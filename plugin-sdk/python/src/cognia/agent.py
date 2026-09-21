@@ -682,3 +682,35 @@ def define_quick_action(
         surfaces=resolved_surfaces,
         selection=dict(selection) if selection is not None else None,
     )
+
+
+# -- command-hooks ----------------------------------------------------------
+
+
+def define_command_hooks(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """Validate + return a ``manifest.commandHooks`` block.
+
+    The block is the settings.json ``hooks`` shape — ``Event → [groups]`` —
+    merged into the host hook runners under the user's own groups. Groups are
+    plain mappings so handler fields (``type``, ``command``, ``timeout``,
+    ``async``, ``matcher``…) pass through verbatim to the runners that honour
+    them; the helper only checks the outer skeleton every runner relies on.
+    """
+    if not isinstance(config, Mapping):
+        raise ValueError("commandHooks must be a mapping of event name to groups")
+    out: Dict[str, Any] = {}
+    for event, groups in config.items():
+        if not isinstance(event, str) or not event.strip():
+            raise ValueError("commandHooks event names must be non-empty strings")
+        if not isinstance(groups, list):
+            raise ValueError(f"commandHooks[{event!r}] must be a list of groups")
+        for index, group in enumerate(groups):
+            if not isinstance(group, Mapping):
+                raise ValueError(f"commandHooks[{event!r}][{index}] must be a group mapping")
+            handlers = group.get("hooks")
+            if not isinstance(handlers, list):
+                raise ValueError(
+                    f"commandHooks[{event!r}][{index}].hooks must be a list of handlers"
+                )
+        out[event] = [dict(group) for group in groups]
+    return out

@@ -3,6 +3,7 @@ import {
   convertPluginBundle,
   detectPluginEcosystem,
 } from "./ecosystem"
+import { renderDist } from "./scaffold"
 
 function snapshot(files: Record<string, string>): Map<string, string> {
   return new Map(Object.entries(files))
@@ -110,7 +111,7 @@ Review the plan for missing validation and rollback steps.
             command: "node",
             args: ["${COGNIA_PLUGIN_ROOT}/servers/release.js"],
             env: {
-              MODE: "release",
+              MODE: "",
               PLUGIN_HOME: "${COGNIA_PLUGIN_ROOT}",
             },
           },
@@ -127,16 +128,10 @@ Review the plan for missing validation and rollback steps.
   it("fails closed and reports unsupported executable Claude Code surfaces", () => {
     const files = snapshot({
       ".claude-plugin/plugin.json": JSON.stringify({
-        name: "unsafe-hooks",
+        name: "unsafe-output-styles",
         version: "1.0.0",
-        description: "Requires executable hooks",
-        hooks: { PreToolUse: [] },
+        description: "Requires executable output styles",
         outputStyles: "./output-styles",
-      }),
-      "hooks/hooks.json": JSON.stringify({
-        hooks: {
-          PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "./guard.sh" }] }],
-        },
       }),
       "output-styles/strict.md": "# Strict output\n",
     })
@@ -150,11 +145,164 @@ Review the plan for missing validation and rollback steps.
       const conversionError = error as UnsupportedPluginConversionError
       expect(conversionError.report.blocking).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ capability: "hooks", path: "hooks" }),
           expect.objectContaining({ capability: "outputStyles", path: "outputStyles" }),
         ])
       )
     }
+  })
+
+  it("converts Claude Code hooks.json into manifest.commandHooks with the command-hooks capability", () => {
+    const files = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({
+        name: "guarded-plugin",
+        version: "1.0.0",
+        description: "Ships a PreToolUse guard",
+      }),
+      "hooks/hooks.json": JSON.stringify({
+        description: "guards",
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              hooks: [
+                {
+                  type: "command",
+                  command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs",
+                  timeout: 5,
+                  async: true,
+                },
+              ],
+            },
+          ],
+          SessionStart: [
+            { hooks: [{ type: "command", command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs" }] },
+          ],
+        },
+      }),
+      "hooks/guard.mjs": "process.exit(0)\n",
+      "hooks/boot.mjs": "process.exit(0)\n",
+    })
+
+    const result = convertPluginBundle(files, "cognia")
+    expect(result.manifest.capabilities).toContain("command-hooks")
+    const commandHooks = result.manifest.commandHooks
+    expect(commandHooks?.PreToolUse).toHaveLength(1)
+    expect(commandHooks?.PreToolUse?.[0]?.matcher).toBe("Bash")
+    expect(commandHooks?.PreToolUse?.[0]?.hooks?.[0]).toMatchObject({
+      type: "command",
+      command: "node ${COGNIA_PLUGIN_ROOT}/hooks/guard.mjs",
+      timeout: 5,
+      async: true,
+    })
+    expect(commandHooks?.SessionStart?.[0]?.hooks?.[0]).toMatchObject({
+      type: "command",
+      command: "node ${COGNIA_PLUGIN_ROOT}/hooks/boot.mjs",
+    })
+    // Hook scripts stay in the bundle as files so the commands can resolve them.
+    expect(result.files.get("hooks/guard.mjs")).toContain("process.exit(0)")
+    expect(result.report.converted).toEqual(
+      expect.arrayContaining([expect.objectContaining({ capability: "commandHooks" })])
+    )
+  })
+
+  it("converts a manifest-declared hooks path and an inline hooks map", () => {
+    const files = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({
+        name: "declared-hooks",
+        hooks: "./my-hooks/config.json",
+      }),
+      "my-hooks/config.json": JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: "command", command: "echo done" }] }],
+        },
+      }),
+    })
+    const result = convertPluginBundle(files, "cognia")
+    expect(result.manifest.commandHooks?.Stop?.[0]?.hooks?.[0]).toMatchObject({
+      type: "command",
+      command: "echo done",
+    })
+  })
+
+  it("blocks hook events with no Cognia runtime equivalent instead of silently dropping them", () => {
+    const files = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({ name: "post-marketplace" }),
+      "hooks/hooks.json": JSON.stringify({
+        hooks: {
+          PostMarketplace: [
+            { hooks: [{ type: "command", command: "node ${CLAUDE_PLUGIN_ROOT}/setup.mjs" }] },
+          ],
+        },
+      }),
+    })
+
+    expect(() => convertPluginBundle(files, "cognia")).toThrow(UnsupportedPluginConversionError)
+    try {
+      convertPluginBundle(files, "cognia")
+    } catch (error) {
+      const report = (error as UnsupportedPluginConversionError).report
+      expect(report.blocking).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            capability: "commandHooks",
+            path: "hooks/hooks.json",
+            message: expect.stringContaining("PostMarketplace"),
+          }),
+        ])
+      )
+    }
+  })
+
+  it("blocks plugin-typed hook handlers that reference source-runtime code", () => {
+    const files = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({ name: "in-process-hook" }),
+      "hooks/hooks.json": JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Bash",
+              hooks: [{ type: "plugin", pluginId: "self", hookId: "onPreToolUse" }],
+            },
+          ],
+        },
+      }),
+    })
+
+    expect(() => convertPluginBundle(files, "cognia")).toThrow(UnsupportedPluginConversionError)
+    try {
+      convertPluginBundle(files, "cognia")
+    } catch (error) {
+      const report = (error as UnsupportedPluginConversionError).report
+      expect(report.blocking).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            capability: "commandHooks",
+            message: expect.stringContaining('"plugin"'),
+          }),
+        ])
+      )
+    }
+  })
+
+  it("converts .codex-plugin hooks documents into commandHooks", () => {
+    const files = snapshot({
+      ".codex-plugin/plugin.json": JSON.stringify({ name: "codex-hooks" }),
+      "hooks/hooks.json": JSON.stringify({
+        hooks: {
+          SessionEnd: [
+            { hooks: [{ type: "command", command: "node ${CODEX_PLUGIN_ROOT}/hooks/end.mjs" }] },
+          ],
+        },
+      }),
+      "hooks/end.mjs": "process.exit(0)\n",
+    })
+
+    const result = convertPluginBundle(files, "cognia")
+    expect(result.manifest.capabilities).toContain("command-hooks")
+    expect(result.manifest.commandHooks?.SessionEnd?.[0]?.hooks?.[0]).toMatchObject({
+      type: "command",
+      command: "node ${COGNIA_PLUGIN_ROOT}/hooks/end.mjs",
+    })
   })
 
   it("does not silently drop Claude Code subagent fields Cognia cannot execute", () => {
@@ -257,7 +405,7 @@ Review the current changes.
     expect(result.manifest.subagents).toHaveLength(1)
     expect(result.manifest.mcpServerPresets?.[0]?.config).toMatchObject({
       args: ["${COGNIA_PLUGIN_ROOT}/server.js"],
-      env: { RETRIES: 2 },
+      env: { RETRIES: "" },
     })
   })
 
@@ -284,8 +432,8 @@ Review the current changes.
     ).toThrow(/did not contain a SKILL\.md/)
   })
 
-  it("detects undeclared executable Claude plugin directories", () => {
-    expect(() =>
+  it("preserves bundled binaries without misclassifying their directory as an activation surface", () => {
+    expect(
       convertPluginBundle(
         snapshot({
           ".claude-plugin/plugin.json": JSON.stringify({ name: "hidden-runtime" }),
@@ -293,7 +441,7 @@ Review the current changes.
         }),
         "cognia"
       )
-    ).toThrow(/bin/)
+    ).toMatchObject({ report: { blocking: [] } })
   })
 
   it("converts Codex skills and MCP servers through the same canonical model", () => {
@@ -555,14 +703,14 @@ User input: {{args}}
         "cognia"
       )
     ).toThrow(/escapes plugin root/)
-    expect(() =>
+    expect(
       convertPluginBundle(
         snapshot({
           ".claude-plugin/plugin.json": JSON.stringify({ name: "cross-format" }),
         }),
         "codex"
       )
-    ).toThrow(/not implemented/)
+    ).toMatchObject({ source: "claude-code", target: "codex", report: { blocking: [] } })
   })
 
   it("fails closed for missing Claude commands and malformed subagents", () => {
@@ -609,7 +757,6 @@ User input: {{args}}
               kind: "inline",
               markdown: "Review the selected changes and explain every finding.",
             },
-            allowedTools: ["Read", "Grep"],
           },
         ],
         mcpServerPresets: [
@@ -625,6 +772,7 @@ User input: {{args}}
         "// Built output of src/index.ts, pre-generated by `cognia plugin import`.\nmodule.exports = {}\n",
     })
 
+    files.set("dist/index.js", renderDist(JSON.parse(files.get("plugin.json")!)))
     const claude = convertPluginBundle(files, "claude-code")
     expect(claude.files.get(".claude-plugin/plugin.json")).toContain('"name": "portable-review"')
     expect(claude.files.get("skills/review/SKILL.md")).toContain("Review the selected changes")
@@ -636,7 +784,7 @@ User input: {{args}}
 
     const gemini = convertPluginBundle(files, "gemini-cli")
     expect(gemini.files.get("gemini-extension.json")).toContain('"name": "portable-review"')
-    expect(gemini.files.get("commands/review.toml")).toContain(
+    expect(gemini.files.get("skills/review/SKILL.md")).toContain(
       "Review the selected changes and explain every finding."
     )
   })
@@ -744,7 +892,7 @@ User input: {{args}}
         ],
       },
       "gemini-cli",
-      "resource-bearing",
+      "was not found",
     ],
     [
       "missing resource skill",
@@ -792,7 +940,7 @@ User input: {{args}}
         ],
       },
       "codex",
-      "compatible subagent",
+      "subagent execution",
     ],
     [
       "Cognia-only subagent routing",
@@ -826,7 +974,7 @@ User input: {{args}}
         ],
       },
       "claude-code",
-      "cannot prompt users",
+      "configuration projection",
     ],
     [
       "Codex SSE",
@@ -872,5 +1020,630 @@ User input: {{args}}
     } catch (error) {
       expect((error as UnsupportedPluginConversionError).message).toContain(message)
     }
+  })
+
+  function cognia(contributions: Record<string, unknown>, payload: Record<string, string> = {}) {
+    return snapshot({
+      "plugin.json": JSON.stringify({
+        id: "portable",
+        name: "Portable",
+        version: "1.0.0",
+        description: "Portable",
+        type: "frontend",
+        capabilities: [],
+        ...contributions,
+      }),
+      ...payload,
+    })
+  }
+
+  it("imports and exports native Gemini skill resources without lowering them to commands", () => {
+    const imported = convertPluginBundle(
+      snapshot({
+        "gemini-extension.json": JSON.stringify({ name: "gemini-skills" }),
+        "skills/review/SKILL.md":
+          "---\nname: review\ndescription: Review\n---\nRead references/a.md.",
+        "skills/review/references/a.md": "# Reference",
+        "skills/review/assets/a.png": "binary-placeholder",
+      }),
+      "cognia",
+      { binaryPaths: new Set(["skills/review/assets/a.png"]) }
+    )
+    expect(imported.manifest.capabilities).toContain("skills")
+    expect(imported.manifest.runtimeCompatibility?.browser?.availability).toBe("blocked")
+    expect(imported.copies).toContainEqual({
+      from: "skills/review/assets/a.png",
+      to: "skills/review/assets/a.png",
+    })
+    const exported = convertPluginBundle(imported.files, "gemini-cli", {
+      binaryPaths: new Set(["skills/review/assets/a.png"]),
+    })
+    expect(exported.files.get("skills/review/SKILL.md")).toContain("Read references/a.md")
+    expect(exported.files.get("skills/review/references/a.md")).toBe("# Reference")
+    expect(exported.files.has("commands/review.toml")).toBe(false)
+    expect(exported.copies).toContainEqual({
+      from: "skills/review/assets/a.png",
+      to: "skills/review/assets/a.png",
+    })
+    expect(exported.report.fidelity).toBe("structured")
+  })
+
+  it.each(["hooks/hooks.json", "agents/reviewer.md", "policies/security.toml"])(
+    "does not silently ignore Gemini native %s",
+    (path) => {
+      expect(() =>
+        convertPluginBundle(
+          snapshot({
+            "gemini-extension.json": JSON.stringify({ name: "native" }),
+            [path]: "native content",
+          }),
+          "cognia"
+        )
+      ).toThrow(/platform-specific/)
+    }
+  )
+
+  it("sanitizes complete MCP bundles and removes raw configuration and dotenv copies", () => {
+    const files = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({
+        name: "private",
+        mcpServers: {
+          api: {
+            type: "http",
+            url: "https://example.test/mcp",
+            headers: { Authorization: "fixture-secret" },
+          },
+        },
+      }),
+      ".env.local": "TOKEN=fixture-secret",
+    })
+    const result = convertPluginBundle(files, "cognia")
+    expect(result.manifest.mcpServerPresets?.[0]?.fields).toEqual([
+      expect.objectContaining({ key: "Authorization", secret: true, placement: "header" }),
+    ])
+    expect([...result.files.values()].join("\n")).not.toContain("fixture-secret")
+    expect(result.files.get(".claude-plugin/plugin.json")).toBe("{}\n")
+    expect(result.files.get(".env.local")).toBe("\n")
+  })
+
+  it("blocks a known MCP credential duplicated in an executable instead of exporting it", () => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          ".claude-plugin/plugin.json": JSON.stringify({
+            name: "private",
+            mcpServers: { api: { command: "node", env: { API_KEY: "fixture-secret" } } },
+          }),
+          "server.js": "const token = 'fixture-secret'",
+        }),
+        "cognia"
+      )
+    ).toThrow(/credential removed/)
+  })
+
+  it("preserves the complete bundled MCP executable layout including binary dependencies", () => {
+    const files = cognia(
+      {
+        capabilities: ["mcp-server-preset"],
+        mcpServerPresets: [
+          {
+            id: "local",
+            name: "Local",
+            transport: "stdio",
+            config: { command: "node", args: ["${COGNIA_PLUGIN_ROOT}/server/index.js"] },
+          },
+        ],
+      },
+      {
+        "server/index.js": "require('../shared/a.js')",
+        "shared/a.js": "module.exports = 1",
+        "server/native.node": "binary",
+        "package.json": '{"dependencies":{"example":"1.0.0"}}',
+      }
+    )
+    const result = convertPluginBundle(files, "claude-code", {
+      binaryPaths: new Set(["server/native.node"]),
+    })
+    expect(result.files.get("server/index.js")).toContain("shared/a.js")
+    expect(result.files.has("shared/a.js")).toBe(true)
+    expect(result.files.has("package.json")).toBe(true)
+    expect(result.copies).toContainEqual({ from: "server/native.node", to: "server/native.node" })
+    expect(result.files.get(".mcp.json")).toContain("${CLAUDE_PLUGIN_ROOT}/server/index.js")
+    files.delete("server/index.js")
+    expect(() => convertPluginBundle(files, "claude-code")).toThrow(/reference is missing/)
+  })
+
+  it("exports supported Claude hooks and blocks selectors and dormant hook behavior", () => {
+    const imported = convertPluginBundle(
+      snapshot({
+        ".claude-plugin/plugin.json": JSON.stringify({ name: "hooked" }),
+        "hooks/hooks.json": JSON.stringify({
+          hooks: {
+            Stop: [
+              {
+                hooks: [{ type: "command", command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/end.js" }],
+              },
+            ],
+          },
+        }),
+        "scripts/end.js": "process.exit(0)",
+      }),
+      "cognia"
+    )
+    expect(imported.manifest.runtimeCompatibility?.browser?.availability).toBe("blocked")
+    const result = convertPluginBundle(imported.files, "claude-code")
+    expect(result.files.get("hooks/hooks.json")).toContain("${CLAUDE_PLUGIN_ROOT}/scripts/end.js")
+    expect(result.files.get("scripts/end.js")).toContain("process.exit")
+    expect(() =>
+      convertPluginBundle(
+        cognia({
+          capabilities: ["command-hooks"],
+          commandHooks: {
+            Stop: [{ agents: "teammate", hooks: [{ type: "command", command: "echo x" }] }],
+          },
+        }),
+        "claude-code"
+      )
+    ).toThrow(/agent selectors/)
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          ".claude-plugin/plugin.json": JSON.stringify({
+            name: "dormant",
+            hooks: { Stop: [{ hooks: [{ type: "command", command: "echo x", once: true }] }] },
+          }),
+        }),
+        "cognia"
+      )
+    ).toThrow(/do not execute hook fields/)
+  })
+
+  it("projects all supported preset field placements to Gemini installation settings", () => {
+    const result = convertPluginBundle(
+      cognia({
+        capabilities: ["mcp-server-preset"],
+        mcpServerPresets: [
+          {
+            id: "local",
+            name: "Local",
+            transport: "stdio",
+            config: { command: "node", args: ["<PATH>"] },
+            fields: [
+              { key: "TOKEN", label: "Token", placement: "env", secret: true },
+              { key: "PATH", label: "Path", placement: "arg-replace", token: "<PATH>" },
+            ],
+          },
+          {
+            id: "remote",
+            name: "Remote",
+            transport: "http",
+            config: {},
+            fields: [
+              { key: "URL", label: "URL", placement: "url" },
+              { key: "Authorization", label: "Authorization", placement: "header", secret: true },
+            ],
+          },
+        ],
+      }),
+      "gemini-cli"
+    )
+    const output = JSON.parse(result.files.get("gemini-extension.json")!)
+    expect(output.settings).toHaveLength(4)
+    expect(output.settings[0]).toMatchObject({ envVar: "COGNIA_LOCAL_TOKEN", sensitive: true })
+    expect(output.mcpServers.local.env.TOKEN).toBe("${COGNIA_LOCAL_TOKEN}")
+    expect(output.mcpServers.local.args).toEqual(["${COGNIA_LOCAL_PATH}"])
+    expect(output.mcpServers.remote.httpUrl).toBe("${COGNIA_REMOTE_URL}")
+    expect(output.mcpServers.remote.headers.Authorization).toBe("${COGNIA_REMOTE_AUTHORIZATION}")
+  })
+
+  it.each(["gemini-cli", "codex"] as const)(
+    "reports missing %s hook adapters without pretending the platform lacks hooks",
+    (target) => {
+      expect(() =>
+        convertPluginBundle(
+          cognia({
+            capabilities: ["command-hooks"],
+            commandHooks: { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] },
+          }),
+          target
+        )
+      ).toThrow(/event\/payload\/decision adapter/)
+    }
+  )
+
+  it("rejects a Gemini export that would lose explicit invocation policy", () => {
+    expect(() =>
+      convertPluginBundle(
+        cognia({
+          capabilities: ["skills"],
+          skills: [
+            {
+              id: "review",
+              name: "Review",
+              description: "Review",
+              invocationPolicy: "explicit",
+              source: { kind: "inline", markdown: "Review." },
+            },
+          ],
+        }),
+        "gemini-cli"
+      )
+    ).toThrow(/cannot silently loosen/)
+  })
+
+  it("imports Gemini install fields without losing labels, placement, or sensitivity", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        "gemini-extension.json": JSON.stringify({
+          name: "configured",
+          settings: [
+            { name: "Service key", envVar: "API_KEY", sensitive: true },
+            { name: "Data path", envVar: "DATA_PATH", sensitive: false },
+          ],
+          mcpServers: {
+            local: { command: "node", args: ["${DATA_PATH}"], env: { TOKEN: "${API_KEY}" } },
+          },
+        }),
+      }),
+      "cognia"
+    )
+    expect(result.manifest.mcpServerPresets?.[0].fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "TOKEN",
+          label: "Service key",
+          placement: "env",
+          secret: true,
+        }),
+        expect.objectContaining({
+          key: "API_KEY",
+          label: "Service key",
+          placement: "env",
+          secret: true,
+        }),
+        expect.objectContaining({
+          key: "DATA_PATH",
+          label: "Data path",
+          placement: "arg-replace",
+          token: "${DATA_PATH}",
+        }),
+      ])
+    )
+  })
+
+  it("rejects composed Gemini configuration bindings rather than discarding their template", () => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          "gemini-extension.json": JSON.stringify({
+            name: "configured",
+            settings: [{ name: "Host", envVar: "API_HOST" }],
+            mcpServers: { remote: { httpUrl: "https://${API_HOST}/mcp" } },
+          }),
+        }),
+        "cognia"
+      )
+    ).toThrow(/Composed URL bindings/)
+  })
+
+  it("applies canonical invocation policy to an exported resource skill", () => {
+    const result = convertPluginBundle(
+      cognia(
+        {
+          capabilities: ["skills"],
+          skills: [
+            {
+              id: "review",
+              name: "Review",
+              description: "Review",
+              invocationPolicy: "explicit",
+              source: { kind: "local-bundle", path: "bundle" },
+            },
+          ],
+        },
+        {
+          "bundle/SKILL.md": "---\nname: old-name\ndescription: Old\n---\nReview.",
+          "bundle/reference.md": "# Reference",
+        }
+      ),
+      "claude-code"
+    )
+    expect(result.files.get("skills/review/SKILL.md")).toContain("disable-model-invocation: true")
+    expect(result.files.get("skills/review/reference.md")).toBe("# Reference")
+  })
+
+  it("blocks missing executable handler fields and excluded runtime references", () => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          ".claude-plugin/plugin.json": JSON.stringify({
+            name: "broken",
+            hooks: { Stop: [{ hooks: [{ type: "command" }] }] },
+          }),
+        }),
+        "cognia"
+      )
+    ).toThrow(/non-empty command/)
+    expect(() =>
+      convertPluginBundle(
+        cognia(
+          {
+            capabilities: ["mcp-server-preset"],
+            mcpServerPresets: [
+              {
+                id: "local",
+                name: "Local",
+                transport: "stdio",
+                config: { command: "node", args: ["${COGNIA_PLUGIN_ROOT}/.env.local"] },
+              },
+            ],
+          },
+          { ".env.local": "SECRET=x" }
+        ),
+        "claude-code"
+      )
+    ).toThrow(/excluded or relocated/)
+  })
+
+  it.each([
+    ["missing file", "./missing.json", {}, "declared hooks file"],
+    ["invalid declaration", 42, {}, "manifest hooks field"],
+    ["invalid group list", { Stop: {} }, {}, "array of groups"],
+    ["null group", { Stop: [null] }, {}, "must be an object"],
+    ["missing handler list", { Stop: [{}] }, {}, "handler array"],
+    [
+      "unknown handler field",
+      { Stop: [{ hooks: [{ type: "command", command: "echo x", futureFlag: true }] }] },
+      {},
+      "Unsupported hook handler fields",
+    ],
+    [
+      "negative timeout",
+      { Stop: [{ hooks: [{ type: "command", command: "echo x", timeout: -1 }] }] },
+      {},
+      "positive number",
+    ],
+    [
+      "invalid async",
+      { Stop: [{ hooks: [{ type: "command", command: "echo x", async: "yes" }] }] },
+      {},
+      "async must be boolean",
+    ],
+    ["missing HTTP endpoint", { Stop: [{ hooks: [{ type: "http" }] }] }, {}, "non-empty url"],
+    ["missing prompt", { Stop: [{ hooks: [{ type: "prompt" }] }] }, {}, "non-empty prompt"],
+  ] as const)("diagnoses malformed hook behavior: %s", (_label, hooks, resources, message) => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          ".claude-plugin/plugin.json": JSON.stringify({ name: "malformed", hooks }),
+          ...resources,
+        }),
+        "cognia"
+      )
+    ).toThrow(String(message))
+  })
+
+  it("uses Codex explicit hook arrays instead of merging conventional defaults", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        ".codex-plugin/plugin.json": JSON.stringify({
+          name: "overridden",
+          hooks: [
+            "./custom/a.json",
+            { Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }] },
+          ],
+        }),
+        "custom/a.json": JSON.stringify({
+          hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo start" }] }] },
+        }),
+        "hooks/hooks.json": JSON.stringify({ hooks: { UnsupportedDefault: [] } }),
+      }),
+      "cognia"
+    )
+    expect(Object.keys(result.manifest.commandHooks ?? {})).toEqual(["SessionStart", "Stop"])
+  })
+
+  it.each([
+    ["non-array", {}, "must be an array"],
+    ["non-object", [null], "must be an object"],
+    ["invalid env", [{ name: "Key", envVar: "not-valid" }], "invalid/duplicate"],
+    ["unknown field", [{ name: "Key", envVar: "KEY", future: true }], "unsupported configuration"],
+    [
+      "duplicate",
+      [
+        { name: "A", envVar: "KEY" },
+        { name: "B", envVar: "KEY" },
+      ],
+      "invalid/duplicate",
+    ],
+  ] as const)("rejects malformed Gemini settings: %s", (_label, settings, message) => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({ "gemini-extension.json": JSON.stringify({ name: "malformed", settings }) }),
+        "cognia"
+      )
+    ).toThrow(String(message))
+  })
+
+  it("imports direct remote settings and diagnoses unused settings", () => {
+    const result = convertPluginBundle(
+      snapshot({
+        "gemini-extension.json": JSON.stringify({
+          name: "remote",
+          settings: [
+            { name: "Endpoint", envVar: "ENDPOINT" },
+            { name: "Auth", envVar: "AUTH", sensitive: true },
+            { name: "Unused", envVar: "UNUSED" },
+          ],
+          mcpServers: { remote: { httpUrl: "${ENDPOINT}", headers: { Authorization: "${AUTH}" } } },
+        }),
+      }),
+      "cognia"
+    )
+    expect(result.manifest.mcpServerPresets?.[0].fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ placement: "url", label: "Endpoint" }),
+        expect.objectContaining({ placement: "header", label: "Auth", secret: true }),
+      ])
+    )
+    expect(result.report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capability: "settings",
+          message: expect.stringContaining("not referenced"),
+        }),
+      ])
+    )
+  })
+
+  it.each([
+    { command: "node", env: { PREFIX: "prefix-${KEY}" } },
+    { httpUrl: "https://example.test", headers: { Authorization: "Bearer ${KEY}" } },
+  ])("rejects composed environment/header settings", (server) => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          "gemini-extension.json": JSON.stringify({
+            name: "composed",
+            settings: [{ name: "Key", envVar: "KEY", sensitive: true }],
+            mcpServers: { server },
+          }),
+        }),
+        "cognia"
+      )
+    ).toThrow(/Composed (environment|header) binding/)
+  })
+
+  it.each([
+    {
+      fields: [
+        { key: "A-B", label: "First", placement: "env" },
+        { key: "A_B", label: "Second", placement: "env" },
+      ],
+    },
+    { fields: [{ key: "PATH", label: "Path", placement: "arg-replace", token: "<MISSING>" }] },
+    { defaultDisallowedTools: ["delete"] },
+    { toolRiskRules: [{ pattern: "*", risk: "destructive" }] },
+    { provisioning: { mode: "managed" } },
+  ])("rejects unsupported preset behavior before Gemini projection", (definition) => {
+    expect(() =>
+      convertPluginBundle(
+        cognia({
+          capabilities: ["mcp-server-preset"],
+          mcpServerPresets: [
+            {
+              id: "local",
+              name: "Local",
+              transport: "stdio",
+              config: { command: "node", args: ["script.js"] },
+              ...definition,
+            },
+          ],
+        }),
+        "gemini-cli"
+      )
+    ).toThrow(UnsupportedPluginConversionError)
+  })
+
+  it("rejects execution frontmatter in imported skills and commands", () => {
+    const skill = "---\nname: Execution\ndescription: Execution\ncontext: fork\n---\nExecute."
+    for (const path of ["skills/execute/SKILL.md", "commands/execute.md"])
+      expect(() =>
+        convertPluginBundle(
+          snapshot({
+            ".claude-plugin/plugin.json": JSON.stringify({ name: "execution" }),
+            [path]: skill,
+          }),
+          "cognia"
+        )
+      ).toThrow(/context/)
+  })
+
+  it("rejects invalid resource-skill execution metadata on export", () => {
+    expect(() =>
+      convertPluginBundle(
+        cognia(
+          {
+            capabilities: ["skills"],
+            skills: [
+              {
+                id: "execution",
+                name: "Execution",
+                description: "Execution",
+                source: { kind: "local-bundle", path: "bundle" },
+              },
+            ],
+          },
+          {
+            "bundle/SKILL.md":
+              "---\nname: execution\ndescription: Execution\ncontext: fork\n---\nExecute.",
+          }
+        ),
+        "claude-code"
+      )
+    ).toThrow(/context/)
+  })
+  it.each([
+    { server: "mcp" },
+    { tool: "run" },
+    { server: " ", tool: "run" },
+    { server: "mcp", tool: 42 },
+  ])("rejects incomplete MCP hook identifiers", (handler) => {
+    expect(() =>
+      convertPluginBundle(
+        snapshot({
+          ".claude-plugin/plugin.json": JSON.stringify({
+            name: "incomplete",
+            hooks: { Stop: [{ hooks: [{ type: "mcp_tool", ...handler }] }] },
+          }),
+        }),
+        "cognia"
+      )
+    ).toThrow(/non-empty server and tool/)
+  })
+})
+
+describe("root skill resources and environment placeholders", () => {
+  it("preserves root skill resources across Kimi import and native export", () => {
+    const source = snapshot({
+      "kimi.plugin.json": JSON.stringify({ name: "example", version: "1.0.0" }),
+      "SKILL.md":
+        "---\nname: example\ndescription: Example skill\n---\nRead references/data.md and run scripts/run.py.\n",
+      "references/data.md": "Important reference content",
+      "scripts/run.py": "print(42)",
+      "assets/data.bin": "",
+    })
+    const binaryPaths = new Set(["assets/data.bin"])
+    const imported = convertPluginBundle(source, "cognia", { binaryPaths })
+    expect(imported.manifest.skills?.[0].source).toEqual({ kind: "local-bundle", path: "." })
+    expect(imported.files.get("references/data.md")).toBe("Important reference content")
+    const exported = convertPluginBundle(source, "claude-code", { binaryPaths })
+    expect(exported.files.get("skills/example/references/data.md")).toBe(
+      "Important reference content"
+    )
+    expect(exported.files.get("skills/example/scripts/run.py")).toBe("print(42)")
+    expect(exported.copies).toContainEqual({
+      from: "assets/data.bin",
+      to: "skills/example/assets/data.bin",
+    })
+    expect(exported.files.has("skills/example/plugin.json")).toBe(false)
+    expect(exported.files.has("skills/example/dist/index.js")).toBe(false)
+  })
+
+  it("overwrites environment binary placeholders without copying their original bytes", () => {
+    const source = snapshot({
+      ".claude-plugin/plugin.json": JSON.stringify({ name: "example" }),
+      ".env": "",
+      "skills/example/.env.local": "",
+      "skills/example/SKILL.md": "---\nname: example\ndescription: Example\n---\nBody",
+    })
+    const binaryPaths = new Set([".env", "skills/example/.env.local"])
+    const imported = convertPluginBundle(source, "cognia", { binaryPaths })
+    expect(imported.files.get(".env")).toBe("\n")
+    expect(imported.files.get("skills/example/.env.local")).toBe("\n")
+    expect(imported.copies).toEqual([])
+    const exported = convertPluginBundle(source, "claude-code", { binaryPaths })
+    expect(exported.copies).toEqual([])
+    expect([...exported.files.keys()].some((path) => path.includes(".env"))).toBe(false)
   })
 })

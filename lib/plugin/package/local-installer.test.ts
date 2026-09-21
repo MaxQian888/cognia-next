@@ -11,7 +11,7 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
 
-import { installFromLocalFile } from "./local-installer"
+import { installFromLocalFile, previewLocalBundleManifest } from "./local-installer"
 import { getDb } from "@/lib/db/schema"
 
 function setTauri(present: boolean) {
@@ -87,6 +87,9 @@ describe("installFromLocalFile", () => {
       bundlePath: "/tmp/p.zip",
       signatureBase64: null,
       expectedPublicKeyBase64: null,
+      previewOnly: false,
+      deferCommit: false,
+      expectedBundleSha256: null,
     })
     expect(result.manifest.id).toBe("demo.wasm")
     expect(result.path).toBe("/plugins/demo.wasm")
@@ -124,4 +127,49 @@ describe("installFromLocalFile", () => {
     })
     expect(await db.trustedPublishers.count()).toBe(1)
   })
+})
+
+it("previews local paths without HTTP or publisher persistence", async () => {
+  invokeMock.mockResolvedValueOnce({
+    manifest: baseManifest,
+    path: "/plugins/demo.wasm",
+    signatureVerified: true,
+    authorPublicKey: "AAA=",
+    authorFingerprint: "ff",
+    bundleSha256: "a".repeat(64),
+  })
+  const result = await previewLocalBundleManifest({
+    bundlePath: "/tmp/plugin name #1.zip",
+    signatureBase64: "sig",
+    expectedPublicKeyBase64: "AAA=",
+  })
+  expect(invokeMock).toHaveBeenCalledWith(
+    "plugin_wasm_install_from_file",
+    expect.objectContaining({ bundlePath: "/tmp/plugin name #1.zip", previewOnly: true })
+  )
+  expect(result.bundleSha256).toBe("a".repeat(64))
+  expect(await getDb().trustedPublishers.count()).toBe(0)
+})
+
+it("pins local installation and refuses substituted signing identities", async () => {
+  invokeMock.mockResolvedValueOnce({
+    manifest: baseManifest,
+    path: "/plugins/demo.wasm",
+    signatureVerified: true,
+    authorPublicKey: "OTHER=",
+    authorFingerprint: "ff",
+  })
+  await expect(
+    installFromLocalFile({
+      bundlePath: "/tmp/p.zip",
+      signatureBase64: "sig",
+      expectedPublicKeyBase64: "AAA=",
+      expectedBundleSha256: "a".repeat(64),
+    })
+  ).rejects.toThrow(/verified publisher/)
+  expect(invokeMock).toHaveBeenCalledWith(
+    "plugin_wasm_install_from_file",
+    expect.objectContaining({ expectedBundleSha256: "a".repeat(64), previewOnly: false })
+  )
+  expect(await getDb().trustedPublishers.count()).toBe(0)
 })

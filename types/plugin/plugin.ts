@@ -169,6 +169,7 @@ export type PluginCapability =
   | "themes" // Provides UI themes
   | "commands" // Provides slash commands
   | "hooks" // Provides lifecycle hooks
+  | "command-hooks" // Provides settings-shaped command hooks merged into every hook runner
   | "processors" // Provides message processors
   | "providers" // Provides AI model providers
   | "exporters" // Provides export formats
@@ -866,6 +867,22 @@ export interface PluginManifest {
    * they never collide with built-in dispatcher names.
    */
   subagents?: import("./plugin-subagent").PluginSubagentDef[]
+  /**
+   * Settings-shaped command hooks contributed by this plugin
+   * (`command-hooks` capability) — the same `Event → HookGroup[]` block a
+   * `settings.json` `hooks` section carries. Imported plugin bundles land
+   * here through the ecosystem converter (`hooks.json` → `commandHooks`,
+   * plugin-root tokens canonicalized to `${COGNIA_PLUGIN_ROOT}`); the Rust
+   * and CLI hook loaders merge each enabled plugin's block under the user's
+   * own groups and above built-ins, binding the token to the install path at
+   * collection time.
+   *
+   * Handlers run in the hook runtime (spawned commands, webhooks) — the same
+   * trust tier as user-configured hooks, NOT inside the plugin sandbox — so
+   * collection is gated on the `command-hooks` capability being declared;
+   * the field alone is inert.
+   */
+  commandHooks?: import("@/lib/claude/hooks").HooksConfig
   /**
    * Immutable unified template packages (`template-package` capability).
    * Definitions are overlay-only and are removed with the plugin lifecycle.

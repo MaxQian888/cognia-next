@@ -57,7 +57,7 @@ pub async fn plugin_window_create(
         None => {
             return Err(PluginError::Internal(
                 "window.create requires a `url`; React-component windows are renderer-only".into(),
-            ))
+            ));
         }
     };
 

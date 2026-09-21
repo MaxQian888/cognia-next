@@ -36,8 +36,8 @@ use serde::Serialize;
 use tauri::State;
 use url::Url;
 
-use super::commands::VscodeCommandError;
 use super::VscodeExtensionState;
+use super::commands::VscodeCommandError;
 
 /// Byte ceiling for a **marketplace-sourced** `.vsix`.
 ///
@@ -300,6 +300,7 @@ fn build_client(
         }
     });
 
+    cognia_net::proxy_config::ensure_crypto_provider();
     let builder = reqwest::Client::builder()
         .user_agent("cognia-desktop")
         .redirect(redirect)

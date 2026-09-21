@@ -1,6 +1,7 @@
 import {
   generatedFilesFrom,
   isSnapshotTextFile,
+  isPluginEnvironmentFile,
   MAX_SNAPSHOT_ENTRIES,
   MAX_TEXT_FILE_BYTES,
   SNAPSHOT_SKIP_DIRS,
@@ -41,6 +42,21 @@ describe("limits", () => {
 })
 
 describe("generatedFilesFrom", () => {
+  it("overlays sanitized environment placeholders but not binary assets", () => {
+    const snapshot = new Map([
+      [".env", ""],
+      ["assets/data.bin", ""],
+    ])
+    expect(
+      generatedFilesFrom(
+        snapshot,
+        new Map([
+          [".env", "\n"],
+          ["assets/data.bin", ""],
+        ])
+      )
+    ).toEqual({ ".env": "\n" })
+  })
   it("returns only what conversion changed", () => {
     const snapshot = new Map([
       ["README.md", "same"],
@@ -69,4 +85,16 @@ describe("generatedFilesFrom", () => {
     const snapshot = new Map([["assets/icon.png", ""]])
     expect(generatedFilesFrom(snapshot, new Map([["assets/icon.png", ""]]))).toEqual({})
   })
+})
+
+describe("isPluginEnvironmentFile", () => {
+  it.each([".env", ".env.local", "skills/review/.env.production"])("recognizes %s", (path) => {
+    expect(isPluginEnvironmentFile(path)).toBe(true)
+  })
+  it.each(["environment.json", "assets/.environment", "env", "x.env"])(
+    "leaves %s intact",
+    (path) => {
+      expect(isPluginEnvironmentFile(path)).toBe(false)
+    }
+  )
 })

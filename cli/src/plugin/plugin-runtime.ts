@@ -27,7 +27,10 @@ import { isHeadlessHost } from "@/lib/platform/detect"
 
 import { installFakeIndexedDb } from "../db/bootstrap"
 import { resolveHome } from "../config/load"
+import { pluginDiscoveryRoots } from "./discover-plugins"
 import { createCliPluginLifecycleStateAdapter, readDisabledPlugins } from "./plugin-state"
+
+export { pluginDiscoveryRoots }
 
 /** Minimal slice of the plugin-runtime store the disabled-set reconciler needs. */
 interface PluginStatusStore {
@@ -121,20 +124,6 @@ function installStorageShim(g: Record<string, unknown>, key: "localStorage" | "s
 }
 
 const PLUGIN_POLICY_KEY = "cognia.plugins.policy"
-
-/**
- * Disk roots shared by standalone CLI and the supervised headless brain.
- * `COGNIA_DATA_DIR` is appended because cognia-server installs remote plugins
- * into `<data>/.cognia/plugins`, while a standalone CLI keeps the established
- * project/home discovery locations.
- */
-export function pluginDiscoveryRoots(
-  env: NodeJS.ProcessEnv = process.env,
-  cwd = process.cwd(),
-  home = resolveHome(env, os.homedir())
-): string[] {
-  return [...new Set([cwd, home, env.COGNIA_DATA_DIR].filter((root): root is string => !!root))]
-}
 
 /**
  * Install the browser globals the plugin subsystem reads, and seed the plugin

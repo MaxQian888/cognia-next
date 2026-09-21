@@ -14,6 +14,7 @@ import {
   type PluginConversionReport,
   type PluginEcosystem,
 } from "./ecosystem"
+import { assessPluginDelivery, type PluginDeliverySurface } from "./delivery"
 
 const MAX_SNAPSHOT_ENTRIES = 2_000
 const MAX_TEXT_FILE_BYTES = 1_000_000
@@ -34,6 +35,7 @@ export interface InspectPluginConversionInput {
   workspaceRoot: string
   sourceDir: string
   target: PluginEcosystem
+  surface?: PluginDeliverySurface
 }
 
 export interface InspectPluginConversionResult {
@@ -52,6 +54,7 @@ export interface ApplyPluginConversionInput {
   workspaceRoot: string
   planId: string
   outputDir: string
+  acknowledgeWarnings?: boolean
 }
 
 export interface ApplyPluginConversionResult {
@@ -75,6 +78,8 @@ interface ConversionPlan {
   target: PluginEcosystem
   digest: string
   expiresAt: number
+  requiresAcknowledgement: boolean
+  applying?: boolean
 }
 
 export interface PluginConversionServiceOptions {
@@ -227,6 +232,44 @@ export function createPluginConversionService(
       const snapshot = await collectSnapshot(fs, workspaceRoot, sourceDir)
       const sourceFormat = detectPluginEcosystem(snapshot.files)
       const proposedOutputDir = defaultOutputDir(sourceDir, input.target)
+      const sourceManifest =
+        sourceFormat === "cognia"
+          ? convertPluginBundle(snapshot.files, "cognia").manifest
+          : undefined
+      const withDelivery = (report: PluginConversionReport, manifest = sourceManifest) => ({
+        ...report,
+        delivery: assessPluginDelivery({
+          manifest,
+          report,
+          target: input.target,
+          surface: input.surface,
+        }),
+      })
+
+      if (input.surface === "cloud" && input.target !== "cognia") {
+        const report: PluginConversionReport = {
+          fidelity: "unsupported",
+          converted: [],
+          warnings: [],
+          blocking: [
+            {
+              capability: "surface",
+              path: "cloud",
+              message:
+                "Cloud installation and execution have not been verified for this target. Select a local CLI or desktop surface; a local package does not establish cloud support.",
+              blocking: true,
+            },
+          ],
+        }
+        return {
+          applicable: false,
+          sourceFormat,
+          target: input.target,
+          proposedOutputDir,
+          files: [],
+          report: withDelivery(report),
+        }
+      }
 
       try {
         const conversion = convertPluginBundle(snapshot.files, input.target, {
@@ -240,6 +283,7 @@ export function createPluginConversionService(
           target: input.target,
           digest: await digest(snapshot.fingerprintInput),
           expiresAt,
+          requiresAcknowledgement: conversion.report.warnings.length > 0,
         })
         return {
           applicable: true,
@@ -248,8 +292,10 @@ export function createPluginConversionService(
           target: input.target,
           pluginId: conversion.manifest.id,
           proposedOutputDir,
-          files: Array.from(conversion.files.keys()).sort(),
-          report: conversion.report,
+          files: [
+            ...new Set([...conversion.files.keys(), ...conversion.copies.map((copy) => copy.to)]),
+          ].sort(),
+          report: withDelivery(conversion.report, conversion.manifest),
           expiresAt,
         }
       } catch (error) {
@@ -260,7 +306,7 @@ export function createPluginConversionService(
           target: input.target,
           proposedOutputDir,
           files: [],
-          report: error.report,
+          report: withDelivery(error.report),
         }
       }
     },
@@ -276,61 +322,71 @@ export function createPluginConversionService(
         plans.delete(input.planId)
         throw new Error("conversion plan expired; inspect again")
       }
-
-      const outputDir = normalizeRelativeDirectory(input.outputDir, "outputDir")
-      if (
-        isSameOrDescendant(plan.sourceDir, outputDir) ||
-        isSameOrDescendant(outputDir, plan.sourceDir)
-      ) {
-        throw new Error("sourceDir and outputDir must not overlap")
+      if (plan.applying) throw new Error("conversion plan is already being applied")
+      if (plan.requiresAcknowledgement && !input.acknowledgeWarnings) {
+        throw new Error("acknowledge the conversion warnings before applying this plan")
       }
-      await assertWritableOutput(fs, workspaceRoot, outputDir)
-
-      const snapshot = await collectSnapshot(fs, workspaceRoot, plan.sourceDir)
-      if ((await digest(snapshot.fingerprintInput)) !== plan.digest) {
-        plans.delete(input.planId)
-        throw new Error("plugin source changed after inspection; inspect again")
-      }
-      const conversion = convertPluginBundle(snapshot.files, plan.target, {
-        binaryPaths: snapshot.binaryPaths,
-      })
-
-      const writes = new Map<string, string>()
-      const copies = new Map<string, { from: string; to: string }>()
-      for (const [relative, content] of conversion.files) {
-        if (snapshot.binaryPaths.has(relative) && content === "") {
-          copies.set(`${relative}\0${relative}`, { from: relative, to: relative })
-        } else {
-          writes.set(relative, content)
+      plan.applying = true
+      try {
+        const outputDir = normalizeRelativeDirectory(input.outputDir, "outputDir")
+        if (
+          isSameOrDescendant(plan.sourceDir, outputDir) ||
+          isSameOrDescendant(outputDir, plan.sourceDir)
+        ) {
+          throw new Error("sourceDir and outputDir must not overlap")
         }
-      }
-      for (const copy of conversion.copies) {
-        copies.set(`${copy.from}\0${copy.to}`, copy)
-      }
+        await assertWritableOutput(fs, workspaceRoot, outputDir)
 
-      await fs.createDir(workspaceRoot, outputDir)
-      const written: string[] = []
-      for (const [relative, content] of Array.from(writes).sort(([a], [b]) => a.localeCompare(b))) {
-        const target = joinRelative(outputDir, relative)
-        await fs.createDir(workspaceRoot, parentDirectory(target))
-        await fs.writeText(workspaceRoot, target, content)
-        written.push(relative)
-      }
-      for (const copy of Array.from(copies.values()).sort((a, b) => a.to.localeCompare(b.to))) {
-        const target = joinRelative(outputDir, copy.to)
-        await fs.createDir(workspaceRoot, parentDirectory(target))
-        await fs.copy(workspaceRoot, joinRelative(plan.sourceDir, copy.from), target)
-        written.push(copy.to)
-      }
+        const snapshot = await collectSnapshot(fs, workspaceRoot, plan.sourceDir)
+        if ((await digest(snapshot.fingerprintInput)) !== plan.digest) {
+          plans.delete(input.planId)
+          throw new Error("plugin source changed after inspection; inspect again")
+        }
+        const conversion = convertPluginBundle(snapshot.files, plan.target, {
+          binaryPaths: snapshot.binaryPaths,
+        })
 
-      plans.delete(input.planId)
-      return {
-        pluginId: conversion.manifest.id,
-        sourceFormat: conversion.source,
-        target: conversion.target,
-        outputDir,
-        files: Array.from(new Set(written)).sort(),
-        warnings: conversion.report.warnings,
+        const writes = new Map<string, string>()
+        const copies = new Map<string, { from: string; to: string }>()
+        for (const [relative, content] of conversion.files) {
+          if (snapshot.binaryPaths.has(relative) && content === "") {
+            copies.set(`${relative}\0${relative}`, { from: relative, to: relative })
+          } else {
+            writes.set(relative, content)
+          }
+        }
+        for (const copy of conversion.copies) {
+          copies.set(`${copy.from}\0${copy.to}`, copy)
+        }
+
+        await fs.createDir(workspaceRoot, outputDir)
+        const written: string[] = []
+        for (const [relative, content] of Array.from(writes).sort(([a], [b]) =>
+          a.localeCompare(b)
+        )) {
+          const target = joinRelative(outputDir, relative)
+          await fs.createDir(workspaceRoot, parentDirectory(target))
+          await fs.writeText(workspaceRoot, target, content)
+          written.push(relative)
+        }
+        for (const copy of Array.from(copies.values()).sort((a, b) => a.to.localeCompare(b.to))) {
+          const target = joinRelative(outputDir, copy.to)
+          await fs.createDir(workspaceRoot, parentDirectory(target))
+          await fs.copy(workspaceRoot, joinRelative(plan.sourceDir, copy.from), target)
+          written.push(copy.to)
+        }
+
+        plans.delete(input.planId)
+        return {
+          pluginId: conversion.manifest.id,
+          sourceFormat: conversion.source,
+          target: conversion.target,
+          outputDir,
+          files: Array.from(new Set(written)).sort(),
+          warnings: conversion.report.warnings,
+        }
+      } finally {
+        plan.applying = false
       }
     },
   }

@@ -262,3 +262,19 @@ describe("convert — merge into an existing plugin", () => {
     ).toThrow(/--into is not supported for --from cli/)
   })
 })
+
+describe("skill invocation portability", () => {
+  it("refuses standalone conversion when execution semantics cannot be enforced", () => {
+    expect(() =>
+      convert({ kind: "skill", text: "---\nname: forked\ncontext: fork\n---\nBody." })
+    ).toThrow(/unsupported execution field "context"/)
+  })
+  it("writes invocation restrictions and frontmatter into the generated manifest", () => {
+    const result = convert({
+      kind: "skill",
+      text: "---\nname: restricted\ndisable-model-invocation: true\nlicense: MIT\n---\nBody.",
+    })
+    const manifest = JSON.parse(result.files.get("plugin.json")!)
+    expect(manifest.skills[0]).toMatchObject({ invocationPolicy: "explicit", license: "MIT" })
+  })
+})

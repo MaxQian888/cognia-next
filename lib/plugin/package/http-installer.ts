@@ -44,6 +44,10 @@ export interface HttpInstallArgs {
    * trusted local server.
    */
   requireSignature?: boolean
+  /** SHA-256 returned by preview; the host rejects changed bytes before installing. */
+  expectedBundleSha256?: string
+  /** Stage for PluginManager; commit only after preflight and runtime teardown. */
+  deferCommit?: boolean
 }
 
 export interface HttpInstallResult {
@@ -52,6 +56,8 @@ export interface HttpInstallResult {
   path: string
   /** Whether the Ed25519 signature was verified end-to-end. */
   signatureVerified: boolean
+  bundleSha256: string
+  transactionId?: string
   authorPublicKey?: string
   authorFingerprint?: string
 }
@@ -62,6 +68,8 @@ interface RustInstallResult {
   source: string
   installRootKind: string
   signatureVerified: boolean
+  bundleSha256: string
+  transactionId?: string
   authorPublicKey?: string
   authorFingerprint?: string
 }
@@ -98,6 +106,12 @@ export async function previewBundleManifest(args: HttpInstallArgs): Promise<Http
  */
 export async function installFromUrl(args: HttpInstallArgs): Promise<HttpInstallResult> {
   const result = await installFromUrlInternal(args, false)
+  if (!args.deferCommit) await recordInstalledPublisher(result)
+  return result
+}
+
+/** Record trust only after the complete install transaction succeeds. */
+export async function recordInstalledPublisher(result: HttpInstallResult): Promise<void> {
   if (result.authorPublicKey && result.authorFingerprint && result.signatureVerified) {
     const trustInput: TrustPublisherInput = {
       publicKey: result.authorPublicKey,
@@ -114,12 +128,11 @@ export async function installFromUrl(args: HttpInstallArgs): Promise<HttpInstall
       })
     }
   }
-  return result
 }
 
 async function installFromUrlInternal(
   args: HttpInstallArgs,
-  _previewOnly: boolean
+  previewOnly: boolean
 ): Promise<HttpInstallResult> {
   if (!canUseTauriInvoke()) {
     throw new Error(
@@ -138,15 +151,49 @@ async function installFromUrlInternal(
     bundleUrl: args.bundleUrl,
     signatureUrl: args.signatureUrl ?? null,
     expectedPublicKeyBase64: args.expectedPublicKeyBase64 ?? null,
+    previewOnly,
+    deferCommit: args.deferCommit ?? false,
+    expectedBundleSha256: args.expectedBundleSha256 ?? null,
   })
+
+  await validateInstalledPublisher(
+    result,
+    args.expectedPublicKeyBase64,
+    Boolean(args.signatureUrl),
+    invoke
+  )
 
   return {
     manifest: result.manifest,
     path: result.path,
     signatureVerified: result.signatureVerified,
+    bundleSha256: result.bundleSha256,
+    transactionId: result.transactionId ?? undefined,
     authorPublicKey: result.authorPublicKey,
     authorFingerprint: result.authorFingerprint,
   }
+}
+
+/** Reject host-contract signer drift before trust is persisted, discarding any staged bytes. */
+export async function validateInstalledPublisher(
+  result: HttpInstallResult,
+  expectedPublicKey: string | undefined,
+  signatureExpected: boolean,
+  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
+): Promise<void> {
+  const invalid =
+    (signatureExpected && !result.signatureVerified) ||
+    (result.signatureVerified &&
+      (!expectedPublicKey ||
+        result.authorPublicKey !== expectedPublicKey.trim() ||
+        !result.authorFingerprint))
+  if (!invalid) return
+  if (result.transactionId)
+    await invoke("plugin_discard_staged_update", {
+      pluginId: result.manifest.id,
+      transactionId: result.transactionId,
+    })
+  throw new Error("The verified publisher does not match the requested signing key.")
 }
 
 /**

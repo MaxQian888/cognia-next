@@ -275,6 +275,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: ["lib/plugin/core/manager.test.ts", "lib/plugin/interceptors/dispatch.test.ts"],
   },
   {
+    id: "command-hooks",
+    support: "supported",
+    manifestFields: ["commandHooks"],
+    runtimeBinding:
+      "settings-shaped hook blocks merged under user hooks and above built-ins on every rail",
+    hostBindings: [
+      "src-tauri/src/hooks/plugin.rs",
+      "src-tauri/src/hooks/mod.rs",
+      "cli/src/hooks/plugin-hooks.ts",
+      "cli/src/hooks/load-hooks.ts",
+      "lib/plugin/convert/ecosystem.ts",
+      "lib/plugin/utils/plugin-root-tokens.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-command-hooks.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "cli/src/hooks/plugin-hooks.test.ts",
+      "cli/src/hooks/load-hooks.test.ts",
+      "lib/plugin/convert/ecosystem.test.ts",
+    ],
+  },
+  {
     id: "processors",
     support: "experimental",
     manifestFields: [],

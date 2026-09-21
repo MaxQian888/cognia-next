@@ -6,6 +6,12 @@ import {
   type GithubPluginPreview,
 } from "./github-source"
 import type { PluginManifest } from "@/types/plugin"
+import * as ecosystem from "@/lib/plugin/convert/ecosystem"
+
+jest.mock("@/lib/plugin/convert/ecosystem", () => {
+  const actual = jest.requireActual("@/lib/plugin/convert/ecosystem")
+  return { ...actual, convertPluginBundle: jest.fn(actual.convertPluginBundle) }
+})
 
 const installPluginFromGithub = jest.fn()
 jest.mock("@/lib/plugin/core/manager", () => ({
@@ -36,6 +42,23 @@ function dirResponse(entries: Array<{ type: string; path: string }>) {
 
 function notFound() {
   return { ok: false, status: 404, json: async () => ({}) } as unknown as Response
+}
+
+function repositoryFetch(tree: Record<string, string>) {
+  return jest.fn(async (url: string) => {
+    if (url.includes("/commits/")) return commitResponse()
+    const path = decodeURIComponent(url.split("/contents/")[1]?.split("?")[0] ?? "")
+    if (Object.hasOwn(tree, path)) return fileResponse(tree[path])
+    const prefix = path ? `${path}/` : ""
+    const entries = new Map<string, { type: string; path: string }>()
+    for (const candidate of Object.keys(tree)) {
+      if (!candidate.startsWith(prefix)) continue
+      const suffix = candidate.slice(prefix.length)
+      const name = suffix.split("/")[0]
+      entries.set(name, { type: suffix.includes("/") ? "dir" : "file", path: `${prefix}${name}` })
+    }
+    return entries.size || !path ? dirResponse([...entries.values()]) : notFound()
+  })
 }
 
 describe("parseGithubPluginRef", () => {
@@ -82,11 +105,19 @@ describe("parseGithubPluginRef", () => {
 })
 
 describe("fetchGithubPluginPreview", () => {
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => {
+    jest.restoreAllMocks()
+    jest
+      .mocked(ecosystem.convertPluginBundle)
+      .mockReset()
+      .mockImplementation(jest.requireActual("@/lib/plugin/convert/ecosystem").convertPluginBundle)
+  })
 
   it("fetches manifest + README + LICENSE at the repo root", async () => {
     const fetchMock = jest.fn(async (url: string) => {
       if (url.includes("/commits/")) return commitResponse()
+      if (url.includes("/contents/?ref="))
+        return dirResponse([{ type: "file", path: "plugin.json" }])
       if (url.includes("/contents/plugin.json")) return fileResponse(JSON.stringify(MANIFEST))
       if (url.includes("/contents/README.md")) return fileResponse("# Demo")
       if (url.includes("/contents/LICENSE")) return fileResponse("MIT")
@@ -115,6 +146,8 @@ describe("fetchGithubPluginPreview", () => {
       if (url.includes("/contents/packages/plugin.json")) {
         return fileResponse(JSON.stringify(MANIFEST))
       }
+      if (url.includes("/contents/packages?ref="))
+        return dirResponse([{ type: "file", path: "packages/plugin.json" }])
       return notFound()
     })
     global.fetch = fetchMock as unknown as typeof fetch
@@ -150,9 +183,10 @@ describe("fetchGithubPluginPreview", () => {
   })
 
   it("throws when no supported plugin manifest is found", async () => {
-    global.fetch = jest.fn(async (url: string) =>
-      url.includes("/commits/") ? commitResponse() : notFound()
-    ) as unknown as typeof fetch
+    global.fetch = jest.fn(async (url: string) => {
+      if (url.includes("/commits/")) return commitResponse()
+      return url.includes("/contents/?ref=") ? dirResponse([]) : notFound()
+    }) as unknown as typeof fetch
     await expect(fetchGithubPluginPreview({ owner: "a", repo: "b" })).rejects.toThrow(
       /no supported plugin manifest/i
     )
@@ -208,10 +242,7 @@ describe("fetchGithubPluginPreview", () => {
         return dirResponse([{ type: "file", path: "packages/deep/plugin.json" }])
       }
       if (url.includes("/contents/?ref=")) {
-        return dirResponse([
-          { type: "file", path: "packages/deep/plugin.json" },
-          { type: "file", path: undefined as unknown as string },
-        ])
+        return dirResponse([{ type: "file", path: "packages/deep/plugin.json" }])
       }
       return notFound()
     })
@@ -249,6 +280,8 @@ describe("fetchGithubPluginPreview", () => {
   it("throws on invalid manifest JSON", async () => {
     global.fetch = jest.fn(async (url: string) => {
       if (url.includes("/commits/")) return commitResponse()
+      if (url.includes("/contents/?ref="))
+        return dirResponse([{ type: "file", path: "plugin.json" }])
       return url.includes("plugin.json") ? fileResponse("not json{") : notFound()
     }) as unknown as typeof fetch
     await expect(fetchGithubPluginPreview({ owner: "a", repo: "b" })).rejects.toThrow(/valid JSON/i)
@@ -303,6 +336,147 @@ describe("fetchGithubPluginPreview", () => {
     expect(preview.generatedFiles["plugin.json"]).toContain('"id": "claude-review"')
     expect(preview.generatedFiles["dist/index.js"]).toContain("claude-review")
   })
+
+  it.each([
+    [".cursor-plugin/plugin.json", "cursor"],
+    [".github/plugin/plugin.json", "copilot"],
+    [".github/plugin.json", "copilot"],
+    ["kimi.plugin.json", "kimi"],
+    [".kimi-plugin/plugin.json", "kimi"],
+    [".devin-plugin/plugin.json", "devin"],
+    ["opencode.json", "opencode"],
+    ["opencode.jsonc", "opencode"],
+    ["package.json", "pi"],
+    ["plugin.json", "agent-plugins"],
+  ] as const)("collects %s with binary resources at a nested root", async (marker, format) => {
+    const manifest =
+      marker === "package.json"
+        ? { name: "demo", pi: { skills: ["./skills"] } }
+        : marker === "plugin.json"
+          ? { name: "demo", $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" }
+          : { name: "demo" }
+    const tree = {
+      "package.json": '{"name":"ordinary-repository"}',
+      [`packages/deep/${marker}`]: JSON.stringify(manifest),
+      "packages/deep/skills/review/SKILL.md": "# Review",
+      "packages/deep/skills/review/logo.png": "BINARY",
+    }
+    const convert = jest
+      .mocked(ecosystem.convertPluginBundle)
+      .mockClear()
+      .mockImplementation((snapshot) => ({
+        source: format,
+        target: "cognia",
+        manifest: MANIFEST as PluginManifest,
+        files: new Map([...snapshot, ["plugin.json", JSON.stringify(MANIFEST)]]),
+        copies: [],
+        report: { fidelity: "structured", converted: [], warnings: [], blocking: [] },
+      }))
+    const fetchMock = repositoryFetch(tree)
+    global.fetch = fetchMock as unknown as typeof fetch
+    const preview = await fetchGithubPluginPreview({ owner: "acme", repo: "plugins", ref: "main" })
+    expect(preview.ref.subdir).toBe("packages/deep")
+    expect(preview.sourceFormat).toBe(format)
+    expect(convert.mock.calls[0][0].get("skills/review/logo.png")).toBe("")
+    expect(preview.generatedFiles["skills/review/logo.png"]).toBeUndefined()
+    expect(
+      fetchMock.mock.calls
+        .filter(([url]) => url.includes("/contents/"))
+        .every(([url]) => url.includes("ref=0123456789abcdef0123456789abcdef01234567"))
+    ).toBe(true)
+  })
+
+  it("does not treat an ordinary or keyword-only package.json as a Pi plugin", async () => {
+    for (const packageJson of [
+      '{"name":"app"}',
+      '{"name":"app","keywords":["pi-package"]}',
+      "broken",
+    ]) {
+      global.fetch = repositoryFetch({ "package.json": packageJson }) as unknown as typeof fetch
+      await expect(fetchGithubPluginPreview({ owner: "a", repo: "ordinary" })).rejects.toThrow(
+        /no supported plugin manifest/
+      )
+    }
+  })
+
+  it("rejects mixed-depth plugin roots instead of selecting the shallow one", async () => {
+    global.fetch = repositoryFetch({
+      "first/plugin.json": JSON.stringify(MANIFEST),
+      "packages/deep/.cursor-plugin/plugin.json": '{"name":"deep"}',
+    }) as unknown as typeof fetch
+    await expect(fetchGithubPluginPreview({ owner: "a", repo: "multi" })).rejects.toThrow(
+      /multiple plugin roots/
+    )
+  })
+
+  it.each([404, 403, 503])(
+    "rejects HTTP %i directory failures instead of treating a partial tree as complete",
+    async (status) => {
+      const normal = repositoryFetch({
+        "plugin.json": JSON.stringify(MANIFEST),
+        "skills/review/SKILL.md": "review",
+      })
+      global.fetch = jest.fn(async (url: string) =>
+        url.includes("/contents/skills?ref=")
+          ? ({ ok: false, status, json: async () => ({}) } as Response)
+          : normal(url)
+      ) as unknown as typeof fetch
+      await expect(fetchGithubPluginPreview({ owner: "a", repo: "partial" })).rejects.toThrow(
+        new RegExp(`GitHub API ${status}.*directory skills`)
+      )
+    }
+  )
+
+  it.each([
+    { truncated: true },
+    Array.from({ length: 1_000 }, (_, index) => ({ type: "file", path: `f${index}.md` })),
+    [{ type: "file" }],
+    [{ type: "symlink", path: "outside" }],
+    [{ type: "file", path: "../outside" }],
+  ])("rejects incomplete directory responses %#", async (entries) => {
+    global.fetch = jest.fn(async (url: string) => {
+      if (url.includes("/commits/")) return commitResponse()
+      if (url.includes("/contents/plugin.json")) return fileResponse(JSON.stringify(MANIFEST))
+      return { ok: true, status: 200, json: async () => entries } as Response
+    }) as unknown as typeof fetch
+    await expect(fetchGithubPluginPreview({ owner: "a", repo: "partial" })).rejects.toThrow(
+      /incomplete|truncated|invalid/
+    )
+  })
+
+  it("refuses a listed file that cannot be fetched", async () => {
+    const normal = repositoryFetch({
+      "plugin.json": JSON.stringify(MANIFEST),
+      "skills/review/SKILL.md": "review",
+    })
+    global.fetch = jest.fn(async (url: string) =>
+      url.includes("/contents/skills/review/SKILL.md") ? notFound() : normal(url)
+    ) as unknown as typeof fetch
+    await expect(fetchGithubPluginPreview({ owner: "a", repo: "partial" })).rejects.toThrow(
+      /could not be read completely/
+    )
+  })
+
+  it("rejects unsupported encodings, oversized actual content and escaping subdirs", async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ type: "file", encoding: "none", content: "" }),
+    })) as unknown as typeof fetch
+    await expect(fetchGithubFile({ owner: "a", repo: "b" }, "large.md")).rejects.toThrow(
+      /incomplete|encoding/
+    )
+    global.fetch = jest.fn(async () =>
+      fileResponse("中".repeat(400_000))
+    ) as unknown as typeof fetch
+    await expect(fetchGithubFile({ owner: "a", repo: "b" }, "large.md")).rejects.toThrow(
+      /too large/
+    )
+    global.fetch = repositoryFetch({}) as unknown as typeof fetch
+    await expect(
+      fetchGithubPluginPreview({ owner: "a", repo: "b", subdir: "../escape" })
+    ).rejects.toThrow(/within the repository/)
+  })
 })
 
 describe("makeGithubMarketplaceClient", () => {
@@ -334,5 +508,20 @@ describe("makeGithubMarketplaceClient", () => {
     const client = makeGithubMarketplaceClient(preview.ref, preview)
     await client.installPlugin("demo.plugin")
     expect(installPluginFromGithub).toHaveBeenCalledWith("acme/cool", "main", "packages/a", {})
+  })
+
+  it("uses the approved preview commit even if passed a mutable source reference", async () => {
+    const pinned = {
+      ...preview,
+      ref: { ...preview.ref, ref: "0123456789abcdef0123456789abcdef01234567" },
+    }
+    const client = makeGithubMarketplaceClient({ ...preview.ref, ref: "main" }, pinned)
+    await client.installPlugin("demo.plugin")
+    expect(installPluginFromGithub).toHaveBeenCalledWith(
+      "acme/cool",
+      pinned.ref.ref,
+      "packages/a",
+      {}
+    )
   })
 })

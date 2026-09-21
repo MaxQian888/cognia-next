@@ -52,7 +52,7 @@ use rusqlite::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -1127,6 +1127,7 @@ fn guard_network_request(
 }
 
 fn network_http_client(url: &str) -> std::result::Result<reqwest::Client, PluginApiError> {
+    cognia_net::proxy_config::ensure_crypto_provider();
     let builder = reqwest::Client::builder().user_agent("cognia-plugin-network/0.1");
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
         .map_err(|error| PluginApiError::internal(error.to_string()))?;
@@ -1991,15 +1992,19 @@ mod tests {
             .map(|worker| worker.join().unwrap())
             .collect();
         let cached = managed_ide_state_connection(&state, "demo").unwrap();
-        assert!(connections
-            .iter()
-            .all(|connection| Arc::ptr_eq(connection, &cached)));
+        assert!(
+            connections
+                .iter()
+                .all(|connection| Arc::ptr_eq(connection, &cached))
+        );
         let plugin = plugin_db_connection(&state, "demo").unwrap();
         assert!(!Arc::ptr_eq(&plugin, &cached));
-        assert!(!plugin
-            .lock()
-            .table_exists(None, "managed_ide_state")
-            .unwrap());
+        assert!(
+            !plugin
+                .lock()
+                .table_exists(None, "managed_ide_state")
+                .unwrap()
+        );
         let other = managed_ide_state_connection(&state, "other").unwrap();
         assert!(!Arc::ptr_eq(&cached, &other));
     }
@@ -2091,14 +2096,18 @@ mod tests {
             handle_managed_ide_state(&state, "demo", "get", &get_b).unwrap(),
             Value::Null
         );
-        assert!(state
-            .plugin_host_state_dir("demo")
-            .join("managed-ide-state.db")
-            .is_file());
-        assert!(!state
-            .plugin_dir("demo")
-            .join("data/managed-ide-state.db")
-            .exists());
+        assert!(
+            state
+                .plugin_host_state_dir("demo")
+                .join("managed-ide-state.db")
+                .is_file()
+        );
+        assert!(
+            !state
+                .plugin_dir("demo")
+                .join("data/managed-ide-state.db")
+                .exists()
+        );
     }
 
     #[test]
@@ -2319,22 +2328,27 @@ mod tests {
         // db now has a real per-plugin SQLite backend.
         let db = caps.iter().find(|c| c.api == "db:query").unwrap();
         assert!(db.supported);
-        assert!(db
-            .required_permissions
-            .contains(&"database:read".to_string()));
+        assert!(
+            db.required_permissions
+                .contains(&"database:read".to_string())
+        );
         let db_exec = caps.iter().find(|c| c.api == "db:execute").unwrap();
         assert!(db_exec.supported && db_exec.high_risk);
         // shell:execute now has a real, allowlist-gated host backend.
         let shell = caps.iter().find(|c| c.api == "shell:execute").unwrap();
         assert!(shell.supported && shell.high_risk);
-        assert!(shell
-            .required_permissions
-            .contains(&"shell:execute".to_string()));
+        assert!(
+            shell
+                .required_permissions
+                .contains(&"shell:execute".to_string())
+        );
         let fs_write = caps.iter().find(|c| c.api == "fs:writeText").unwrap();
         assert!(fs_write.supported && fs_write.high_risk);
-        assert!(fs_write
-            .required_permissions
-            .contains(&"filesystem:write".to_string()));
+        assert!(
+            fs_write
+                .required_permissions
+                .contains(&"filesystem:write".to_string())
+        );
     }
 
     #[test]
@@ -2342,14 +2356,16 @@ mod tests {
         let caps = capability_table();
         let dl = caps.iter().find(|c| c.api == "network:download").unwrap();
         assert!(dl.supported);
-        assert!(dl
-            .required_permissions
-            .contains(&"network:fetch".to_string()));
+        assert!(
+            dl.required_permissions
+                .contains(&"network:fetch".to_string())
+        );
         let up = caps.iter().find(|c| c.api == "network:upload").unwrap();
         assert!(up.supported && up.high_risk);
-        assert!(up
-            .required_permissions
-            .contains(&"network:upload".to_string()));
+        assert!(
+            up.required_permissions
+                .contains(&"network:upload".to_string())
+        );
     }
 
     #[test]
@@ -2378,13 +2394,15 @@ mod tests {
             }],
         );
 
-        assert!(guard_network_request(
-            &state,
-            "demo",
-            "https://observability.test/api/logs/recent?limit=10",
-            "GET"
-        )
-        .is_ok());
+        assert!(
+            guard_network_request(
+                &state,
+                "demo",
+                "https://observability.test/api/logs/recent?limit=10",
+                "GET"
+            )
+            .is_ok()
+        );
         assert_eq!(
             guard_network_request(
                 &state,
@@ -2561,11 +2579,12 @@ mod tests {
             .unwrap();
         assert_eq!(out.get("code").and_then(Value::as_i64), Some(0));
         assert_eq!(out.get("success").and_then(Value::as_bool), Some(true));
-        assert!(out
-            .get("stdout")
-            .and_then(Value::as_str)
-            .unwrap()
-            .contains("hello"));
+        assert!(
+            out.get("stdout")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains("hello")
+        );
     }
 
     #[tokio::test]
@@ -2693,11 +2712,13 @@ mod tests {
         );
 
         // The file lives inside the plugin's own data sandbox.
-        assert!(state
-            .plugin_dir("demo")
-            .join("data")
-            .join("plugin.db")
-            .exists());
+        assert!(
+            state
+                .plugin_dir("demo")
+                .join("data")
+                .join("plugin.db")
+                .exists()
+        );
     }
 
     #[test]
@@ -2877,7 +2898,7 @@ mod tests {
 
     #[test]
     fn has_permission_reflects_a_written_manifest_grant() {
-        use crate::{permissions::read_ledger, PermissionGrant};
+        use crate::{PermissionGrant, permissions::read_ledger};
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
         assert!(!state.has_permission("demo", "filesystem:read"));

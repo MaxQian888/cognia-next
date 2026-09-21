@@ -1,6 +1,6 @@
 //! `cognia:plugin/ai` host import — `generate-text` only.
 
-use super::super::errors::{coded, WasmErrorCode};
+use super::super::errors::{WasmErrorCode, coded};
 use super::super::store::HostState;
 use super::require;
 

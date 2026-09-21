@@ -20,16 +20,23 @@ Search, then read primary sources.
 `
 
 describe("isBundleResource", () => {
-  it.each(["scripts/run.sh", "references/api.md", "assets/logo.png", "./scripts/a.py"])(
-    "accepts %s",
+  it.each([
+    "scripts/run.sh",
+    "references/api.md",
+    "assets/logo.png",
+    "./scripts/a.py",
+    "notes.txt",
+    "docs/readme.md",
+  ])("accepts %s", (path) => {
+    expect(isBundleResource(path)).toBe(true)
+  })
+
+  it.each(["SKILL.md", "../escape", "/absolute", "C:\\escape", "a/../../escape", "a\\..\\escape"])(
+    "rejects %s",
     (path) => {
-      expect(isBundleResource(path)).toBe(true)
+      expect(isBundleResource(path)).toBe(false)
     }
   )
-
-  it.each(["notes.txt", "docs/readme.md", "SKILL.md"])("rejects %s", (path) => {
-    expect(isBundleResource(path)).toBe(false)
-  })
 })
 
 describe("listSkillCandidates", () => {
@@ -56,6 +63,7 @@ describe("buildSkill", () => {
     expect(built.copies).toEqual([])
     expect(built.skill).toEqual({
       id: "code-review",
+      slug: "code-review",
       name: "Code Review",
       description: "Review a diff for correctness and style.",
       source: { kind: "inline", markdown: expect.stringContaining("Read the diff") },
@@ -88,10 +96,33 @@ describe("buildSkill", () => {
     expect(source.path).not.toContain("..")
   })
 
-  it("warns about files it did not copy instead of dropping them silently", () => {
-    const built = buildSkill(SIMPLE_SKILL, ["scripts/a.sh", "notes.txt"], "cr")
-    expect(built.warnings.join(" ")).toContain("notes.txt")
-    expect(built.copies.map((c) => c.from)).not.toContain("notes.txt")
+  it("preserves arbitrary sibling resources and rejects unsafe paths", () => {
+    const built = buildSkill(SIMPLE_SKILL, ["notes.txt", "docs/readme.md"], "cr")
+    expect(built.copies.map((c) => c.from)).toEqual(["SKILL.md", "notes.txt", "docs/readme.md"])
+    expect(() => buildSkill(SIMPLE_SKILL, ["../secret"], "cr")).toThrow(/unsafe resource path/)
+  })
+
+  it("preserves invocation restrictions and metadata for both source kinds", () => {
+    const markdown = `---
+name: restricted
+metadata:
+  vendor: example
+compatibility: Needs git
+license: MIT
+disable-model-invocation: true
+argument-hint: '[file]'
+---
+Review the file.
+`
+    for (const resources of [[], ["helper.txt"]]) {
+      expect(buildSkill(markdown, resources).skill).toMatchObject({
+        invocationPolicy: "explicit",
+        metadata: { vendor: "example" },
+        compatibility: "Needs git",
+        license: "MIT",
+        frontmatterExtensions: { "argument-hint": "[file]" },
+      })
+    }
   })
 
   it("does not treat SKILL.md itself as an uncopied stray", () => {
@@ -131,5 +162,35 @@ describe("buildSkill — degenerate frontmatter", () => {
     const noDescription = "---\nname: Bare\n---\n\nBody.\n"
     expect(buildSkill(noDescription, [], "bare").skill.description).toBe("")
     expect(buildSkill(noDescription, ["assets/x.png"], "bare").skill.description).toBe("")
+  })
+})
+
+describe("skill execution portability", () => {
+  it.each([
+    "context: fork",
+    "agent: Explore",
+    "hooks: {}",
+    "model: opus",
+    "user-invocable: false",
+    "paths: ['src/**']",
+  ])("blocks unsupported %s", (field) => {
+    const built = buildSkill(`---\nname: vendor\n${field}\n---\nBody.`)
+    expect(built.blockers.join(" ")).toContain(field.split(":")[0])
+  })
+  it.each([
+    "Inspect !`git status`",
+    "Analyze $ARGUMENTS",
+    "Read ${CLAUDE_SKILL_DIR}/helper",
+    "Read $0",
+  ])("blocks unimplemented preprocessing: %s", (body) => {
+    expect(buildSkill(`---\nname: vendor\n---\n${body}`).blockers.length).toBeGreaterThan(0)
+  })
+  it("normalizes and deduplicates safe resource paths", () => {
+    const built = buildSkill(SIMPLE_SKILL, ["./docs/a.md", "docs/a.md", "docs\\b.md"])
+    expect(built.copies.map((copy) => copy.to)).toEqual([
+      "skills/code-review/SKILL.md",
+      "skills/code-review/docs/a.md",
+      "skills/code-review/docs/b.md",
+    ])
   })
 })

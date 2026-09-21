@@ -22,13 +22,8 @@
  */
 
 import type { PluginManifest } from "@/types/plugin"
-import { loggers } from "@/lib/plugin/core/logger"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { trustPublisher, type TrustPublisherInput } from "@/lib/db/trusted-publishers"
-
-const installerLogger = loggers.manager.child
-  ? loggers.manager.child("wasm-installer")
-  : loggers.manager
+import { recordInstalledPublisher, validateInstalledPublisher } from "./http-installer"
 
 export interface LocalInstallArgs {
   /** Absolute path to the `.zip` bundle on this machine. */
@@ -40,6 +35,10 @@ export interface LocalInstallArgs {
   signatureBase64?: string
   /** Public key (base64) expected to have signed the bundle. */
   expectedPublicKeyBase64?: string
+  /** Pin confirmation to the exact bytes inspected during preview. */
+  expectedBundleSha256?: string
+  /** Stage for PluginManager without replacing an existing package. */
+  deferCommit?: boolean
 }
 
 export interface LocalInstallResult {
@@ -48,6 +47,8 @@ export interface LocalInstallResult {
   path: string
   /** Whether the Ed25519 signature was verified end-to-end. */
   signatureVerified: boolean
+  bundleSha256: string
+  transactionId?: string
   authorPublicKey?: string
   authorFingerprint?: string
 }
@@ -58,6 +59,8 @@ interface RustInstallResult {
   source: string
   installRootKind: string
   signatureVerified: boolean
+  bundleSha256: string
+  transactionId?: string
   authorPublicKey?: string
   authorFingerprint?: string
 }
@@ -82,7 +85,20 @@ async function getInvoke(): Promise<
  * is already installed, and losing the trust note is not worth turning a
  * finished install into an error.
  */
+export async function previewLocalBundleManifest(
+  args: LocalInstallArgs
+): Promise<LocalInstallResult> {
+  return installFromLocalFileInternal(args, true)
+}
+
 export async function installFromLocalFile(args: LocalInstallArgs): Promise<LocalInstallResult> {
+  return installFromLocalFileInternal(args, false)
+}
+
+async function installFromLocalFileInternal(
+  args: LocalInstallArgs,
+  previewOnly: boolean
+): Promise<LocalInstallResult> {
   if (!canUseTauriInvoke()) {
     throw new Error("Installing a plugin from a local file requires the Tauri desktop runtime.")
   }
@@ -97,29 +113,26 @@ export async function installFromLocalFile(args: LocalInstallArgs): Promise<Loca
     bundlePath: args.bundlePath,
     signatureBase64: args.signatureBase64 ?? null,
     expectedPublicKeyBase64: args.expectedPublicKeyBase64 ?? null,
+    previewOnly,
+    deferCommit: args.deferCommit ?? false,
+    expectedBundleSha256: args.expectedBundleSha256 ?? null,
   })
 
-  if (result.authorPublicKey && result.authorFingerprint && result.signatureVerified) {
-    const trustInput: TrustPublisherInput = {
-      publicKey: result.authorPublicKey,
-      fingerprint: result.authorFingerprint,
-      authorName: result.manifest.author?.name,
-      authorEmail: result.manifest.author?.email,
-      homepage: result.manifest.homepage,
-    }
-    try {
-      await trustPublisher(trustInput)
-    } catch (error) {
-      installerLogger.warn("Failed to record trusted publisher", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
+  await validateInstalledPublisher(
+    result,
+    args.expectedPublicKeyBase64,
+    Boolean(args.signatureBase64),
+    invoke
+  )
+
+  if (!previewOnly && !args.deferCommit) await recordInstalledPublisher(result)
 
   return {
     manifest: result.manifest,
     path: result.path,
     signatureVerified: result.signatureVerified,
+    bundleSha256: result.bundleSha256,
+    transactionId: result.transactionId ?? undefined,
     authorPublicKey: result.authorPublicKey,
     authorFingerprint: result.authorFingerprint,
   }

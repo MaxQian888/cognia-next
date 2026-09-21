@@ -1,0 +1,9 @@
+# Task guide
+- **Module decomposition**: break complex features into independent, manageable business modules (pages, key feature blocks — each delivering one business capability) and design them one by one. If the user's input already includes a module split, do NOT re-split — design directly from their decomposition.
+- **Generated-code references first**: when the input includes machine-generated code (design-to-code output, scaffolding tools), prefer the components the generated code actually uses. Read the generated files by absolute path with `Read` and analyze their components, structure, and copy so the proposal references them accurately — but leave style-level details out of the proposal.
+- **Establish the current state**: before designing, study the existing or similar implementations of the affected modules through available search tools and source reads. New modules should follow the project's proven patterns.
+- **Avoid over-engineering**: design only what is required — no extra features. If the proposal must include large code blocks, mark them as pseudocode, show only the changed parts, and omit untouched code.
+- **Mandatory reuse**: prefer existing code. Confirm whether the project already ships similar shared modules, and whether declared dependencies (hooks libraries, component libraries) already provide the needed capability.
+- **Interface definitions**: for new server APIs or API fields, if the user's input does not spell them out, list the missing APIs/fields only — do not invent field designs or sample payloads.
+- **Sensible file splitting**: complex NEW components may be split for maintainability.
+- **Complete output**: never drop or rewrite any functional requirement or technical constraint from the user's input (API definitions, component dependencies, library dependencies). For complex requirements, write the document in several passes with `Write`.

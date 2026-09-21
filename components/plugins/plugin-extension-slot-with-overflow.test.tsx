@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { PluginExtensionSlotWithOverflow } from "./plugin-extension-slot-with-overflow"
 import {
   getExtensionsForPoint,
@@ -58,10 +59,14 @@ beforeEach(() => {
   ;(subscribeExtensionChanges as jest.Mock).mockReset().mockReturnValue(() => {})
 })
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("PluginExtensionSlotWithOverflow", () => {
   it("renders the fallback when no extensions are registered", () => {
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([])
-    render(
+    renderUI(
       <PluginExtensionSlotWithOverflow
         point={POINT}
         limit={3}
@@ -74,7 +79,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
 
   it("returns null when no extensions and no fallback", () => {
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([])
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={3} overflowLabel="More" />
     )
     expect(container.firstChild).toBeNull()
@@ -83,7 +88,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
   it("renders all extensions inline when count <= limit", () => {
     const exts = [makeExt("a", 10, "Alpha"), makeExt("b", 5, "Beta"), makeExt("c", 0, "Gamma")]
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue(exts)
-    render(<PluginExtensionSlotWithOverflow point={POINT} limit={5} overflowLabel="More" />)
+    renderUI(<PluginExtensionSlotWithOverflow point={POINT} limit={5} overflowLabel="More" />)
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
     expect(screen.getByText("Gamma")).toBeInTheDocument()
@@ -95,7 +100,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
   it("orders extensions by descending priority", () => {
     const exts = [makeExt("low", 1, "Low"), makeExt("high", 100, "High"), makeExt("mid", 50, "Mid")]
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue(exts)
-    render(<PluginExtensionSlotWithOverflow point={POINT} limit={5} overflowLabel="More" />)
+    renderUI(<PluginExtensionSlotWithOverflow point={POINT} limit={5} overflowLabel="More" />)
     const rendered = screen.getAllByText(/^(High|Mid|Low)$/).map((el) => el.textContent)
     expect(rendered).toEqual(["High", "Mid", "Low"])
   })
@@ -108,7 +113,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
       makeExt("d", 70, "D"),
     ]
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue(exts)
-    render(<PluginExtensionSlotWithOverflow point={POINT} limit={2} overflowLabel="More" />)
+    renderUI(<PluginExtensionSlotWithOverflow point={POINT} limit={2} overflowLabel="More" />)
     expect(screen.getByText("A")).toBeInTheDocument()
     expect(screen.getByText("B")).toBeInTheDocument()
     // C and D are inside the dropdown — the trigger button is rendered.
@@ -118,7 +123,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
   it("exposes data attributes for the counts so audit panels can read them", () => {
     const exts = [makeExt("a", 0, "A"), makeExt("b", 0, "B"), makeExt("c", 0, "C")]
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue(exts)
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />
     )
     const wrapper = container.querySelector(`[data-plugin-extension-slot="${POINT}"]`)
@@ -130,7 +135,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
   it("wraps inline contributions in their plugin scope root", () => {
     const exts = [makeExt("inline", 100, "Inline"), makeExt("overflow", 10, "Overflow")]
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue(exts)
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />
     )
 
@@ -142,7 +147,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     ext.options.minWidth = 120
     ext.options.maxWidth = 240
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />
     )
 
@@ -158,7 +163,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     }
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    render(<PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />)
+    renderUI(<PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />)
 
     await waitFor(() => {
       expect(recordPluginPointDiagnostic).toHaveBeenCalledWith(
@@ -179,7 +184,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     }
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow
         point={POINT}
         limit={1}
@@ -200,7 +205,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     }
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([ext])
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={1} overflowLabel="More" />
     )
 
@@ -224,7 +229,7 @@ describe("PluginExtensionSlotWithOverflow", () => {
     const alive = makeExt("alive", 10, "Alive")
     ;(getExtensionsForPoint as jest.Mock).mockReturnValue([broken, alive])
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow point={POINT} limit={2} overflowLabel="More" />
     )
 

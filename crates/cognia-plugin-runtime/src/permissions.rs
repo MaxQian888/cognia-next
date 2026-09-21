@@ -300,11 +300,13 @@ mod tests {
         revoke_permission_for_state(&state, "demo".into(), "filesystem:read".into()).unwrap();
 
         assert!(read_ledger(&state, "demo").unwrap().is_empty());
-        assert!(state
-            .permissions
-            .read()
-            .get("demo")
-            .is_some_and(Vec::is_empty));
+        assert!(
+            state
+                .permissions
+                .read()
+                .get("demo")
+                .is_some_and(Vec::is_empty)
+        );
     }
 
     #[cfg(unix)]
@@ -328,9 +330,11 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!state.has_permission("demo", "filesystem:write"));
-        assert!(!attacker
-            .join("accounts/acct_test/demo/permissions.json")
-            .exists());
+        assert!(
+            !attacker
+                .join("accounts/acct_test/demo/permissions.json")
+                .exists()
+        );
     }
 
     #[test]
@@ -338,12 +342,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let state = make_state(&tmp);
         assert!(read_ledger(&state, ".host-state").is_err());
-        assert!(revoke_permission_for_state(
-            &state,
-            "_marketplace_cache".into(),
-            "filesystem:read".into()
-        )
-        .is_err());
+        assert!(
+            revoke_permission_for_state(
+                &state,
+                "_marketplace_cache".into(),
+                "filesystem:read".into()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -365,14 +371,16 @@ mod tests {
         write_ledger(&state, "demo", &[grant]).unwrap();
         assert!(read_ledger(&state, "demo").is_err());
 
-        assert!(grant_permission_for_state(
-            &state,
-            "demo".into(),
-            "unknown:permission".into(),
-            "attacker".into(),
-            None,
-        )
-        .is_err());
+        assert!(
+            grant_permission_for_state(
+                &state,
+                "demo".into(),
+                "unknown:permission".into(),
+                "attacker".into(),
+                None,
+            )
+            .is_err()
+        );
         assert!(state.permissions.read().is_empty());
     }
 
@@ -393,9 +401,11 @@ mod tests {
 
         state.activate_account("acct_b").unwrap();
         assert!(!state.has_permission("demo", "filesystem:read"));
-        assert!(list_permissions_for_state(&state, "demo".into())
-            .unwrap()
-            .is_empty());
+        assert!(
+            list_permissions_for_state(&state, "demo".into())
+                .unwrap()
+                .is_empty()
+        );
 
         state.activate_account("acct_a").unwrap();
         assert!(state.has_permission("demo", "filesystem:read"));

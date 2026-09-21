@@ -78,6 +78,65 @@ describe("fetchMarketplaceCatalog", () => {
     await expect(fetchMarketplaceCatalog("acme/x")).rejects.toThrow(/plugins/i)
   })
 
+  it("resolves presets against catalog plugin names, keeping missing ones", async () => {
+    fetchGithubFileMock.mockImplementation(async (_ref: unknown, path: string) =>
+      path === "marketplace.json"
+        ? JSON.stringify({
+            name: "Acme Plugins",
+            plugins: [
+              { name: "Alpha", source: "./packages/alpha" },
+              { name: "Beta", source: "packages/beta" },
+            ],
+            presets: [
+              {
+                name: "starter",
+                description: "The essentials",
+                plugins: ["Beta", "Alpha", "Ghost"],
+              },
+            ],
+          })
+        : null
+    )
+    const catalog = await fetchMarketplaceCatalog("acme/store")
+    expect(catalog.presets).toHaveLength(1)
+    const preset = catalog.presets[0]
+    expect(preset.id).toBe("acme/store:starter")
+    expect(preset.description).toBe("The essentials")
+    // Members resolve to entries in the preset's declared order, not the
+    // catalog's — "Beta" is listed before "Alpha".
+    expect(preset.members.map((m) => m.name)).toEqual(["Beta", "Alpha"])
+    expect(preset.members[0].github.subdir).toBe("packages/beta")
+    // A name no catalog plugin carries is reported, not silently dropped.
+    expect(preset.missingPlugins).toEqual(["Ghost"])
+  })
+
+  it("produces an empty preset list when the catalog declares none", async () => {
+    fetchGithubFileMock.mockImplementation(async (_ref: unknown, path: string) =>
+      path === "marketplace.json" ? CATALOG : null
+    )
+    const catalog = await fetchMarketplaceCatalog("acme/store")
+    expect(catalog.presets).toEqual([])
+  })
+
+  it("drops malformed presets but keeps well-formed ones", async () => {
+    fetchGithubFileMock.mockImplementation(async (_ref: unknown, path: string) =>
+      path === "marketplace.json"
+        ? JSON.stringify({
+            plugins: [{ name: "Alpha", source: "./a" }],
+            presets: [
+              42, // no name → dropped
+              { name: "ok", plugins: "Alpha" }, // plugins not an array → no members
+              { name: "real", plugins: ["Alpha", 7] }, // non-string filtered
+            ],
+          })
+        : null
+    )
+    const catalog = await fetchMarketplaceCatalog("acme/store")
+    expect(catalog.presets.map((p) => p.name)).toEqual(["ok", "real"])
+    expect(catalog.presets[0].members).toEqual([])
+    expect(catalog.presets[1].members.map((m) => m.name)).toEqual(["Alpha"])
+  })
+
   it("falls back to owner/repo when the catalog names nobody", async () => {
     fetchGithubFileMock.mockResolvedValue(
       JSON.stringify({ name: "   ", owner: {}, plugins: [{ name: "Alpha", source: "./" }] })

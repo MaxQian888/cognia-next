@@ -4,13 +4,12 @@
  * "Install local WASM plugin" entry button + the underlying flow hook.
  *
  * Flow:
- *   1. peek the manifest (via a temp-dir install) so we can show the user
+ *   1. preview the manifest without installing so we can show the user
  *      what they're about to grant
  *   2. open the capability grant sheet (via `useWasmCapabilityGrant`)
  *   3. on confirm, finalize the install through the manager so manifest
  *      validation, descriptor projection, and Dexie wiring all happen
- *   4. on cancel, the staged bundle stays in place and the user can
- *      revisit the grant later from per-plugin settings
+ *   4. on cancel, neither the installed bundle nor its grants change
  *
  * `useInstallWasmFromLocal` is exported separately so the plugin panel
  * toolbar can wire the same flow into a `DropdownMenuItem` without nesting
@@ -27,7 +26,7 @@ import { canUseTauriInvoke } from "@/lib/native/utils"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import { useWasmCapabilityGrant } from "@/hooks/plugins/use-wasm-capability-grant"
 import { shortFingerprint } from "@/lib/plugin/security/signature"
-import { previewBundleManifest } from "@/lib/plugin/package/http-installer"
+import { previewLocalBundleManifest } from "@/lib/plugin/package/local-installer"
 
 export interface InstallWasmPluginButtonProps {
   className?: string
@@ -38,8 +37,6 @@ export interface InstallWasmPluginButtonProps {
 interface PickedPath {
   /** Absolute filesystem path of the user-picked file. */
   path: string
-  /** Whether the file is a `.wasm` (no manifest extraction needed). */
-  isBareWasm: boolean
 }
 
 interface PickerLabels {
@@ -56,14 +53,13 @@ async function pickFile(labels: PickerLabels): Promise<PickedPath | null> {
     directory: false,
     title: labels.title,
     filters: [
-      { name: labels.bundleFilter, extensions: ["wasm", "zip"] },
+      { name: labels.bundleFilter, extensions: ["zip"] },
       { name: labels.allFilesFilter, extensions: ["*"] },
     ],
   })
   if (typeof selected !== "string") return null
   return {
     path: selected,
-    isBareWasm: selected.toLowerCase().endsWith(".wasm"),
   }
 }
 
@@ -99,40 +95,20 @@ export function useInstallWasmFromLocal(
       })
       if (!picked) return // User cancelled the file picker.
 
-      // Preview manifest. For bare .wasm we go straight to install with no
-      // preview (no plugin.json to surface); for .zip we peek so we can show
-      // the grant sheet with the real declared permissions before install.
-      let manifest: import("@/types/plugin").PluginManifest | null = null
-      let authorFingerprint: string | undefined
-      if (!picked.isBareWasm) {
-        const preview = await previewBundleManifest({
-          bundleUrl: pathToFileUrl(picked.path),
-        })
-        manifest = preview.manifest
-        authorFingerprint = preview.authorFingerprint
+      if (!picked.path.toLowerCase().endsWith(".zip")) {
+        throw new Error(t("zipRequiredError"))
+      }
+      const preview = await previewLocalBundleManifest({ bundlePath: picked.path })
+      if (!preview.bundleSha256) throw new Error(t("previewIntegrityError"))
+      const authorFingerprint =
+        preview.signatureVerified && preview.authorFingerprint
           ? shortFingerprint(preview.authorFingerprint)
           : undefined
-      }
-
-      // We need *some* manifest before opening the grant sheet. For bare
-      // .wasm sideloads, build a minimal stub the user can grant against —
-      // `description` is a stored manifest field, not user-facing prose, so
-      // it stays in English to keep the persisted record stable.
-      const grantManifest: import("@/types/plugin").PluginManifest = manifest ?? {
-        id: deriveIdFromPath(picked.path),
-        name: pathBaseName(picked.path),
-        version: "0.0.0",
-        description: "Local WASM plugin (sideloaded)",
-        type: "wasm",
-        capabilities: [],
-        wasmMain: pathBaseName(picked.path),
-        wasm: { apiVersion: "0.1.0" },
-        permissions: [],
-      }
 
       const decision = await grant.requestGrant({
-        manifest: grantManifest,
+        manifest: preview.manifest,
         authorFingerprint,
+        persist: false,
       })
       if (!decision) {
         // Cancelled grant — abort before any disk write.
@@ -140,7 +116,9 @@ export function useInstallWasmFromLocal(
       }
 
       const manager = getPluginManager()
-      const plugin = await manager.installWasmPluginFromLocalFile(picked.path, decision.decision)
+      const plugin = await manager.installWasmPluginFromLocalFile(picked.path, decision.decision, {
+        expectedBundleSha256: preview.bundleSha256,
+      })
       onInstalled?.(plugin.manifest.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -179,25 +157,4 @@ export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmP
       {sheet}
     </>
   )
-}
-
-function pathBaseName(p: string): string {
-  return p.split(/[\\/]/).pop() ?? p
-}
-
-function deriveIdFromPath(p: string): string {
-  return pathBaseName(p)
-    .replace(/\.(wasm|zip)$/i, "")
-    .replace(/[^a-zA-Z0-9.-]/g, "-")
-    .toLowerCase()
-}
-
-function pathToFileUrl(p: string): string {
-  // The HTTP installer command accepts file:// URLs as well as https://.
-  // We forward the absolute path verbatim — Rust normalizes via reqwest
-  // when scheme is https, and via std::fs when scheme is file://.
-  if (/^https?:\/\//i.test(p) || p.startsWith("file://")) return p
-  // Windows: backslash → forward slash; ensure double-slash after file:.
-  const normalized = p.replace(/\\/g, "/")
-  return normalized.startsWith("/") ? `file://${normalized}` : `file:///${normalized}`
 }

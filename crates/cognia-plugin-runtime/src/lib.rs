@@ -81,6 +81,17 @@ pub struct PluginRuntimeSnapshot {
     pub install_path: String,
 }
 
+/// Cached result of one `collect_command_hooks` pass
+/// (`src-tauri/src/hooks/plugin.rs`). `signature` fingerprints the enabled
+/// ledger plus each manifest's resolved path, mtime, and length — an
+/// enable/disable flip, install, or manifest rewrite changes it and forces a
+/// recollect; other dispatches reuse `merged` without touching disk.
+#[derive(Debug, Clone)]
+pub struct CachedCommandHooks {
+    pub signature: String,
+    pub merged: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
 /// One persisted permission entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionGrant {
@@ -165,6 +176,13 @@ pub struct PluginRuntimeState {
     /// declarative half of the shell capability gate (the user-consent +
     /// `shell:execute` permission is the other half).
     pub shell_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Memoized `collect_command_hooks` merge product used by the hooks
+    /// pipeline (`src-tauri/src/hooks/plugin.rs`). Without it every hook
+    /// dispatch would read + parse every enabled plugin manifest off disk.
+    /// Self-invalidating: the cached signature covers the enabled ledger and
+    /// each manifest's mtime+len, so ledger or file changes recompute
+    /// automatically — no explicit invalidation wiring required.
+    pub command_hooks_cache: Arc<RwLock<Option<CachedCommandHooks>>>,
 }
 
 /// True when `program` matches an entry in `allowlist` by file stem.
@@ -215,6 +233,7 @@ impl PluginRuntimeState {
             db_connections: Arc::new(RwLock::new(HashMap::new())),
             managed_ide_connections: Arc::new(RwLock::new(HashMap::new())),
             shell_allowlist: Arc::new(RwLock::new(HashMap::new())),
+            command_hooks_cache: Arc::new(RwLock::new(None)),
         };
         let recovery = marketplace::recover_update_transactions_for_state(&state);
         if recovery.recovered_transactions > 0 || recovery.discarded_transactions > 0 {
@@ -397,7 +416,7 @@ pub async fn teardown_account_runtimes(
     wasm: &wasm::WasmPluginState,
     vscode: &vscode::VscodeExtensionState,
 ) -> Result<()> {
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     // Revoke authorization before awaiting any child process.
     plugins.clear_account();

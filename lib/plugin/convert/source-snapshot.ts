@@ -53,6 +53,11 @@ export function isSnapshotTextFile(relativePath: string): boolean {
   return SNAPSHOT_TEXT_FILE_PATTERN.test(relativePath)
 }
 
+/** Environment files must be overwritten, never restored from binary placeholders. */
+export function isPluginEnvironmentFile(relativePath: string): boolean {
+  return /(^|\/)\.env(?:\.|$)/.test(relativePath)
+}
+
 /**
  * Which converted files differ from what the source already contained.
  *

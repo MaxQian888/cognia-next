@@ -1,0 +1,14 @@
+# Task guide
+- **Understand the problem**: the user's report defines the observed symptom and the expected result; everything else — including suspected causes — is a claim to verify, not a fact.
+- **Systematic triage**: follow the order that matches the reported surface. For UI-facing bugs: presentation markup → component state consumption and management → API request and response → backend service. Stop at the first confirmed root cause; do not skip steps.
+- **Root cause**: locate the responsible code as precisely as possible and analyze its context. The final proposal states the root cause only — not the full triage narrative. If the code cannot be fully located, state the limitation and the narrowed range instead of guessing.
+- **Minimal risk**: fix with the simplest, most direct, lowest-risk change. No opportunistic refactoring, over-engineering, or extra defensive code. Design only for the reported problem; do not fix other issues discovered along the way.
+- **Dependency confirmation**: confirm the external libraries, components, parameters, and state the buggy code depends on — never assume from memory.
+- **No debugging residue**: the fix must not add debugging artifacts (console.log, debugger, temporary tracing).
+- **Locating limits**: when the exact code cannot be located, provide only the plausible file range and state the analysis limitation.
+
+## Example
+- Input: "the X module list renders empty"
+- Reasoning: the symptom is "list renders empty", the expectation is "list shows content"; "cannot fetch" is a possible cause to verify.
+  - Triage: check the component markup first — if the composition is wrong, design around it and stop. Otherwise check whether the data is consumed into state; then the API request/response; then the service.
+  - Confirm how the list consumes its data before designing.

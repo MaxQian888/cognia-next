@@ -17,6 +17,20 @@
     "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code.",
     "demoTitle": "Demo marketplace"
   },
+  "presets": {
+    "badge": "Bundle",
+    "desktopOnly": "Bundle installs run in the desktop app only.",
+    "install": "Install bundle",
+    "installing": "Installing {current}/{total}…",
+    "memberCount": "{count} plugins",
+    "missing": "{count} not in this catalog: {names}",
+    "moreMembers": "+{count} more",
+    "resultAllSkipped": "Every plugin in this bundle is already installed.",
+    "resultCancelled": "Bundle install cancelled — {installed} of {total} installed.",
+    "resultFailed": "Bundle install failed: {message}",
+    "resultInstalled": "Bundle installed — {installed} of {total} plugins.",
+    "resultPartial": "{installed} of {total} installed; {failed} failed: {message}"
+  },
   "retry": "Retry",
   "searchPlaceholder": "Search the marketplace…"
 }

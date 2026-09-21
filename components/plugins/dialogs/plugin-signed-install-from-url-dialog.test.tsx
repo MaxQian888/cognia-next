@@ -15,8 +15,13 @@ const isPublisherKeyTrustedMock = jest.fn()
 
 jest.mock("@/lib/plugin/package/http-installer", () => ({
   previewBundleManifest: (...args: unknown[]) => previewMock(...args),
-  installFromUrl: (...args: unknown[]) => installMock(...args),
   isPublisherKeyTrusted: (...args: unknown[]) => isPublisherKeyTrustedMock(...args),
+}))
+
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({
+    installWasmPluginFromUrl: (...args: unknown[]) => installMock(...args),
+  }),
 }))
 
 import { PluginSignedInstallFromUrlDialog } from "./plugin-signed-install-from-url-dialog"
@@ -73,6 +78,7 @@ describe("PluginSignedInstallFromUrlDialog", () => {
       manifest: baseManifest,
       path: "/plugins/demo.wasm",
       signatureVerified: true,
+      bundleSha256: "a".repeat(64),
       authorPublicKey: "AAA=",
       authorFingerprint: "9f3a112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
     })
@@ -93,6 +99,7 @@ describe("PluginSignedInstallFromUrlDialog", () => {
       manifest: baseManifest,
       path: "/plugins/demo.wasm",
       signatureVerified: true,
+      bundleSha256: "a".repeat(64),
       authorPublicKey: "AAA=",
       authorFingerprint: "deadbeef",
     })
@@ -132,6 +139,7 @@ describe("PluginSignedInstallFromUrlDialog", () => {
       manifest: baseManifest,
       path: "/plugins/demo.wasm",
       signatureVerified: true,
+      bundleSha256: "a".repeat(64),
       authorPublicKey: "AAA=",
       authorFingerprint: "9f3a",
     })
@@ -155,4 +163,49 @@ describe("PluginSignedInstallFromUrlDialog", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
   })
+})
+
+it("cancelling capability review leaves the preview uninstalled", async () => {
+  previewMock.mockResolvedValueOnce({
+    manifest: baseManifest,
+    path: "/plugins/demo.wasm",
+    signatureVerified: false,
+    bundleSha256: "a".repeat(64),
+  })
+  render(<PluginSignedInstallFromUrlDialog open onOpenChange={() => {}} />)
+  fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
+    target: { value: "https://example.com/p.zip" },
+  })
+  fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
+  fireEvent.click(await screen.findByTestId("install-from-url-confirm-button"))
+  fireEvent.click(await screen.findByTestId("wasm-grant-cancel"))
+  expect(installMock).not.toHaveBeenCalled()
+  expect(await screen.findByTestId("install-from-url-preview")).toBeInTheDocument()
+})
+
+it("confirms the exact preview through manager registration only after capability consent", async () => {
+  const result = {
+    manifest: baseManifest,
+    path: "/plugins/demo.wasm",
+    signatureVerified: false,
+    bundleSha256: "a".repeat(64),
+  }
+  previewMock.mockResolvedValueOnce(result)
+  installMock.mockResolvedValueOnce(result)
+  const onInstalled = jest.fn()
+  render(
+    <PluginSignedInstallFromUrlDialog open onOpenChange={() => {}} onInstalled={onInstalled} />
+  )
+  fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
+    target: { value: "https://example.com/p.zip" },
+  })
+  fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
+  fireEvent.click(await screen.findByTestId("install-from-url-confirm-button"))
+  expect(installMock).not.toHaveBeenCalled()
+  fireEvent.click(await screen.findByTestId("wasm-grant-confirm"))
+  await waitFor(() => expect(onInstalled).toHaveBeenCalledWith(result))
+  expect(installMock).toHaveBeenCalledWith(
+    expect.objectContaining({ expectedBundleSha256: "a".repeat(64) }),
+    expect.objectContaining({ pluginId: "demo.wasm" })
+  )
 })

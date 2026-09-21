@@ -2,11 +2,12 @@ import { z } from "zod"
 
 import { getPluginConversionService } from "@/lib/plugin/convert/agent-service"
 import type { PluginEcosystem } from "@/lib/plugin/convert/ecosystem"
+import { PLUGIN_ECOSYSTEMS } from "@/lib/plugin/convert/delivery"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillContext } from "../types"
 
-const targetSchema = z.enum(["cognia", "claude-code", "codex", "gemini-cli"])
+const targetSchema = z.enum(PLUGIN_ECOSYSTEMS)
 
 const inspectSchema = z.object({
   sourceDir: z
@@ -14,14 +15,26 @@ const inspectSchema = z.object({
     .min(1)
     .describe("Plugin bundle directory relative to the active workspace."),
   target: targetSchema.describe("Target plugin ecosystem."),
+  surface: z
+    .enum(["cli", "desktop", "cloud"])
+    .optional()
+    .describe(
+      "Target execution surface; cloud support is checked separately from local packaging."
+    ),
 })
 
 const applySchema = z.object({
-  planId: z.string().min(1).describe("Opaque plan id returned by inspect_plugin_conversion."),
+  planId: z.string().min(1).describe("Opaque plan id returned by plugin_conversion_inspect."),
   outputDir: z
     .string()
     .min(1)
     .describe("Empty or non-existing output directory relative to the active workspace."),
+  acknowledgeWarnings: z
+    .boolean()
+    .optional()
+    .describe(
+      "True only after the user has reviewed and accepted the inspected conversion warnings."
+    ),
 })
 
 function requireWorkspaceRoot(ctx: BuiltInSkillContext): string {
@@ -43,13 +56,14 @@ const inspectSkill: BuiltInSkill<typeof inspectSchema> = {
   platforms: "any",
   mutation: "read",
   imAccess: "blocked",
-  mcpToolName: "inspect_plugin_conversion",
+  mcpToolName: "plugin_conversion_inspect",
   inputSchema: inspectSchema,
   execute: async (args, ctx) =>
     await getPluginConversionService().inspect({
       workspaceRoot: requireWorkspaceRoot(ctx),
       sourceDir: args.sourceDir,
       target: args.target as PluginEcosystem,
+      ...(args.surface ? { surface: args.surface } : {}),
     }),
 }
 
@@ -64,13 +78,16 @@ const applySkill: BuiltInSkill<typeof applySchema> = {
   platforms: "any",
   mutation: "write",
   imAccess: "blocked",
-  mcpToolName: "apply_plugin_conversion",
+  mcpToolName: "plugin_conversion_apply",
   inputSchema: applySchema,
   execute: async (args, ctx) =>
     await getPluginConversionService().apply({
       workspaceRoot: requireWorkspaceRoot(ctx),
       planId: args.planId,
       outputDir: args.outputDir,
+      ...(args.acknowledgeWarnings !== undefined
+        ? { acknowledgeWarnings: args.acknowledgeWarnings }
+        : {}),
     }),
   hitlSurface: (args) =>
     buildConfirmSurface({

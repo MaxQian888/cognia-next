@@ -9,6 +9,7 @@ from cognia import (
     define_agent_team_template,
     define_character_pack,
     define_command,
+    define_command_hooks,
     define_mcp_server_preset,
     define_native_anthropic_tool,
     define_quick_action,
@@ -259,6 +260,45 @@ def test_command_minimal_and_full():
 def test_command_requires_core():
     with pytest.raises(ValueError):
         define_command("", "n")
+
+
+# -- command-hooks ----------------------------------------------------------
+
+
+def test_command_hooks_validates_and_passes_groups_through():
+    block = define_command_hooks(
+        {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "node ${COGNIA_PLUGIN_ROOT}/guard.mjs",
+                            "async": True,
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    assert block["PreToolUse"][0]["hooks"][0]["async"] is True
+    assert block["PreToolUse"][0]["matcher"] == "Bash"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not-a-mapping",
+        {"": []},
+        {"PreToolUse": "not-a-list"},
+        {"PreToolUse": ["not-a-group"]},
+        {"PreToolUse": [{"matcher": "Bash"}]},
+    ],
+)
+def test_command_hooks_rejects_malformed_blocks(bad):
+    with pytest.raises(ValueError):
+        define_command_hooks(bad)
 
 
 # -- quick-action -----------------------------------------------------------

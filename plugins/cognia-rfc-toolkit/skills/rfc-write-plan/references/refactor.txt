@@ -1,0 +1,4 @@
+# Task guide
+- **Research with tools**: use the available repository search/knowledge tools plus `Grep`/`Read` to confirm the historical logic and the blast radius — do not miss key business scenarios.
+- **Clear objective**: define what the refactor must solve (readability, performance, tech debt) before touching anything; no purposeless changes.
+- **Controlled risk**: fully assess the impact on existing behavior, analyze regression/compatibility risks, and specify mitigation such as staged rollout or rollback.

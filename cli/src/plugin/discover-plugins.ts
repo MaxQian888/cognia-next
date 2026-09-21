@@ -6,11 +6,28 @@
  * as "unsupported in CLI".
  */
 import nodeFs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 
 import type { McpTransport } from "@cognia/agent-config-types"
 import type { PluginType } from "@/types/plugin/plugin"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
+
+import { resolveHome } from "../config/load"
+
+/**
+ * Disk roots shared by standalone CLI and the supervised headless brain.
+ * `COGNIA_DATA_DIR` is appended because cognia-server installs remote plugins
+ * into `<data>/.cognia/plugins`, while a standalone CLI keeps the established
+ * project/home discovery locations. Each root scans as `<root>/.cognia/plugins`.
+ */
+export function pluginDiscoveryRoots(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+  home = resolveHome(env, os.homedir())
+): string[] {
+  return [...new Set([cwd, home, env.COGNIA_DATA_DIR].filter((root): root is string => !!root))]
+}
 
 export interface PluginFs {
   exists(path: string): Promise<boolean>

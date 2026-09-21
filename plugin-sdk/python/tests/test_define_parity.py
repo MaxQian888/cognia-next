@@ -86,6 +86,7 @@ PYTHON_MIRRORS: dict[str, str] = {
     "native-anthropic-tool": "define_native_anthropic_tool",
     "mcp-server-preset": "define_mcp_server_preset",
     "command": "define_command",
+    "command-hooks": "define_command_hooks",
     "quick-action": "define_quick_action",
     # provider / language-server family
     "ai-provider": "define_ai_provider",

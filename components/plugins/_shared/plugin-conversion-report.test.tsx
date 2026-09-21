@@ -85,16 +85,33 @@ describe("PluginConversionReport", () => {
     expect(items[1]).toHaveTextContent("Warning")
   })
 
-  it("says everything carried over, and still says what was converted", () => {
+  it("keeps structural success separate from native runtime verification", () => {
     // "Everything carried over." on its own drops the fact that anything was
     // converted at all, which is the other half of what the user is deciding on.
     renderReport(report({ fidelity: "native-exact", converted: [issue()] }))
     expect(screen.getByTestId("plugin-conversion-no-issues")).toHaveTextContent(
-      "Everything carried over."
+      "No conversion issues detected."
     )
     expect(screen.getByTestId("plugin-conversion-report")).toHaveTextContent(
       "1 capability converted, no warnings, nothing blocking"
     )
+  })
+
+  it("explains hosted tool scope and the contributions retained in Cognia", () => {
+    renderReport(
+      report({
+        delivery: {
+          target: "codex",
+          surface: "cli",
+          native: "blocked",
+          hostVerified: false,
+          hosted: { status: "requires-cognia", capabilities: ["tools"], retained: ["bot"] },
+        },
+      })
+    )
+    expect(screen.getByText(/Cognia must remain running/)).toBeInTheDocument()
+    expect(screen.getByText(/Retained in Cognia: bot/)).toBeInTheDocument()
+    expect(screen.getByText(/Native execution has not been verified/)).toBeInTheDocument()
   })
 
   it("folds a long issue list into a remainder line", () => {

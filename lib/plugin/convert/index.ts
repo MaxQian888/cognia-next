@@ -89,6 +89,7 @@ function buildContribution(input: ConvertInput): Contribution {
     }
     case "skill": {
       const built = buildSkill(requireText(input), input.resources ?? [], input.sourceName)
+      if (built.blockers.length > 0) throw new Error(built.blockers.join("\n"))
       return {
         capability: "skills",
         manifestField: "skills",

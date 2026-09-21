@@ -59,7 +59,7 @@ url = "2"
 dirs = "6"
 notify = "8"
 rusqlite = { version = "0.37", features = ["bundled"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "socks", "http2", "multipart"] }
 # Marketplace archive staging / extraction.
 tempfile = "3"
 zip = { version = "8", default-features = false, features = ["deflate", "bzip2"] }

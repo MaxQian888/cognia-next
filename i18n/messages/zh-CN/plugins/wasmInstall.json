@@ -32,7 +32,9 @@
     "filterAllFiles": "所有文件",
     "filterWasmBundle": "WASM 包",
     "label": "安装本地 WASM 插件",
-    "tauriRequiredError": "安装本地 WASM 插件需要桌面应用。"
+    "tauriRequiredError": "安装本地 WASM 插件需要桌面应用。",
+    "zipRequiredError": "请选择包含插件清单和 WASM 组件的 .zip 包。",
+    "previewIntegrityError": "插件预览未返回完整性校验信息，请重新预览后再安装。"
   },
   "fromUrlDialog": {
     "alreadyTrusted": "你已信任该作者。",
@@ -55,6 +57,7 @@
     "trustAriaLabel": "信任该作者",
     "trustFirstTime": "信任该作者，用于后续安装。",
     "trustRequiredError": "安装前请先信任该作者。",
-    "unsignedBundle": "未签名的包"
+    "unsignedBundle": "未签名的包",
+    "previewIntegrityError": "插件预览未返回完整性校验信息，请重新预览后再安装。"
   }
 }

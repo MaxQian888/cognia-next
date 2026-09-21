@@ -7,7 +7,44 @@ import type {
   PluginToolExecResponse,
 } from "@/lib/claude/plugin-tool-ipc"
 
+type PluginToolExecutorForTest = (
+  request: PluginToolExecRequest,
+  deps?: PluginToolExecHostDeps
+) => Promise<PluginToolExecResponse>
+const mockEnsureCliDb = jest.fn(async () => undefined)
+const mockResolveAttachmentDeps = jest.fn(async () => ({
+  list: jest.fn(),
+  getMetadata: jest.fn(),
+  search: jest.fn(),
+}))
+jest.mock("../db/bootstrap", () => ({ ensureCliDb: () => mockEnsureCliDb() }))
+jest.mock("@/lib/claude/attachment-builtin-tools", () => ({
+  resolveAttachmentToolDeps: () => mockResolveAttachmentDeps(),
+}))
+
 describe("makeConfiguredCliPluginToolHandle", () => {
+  it("bootstraps the CLI database lazily before resolving attachment storage", async () => {
+    const execute: PluginToolExecutorForTest = async (request, deps) => ({
+      type: "plugin_tool_response",
+      sessionId: request.sessionId,
+      toolUseId: request.toolUseId,
+      result: await deps?.resolveAttachmentToolDeps?.(),
+    })
+    const handle = makeConfiguredCliPluginToolHandle(DEFAULT_RESOLVED_CONFIG, execute)
+    expect(mockEnsureCliDb).not.toHaveBeenCalled()
+    await handle({
+      type: "plugin_tool_exec",
+      sessionId: "s1",
+      toolUseId: "a1",
+      name: "attachment_list",
+      args: {},
+    })
+    expect(mockEnsureCliDb).toHaveBeenCalledTimes(1)
+    expect(mockResolveAttachmentDeps).toHaveBeenCalledTimes(1)
+    expect(mockEnsureCliDb.mock.invocationCallOrder[0]).toBeLessThan(
+      mockResolveAttachmentDeps.mock.invocationCallOrder[0]
+    )
+  })
   it("injects the resolved CLI search configuration into the shared executor", async () => {
     const execute = jest.fn<
       Promise<PluginToolExecResponse>,
@@ -53,7 +90,7 @@ describe("makeConfiguredCliPluginToolHandle", () => {
   it("carries no per-plugin host dependencies", async () => {
     // The CLI used to hand one named plugin its own model bridge here. Every
     // plugin now reaches the model through `ctx.ai` and the session's host
-    // runtime, so the only host dep left is the shared web policy.
+    // runtime, so shared host dependencies only serve core web and attachment tools.
     const execute = jest.fn<
       Promise<PluginToolExecResponse>,
       [PluginToolExecRequest, PluginToolExecHostDeps?]
@@ -76,6 +113,9 @@ describe("makeConfiguredCliPluginToolHandle", () => {
       args: { query: "Cognia" },
     })
 
-    expect(Object.keys(execute.mock.calls[0]?.[1] ?? {})).toEqual(["resolveWebToolDeps"])
+    expect(Object.keys(execute.mock.calls[0]?.[1] ?? {})).toEqual([
+      "resolveWebToolDeps",
+      "resolveAttachmentToolDeps",
+    ])
   })
 })

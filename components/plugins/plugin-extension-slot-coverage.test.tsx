@@ -15,6 +15,7 @@
 // "slot lives in the wrong file" failure mode independently.
 
 import { render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { PluginExtensionSlot } from "./plugin-extension-slot"
 import { PluginExtensionSlotWithOverflow } from "./plugin-extension-slot-with-overflow"
 import { registerMockExtension, clearAllMockExtensions } from "./test-utils/register-mock-extension"
@@ -32,11 +33,15 @@ const IMPLEMENTED_POINTS: CanonicalExtensionPoint[] = CANONICAL_EXTENSION_POINTS
   (point) => getExtensionPointContract(point).status === "implemented"
 )
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("plugin slot coverage — every implemented extension point", () => {
   it.each(IMPLEMENTED_POINTS)("renders a registered extension at point %s", (point) => {
     const TestExtension = () => <span data-testid={`ext-for-${point}`}>plugin content</span>
     registerMockExtension(point, TestExtension)
-    render(<PluginExtensionSlot point={point} />)
+    renderUI(<PluginExtensionSlot point={point} />)
     expect(screen.getByTestId(`ext-for-${point}`)).toBeInTheDocument()
   })
 
@@ -49,7 +54,7 @@ describe("plugin slot coverage — every implemented extension point", () => {
     registerMockExtension("chat.input.actions", Second, { priority: 3 })
     registerMockExtension("chat.input.actions", Third, { priority: 2 })
     registerMockExtension("chat.input.actions", Fourth, { priority: 1 })
-    render(
+    renderUI(
       <PluginExtensionSlotWithOverflow
         point="chat.input.actions"
         limit={3}
@@ -70,7 +75,7 @@ describe("plugin slot coverage — every implemented extension point", () => {
     const Second = () => <span data-testid="ext-2">2</span>
     registerMockExtension("chat.input.actions", First, { priority: 2 })
     registerMockExtension("chat.input.actions", Second, { priority: 1 })
-    render(
+    renderUI(
       <PluginExtensionSlotWithOverflow
         point="chat.input.actions"
         limit={1}
@@ -81,7 +86,7 @@ describe("plugin slot coverage — every implemented extension point", () => {
   })
 
   it("the WithOverflow wrapper renders nothing when no extensions registered", () => {
-    const { container } = render(
+    const { container } = renderUI(
       <PluginExtensionSlotWithOverflow
         point="chat.input.actions"
         limit={3}

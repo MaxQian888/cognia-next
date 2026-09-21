@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Two new installable first-party plugins port generic mechanisms from the aiden-plugins catalog. `cognia-rfc-toolkit` ships three local-bundle skills: `rfc-write-plan` (task-type-aware RFC planning — bug fix / new feature / refactor each load their own guide + output template, with fact-driven, reuse-first, source-verified design rules), `rfc-reflect` (a five-dimension self-critique checklist for proposal drafts), and `mermaid-visualizer` (syntax-safe Mermaid generation with parse-error prevention rules). `cognia-bugfix-review` ships an audit-only review flow: the `bugfix-review` skill resolves the review input and delegates exactly once to the `bugfix-reviewer` subagent, which statically judges whether changes resolve the original bug report and writes a timestamped Chinese-first Markdown report to the artifacts directory. Both are desktop-only installable bundles (local-bundle skills resolve through the filesystem bridge) and carry no vendor-specific tooling.

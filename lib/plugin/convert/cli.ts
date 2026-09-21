@@ -19,7 +19,14 @@
  */
 
 import { convert, listCandidates } from "./index"
-import { convertPluginBundle, type PluginEcosystem } from "./ecosystem"
+import {
+  convertPluginBundle,
+  detectPluginEcosystem,
+  UnsupportedPluginConversionError,
+  type PluginConversionReport,
+  type PluginEcosystem,
+} from "./ecosystem"
+import { PLUGIN_ECOSYSTEMS, assessPluginDelivery, type PluginDeliverySurface } from "./delivery"
 import { BUNDLE_RESOURCE_DIRS } from "./skill-source"
 import type { ConvertIdentityOverrides, ConvertSourceKind } from "./types"
 
@@ -46,7 +53,8 @@ export interface ConvertCliOutput {
   ok: boolean
   /** Present when `ok: false`. */
   error?: string
-  mode?: "create" | "merge" | "list" | "export"
+  mode?: "create" | "merge" | "list" | "export" | "inspect"
+  report?: PluginConversionReport
   pluginId?: string
   /** Absolute path of the directory that was written. */
   dir?: string
@@ -207,7 +215,7 @@ function assertWritableTarget(dir: string, io: ConvertIo): void {
   }
 }
 
-const ECOSYSTEM_TARGETS: PluginEcosystem[] = ["cognia", "claude-code", "codex", "gemini-cli"]
+const ECOSYSTEM_TARGETS: readonly PluginEcosystem[] = PLUGIN_ECOSYSTEMS
 const BUNDLE_TEXT_PATTERN =
   /\.(?:md|markdown|txt|json|jsonc|toml|ya?ml|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|py|rs|css|html)$/i
 
@@ -216,11 +224,24 @@ function parseEcosystemArgs(argv: string[]): {
   input: string
   target: PluginEcosystem
   dir?: string
+  dryRun: boolean
+  acceptWarnings: boolean
+  surface: PluginDeliverySurface
 } {
-  const allowed = new Set(["--operation", "--from", "--input", "--to", "--dir"])
+  const allowed = new Set(["--operation", "--from", "--input", "--to", "--dir", "--surface"])
   const values = new Map<string, string>()
+  let dryRun = false
+  let acceptWarnings = false
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]
+    if (flag === "--dry-run") {
+      dryRun = true
+      continue
+    }
+    if (flag === "--accept-warnings") {
+      acceptWarnings = true
+      continue
+    }
     if (!allowed.has(flag)) throw new Error(`unknown option: ${flag}`)
     const value = argv[i + 1]
     if (value === undefined || value.startsWith("--")) {
@@ -243,13 +264,21 @@ function parseEcosystemArgs(argv: string[]): {
     throw new Error(`--to must be one of ${ECOSYSTEM_TARGETS.join(" | ")}, got "${target}"`)
   }
   if (operation === "export" && target === "cognia") {
-    throw new Error("plugin export requires --to claude-code, codex, or gemini-cli")
+    throw new Error(
+      `plugin export requires --to ${ECOSYSTEM_TARGETS.filter((target) => target !== "cognia").join(", ")}`
+    )
   }
+  const surface = values.get("--surface") ?? "cli"
+  if (!["cli", "desktop", "cloud"].includes(surface))
+    throw new Error("--surface must be cli, desktop, or cloud")
   return {
     operation,
     input,
     target: target as PluginEcosystem,
     dir: values.get("--dir"),
+    dryRun,
+    acceptWarnings,
+    surface: surface as PluginDeliverySurface,
   }
 }
 
@@ -273,10 +302,83 @@ export function runEcosystemConvertCli(argv: string[], io: ConvertIo): ConvertCl
       binaryPaths.add(normalized)
     }
   }
-  const result = convertPluginBundle(files, args.target, { binaryPaths })
+  let result
+  try {
+    result = convertPluginBundle(files, args.target, { binaryPaths })
+    if (args.surface === "cloud" && args.target !== "cognia") {
+      throw new UnsupportedPluginConversionError(result.source, args.target, {
+        fidelity: "unsupported",
+        converted: [],
+        warnings: [],
+        blocking: [
+          {
+            capability: "surface",
+            path: "cloud",
+            message:
+              "Cloud installation and execution have not been verified. Use a local CLI or desktop target.",
+            blocking: true,
+          },
+        ],
+      })
+    }
+  } catch (error) {
+    if (!(error instanceof UnsupportedPluginConversionError)) throw error
+    const manifest =
+      detectPluginEcosystem(files) === "cognia"
+        ? convertPluginBundle(files, "cognia", { binaryPaths }).manifest
+        : undefined
+    error.report.delivery = assessPluginDelivery({
+      manifest,
+      report: error.report,
+      target: args.target,
+      surface: args.surface,
+    })
+    if (!args.dryRun) throw error
+    return { ok: true, mode: "inspect", files: [], report: error.report }
+  }
+  result.report.delivery = assessPluginDelivery({
+    manifest: result.manifest,
+    report: result.report,
+    target: args.target,
+    surface: args.surface,
+  })
   const defaultDir =
     args.operation === "import" ? result.manifest.id : `${result.manifest.id}-${args.target}`
   const outputDir = io.resolve(args.dir ?? defaultDir)
+  const normalizeDirectory = (path: string) => path.replaceAll("\\", "/").replace(/\/+$/, "")
+  const sourcePath = normalizeDirectory(sourceRoot)
+  const outputPath = normalizeDirectory(outputDir)
+  if (
+    sourcePath === outputPath ||
+    outputPath.startsWith(`${sourcePath}/`) ||
+    sourcePath.startsWith(`${outputPath}/`)
+  ) {
+    throw new Error("source and output directories must not overlap")
+  }
+  if (args.dryRun) {
+    return {
+      ok: true,
+      mode: "inspect",
+      pluginId: result.manifest.id,
+      dir: outputDir,
+      files: [...new Set([...result.files.keys(), ...result.copies.map((copy) => copy.to)])].sort(),
+      report: result.report,
+    }
+  }
+  if (result.report.warnings.length && !args.acceptWarnings) {
+    throw new UnsupportedPluginConversionError(result.source, result.target, {
+      ...result.report,
+      blocking: [
+        {
+          capability: "review",
+          path: "--accept-warnings",
+          message:
+            "Inspect with --dry-run, then acknowledge the conversion warnings with --accept-warnings before writing.",
+          blocking: true,
+        },
+      ],
+    })
+  }
   assertWritableTarget(outputDir, io)
 
   const written: string[] = []
@@ -309,6 +411,7 @@ export function runEcosystemConvertCli(argv: string[], io: ConvertIo): ConvertCl
     dir: outputDir,
     files: written.sort(),
     warnings: result.report.warnings.map((issue) => `${issue.path}: ${issue.message}`),
+    report: result.report,
   }
 }
 
@@ -420,7 +523,14 @@ export function runMain(argv: string[], io: ConvertIo): { output: string; exitCo
     return { output: JSON.stringify(result), exitCode: 0 }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { output: JSON.stringify({ ok: false, error: message }), exitCode: 1 }
+    return {
+      output: JSON.stringify({
+        ok: false,
+        error: message,
+        ...(err instanceof UnsupportedPluginConversionError ? { report: err.report } : {}),
+      }),
+      exitCode: 1,
+    }
   }
 }
 

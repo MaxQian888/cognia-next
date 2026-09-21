@@ -613,7 +613,7 @@ pub async fn dry_run_resolve(
         Installer::Custom { .. } => {
             return Err(PluginError::PythonHost(
                 "a custom installer cannot resolve without installing".into(),
-            ))
+            ));
         }
     };
     let tail = run_streaming_collecting(&mut cmd, plugin_id, "resolve", sink).await?;
@@ -984,17 +984,21 @@ mod tests {
 
     #[test]
     fn a_custom_installer_needs_a_program_and_an_install_template() {
-        assert!(resolve_installer(&InstallerPreference {
-            kind: Some("custom".into()),
-            ..Default::default()
-        })
-        .is_err());
-        assert!(resolve_installer(&InstallerPreference {
-            kind: Some("custom".into()),
-            path: Some("/usr/bin/poetry".into()),
-            ..Default::default()
-        })
-        .is_err());
+        assert!(
+            resolve_installer(&InstallerPreference {
+                kind: Some("custom".into()),
+                ..Default::default()
+            })
+            .is_err()
+        );
+        assert!(
+            resolve_installer(&InstallerPreference {
+                kind: Some("custom".into()),
+                path: Some("/usr/bin/poetry".into()),
+                ..Default::default()
+            })
+            .is_err()
+        );
         let ok = resolve_installer(&InstallerPreference {
             kind: Some("custom".into()),
             path: Some("/usr/bin/poetry".into()),
@@ -1331,14 +1335,18 @@ mod tests {
         assert!(!after.contributors.contains_key("newcomer"));
 
         // And each plugin resolves to the environment it actually owns.
-        assert!(venv_interpreter(tmp.path(), "incumbent")
-            .unwrap()
-            .argv_prefix[0]
-            .contains(SHARED_VENV_DIR));
-        assert!(venv_interpreter(tmp.path(), "newcomer")
-            .unwrap()
-            .argv_prefix[0]
-            .contains("newcomer"));
+        assert!(
+            venv_interpreter(tmp.path(), "incumbent")
+                .unwrap()
+                .argv_prefix[0]
+                .contains(SHARED_VENV_DIR)
+        );
+        assert!(
+            venv_interpreter(tmp.path(), "newcomer")
+                .unwrap()
+                .argv_prefix[0]
+                .contains("newcomer")
+        );
     }
 
     /// A plugin that asks for isolation gets it, and is evicted from the
@@ -1363,10 +1371,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(read_marker(&shared_venv_dir(tmp.path()))
-            .unwrap()
-            .contributors
-            .contains_key("demo"));
+        assert!(
+            read_marker(&shared_venv_dir(tmp.path()))
+                .unwrap()
+                .contributors
+                .contains_key("demo")
+        );
 
         let isolated = provision_dependencies(
             &interp,
@@ -1380,10 +1390,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(isolated.scope, VenvScope::Isolated);
-        assert!(!read_marker(&shared_venv_dir(tmp.path()))
-            .unwrap()
-            .contributors
-            .contains_key("demo"));
+        assert!(
+            !read_marker(&shared_venv_dir(tmp.path()))
+                .unwrap()
+                .contributors
+                .contains_key("demo")
+        );
         // And the plugin now resolves to its own environment.
         let interp_now = venv_interpreter(tmp.path(), "demo").unwrap();
         assert!(interp_now.argv_prefix[0].contains("demo"));

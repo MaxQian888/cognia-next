@@ -5,7 +5,14 @@
     "cognia": "Cognia",
     "claude-code": "Claude Code",
     "codex": "Codex",
-    "gemini-cli": "Gemini CLI"
+    "gemini-cli": "Gemini CLI",
+    "agent-plugins": "Agent Plugins 1.0",
+    "cursor": "Cursor",
+    "copilot": "GitHub Copilot",
+    "kimi": "Kimi Code",
+    "devin": "Devin",
+    "opencode": "OpenCode",
+    "pi": "Pi"
   },
   "fidelity": {
     "native-exact": "原生",
@@ -15,13 +22,43 @@
   },
   "fidelityHint": {
     "native-exact": "这已经是 Cognia 原生插件，无需转换。",
-    "structured": "清单及其贡献项可以完整迁移，与宿主强相关的部分列在下方。",
+    "structured": "已转换声明式贡献。请检查各项能力的限制；这不代表已验证原生运行。",
     "contextual": "行为是依据来源的声明重建的，并非逐项对应翻译。",
     "unsupported": "这个插件无法在不丢失行为的前提下转换。"
   },
   "counts": "已转换 {converted} 项能力，{warnings} 条警告，{blocking} 项阻塞",
-  "noIssues": "全部内容都已迁移。",
+  "noIssues": "未检测到转换问题。",
   "issueBlocking": "阻塞 · {capability}",
   "issueWarning": "警告 · {capability}",
-  "more": "还有 {count} 条"
+  "more": "还有 {count} 条",
+  "delivery": {
+    "target": "目标：{target} · {surface}",
+    "surfaces": {
+      "cli": "CLI",
+      "desktop": "桌面端",
+      "cloud": "云端"
+    },
+    "native": {
+      "ready": "可生成原生包，供独立安装。",
+      "review-required": "生成原生包前，请确认行为变化和配置要求。",
+      "blocked": "上述问题阻止完整原生导出。"
+    },
+    "unverified": "尚未针对你安装的 Agent 版本验证原生运行。",
+    "hosted": {
+      "requires-cognia": "托管工具：在 Cognia 中启用插件，并在使用此 Agent 的 Cognia 会话中调用。Cognia 必须保持运行；每轮都会检查工具权限和可用性。",
+      "unverified": "尚未验证此平台或云端的托管使用能力，不能假设它能够访问本地 Cognia 端点。"
+    },
+    "tools": "可托管的工具贡献：{capabilities}",
+    "retained": "保留在 Cognia：{capabilities}。这些不会变成目标 Agent 的原生能力。",
+    "capability": "能力",
+    "outcome": "处理结果",
+    "status": {
+      "native": "原生保留",
+      "configuration-required": "需要配置",
+      "contextual": "行为降级",
+      "hosted": "需要 Cognia 托管",
+      "unsupported": "需要适配或不支持",
+      "unverified": "尚未验证"
+    }
+  }
 }

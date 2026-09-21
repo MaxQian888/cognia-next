@@ -3,7 +3,7 @@
 //! Served in-process by the host's native clipboard plugin — no renderer round
 //! trip. Clipboard contents are never logged, in full or in part.
 
-use super::super::errors::{coded, WasmErrorCode};
+use super::super::errors::{WasmErrorCode, coded};
 use super::super::store::HostState;
 use super::require;
 

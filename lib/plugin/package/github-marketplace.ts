@@ -32,15 +32,45 @@ interface CatalogPlugin {
   author?: string
 }
 
+/**
+ * A `presets` entry: a named bundle of plugins from the same catalog.
+ * `plugins` references catalog plugins by their `name` field (the Aiden /
+ * Claude marketplace convention), not by id.
+ */
+interface CatalogPreset {
+  name: string
+  description?: string
+  plugins?: unknown
+}
+
 interface CatalogFile {
   name?: string
   owner?: { name?: string } | string
   plugins?: CatalogPlugin[]
+  presets?: CatalogPreset[]
 }
 
 /** A browse-grid entry that carries its GitHub origin for install routing. */
 export interface GithubMarketplaceEntry extends PluginMarketplaceEntry {
   github: GithubPluginRef
+}
+
+/**
+ * A named bundle of catalog plugins with its members already resolved against
+ * the same catalog's entries (preset `plugins` reference catalog `name`s).
+ */
+export interface MarketplacePreset {
+  /** `${repoLabel}:${preset.name}` — unique within one catalog. */
+  id: string
+  name: string
+  description?: string
+  /** Member entries in the order the preset declares them. */
+  members: GithubMarketplaceEntry[]
+  /**
+   * Names the preset listed that no catalog plugin carries. Kept rather than
+   * silently dropped so the UI can say the bundle is partially unsatisfiable.
+   */
+  missingPlugins: string[]
 }
 
 export interface MarketplaceCatalog {
@@ -55,6 +85,7 @@ export interface MarketplaceCatalog {
   /** Browser URL for the repo — what "Open on GitHub" opens. */
   repoUrl: string
   entries: GithubMarketplaceEntry[]
+  presets: MarketplacePreset[]
 }
 
 function normalizeSubdir(source: string): string | undefined {
@@ -116,6 +147,31 @@ export async function fetchMarketplaceCatalog(repoRef: string): Promise<Marketpl
       }
     })
 
+  // Preset membership resolves by catalog `name` — the field preset authors
+  // write — not by entry id (which may be a synthetic `repo:name` key).
+  const entriesByName = new Map(entries.map((e) => [e.name, e]))
+  const presets: MarketplacePreset[] = (Array.isArray(catalog.presets) ? catalog.presets : [])
+    .filter((p): p is CatalogPreset => !!p && typeof p.name === "string")
+    .map((p) => {
+      const memberNames = Array.isArray(p.plugins)
+        ? p.plugins.filter((n): n is string => typeof n === "string")
+        : []
+      const members: GithubMarketplaceEntry[] = []
+      const missingPlugins: string[] = []
+      for (const memberName of memberNames) {
+        const entry = entriesByName.get(memberName)
+        if (entry) members.push(entry)
+        else missingPlugins.push(memberName)
+      }
+      return {
+        id: `${repoLabel}:${p.name}`,
+        name: p.name,
+        description: typeof p.description === "string" ? p.description : undefined,
+        members,
+        missingPlugins,
+      }
+    })
+
   return {
     id: `${repoLabel}${ref.ref ? `@${ref.ref}` : ""}`,
     name: catalog.name?.trim() || repoLabel,
@@ -123,6 +179,7 @@ export async function fetchMarketplaceCatalog(repoRef: string): Promise<Marketpl
     catalogPath,
     repoUrl: githubRepoUrl({ owner: ref.owner, repo: ref.repo, ref: ref.ref }),
     entries,
+    presets,
   }
 }
 

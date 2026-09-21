@@ -25,7 +25,7 @@ description: The declarative truth layer that states what a plugin may contribut
 `lib/plugin/contracts/` is the **declarative truth layer**: it states what a plugin may contribute and whether each declared surface is actually wired. Two canonical catalogs anchor it:
 
 - `plugin-points.ts` — every UI-slot / hook / activation / runtime extension point, each carrying `binding`, `docs`, and `requiredTests` proof fields.
-- `plugin-capabilities.ts` — the 66 `PluginCapability` contracts.
+- `plugin-capabilities.ts` — the 72 `PluginCapability` contracts.
 
 `capability-contributions.ts:79` maps a plugin's capability tags to concrete manifest entries for UI summaries. Two wiring maps connect manifest fields to runtime stores: `capability-bridge-map.ts` for synchronous overlay-registry dispatch, and `module-bridge-map.ts` for asynchronous module-loading bridges. Provability is enforced by `runtime-proof-audit.ts`, `conflict-reporter.ts`, and `diagnostics-store.ts`, which prove every "implemented" surface has evidence and report conflicts and diagnostics.
 
@@ -88,9 +88,15 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
 
 The bridge maps are **not** keyed by point-id; they are keyed by manifest field / capability tag and reference the same registry singletons the runtime-point bindings name. `capability-bridge-map.ts` (`OVERLAY_REGISTRY_CAPABILITIES`) holds the 16 synchronous overlay capabilities with a uniform `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` shape; `defineOverlayCapability<E>` is the single variance bridge. `module-bridge-map.ts` (`MODULE_BRIDGE_CAPABILITIES`) holds the 20 asynchronous bridges, each normalized to `register(ctx) => Promise<void>` / `unregister(pluginId)`. Both expose their `*_CAPABILITY_KEYS` via `Object.keys`.
 
+## Capabilities
+
+`PLUGIN_CAPABILITY_CONTRACTS` (`plugin-capabilities.ts:77`) catalogs the 72 `PluginCapability` contracts — the manifest-level features a plugin may declare. Each entry carries `id`, a `support` level (`"supported" | "partial" | "experimental" | "blocked"`), the `manifestFields` it activates, a `runtimeBinding` summary, `hostBindings` / `typescriptSdk` / `pythonSdk` proof paths, `docs`, and `requiredTests` (`plugin-capabilities.ts:8-49`). 68 are `supported`; the 4 `experimental` entries are documented but exempt from the proof audit.
+
+`command-hooks` is the newest entry (`plugin-capabilities.ts:277-301`): declaring it merges a settings-shaped `hooks` block under user hooks and above built-ins on every rail — CLI (`cli/src/hooks/plugin-hooks.ts`), desktop (`src-tauri/src/hooks/plugin.rs`), and the ecosystem converter (`lib/plugin/convert/ecosystem.ts`). SDK: `defineCommandHooks` (`packages/plugin-sdk/src/define/define-command-hooks.ts`).
+
 ## Provable contribution
 
-`auditPluginPointContracts()` walks every contract; for `status === "implemented"` it asserts `binding`, `docs`, and `requiredTests` are non-empty, yielding a `proofStatus` of `"verified" | "missing_proof" | "not_applicable"`. `auditPluginCapabilityContracts()` does the same for the 59 capabilities, additionally requiring `builtinContributionPaths` for tools / commands / hooks. `runtime-proof-audit.ts:auditPluginRuntimeClaims()` composes both, plus hand-authored `RUNTIME_RISK_AUDITS`, into one `PluginRuntimeClaimsAuditReport`.
+`auditPluginPointContracts()` walks every contract; for `status === "implemented"` it asserts `binding`, `docs`, and `requiredTests` are non-empty, yielding a `proofStatus` of `"verified" | "missing_proof" | "not_applicable"`. `auditPluginCapabilityContracts()` does the same across all 72 capability contracts — proof is required while `support === "supported"` — additionally requiring `builtinContributionPaths` for tools / commands / hooks. `runtime-proof-audit.ts:auditPluginRuntimeClaims()` composes both, plus hand-authored `RUNTIME_RISK_AUDITS`, into one `PluginRuntimeClaimsAuditReport`.
 
 `diagnostics-store.ts` is a module-level `Map<pluginId, PluginPointDiagnostic[]>` with pub/sub — `recordPluginPointDiagnostic` / `getAllPluginPointDiagnostics` / `subscribePluginPointDiagnostics` (`diagnostics-store.ts:21-60`). `recordSilentFailure` branches on `expected`: web-mode-without-Tauri produces a debug log, while desktop produces a warning plus a `plugin.silent-failure` diagnostic (`diagnostics-store.ts:79-98`).
 

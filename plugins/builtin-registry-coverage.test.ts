@@ -54,6 +54,10 @@ const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze(
   "cognia-character-seeds": "Copy-paste character-pack template for plugin authors (ADR-0030).",
   "cognia-impeccable":
     "Installable desktop skill bundle — discovered from the on-disk plugin directory and deliberately blocked in browser/mobile shells.",
+  "cognia-rfc-toolkit":
+    "Installable desktop skill bundle — its local-bundle references resolve through the desktop filesystem bridge, so it is blocked in browser/mobile shells and deliberately not bundled.",
+  "cognia-bugfix-review":
+    "Installable desktop skill + subagent bundle — the local-bundle skill resolves through the desktop filesystem bridge, so it is blocked in browser/mobile shells and deliberately not bundled.",
   // Present in `browserBuiltins` but filtered out of the effective registry by
   // `isBrowserBuiltinAvailable` unless NEXT_PUBLIC_E2E=1 — so it is out of the
   // DEFAULT registry, which is what this list curates. Do not "wire it up".

@@ -731,6 +731,70 @@ describe("handlePluginToolExec — ask_user elicitation", () => {
     expect(response.result).toBe("Selected: Apple")
     expect(response.error).toBeUndefined()
   })
+
+  it("routes ask_user to the IM question card when an elicitation context is live", async () => {
+    const imCtx = {
+      sessionId: "sess-IM",
+      adapterId: "adp-1",
+      conversationKey: "lark:adp-1:oc_1",
+      conversationRef: { platform: "lark", adapterId: "adp-1" },
+      initiatorUserId: "ou_1",
+    }
+    const runImAskUser = jest.fn().mockResolvedValue("Selected: Beta")
+    const runAskUser = jest.fn()
+    jest.doMock("@/lib/connectors/hitl/im-elicitation-context", () => ({
+      getImElicitationContext: jest.fn(() => imCtx),
+    }))
+    jest.doMock("@/lib/connectors/hitl/ask-user-question", () => ({ runImAskUser }))
+    jest.doMock("@/stores/agent/ask-user-store", () => ({ runAskUser }))
+
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    freshSet({ getTool: () => undefined })
+
+    const abortSignal = new AbortController().signal
+    const response = await freshHandle({
+      type: "plugin_tool_exec",
+      sessionId: "sess-IM",
+      toolUseId: "use-IM",
+      name: "ask_user",
+      args: { question: "Pick" },
+      abortSignal,
+    })
+
+    expect(runImAskUser).toHaveBeenCalledWith({
+      ctx: imCtx,
+      toolUseId: "use-IM",
+      args: { question: "Pick" },
+      signal: abortSignal,
+    })
+    expect(runAskUser).not.toHaveBeenCalled()
+    expect(response.result).toBe("Selected: Beta")
+    expect(response.error).toBeUndefined()
+  })
+
+  it("falls back to the desktop dialog when the registered context is gone", async () => {
+    const runAskUser = jest.fn().mockResolvedValue("Answer: typed")
+    jest.doMock("@/lib/connectors/hitl/im-elicitation-context", () => ({
+      getImElicitationContext: jest.fn(() => undefined),
+    }))
+    jest.doMock("@/stores/agent/ask-user-store", () => ({ runAskUser }))
+
+    const { handlePluginToolExec: freshHandle, __setPluginToolResolverForTesting: freshSet } =
+      await import("./plugin-tool-ipc")
+    freshSet({ getTool: () => undefined })
+
+    const response = await freshHandle({
+      type: "plugin_tool_exec",
+      sessionId: "sess-dead",
+      toolUseId: "use-dead",
+      name: "ask_user",
+      args: { question: "Pick" },
+    })
+
+    expect(runAskUser).toHaveBeenCalled()
+    expect(response.result).toBe("Answer: typed")
+  })
 })
 
 describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
@@ -1202,5 +1266,36 @@ describe("project_history_search routing", () => {
     )
     expect(response.error).toBeUndefined()
     expect(response.result).toMatchObject({ ok: false, code: "no_workspace" })
+  })
+})
+
+describe("attachment built-in relay", () => {
+  it("uses host storage and the trusted relay session", async () => {
+    const list = jest.fn(async () => [])
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "attachment_list", args: {} }),
+      {
+        resolveAttachmentToolDeps: () => ({ list, getMetadata: jest.fn(), search: jest.fn() }),
+      }
+    )
+    expect(response.result).toMatchObject({ ok: true, assets: [] })
+    expect(list).toHaveBeenCalledWith("session-1")
+  })
+  it("rejects PII metadata at the shared output gate", async () => {
+    const list = jest.fn(async () => [
+      { assetId: "a", filename: "person@example.com", revision: 1 },
+    ])
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "attachment_list", args: {} }),
+      {
+        resolveAttachmentToolDeps: () => ({
+          list: list as never,
+          getMetadata: jest.fn(),
+          search: jest.fn(),
+        }),
+      }
+    )
+    expect(response.error).toBe("Plugin tool result blocked by the PII redaction gate")
+    expect(response.result).toBeUndefined()
   })
 })

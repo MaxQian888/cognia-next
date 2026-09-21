@@ -60,7 +60,32 @@ const PLUGIN_MARKERS: Array<{ format: PluginEcosystem; path: string }> = [
   { format: "claude-code", path: ".claude-plugin/plugin.json" },
   { format: "codex", path: ".codex-plugin/plugin.json" },
   { format: "gemini-cli", path: "gemini-extension.json" },
+  { format: "cursor", path: ".cursor-plugin/plugin.json" },
+  { format: "copilot", path: ".github/plugin/plugin.json" },
+  { format: "copilot", path: ".github/plugin.json" },
+  { format: "kimi", path: "kimi.plugin.json" },
+  { format: "kimi", path: ".kimi-plugin/plugin.json" },
+  { format: "devin", path: ".devin-plugin/plugin.json" },
+  { format: "opencode", path: "opencode.json" },
+  { format: "opencode", path: "opencode.jsonc" },
+  { format: "pi", path: "package.json" },
 ]
+
+function acceptsMarker(path: string, text: string): boolean {
+  if (path !== "package.json") return true
+  try {
+    const parsed = JSON.parse(text) as { pi?: unknown }
+    return (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      parsed.pi !== null &&
+      typeof parsed.pi === "object" &&
+      !Array.isArray(parsed.pi)
+    )
+  } catch {
+    return false
+  }
+}
 
 const README_CANDIDATES = [
   "README.md",
@@ -192,17 +217,18 @@ export async function fetchGithubFile(ref: GithubPluginRef, path: string): Promi
   if (Array.isArray(json) || json.type !== "file" || typeof json.content !== "string") {
     return null
   }
-  return decodeBase64Utf8(json.content)
+  if (json.encoding !== "base64")
+    throw new Error(`GitHub file content is incomplete or has unsupported encoding: ${path}`)
+  const text = decodeBase64Utf8(json.content)
+  if (new TextEncoder().encode(text).byteLength > MAX_TEXT_FILE_BYTES) {
+    throw new Error(`plugin text file is too large to convert safely: ${path}`)
+  }
+  return text
 }
 
 /** List the immediate sub-directory paths of `path` (default: repo root). */
 async function listRepoDirs(ref: GithubPluginRef, path = ""): Promise<string[]> {
-  const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/contents/${path}${refQuery(ref.ref)}`
-  const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
-  if (!res.ok) return []
-  const json = (await res.json()) as unknown
-  if (!Array.isArray(json)) return []
-  return (json as Array<{ type?: string; path?: string }>)
+  return (await listRepoEntries(ref, path))
     .filter((e) => e.type === "dir" && typeof e.path === "string")
     .map((e) => e.path as string)
 }
@@ -216,16 +242,41 @@ interface GithubRepoEntry {
 async function listRepoEntries(ref: GithubPluginRef, path = ""): Promise<GithubRepoEntry[]> {
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/contents/${path}${refQuery(ref.ref)}`
   const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
-  if (!res.ok) return []
+  if (!res.ok)
+    throw new Error(`GitHub API ${res.status} while reading plugin directory ${path || "/"}`)
   const json = (await res.json()) as unknown
-  return Array.isArray(json) ? (json as GithubRepoEntry[]) : []
+  if (!Array.isArray(json))
+    throw new Error(`GitHub directory response is incomplete: ${path || "/"}`)
+  if (json.length >= 1_000)
+    throw new Error(
+      `GitHub directory listing may be truncated at 1000 entries: ${path || "/"}; choose a narrower subdir`
+    )
+  for (const entry of json as GithubRepoEntry[]) {
+    if (
+      !entry ||
+      typeof entry.path !== "string" ||
+      !entry.path ||
+      entry.path.startsWith("/") ||
+      entry.path.split(/[\\/]/).includes("..") ||
+      entry.path.includes("\\") ||
+      (path && !entry.path.startsWith(`${path}/`)) ||
+      !["file", "dir"].includes(entry.type ?? "")
+    ) {
+      throw new Error(`GitHub directory contains an unsupported or invalid entry: ${path || "/"}`)
+    }
+  }
+  return json as GithubRepoEntry[]
 }
 
 async function collectRepoEntries(ref: GithubPluginRef, root: string): Promise<GithubRepoEntry[]> {
   const queue = [root]
   const entries: GithubRepoEntry[] = []
+  const visited = new Set<string>()
   while (queue.length > 0) {
     const directory = queue.shift() ?? ""
+    if (visited.has(directory))
+      throw new Error(`GitHub directory was listed more than once: ${directory}`)
+    visited.add(directory)
     for (const entry of await listRepoEntries(ref, directory)) {
       if (typeof entry.path !== "string") continue
       entries.push(entry)
@@ -248,10 +299,12 @@ async function findManifestMarker(
   ref: GithubPluginRef
 ): Promise<{ root: string; marker: (typeof PLUGIN_MARKERS)[number]; text: string }> {
   const requestedRoot = ref.subdir?.replace(/^\/+|\/+$/g, "") ?? ""
+  if (requestedRoot.split(/[\\/]/).includes("..") || requestedRoot.includes("\\"))
+    throw new Error("plugin subdir must stay within the repository")
   const probeRoot = async (root: string) => {
     for (const marker of PLUGIN_MARKERS) {
       const text = await fetchGithubFile(ref, joinRepoPath(root, marker.path))
-      if (text !== null) return { root, marker, text }
+      if (text !== null && acceptsMarker(marker.path, text)) return { root, marker, text }
     }
     return null
   }
@@ -271,6 +324,7 @@ async function findManifestMarker(
     text: string
   }> = []
   for (const directory of await listRepoDirs(ref)) {
+    if (PLUGIN_MARKERS.some((marker) => marker.path.startsWith(`${directory}/`))) continue
     const found = await probeRoot(directory)
     if (found) immediate.push(found)
   }
@@ -279,7 +333,8 @@ async function findManifestMarker(
       `multiple plugin roots found (${immediate.map((candidate) => candidate.root).join(", ")}); specify the plugin subdir`
     )
   }
-  if (immediate.length === 1) return immediate[0]
+  // A shallow candidate does not exclude another plugin deeper in the tree.
+  // Complete discovery before returning so mixed-depth roots stay ambiguous.
 
   // Fall back to a full tree walk for deeper monorepos. Multiple plugin roots
   // are ambiguous and require an explicit subdir instead of an arbitrary pick.
@@ -287,17 +342,23 @@ async function findManifestMarker(
   const candidates = new Map<string, { root: string; marker: (typeof PLUGIN_MARKERS)[number] }>()
   for (const entry of entries) {
     if (entry.type !== "file" || typeof entry.path !== "string") continue
-    for (const marker of PLUGIN_MARKERS) {
+    // A nested .cursor-plugin/plugin.json is one marker, not an additional
+    // generic plugin.json rooted inside .cursor-plugin.
+    for (const marker of [...PLUGIN_MARKERS].sort((a, b) => b.path.length - a.path.length)) {
       if (entry.path === marker.path || entry.path.endsWith(`/${marker.path}`)) {
+        const text = await fetchGithubFile(ref, entry.path)
+        if (text === null)
+          throw new Error(`plugin manifest disappeared while fetching the preview: ${entry.path}`)
+        if (!acceptsMarker(marker.path, text)) break
         const root = entry.path.slice(0, entry.path.length - marker.path.length).replace(/\/$/, "")
-        candidates.set(`${root}\0${marker.format}`, { root, marker })
+        candidates.set(`${root}\0${marker.path}`, { root, marker })
+        break
       }
     }
   }
   if (candidates.size === 0) {
     throw new Error(
-      "no supported plugin manifest found (plugin.json, .claude-plugin/plugin.json, " +
-        ".codex-plugin/plugin.json, or gemini-extension.json)"
+      `no supported plugin manifest found (${PLUGIN_MARKERS.map((marker) => marker.path).join(", ")})`
     )
   }
   const roots = new Set(Array.from(candidates.values(), (candidate) => candidate.root))
@@ -307,9 +368,9 @@ async function findManifestMarker(
     )
   }
   const root = Array.from(roots)[0]
-  const candidate = PLUGIN_MARKERS.map((marker) =>
-    candidates.get(`${root}\0${marker.format}`)
-  ).find((value) => value !== undefined)
+  const candidate = PLUGIN_MARKERS.map((marker) => candidates.get(`${root}\0${marker.path}`)).find(
+    (value) => value !== undefined
+  )
   if (!candidate) throw new Error("plugin manifest candidate could not be resolved")
   const text = await fetchGithubFile(ref, joinRepoPath(candidate.root, candidate.marker.path))
   if (text === null) throw new Error("plugin manifest disappeared while fetching the preview")
@@ -338,7 +399,9 @@ async function fetchPluginSnapshot(
       throw new Error(`plugin text file is too large to convert safely: ${relative}`)
     }
     const text = await fetchGithubFile(ref, entry.path)
-    if (text !== null) snapshot.set(relative, text)
+    if (text === null)
+      throw new Error(`plugin source file could not be read completely: ${relative}`)
+    snapshot.set(relative, text)
   }
   return snapshot
 }
@@ -408,7 +471,7 @@ export interface GithubMarketplaceClient {
 }
 
 export function makeGithubMarketplaceClient(
-  ref: GithubPluginRef,
+  _ref: GithubPluginRef,
   preview: GithubPluginPreview
 ): GithubMarketplaceClient {
   return {
@@ -416,9 +479,9 @@ export function makeGithubMarketplaceClient(
     installPlugin: async () => {
       const { getPluginManager } = await import("@/lib/plugin/core/manager")
       return getPluginManager().installPluginFromGithub(
-        `${ref.owner}/${ref.repo}`,
-        ref.ref,
-        ref.subdir,
+        `${preview.ref.owner}/${preview.ref.repo}`,
+        preview.ref.ref,
+        preview.ref.subdir,
         preview.generatedFiles
       )
     },

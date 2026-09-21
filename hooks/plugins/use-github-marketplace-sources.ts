@@ -28,6 +28,7 @@ import {
   fetchMarketplaceCatalog,
   type GithubMarketplaceEntry,
   type MarketplaceCatalog,
+  type MarketplacePreset,
   type SourceFetchResult,
 } from "@/lib/plugin/package/github-marketplace"
 import { parseGithubPluginRef } from "@/lib/plugin/package/github-source"
@@ -36,6 +37,8 @@ import type { PluginMarketplaceSourceRow } from "@/lib/db/plugin-types"
 export interface UseGithubMarketplaceSources {
   sources: PluginMarketplaceSourceRow[]
   entries: GithubMarketplaceEntry[]
+  /** Catalog-declared preset bundles, same per-source ordering as `entries`. */
+  presets: MarketplacePreset[]
   loading: boolean
   errors: Array<{ repoRef: string; message: string }>
   /** Source ids whose catalog is being fetched right now. */
@@ -62,6 +65,7 @@ export function canonicalSourceId(repoRef: string): string {
 export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
   const sources = useLiveQuery(() => listMarketplaceSources(), [], [])
   const [entriesByRef, setEntriesByRef] = useState<Record<string, GithubMarketplaceEntry[]>>({})
+  const [presetsByRef, setPresetsByRef] = useState<Record<string, MarketplacePreset[]>>({})
   const [errorsByRef, setErrorsByRef] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [syncingIds, setSyncingIds] = useState<ReadonlySet<string>>(new Set())
@@ -132,6 +136,11 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
       for (const r of results) next[r.repoRef] = r.ok ? r.catalog.entries : []
       return next
     })
+    setPresetsByRef((prev) => {
+      const next = { ...prev }
+      for (const r of results) next[r.repoRef] = r.ok ? r.catalog.presets : []
+      return next
+    })
     setErrorsByRef((prev) => {
       const next = { ...prev }
       for (const r of results) {
@@ -178,6 +187,10 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
     () => (hasSources ? repoRefs.flatMap((ref) => entriesByRef[ref] ?? []) : []),
     [hasSources, repoRefs, entriesByRef]
   )
+  const presets = useMemo(
+    () => (hasSources ? repoRefs.flatMap((ref) => presetsByRef[ref] ?? []) : []),
+    [hasSources, repoRefs, presetsByRef]
+  )
   const errors = useMemo(
     () =>
       hasSources
@@ -192,6 +205,7 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
     () => ({
       sources: sources ?? [],
       entries,
+      presets,
       loading,
       errors,
       syncingIds,
@@ -259,6 +273,6 @@ export function useGithubMarketplaceSources(): UseGithubMarketplaceSources {
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sources, entries, loading, errors, syncingIds]
+    [sources, entries, presets, loading, errors, syncingIds]
   )
 }

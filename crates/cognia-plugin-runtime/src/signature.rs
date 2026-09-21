@@ -12,7 +12,7 @@
 use std::fs;
 
 use chrono::Utc;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, SIGNATURE_LENGTH};
+use ed25519_dalek::{SIGNATURE_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 

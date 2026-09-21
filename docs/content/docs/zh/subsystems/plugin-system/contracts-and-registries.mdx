@@ -12,7 +12,7 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 </TLDR>
 
 <StatGrid>
-  <Stat label="能力契约" value="59" />
+  <Stat label="能力契约" value="72" />
   <Stat label="UI 槽 / 钩子 / 激活" value="49 / ~150 / 26" />
   <Stat label="运行时点" value="11" />
   <Stat label="同步覆盖能力" value="16" />
@@ -25,7 +25,7 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 `lib/plugin/contracts/` 是**声明式真相层**：它声明插件可以贡献什么，以及每个声明的表面是否真的被接线。两个规范目录是其锚点：
 
 - `plugin-points.ts` —— 每个 UI 槽 / 钩子 / 激活 / 运行时扩展点，各自携带 `binding`、`docs` 与 `requiredTests` 证明字段。
-- `plugin-capabilities.ts` —— 59 个 `PluginCapability` 契约。
+- `plugin-capabilities.ts` —— 72 个 `PluginCapability` 契约。
 
 `capability-contributions.ts:79` 把插件的能力标签映射到具体的 manifest 条目，供 UI 摘要使用。两个接线映射把 manifest 字段连到运行时存储：`capability-bridge-map.ts` 负责同步覆盖注册表分发，`module-bridge-map.ts` 负责异步模块加载桥。可证明性由 `runtime-proof-audit.ts`、`conflict-reporter.ts` 与 `diagnostics-store.ts` 强制执行，它们证明每个"已实现"表面都有证据，并上报冲突与诊断。
 
@@ -88,9 +88,15 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
 
 桥映射**不**以 point-id 为键；它们以 manifest 字段 / 能力标签为键，并引用运行时点绑定所命名的同一批注册表单例。`capability-bridge-map.ts`（`OVERLAY_REGISTRY_CAPABILITIES`）持有 16 个同步覆盖能力，统一为 `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` 形态；`defineOverlayCapability<E>` 是唯一的型变桥。`module-bridge-map.ts`（`MODULE_BRIDGE_CAPABILITIES`）持有 20 个异步桥，各自归一化为 `register(ctx) => Promise<void>` / `unregister(pluginId)`。两者都通过 `Object.keys` 暴露各自的 `*_CAPABILITY_KEYS`。
 
+## 能力
+
+`PLUGIN_CAPABILITY_CONTRACTS`（`plugin-capabilities.ts:77`）编目 72 个 `PluginCapability` 契约 —— 插件可以在 manifest 中声明的特性。每个条目携带 `id`、`support` 级别（`"supported" | "partial" | "experimental" | "blocked"`）、其激活的 `manifestFields`、`runtimeBinding` 摘要、`hostBindings` / `typescriptSdk` / `pythonSdk` 证明路径、`docs` 与 `requiredTests`（`plugin-capabilities.ts:8-49`）。其中 68 个为 `supported`；4 个 `experimental` 条目已记录在案但免于证明审计。
+
+`command-hooks` 是最新条目（`plugin-capabilities.ts:277-301`）：声明它会把一个 settings 形态的 `hooks` 块在每条执行轨道上合并到用户钩子之下、内置钩子之上 —— CLI（`cli/src/hooks/plugin-hooks.ts`）、桌面端（`src-tauri/src/hooks/plugin.rs`）与生态转换器（`lib/plugin/convert/ecosystem.ts`）。SDK：`defineCommandHooks`（`packages/plugin-sdk/src/define/define-command-hooks.ts`）。
+
 ## 可证明的贡献
 
-`auditPluginPointContracts()` 遍历每个契约；对于 `status === "implemented"`，它断言 `binding`、`docs` 与 `requiredTests` 非空，产出 `"verified" | "missing_proof" | "not_applicable"` 的 `proofStatus`。`auditPluginCapabilityContracts()` 对 59 个能力做同样的事，并额外要求工具 / 命令 / 钩子提供 `builtinContributionPaths`。`runtime-proof-audit.ts:auditPluginRuntimeClaims()` 把两者加上手写的 `RUNTIME_RISK_AUDITS` 组合成一个 `PluginRuntimeClaimsAuditReport`。
+`auditPluginPointContracts()` 遍历每个契约；对于 `status === "implemented"`，它断言 `binding`、`docs` 与 `requiredTests` 非空，产出 `"verified" | "missing_proof" | "not_applicable"` 的 `proofStatus`。`auditPluginCapabilityContracts()` 对全部 72 个能力契约做同样的事 —— 仅当 `support === "supported"` 时才要求证明 —— 并额外要求工具 / 命令 / 钩子提供 `builtinContributionPaths`。`runtime-proof-audit.ts:auditPluginRuntimeClaims()` 把两者加上手写的 `RUNTIME_RISK_AUDITS` 组合成一个 `PluginRuntimeClaimsAuditReport`。
 
 `diagnostics-store.ts` 是一个带发布/订阅的模块级 `Map<pluginId, PluginPointDiagnostic[]>` —— `recordPluginPointDiagnostic` / `getAllPluginPointDiagnostics` / `subscribePluginPointDiagnostics`（`diagnostics-store.ts:21-60`）。`recordSilentFailure` 按 `expected` 分支：web 模式无 Tauri 产出 debug 日志，桌面端产出 warning 加一条 `plugin.silent-failure` 诊断（`diagnostics-store.ts:79-98`）。
 

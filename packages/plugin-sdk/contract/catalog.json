@@ -212,6 +212,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "command-hooks",
+      "support": "supported",
+      "manifestFields": ["commandHooks"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "processors",
       "support": "experimental",
       "manifestFields": [],
@@ -1135,6 +1142,11 @@
     {
       "field": "subagents",
       "capabilities": ["subagent"],
+      "execution": "host"
+    },
+    {
+      "field": "commandHooks",
+      "capabilities": ["command-hooks"],
       "execution": "host"
     },
     {

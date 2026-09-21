@@ -28,11 +28,7 @@ pub const DEFAULT_CALL_TIMEOUT_MS: u64 = 30_000;
 /// One epoch tick = 100 ms. 30 s / 100 ms = 300 ticks.
 pub const fn deadline_from_timeout_ms(ms: u64) -> u64 {
     let ticks = ms.div_ceil(super::engine::EPOCH_TICK_MS);
-    if ticks == 0 {
-        1
-    } else {
-        ticks
-    }
+    if ticks == 0 { 1 } else { ticks }
 }
 
 /// The granted capabilities a plugin instance carries. Each cognia

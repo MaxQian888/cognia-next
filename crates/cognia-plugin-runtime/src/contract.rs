@@ -405,23 +405,27 @@ mod tests {
 
     #[test]
     fn rejects_unknown_and_host_incompatible_capabilities() {
-        assert!(validate_manifest_contract(&json!({
-            "id": "demo",
-            "type": "frontend",
-            "main": "index.js",
-            "capabilities": ["unknown"]
-        }))
-        .unwrap_err()
-        .contains("unknown"));
-        assert!(validate_manifest_contract(&json!({
-            "id": "demo",
-            "type": "frontend",
-            "main": "index.js",
-            "capabilities": ["tools"],
-            "engines": { "cognia": ">=0.0.9" }
-        }))
-        .unwrap_err()
-        .contains("capability minimum"));
+        assert!(
+            validate_manifest_contract(&json!({
+                "id": "demo",
+                "type": "frontend",
+                "main": "index.js",
+                "capabilities": ["unknown"]
+            }))
+            .unwrap_err()
+            .contains("unknown")
+        );
+        assert!(
+            validate_manifest_contract(&json!({
+                "id": "demo",
+                "type": "frontend",
+                "main": "index.js",
+                "capabilities": ["tools"],
+                "engines": { "cognia": ">=0.0.9" }
+            }))
+            .unwrap_err()
+            .contains("capability minimum")
+        );
     }
 
     #[test]
@@ -430,19 +434,25 @@ mod tests {
             validate_manifest_contract(&json!({})).unwrap_err(),
             "manifest type is required"
         );
-        assert!(validate_manifest_contract(&json!({
-            "id": "demo", "type": "frontend", "main": "index.js", "capabilities": {}
-        }))
-        .is_err());
-        assert!(validate_manifest_contract(&json!({
-            "id": "demo", "type": "frontend", "main": "index.js", "engines": { "cognia": 1 }
-        }))
-        .is_err());
+        assert!(
+            validate_manifest_contract(&json!({
+                "id": "demo", "type": "frontend", "main": "index.js", "capabilities": {}
+            }))
+            .is_err()
+        );
+        assert!(
+            validate_manifest_contract(&json!({
+                "id": "demo", "type": "frontend", "main": "index.js", "engines": { "cognia": 1 }
+            }))
+            .is_err()
+        );
         assert!(validate_manifest_contract(&json!({ "id": "demo", "type": "unknown" })).is_err());
-        assert!(validate_manifest_contract(&json!({
-            "id": "demo", "type": "frontend", "main": "index.js", "permissions": ["unknown"]
-        }))
-        .is_err());
+        assert!(
+            validate_manifest_contract(&json!({
+                "id": "demo", "type": "frontend", "main": "index.js", "permissions": ["unknown"]
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -500,9 +510,11 @@ mod tests {
                 "pythonMain": "main.py"
             });
             manifest[field] = json!([{ "entry": "dist/provider.js" }]);
-            assert!(validate_manifest_contract(&manifest)
-                .unwrap_err()
-                .contains("type python"));
+            assert!(
+                validate_manifest_contract(&manifest)
+                    .unwrap_err()
+                    .contains("type python")
+            );
         }
 
         validate_manifest_contract(&json!({
@@ -547,9 +559,11 @@ mod tests {
                 .as_object_mut()
                 .unwrap()
                 .extend(contribution.as_object().unwrap().clone());
-            assert!(validate_manifest_contract(&manifest)
-                .unwrap_err()
-                .contains("type python"));
+            assert!(
+                validate_manifest_contract(&manifest)
+                    .unwrap_err()
+                    .contains("type python")
+            );
         }
     }
 
@@ -584,9 +598,11 @@ mod tests {
         validate_existing_manifest_paths(root.path(), &manifest).unwrap();
 
         std::fs::remove_file(root.path().join("prompts/chat.md")).unwrap();
-        assert!(validate_existing_manifest_paths(root.path(), &manifest)
-            .unwrap_err()
-            .contains("chatPromptFiles"));
+        assert!(
+            validate_existing_manifest_paths(root.path(), &manifest)
+                .unwrap_err()
+                .contains("chatPromptFiles")
+        );
     }
 
     #[test]

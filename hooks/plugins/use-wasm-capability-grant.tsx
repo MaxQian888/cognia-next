@@ -12,7 +12,7 @@
  * `preopens` to the Rust host.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   WasmCapabilityGrantSheet,
   type WasmCapabilityGrantDecision,
@@ -23,6 +23,8 @@ import type { PluginManifest } from "@/types/plugin"
 export interface RequestGrantArgs {
   manifest: PluginManifest
   authorFingerprint?: string
+  /** Install flows persist only after the host accepts the pinned bundle. */
+  persist?: boolean
 }
 
 export interface RequestGrantResult {
@@ -36,12 +38,14 @@ export interface UseWasmCapabilityGrant {
   sheet: React.ReactNode
   /** Mounts the dialog and resolves on confirm/cancel. */
   requestGrant: (args: RequestGrantArgs) => Promise<RequestGrantResult | null>
+  cancel: () => void
 }
 
 export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
   const [open, setOpen] = useState(false)
   const [manifest, setManifest] = useState<PluginManifest | null>(null)
   const [fingerprint, setFingerprint] = useState<string>("")
+  const persistRef = useRef(true)
   const resolverRef = useRef<((value: RequestGrantResult | null) => void) | null>(null)
 
   const cleanup = useCallback(() => {
@@ -52,12 +56,14 @@ export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
   }, [])
 
   const requestGrant = useCallback<UseWasmCapabilityGrant["requestGrant"]>(
-    ({ manifest, authorFingerprint }) => {
+    ({ manifest, authorFingerprint, persist = true }) => {
       if (manifest.type !== "wasm") {
         return Promise.reject(
           new Error(`requestGrant: manifest.type must be "wasm", got "${manifest.type}"`)
         )
       }
+      resolverRef.current?.(null)
+      persistRef.current = persist
       return new Promise<RequestGrantResult | null>((resolve) => {
         resolverRef.current = resolve
         setManifest(manifest)
@@ -70,7 +76,12 @@ export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
 
   const handleConfirm = useCallback(
     async (decision: WasmCapabilityGrantDecision) => {
-      const result = await applyWasmCapabilityGrant(decision)
+      const result = persistRef.current
+        ? await applyWasmCapabilityGrant(decision)
+        : {
+            permissions: Array.from(new Set(decision.grantedPermissions)).sort(),
+            preopens: Array.from(new Set(decision.grantedPreopens)).sort(),
+          }
       const value: RequestGrantResult = {
         decision: {
           ...decision,
@@ -89,6 +100,13 @@ export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
     resolverRef.current?.(null)
     cleanup()
   }, [cleanup])
+
+  useEffect(
+    () => () => {
+      resolverRef.current?.(null)
+    },
+    []
+  )
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -118,5 +136,5 @@ export function useWasmCapabilityGrant(): UseWasmCapabilityGrant {
     )
   }, [manifest, fingerprint, open, handleOpenChange, handleConfirm, handleCancel])
 
-  return { sheet, requestGrant }
+  return { sheet, requestGrant, cancel: handleCancel }
 }

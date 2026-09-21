@@ -759,7 +759,7 @@ fn spawn_reserved_node_process(
         _ => {
             return Err(PluginError::InvalidArgument(
                 "Node plugin launch was cancelled".into(),
-            ))
+            ));
         }
     };
     let spawned = tokio::process::Command::new(command)
@@ -1488,12 +1488,10 @@ mod tests {
             "module.exports = {};"
         );
         assert!(read_plugin_entry_inner(&root, &root, "../outside.js").is_err());
-        assert!(read_plugin_entry_inner(
-            &root,
-            tmp.path().join("outside").as_path(),
-            "dist/index.js"
-        )
-        .is_err());
+        assert!(
+            read_plugin_entry_inner(&root, tmp.path().join("outside").as_path(), "dist/index.js")
+                .is_err()
+        );
     }
 
     #[test]
@@ -1643,24 +1641,30 @@ mod tests {
         let state_dir = state_dir.canonicalize().unwrap();
         let outside = outside.canonicalize().unwrap();
 
-        assert!(checked_scope_paths(
-            vec![outside.to_string_lossy().into_owned()],
-            "read",
-            &[(&state_dir, "host metadata")]
-        )
-        .is_ok());
-        assert!(checked_scope_paths(
-            vec![install.to_string_lossy().into_owned()],
-            "write",
-            &[(&install, "install tree"), (&state_dir, "host metadata")]
-        )
-        .is_err());
-        assert!(checked_scope_paths(
-            vec![state_dir.to_string_lossy().into_owned()],
-            "read",
-            &[(&state_dir, "host metadata")]
-        )
-        .is_err());
+        assert!(
+            checked_scope_paths(
+                vec![outside.to_string_lossy().into_owned()],
+                "read",
+                &[(&state_dir, "host metadata")]
+            )
+            .is_ok()
+        );
+        assert!(
+            checked_scope_paths(
+                vec![install.to_string_lossy().into_owned()],
+                "write",
+                &[(&install, "install tree"), (&state_dir, "host metadata")]
+            )
+            .is_err()
+        );
+        assert!(
+            checked_scope_paths(
+                vec![state_dir.to_string_lossy().into_owned()],
+                "read",
+                &[(&state_dir, "host metadata")]
+            )
+            .is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -1713,16 +1717,18 @@ mod tests {
         };
         write_manifest(&[], &[]);
 
-        assert!(prepare_node_launch(
-            &root,
-            &root,
-            &state.plugin_install_dir,
-            &state.plugin_state_dir,
-            "../outside.mjs",
-            vec![],
-            vec![]
-        )
-        .is_err());
+        assert!(
+            prepare_node_launch(
+                &root,
+                &root,
+                &state.plugin_install_dir,
+                &state.plugin_state_dir,
+                "../outside.mjs",
+                vec![],
+                vec![]
+            )
+            .is_err()
+        );
         write_manifest(&["filesystem:read"], &["relative"]);
         let read_grant = PermissionGrant {
             plugin_id: "demo".into(),
@@ -1731,16 +1737,18 @@ mod tests {
             granted_at: Utc::now().to_rfc3339(),
             expires_at: None,
         };
-        assert!(prepare_node_launch(
-            &root,
-            &root,
-            &state.plugin_install_dir,
-            &state.plugin_state_dir,
-            "index.mjs",
-            vec![read_grant],
-            vec![],
-        )
-        .is_err());
+        assert!(
+            prepare_node_launch(
+                &root,
+                &root,
+                &state.plugin_install_dir,
+                &state.plugin_state_dir,
+                "index.mjs",
+                vec![read_grant],
+                vec![],
+            )
+            .is_err()
+        );
         write_manifest(&["network:fetch"], &[]);
         let network_grant = PermissionGrant {
             plugin_id: "demo".into(),
@@ -1749,16 +1757,18 @@ mod tests {
             granted_at: Utc::now().to_rfc3339(),
             expires_at: None,
         };
-        assert!(prepare_node_launch(
-            &root,
-            &root,
-            &state.plugin_install_dir,
-            &state.plugin_state_dir,
-            "index.mjs",
-            vec![network_grant],
-            vec![],
-        )
-        .is_err());
+        assert!(
+            prepare_node_launch(
+                &root,
+                &root,
+                &state.plugin_install_dir,
+                &state.plugin_state_dir,
+                "index.mjs",
+                vec![network_grant],
+                vec![],
+            )
+            .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1777,9 +1787,11 @@ mod tests {
                 .unwrap()
         );
         assert!(state.node_plugin_processes.lock().contains_key("demo"));
-        assert!(stop_node_plugin_process(&state, "demo", Some(current))
-            .await
-            .unwrap());
+        assert!(
+            stop_node_plugin_process(&state, "demo", Some(current))
+                .await
+                .unwrap()
+        );
         assert!(!state.node_plugin_processes.lock().contains_key("demo"));
     }
 
@@ -1796,18 +1808,22 @@ mod tests {
             assert_current_node_generation(&state, "demo", &generation.to_string()).unwrap();
         let action = gate.read().await;
 
-        assert!(tokio::time::timeout(
-            std::time::Duration::from_millis(10),
-            stop_node_plugin_process(&state, "demo", Some(generation))
-        )
-        .await
-        .is_err());
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                stop_node_plugin_process(&state, "demo", Some(generation))
+            )
+            .await
+            .is_err()
+        );
         assert!(state.node_plugin_processes.lock().contains_key("demo"));
 
         drop(action);
-        assert!(stop_node_plugin_process(&state, "demo", Some(generation))
-            .await
-            .unwrap());
+        assert!(
+            stop_node_plugin_process(&state, "demo", Some(generation))
+                .await
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1872,15 +1888,17 @@ mod tests {
             .lock()
             .insert("demo".into(), launching(first));
 
-        assert!(spawn_reserved_node_process(
-            &state,
-            "demo",
-            first,
-            &tmp.path().join("missing-node"),
-            &[],
-            tmp.path(),
-        )
-        .is_err());
+        assert!(
+            spawn_reserved_node_process(
+                &state,
+                "demo",
+                first,
+                &tmp.path().join("missing-node"),
+                &[],
+                tmp.path(),
+            )
+            .is_err()
+        );
         assert!(!state.node_plugin_processes.lock().contains_key("demo"));
 
         let retry = uuid::Uuid::new_v4();
@@ -1888,11 +1906,13 @@ mod tests {
             .node_plugin_processes
             .lock()
             .insert("demo".into(), launching(retry));
-        assert!(state
-            .node_plugin_processes
-            .lock()
-            .get("demo")
-            .is_some_and(|process| generation_matches(process, retry)));
+        assert!(
+            state
+                .node_plugin_processes
+                .lock()
+                .get("demo")
+                .is_some_and(|process| generation_matches(process, retry))
+        );
     }
 
     #[tokio::test]

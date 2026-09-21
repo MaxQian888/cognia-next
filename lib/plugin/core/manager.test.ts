@@ -67,6 +67,7 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
 
 jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
+    setState: jest.fn(),
     getState: jest.fn(),
   },
 }))
@@ -134,6 +135,7 @@ jest.mock("@/lib/plugin/dexie/bridge", () => ({
 // without a real database.
 jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(async () => undefined),
+  deletePlugin: jest.fn(async () => undefined),
   updatePlugin: jest.fn(async () => undefined),
   upsertPlugin: jest.fn(async () => undefined),
   upsertPlugins: jest.fn(async () => []),
@@ -150,6 +152,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
     })
   ),
   clearWasmCapabilityGrant: jest.fn(async () => undefined),
+  getGrantedPreopens: jest.fn(async () => []),
   reconcileWasmGrantLedgerWithManifest: jest.fn(async (_pluginId: string, preopens: string[]) => ({
     allowedPreopens: [...preopens],
     deniedLedgerPreopens: [],
@@ -434,6 +437,7 @@ describe("PluginManager", () => {
         licenseText: "MIT",
         repo: "acme/gh",
         gitRef: "main",
+        transactionId: "github-install-1",
       })
 
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
@@ -448,6 +452,7 @@ describe("PluginManager", () => {
         gitRef: "main",
         subdir: "sub",
         generatedFiles,
+        deferCommit: true,
       })
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,
@@ -1149,6 +1154,8 @@ describe("PluginManager", () => {
             source: "local",
             installRootKind: "installed",
             signatureVerified: false,
+            bundleSha256: "a".repeat(64),
+            transactionId: "wasm-install-1",
           }
         }
         if (cmd === "plugin_wasm_load") {
@@ -1169,6 +1176,9 @@ describe("PluginManager", () => {
         bundlePath: "/tmp/demo.zip",
         signatureBase64: null,
         expectedPublicKeyBase64: null,
+        previewOnly: false,
+        expectedBundleSha256: null,
+        deferCommit: true,
       })
       expect(mockInvoke).toHaveBeenCalledWith(
         "plugin_wasm_load",
@@ -1215,11 +1225,232 @@ describe("PluginManager", () => {
       mockInvoke.mockResolvedValueOnce({
         manifest: createManifest("regular"),
         path: "/plugins/regular",
+        transactionId: "invalid-type-1",
       })
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
       await expect(manager.installWasmPluginFromLocalFile("/tmp/regular.zip")).rejects.toThrow(
         /did not declare type: "wasm"/
       )
+    })
+  })
+
+  describe("transactional WASM bundle installation", () => {
+    const manifest: PluginManifest = {
+      id: "transaction.wasm",
+      name: "Transaction",
+      version: "2.0.0",
+      description: "x",
+      type: "wasm",
+      capabilities: [],
+      wasmMain: "main.wasm",
+      wasm: { apiVersion: "0.1.0" },
+      permissions: ["notification"],
+    }
+    const decision = {
+      pluginId: manifest.id,
+      grantedPermissions: ["notification" as const],
+      grantedPreopens: [],
+    }
+    function setup(prior = false) {
+      const old: Plugin = {
+        manifest: { ...manifest, version: "1.0.0" },
+        path: "/plugins/transaction.wasm",
+        source: "local",
+        status: "installed",
+        config: { preserved: true },
+      }
+      const store = {
+        plugins: (prior ? { [manifest.id]: old } : {}) as Record<string, Plugin>,
+        discoverPlugin: jest.fn((next: PluginManifest, source: Plugin["source"], path: string) => {
+          store.plugins[next.id] = {
+            manifest: next,
+            source,
+            path,
+            status: "discovered",
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (id: string) => {
+          store.plugins[id].status = "installed"
+        }),
+        uninstallPlugin: jest.fn(async (id: string) => {
+          delete store.plugins[id]
+        }),
+        setPluginStatus: jest.fn((id: string, status: Plugin["status"]) => {
+          store.plugins[id].status = status
+        }),
+        setPluginConfig: jest.fn((id: string, config: Record<string, unknown>) => {
+          store.plugins[id].config = config
+        }),
+      }
+      ;(usePluginStore.setState as unknown as jest.Mock).mockImplementation((update) => {
+        Object.assign(store, update(store))
+      })
+      mockGetState.mockReturnValue(store)
+      const result = {
+        manifest,
+        path: old.path,
+        signatureVerified: false,
+        bundleSha256: "a".repeat(64),
+        transactionId: "wasm-txn-1",
+      }
+      mockInvoke.mockImplementation(async (command) => {
+        if (
+          command === "plugin_wasm_install_from_file" ||
+          command === "plugin_wasm_install_from_url"
+        )
+          return result
+        return undefined
+      })
+      return { store, old, result, manager: new PluginManager({ pluginDirectory: "/plugins" }) }
+    }
+
+    it("does not change grants or the previous plugin when backend staging fails", async () => {
+      const { store, old, manager } = setup(true)
+      mockInvoke.mockRejectedValueOnce(new Error("download failed"))
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "download failed"
+      )
+      expect(store.plugins[manifest.id]).toBe(old)
+      expect(mockApplyWasmCapabilityGrant).not.toHaveBeenCalled()
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_commit_staged_update", expect.anything())
+    })
+
+    it("registers URL installs and finalizes only after registration and grant persistence", async () => {
+      const { store, manager } = setup()
+      await manager.installWasmPluginFromUrl(
+        { bundleUrl: "https://example.com/p.zip", expectedBundleSha256: "a".repeat(64) },
+        decision
+      )
+      expect(store.plugins[manifest.id].manifest.version).toBe("2.0.0")
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_wasm_install_from_url",
+        expect.objectContaining({ deferCommit: true, expectedBundleSha256: "a".repeat(64) })
+      )
+      const commands = mockInvoke.mock.calls.map(([command]) => command)
+      expect(commands.indexOf("plugin_commit_staged_update")).toBeLessThan(
+        commands.indexOf("plugin_wasm_load")
+      )
+      expect(commands.indexOf("plugin_wasm_load")).toBeLessThan(
+        commands.indexOf("plugin_finalize_staged_update")
+      )
+      expect(mockApplyWasmCapabilityGrant).toHaveBeenCalledWith(decision)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_uninstall", expect.anything())
+    })
+
+    it("discards a staged bundle if consent names a different plugin", async () => {
+      const { manager } = setup()
+      await expect(
+        manager.installWasmPluginFromLocalFile("/tmp/p.zip", { ...decision, pluginId: "other" })
+      ).rejects.toThrow("capability decision")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
+        pluginId: manifest.id,
+        transactionId: "wasm-txn-1",
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_commit_staged_update", expect.anything())
+      expect(mockApplyWasmCapabilityGrant).not.toHaveBeenCalled()
+    })
+
+    it("restores the previous package projection after registration fails without uninstalling its files", async () => {
+      const { store, old, manager } = setup(true)
+      store.installPlugin.mockRejectedValueOnce(new Error("store failed"))
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "store failed"
+      )
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
+        pluginId: manifest.id,
+        transactionId: "wasm-txn-1",
+      })
+      expect(store.plugins[manifest.id].manifest.version).toBe("1.0.0")
+      expect(store.plugins[manifest.id].config).toEqual(old.config)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_uninstall", expect.anything())
+      expect(mockInvoke).not.toHaveBeenCalledWith(
+        "plugin_finalize_staged_update",
+        expect.anything()
+      )
+    })
+
+    it("restores grants even when metadata rollback fails", async () => {
+      const { store, manager } = setup(true)
+      store.installPlugin.mockRejectedValueOnce(new Error("registration failed"))
+      const { deletePlugin } = await import("@/lib/db/plugins")
+      ;(deletePlugin as jest.Mock).mockRejectedValueOnce(new Error("db restore failed"))
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "metadata rollback: Error: db restore failed"
+      )
+      expect(mockApplyWasmCapabilityGrant).toHaveBeenLastCalledWith({
+        pluginId: manifest.id,
+        grantedPermissions: [],
+        grantedPreopens: [],
+      })
+    })
+
+    it("uses the same deferred rollback for GitHub installs", async () => {
+      const { result, store, manager } = setup(true)
+      store.installPlugin.mockRejectedValueOnce(new Error("github registration failed"))
+      mockInvoke.mockImplementation(async (command) => {
+        if (command === "plugin_install_from_github")
+          return { ...result, repo: "acme/plugin", gitRef: "exact-sha" }
+        return undefined
+      })
+      await expect(manager.installPluginFromGithub("acme/plugin", "exact-sha")).rejects.toThrow(
+        "github registration failed"
+      )
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_install_from_github",
+        expect.objectContaining({ deferCommit: true, gitRef: "exact-sha" })
+      )
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_discard_staged_update", {
+        pluginId: manifest.id,
+        transactionId: "wasm-txn-1",
+      })
+      expect(store.plugins[manifest.id].manifest.version).toBe("1.0.0")
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_uninstall", expect.anything())
+    })
+
+    it("retains the transaction backup while failed runtime cleanup still owns effects", async () => {
+      const { store, manager } = setup(true)
+      store.installPlugin.mockRejectedValueOnce(new Error("registration failed"))
+      jest
+        .spyOn(
+          manager as unknown as { hasUnresolvedActivationResources(id: string): boolean },
+          "hasUnresolvedActivationResources"
+        )
+        .mockReturnValueOnce(false)
+        .mockReturnValue(true)
+      jest.spyOn(manager, "unloadPlugin").mockRejectedValueOnce(new Error("runtime still live"))
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "runtime still live"
+      )
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_discard_staged_update", expect.anything())
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_uninstall", expect.anything())
+    })
+
+    it("restores previous grants after finalization fails", async () => {
+      const { result, store, manager } = setup(true)
+      mockInvoke.mockImplementation(async (command) => {
+        if (command === "plugin_wasm_install_from_file") return result
+        if (command === "plugin_wasm_load") return { generation: "preload-new" }
+        if (command === "plugin_finalize_staged_update") throw new Error("finalize failed")
+        return undefined
+      })
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/p.zip", decision)).rejects.toThrow(
+        "finalize failed"
+      )
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_wasm_unload", {
+        pluginId: manifest.id,
+        generation: "preload-new",
+      })
+      const commands = mockInvoke.mock.calls.map(([command]) => command)
+      expect(commands.indexOf("plugin_wasm_unload")).toBeLessThan(
+        commands.indexOf("plugin_discard_staged_update")
+      )
+      expect(store.plugins[manifest.id].manifest.version).toBe("1.0.0")
+      expect(mockApplyWasmCapabilityGrant).toHaveBeenLastCalledWith({
+        pluginId: manifest.id,
+        grantedPermissions: [],
+        grantedPreopens: [],
+      })
     })
   })
 

@@ -17,6 +17,20 @@
     "demoHint": "你正在浏览示例目录，在此模式下安装为模拟，不会真正运行插件代码。",
     "demoTitle": "演示市场"
   },
+  "presets": {
+    "badge": "套装",
+    "desktopOnly": "套装安装仅在桌面端可用。",
+    "install": "安装套装",
+    "installing": "正在安装 {current}/{total}…",
+    "memberCount": "{count} 个插件",
+    "missing": "{count} 个不在此目录中:{names}",
+    "moreMembers": "+{count} 个",
+    "resultAllSkipped": "该套装中的插件均已安装。",
+    "resultCancelled": "套装安装已取消——已安装 {installed}/{total}。",
+    "resultFailed": "套装安装失败:{message}",
+    "resultInstalled": "套装已安装——{installed}/{total} 个插件。",
+    "resultPartial": "已安装 {installed}/{total};{failed} 个失败:{message}"
+  },
   "retry": "重试",
   "searchPlaceholder": "在市场中搜索…"
 }

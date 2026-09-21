@@ -5,7 +5,14 @@
     "cognia": "Cognia",
     "claude-code": "Claude Code",
     "codex": "Codex",
-    "gemini-cli": "Gemini CLI"
+    "gemini-cli": "Gemini CLI",
+    "agent-plugins": "Agent Plugins 1.0",
+    "cursor": "Cursor",
+    "copilot": "GitHub Copilot",
+    "kimi": "Kimi Code",
+    "devin": "Devin",
+    "opencode": "OpenCode",
+    "pi": "Pi"
   },
   "fidelity": {
     "native-exact": "Native",
@@ -15,13 +22,43 @@
   },
   "fidelityHint": {
     "native-exact": "Native Cognia plugin; no conversion required.",
-    "structured": "The manifest and its contributions carry over. Anything host-specific is listed below.",
+    "structured": "Declared contributions were converted. Review the per-capability limitations; native execution is not certified.",
     "contextual": "Behaviour is rebuilt from what the source declared, not translated one-to-one.",
     "unsupported": "This plugin cannot be converted without losing behaviour."
   },
   "counts": "{converted, plural, =0 {Nothing converted} =1 {1 capability converted} other {# capabilities converted}}, {warnings, plural, =0 {no warnings} =1 {1 warning} other {# warnings}}, {blocking, plural, =0 {nothing blocking} =1 {1 blocker} other {# blockers}}",
-  "noIssues": "Everything carried over.",
+  "noIssues": "No conversion issues detected.",
   "issueBlocking": "Blocked · {capability}",
   "issueWarning": "Warning · {capability}",
-  "more": "{count, plural, =1 {and 1 more} other {and # more}}"
+  "more": "{count, plural, =1 {and 1 more} other {and # more}}",
+  "delivery": {
+    "target": "Target: {target} · {surface}",
+    "surfaces": {
+      "cli": "CLI",
+      "desktop": "Desktop",
+      "cloud": "Cloud"
+    },
+    "native": {
+      "ready": "Native package can be written for independent installation.",
+      "review-required": "Review the conversion changes and configuration requirements before writing the native package.",
+      "blocked": "A complete native export is blocked by the issues above."
+    },
+    "unverified": "Native execution has not been verified against your installed agent version.",
+    "hosted": {
+      "requires-cognia": "Hosted tools: enable the plugin in Cognia and use it in a Cognia session with this agent. Cognia must remain running; tool permissions and availability are checked each turn.",
+      "unverified": "Hosted use on this platform or cloud surface is unverified. A local Cognia endpoint must not be assumed reachable."
+    },
+    "tools": "Hosted tool contributions: {capabilities}",
+    "retained": "Retained in Cognia: {capabilities}. These do not become native agent capabilities.",
+    "capability": "Capability",
+    "outcome": "Outcome",
+    "status": {
+      "native": "Preserved natively",
+      "configuration-required": "Configuration required",
+      "contextual": "Behavior changed",
+      "hosted": "Requires Cognia hosting",
+      "unsupported": "Adapter required / unsupported",
+      "unverified": "Needs verification"
+    }
+  }
 }

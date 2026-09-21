@@ -1,0 +1,26 @@
+{
+  "title": "Convert plugin",
+  "description": "Inspect platform differences, review the files, then write a converted copy.",
+  "workspaceRoot": "Workspace root (absolute path)",
+  "sourceDir": "Source directory",
+  "relativePaths": "Source and output directories are relative to the workspace root.",
+  "target": "Target platform",
+  "surface": "Target environment",
+  "surfaces": {
+    "cli": "CLI",
+    "desktop": "Desktop",
+    "cloud": "Cloud"
+  },
+  "cloudHint": "Cloud export is currently blocked. Inspect to see the platform limitations.",
+  "files": "Output files ({count})",
+  "outputDir": "Output directory",
+  "acknowledge": "I have reviewed the warnings and accept the described behavior differences.",
+  "written": "Converted files written to {path}. No plugin was installed.",
+  "close": "Close",
+  "inspect": "Inspect conversion",
+  "inspecting": "Inspecting…",
+  "write": "Write converted files",
+  "writing": "Writing…",
+  "inspectFailed": "Could not inspect conversion: {message}",
+  "writeFailed": "Could not write converted files: {message}"
+}

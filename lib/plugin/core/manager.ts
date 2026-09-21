@@ -124,6 +124,7 @@ import {
   upsertPlugin,
   upsertPlugins,
   getPlugin,
+  deletePlugin,
   setPluginEnabled,
   setPluginConfig,
   getPythonHostSettings,
@@ -173,11 +174,18 @@ import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   applyWasmCapabilityGrant,
   clearWasmCapabilityGrant,
+  getGrantedPreopens,
   reconcileWasmGrantLedgerWithManifest,
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
-import { installFromLocalFile } from "@/lib/plugin/package/local-installer"
+import { installFromLocalFile, type LocalInstallArgs } from "@/lib/plugin/package/local-installer"
+import {
+  installFromUrl,
+  recordInstalledPublisher,
+  type HttpInstallArgs,
+  type HttpInstallResult,
+} from "@/lib/plugin/package/http-installer"
 import {
   validateActivationEvent,
   validateHookPoint,
@@ -468,7 +476,16 @@ interface OptionalServiceSubscription {
  * grants, WASM preload). Runtime teardown deliberately has no shallow
  * resurrection path: once teardown starts, old effects stay detached.
  */
+interface StagedBackendInstallResult {
+  manifest: PluginManifest
+  path: string
+  source?: PluginSource
+  installRootKind?: PluginInstallRootKind
+  transactionId?: string
+}
+
 interface InstallTransactionState {
+  wasmPreloadGeneration?: string
   pluginId: string | null
   pluginPath: string | null
   manifest: PluginManifest | null
@@ -2706,7 +2723,8 @@ export class PluginManager {
       installRootKind?: PluginInstallRootKind
     },
     type: "local" | "git" | "marketplace",
-    txn: InstallTransactionState
+    txn: InstallTransactionState,
+    grantDecision?: WasmCapabilityGrantDecision
   ): Promise<Plugin> {
     const store = usePluginStore.getState()
     txn.pluginId = result.manifest.id
@@ -2781,8 +2799,10 @@ export class PluginManager {
       )
     }
 
+    if (grantDecision) await applyWasmCapabilityGrant(grantDecision)
+
     if (result.manifest.type === "wasm") {
-      await this.preloadWasmComponent(result.manifest, result.path)
+      txn.wasmPreloadGeneration = await this.preloadWasmComponent(result.manifest, result.path)
     }
 
     return store.plugins[result.manifest.id]
@@ -2804,71 +2824,40 @@ export class PluginManager {
     subdir?: string,
     generatedFiles: Record<string, string> = {}
   ): Promise<Plugin> {
-    const txn: InstallTransactionState = {
-      pluginId: null,
-      pluginPath: null,
-      manifest: null,
-      stepsCompleted: {
-        backendInstall: false,
-        storeDiscovery: false,
-        storeInstall: false,
-        permissionRegistration: false,
-      },
-    }
-
+    const { plugin, result } = await this.installStagedBundle(
+      () =>
+        invoke<
+          StagedBackendInstallResult & {
+            readme?: string | null
+            licenseText?: string | null
+            repo: string
+            gitRef: string
+          }
+        >("plugin_install_from_github", {
+          repo,
+          gitRef,
+          subdir,
+          generatedFiles,
+          deferCommit: true,
+        }),
+      "git"
+    )
+    // Descriptive source metadata is not part of package activation.
     try {
-      const result = await invoke<{
-        manifest: PluginManifest
-        path: string
-        source?: PluginSource
-        installRootKind?: PluginInstallRootKind
-        readme?: string | null
-        licenseText?: string | null
-        repo: string
-        gitRef: string
-      }>("plugin_install_from_github", { repo, gitRef, subdir, generatedFiles })
-
-      const plugin = await this.registerBackendInstall(
-        {
-          manifest: result.manifest,
-          path: result.path,
-          source: result.source ?? ("git" as PluginSource),
-          installRootKind: result.installRootKind,
-        },
-        "git",
-        txn
-      )
-
-      // Persist README / LICENSE text + the resolved source URL so the
-      // detail views can render them offline. Non-fatal: the install itself
-      // already succeeded, so a metadata-write hiccup must not fail it.
-      try {
-        const sourceUrl = `https://github.com/${result.repo}${
-          result.gitRef ? `/tree/${result.gitRef}` : ""
-        }`
-        await updatePlugin(result.manifest.id, {
-          readme: result.readme ?? undefined,
-          licenseText: result.licenseText ?? undefined,
-          sourceUrl,
-        })
-      } catch (error) {
-        loggers.manager.warn(
-          `[plugin:${result.manifest.id}] failed to persist GitHub source metadata`,
-          { error: error instanceof Error ? error.message : String(error) }
-        )
-      }
-
-      return plugin
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
-        loggers.manager.error(
-          `[plugin:${txn.pluginId || "(unknown)"}] install rollback itself failed`,
-          rollbackErr
-        )
+      await updatePlugin(result.manifest.id, {
+        readme: result.readme ?? undefined,
+        licenseText: result.licenseText ?? undefined,
+        sourceUrl: `https://github.com/${result.repo}${result.gitRef ? `/tree/${result.gitRef}` : ""}`,
       })
-      throw new Error(`Failed to install plugin: ${reason}`)
+    } catch (error) {
+      loggers.manager.warn(
+        `[plugin:${result.manifest.id}] failed to persist GitHub source metadata`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        }
+      )
     }
+    return plugin
   }
 
   /**
@@ -2990,29 +2979,40 @@ export class PluginManager {
     )
   }
 
-  /**
-   * Install a WASM plugin from a local bundle (either a single `.wasm` file
-   * or a `.zip` containing `plugin.json` + `.wasm`). Persists the user's
-   * capability grant decision via `applyWasmCapabilityGrant` before
-   * delegating to the canonical `installPlugin` path so manifest validation,
-   * compatibility checks, and store wiring stay shared with other types.
-   */
+  /** Confirm a local ZIP through the same staged transaction as URL installs. */
   async installWasmPluginFromLocalFile(
     bundlePath: string,
-    grantDecision?: WasmCapabilityGrantDecision
+    grantDecision?: WasmCapabilityGrantDecision,
+    options: Pick<LocalInstallArgs, "expectedBundleSha256"> = {}
   ): Promise<Plugin> {
-    if (grantDecision) {
-      await applyWasmCapabilityGrant(grantDecision)
-    }
+    const installed = await this.installStagedBundle(
+      () => installFromLocalFile({ bundlePath, ...options, deferCommit: true }),
+      "local",
+      grantDecision
+    )
+    await recordInstalledPublisher(installed.result)
+    return installed.plugin
+  }
 
-    // `installPlugin` was the wrong door and could never open. It calls
-    // `plugin_install`, which unpacks nothing (it validates a manifest, creates
-    // a directory and writes `manifest.json`) and which takes
-    // `(pluginId, source, payload)` rather than the `{ source, installType,
-    // pluginDir }` that call sent, so the invoke was rejected before any of
-    // that mattered. `plugin_wasm_install_from_file` is the real unpacker, and
-    // it shares the archive limits, manifest-contract validation and atomic
-    // replace with the HTTP and Git installers.
+  /** Register signed URL installs with the canonical runtime/store pipeline. */
+  async installWasmPluginFromUrl(
+    args: HttpInstallArgs,
+    grantDecision?: WasmCapabilityGrantDecision
+  ): Promise<HttpInstallResult> {
+    const installed = await this.installStagedBundle(
+      () => installFromUrl({ ...args, deferCommit: true }),
+      "marketplace",
+      grantDecision
+    )
+    await recordInstalledPublisher(installed.result)
+    return installed.result
+  }
+
+  private async installStagedBundle<T extends StagedBackendInstallResult>(
+    stage: () => Promise<T>,
+    source: "local" | "marketplace" | "git",
+    grantDecision?: WasmCapabilityGrantDecision
+  ): Promise<{ plugin: Plugin; result: T }> {
     const txn: InstallTransactionState = {
       pluginId: null,
       pluginPath: null,
@@ -3024,33 +3024,187 @@ export class PluginManager {
         permissionRegistration: false,
       },
     }
-
+    let result: T | undefined
+    let previous: Plugin | undefined
+    let previousRow: PluginRow | undefined
+    let priorGrants: WasmCapabilityGrantDecision | undefined
+    let graphReservation: PluginGraphReservation | undefined
+    let committed = false
+    let grantsChanged = false
+    let runtimeQuiesced = false
     try {
-      const result = await installFromLocalFile({ bundlePath })
-      // Checked BEFORE registering: a non-wasm bundle that reached the store
-      // would leave behind a plugin nothing can load, and the rollback below is
-      // what removes the directory the host has already written.
-      if (result.manifest.type !== "wasm") {
-        throw new Error(`bundle at ${bundlePath} did not declare type: "wasm"`)
+      result = await stage()
+      if (!result.transactionId)
+        throw new Error("The host did not return a staged install transaction")
+      if (source !== "git" && result.manifest.type !== "wasm")
+        throw new Error('The bundle did not declare type: "wasm"')
+      if (grantDecision && grantDecision.pluginId !== result.manifest.id) {
+        throw new Error("The capability decision does not match the previewed plugin")
       }
-      return await this.registerBackendInstall(
-        {
-          manifest: result.manifest,
-          path: result.path,
-          source: "local" as PluginSource,
-        },
-        "local",
-        txn
-      )
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
-        loggers.manager.error(
-          `[plugin:${txn.pluginId || "(unknown)"}] local install rollback itself failed`,
-          rollbackErr
-        )
+      const validation = validatePluginManifest(result.manifest, {
+        governanceMode: this.pluginPointGovernanceMode,
       })
-      throw new Error(`Failed to install plugin: ${reason}`)
+      if (!validation.valid)
+        throw new Error(`Invalid plugin manifest: ${validation.errors.join(", ")}`)
+      const compatibility = this.applyCompatibilityPolicy(result.manifest, `install:${source}`)
+      if (compatibility.blocked) throw new Error("The plugin is incompatible with this host")
+
+      const pluginId = result.manifest.id
+      graphReservation = this.reservePluginRuntimeGraph(pluginId)
+      const store = usePluginStore.getState()
+      previous = store.plugins[pluginId]
+      previousRow = await getPlugin(pluginId)
+      priorGrants = {
+        pluginId,
+        grantedPermissions: [...getPermissionGuard().getPluginPermissions(pluginId)],
+        grantedPreopens: await getGrantedPreopens(pluginId),
+      }
+      const wasActive = previous?.status === "enabled" || previous?.status === "suspended"
+      const hadRuntime =
+        previous &&
+        ["loading", "loaded", "enabling", "enabled", "suspended", "disabled"].includes(
+          previous.status
+        )
+      if (hadRuntime) {
+        if (wasActive) await this.disablePlugin(pluginId, "transactional-install")
+        await this.unloadPlugin(pluginId)
+        runtimeQuiesced = true
+      }
+      if (this.hasUnresolvedActivationResources(pluginId)) {
+        throw new Error(
+          "The previous plugin runtime has unresolved resources; recover it before installing"
+        )
+      }
+      // Set before invoking: a lost response can hide a successful host commit.
+      committed = true
+      await invoke("plugin_commit_staged_update", { pluginId, transactionId: result.transactionId })
+      grantsChanged = Boolean(grantDecision)
+      const plugin = await this.registerBackendInstall(
+        { ...result, source },
+        source,
+        txn,
+        grantDecision
+      )
+      if (wasActive) await this.enablePlugin(pluginId, "transactional-install")
+      await invoke("plugin_finalize_staged_update", {
+        pluginId,
+        transactionId: result.transactionId,
+      })
+      return { plugin: usePluginStore.getState().plugins[pluginId] ?? plugin, result }
+    } catch (error) {
+      const failures: string[] = []
+      const reason = error instanceof Error ? error.message : String(error)
+      if (result?.transactionId) {
+        const pluginId = result.manifest.id
+        // Quiesce any new runtime before the host restores the prior package.
+        // If teardown fails, retain its transaction backup for recovery.
+        let canRestore = true
+        if (txn.stepsCompleted.storeDiscovery) {
+          const current = usePluginStore.getState().plugins[pluginId]
+          if (
+            current &&
+            (["loading", "loaded", "enabling", "enabled", "suspended", "disabled"].includes(
+              current.status
+            ) ||
+              this.hasUnresolvedActivationResources(pluginId))
+          ) {
+            try {
+              if (current.status === "enabled" || current.status === "suspended")
+                await this.disablePlugin(pluginId, "transactional-install-rollback")
+              await this.unloadPlugin(pluginId)
+              if (this.hasUnresolvedActivationResources(pluginId)) {
+                throw new Error("Plugin runtime cleanup was not confirmed")
+              }
+            } catch (cleanupError) {
+              canRestore = false
+              failures.push(`runtime cleanup: ${String(cleanupError)}`)
+            }
+          }
+        }
+        if (canRestore && txn.wasmPreloadGeneration) {
+          try {
+            await this.invokeNativeHost("plugin_wasm_unload", {
+              pluginId,
+              generation: txn.wasmPreloadGeneration,
+            })
+          } catch (cleanupError) {
+            canRestore = false
+            failures.push(`WASM preload cleanup: ${String(cleanupError)}`)
+          }
+        }
+        if (canRestore) {
+          try {
+            await invoke("plugin_discard_staged_update", {
+              pluginId,
+              transactionId: result.transactionId,
+            })
+          } catch (rollbackError) {
+            canRestore = false
+            failures.push(`package rollback: ${String(rollbackError)}`)
+          }
+        }
+        if (canRestore && committed) {
+          try {
+            const store = usePluginStore.getState()
+            if (previous) {
+              // Restore package metadata, never resurrect a torn-down runtime.
+              const restored: Plugin = runtimeQuiesced
+                ? {
+                    ...previous,
+                    status: "installed",
+                    hooks: undefined,
+                    tools: undefined,
+                    components: undefined,
+                    modes: undefined,
+                    commands: undefined,
+                    enabledAt: undefined,
+                  }
+                : previous
+              usePluginStore.setState((state) => ({
+                plugins: { ...state.plugins, [pluginId]: restored },
+              }))
+              this.registerPluginPermissions(pluginId, previous.manifest.permissions || [])
+            } else if (txn.stepsCompleted.storeDiscovery && store.plugins[pluginId]) {
+              await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
+              getPermissionGuard().unregisterPlugin(pluginId)
+            }
+          } catch (rollbackError) {
+            failures.push(`store rollback: ${String(rollbackError)}`)
+          }
+          try {
+            if (previousRow)
+              await upsertPlugin({
+                ...previousRow,
+                ...(runtimeQuiesced ? { status: "installed" as const, lifecycle: undefined } : {}),
+              })
+            else await deletePlugin(pluginId)
+          } catch (rollbackError) {
+            failures.push(`metadata rollback: ${String(rollbackError)}`)
+          }
+        }
+        if (
+          canRestore &&
+          (committed || grantsChanged || txn.stepsCompleted.permissionRegistration) &&
+          priorGrants
+        ) {
+          try {
+            await applyWasmCapabilityGrant(priorGrants)
+          } catch (rollbackError) {
+            failures.push(`permission rollback: ${String(rollbackError)}`)
+          }
+        }
+        dispatchPluginError({
+          pluginId,
+          pluginName: result.manifest.name,
+          stage: "install",
+          message: reason,
+          severity: "error",
+          recoverable: failures.length === 0,
+        })
+      }
+      throw new Error(`Failed to install plugin: ${[reason, ...failures].join("; ")}`)
+    } finally {
+      if (graphReservation) this.releasePluginRuntimeGraph(graphReservation)
     }
   }
 
@@ -3060,7 +3214,10 @@ export class PluginManager {
    * cost. Tauri-only — silently no-ops when the host is unavailable
    * (browser mode is already in a degraded state at this point).
    */
-  private async preloadWasmComponent(manifest: PluginManifest, pluginPath: string): Promise<void> {
+  private async preloadWasmComponent(
+    manifest: PluginManifest,
+    pluginPath: string
+  ): Promise<string | undefined> {
     if (!canUseTauriInvoke()) return
     try {
       const grantReconciliation = await reconcileWasmGrantLedgerWithManifest(
@@ -3079,11 +3236,12 @@ export class PluginManager {
             }
           : manifest.wasm,
       }
-      await invoke("plugin_wasm_load", {
+      const loaded = await invoke<{ generation: string }>("plugin_wasm_load", {
         pluginId: manifest.id,
         manifestJson: JSON.stringify(manifestForLoad),
         pluginPath,
       })
+      return loaded?.generation
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       loggers.manager.warn(`[plugin:${manifest.id}] WASM preload failed`, { error: message })

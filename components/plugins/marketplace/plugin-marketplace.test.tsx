@@ -4,13 +4,14 @@
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+const mockCanUseTauriInvoke = jest.fn(() => true)
 jest.mock("@/lib/native/utils", () => ({
   ...jest.requireActual("@/lib/native/utils"),
   // `InstallButton` gates install on the desktop host, because the download
   // and checksum verification run in the Rust backend. These suites are about
   // what the surface renders and what it calls, not about the gate, which has
   // its own tests in `_shared/install-button.test.tsx`.
-  canUseTauriInvoke: () => true,
+  canUseTauriInvoke: () => mockCanUseTauriInvoke(),
 }))
 
 jest.mock("next-intl", () => ({
@@ -29,16 +30,36 @@ jest.mock("@/lib/db/plugins", () => ({
 
 // GitHub marketplace catalogs the user/org added — the "Workspace" section.
 const githubSourceEntries: Array<{ id: string; name: string }> = []
+const githubSourcePresets: MarketplacePreset[] = []
 jest.mock("@/hooks/plugins/use-github-marketplace-sources", () => ({
   useGithubMarketplaceSources: () => ({
     sources: [],
     entries: githubSourceEntries,
+    presets: githubSourcePresets,
     loading: false,
     errors: [],
     add: jest.fn(async () => undefined),
     remove: jest.fn(async () => undefined),
     refresh: jest.fn(async () => undefined),
   }),
+}))
+
+// Preset bundles install through the shared sequential runner — mocked at the
+// lib seam so the suite asserts the component's wiring and toast branches, not
+// the runner's own mechanics (covered by preset-install.test.ts).
+const runPresetInstallMock = jest.fn()
+jest.mock("@/lib/plugin/marketplace/preset-install", () => ({
+  runPresetInstall: (args: unknown) => runPresetInstallMock(args),
+}))
+
+const mockToast = { error: jest.fn(), message: jest.fn(), warning: jest.fn(), success: jest.fn() }
+// Lazy getter: the factory runs while the file's imports are still resolving,
+// before `mockToast` above is initialized — deferring the property access is
+// what keeps this out of the TDZ.
+jest.mock("sonner", () => ({
+  get toast() {
+    return mockToast
+  },
 }))
 
 // The Open VSX registry client. Mocked at the client seam rather than at the
@@ -57,6 +78,7 @@ jest.mock("@/lib/plugin/vscode-shim/openvsx-install-flow", () => ({
 }))
 
 import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
+import type { MarketplacePreset } from "@/lib/plugin/package/github-marketplace"
 import { getOpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginMarketplace } from "./plugin-marketplace"
@@ -113,6 +135,7 @@ beforeEach(() => {
   usePluginsStore.setState({ discoverCuration: "all", discoverOrigin: "all" })
   installedRows.length = 0
   githubSourceEntries.length = 0
+  githubSourcePresets.length = 0
   jest.clearAllMocks()
   mockOpenVsxSearch()
   __resetPluginMarketplaceClientForTests({
@@ -450,6 +473,103 @@ describe("PluginMarketplace", () => {
       expect(
         screen.getByTestId("plugin-openvsx-integrity-esbenp.prettier-vscode")
       ).toBeInTheDocument()
+    })
+  })
+
+  describe("preset bundles", () => {
+    const presetMember = (id: string) => ({
+      id,
+      name: id,
+      version: "1.0.0",
+      type: "plugin" as const,
+      source: "git" as const,
+      github: { owner: "acme", repo: "repo" },
+    })
+    const preset = (id: string, memberIds: string[]): MarketplacePreset => ({
+      id,
+      name: id.split(":").pop() ?? id,
+      members: memberIds.map(presetMember),
+      missingPlugins: [],
+    })
+    const result = (over: Record<string, unknown> = {}) => ({
+      installed: [],
+      failed: [],
+      cancelled: [],
+      skipped: [],
+      ...over,
+    })
+
+    it("renders catalog presets in the Workspace section and runs the install", async () => {
+      githubSourcePresets.push(preset("acme/repo:starter", ["p-one", "p-two"]))
+      runPresetInstallMock.mockResolvedValue(result({ installed: ["p-one", "p-two"] }))
+      render(<PluginMarketplace />)
+      act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
+
+      const installBtn = await screen.findByTestId("preset-install-acme/repo:starter")
+      fireEvent.click(installBtn)
+
+      await waitFor(() => expect(runPresetInstallMock).toHaveBeenCalledTimes(1))
+      const args = runPresetInstallMock.mock.calls[0][0] as {
+        members: Array<{ id: string }>
+        isInstalled: (id: string) => boolean
+        install: unknown
+        onProgress: unknown
+      }
+      expect(args.members.map((m) => m.id)).toEqual(["p-one", "p-two"])
+      expect(args.isInstalled("p-one")).toBe(false)
+      expect(typeof args.install).toBe("function")
+      expect(typeof args.onProgress).toBe("function")
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("presets.resultInstalled"))
+    })
+
+    it("toasts the cancelled, all-skipped, and failed result branches", async () => {
+      githubSourcePresets.push(preset("acme/repo:bundle", ["p-one"]))
+      render(<PluginMarketplace />)
+      act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
+      const installBtn = await screen.findByTestId("preset-install-acme/repo:bundle")
+
+      runPresetInstallMock.mockResolvedValueOnce(result({ cancelled: ["p-one"] }))
+      fireEvent.click(installBtn)
+      await waitFor(() => expect(mockToast.message).toHaveBeenCalledWith("presets.resultCancelled"))
+
+      runPresetInstallMock.mockResolvedValueOnce(result({ skipped: ["p-one"] }))
+      fireEvent.click(installBtn)
+      await waitFor(() =>
+        expect(mockToast.message).toHaveBeenCalledWith("presets.resultAllSkipped")
+      )
+
+      runPresetInstallMock.mockResolvedValueOnce(
+        result({ failed: [{ id: "p-one", name: "P One", message: "sha mismatch" }] })
+      )
+      fireEvent.click(installBtn)
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("presets.resultFailed"))
+    })
+
+    it("toasts the partial-success branch", async () => {
+      githubSourcePresets.push(preset("acme/repo:bundle", ["p-one", "p-two"]))
+      runPresetInstallMock.mockResolvedValue(
+        result({
+          installed: ["p-one"],
+          failed: [{ id: "p-two", name: "P Two", message: "denied" }],
+        })
+      )
+      render(<PluginMarketplace />)
+      act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
+      fireEvent.click(await screen.findByTestId("preset-install-acme/repo:bundle"))
+      await waitFor(() => expect(mockToast.warning).toHaveBeenCalledWith("presets.resultPartial"))
+    })
+
+    it("gates preset installs on the desktop host", async () => {
+      // Not a once-return: card renders consume the gate too, so the override
+      // must still hold when the click reaches it.
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      githubSourcePresets.push(preset("acme/repo:bundle", ["p-one"]))
+      render(<PluginMarketplace />)
+      act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
+      fireEvent.click(await screen.findByTestId("preset-install-acme/repo:bundle"))
+      expect(mockToast.error).toHaveBeenCalledWith("presets.desktopOnly")
+      expect(runPresetInstallMock).not.toHaveBeenCalled()
+      mockCanUseTauriInvoke.mockReturnValue(true)
     })
   })
 })

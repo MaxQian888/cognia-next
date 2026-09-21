@@ -103,6 +103,21 @@ jest.mock("./dialogs/plugin-install-from-url-dialog", () => ({
     ) : null,
 }))
 
+jest.mock("./dialogs/plugin-conversion-dialog", () => ({
+  PluginConversionDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+  }) =>
+    open ? (
+      <div aria-label="conversion-dialog">
+        <button onClick={() => onOpenChange(false)}>close-conversion</button>
+      </div>
+    ) : null,
+}))
+
 import { PluginPanelToolbar } from "./plugin-panel-toolbar"
 
 // Cache the prototype createElement once at module load — before any spy
@@ -357,4 +372,24 @@ describe("PluginPanelToolbar", () => {
     expect(syncLabel.className).toContain("hidden")
     expect(syncLabel.className).toContain("lg:inline")
   })
+})
+
+it("opens plugin conversion from the desktop toolbar", () => {
+  canUseTauriInvokeMock.mockReturnValue(true)
+  render(<PluginPanelToolbar />)
+  fireEvent.click(screen.getByRole("button", { name: "convertPlugin" }))
+  expect(screen.getByLabelText("conversion-dialog")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "close-conversion" }))
+  expect(screen.queryByLabelText("conversion-dialog")).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "convertPlugin" }))
+  expect(screen.getByLabelText("conversion-dialog")).toBeInTheDocument()
+})
+
+it("shows conversion disabled with the desktop requirement in web", () => {
+  canUseTauriInvokeMock.mockReturnValue(false)
+  render(<PluginPanelToolbar />)
+  const button = screen.getByRole("button", { name: "convertPlugin" })
+  expect(button).toBeDisabled()
+  expect(button).toHaveAttribute("title", "desktopOnlyHint")
+  expect(screen.queryByLabelText("conversion-dialog")).not.toBeInTheDocument()
 })

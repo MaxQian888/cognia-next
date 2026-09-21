@@ -47,6 +47,7 @@ const SKIP_DIRS: &[&str] = &[".git", ".github", "node_modules", "target"];
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubInstallResult {
+    pub transaction_id: Option<String>,
     pub manifest: serde_json::Value,
     pub path: String,
     pub source: String,
@@ -384,13 +385,15 @@ pub async fn plugin_install_from_github(
     git_ref: Option<String>,
     subdir: Option<String>,
     generated_files: Option<BTreeMap<String, String>>,
+    defer_commit: Option<bool>,
 ) -> Result<GithubInstallResult, String> {
-    plugin_install_from_github_for_state(
+    install_from_github_inner(
         state.inner(),
         repo,
         git_ref,
         subdir,
         generated_files.unwrap_or_default(),
+        defer_commit.unwrap_or(false),
     )
     .await
 }
@@ -403,6 +406,17 @@ pub async fn plugin_install_from_github_for_state(
     subdir: Option<String>,
     generated_files: BTreeMap<String, String>,
 ) -> Result<GithubInstallResult, String> {
+    install_from_github_inner(state, repo, git_ref, subdir, generated_files, false).await
+}
+
+async fn install_from_github_inner(
+    state: &PluginRuntimeState,
+    repo: String,
+    git_ref: Option<String>,
+    subdir: Option<String>,
+    generated_files: BTreeMap<String, String>,
+    defer_commit: bool,
+) -> Result<GithubInstallResult, String> {
     let mut gh = parse_github_ref(&repo)?;
     if let Some(r) = git_ref.filter(|s| !s.trim().is_empty()) {
         gh.git_ref = Some(r.trim().to_string());
@@ -412,6 +426,7 @@ pub async fn plugin_install_from_github_for_state(
     }
 
     let policy_url = format!("https://api.github.com/repos/{}/{}", gh.owner, gh.repo);
+    cognia_net::proxy_config::ensure_crypto_provider();
     let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &policy_url)
         .map_err(|error| error.to_string())?;
@@ -484,16 +499,19 @@ pub async fn plugin_install_from_github_for_state(
     let readme = read_optional_text(&plugin_root, README_NAMES);
     let license_text = read_optional_text(&plugin_root, LICENSE_NAMES);
 
-    // Step 6 — copy the plugin tree into the canonical install dir.
+    // Step 6 — prepare completely before publishing; activation may defer the
+    // swap so the manager can quiesce the prior runtime and roll back failures.
     let plugin_dir = state.plugin_dir(&parsed.id);
-    if plugin_dir.exists() {
-        std::fs::remove_dir_all(&plugin_dir).map_err(|e| format!("clear {plugin_dir:?}: {e}"))?;
-    }
-    std::fs::create_dir_all(&plugin_dir).map_err(|e| format!("mkdir {plugin_dir:?}: {e}"))?;
-    copy_plugin_tree(&plugin_root, &plugin_dir)?;
-    crate::contract::validate_existing_manifest_paths(&plugin_dir, &manifest_value)?;
+    let transaction_id = install_github_tree(
+        &state.plugin_state_dir,
+        &plugin_root,
+        &plugin_dir,
+        &manifest_value,
+        defer_commit,
+    )?;
 
     Ok(GithubInstallResult {
+        transaction_id,
         manifest: manifest_value,
         path: plugin_dir.to_string_lossy().into_owned(),
         source: "git".into(),
@@ -505,9 +523,84 @@ pub async fn plugin_install_from_github_for_state(
     })
 }
 
+fn install_github_tree(
+    state_root: &Path,
+    source: &Path,
+    destination: &Path,
+    manifest: &serde_json::Value,
+    defer_commit: bool,
+) -> Result<Option<String>, String> {
+    let prepared = tempfile::tempdir().map_err(|error| error.to_string())?;
+    copy_plugin_tree(source, prepared.path())?;
+    // GitHub archives are unsigned; never inherit a repository-authored receipt.
+    let receipt = prepared
+        .path()
+        .join(crate::marketplace::VERIFICATION_RECEIPT_FILE);
+    if receipt.exists() {
+        std::fs::remove_file(receipt).map_err(|error| error.to_string())?;
+    }
+    if defer_commit {
+        crate::marketplace::stage_tree_install(state_root, prepared.path(), manifest)
+            .map(Some)
+            .map_err(|error| error.to_string())
+    } else {
+        crate::wasm::installer::atomically_install_tree(prepared.path(), destination, manifest)?;
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_replacement_preserves_existing_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("demo.github");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("index.js"), b"old").unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let manifest =
+            serde_json::json!({"id":"demo.github","type":"frontend","main":"missing.js"});
+        std::fs::write(source.path().join("plugin.json"), manifest.to_string()).unwrap();
+        assert!(install_github_tree(
+            &root.path().join(".host-state"),
+            source.path(),
+            &destination,
+            &manifest,
+            false
+        )
+        .is_err());
+        assert_eq!(std::fs::read(destination.join("index.js")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn deferred_github_install_retains_previous_until_activation_acknowledges() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::PluginRuntimeState::new(root.path().to_path_buf());
+        let destination = state.plugin_dir("demo.github");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("index.js"), b"old").unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let manifest = serde_json::json!({"id":"demo.github","version":"1.0.0","type":"frontend","main":"index.js"});
+        std::fs::write(source.path().join("plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(source.path().join("index.js"), b"new").unwrap();
+        let transaction = install_github_tree(
+            &state.plugin_state_dir,
+            source.path(),
+            &destination,
+            &manifest,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(std::fs::read(destination.join("index.js")).unwrap(), b"old");
+        crate::marketplace::commit_staged_update_for_state(&state, "demo.github", &transaction)
+            .unwrap();
+        crate::marketplace::discard_staged_update_for_state(&state, "demo.github", &transaction)
+            .unwrap();
+        assert_eq!(std::fs::read(destination.join("index.js")).unwrap(), b"old");
+    }
 
     fn r(owner: &str, repo: &str, git_ref: Option<&str>, subdir: Option<&str>) -> GithubRef {
         GithubRef {

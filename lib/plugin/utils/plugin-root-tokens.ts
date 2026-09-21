@@ -8,7 +8,7 @@
  * plugin directory.
  */
 
-const PLUGIN_ROOT_TOKENS = [
+export const PLUGIN_ROOT_TOKENS = [
   "${COGNIA_PLUGIN_ROOT}",
   "${CLAUDE_PLUGIN_ROOT}",
   "${CODEX_PLUGIN_ROOT}",

@@ -8,7 +8,7 @@
 //! user ever approving it. The hard cutover was the moment to add the gate at
 //! zero migration cost: every plugin has to be rebuilt regardless.
 
-use super::super::errors::{coded, WasmErrorCode};
+use super::super::errors::{WasmErrorCode, coded};
 use super::super::store::HostState;
 use super::require;
 

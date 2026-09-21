@@ -9,6 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   getExtensionRevision,
   getExtensionsForPoint,
@@ -103,17 +104,22 @@ export function PluginExtensionSlotWithOverflow({
       ))}
       {overflow.length > 0 && (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={overflowLabel}
-              data-testid={`plugin-extension-overflow-${point}`}
-              className="size-7"
-            >
-              <MoreHorizontalIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={overflowLabel}
+                  data-testid={`plugin-extension-overflow-${point}`}
+                  className="size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
+                >
+                  <MoreHorizontalIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">{overflowLabel}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="end" sideOffset={4} className={overflowClassName}>
             {overflow.map((ext) => (
               <PluginSurface

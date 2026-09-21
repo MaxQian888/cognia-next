@@ -6,6 +6,7 @@ import { useGithubMarketplaceSources, canonicalSourceId } from "./use-github-mar
 import type {
   GithubMarketplaceEntry,
   MarketplaceCatalog,
+  MarketplacePreset,
 } from "@/lib/plugin/package/github-marketplace"
 
 let liveRows: unknown
@@ -42,22 +43,38 @@ function entry(id: string): GithubMarketplaceEntry {
   }
 }
 
-function catalogFor(repoRef: string, entryIds: string[], name = "Acme"): MarketplaceCatalog {
+function preset(
+  id: string,
+  memberIds: string[] = [],
+  missingPlugins: string[] = []
+): MarketplacePreset {
+  return { id, name: id.split(":").pop()!, members: memberIds.map(entry), missingPlugins }
+}
+
+function catalogFor(
+  repoRef: string,
+  entryIds: string[],
+  name = "Acme",
+  presets: MarketplacePreset[] = []
+): MarketplaceCatalog {
   return {
     id: repoRef,
     name,
     catalogPath: "marketplace.json",
     repoUrl: `https://github.com/${repoRef}`,
     entries: entryIds.map(entry),
+    presets,
   }
 }
 
 /** `fetchAllSourceEntries`-shaped result built from per-source catalogs. */
-function allEntriesResult(catalogs: Array<{ repoRef: string; entryIds: string[] }>) {
+function allEntriesResult(
+  catalogs: Array<{ repoRef: string; entryIds: string[]; presets?: MarketplacePreset[] }>
+) {
   const results = catalogs.map((c) => ({
     repoRef: c.repoRef,
     ok: true as const,
-    catalog: catalogFor(c.repoRef, c.entryIds),
+    catalog: catalogFor(c.repoRef, c.entryIds, "Acme", c.presets),
   }))
   return { entries: results.flatMap((r) => r.catalog.entries), errors: [], results }
 }
@@ -104,6 +121,47 @@ describe("useGithubMarketplaceSources", () => {
     const { result } = renderHook(() => useGithubMarketplaceSources())
     await waitFor(() => expect(result.current.entries).toHaveLength(2))
     expect(result.current.entries.map((e) => e.id)).toEqual(["a:1", "b:1"])
+  })
+
+  it("collects catalog presets in the same per-source order as entries", async () => {
+    liveRows = [
+      { id: "a/one", repoRef: "a/one", name: "One", addedAt: 2 },
+      { id: "b/two", repoRef: "b/two", name: "Two", addedAt: 1 },
+    ]
+    // Deliberately reversed, same as the entries ordering test.
+    fetchAllSourceEntries.mockResolvedValue(
+      allEntriesResult([
+        { repoRef: "b/two", entryIds: ["b:1"], presets: [preset("b/two:bundle")] },
+        { repoRef: "a/one", entryIds: ["a:1"], presets: [preset("a/one:starter", ["a:1"])] },
+      ])
+    )
+    const { result } = renderHook(() => useGithubMarketplaceSources())
+    await waitFor(() => expect(result.current.presets).toHaveLength(2))
+    expect(result.current.presets.map((p) => p.id)).toEqual(["a/one:starter", "b/two:bundle"])
+  })
+
+  it("yields no presets for a source whose fetch failed", async () => {
+    liveRows = [
+      { id: "acme/good", repoRef: "acme/good", name: "Good", addedAt: 2 },
+      { id: "acme/bad", repoRef: "acme/bad", name: "Bad", addedAt: 1 },
+    ]
+    fetchAllSourceEntries.mockResolvedValue({
+      entries: [entry("acme/good:Alpha")],
+      errors: [{ repoRef: "acme/bad", message: "no marketplace.json" }],
+      results: [
+        {
+          repoRef: "acme/good",
+          ok: true,
+          catalog: catalogFor("acme/good", ["acme/good:Alpha"], "Good", [
+            preset("acme/good:starter"),
+          ]),
+        },
+        { repoRef: "acme/bad", ok: false, message: "no marketplace.json" },
+      ],
+    })
+    const { result } = renderHook(() => useGithubMarketplaceSources())
+    await waitFor(() => expect(result.current.presets).toHaveLength(1))
+    expect(result.current.presets.map((p) => p.id)).toEqual(["acme/good:starter"])
   })
 
   it("records each fetch outcome against its own source", async () => {

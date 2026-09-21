@@ -1,6 +1,7 @@
 import { render, renderHook, act } from "@testing-library/react"
 import { useState, useEffect } from "react"
 import { useWasmCapabilityGrant } from "./use-wasm-capability-grant"
+import { applyWasmCapabilityGrant } from "@/lib/plugin/security/wasm-grant"
 import type { PluginManifest } from "@/types/plugin"
 
 jest.mock("@/components/plugins/dialogs/wasm-capability-grant-sheet", () => {
@@ -56,6 +57,7 @@ function makeNonWasmManifest(): PluginManifest {
 
 beforeEach(() => {
   sheetModule.__sheetCalls.length = 0
+  jest.mocked(applyWasmCapabilityGrant).mockClear()
 })
 
 /**
@@ -64,17 +66,17 @@ beforeEach(() => {
  * Returns a ref-like object the test can drive.
  */
 function renderHostedHook(): {
-  trigger: (m: PluginManifest) => Promise<unknown>
+  trigger: (m: PluginManifest, persist?: boolean) => Promise<unknown>
 } {
-  const ref: { trigger: (m: PluginManifest) => Promise<unknown> } = {
+  const ref: { trigger: (m: PluginManifest, persist?: boolean) => Promise<unknown> } = {
     trigger: () => Promise.reject(new Error("hook not ready")),
   }
   function Host(): React.ReactElement {
     const hook = useWasmCapabilityGrant()
     const [_, force] = useState(0)
     useEffect(() => {
-      ref.trigger = (m) => {
-        const p = hook.requestGrant({ manifest: m })
+      ref.trigger = (m, persist) => {
+        const p = hook.requestGrant({ manifest: m, persist })
         force((x) => x + 1)
         return p
       }
@@ -151,4 +153,36 @@ describe("useWasmCapabilityGrant", () => {
     })
     await expect(promise).resolves.toBeNull()
   })
+})
+
+it("collects install consent without changing persisted grants", async () => {
+  const host = renderHostedHook()
+  let promise!: Promise<unknown>
+  await act(async () => {
+    promise = host.trigger(makeWasmManifest(), false)
+  })
+  const props = sheetModule.__sheetCalls[sheetModule.__sheetCalls.length - 1]
+  await act(async () => {
+    await props.onConfirm?.({
+      pluginId: "w1",
+      grantedPermissions: ["network:fetch"],
+      grantedPreopens: ["/chosen"],
+    })
+  })
+  await expect(promise).resolves.toMatchObject({
+    decision: { pluginId: "w1" },
+    preopens: ["/chosen"],
+  })
+  expect(applyWasmCapabilityGrant).not.toHaveBeenCalled()
+})
+
+it("settles an outstanding grant as cancelled when its owner unmounts", async () => {
+  const { result, unmount } = renderHook(() => useWasmCapabilityGrant())
+  let promise!: Promise<unknown>
+  act(() => {
+    promise = result.current.requestGrant({ manifest: makeWasmManifest(), persist: false })
+  })
+  unmount()
+  await expect(promise).resolves.toBeNull()
+  expect(applyWasmCapabilityGrant).not.toHaveBeenCalled()
 })

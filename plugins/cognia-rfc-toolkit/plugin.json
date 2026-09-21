@@ -1,0 +1,77 @@
+{
+  "id": "cognia-rfc-toolkit",
+  "name": "RFC Toolkit",
+  "version": "0.1.0",
+  "description": "Structured technical-design (RFC) workflow: task-type-aware planning guides and output templates, a self-critique checklist, and a syntax-safe Mermaid diagram generator. Generic mechanism ported from the aiden-plugins arch bundle; vendor-specific tooling removed.",
+  "type": "frontend",
+  "capabilities": ["skills"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Skill bundles are read from the plugin directory through the desktop filesystem bridge."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Skill bundles are read from the plugin directory through the desktop filesystem bridge."
+    }
+  },
+  "skills": [
+    {
+      "id": "cognia-rfc-toolkit:rfc-write-plan",
+      "name": "rfc-write-plan",
+      "description": "Structured technical-design (RFC) planning. Use when the user needs a technical proposal, a design document, or a structured plan for a bug fix, a new feature, or a refactor — it loads the matching task guide and output template, researches the codebase, and writes a precise design document.",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/rfc-write-plan"
+      },
+      "allowedTools": ["Read", "Write", "Edit", "Grep", "Glob", "Bash", "Task", "dispatch_agent"]
+    },
+    {
+      "id": "cognia-rfc-toolkit:rfc-reflect",
+      "name": "rfc-reflect",
+      "description": "Technical-proposal critique and evaluation. Use to check a draft design/RFC for completeness and soundness, assess whether gathered knowledge is sufficient and correctly applied, or critically review the current proposal — especially for complex requirements.",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/rfc-reflect"
+      }
+    },
+    {
+      "id": "cognia-rfc-toolkit:mermaid-visualizer",
+      "name": "mermaid-visualizer",
+      "description": "Generate syntactically correct and visually clear Mermaid diagrams (flowcharts, sequence diagrams, state diagrams, etc.) with clean layout and error-free syntax.",
+      "source": {
+        "kind": "local-bundle",
+        "path": "skills/mermaid-visualizer"
+      },
+      "allowedTools": ["Read", "Bash"]
+    }
+  ],
+  "bundle_include": [
+    "plugin.json",
+    "README.md",
+    "src/index.ts",
+    "skills/rfc-write-plan/SKILL.md",
+    "skills/rfc-write-plan/references/bugfix-guide.txt",
+    "skills/rfc-write-plan/references/bugfix-template.md",
+    "skills/rfc-write-plan/references/newfeature-guide.txt",
+    "skills/rfc-write-plan/references/newfeature-template.md",
+    "skills/rfc-write-plan/references/refactor.txt",
+    "skills/rfc-write-plan/references/refactor-template.md",
+    "skills/rfc-reflect/SKILL.md",
+    "skills/mermaid-visualizer/SKILL.md",
+    "skills/mermaid-visualizer/references/syntax-rules.md"
+  ]
+}

@@ -16,6 +16,8 @@
  * skill-creator / Codex CLI superset format.
  */
 
+import type { SkillCategory } from "@cognia/agent-config-types"
+
 export type PluginSkillSource =
   | { kind: "local-folder"; path: string }
   | { kind: "anthropic-managed"; containerSkillId: string; version?: string }
@@ -30,6 +32,18 @@ export interface PluginSkillDef {
   name: string
   /** One-line description. */
   description: string
+  /** Portable skill identity and frontmatter retained through conversion. */
+  slug?: string
+  compatibility?: string
+  metadata?: Record<string, string>
+  frontmatterExtensions?: Record<string, unknown>
+  license?: string
+  version?: string
+  author?: string
+  tags?: string[]
+  category?: SkillCategory
+  /** Explicit skills are excluded from character auto-attachment. */
+  invocationPolicy?: "implicit" | "explicit"
   /** Where the skill content comes from. */
   source: PluginSkillSource
   /**

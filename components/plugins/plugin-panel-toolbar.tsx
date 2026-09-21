@@ -33,6 +33,7 @@ import {
   GitBranchIcon,
   FileArchiveIcon,
   GitMergeIcon,
+  ArrowRightLeftIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,6 +52,7 @@ import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-instal
 import { PluginWasmFromGitDialog } from "./dialogs/plugin-wasm-from-git-dialog"
 import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
+import { PluginConversionDialog } from "./dialogs/plugin-conversion-dialog"
 import { CliStatusChip } from "./cli-status-chip"
 
 const PluginVsixInstallDialog = dynamic(
@@ -80,6 +82,7 @@ function DesktopOnlyChip({ label }: { label: string }) {
 export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = false }: Props) {
   const t = useTranslations("plugins.toolbar")
   const setImportStaging = usePluginsStore((s) => s.setImportStaging)
+  const [conversionOpen, setConversionOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [githubDialogOpen, setGithubDialogOpen] = useState(false)
@@ -230,6 +233,17 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!wasmAvailable}
+          onClick={() => setConversionOpen(true)}
+          aria-label={t("convertPlugin")}
+          title={!wasmAvailable ? t("desktopOnlyHint") : undefined}
+        >
+          <ArrowRightLeftIcon className="size-3.5 lg:mr-1.5" />
+          <span className="hidden lg:inline">{t("convertPlugin")}</span>
+        </Button>
         <Button size="sm" variant="outline" onClick={onCheckUpdates} aria-label={t("checkUpdates")}>
           <RefreshCcwIcon className="size-3.5 lg:mr-1.5" />
           <span className="hidden lg:inline">{t("checkUpdates")}</span>
@@ -264,6 +278,9 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
         </p>
       )}
 
+      {wasmAvailable && (
+        <PluginConversionDialog open={conversionOpen} onOpenChange={setConversionOpen} />
+      )}
       <PluginInstallFromUrlDialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen} />
       {wasmAvailable && (
         <PluginInstallFromGithubDialog open={githubDialogOpen} onOpenChange={setGithubDialogOpen} />

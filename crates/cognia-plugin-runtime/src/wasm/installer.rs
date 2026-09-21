@@ -29,6 +29,8 @@ pub struct WasmInstallResult {
     pub source: String,
     pub install_root_kind: String,
     pub signature_verified: bool,
+    pub bundle_sha256: Option<String>,
+    pub transaction_id: Option<String>,
     pub author_public_key: Option<String>,
     pub author_fingerprint: Option<String>,
 }
@@ -215,8 +217,12 @@ pub async fn plugin_wasm_install_from_url(
     bundle_url: String,
     signature_url: Option<String>,
     expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
 ) -> Result<WasmInstallResult, String> {
     // Step 1 — fetch the bundle.
+    cognia_net::proxy_config::ensure_crypto_provider();
     let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, &bundle_url)
         .map_err(|error| error.to_string())?;
@@ -266,9 +272,21 @@ pub async fn plugin_wasm_install_from_url(
     }
 
     let install_root = state.plugin_install_dir.clone();
+    let state_root = state.plugin_state_dir.clone();
     let bundle = bundle.to_vec();
     tokio::task::spawn_blocking(move || {
-        install_downloaded_wasm_bundle(&install_root, &bundle, signature_verified)
+        install_downloaded_wasm_bundle(
+            &install_root,
+            &bundle,
+            signature_verified
+                .then_some(expected_public_key_base64.as_deref())
+                .flatten(),
+            preview_only.unwrap_or(false),
+            expected_bundle_sha256.as_deref(),
+            defer_commit
+                .unwrap_or(false)
+                .then_some(state_root.as_path()),
+        )
     })
     .await
     .map_err(|error| format!("WASM bundle install task failed: {error}"))?
@@ -306,8 +324,12 @@ pub async fn plugin_wasm_install_from_file(
     bundle_path: String,
     signature_base64: Option<String>,
     expected_public_key_base64: Option<String>,
+    preview_only: Option<bool>,
+    expected_bundle_sha256: Option<String>,
+    defer_commit: Option<bool>,
 ) -> Result<WasmInstallResult, String> {
     let install_root = state.plugin_install_dir.clone();
+    let state_root = state.plugin_state_dir.clone();
     let path = PathBuf::from(bundle_path.trim());
     if !path.is_absolute() {
         return Err("bundle_path must be an absolute path".into());
@@ -338,12 +360,23 @@ pub async fn plugin_wasm_install_from_file(
         _ => {
             return Err(
                 "signature_base64 and expected_public_key_base64 must be provided together".into(),
-            )
+            );
         }
     };
 
     let mut result = tokio::task::spawn_blocking(move || {
-        install_downloaded_wasm_bundle(&install_root, &bundle, signature_verified)
+        install_downloaded_wasm_bundle(
+            &install_root,
+            &bundle,
+            signature_verified
+                .then_some(expected_public_key_base64.as_deref())
+                .flatten(),
+            preview_only.unwrap_or(false),
+            expected_bundle_sha256.as_deref(),
+            defer_commit
+                .unwrap_or(false)
+                .then_some(state_root.as_path()),
+        )
     })
     .await
     .map_err(|error| format!("WASM bundle install task failed: {error}"))??;
@@ -377,8 +410,17 @@ fn read_bundle_file_limited(path: &Path, limit: u64) -> Result<Vec<u8>, String> 
 fn install_downloaded_wasm_bundle(
     install_root: &Path,
     bundle: &[u8],
-    signature_verified: bool,
+    verified_public_key: Option<&str>,
+    preview_only: bool,
+    expected_bundle_sha256: Option<&str>,
+    deferred_state_root: Option<&Path>,
 ) -> Result<WasmInstallResult, String> {
+    let digest = sha256_hex(bundle);
+    if expected_bundle_sha256.is_some_and(|expected| !expected.eq_ignore_ascii_case(&digest)) {
+        return Err(
+            "plugin bundle changed since preview; inspect it again before installing".into(),
+        );
+    }
     // Extract to a temp dir, parse manifest, validate.
     let staging = tempfile::tempdir().map_err(|e| format!("create temp dir: {e}"))?;
     let manifest_path = extract_zip_bundle(bundle, staging.path())?;
@@ -393,9 +435,25 @@ fn install_downloaded_wasm_bundle(
     let plugin_id =
         crate::validate_plugin_id_path_component(&parsed.id).map_err(|error| error.to_string())?;
     let plugin_dir = install_root.join(plugin_id);
-    atomically_install_tree(plugin_root, &plugin_dir, &manifest_value)?;
-
-    let (author_pk, author_fp) = match parsed.author.as_ref().and_then(|a| a.public_key.clone()) {
+    let declared_key = parsed
+        .author
+        .as_ref()
+        .and_then(|author| author.public_key.as_deref());
+    if let (Some(verified), Some(declared)) = (verified_public_key, declared_key) {
+        if b64()
+            .decode(verified.trim())
+            .map_err(|error| error.to_string())?
+            != b64()
+                .decode(declared.trim())
+                .map_err(|error| error.to_string())?
+        {
+            return Err("manifest author public key does not match the verified signer".into());
+        }
+    }
+    let author_key = verified_public_key
+        .or(declared_key)
+        .map(|key| key.trim().to_string());
+    let (author_pk, author_fp) = match author_key {
         Some(pk) => {
             let decoded = b64().decode(pk.as_bytes()).ok();
             let fp = decoded.as_ref().map(|b| sha256_hex(b));
@@ -404,18 +462,59 @@ fn install_downloaded_wasm_bundle(
         None => (None, None),
     };
 
+    let transaction_id = if preview_only {
+        None
+    } else {
+        // A package cannot author its own verification receipt.
+        let receipt_path = plugin_root.join(crate::marketplace::VERIFICATION_RECEIPT_FILE);
+        if receipt_path.exists() {
+            std::fs::remove_file(&receipt_path)
+                .map_err(|error| format!("remove bundled verification receipt: {error}"))?;
+        }
+        if verified_public_key.is_some() {
+            let receipt = crate::marketplace::VerificationReceipt {
+                verified_via: "signature".into(),
+                version: manifest_value
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+                verified_at: chrono::Utc::now().to_rfc3339(),
+            };
+            std::fs::write(
+                &receipt_path,
+                serde_json::to_vec(&receipt).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| format!("write verified signer receipt: {error}"))?;
+        }
+        if let Some(state_root) = deferred_state_root {
+            Some(
+                crate::marketplace::stage_tree_install(state_root, plugin_root, &manifest_value)
+                    .map_err(|error| error.to_string())?,
+            )
+        } else {
+            atomically_install_tree(plugin_root, &plugin_dir, &manifest_value)?;
+            None
+        }
+    };
     Ok(WasmInstallResult {
         manifest: manifest_value,
         path: plugin_dir.to_string_lossy().into_owned(),
         source: "marketplace".into(),
         install_root_kind: "installed".into(),
-        signature_verified,
+        signature_verified: verified_public_key.is_some(),
+        bundle_sha256: Some(digest),
+        transaction_id,
         author_public_key: author_pk,
         author_fingerprint: author_fp,
     })
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path, excluded_top_level: &[&str]) -> Result<(), String> {
+pub(crate) fn copy_dir_recursive(
+    src: &Path,
+    dst: &Path,
+    excluded_top_level: &[&str],
+) -> Result<(), String> {
     for entry in std::fs::read_dir(src).map_err(|e| format!("read_dir {src:?}: {e}"))? {
         let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
         let path = entry.path();
@@ -447,7 +546,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path, excluded_top_level: &[&str]) -> Re
     Ok(())
 }
 
-fn atomically_install_tree(
+pub(crate) fn atomically_install_tree(
     source_root: &Path,
     plugin_dir: &Path,
     manifest: &serde_json::Value,
@@ -464,9 +563,18 @@ fn atomically_install_tree(
     let prepared = transaction.path().join("payload");
     std::fs::create_dir(&prepared).map_err(|e| format!("mkdir {prepared:?}: {e}"))?;
     copy_dir_recursive(source_root, &prepared, &[])?;
+    let marker = prepared.join(crate::marketplace::INSTALL_TRANSACTION_FILE);
+    if marker.exists() {
+        std::fs::remove_file(marker).map_err(|error| error.to_string())?;
+    }
     crate::contract::validate_existing_manifest_paths(&prepared, manifest)?;
 
-    let transaction_path = transaction.keep();
+    let _guard = crate::marketplace::INSTALL_COMMIT_LOCK
+        .lock()
+        .map_err(|_| "install commit lock poisoned".to_string())?;
+    crate::marketplace::ensure_install_not_pending(plugin_dir)
+        .map_err(|error| error.to_string())?;
+    let transaction_path = transaction.path().to_path_buf();
     let prepared = transaction_path.join("payload");
     let backup = parent.join(format!(".plugin-backup-{}", uuid::Uuid::new_v4()));
     let had_previous = plugin_dir.exists();
@@ -590,6 +698,8 @@ fn install_prebuilt_wasm_from_git(
         source: "git".into(),
         install_root_kind: "installed".into(),
         signature_verified: false,
+        bundle_sha256: None,
+        transaction_id: None,
         author_public_key: author_pk,
         author_fingerprint: author_fp,
     })
@@ -672,6 +782,114 @@ mod tests {
         buf
     }
 
+    #[test]
+    fn preview_does_not_create_or_replace_installation() {
+        let manifest = r#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let bundle = make_test_zip(manifest, b"new");
+        let root = tempfile::tempdir().unwrap();
+        let absent = root.path().join("absent");
+        let result =
+            install_downloaded_wasm_bundle(&absent, &bundle, None, true, None, None).unwrap();
+        assert_eq!(
+            result.bundle_sha256.as_deref(),
+            Some(sha256_hex(&bundle).as_str())
+        );
+        assert!(!absent.exists(), "preview must not create install root");
+        let existing = root.path().join("demo.wasm");
+        std::fs::create_dir(&existing).unwrap();
+        std::fs::write(existing.join("main.wasm"), b"old").unwrap();
+        install_downloaded_wasm_bundle(root.path(), &bundle, None, true, None, None).unwrap();
+        assert_eq!(std::fs::read(existing.join("main.wasm")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn confirmed_bundle_digest_must_match_before_replacement() {
+        let manifest = r#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let bundle = make_test_zip(manifest, b"changed after preview");
+        let root = tempfile::tempdir().unwrap();
+        let error = install_downloaded_wasm_bundle(
+            root.path(),
+            &bundle,
+            None,
+            false,
+            Some(&sha256_hex(b"preview")),
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("changed since preview"), "{error}");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn verified_signer_cannot_claim_another_author_key() {
+        let signer = SigningKey::from_bytes(&[7; 32]);
+        let other = SigningKey::from_bytes(&[9; 32]);
+        let key = b64().encode(signer.verifying_key().as_bytes());
+        let manifest = serde_json::json!({"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"},"author":{"publicKey":b64().encode(other.verifying_key().as_bytes())}});
+        let bundle = make_test_zip(&manifest.to_string(), b"wasm");
+        verify_detached(
+            &bundle,
+            &b64().encode(signer.sign(&bundle).to_bytes()),
+            &key,
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let error =
+            install_downloaded_wasm_bundle(root.path(), &bundle, Some(&key), false, None, None)
+                .unwrap_err();
+        assert!(error.contains("verified signer"), "{error}");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn verified_signer_metadata_does_not_require_manifest_author() {
+        let signer = SigningKey::from_bytes(&[7; 32]);
+        let key = b64().encode(signer.verifying_key().as_bytes());
+        let manifest = r#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let bundle = make_test_zip(manifest, b"wasm");
+        let root = tempfile::tempdir().unwrap();
+        let result =
+            install_downloaded_wasm_bundle(root.path(), &bundle, Some(&key), true, None, None)
+                .unwrap();
+        assert_eq!(result.author_public_key.as_deref(), Some(key.as_str()));
+        assert_eq!(
+            result.author_fingerprint,
+            Some(sha256_hex(signer.verifying_key().as_bytes()))
+        );
+    }
+
+    #[test]
+    fn deferred_signed_archive_stages_receipt_and_preserves_old_until_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::PluginRuntimeState::new(root.path().to_path_buf());
+        let old = root.path().join("demo.wasm");
+        std::fs::create_dir(&old).unwrap();
+        std::fs::write(old.join("main.wasm"), b"old").unwrap();
+        let signer = SigningKey::from_bytes(&[7; 32]);
+        let key = b64().encode(signer.verifying_key().as_bytes());
+        let manifest = r#"{"id":"demo.wasm","version":"1.0.0","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let bytes = make_test_zip(manifest, b"new");
+        let result = install_downloaded_wasm_bundle(
+            root.path(),
+            &bytes,
+            Some(&key),
+            false,
+            Some(&sha256_hex(&bytes)),
+            Some(&state.plugin_state_dir),
+        )
+        .unwrap();
+        let transaction = result.transaction_id.unwrap();
+        assert_eq!(std::fs::read(old.join("main.wasm")).unwrap(), b"old");
+        crate::marketplace::commit_staged_update_for_state(&state, "demo.wasm", &transaction)
+            .unwrap();
+        let receipt = crate::marketplace::read_verification_receipt(&state, "demo.wasm").unwrap();
+        assert_eq!(receipt.verified_via, "signature");
+        assert_eq!(receipt.version, "1.0.0");
+        crate::marketplace::discard_staged_update_for_state(&state, "demo.wasm", &transaction)
+            .unwrap();
+        assert_eq!(std::fs::read(old.join("main.wasm")).unwrap(), b"old");
+    }
+
     // The local-file source: `plugin_wasm_install_from_file` only adds "read the
     // bytes" in front of the shared install path, so these pin the reading half
     // and that the bytes it produces really do install.
@@ -685,7 +903,9 @@ mod tests {
 
         let bytes = read_bundle_file_limited(&bundle_path, 1024 * 1024).unwrap();
         let install_root = tempfile::tempdir().unwrap();
-        let result = install_downloaded_wasm_bundle(install_root.path(), &bytes, false).unwrap();
+        let result =
+            install_downloaded_wasm_bundle(install_root.path(), &bytes, None, false, None, None)
+                .unwrap();
 
         assert_eq!(result.manifest["id"], "demo.wasm");
         assert!(!result.signature_verified);
@@ -776,8 +996,9 @@ mod tests {
         let zipped = make_test_zip(manifest, &[0, 1, 2, 3]);
         let install_root = tempfile::tempdir().unwrap();
 
-        let error = install_downloaded_wasm_bundle(install_root.path(), &zipped, false)
-            .expect_err("empty id must be rejected");
+        let error =
+            install_downloaded_wasm_bundle(install_root.path(), &zipped, None, false, None, None)
+                .expect_err("empty id must be rejected");
 
         assert!(error.contains("plugin id"), "{error}");
         assert_eq!(std::fs::read_dir(install_root.path()).unwrap().count(), 0);

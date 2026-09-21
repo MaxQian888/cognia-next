@@ -193,6 +193,7 @@ export { defineA2UITemplate } from "./define/define-a2ui-template"
 export { defineAiProvider } from "./define/define-ai-provider"
 export { defineCliTool } from "./define/define-cli-tool"
 export { defineCommand } from "./define/define-command"
+export { defineCommandHooks } from "./define/define-command-hooks"
 export { defineLspServer } from "./define/define-lsp-server"
 export { defineBot, defineBotHandler } from "./define/define-bot"
 export type {

@@ -40,7 +40,7 @@ pub mod process;
 pub mod secrets;
 pub mod workflow;
 
-use super::errors::{coded, WasmErrorCode};
+use super::errors::{WasmErrorCode, coded};
 use super::store::HostState;
 
 /// Trap-on-deny helper. Returns `Ok(())` when the plugin has been granted

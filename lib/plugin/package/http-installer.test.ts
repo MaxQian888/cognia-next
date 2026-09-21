@@ -97,6 +97,9 @@ describe("installFromUrl", () => {
       bundleUrl: "https://example.com/p.zip",
       signatureUrl: "https://example.com/p.zip.sig",
       expectedPublicKeyBase64: "AAA=",
+      previewOnly: false,
+      deferCommit: false,
+      expectedBundleSha256: null,
     })
   })
 
@@ -150,6 +153,10 @@ describe("previewBundleManifest", () => {
       expectedPublicKeyBase64: "AAA=",
     })
     expect(preview.manifest.id).toBe("demo.wasm")
+    expect(invokeMock).toHaveBeenCalledWith(
+      "plugin_wasm_install_from_url",
+      expect.objectContaining({ previewOnly: true })
+    )
     // Preview should NOT trust the publisher.
     expect(await isPublisherKeyTrusted("AAA=")).toBe(false)
   })
@@ -159,5 +166,77 @@ describe("isPublisherKeyTrusted", () => {
   it("returns false for empty / undefined keys", async () => {
     expect(await isPublisherKeyTrusted()).toBe(false)
     expect(await isPublisherKeyTrusted("")).toBe(false)
+  })
+})
+
+describe("preview integrity and verified signer", () => {
+  it("pins installation to the preview digest", async () => {
+    const bundleSha256 = "a".repeat(64)
+    invokeMock.mockResolvedValueOnce({
+      manifest: baseManifest,
+      path: "/plugins/demo.wasm",
+      signatureVerified: false,
+      bundleSha256,
+    })
+    const result = await installFromUrl({
+      bundleUrl: "https://example.com/p.zip",
+      expectedBundleSha256: bundleSha256,
+    })
+    expect(result.bundleSha256).toBe(bundleSha256)
+    expect(invokeMock).toHaveBeenCalledWith(
+      "plugin_wasm_install_from_url",
+      expect.objectContaining({ expectedBundleSha256: bundleSha256, previewOnly: false })
+    )
+  })
+
+  it("never trusts a manifest author substituted for the actual signer", async () => {
+    invokeMock.mockResolvedValueOnce({
+      manifest: baseManifest,
+      path: "/plugins/demo.wasm",
+      signatureVerified: true,
+      authorPublicKey: "OTHER=",
+      authorFingerprint: "ff",
+    })
+    await expect(
+      installFromUrl({
+        bundleUrl: "https://example.com/p.zip",
+        signatureUrl: "https://example.com/p.sig",
+        expectedPublicKeyBase64: "AAA=",
+      })
+    ).rejects.toThrow(/verified publisher/)
+    expect(await getDb().trustedPublishers.count()).toBe(0)
+  })
+
+  it("preserves trust state when the backend rejects changed bytes", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("bundle checksum changed"))
+    await expect(
+      installFromUrl({
+        bundleUrl: "https://example.com/p.zip",
+        expectedBundleSha256: "a".repeat(64),
+      })
+    ).rejects.toThrow("bundle checksum changed")
+    expect(await getDb().trustedPublishers.count()).toBe(0)
+  })
+})
+
+it("discards a staged response that did not verify the required signature", async () => {
+  invokeMock.mockResolvedValueOnce({
+    manifest: { id: "test.plugin" },
+    path: "/plugins/test.plugin",
+    signatureVerified: false,
+    bundleSha256: "a".repeat(64),
+    transactionId: "stage",
+  })
+  await expect(
+    installFromUrl({
+      bundleUrl: "https://example.com/p.zip",
+      signatureUrl: "https://example.com/p.sig",
+      expectedPublicKeyBase64: "expected",
+      deferCommit: true,
+    })
+  ).rejects.toThrow("verified publisher")
+  expect(invokeMock).toHaveBeenLastCalledWith("plugin_discard_staged_update", {
+    pluginId: "test.plugin",
+    transactionId: "stage",
   })
 })

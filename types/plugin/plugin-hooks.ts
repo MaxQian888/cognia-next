@@ -646,6 +646,17 @@ export interface ConnectorOutboundHookPayload {
   /** Outbound provenance: "ai-run" | "manual" | "workflow" | "draft-approved". */
   source: string
   idempotencyKey: string
+  /**
+   * Set when this job carries a terminal result card — the structured meta a
+   * result-card middleware (`onResultCard` in other frameworks) needs to
+   * recognize and rewrite the card without parsing its JSON payload.
+   * Undefined on all ordinary traffic.
+   */
+  resultCard?: {
+    runId?: string
+    status: "done" | "error" | "interrupted"
+    sourceMessageId?: string
+  }
 }
 
 export type ConnectorHookDecision =

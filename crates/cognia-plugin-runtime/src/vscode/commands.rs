@@ -31,8 +31,8 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
@@ -40,9 +40,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 
-use super::host::{InboundFrame, Sidecar, SpawnRequest};
-use super::installer::{install_vsix, InstallError, InstallResult};
 use super::VscodeExtensionState;
+use super::host::{InboundFrame, Sidecar, SpawnRequest};
+use super::installer::{InstallError, InstallResult, install_vsix};
 use crate::PluginRuntimeState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

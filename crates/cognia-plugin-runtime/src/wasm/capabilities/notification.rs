@@ -1,6 +1,6 @@
 //! `cognia:plugin/notification` host import.
 
-use super::super::errors::{coded, WasmErrorCode};
+use super::super::errors::{WasmErrorCode, coded};
 use super::super::store::HostState;
 use super::require;
 

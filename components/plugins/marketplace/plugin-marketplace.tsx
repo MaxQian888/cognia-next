@@ -29,7 +29,11 @@ import { loadPluginMarketplaceClient } from "@/hooks/plugins/use-plugin-marketpl
 import { usePluginPreInstall } from "@/hooks/plugins/use-plugin-pre-install"
 import { GitBranchIcon } from "lucide-react"
 import { useGithubMarketplaceSources } from "@/hooks/plugins/use-github-marketplace-sources"
+import { runPresetInstall } from "@/lib/plugin/marketplace/preset-install"
+import type { MarketplacePreset } from "@/lib/plugin/package/github-marketplace"
+import { canUseTauriInvoke } from "@/lib/native/utils"
 import { PluginMarketplaceCard } from "./plugin-marketplace-card"
+import { PluginMarketplacePresetCard } from "./plugin-marketplace-preset-card"
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
 import { PluginMarketplaceSourcesDialog } from "./plugin-marketplace-sources-dialog"
 import { PluginInstallFromGithubDialog } from "../dialogs/plugin-install-from-github-dialog"
@@ -60,6 +64,17 @@ export function PluginMarketplace() {
   const sources = useGithubMarketplaceSources()
   const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false)
   const [githubInstallRef, setGithubInstallRef] = useState<string | null>(null)
+  /**
+   * Preset bundles the fetched catalogs declare. `?? []` keeps the field
+   * optional for older hook consumers (test doubles included).
+   */
+  const presets = sources.presets ?? []
+  /** Which preset is mid-run plus how far it got — `null` when idle. */
+  const [presetRun, setPresetRun] = useState<{
+    id: string
+    completed: number
+    total: number
+  } | null>(null)
 
   /**
    * The search box moved to the page header, so `filters.query` in the plugins
@@ -161,6 +176,52 @@ export function PluginMarketplace() {
     })
   }
 
+  /**
+   * A preset install is N sequential `preInstall.install` calls — each member
+   * still gets the full conflict/permission/config consent chain through the
+   * ONE dialog already mounted below, just back to back. GitHub installs are
+   * desktop-only (the disk write is a Rust command), same gate as the
+   * single-plugin GitHub dialog.
+   */
+  const runPreset = (preset: MarketplacePreset) => {
+    if (!client || presetRun) return
+    if (!canUseTauriInvoke()) {
+      toast.error(t("presets.desktopOnly"))
+      return
+    }
+    setPresetRun({ id: preset.id, completed: 0, total: preset.members.length })
+    void runPresetInstall({
+      members: preset.members,
+      isInstalled: (manifestId) => installedIds.has(manifestId),
+      install: (pluginId, version, pluginName, githubClient) =>
+        preInstall.install(pluginId, version, pluginName, githubClient),
+      onProgress: (completed, total) => setPresetRun({ id: preset.id, completed, total }),
+    })
+      .then((result) => {
+        const { installed, failed, cancelled } = result
+        const total = preset.members.length
+        if (cancelled.length > 0) {
+          toast.message(t("presets.resultCancelled", { installed: installed.length, total }))
+        } else if (installed.length === 0 && failed.length === 0) {
+          toast.message(t("presets.resultAllSkipped"))
+        } else if (installed.length === 0) {
+          toast.error(t("presets.resultFailed", { message: failed[0].message }))
+        } else if (failed.length > 0) {
+          toast.warning(
+            t("presets.resultPartial", {
+              installed: installed.length,
+              failed: failed.length,
+              total,
+              message: failed[0].message,
+            })
+          )
+        } else {
+          toast.success(t("presets.resultInstalled", { installed: installed.length, total }))
+        }
+      })
+      .finally(() => setPresetRun(null))
+  }
+
   const allResults =
     market.state.kind === "ready" && Array.isArray(market.state.results) ? market.state.results : []
 
@@ -250,6 +311,16 @@ export function PluginMarketplace() {
   // featured plugins without competing with their search results.
   const showDiscovery = origin === "all" && curation === "all" && storeQuery.trim() === ""
 
+  /**
+   * Preset bundles surface wherever the git-source entries do: the workspace
+   * section outright, and the merged "all" view while no ranking filter is
+   * applied (the same gate that merges `sources.entries` in). Computed once —
+   * the empty-state branch below must agree or a registry-empty view with
+   * workspace presets would render a blank pane.
+   */
+  const showPresets =
+    presets.length > 0 && (origin === "workspace" || (origin === "all" && curation === "all"))
+
   return (
     <div className="@container/plugin-discover flex w-full min-w-0 max-w-full flex-col gap-4 overflow-x-clip">
       <PluginMarketplaceModeBanner />
@@ -282,10 +353,31 @@ export function PluginMarketplace() {
         </div>
       ) : status.kind === "error" ? (
         <PluginErrorCard message={status.message} onRetry={status.retry} />
-      ) : sectionEntries.length === 0 ? (
+      ) : sectionEntries.length === 0 && !showPresets ? (
         <PluginEmptyState hint={isVscodeSection ? tv("vscodeEmpty") : t("emptySection")} />
       ) : (
         <>
+          {showPresets && (
+            <div
+              className="grid gap-3 @lg/plugin-discover:grid-cols-2 @4xl/plugin-discover:grid-cols-3"
+              data-testid="plugin-marketplace-presets"
+            >
+              {presets.map((preset) => (
+                <PluginMarketplacePresetCard
+                  key={preset.id}
+                  preset={preset}
+                  busy={presetRun !== null || preInstall.busy}
+                  progress={
+                    presetRun?.id === preset.id
+                      ? { completed: presetRun.completed, total: presetRun.total }
+                      : undefined
+                  }
+                  onInstall={runPreset}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Container-query columns (not viewport): the marketplace renders
               inside the center pane, so viewport breakpoints would overlap the
               cards when the window is wide but the pane is narrow. */}

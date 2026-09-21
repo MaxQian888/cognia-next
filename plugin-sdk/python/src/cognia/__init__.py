@@ -66,6 +66,7 @@ from .agent import (
     define_agent_team_template,
     define_character_pack,
     define_command,
+    define_command_hooks,
     define_mcp_server_preset,
     define_native_anthropic_tool,
     define_quick_action,
@@ -255,6 +256,7 @@ __all__ = [
     "define_mcp_server_preset",
     "Command",
     "define_command",
+    "define_command_hooks",
     "QuickAction",
     "define_quick_action",
     # provider / language-server manifest mirrors

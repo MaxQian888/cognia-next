@@ -35,6 +35,12 @@ export function makeConfiguredCliPluginToolHandle(
   return makeCliPluginToolHandle((request) =>
     execute(request, {
       resolveWebToolDeps: () => buildCliWebToolDeps(config),
+      resolveAttachmentToolDeps: async () => {
+        const { ensureCliDb } = await import("../db/bootstrap")
+        await ensureCliDb()
+        const { resolveAttachmentToolDeps } = await import("@/lib/claude/attachment-builtin-tools")
+        return resolveAttachmentToolDeps()
+      },
     })
   )
 }

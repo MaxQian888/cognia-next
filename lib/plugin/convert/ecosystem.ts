@@ -1,20 +1,32 @@
 import { parseMarkdownAgent, serializeMarkdownAgent } from "@/lib/claude/agents/markdown-agents"
 import { MCP_AGENT_ADAPTERS } from "@/lib/claude/agents"
 import { serializeSkill } from "@/lib/claude/skills-io"
+import { HOOK_EVENTS } from "@/lib/claude/hooks/event-catalog"
+import { DORMANT_HOOK_HANDLER_FIELDS, type HookGroup, type HooksConfig } from "@/lib/claude/hooks"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import type { McpServer } from "@cognia/agent-config-types"
-import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
+import { parse as parseToml } from "smol-toml"
 import { slugify } from "./identity"
 import { assembleManifest, serializeManifest, type RuntimeNeed } from "./manifest"
 import { describeConfig, readMcpDrafts } from "./mcp-source"
 import { parseExistingManifest } from "./merge"
 import { renderDist } from "./scaffold"
 import { buildSkill } from "./skill-source"
+import { sanitizeMcpConfig } from "./secrets"
+import { assessPluginDelivery } from "./delivery"
+import { isPluginEnvironmentFile } from "./source-snapshot"
+import {
+  detectPlatformBundle,
+  normalizePlatformBundle,
+  projectPlatformBundle,
+  PLATFORM_BUNDLE_PROFILES,
+  type PlatformBundleTarget,
+} from "./platform-bundles"
 
-export type PluginEcosystem = "cognia" | "claude-code" | "codex" | "gemini-cli"
+export type PluginEcosystem = import("./delivery").PluginDeliveryTarget
 export type PluginConversionFidelity = "native-exact" | "structured" | "contextual" | "unsupported"
 
 export interface PluginConversionIssue {
@@ -25,6 +37,7 @@ export interface PluginConversionIssue {
 }
 
 export interface PluginConversionReport {
+  delivery?: import("./delivery").PluginDeliveryAssessment
   fidelity: PluginConversionFidelity
   converted: PluginConversionIssue[]
   warnings: PluginConversionIssue[]
@@ -102,6 +115,8 @@ interface CanonicalContributions {
   skills: PluginSkillDef[]
   subagents: PluginSubagentDef[]
   presets: PluginMcpServerPresetDef[]
+  /** Converted `hooks.json` / manifest `hooks` blocks → `manifest.commandHooks`. */
+  commandHooks?: HooksConfig
   needsFilesystem: boolean
 }
 
@@ -208,6 +223,7 @@ function replacePluginRootToken(value: unknown): unknown {
     return value
       .replaceAll("${CLAUDE_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
       .replaceAll("${CODEX_PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
+      .replaceAll("${PLUGIN_ROOT}", "${COGNIA_PLUGIN_ROOT}")
       .replaceAll("${extensionPath}", "${COGNIA_PLUGIN_ROOT}")
   }
   if (Array.isArray(value)) return value.map(replacePluginRootToken)
@@ -220,6 +236,7 @@ function replacePluginRootToken(value: unknown): unknown {
 }
 
 const UNSUPPORTED_RUNTIME_TOKENS = [
+  "${PLUGIN_DATA}",
   "${CLAUDE_PLUGIN_DATA}",
   "${CLAUDE_PROJECT_DIR}",
   "${workspacePath}",
@@ -242,11 +259,11 @@ function rejectUnsupportedRuntimeTokens(args: {
   return true
 }
 
-function unsupportedIssue(capability: string): PluginConversionIssue {
+function unsupportedIssue(capability: string, target = "cognia"): PluginConversionIssue {
   return {
     capability,
     path: capability,
-    message: `${capability} has no behaviorally equivalent Cognia declarative contribution`,
+    message: `${capability} requires a ${target} adapter or host runtime; native conversion is not implemented`,
     blocking: true,
   }
 }
@@ -337,12 +354,17 @@ function finalizeForeignConversion(args: {
   if (contributions.skills.length > 0) capabilities.push("skills")
   if (contributions.subagents.length > 0) capabilities.push("subagent")
   if (contributions.presets.length > 0) capabilities.push("mcp-server-preset")
+  const hasCommandHooks = Object.values(contributions.commandHooks ?? {}).some(
+    (groups) => Array.isArray(groups) && groups.length > 0
+  )
+  if (hasCommandHooks) capabilities.push("command-hooks")
 
-  const need: RuntimeNeed = contributions.presets.some((preset) => preset.transport === "stdio")
-    ? "host-process"
-    : contributions.needsFilesystem
-      ? "host-filesystem"
-      : "portable"
+  const need: RuntimeNeed =
+    hasCommandHooks || contributions.presets.some((preset) => preset.transport === "stdio")
+      ? "host-process"
+      : contributions.needsFilesystem
+        ? "host-filesystem"
+        : "portable"
   const manifest = assembleManifest({
     identity: {
       id: metadata.id,
@@ -360,6 +382,7 @@ function finalizeForeignConversion(args: {
       ...(contributions.skills.length > 0 ? { skills: contributions.skills } : {}),
       ...(contributions.subagents.length > 0 ? { subagents: contributions.subagents } : {}),
       ...(contributions.presets.length > 0 ? { mcpServerPresets: contributions.presets } : {}),
+      ...(hasCommandHooks ? { commandHooks: contributions.commandHooks } : {}),
     },
   })
   manifest.homepage = metadata.homepage
@@ -370,6 +393,18 @@ function finalizeForeignConversion(args: {
   if (metadata.author.url && manifest.author) {
     manifest.author.url = metadata.author.url
   }
+  // Imported source manifests/configuration may contain credentials. The canonical
+  // manifest replaces their role. Overwrite, rather than delete, because installers
+  // apply generated-file overlays on top of the original source snapshot.
+  for (const path of [
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "gemini-extension.json",
+  ])
+    if (output.has(path)) output.set(path, "{}\n")
+  for (const path of output.keys()) {
+    if (isPluginEnvironmentFile(path)) output.set(path, "\n")
+  }
   output.set("plugin.json", serializeManifest(manifest))
   output.set("dist/index.js", renderDist(manifest))
 
@@ -378,7 +413,9 @@ function finalizeForeignConversion(args: {
     target: "cognia",
     manifest,
     files: output,
-    copies: [],
+    copies: [...(options.binaryPaths ?? [])]
+      .filter((path) => output.has(path) && !isPluginEnvironmentFile(path))
+      .map((path) => ({ from: path, to: path })),
     report,
   }
 }
@@ -406,13 +443,25 @@ function collectSkillMarkdownFiles(files: SourceFiles, declared: unknown): strin
   return Array.from(result).sort()
 }
 
+/** Root skills share a plugin directory; package controls are not skill resources. */
+function rootSkillFiles(files: SourceFiles, runtimeEntry?: string): string[] {
+  return [...files.keys()].filter(
+    (path) =>
+      path !== runtimeEntry &&
+      !isPluginEnvironmentFile(path) &&
+      !/^(?:\.(?:claude|codex|cursor|kimi|devin)-plugin\/|\.github\/|\.opencode\/|(?:skills|agents|commands|hooks|policies|output-styles|workflows)\/|(?:plugin|kimi\.plugin|gemini-extension|mcp|\.mcp|hooks|settings|opencode)\.jsonc?$)/.test(
+        path
+      )
+  )
+}
+
 function convertSkillFiles(args: {
   files: SourceFiles
   declared: unknown
   output: Map<string, string>
   report: PluginConversionReport
 }): { skills: PluginSkillDef[]; needsFilesystem: boolean } {
-  const { files, declared, output, report } = args
+  const { files, declared, report } = args
   const paths = collectSkillMarkdownFiles(files, declared)
   if (!configured(declared) && files.has("SKILL.md")) paths.unshift("SKILL.md")
   const skills: PluginSkillDef[] = []
@@ -435,19 +484,15 @@ function convertSkillFiles(args: {
       report,
     })
     const directory = skillFile.slice(0, Math.max(0, skillFile.lastIndexOf("/")))
-    const resources = directory ? filesBelow(files, directory) : []
+    const resources = directory ? filesBelow(files, directory) : rootSkillFiles(files)
     const built = buildSkill(text, resources, displayNameFromPath(directory || skillFile))
-    if (built.skill.source.kind === "local-bundle" && directory) {
-      built.skill.source = { kind: "local-bundle", path: directory }
+    for (const message of built.blockers)
+      report.blocking.push({ capability: "skills", path: skillFile, message, blocking: true })
+    if (built.skill.source.kind === "local-bundle") {
+      built.skill.source = { kind: "local-bundle", path: directory || "." }
     }
     skills.push(built.skill)
     needsFilesystem ||= built.needsFilesystem
-    if (!directory) {
-      for (const copy of built.copies) {
-        const contents = files.get(normalizePath(copy.from))
-        if (contents !== undefined) output.set(copy.to, contents)
-      }
-    }
     for (const warning of built.warnings) {
       report.warnings.push({
         capability: "skills",
@@ -493,6 +538,7 @@ function mcpDocuments(
 function convertMcpDocuments(args: {
   documents: Array<{ path: string; value: Record<string, unknown> }>
   adapterSourceName: string
+  output: Map<string, string>
   report: PluginConversionReport
 }): PluginMcpServerPresetDef[] {
   const presets: PluginMcpServerPresetDef[] = []
@@ -504,17 +550,107 @@ function convertMcpDocuments(args: {
       report: args.report,
     })
     const canonicalText = JSON.stringify(replacePluginRootToken(document.value))
-    const { drafts } = readMcpDrafts(canonicalText, args.adapterSourceName)
+    const declaredServers = document.value.mcpServers
+    let drafts: ReturnType<typeof readMcpDrafts>["drafts"]
+    try {
+      drafts = readMcpDrafts(canonicalText, args.adapterSourceName).drafts
+    } catch {
+      args.report.blocking.push({
+        capability: "mcpServers",
+        path: document.path,
+        message: "MCP configuration does not contain valid server declarations",
+        blocking: true,
+      })
+      continue
+    }
+    if (declaredServers && typeof declaredServers === "object" && !Array.isArray(declaredServers)) {
+      for (const name of Object.keys(declaredServers)) {
+        if (!drafts.some((draft) => draft.name === name))
+          args.report.blocking.push({
+            capability: "mcpServers",
+            path: `${document.path}.${name}`,
+            message: "Declared MCP server could not be parsed; conversion cannot silently omit it",
+            blocking: true,
+          })
+      }
+    }
+    // Overwrite original configuration in generated-file overlays: deleting a map
+    // entry would leave the original source file intact in local/GitHub installs.
+    if (args.output.has(document.path)) args.output.set(document.path, "{}\n")
+    for (const path of [
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      "gemini-extension.json",
+    ])
+      if (args.output.has(path)) args.output.set(path, "{}\n")
+    for (const path of args.output.keys())
+      if (isPluginEnvironmentFile(path)) args.output.set(path, "\n")
     for (const draft of drafts) {
+      const hostFields = [
+        "excludeTools",
+        "includeTools",
+        "disabled",
+        "enabled",
+        "trust",
+        "autoApprove",
+      ].filter((field) => draft.config[field] !== undefined)
+      if (hostFields.length)
+        args.report.blocking.push({
+          capability: "mcpServers",
+          path: `${document.path}.${draft.name}`,
+          message: `Host-specific MCP policy requires an enforcement adapter: ${hostFields.join(", ")}`,
+          blocking: true,
+        })
+      const sanitized = sanitizeMcpConfig(draft.transport, draft.config)
+      // Plugin-relative environment bindings are portable executable references,
+      // not user credentials. Retain them without asking the user for a path.
+      const env = draft.config.env as Record<string, unknown> | undefined
+      for (const [key, value] of Object.entries(env ?? {})) {
+        if (typeof value === "string" && value.startsWith("${COGNIA_PLUGIN_ROOT}")) {
+          ;(sanitized.config.env as Record<string, unknown>)[key] = value
+          sanitized.fields = sanitized.fields.filter(
+            (field) => !(field.placement === "env" && field.key === key)
+          )
+        }
+      }
       const preset: PluginMcpServerPresetDef = {
         id: draft.name,
         name: draft.name,
-        description: describeConfig(draft.transport, draft.config),
+        description: describeConfig(draft.transport, sanitized.config),
         transport: draft.transport,
-        config: draft.config,
-        fields: [],
+        config: sanitized.config,
+        fields: sanitized.fields,
+      }
+      for (const field of sanitized.fields.filter(
+        (field) => field.secret || field.placement === "url"
+      )) {
+        const original =
+          field.placement === "env"
+            ? (draft.config.env as Record<string, unknown>)?.[field.key]
+            : field.placement === "header"
+              ? (draft.config.headers as Record<string, unknown>)?.[field.key]
+              : draft.config.url
+        if (typeof original !== "string" || !original || /^\$\{[A-Z0-9_]+\}$/.test(original))
+          continue
+        for (const [path, contents] of args.output) {
+          if (contents.includes(original))
+            args.report.blocking.push({
+              capability: "secrets",
+              path,
+              message:
+                "A credential removed from MCP configuration is also present in this bundled file; remove it before conversion",
+              blocking: true,
+            })
+        }
       }
       presets.push(preset)
+      if (sanitized.fields.length)
+        args.report.warnings.push({
+          capability: "mcpServers",
+          path: document.path,
+          message: `User configuration required for ${draft.name}: ${sanitized.fields.map((field) => field.key).join(", ")}; source values were removed`,
+          blocking: false,
+        })
       args.report.converted.push({
         capability: "mcpServers",
         path: document.path,
@@ -526,14 +662,338 @@ function convertMcpDocuments(args: {
   return presets
 }
 
+/**
+ * Hook handler types the Cognia runners can execute verbatim. `plugin` is
+ * excluded on purpose: it names an in-process hook of the SOURCE plugin's own
+ * runtime code, which a converted declarative bundle cannot carry — treating
+ * it as a shell command would silently produce a hook that always fails.
+ */
+const CONVERTIBLE_HOOK_HANDLER_TYPES = new Set([
+  "command",
+  "http",
+  "webhook",
+  "prompt",
+  "agent",
+  "mcp_tool",
+])
+
+/**
+ * Gather the hook documents a foreign plugin declares: the manifest `hooks`
+ * field (a file path or an inline event map) plus the conventional
+ * `hooks/hooks.json` / `hooks.json` files. Deduplicates by path so a manifest
+ * pointing at its own conventional file doesn't convert it twice.
+ */
+function collectHookDocuments(args: {
+  files: SourceFiles
+  declared: unknown
+  sourcePath: string
+  report: PluginConversionReport
+  defaultDiscovery?: boolean
+}): Array<{ path: string; value: Record<string, unknown> }> {
+  const { files, declared, sourcePath, report } = args
+  const documents: Array<{ path: string; value: Record<string, unknown> }> = []
+  const seen = new Set<string>()
+  const addFile = (path: string) => {
+    const normalized = normalizePath(path)
+    if (seen.has(normalized)) return
+    const text = files.get(normalized)
+    if (text === undefined) return
+    seen.add(normalized)
+    documents.push({ path: normalized, value: parseJsonObject(text, normalized) })
+  }
+  const addDeclared = (value: unknown, path: string) => {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => addDeclared(item, `${path}[${index}]`))
+      return
+    }
+    if (typeof value === "string" && value.trim()) {
+      const normalized = normalizePath(value)
+      if (!files.has(normalized))
+        report.blocking.push({
+          capability: "commandHooks",
+          path: normalized,
+          message: "declared hooks file was not found",
+          blocking: true,
+        })
+      else addFile(normalized)
+    } else if (value && typeof value === "object") {
+      documents.push({ path, value: value as Record<string, unknown> })
+    } else if (value !== undefined) {
+      report.blocking.push({
+        capability: "commandHooks",
+        path,
+        message: "manifest hooks field must be a file path, inline event map, or array of these",
+        blocking: true,
+      })
+    }
+  }
+  addDeclared(declared, `${sourcePath}.hooks`)
+  if (args.defaultDiscovery !== false) {
+    addFile("hooks/hooks.json")
+    addFile("hooks.json")
+  }
+  return documents
+}
+
+/**
+ * Convert hook documents into a `commandHooks` contribution. The event map
+ * shape (`Event → [{matcher?, hooks: [handlers]}]`) is already Cognia's
+ * canonical `HooksConfig`, so groups pass through once validated:
+ *
+ * - events must be {@link HOOK_EVENTS} members — anything else (notably
+ *   `PostMarketplace`, whose install-time lifecycle has no Cognia equivalent)
+ *   is a blocking issue rather than a silent drop;
+ * - each group must be an object carrying a `hooks` array;
+ * - each handler must be an object whose `type` is a runnable handler kind —
+ *   `plugin` handlers reference source-runtime code and are blocking.
+ *
+ * Plugin-root tokens are canonicalized to `${COGNIA_PLUGIN_ROOT}`; the host
+ * binds the token to the install dir when it merges the block.
+ */
+function convertHookDocuments(args: {
+  documents: Array<{ path: string; value: Record<string, unknown> }>
+  report: PluginConversionReport
+}): HooksConfig {
+  const { documents, report } = args
+  const merged: Record<string, HookGroup[]> = {}
+  let convertedGroups = 0
+  for (const document of documents) {
+    const text = JSON.stringify(document.value)
+    rejectUnsupportedRuntimeTokens({
+      text,
+      capability: "commandHooks",
+      path: document.path,
+      report,
+    })
+    const canonical = replacePluginRootToken(document.value) as Record<string, unknown>
+    // `hooks/hooks.json` wraps the map in a `hooks` key; a manifest's inline
+    // `hooks` field IS the map. Accept the wrapper when present.
+    const inner = canonical.hooks
+    const eventMap =
+      inner && typeof inner === "object" && !Array.isArray(inner)
+        ? (inner as Record<string, unknown>)
+        : canonical
+    for (const [event, groups] of Object.entries(eventMap)) {
+      if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
+        report.blocking.push({
+          capability: "commandHooks",
+          path: document.path,
+          message:
+            `hook event "${event}" has no Cognia hook-runtime equivalent ` +
+            "(install/update lifecycle events are not dispatched to command hooks)",
+          blocking: true,
+        })
+        continue
+      }
+      if (!Array.isArray(groups)) {
+        report.blocking.push({
+          capability: "commandHooks",
+          path: document.path,
+          message: `hook event "${event}" must map to an array of groups`,
+          blocking: true,
+        })
+        continue
+      }
+      let usable = true
+      for (const [index, group] of groups.entries()) {
+        if (!group || typeof group !== "object" || Array.isArray(group)) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `hook group "${event}"[${index}] must be an object`,
+            blocking: true,
+          })
+          usable = false
+          continue
+        }
+        const unknownGroupKeys = Object.keys(group).filter(
+          (key) => !["matcher", "hooks"].includes(key)
+        )
+        if (unknownGroupKeys.length) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `Unsupported hook group selectors/fields: ${unknownGroupKeys.join(", ")}`,
+            blocking: true,
+          })
+          usable = false
+        }
+        const handlers = (group as Record<string, unknown>).hooks
+        if (!Array.isArray(handlers)) {
+          report.blocking.push({
+            capability: "commandHooks",
+            path: document.path,
+            message: `hook group "${event}"[${index}] must carry a "hooks" handler array`,
+            blocking: true,
+          })
+          usable = false
+          continue
+        }
+        for (const [handlerIndex, handler] of handlers.entries()) {
+          const type =
+            handler && typeof handler === "object" && !Array.isArray(handler)
+              ? (handler as Record<string, unknown>).type
+              : undefined
+          if (handler && typeof handler === "object" && !Array.isArray(handler)) {
+            const record = handler as Record<string, unknown>
+            const supported = new Set([
+              "type",
+              "timeout",
+              ...(type === "command"
+                ? ["command", "async"]
+                : type === "http" || type === "webhook"
+                  ? ["url", "headers"]
+                  : type === "prompt" || type === "agent"
+                    ? ["prompt", "model"]
+                    : type === "mcp_tool"
+                      ? ["server", "tool", "input"]
+                      : []),
+            ])
+            const unknown = Object.keys(record).filter(
+              (key) => !supported.has(key) && !DORMANT_HOOK_HANDLER_FIELDS.includes(key)
+            )
+            if (unknown.length) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `Unsupported hook handler fields: ${unknown.join(", ")}`,
+                blocking: true,
+              })
+              usable = false
+            }
+            if (
+              (record.timeout !== undefined &&
+                (typeof record.timeout !== "number" ||
+                  !Number.isFinite(record.timeout) ||
+                  record.timeout <= 0)) ||
+              (record.async !== undefined && typeof record.async !== "boolean")
+            ) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: "Hook timeout must be a positive number and async must be boolean",
+                blocking: true,
+              })
+              usable = false
+            }
+            const dormant = DORMANT_HOOK_HANDLER_FIELDS.filter((field) => configured(record[field]))
+            if (dormant.length) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `Cognia runners do not execute hook fields: ${dormant.join(", ")}`,
+                blocking: true,
+              })
+              usable = false
+            }
+            const required =
+              type === "command"
+                ? "command"
+                : type === "http" || type === "webhook"
+                  ? "url"
+                  : type === "prompt" || type === "agent"
+                    ? "prompt"
+                    : undefined
+            if (
+              type === "mcp_tool" &&
+              (!optionalString(record.server) || !optionalString(record.tool))
+            ) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: "MCP hook handler requires non-empty server and tool identifiers",
+                blocking: true,
+              })
+              usable = false
+            }
+            if (required && !optionalString(record[required])) {
+              report.blocking.push({
+                capability: "commandHooks",
+                path: document.path,
+                message: `hook handler requires a non-empty ${required}`,
+                blocking: true,
+              })
+              usable = false
+            }
+          }
+          if (typeof type !== "string" || !CONVERTIBLE_HOOK_HANDLER_TYPES.has(type)) {
+            report.blocking.push({
+              capability: "commandHooks",
+              path: document.path,
+              message:
+                `hook handler "${event}"[${index}].hooks[${handlerIndex}] has ` +
+                `unsupported type ${JSON.stringify(type ?? null)} — only ` +
+                `${[...CONVERTIBLE_HOOK_HANDLER_TYPES].join("/")} handlers convert`,
+              blocking: true,
+            })
+            usable = false
+          }
+        }
+      }
+      if (!usable) continue
+      const target = (merged[event] ??= [])
+      for (const group of groups) {
+        target.push(group as HookGroup)
+        convertedGroups += 1
+      }
+    }
+    if (convertedGroups > 0) {
+      report.converted.push({
+        capability: "commandHooks",
+        path: document.path,
+        message: `converted ${convertedGroups} hook group(s) into manifest.commandHooks`,
+        blocking: false,
+      })
+      convertedGroups = 0
+    }
+  }
+  return merged as HooksConfig
+}
+
 export function detectPluginEcosystem(files: SourceFiles): PluginEcosystem {
-  if (files.has("plugin.json")) return "cognia"
-  if (files.has(".claude-plugin/plugin.json")) return "claude-code"
-  if (files.has(".codex-plugin/plugin.json")) return "codex"
-  if (files.has("gemini-extension.json")) return "gemini-cli"
+  const rootText = files.get("plugin.json")
+  if (rootText !== undefined) {
+    const root = parseJsonObject(rootText, "plugin.json")
+    // Converted packages retain neutralized source markers. The canonical
+    // Cognia identity wins over those inert overlay files.
+    if (typeof root.id === "string" && typeof root.type === "string") return "cognia"
+  }
+  const markers: Array<[string, PluginEcosystem]> = [
+    [".claude-plugin/plugin.json", "claude-code"],
+    [".codex-plugin/plugin.json", "codex"],
+    ["gemini-extension.json", "gemini-cli"],
+    [".cursor-plugin/plugin.json", "cursor"],
+    [".github/plugin/plugin.json", "copilot"],
+    [".github/plugin.json", "copilot"],
+    ["kimi.plugin.json", "kimi"],
+    [".kimi-plugin/plugin.json", "kimi"],
+    [".devin-plugin/plugin.json", "devin"],
+    ["opencode.json", "opencode"],
+    ["opencode.jsonc", "opencode"],
+  ]
+  const candidates = markers.filter(([path]) => files.has(path))
+  const active = candidates.filter(([path]) => !/^\s*\{\s*\}\s*$/.test(files.get(path)!))
+  const formats = [...new Set((active.length ? active : candidates).map(([, format]) => format))]
+  if (formats.length > 1)
+    throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle")
+  const platformFiles = new Map(files)
+  for (const [path] of candidates)
+    if (!active.some(([entry]) => entry === path)) platformFiles.delete(path)
+  const platform = detectPlatformBundle(platformFiles)
+  if (platform) {
+    if (formats.length && formats[0] !== platform)
+      throw new Error("multiple plugin formats found; provide one unambiguous plugin bundle")
+    return platform
+  }
+  if (formats.length) return formats[0]
+  if (rootText !== undefined) {
+    const root = parseJsonObject(rootText, "plugin.json")
+    if (root.$schema)
+      throw new Error("plugin.json schema is not a recognized Cognia or Agent Plugins format")
+    return "cognia"
+  }
   throw new Error(
-    "plugin format not recognized — expected plugin.json, .claude-plugin/plugin.json, " +
-      ".codex-plugin/plugin.json, or gemini-extension.json"
+    "plugin format not recognized — provide a Cognia, Agent Plugins, Claude Code, Codex, Gemini, Cursor, Copilot, Kimi, Devin, OpenCode or Pi bundle"
   )
 }
 
@@ -549,7 +1009,6 @@ function convertClaudePlugin(
   const sourceRecord = source as Record<string, unknown>
 
   const blocking = [
-    ["hooks", source.hooks],
     ["lspServers", source.lspServers],
     ["outputStyles", source.outputStyles],
     ["workflows", source.workflows],
@@ -562,9 +1021,7 @@ function convertClaudePlugin(
     .filter(([, value]) => configured(value))
     .map(([capability]) => unsupportedIssue(String(capability)))
   const discoveredExecutableSurfaces = [
-    ["hooks", ["hooks/", "hooks.json"]],
     ["monitors", ["monitors/"]],
-    ["bin", ["bin/"]],
     ["themes", ["themes/"]],
     ["workflows", ["workflows/"]],
     ["outputStyles", ["output-styles/"]],
@@ -621,7 +1078,23 @@ function convertClaudePlugin(
     sourcePath,
     report,
   })
-  if (blocking.length > 0) {
+  // Hooks convert rather than block: `hooks.json` files, plus a manifest
+  // `hooks` path/inline map, land in `manifest.commandHooks`. Run this before
+  // the early throw so unmappable hook surfaces (PostMarketplace, `plugin`
+  // handlers, unsupported runtime tokens) surface alongside the other
+  // blockers in one report instead of a second failed attempt.
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files,
+      declared: source.hooks,
+      sourcePath,
+      report,
+    }),
+    report,
+  })
+  // `report.blocking` aliases the surface list above plus anything the hook
+  // conversion appended, so one check covers both.
+  if (report.blocking.length > 0) {
     throw new UnsupportedPluginConversionError("claude-code", "cognia", report)
   }
 
@@ -652,6 +1125,8 @@ function convertClaudePlugin(
         report,
       })
       const built = buildSkill(text, [], displayNameFromPath(commandPath))
+      for (const message of built.blockers)
+        report.blocking.push({ capability: "commands", path: commandPath, message, blocking: true })
       skills.push(built.skill)
       report.converted.push({
         capability: "commands",
@@ -733,6 +1208,7 @@ function convertClaudePlugin(
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
+    output,
     report,
   })
   return finalizeForeignConversion({
@@ -743,6 +1219,7 @@ function convertClaudePlugin(
       skills,
       subagents,
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem,
     },
     report,
@@ -756,10 +1233,7 @@ function convertCodexPlugin(
 ): PluginConversionResult {
   const sourcePath = ".codex-plugin/plugin.json"
   const source = parseJsonObject(requiredString(files.get(sourcePath), sourcePath), sourcePath)
-  const blocking = [
-    ["hooks", source.hooks],
-    ["apps", source.apps],
-  ]
+  const blocking = [["apps", source.apps]]
     .filter(([, value]) => configured(value))
     .map(([capability]) => unsupportedIssue(String(capability)))
   const report: PluginConversionReport = {
@@ -788,6 +1262,18 @@ function convertCodexPlugin(
     sourcePath,
     report,
   })
+  // Same conversion as the Claude path — `.codex-plugin` manifests carry the
+  // same hooks.json convention (see `convertClaudePlugin`).
+  const commandHooks = convertHookDocuments({
+    documents: collectHookDocuments({
+      files,
+      declared: source.hooks,
+      sourcePath,
+      report,
+      defaultDiscovery: source.hooks === undefined,
+    }),
+    report,
+  })
   const output = cloneFiles(files)
   const convertedSkills = convertSkillFiles({
     files,
@@ -798,6 +1284,7 @@ function convertCodexPlugin(
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "claude-code.json",
+    output,
     report,
   })
   const interfaceMetadata =
@@ -844,6 +1331,7 @@ function convertCodexPlugin(
       skills: convertedSkills.skills,
       subagents: [],
       presets,
+      commandHooks,
       needsFilesystem: convertedSkills.needsFilesystem,
     },
     report,
@@ -949,12 +1437,23 @@ function convertGeminiPlugin(
       "contextFileName",
       "excludeTools",
       "mcpServers",
+      "settings",
     ]),
     sourcePath,
     report,
   })
   const output = cloneFiles(files)
-  const skills: PluginSkillDef[] = []
+  const convertedSkills = convertSkillFiles({ files, declared: undefined, output, report })
+  const skills: PluginSkillDef[] = [...convertedSkills.skills]
+  for (const directory of ["hooks", "agents", "policies"]) {
+    if (filesBelow(files, directory).length)
+      report.blocking.push({
+        capability: directory,
+        path: `${directory}/`,
+        message: `Gemini ${directory} use platform-specific event, execution, or policy semantics; a Cognia adapter is not implemented`,
+        blocking: true,
+      })
+  }
   const contextPath = optionalString(source.contextFileName) ?? "GEMINI.md"
   const context = files.get(normalizePath(contextPath))
   if (context !== undefined && context.trim()) {
@@ -997,8 +1496,10 @@ function convertGeminiPlugin(
   const presets = convertMcpDocuments({
     documents: mcpDocuments(files, source.mcpServers, ".mcp.json"),
     adapterSourceName: "gemini.json",
+    output,
     report,
   })
+  importGeminiSettings({ settings: source.settings, presets, source, report })
   return finalizeForeignConversion({
     source: "gemini-cli",
     output,
@@ -1007,11 +1508,125 @@ function convertGeminiPlugin(
       skills,
       subagents: [],
       presets,
-      needsFilesystem: false,
+      needsFilesystem: convertedSkills.needsFilesystem,
     },
     report,
     options,
   })
+}
+
+/** Gemini install settings are environment bindings, not arbitrary manifest keys.
+ * Preserve their placement and secret marker in Cognia's existing preset fields. */
+function importGeminiSettings(args: {
+  settings: unknown
+  presets: PluginMcpServerPresetDef[]
+  source: Record<string, unknown>
+  report: PluginConversionReport
+}): void {
+  if (args.settings === undefined) return
+  const fail = (path: string, message: string) =>
+    args.report.blocking.push({ capability: "settings", path, message, blocking: true })
+  if (!Array.isArray(args.settings)) {
+    fail("settings", "Gemini settings must be an array")
+    return
+  }
+  const servers = args.source.mcpServers as Record<string, Record<string, unknown>> | undefined
+  const seen = new Set<string>()
+  for (const [index, value] of args.settings.entries()) {
+    const path = `settings[${index}]`
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      fail(path, "Gemini setting must be an object")
+      continue
+    }
+    const setting = value as Record<string, unknown>
+    const variable = optionalString(setting.envVar)
+    const label = optionalString(setting.name)
+    if (
+      !variable ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable) ||
+      !label ||
+      seen.has(variable) ||
+      Object.keys(setting).some(
+        (key) => !["name", "description", "envVar", "sensitive"].includes(key)
+      ) ||
+      (setting.sensitive !== undefined && typeof setting.sensitive !== "boolean")
+    ) {
+      fail(
+        path,
+        "Setting has invalid/duplicate environment variable, missing name, or unsupported configuration fields"
+      )
+      continue
+    }
+    seen.add(variable)
+    const reference = "${" + variable + "}"
+    let used = false
+    for (const preset of args.presets) {
+      const original = servers?.[preset.id] ?? {}
+      const fields = (preset.fields ??= [])
+      const add = (field: NonNullable<PluginMcpServerPresetDef["fields"]>[number]) => {
+        const existing = fields.findIndex(
+          (candidate) => candidate.placement === field.placement && candidate.key === field.key
+        )
+        const mapped = {
+          ...field,
+          label,
+          ...(optionalString(setting.description)
+            ? { description: optionalString(setting.description) }
+            : {}),
+          secret: Boolean(setting.sensitive),
+        }
+        if (existing >= 0) fields[existing] = mapped
+        else fields.push(mapped)
+        used = true
+      }
+      const env = original.env as Record<string, unknown> | undefined
+      for (const [key, raw] of Object.entries(env ?? {})) {
+        if (raw === reference) add({ key, label, placement: "env" })
+        else if (typeof raw === "string" && raw.includes(reference))
+          fail(
+            path,
+            `Composed environment binding ${key} cannot be represented by a Cognia preset field`
+          )
+      }
+      const headers = original.headers as Record<string, unknown> | undefined
+      for (const [key, raw] of Object.entries(headers ?? {})) {
+        if (raw === reference) add({ key, label, placement: "header" })
+        else if (typeof raw === "string" && raw.includes(reference))
+          fail(
+            path,
+            `Composed header binding ${key} cannot be represented by a Cognia preset field`
+          )
+      }
+      const url = original.httpUrl ?? original.url
+      if (url === reference) add({ key: "url", label, placement: "url" })
+      else if (typeof url === "string" && url.includes(reference))
+        fail(
+          path,
+          "Composed URL bindings require a template adapter; conversion cannot replace them with an unrelated full URL"
+        )
+      if (
+        Array.isArray(original.args) &&
+        original.args.some((arg) => typeof arg === "string" && arg.includes(reference))
+      )
+        add({ key: variable, label, placement: "arg-replace", token: reference })
+      // Gemini also exposes declared settings directly to local server processes.
+      if (preset.transport === "stdio" && !(variable in (env ?? {}))) {
+        preset.config.env = {
+          ...((preset.config.env as Record<string, unknown>) ?? {}),
+          [variable]: "",
+        }
+        add({ key: variable, label, placement: "env" })
+      }
+    }
+    if (!used)
+      args.report.warnings.push({
+        capability: "settings",
+        path,
+        message:
+          "Setting is not referenced by a converted MCP contribution; no Cognia field was created",
+        blocking: false,
+      })
+  }
 }
 
 function loadCogniaPlugin(files: SourceFiles): PluginConversionResult {
@@ -1040,7 +1655,7 @@ function replaceCanonicalRootToken(value: unknown, target: PluginEcosystem): unk
       ? "${CLAUDE_PLUGIN_ROOT}"
       : target === "gemini-cli"
         ? "${extensionPath}"
-        : "${CODEX_PLUGIN_ROOT}"
+        : "${CLAUDE_PLUGIN_ROOT}"
   if (typeof value === "string") {
     return value.replaceAll("${COGNIA_PLUGIN_ROOT}", token)
   }
@@ -1064,29 +1679,84 @@ function exportCogniaSkills(args: {
 }): void {
   for (const skill of args.manifest.skills ?? []) {
     const targetDirectory = `skills/${skill.id}`
+    if (
+      args.target === "gemini-cli" &&
+      (skill.invocationPolicy === "explicit" || skill.allowedTools?.length)
+    ) {
+      args.report.blocking.push({
+        capability: "skills",
+        path: `skills.${skill.id}`,
+        message:
+          "Gemini skill activation and tool approval do not implement Claude invocation/tool controls; export cannot silently loosen them",
+        blocking: true,
+      })
+      continue
+    }
+    const markdown =
+      skill.source.kind === "inline"
+        ? skill.source.markdown
+        : args.files.get(
+            [normalizePath("path" in skill.source ? skill.source.path : ""), "SKILL.md"]
+              .filter(Boolean)
+              .join("/")
+          )
+    if (markdown) {
+      const built = buildSkill(serializeSkill({ ...skill, content: markdown }), [], skill.name)
+      for (const message of built.blockers)
+        args.report.blocking.push({
+          capability: "skills",
+          path: `skills.${skill.id}`,
+          message,
+          blocking: true,
+        })
+    }
     if (skill.source.kind === "inline") {
       args.output.set(
         `${targetDirectory}/SKILL.md`,
         serializeSkill({
-          name: skill.name,
-          description: skill.description,
+          ...skill,
           content: skill.source.markdown,
-          allowedTools: skill.allowedTools,
         })
       )
     } else if (skill.source.kind === "local-folder" || skill.source.kind === "local-bundle") {
-      if (args.target === "gemini-cli") {
+      const sourceDirectory = normalizePath(skill.source.path)
+      const sourcePrefix = sourceDirectory ? `${sourceDirectory}/` : ""
+      const originalMarkdown = args.files.get(`${sourcePrefix}SKILL.md`)
+      if (originalMarkdown === undefined) {
         args.report.blocking.push({
           capability: "skills",
-          path: `skills.${skill.id}.source`,
-          message: "Gemini prompt commands cannot preserve a resource-bearing Cognia skill",
+          path: sourceDirectory,
+          message: `skill bundle ${skill.id} was not found or is missing SKILL.md`,
           blocking: true,
         })
         continue
       }
-      const sourceDirectory = normalizePath(skill.source.path)
-      const entries = Array.from(args.files.entries()).filter(([path]) =>
-        normalizePath(path).startsWith(`${sourceDirectory}/`)
+      const parsedBundle = buildSkill(originalMarkdown, [], skill.name)
+      for (const message of parsedBundle.blockers)
+        args.report.blocking.push({
+          capability: "skills",
+          path: `${sourceDirectory}/SKILL.md`,
+          message,
+          blocking: true,
+        })
+      if (
+        args.target === "gemini-cli" &&
+        (parsedBundle.skill.invocationPolicy === "explicit" ||
+          parsedBundle.skill.allowedTools?.length)
+      )
+        args.report.blocking.push({
+          capability: "skills",
+          path: `${sourceDirectory}/SKILL.md`,
+          message: "Gemini cannot enforce the skill's invocation or tool approval controls",
+          blocking: true,
+        })
+      const rootFiles = sourceDirectory
+        ? undefined
+        : new Set(rootSkillFiles(args.files, args.manifest.main))
+      const entries = Array.from(args.files.entries()).filter(
+        ([path]) =>
+          !isPluginEnvironmentFile(path) &&
+          (rootFiles ? rootFiles.has(path) : normalizePath(path).startsWith(sourcePrefix))
       )
       if (entries.length === 0) {
         args.report.blocking.push({
@@ -1098,13 +1768,22 @@ function exportCogniaSkills(args: {
         continue
       }
       for (const [path, contents] of entries) {
-        const relative = normalizePath(path).slice(sourceDirectory.length + 1)
+        const relative = normalizePath(path).slice(sourcePrefix.length)
         const normalizedSource = normalizePath(path)
         const target = `${targetDirectory}/${relative}`
         if (args.binaryPaths?.has(normalizedSource)) {
           args.copies.push({ from: normalizedSource, to: target })
         } else {
-          args.output.set(target, contents)
+          args.output.set(
+            target,
+            relative === "SKILL.md" && parsedBundle.skill.source.kind === "inline"
+              ? serializeSkill({
+                  ...parsedBundle.skill,
+                  ...skill,
+                  content: parsedBundle.skill.source.markdown,
+                })
+              : contents
+          )
         }
       }
     } else {
@@ -1137,7 +1816,7 @@ function exportCogniaSubagents(args: {
     args.report.blocking.push({
       capability: "subagent",
       path: "subagents",
-      message: `${args.target} plugins do not expose a compatible subagent contribution`,
+      message: `${args.target} subagent execution and routing require a dedicated adapter; native export is not implemented`,
       blocking: true,
     })
     return
@@ -1187,20 +1866,140 @@ function exportMcpServers(args: {
   output: Map<string, string>
   target: Exclude<PluginEcosystem, "cognia">
   report: PluginConversionReport
+  settings: Array<Record<string, unknown>>
+  removedValues: Set<string>
 }): Record<string, unknown> | undefined {
   const presets = args.manifest.mcpServerPresets ?? []
   if (presets.length === 0) return undefined
   const servers: McpServer[] = []
   for (const preset of presets) {
-    if (preset.fields?.length) {
+    const sanitized = sanitizeMcpConfig(preset.transport, preset.config)
+    const config = sanitized.config
+    const fields = [...(preset.fields ?? [])]
+    for (const field of sanitized.fields) {
+      const container = field.placement === "env" ? "env" : "headers"
+      const original =
+        field.placement === "url"
+          ? preset.config.url
+          : field.placement === "arg-replace"
+            ? undefined
+            : (preset.config[container] as Record<string, unknown> | undefined)?.[field.key]
+      const binding =
+        typeof original === "string" &&
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}(?:\/[^\r\n]*)?$/.test(original)
+      if (field.placement === "arg-replace") {
+        config.args = structuredClone(preset.config.args)
+        continue
+      }
+      if ((field.placement === "env" && !field.secret) || binding) {
+        if (field.placement === "url") config.url = original
+        else
+          config[container] = {
+            ...((config[container] as Record<string, unknown>) ?? {}),
+            [field.key]: original,
+          }
+        continue
+      }
+      if (typeof original === "string" && original) args.removedValues.add(original)
+      if (
+        !fields.some(
+          (existing) => existing.key === field.key && existing.placement === field.placement
+        )
+      )
+        fields.push(field)
+    }
+    const hostFields = [
+      "excludeTools",
+      "includeTools",
+      "disabled",
+      "enabled",
+      "trust",
+      "autoApprove",
+    ].filter((field) => config[field] !== undefined)
+    if (hostFields.length)
       args.report.blocking.push({
         capability: "mcp-server-preset",
-        path: `mcpServerPresets.${preset.id}.fields`,
-        message: "target plugin formats cannot prompt users for Cognia preset fields",
+        path: `mcpServerPresets.${preset.id}`,
+        message: `Host-specific MCP policy requires a target enforcement adapter: ${hostFields.join(", ")}`,
+        blocking: true,
+      })
+    if (
+      preset.defaultDisallowedTools?.length ||
+      preset.toolRiskRules?.length ||
+      preset.provisioning?.mode === "managed" ||
+      (preset.runtime && preset.runtime !== "both")
+    ) {
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}`,
+        message:
+          "Cognia tool restrictions, runtime routing, managed provisioning, and risk policy require host enforcement; native export cannot drop them",
         blocking: true,
       })
       continue
     }
+    if (fields.length && args.target !== "gemini-cli") {
+      args.report.blocking.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.fields`,
+        message: `${args.target} installation configuration projection is not implemented; configure the preset or use Cognia hosting`,
+        blocking: true,
+      })
+      continue
+    }
+    for (const field of fields) {
+      const variable = `COGNIA_${preset.id}_${field.key}`.toUpperCase().replace(/[^A-Z0-9_]/g, "_")
+      if (args.settings.some((setting) => setting.envVar === variable)) {
+        args.report.blocking.push({
+          capability: "mcp-server-preset",
+          path: `mcpServerPresets.${preset.id}.fields`,
+          message: "Configuration fields collide after environment-variable normalization",
+          blocking: true,
+        })
+        continue
+      }
+      const reference = "${" + variable + "}"
+      if (field.placement === "env" || field.placement === "header") {
+        const key = field.placement === "env" ? "env" : "headers"
+        config[key] = {
+          ...((config[key] as Record<string, unknown>) ?? {}),
+          [field.key]: reference,
+        }
+      } else if (field.placement === "url") {
+        config.url = reference
+      } else if (
+        field.placement === "arg-replace" &&
+        field.token &&
+        Array.isArray(config.args) &&
+        config.args.some((arg) => typeof arg === "string" && arg.includes(field.token!))
+      ) {
+        config.args = config.args.map((arg) =>
+          typeof arg === "string" ? arg.replaceAll(field.token!, reference) : arg
+        )
+      } else {
+        args.report.blocking.push({
+          capability: "mcp-server-preset",
+          path: `mcpServerPresets.${preset.id}.fields.${field.key}`,
+          message: "Invalid configuration placement or missing argument replacement token",
+          blocking: true,
+        })
+        continue
+      }
+      args.settings.push({
+        name: field.label,
+        description: field.description ?? field.label,
+        envVar: variable,
+        sensitive: Boolean(field.secret),
+      })
+    }
+    if (fields.length)
+      args.report.warnings.push({
+        capability: "mcp-server-preset",
+        path: `mcpServerPresets.${preset.id}.fields`,
+        message:
+          "Gemini requests these settings during installation; values must be supplied before use",
+        blocking: false,
+      })
     if (args.target === "codex" && preset.transport === "sse") {
       args.report.blocking.push({
         capability: "mcp-server-preset",
@@ -1214,7 +2013,7 @@ function exportMcpServers(args: {
       id: preset.id,
       name: preset.id,
       transport: preset.transport,
-      config: replaceCanonicalRootToken(preset.config, args.target) as Record<string, unknown>,
+      config: replaceCanonicalRootToken(config, args.target) as Record<string, unknown>,
       enabled: true,
       createdAt: 0,
       updatedAt: 0,
@@ -1239,6 +2038,160 @@ function exportMcpServers(args: {
   return projected as Record<string, unknown>
 }
 
+/** Native hooks are only emitted where Cognia shares the Claude hook contract.
+ * Gemini event renaming is deliberately not an adapter: payloads and decisions differ. */
+function exportCommandHooks(args: {
+  manifest: PluginManifest
+  output: Map<string, string>
+  target: Exclude<PluginEcosystem, "cognia">
+  report: PluginConversionReport
+}): void {
+  const hooks = args.manifest.commandHooks
+  if (!hooks || !Object.keys(hooks).length) return
+  if (args.target !== "claude-code") {
+    args.report.blocking.push({
+      capability: "command-hooks",
+      path: "commandHooks",
+      message: `${args.target} hooks require an event/payload/decision adapter; native export is not implemented`,
+      blocking: true,
+    })
+    return
+  }
+  const validated = convertHookDocuments({
+    documents: [{ path: "commandHooks", value: { hooks } }],
+    report: args.report,
+  })
+  for (const [event, groups] of Object.entries(hooks)) {
+    for (const group of groups ?? []) {
+      if (group.agents)
+        args.report.blocking.push({
+          capability: "command-hooks",
+          path: `commandHooks.${event}`,
+          message: "Claude Code cannot enforce Cognia agent selectors",
+          blocking: true,
+        })
+      for (const handler of group.hooks) {
+        if (
+          !["command", "http", "prompt", "agent"].includes(handler.type) ||
+          handler.policyClass === "managed"
+        ) {
+          args.report.blocking.push({
+            capability: "command-hooks",
+            path: `commandHooks.${event}`,
+            message:
+              "Cognia-only hook handlers and managed fail-closed policies require the Cognia host",
+            blocking: true,
+          })
+        }
+      }
+    }
+  }
+  args.output.set(
+    "hooks/hooks.json",
+    JSON.stringify(replaceCanonicalRootToken({ hooks: validated }, args.target), null, 2) + "\n"
+  )
+}
+
+/** Keep the payload layout intact: scripts can load dynamic sibling dependencies.
+ * Copying only argv[0] cannot establish an executable dependency closure. */
+function exportRuntimeResources(args: {
+  manifest: PluginManifest
+  files: SourceFiles
+  output: Map<string, string>
+  copies: Array<{ from: string; to: string }>
+  target: PluginEcosystem
+  report: PluginConversionReport
+  binaryPaths?: ReadonlySet<string>
+}): void {
+  const strings: string[] = []
+  const collectStrings = (value: unknown) => {
+    if (typeof value === "string") strings.push(value)
+    else if (Array.isArray(value)) value.forEach(collectStrings)
+    else if (value && typeof value === "object") Object.values(value).forEach(collectStrings)
+  }
+  collectStrings([args.manifest.mcpServerPresets, args.manifest.commandHooks])
+  if (!strings.some((value) => value.includes("${COGNIA_PLUGIN_ROOT}"))) return
+  const payloadPaths = new Set(args.files.keys())
+  for (const path of args.files.keys()) {
+    const segments = path.split("/")
+    for (let length = 1; length < segments.length; length++)
+      payloadPaths.add(segments.slice(0, length).join("/"))
+  }
+  const candidates = [...payloadPaths].sort((a, b) => b.length - a.length)
+  const references: string[] = []
+  for (const value of strings) {
+    for (const match of value.matchAll(/\$\{COGNIA_PLUGIN_ROOT\}\//g)) {
+      const suffix = value.slice(match.index + match[0].length)
+      const known = candidates.find(
+        (path) =>
+          suffix.startsWith(path) && (!suffix[path.length] || /[\s"'`;)]/.test(suffix[path.length]))
+      )
+      references.push(known ?? suffix.split(/["'`\r\n]/)[0])
+    }
+  }
+  for (const reference of references) {
+    const path = normalizePath(reference)
+    if (!args.files.has(path) && !filesBelow(args.files, path).length)
+      args.report.blocking.push({
+        capability: "resources",
+        path,
+        message: "Plugin-relative executable or resource reference is missing from the bundle",
+        blocking: true,
+      })
+  }
+  for (const [path, text] of args.files) {
+    if (
+      path === "plugin.json" ||
+      path === args.manifest.main ||
+      path === "gemini-extension.json" ||
+      /^\.(?:claude|codex)-plugin\//.test(path) ||
+      /(^|\/)\.env(?:\.|$)/.test(path) ||
+      path === ".mcp.json" ||
+      path === "hooks/hooks.json" ||
+      path === "hooks.json"
+    )
+      continue
+    // The export above owns auto-discovered declarative definitions. Retain
+    // their non-definition resources at their original paths for root refs.
+    if (
+      (path.startsWith("skills/") && path.endsWith("/SKILL.md")) ||
+      (path.startsWith("agents/") && path.endsWith(".md")) ||
+      (path.startsWith("commands/") && /\.(?:toml|md)$/.test(path)) ||
+      path.startsWith("policies/") ||
+      path.startsWith("output-styles/") ||
+      path.startsWith("workflows/") ||
+      path === ".lsp.json" ||
+      path === "settings.json"
+    )
+      continue
+    if (args.output.has(path)) continue
+    if (args.binaryPaths?.has(path)) args.copies.push({ from: path, to: path })
+    else args.output.set(path, replaceCanonicalRootToken(text, args.target) as string)
+  }
+  for (const reference of references) {
+    const path = normalizePath(reference)
+    if (
+      !args.output.has(path) &&
+      !filesBelow(args.output, path).length &&
+      !args.copies.some((copy) => copy.to === path || copy.to.startsWith(`${path}/`))
+    )
+      args.report.blocking.push({
+        capability: "resources",
+        path,
+        message:
+          "Referenced resource is excluded or relocated in this target bundle; update the reference before exporting",
+        blocking: true,
+      })
+  }
+  args.report.warnings.push({
+    capability: "resources",
+    path: ".",
+    message:
+      "Bundled runtime payload and dependency manifests preserved; executable installation and runtime availability require target-host verification",
+    blocking: false,
+  })
+}
+
 function authorForForeign(manifest: PluginManifest): Record<string, string> | undefined {
   if (!manifest.author) return undefined
   return {
@@ -1256,7 +2209,7 @@ function convertCogniaPlugin(
   const loaded = loadCogniaPlugin(files)
   const { manifest } = loaded
   const report: PluginConversionReport = {
-    fidelity: target === "gemini-cli" ? "contextual" : "structured",
+    fidelity: "structured",
     converted: [],
     warnings: [],
     blocking: [],
@@ -1264,25 +2217,26 @@ function convertCogniaPlugin(
   const allowedCapabilities = new Set([
     "skills",
     "mcp-server-preset",
+    "command-hooks",
     ...(target === "claude-code" ? ["subagent"] : []),
   ])
   for (const capability of manifest.capabilities ?? []) {
     if (!allowedCapabilities.has(capability)) {
-      report.blocking.push(unsupportedIssue(capability))
+      report.blocking.push(unsupportedIssue(capability, target))
     }
   }
   if (manifest.permissions?.length) {
-    report.blocking.push(unsupportedIssue("permissions"))
+    report.blocking.push(unsupportedIssue("permissions", target))
   }
   const executableEntries = [manifest.pythonMain, manifest.wasmMain, manifest.vscodeMain].filter(
     configured
   )
   if (executableEntries.length > 0) {
-    report.blocking.push(unsupportedIssue("runtime"))
+    report.blocking.push(unsupportedIssue("runtime", target))
   }
   if (manifest.main) {
     const entry = files.get(normalizePath(manifest.main))
-    if (!entry?.includes("Built output of src/index.ts, pre-generated by `cognia plugin import`")) {
+    if (entry !== renderDist(manifest)) {
       report.blocking.push({
         capability: "runtime",
         path: manifest.main,
@@ -1304,7 +2258,28 @@ function convertCogniaPlugin(
     binaryPaths: options.binaryPaths,
   })
   exportCogniaSubagents({ manifest, output, target, report })
-  const mcp = exportMcpServers({ manifest, output, target, report })
+  const settings: Array<Record<string, unknown>> = []
+  const removedValues = new Set<string>()
+  const mcp = exportMcpServers({ manifest, output, target, report, settings, removedValues })
+  exportCommandHooks({ manifest, output, target, report })
+  exportRuntimeResources({
+    manifest,
+    files,
+    output,
+    copies,
+    target,
+    report,
+    binaryPaths: options.binaryPaths,
+  })
+  for (const [path, text] of output) {
+    if ([...removedValues].some((value) => text.includes(value)))
+      report.blocking.push({
+        capability: "secrets",
+        path,
+        message: "A removed MCP credential is also present in an exported resource",
+        blocking: true,
+      })
+  }
   if (report.blocking.length > 0) {
     report.fidelity = "unsupported"
     throw new UnsupportedPluginConversionError("cognia", target, report)
@@ -1357,28 +2332,6 @@ function convertCogniaPlugin(
   } else {
     const geminiServers =
       mcp && typeof mcp.mcpServers === "object" && mcp.mcpServers ? mcp.mcpServers : undefined
-    for (const skill of manifest.skills ?? []) {
-      const skillFile = output.get(`skills/${skill.id}/SKILL.md`)
-      if (skillFile === undefined) continue
-      const parsed = buildSkill(skillFile, [], skill.name).skill
-      const markdown = parsed.source.kind === "inline" ? parsed.source.markdown : skillFile
-      output.set(
-        `commands/${skill.id}.toml`,
-        stringifyToml({
-          description: skill.description,
-          prompt: markdown,
-        })
-      )
-      report.warnings.push({
-        capability: "skills",
-        path: `skills.${skill.id}`,
-        message: "exported as a Gemini prompt command; autonomous skill activation is contextual",
-        blocking: false,
-      })
-    }
-    for (const path of Array.from(output.keys())) {
-      if (path.startsWith("skills/")) output.delete(path)
-    }
     output.set(
       "gemini-extension.json",
       `${JSON.stringify(
@@ -1387,6 +2340,7 @@ function convertCogniaPlugin(
           version: manifest.version,
           description: manifest.description,
           ...(geminiServers ? { mcpServers: geminiServers } : {}),
+          ...(settings.length ? { settings } : {}),
         },
         null,
         2
@@ -1409,32 +2363,77 @@ export function convertPluginBundle(
   target: PluginEcosystem,
   options: PluginConversionOptions = {}
 ): PluginConversionResult {
+  for (const path of files.keys()) {
+    if (
+      path.startsWith("/") ||
+      /^[A-Za-z]:/.test(path) ||
+      path.includes("\\") ||
+      path.split("/").includes("..")
+    ) {
+      throw new Error(`plugin source path must stay relative to the bundle: ${path}`)
+    }
+  }
   const source = detectPluginEcosystem(files)
-  if (source === target && source === "cognia") return loadCogniaPlugin(files)
-  if (source === "claude-code" && target === "cognia") {
-    return convertClaudePlugin(files, options)
+  let canonical: PluginConversionResult | undefined
+  const platformTarget = (value: PluginEcosystem): value is PlatformBundleTarget =>
+    value in PLATFORM_BUNDLE_PROFILES
+  const finish = (result: PluginConversionResult): PluginConversionResult => {
+    result.source = source
+    result.target = target
+    result.report.delivery = assessPluginDelivery({
+      manifest: canonical?.manifest ?? result.manifest,
+      report: result.report,
+      target,
+    })
+    return result
   }
-  if (source === "codex" && target === "cognia") {
-    return convertCodexPlugin(files, options)
+  try {
+    if (source === "cognia") canonical = loadCogniaPlugin(files)
+    else if (source === "claude-code") canonical = convertClaudePlugin(files, options)
+    else if (source === "codex") canonical = convertCodexPlugin(files, options)
+    else if (source === "gemini-cli") canonical = convertGeminiPlugin(files, options)
+    else {
+      const normalized = normalizePlatformBundle(files, source)
+      if (normalized.blocking.length)
+        throw new UnsupportedPluginConversionError(source, target, {
+          fidelity: "unsupported",
+          converted: [],
+          warnings: normalized.warnings,
+          blocking: normalized.blocking,
+        })
+      canonical = convertClaudePlugin(normalized.files, options)
+      canonical.report.warnings.unshift(...normalized.warnings)
+    }
+    if (target === "cognia") return finish(canonical)
+    const exportTarget = platformTarget(target) ? "claude-code" : target
+    const result = convertCogniaPlugin(canonical.files, exportTarget, options)
+    result.report.warnings.unshift(...canonical.report.warnings)
+    if (platformTarget(target)) {
+      // Binary placeholders must take part in path relocation just like text.
+      const nativeFiles = new Map(result.files)
+      for (const copy of result.copies) if (!nativeFiles.has(copy.to)) nativeFiles.set(copy.to, "")
+      const projected = projectPlatformBundle(nativeFiles, target)
+      result.report.warnings.push(...projected.warnings)
+      result.report.blocking.push(...projected.blocking)
+      if (projected.blocking.length) {
+        result.report.fidelity = "unsupported"
+        throw new UnsupportedPluginConversionError(source, target, result.report)
+      }
+      result.files = projected.files
+      result.copies = result.copies.map((copy) => ({
+        ...copy,
+        to:
+          target === "opencode" && copy.to.startsWith("skills/") ? `.opencode/${copy.to}` : copy.to,
+      }))
+      // Explicit copies own their destination; placeholder text must not write
+      // over binary data in either CLI or workspace apply.
+      for (const copy of result.copies) result.files.delete(copy.to)
+    }
+    return finish(result)
+  } catch (error) {
+    if (!(error instanceof UnsupportedPluginConversionError)) throw error
+    const report = { ...error.report, fidelity: "unsupported" as const }
+    report.delivery = assessPluginDelivery({ manifest: canonical?.manifest, report, target })
+    throw new UnsupportedPluginConversionError(source, target, report)
   }
-  if (source === "gemini-cli" && target === "cognia") {
-    return convertGeminiPlugin(files, options)
-  }
-  if (source === "cognia" && target !== "cognia") {
-    return convertCogniaPlugin(files, target, options)
-  }
-  const report: PluginConversionReport = {
-    fidelity: "unsupported",
-    converted: [],
-    warnings: [],
-    blocking: [
-      {
-        capability: "format",
-        path: source,
-        message: `conversion from ${source} to ${target} is not implemented`,
-        blocking: true,
-      },
-    ],
-  }
-  throw new UnsupportedPluginConversionError(source, target, report)
 }

@@ -11,9 +11,9 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use serde::Serialize;
 use tauri::State;
 

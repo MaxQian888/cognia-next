@@ -32,7 +32,9 @@
     "filterAllFiles": "All files",
     "filterWasmBundle": "WASM bundle",
     "label": "Install local WASM plugin",
-    "tauriRequiredError": "Installing a local WASM plugin requires the desktop app."
+    "tauriRequiredError": "Installing a local WASM plugin requires the desktop app.",
+    "zipRequiredError": "Select a .zip bundle containing a plugin manifest and WASM component.",
+    "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing."
   },
   "fromUrlDialog": {
     "alreadyTrusted": "You already trust this author.",
@@ -55,6 +57,7 @@
     "trustAriaLabel": "Trust this author",
     "trustFirstTime": "Trust this author for future installs.",
     "trustRequiredError": "Trust this author before installing.",
-    "unsignedBundle": "Unsigned bundle"
+    "unsignedBundle": "Unsigned bundle",
+    "previewIntegrityError": "The bundle preview did not include an integrity check. Preview it again before installing."
   }
 }

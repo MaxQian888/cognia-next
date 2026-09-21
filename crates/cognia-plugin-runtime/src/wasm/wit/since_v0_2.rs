@@ -45,7 +45,7 @@ use std::time::Duration;
 use wasmtime::component::Linker;
 use wasmtime_wasi::p2::add_to_linker_async;
 
-use super::super::bridge::{effective_timeout_ms, WasmBridgeOperation};
+use super::super::bridge::{WasmBridgeOperation, effective_timeout_ms};
 use super::super::capabilities::{ai, clipboard, logger, notification, process, secrets, workflow};
 use super::super::services::host_unavailable;
 use super::super::store::HostState;
@@ -386,7 +386,7 @@ mod tests {
 
     use super::*;
     use crate::wasm::bridge::{
-        CancelReason, WasmRendererBridge, WasmRendererResponse, MAX_BODY_BYTES, REQUEST_EVENT,
+        CancelReason, MAX_BODY_BYTES, REQUEST_EVENT, WasmRendererBridge, WasmRendererResponse,
     };
     use crate::wasm::errors::WasmErrorCode;
     use crate::wasm::services::test_support::{
@@ -569,16 +569,18 @@ mod tests {
     #[tokio::test]
     async fn clipboard_without_a_backend_is_host_unavailable() {
         let mut st = test_host_state("demo", &["clipboard:read", "clipboard:write"]);
-        assert!(st
-            .read_text()
-            .await
-            .unwrap_err()
-            .starts_with("HOST_UNAVAILABLE: "));
-        assert!(st
-            .write_text("x".into())
-            .await
-            .unwrap_err()
-            .starts_with("HOST_UNAVAILABLE: "));
+        assert!(
+            st.read_text()
+                .await
+                .unwrap_err()
+                .starts_with("HOST_UNAVAILABLE: ")
+        );
+        assert!(
+            st.write_text("x".into())
+                .await
+                .unwrap_err()
+                .starts_with("HOST_UNAVAILABLE: ")
+        );
     }
 
     #[tokio::test]

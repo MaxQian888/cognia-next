@@ -86,6 +86,9 @@ mod tests {
             socket.write_all(raw_response).await.unwrap();
             socket.shutdown().await.unwrap();
         });
+        // `reqwest` resolves the process-wide TLS provider at `Client`
+        // construction; no `main` runs inside a test binary, so install it here.
+        cognia_net::proxy_config::ensure_crypto_provider();
         reqwest::get(format!("http://{address}")).await.unwrap()
     }
 
@@ -134,13 +137,15 @@ mod tests {
             "first",
         )
         .unwrap();
-        assert!(copy_with_budget(
-            &mut std::io::Cursor::new(vec![2_u8; 5]),
-            &mut output,
-            &mut total,
-            8,
-            "second",
-        )
-        .is_err());
+        assert!(
+            copy_with_budget(
+                &mut std::io::Cursor::new(vec![2_u8; 5]),
+                &mut output,
+                &mut total,
+                8,
+                "second",
+            )
+            .is_err()
+        );
     }
 }

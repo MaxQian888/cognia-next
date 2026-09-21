@@ -136,6 +136,31 @@ describe("plugin conversion agent service", () => {
     jest.clearAllMocks()
   })
 
+  it("reports required setup from the converted foreign manifest", async () => {
+    const fs = new MemoryWorkspaceFs({
+      ...claudePluginFiles(),
+      "plugins/source/.mcp.json": JSON.stringify({
+        mcpServers: {
+          remote: {
+            command: "node",
+            args: ["server.js"],
+            env: { API_KEY: "synthetic-test-token" },
+          },
+        },
+      }),
+    })
+    const result = await createService(fs).inspect({
+      workspaceRoot: "/workspace",
+      sourceDir: "plugins/source",
+      target: "cognia",
+    })
+    expect(result.applicable).toBe(true)
+    expect(result.report.delivery?.capabilities).toContainEqual({
+      capability: "mcp-server-preset",
+      status: "configuration-required",
+    })
+  })
+
   it("inspects a conversion without mutating the workspace", async () => {
     const fs = new MemoryWorkspaceFs(claudePluginFiles())
     const service = createService(fs)
@@ -157,6 +182,84 @@ describe("plugin conversion agent service", () => {
     })
     expect(result.files).toEqual(expect.arrayContaining(["plugin.json", "dist/index.js"]))
     expect(fs.writes).toEqual([])
+  })
+
+  it("explains hosted tools when a Cognia runtime cannot be exported", async () => {
+    const fs = new MemoryWorkspaceFs({
+      "plugins/source/plugin.json": JSON.stringify({
+        id: "research",
+        name: "Research",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: ["tools", "bot"],
+      }),
+    })
+    const result = await createService(fs).inspect({
+      workspaceRoot: "/workspace",
+      sourceDir: "plugins/source",
+      target: "codex",
+    })
+    expect(result).toMatchObject({
+      applicable: false,
+      report: {
+        delivery: {
+          native: "blocked",
+          hostVerified: false,
+          hosted: { status: "requires-cognia", capabilities: ["tools"], retained: ["bot"] },
+        },
+      },
+    })
+    expect(result.planId).toBeUndefined()
+  })
+
+  it("requires acknowledgement before writing a conversion with warnings", async () => {
+    const fs = new MemoryWorkspaceFs({
+      "plugins/source/gemini-extension.json": JSON.stringify({ name: "review", version: "1.0.0" }),
+      "plugins/source/commands/review.toml": 'prompt = "Review {{args}}"',
+    })
+    const service = createService(fs)
+    const result = await service.inspect({
+      workspaceRoot: "/workspace",
+      sourceDir: "plugins/source",
+      target: "cognia",
+    })
+    expect(result.report.warnings.length).toBeGreaterThan(0)
+    await expect(
+      service.apply({
+        workspaceRoot: "/workspace",
+        planId: result.planId!,
+        outputDir: "plugins/output",
+      })
+    ).rejects.toThrow(/acknowledge/i)
+    expect(fs.writes).toEqual([])
+    await expect(
+      service.apply({
+        workspaceRoot: "/workspace",
+        planId: result.planId!,
+        outputDir: "plugins/output",
+        acknowledgeWarnings: true,
+      })
+    ).resolves.toMatchObject({ pluginId: "review" })
+  })
+
+  it("rejects cloud export claims before minting a local-only plan", async () => {
+    const fs = new MemoryWorkspaceFs({
+      "plugins/source/plugin.json": JSON.stringify({
+        id: "local",
+        name: "Local",
+        version: "1.0.0",
+        type: "frontend",
+        capabilities: [],
+      }),
+    })
+    const result = await createService(fs).inspect({
+      workspaceRoot: "/workspace",
+      sourceDir: "plugins/source",
+      target: "codex",
+      surface: "cloud",
+    })
+    expect(result.applicable).toBe(false)
+    expect(result.report.delivery).toMatchObject({ surface: "cloud", native: "blocked" })
   })
 
   it("applies the inspected deterministic output exactly once", async () => {
@@ -238,7 +341,7 @@ describe("plugin conversion agent service", () => {
     expect(fs.writes).toEqual([])
   })
 
-  it("returns a blocking report without minting a plan for unsupported foreign-to-foreign conversion", async () => {
+  it("plans a foreign-to-foreign conversion through the canonical contract", async () => {
     const fs = new MemoryWorkspaceFs(claudePluginFiles())
     const service = createService(fs)
 
@@ -249,16 +352,16 @@ describe("plugin conversion agent service", () => {
     })
 
     expect(result).toMatchObject({
-      applicable: false,
+      applicable: true,
       sourceFormat: "claude-code",
       target: "codex",
-      files: [],
+      files: expect.arrayContaining([".codex-plugin/plugin.json", "skills/review/assets/icon.png"]),
       report: {
-        fidelity: "unsupported",
-        blocking: [expect.objectContaining({ capability: "format", blocking: true })],
+        fidelity: "structured",
+        blocking: [],
       },
     })
-    expect(result.planId).toBeUndefined()
+    expect(result.planId).toBeDefined()
   })
 
   it("rejects paths that escape or consume the workspace root", async () => {

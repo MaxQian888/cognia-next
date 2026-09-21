@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const installFromLocalMock = jest.fn()
-const previewBundleManifestMock = jest.fn()
+const previewLocalBundleManifestMock = jest.fn()
 const dialogOpenMock = jest.fn()
 const canUseTauriInvokeMock = jest.fn()
 
@@ -28,8 +28,8 @@ jest.mock("@/lib/plugin/core/manager", () => ({
   }),
 }))
 
-jest.mock("@/lib/plugin/package/http-installer", () => ({
-  previewBundleManifest: (...args: unknown[]) => previewBundleManifestMock(...args),
+jest.mock("@/lib/plugin/package/local-installer", () => ({
+  previewLocalBundleManifest: (...args: unknown[]) => previewLocalBundleManifestMock(...args),
 }))
 
 jest.mock("@/lib/plugin/security/wasm-grant", () => ({
@@ -59,7 +59,7 @@ const baseManifest = {
 
 beforeEach(() => {
   installFromLocalMock.mockReset()
-  previewBundleManifestMock.mockReset()
+  previewLocalBundleManifestMock.mockReset()
   dialogOpenMock.mockReset()
   canUseTauriInvokeMock.mockReset()
   canUseTauriInvokeMock.mockReturnValue(true)
@@ -89,10 +89,11 @@ describe("InstallWasmPluginButton", () => {
 
   it("aborts when the user picks a .zip and cancels the grant sheet", async () => {
     dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
+    previewLocalBundleManifestMock.mockResolvedValue({
       manifest: baseManifest,
       path: "/tmp/demo.zip",
       signatureVerified: false,
+      bundleSha256: "a".repeat(64),
       authorPublicKey: "AAA=",
       authorFingerprint: "9f3a",
     })
@@ -108,10 +109,11 @@ describe("InstallWasmPluginButton", () => {
   it("invokes installWasmPluginFromLocalFile after grant confirmation", async () => {
     const onInstalled = jest.fn()
     dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
+    previewLocalBundleManifestMock.mockResolvedValue({
       manifest: baseManifest,
       path: "/tmp/demo.zip",
       signatureVerified: false,
+      bundleSha256: "a".repeat(64),
       authorPublicKey: undefined,
       authorFingerprint: undefined,
     })
@@ -129,38 +131,31 @@ describe("InstallWasmPluginButton", () => {
     )
     fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
     await waitFor(() => expect(installFromLocalMock).toHaveBeenCalled())
+    expect(previewLocalBundleManifestMock).toHaveBeenCalledWith({ bundlePath: "/tmp/demo.zip" })
     expect(installFromLocalMock.mock.calls[0][0]).toBe("/tmp/demo.zip")
+    expect(installFromLocalMock.mock.calls[0][2]).toEqual({ expectedBundleSha256: "a".repeat(64) })
     const grantDecision = installFromLocalMock.mock.calls[0][1]
     expect(grantDecision.pluginId).toBe("demo.wasm")
     expect(onInstalled).toHaveBeenCalledWith("demo.wasm")
   })
 
-  it("uses a synthetic manifest for bare .wasm sideloads (no preview)", async () => {
+  it("refuses bare WASM files before granting fabricated permissions", async () => {
     dialogOpenMock.mockResolvedValue("/tmp/my-plugin.wasm")
-    installFromLocalMock.mockResolvedValue({
-      manifest: { ...baseManifest, id: "my-plugin" },
-      status: "installed",
-      source: "local",
-      path: "/plugins/my-plugin",
-      config: {},
-    })
     render(<InstallWasmPluginButton />)
     fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByTestId("wasm-capability-grant-sheet")).toBeInTheDocument()
-    )
-    // No preview should have been requested for bare .wasm.
-    expect(previewBundleManifestMock).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
-    await waitFor(() => expect(installFromLocalMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("zipRequiredError"))
+    expect(previewLocalBundleManifestMock).not.toHaveBeenCalled()
+    expect(installFromLocalMock).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("wasm-capability-grant-sheet")).not.toBeInTheDocument()
   })
 
   it("surfaces install errors in the alert region", async () => {
     dialogOpenMock.mockResolvedValue("/tmp/demo.zip")
-    previewBundleManifestMock.mockResolvedValue({
+    previewLocalBundleManifestMock.mockResolvedValue({
       manifest: baseManifest,
       path: "/tmp/demo.zip",
       signatureVerified: false,
+      bundleSha256: "a".repeat(64),
     })
     installFromLocalMock.mockRejectedValue(new Error("boom"))
     render(<InstallWasmPluginButton />)

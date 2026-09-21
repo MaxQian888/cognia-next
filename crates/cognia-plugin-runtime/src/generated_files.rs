@@ -92,10 +92,8 @@ mod tests {
         let traversal = BTreeMap::from([("../plugin.json".to_string(), "{}".to_string())]);
         assert!(apply_generated_files(tmp.path(), &traversal).is_err());
 
-        let arbitrary = BTreeMap::from([(
-            "scripts/postinstall.sh".to_string(),
-            "exit 0".to_string(),
-        )]);
+        let arbitrary =
+            BTreeMap::from([("scripts/postinstall.sh".to_string(), "exit 0".to_string())]);
         assert!(apply_generated_files(tmp.path(), &arbitrary).is_err());
     }
 

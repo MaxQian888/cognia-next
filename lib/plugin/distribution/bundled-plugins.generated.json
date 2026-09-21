@@ -16,18 +16,18 @@
         },
         {
           "path": "main.py",
-          "bytes": 43055,
-          "sha256": "1c5ae43ab6cb0934350b9726ef6811a1534d7ea7f79d2a62efd7d5a9b21dd750"
+          "bytes": 52289,
+          "sha256": "c0e88827cf36aa46bb0ba857ba407dd14c622b8485acb0740a520637b4c4560a"
         },
         {
           "path": "plugin.json",
-          "bytes": 6012,
-          "sha256": "b5db4ffbc2157296a673ab2fdb818ccd61f8850e631f70258e512db082f064a4"
+          "bytes": 6139,
+          "sha256": "d9f82af5c56e34d1ec6aaf53deeec92cc32dbd2e30fafd54545da4e3b7686031"
         },
         {
           "path": "pyproject.toml",
-          "bytes": 534,
-          "sha256": "0e04094a5ed28de7daaddc5b40dc4b4600ec87bcfb6d9e7ff66af43a18291e61"
+          "bytes": 555,
+          "sha256": "ff268090d8853756df92dd842bd12fc0de822c9fed58cbe68a1478f545844253"
         },
         {
           "path": "repowiki/__init__.py",
@@ -46,8 +46,8 @@
         },
         {
           "path": "repowiki/core/analyzer.py",
-          "bytes": 24052,
-          "sha256": "e4a6bba44f1dca1445934baeb8e5968c67c85c7c6b706bb8223870ec263b68a7"
+          "bytes": 24340,
+          "sha256": "aecf43b4b1935cba4bd5b9b0f5e90c61098dbb228483ecb7216b316d89a2ee67"
         },
         {
           "path": "repowiki/core/cache.py",
@@ -71,13 +71,13 @@
         },
         {
           "path": "repowiki/core/rag.py",
-          "bytes": 27262,
-          "sha256": "ddbb42f51acd28d84e17cd262ff95fb48bda93b70c637079afe5bb31faaf766a"
+          "bytes": 34184,
+          "sha256": "4b735d1e9a04fd857c16f657619ba8cdd0df90b2414b50d2715a3ae5f1c11731"
         },
         {
           "path": "repowiki/core/rag_store.py",
-          "bytes": 12085,
-          "sha256": "19db76ae3100be9ea583d0713dc230408ae3184c1626e1e815c454e42b3d44a3"
+          "bytes": 14004,
+          "sha256": "f77403ceb984996ef5bb94b70c69dbc0e761bcee97307484e33a7e25c52507fb"
         },
         {
           "path": "repowiki/core/scanner.py",
@@ -91,8 +91,8 @@
         },
         {
           "path": "repowiki/core/wiki_store.py",
-          "bytes": 7663,
-          "sha256": "8c445cdad7982a636515c41dd07b0679b96e77d51b6e9314e18b18a36523b5d0"
+          "bytes": 9034,
+          "sha256": "a34dea489d4a8c6a6dd805eb8f4cabfb5c6afe90ca7e9c3ba662f4a7f9b85089"
         },
         {
           "path": "repowiki/export/__init__.py",
@@ -166,13 +166,13 @@
         },
         {
           "path": "repowiki/pipeline.py",
-          "bytes": 14021,
-          "sha256": "540c3f3020996ea9aa31b68d2808299a6e316980698fd38154aa83fdd7ae587d"
+          "bytes": 16354,
+          "sha256": "011500e9da06be07616a67404e4f4339d4c4377b11090bfc3016177ee5bc7e57"
         },
         {
           "path": "repowiki/project.py",
-          "bytes": 3511,
-          "sha256": "1be4d1bcad611925201148826fa1ebe22daaba2e82e932a62ccd097da97521f5"
+          "bytes": 3863,
+          "sha256": "2f63776818c29f35cfb49953aade79557def2f2d5ee91c9b901a446e54d83951"
         }
       ]
     }

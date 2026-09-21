@@ -128,7 +128,9 @@ export async function bundle() {
     write: false,
     banner: { js: BANNER },
     plugins: [cutHostModules],
-    alias: { "@": repoRoot },
+    // jsonc-parser's UMD entry passes require as a function argument, hiding
+    // its relative imports from esbuild. Its ESM entry bundles those imports.
+    alias: { "@": repoRoot, "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
     logLevel: "warning",
     legalComments: "none",
   })

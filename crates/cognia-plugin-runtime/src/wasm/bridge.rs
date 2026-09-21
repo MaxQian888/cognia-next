@@ -34,7 +34,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::errors::{coded, WasmErrorCode};
+use super::errors::{WasmErrorCode, coded};
 
 /// Event the host emits carrying one renderer-backed request.
 pub const REQUEST_EVENT: &str = "plugin-wasm://renderer-request";
@@ -279,7 +279,7 @@ impl WasmRendererBridge {
                         "{}: request payload is not serializable: {err}",
                         operation.as_str()
                     ),
-                ))
+                ));
             }
         };
         if request_bytes > MAX_BODY_BYTES {

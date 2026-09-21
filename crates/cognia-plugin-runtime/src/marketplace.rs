@@ -85,6 +85,65 @@ pub struct VerificationReceipt {
     pub verified_at: String,
 }
 
+// Serializes the short canonical-directory swap and its ownership bookkeeping.
+// Extraction and staging run outside this lock.
+pub(crate) static INSTALL_COMMIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) const INSTALL_TRANSACTION_FILE: &str = ".cognia-install-transaction";
+
+pub(crate) fn ensure_install_not_pending(plugin_dir: &Path) -> Result<()> {
+    if plugin_dir.join(INSTALL_TRANSACTION_FILE).exists() {
+        return Err(PluginError::InvalidArgument("plugin installation is awaiting activation; finish or roll back that transaction first".into()));
+    }
+    Ok(())
+}
+
+/// Stage an already validated source tree using the same durable lifecycle as
+/// marketplace updates. The installed tree is untouched until explicit commit.
+pub(crate) fn stage_tree_install(
+    state_root: &Path,
+    source: &Path,
+    manifest: &serde_json::Value,
+) -> Result<String> {
+    crate::contract::validate_manifest_contract(manifest).map_err(PluginError::Internal)?;
+    crate::contract::validate_existing_manifest_paths(source, manifest)
+        .map_err(PluginError::Internal)?;
+    let plugin_id = manifest
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| PluginError::InvalidArgument("plugin id missing".into()))?;
+    crate::validate_plugin_id_path_component(plugin_id)?;
+    let transaction_id = uuid::Uuid::new_v4().to_string();
+    let transaction_dir = state_root
+        .join("update-transactions")
+        .join(plugin_id)
+        .join(&transaction_id);
+    let staged = transaction_dir.join("package");
+    fs::create_dir_all(&staged)?;
+    let result = (|| {
+        crate::wasm::installer::copy_dir_recursive(source, &staged, &[])
+            .map_err(PluginError::Internal)?;
+        crate::contract::validate_existing_manifest_paths(&staged, manifest)
+            .map_err(PluginError::Internal)?;
+        let metadata = StagedUpdateMetadata {
+            transaction_id: transaction_id.clone(),
+            plugin_id: plugin_id.into(),
+            version: manifest
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .into(),
+            size_bytes: 0,
+            manifest: manifest.clone(),
+        };
+        persist_staged_update_metadata(&transaction_dir, &metadata)?;
+        Ok(transaction_id)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&transaction_dir);
+    }
+    result
+}
+
 fn cache_dir(state: &PluginRuntimeState) -> PathBuf {
     state.plugin_install_dir.join("_marketplace_cache")
 }
@@ -119,7 +178,11 @@ fn installed_package_matches(package_dir: &Path, plugin_id: &str, version: &str)
     let manifest: serde_json::Value = serde_json::from_slice(&fs::read(manifest_path)?)?;
     Ok(
         manifest.get("id").and_then(serde_json::Value::as_str) == Some(plugin_id)
-            && manifest.get("version").and_then(serde_json::Value::as_str) == Some(version),
+            && manifest
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                == version,
     )
 }
 
@@ -145,6 +208,14 @@ fn recover_update_transaction(
         ));
     }
 
+    if transaction_dir.join("finalized").is_file() {
+        let marker = state.plugin_dir(plugin_id).join(INSTALL_TRANSACTION_FILE);
+        if fs::read_to_string(&marker).ok().as_deref() == Some(transaction_id) {
+            fs::remove_file(marker)?;
+        }
+        fs::remove_dir_all(&transaction_dir)?;
+        return Ok(false);
+    }
     let staged = transaction_dir.join("package");
     let previous = transaction_dir.join("previous-package");
     let committed = transaction_dir.join("committed").is_file();
@@ -164,6 +235,11 @@ fn recover_update_transaction(
     if plugin_dir.exists() {
         if fs::symlink_metadata(&plugin_dir)?.file_type().is_symlink()
             || !installed_package_matches(&plugin_dir, plugin_id, &metadata.version)?
+            || (transaction_dir.join("ownership-required").exists()
+                && fs::read_to_string(plugin_dir.join(INSTALL_TRANSACTION_FILE))
+                    .ok()
+                    .as_deref()
+                    != Some(transaction_id))
         {
             return Err(PluginError::InvalidArgument(format!(
                 "refusing to replace an unknown package while recovering {plugin_id}"
@@ -293,6 +369,7 @@ pub fn recover_update_transactions_for_state(state: &PluginRuntimeState) -> Upda
 }
 
 fn http_client(url: &str) -> Result<reqwest::Client> {
+    cognia_net::proxy_config::ensure_crypto_provider();
     let builder = reqwest::Client::builder().user_agent("cognia-plugin-installer/0.1");
     let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, url)
         .map_err(|error| PluginError::Internal(error.to_string()))?;
@@ -586,6 +663,10 @@ pub(crate) fn install_archive_into_plugin_dir(
         prepare_archive_package(expected_plugin_id, version, bytes, integrity, &prepared)?;
 
     let plugin_dir = state.plugin_dir(&plugin_id);
+    let _guard = INSTALL_COMMIT_LOCK
+        .lock()
+        .map_err(|_| PluginError::Internal("install commit lock poisoned".into()))?;
+    ensure_install_not_pending(&plugin_dir)?;
     let previous = transaction.path().join("previous");
     if plugin_dir.exists() {
         fs::rename(&plugin_dir, &previous)
@@ -735,6 +816,9 @@ pub fn commit_staged_update_for_state(
     plugin_id: &str,
     transaction_id: &str,
 ) -> Result<DownloadPayload> {
+    let _guard = INSTALL_COMMIT_LOCK
+        .lock()
+        .map_err(|_| PluginError::Internal("install commit lock poisoned".into()))?;
     let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
     let metadata: StagedUpdateMetadata =
         serde_json::from_slice(&fs::read(transaction_dir.join("transaction.json"))?)?;
@@ -747,12 +831,15 @@ pub fn commit_staged_update_for_state(
     crate::contract::validate_existing_manifest_paths(&staged_path, &metadata.manifest)
         .map_err(PluginError::Internal)?;
     let plugin_dir = state.plugin_dir(plugin_id);
+    ensure_install_not_pending(&plugin_dir)?;
     let previous = transaction_dir.join("previous-package");
-    if previous.exists() {
+    if previous.exists() || transaction_dir.join("committed").exists() {
         return Err(PluginError::InvalidArgument(
             "update transaction was already committed".into(),
         ));
     }
+    fs::write(staged_path.join(INSTALL_TRANSACTION_FILE), transaction_id)?;
+    fs::write(transaction_dir.join("ownership-required"), b"1")?;
     if plugin_dir.exists() {
         fs::rename(&plugin_dir, &previous)?;
     }
@@ -776,14 +863,12 @@ pub fn discard_staged_update_for_state(
     plugin_id: &str,
     transaction_id: &str,
 ) -> Result<()> {
+    let _guard = INSTALL_COMMIT_LOCK
+        .lock()
+        .map_err(|_| PluginError::Internal("install commit lock poisoned".into()))?;
     let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
-    if transaction_dir.join("committed").exists() {
-        return Err(PluginError::InvalidArgument(
-            "cannot discard a committed update transaction".into(),
-        ));
-    }
     if transaction_dir.exists() {
-        fs::remove_dir_all(transaction_dir)?;
+        recover_update_transaction(state, plugin_id, transaction_id)?;
     }
     Ok(())
 }
@@ -793,13 +878,31 @@ pub fn finalize_staged_update_for_state(
     plugin_id: &str,
     transaction_id: &str,
 ) -> Result<()> {
+    let _guard = INSTALL_COMMIT_LOCK
+        .lock()
+        .map_err(|_| PluginError::Internal("install commit lock poisoned".into()))?;
     let transaction_dir = update_transaction_dir(state, plugin_id, transaction_id)?;
     if !transaction_dir.join("committed").exists() {
         return Err(PluginError::InvalidArgument(
             "cannot finalize an uncommitted update transaction".into(),
         ));
     }
-    fs::remove_dir_all(transaction_dir)?;
+    let marker = state.plugin_dir(plugin_id).join(INSTALL_TRANSACTION_FILE);
+    if fs::read_to_string(&marker).ok().as_deref() != Some(transaction_id) {
+        return Err(PluginError::InvalidArgument(
+            "installed package does not belong to this transaction".into(),
+        ));
+    }
+    fs::write(transaction_dir.join("finalized"), b"1")?;
+    // Finalized is the durable commit point. Cleanup failure must not tell the
+    // caller to roll back an installation which startup recovery will retain.
+    if let Err(error) = fs::remove_file(marker) {
+        log::warn!("finalized plugin marker cleanup deferred to recovery: {error}");
+        return Ok(());
+    }
+    if let Err(error) = fs::remove_dir_all(transaction_dir) {
+        log::warn!("finalized plugin backup cleanup deferred to recovery: {error}");
+    }
     Ok(())
 }
 
@@ -990,6 +1093,103 @@ mod tests {
         let state = make_state(&tmp);
         let path = state.plugin_install_dir.to_string_lossy().into_owned();
         assert_eq!(path, tmp.path().to_string_lossy().into_owned());
+    }
+
+    fn stage_test_tree(state: &PluginRuntimeState, bytes: &[u8]) -> String {
+        let source = TempDir::new().unwrap();
+        let manifest = serde_json::json!({"id":"demo.market","version":"1.0.0","type":"frontend","main":"index.js"});
+        fs::write(source.path().join("plugin.json"), manifest.to_string()).unwrap();
+        fs::write(source.path().join("index.js"), bytes).unwrap();
+        stage_tree_install(&state.plugin_state_dir, source.path(), &manifest).unwrap()
+    }
+
+    #[test]
+    fn committed_install_can_roll_back_without_losing_prior_package() {
+        let root = TempDir::new().unwrap();
+        let state = make_state(&root);
+        let old = stage_test_tree(&state, b"old");
+        commit_staged_update_for_state(&state, "demo.market", &old).unwrap();
+        finalize_staged_update_for_state(&state, "demo.market", &old).unwrap();
+        let new = stage_test_tree(&state, b"new");
+        assert_eq!(
+            fs::read(state.plugin_dir("demo.market").join("index.js")).unwrap(),
+            b"old"
+        );
+        commit_staged_update_for_state(&state, "demo.market", &new).unwrap();
+        assert_eq!(
+            fs::read(state.plugin_dir("demo.market").join("index.js")).unwrap(),
+            b"new"
+        );
+        discard_staged_update_for_state(&state, "demo.market", &new).unwrap();
+        assert_eq!(
+            fs::read(state.plugin_dir("demo.market").join("index.js")).unwrap(),
+            b"old"
+        );
+    }
+
+    #[test]
+    fn failed_fresh_activation_removes_only_its_own_package() {
+        let root = TempDir::new().unwrap();
+        let state = make_state(&root);
+        let transaction = stage_test_tree(&state, b"new");
+        commit_staged_update_for_state(&state, "demo.market", &transaction).unwrap();
+        discard_staged_update_for_state(&state, "demo.market", &transaction).unwrap();
+        assert!(!state.plugin_dir("demo.market").exists());
+    }
+
+    #[test]
+    fn pending_activation_blocks_another_commit_and_stale_same_version_rollback() {
+        let root = TempDir::new().unwrap();
+        let state = make_state(&root);
+        let first = stage_test_tree(&state, b"first");
+        let second = stage_test_tree(&state, b"second");
+        commit_staged_update_for_state(&state, "demo.market", &first).unwrap();
+        assert!(
+            commit_staged_update_for_state(&state, "demo.market", &second)
+                .unwrap_err()
+                .to_string()
+                .contains("awaiting activation")
+        );
+        // A foreign same-version package is not proof that this transaction owns it.
+        fs::write(
+            state
+                .plugin_dir("demo.market")
+                .join(INSTALL_TRANSACTION_FILE),
+            &second,
+        )
+        .unwrap();
+        assert!(
+            discard_staged_update_for_state(&state, "demo.market", &first)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown package")
+        );
+        assert!(finalize_staged_update_for_state(&state, "demo.market", &first).is_err());
+        assert_eq!(
+            fs::read(state.plugin_dir("demo.market").join("index.js")).unwrap(),
+            b"first"
+        );
+    }
+
+    #[test]
+    fn startup_recovery_retains_finalized_package_after_cleanup_interruption() {
+        let root = TempDir::new().unwrap();
+        let state = make_state(&root);
+        let transaction = stage_test_tree(&state, b"new");
+        commit_staged_update_for_state(&state, "demo.market", &transaction).unwrap();
+        let transaction_dir = update_transaction_dir(&state, "demo.market", &transaction).unwrap();
+        fs::write(transaction_dir.join("finalized"), b"1").unwrap();
+        let report = recover_update_transactions_for_state(&state);
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert_eq!(
+            fs::read(state.plugin_dir("demo.market").join("index.js")).unwrap(),
+            b"new"
+        );
+        assert!(!state
+            .plugin_dir("demo.market")
+            .join(INSTALL_TRANSACTION_FILE)
+            .exists());
+        assert!(!transaction_dir.exists());
     }
 
     #[test]

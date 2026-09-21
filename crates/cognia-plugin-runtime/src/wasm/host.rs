@@ -13,15 +13,15 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use wasmtime::component::{Component, Linker};
 
+use super::HOST_API_VERSION;
 use super::bridge::{CancelReason, WasmRendererBridge};
 use super::engine::{api_version_compatible, engine, parse_plugin_api_version};
 use super::errors::upgrade_required;
 use super::services::WasmHostServices;
 use super::store::{
-    build_store, CapabilitySet, HostState, DEFAULT_CALL_TIMEOUT_MS, DEFAULT_MEMORY_LIMIT_MB,
+    CapabilitySet, DEFAULT_CALL_TIMEOUT_MS, DEFAULT_MEMORY_LIMIT_MB, HostState, build_store,
 };
 use super::wit::since_v0_2;
-use super::HOST_API_VERSION;
 
 /// Subset of the TS manifest the host needs at instantiate time. We
 /// deserialize lazily out of the JSON the loader sends over IPC.

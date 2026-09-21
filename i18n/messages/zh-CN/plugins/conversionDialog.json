@@ -1,0 +1,26 @@
+{
+  "title": "转换插件",
+  "description": "检查平台差异、审阅生成文件，然后写入转换后的副本。",
+  "workspaceRoot": "工作区根目录（绝对路径）",
+  "sourceDir": "源目录",
+  "relativePaths": "源目录和输出目录均相对于工作区根目录。",
+  "target": "目标平台",
+  "surface": "目标运行环境",
+  "surfaces": {
+    "cli": "命令行",
+    "desktop": "桌面",
+    "cloud": "云端"
+  },
+  "cloudHint": "当前不支持云端导出。可先检查以查看具体的平台限制。",
+  "files": "输出文件（{count}）",
+  "outputDir": "输出目录",
+  "acknowledge": "我已审阅警告，并接受报告中说明的行为差异。",
+  "written": "转换文件已写入 {path}。尚未安装任何插件。",
+  "close": "关闭",
+  "inspect": "检查转换",
+  "inspecting": "检查中…",
+  "write": "写入转换文件",
+  "writing": "写入中…",
+  "inspectFailed": "无法检查转换：{message}",
+  "writeFailed": "无法写入转换文件：{message}"
+}

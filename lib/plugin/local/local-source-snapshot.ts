@@ -71,36 +71,39 @@ export async function collectLocalPluginSource(
   let seen = 0
 
   const walk = async (absolute: string, relative: string, depth: number): Promise<void> => {
-    if (depth > MAX_DEPTH) return
+    if (depth > MAX_DEPTH) {
+      throw new Error(`plugin source exceeds maximum directory depth ${MAX_DEPTH}: ${relative}`)
+    }
     let names: string[]
     try {
       names = await fs.readDir(absolute)
-    } catch {
-      // An unreadable subdirectory is skipped, matching `walkFiles`. An
-      // unreadable ROOT is not: `inspectLocalPluginSource` fails on the empty
-      // snapshot, because "this directory holds no plugin" and "this directory
-      // could not be read" must not look the same.
-      return
+    } catch (error) {
+      throw new Error(`cannot read plugin source directory ${absolute}: ${String(error)}`)
     }
     for (const name of names) {
+      if (!name || name === "." || name === ".." || /[\\/]/.test(name)) {
+        throw new Error(`invalid plugin source directory entry: ${name}`)
+      }
+      seen += 1
+      if (seen > MAX_SNAPSHOT_ENTRIES) {
+        throw new Error(
+          `plugin source contains more than ${MAX_SNAPSHOT_ENTRIES} entries; choose the plugin directory itself`
+        )
+      }
       const childAbsolute = joinPath(absolute, name)
       const childRelative = relative ? `${relative}/${name}` : name
       let info: { size: number; isFile: boolean }
       try {
         info = await fs.stat(childAbsolute)
-      } catch {
-        continue
+      } catch (error) {
+        throw new Error(`cannot stat plugin source entry ${childRelative}: ${String(error)}`)
       }
       if (!info.isFile) {
-        if (SNAPSHOT_SKIP_DIRS.has(name)) continue
+        // Built outputs may be referenced by packaged MCP servers or runtimes.
+        if (SNAPSHOT_SKIP_DIRS.has(name) && !["dist", "build", "out", "target"].includes(name))
+          continue
         await walk(childAbsolute, childRelative, depth + 1)
         continue
-      }
-      seen += 1
-      if (seen > MAX_SNAPSHOT_ENTRIES) {
-        throw new Error(
-          `plugin source contains more than ${MAX_SNAPSHOT_ENTRIES} files; choose the plugin directory itself`
-        )
       }
       if (!isSnapshotTextFile(childRelative)) {
         // Keep the path so resource-bearing skills stay bundles. The installer
@@ -112,7 +115,11 @@ export async function collectLocalPluginSource(
       if (info.size > MAX_TEXT_FILE_BYTES) {
         throw new Error(`plugin text file is too large to convert safely: ${childRelative}`)
       }
-      files.set(childRelative, await fs.readTextFile(childAbsolute))
+      const text = await fs.readTextFile(childAbsolute)
+      if (new TextEncoder().encode(text).byteLength > MAX_TEXT_FILE_BYTES) {
+        throw new Error(`plugin text file is too large to convert safely: ${childRelative}`)
+      }
+      files.set(childRelative, text)
     }
   }
 

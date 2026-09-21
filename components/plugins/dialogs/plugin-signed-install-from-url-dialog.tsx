@@ -14,7 +14,7 @@
  *      sheet via the imperative hook → done
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
@@ -37,11 +37,11 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import {
-  installFromUrl,
   previewBundleManifest,
   isPublisherKeyTrusted,
   type HttpInstallResult,
 } from "@/lib/plugin/package/http-installer"
+import { getPluginManager } from "@/lib/plugin/core/manager"
 import { shortFingerprint } from "@/lib/plugin/security/signature"
 import { useWasmCapabilityGrant } from "@/hooks/plugins/use-wasm-capability-grant"
 
@@ -51,7 +51,7 @@ export interface PluginSignedInstallFromUrlDialogProps {
   onInstalled?: (result: HttpInstallResult) => void
 }
 
-type Stage = "input" | "preview" | "installing" | "error"
+type Stage = "input" | "preview" | "previewing" | "granting" | "installing" | "error"
 
 export function PluginSignedInstallFromUrlDialog({
   open,
@@ -59,7 +59,8 @@ export function PluginSignedInstallFromUrlDialog({
   onInstalled,
 }: PluginSignedInstallFromUrlDialogProps) {
   const t = useTranslations("plugins.wasmInstall.fromUrlDialog")
-  const grant = useWasmCapabilityGrant()
+  const { requestGrant, cancel: cancelGrant, sheet: grantSheet } = useWasmCapabilityGrant()
+  const attemptRef = useRef(0)
   const [bundleUrl, setBundleUrl] = useState("")
   const [signatureUrl, setSignatureUrl] = useState("")
   const [publicKey, setPublicKey] = useState("")
@@ -70,6 +71,7 @@ export function PluginSignedInstallFromUrlDialog({
   const [publisherAlreadyTrusted, setPublisherAlreadyTrusted] = useState(false)
 
   const reset = useCallback(() => {
+    attemptRef.current += 1
     setBundleUrl("")
     setSignatureUrl("")
     setPublicKey("")
@@ -82,28 +84,46 @@ export function PluginSignedInstallFromUrlDialog({
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
-      if (!next) reset()
+      if (!next && stage === "installing") return
+      if (!next) {
+        cancelGrant()
+        reset()
+      }
       onOpenChange(next)
     },
-    [onOpenChange, reset]
+    [onOpenChange, reset, stage, cancelGrant]
+  )
+
+  useEffect(
+    () => () => {
+      attemptRef.current += 1
+      cancelGrant()
+    },
+    [open, cancelGrant]
   )
 
   const handlePreview = useCallback(async () => {
+    const attempt = ++attemptRef.current
     setErrorMessage(null)
+    setPreview(null)
     try {
-      setStage("installing")
+      setStage("previewing")
       const result = await previewBundleManifest({
         bundleUrl: bundleUrl.trim(),
         signatureUrl: signatureUrl.trim() || undefined,
         expectedPublicKeyBase64: publicKey.trim() || undefined,
         requireSignature: false,
       })
+      if (attempt !== attemptRef.current) return
+      const trusted =
+        result.signatureVerified && (await isPublisherKeyTrusted(result.authorPublicKey))
+      if (attempt !== attemptRef.current) return
       setPreview(result)
-      const trusted = await isPublisherKeyTrusted(result.authorPublicKey)
       setPublisherAlreadyTrusted(trusted)
       setTrustAuthor(trusted) // already trusted → preselect "yes, keep trusting"
       setStage("preview")
     } catch (error) {
+      if (attempt !== attemptRef.current) return
       setErrorMessage(error instanceof Error ? error.message : String(error))
       setStage("error")
     }
@@ -113,36 +133,43 @@ export function PluginSignedInstallFromUrlDialog({
 
   const handleConfirm = useCallback(async () => {
     if (!preview) return
+    const attempt = attemptRef.current
     setErrorMessage(null)
-    setStage("installing")
     try {
-      // If the user opted not to trust an unknown signed author, abort
-      // before we hit the network again — they have to accept first.
       if (preview.signatureVerified && !publisherAlreadyTrusted && !trustAuthor) {
         throw new Error(trustRequiredError)
       }
-      const result = await installFromUrl({
-        bundleUrl: bundleUrl.trim(),
-        signatureUrl: signatureUrl.trim() || undefined,
-        expectedPublicKeyBase64: publicKey.trim() || undefined,
+      if (!preview.bundleSha256) throw new Error(t("previewIntegrityError"))
+      setStage("granting")
+      const decision = await requestGrant({
+        manifest: preview.manifest,
+        authorFingerprint:
+          preview.signatureVerified && preview.authorFingerprint
+            ? shortFingerprint(preview.authorFingerprint)
+            : undefined,
+        persist: false,
       })
-      const decision = await grant.requestGrant({
-        manifest: result.manifest,
-        authorFingerprint: result.authorFingerprint
-          ? shortFingerprint(result.authorFingerprint)
-          : undefined,
-      })
-      if (decision) {
-        onInstalled?.(result)
-        handleOpenChange(false)
-      } else {
-        // User cancelled the grant sheet — leave the install in place but
-        // close the URL dialog so they can grant later from the per-plugin
-        // permission UI.
-        onInstalled?.(result)
-        handleOpenChange(false)
+      if (attempt !== attemptRef.current) return
+      if (!decision) {
+        setStage("preview")
+        return
       }
+      setStage("installing")
+      const result = await getPluginManager().installWasmPluginFromUrl(
+        {
+          bundleUrl: bundleUrl.trim(),
+          signatureUrl: signatureUrl.trim() || undefined,
+          expectedPublicKeyBase64: publicKey.trim() || undefined,
+          expectedBundleSha256: preview.bundleSha256,
+          requireSignature: preview.signatureVerified,
+        },
+        decision.decision
+      )
+      if (attempt !== attemptRef.current) return
+      onInstalled?.(result)
+      handleOpenChange(false)
     } catch (error) {
+      if (attempt !== attemptRef.current) return
       setErrorMessage(error instanceof Error ? error.message : String(error))
       setStage("error")
     }
@@ -153,10 +180,11 @@ export function PluginSignedInstallFromUrlDialog({
     bundleUrl,
     signatureUrl,
     publicKey,
-    grant,
+    requestGrant,
     onInstalled,
     handleOpenChange,
     trustRequiredError,
+    t,
   ])
 
   const canPreview = useMemo(() => {
@@ -290,7 +318,7 @@ export function PluginSignedInstallFromUrlDialog({
             </div>
           )}
 
-          {stage === "installing" && (
+          {(stage === "previewing" || stage === "granting" || stage === "installing") && (
             <div className="flex items-center justify-center py-8">
               <Loader2Icon className="size-5 animate-spin text-muted-foreground" aria-hidden />
               <span className="ml-2 text-sm">
@@ -303,6 +331,7 @@ export function PluginSignedInstallFromUrlDialog({
             <Button
               variant="outline"
               onClick={() => handleOpenChange(false)}
+              disabled={stage === "installing"}
               data-testid="install-from-url-cancel"
             >
               {t("cancel")}
@@ -324,7 +353,7 @@ export function PluginSignedInstallFromUrlDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {grant.sheet}
+      {grantSheet}
     </>
   )
 }
