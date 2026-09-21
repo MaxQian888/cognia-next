@@ -960,6 +960,21 @@ fn write_entry(root: &Path, rel_path: &str, entry: Option<&EntryPayload>) -> Res
     Ok(())
 }
 
+/// The workspace-relative path a patch entry may touch, or a refusal.
+///
+/// The lexical half — no `..`, no absolute path, no drive prefix — is the
+/// obvious one. The second half exists because the lexical check alone was
+/// evaded by a symlinked directory: `read_entry` would `fs::read` through it
+/// and `write_entry` would `fs::remove_file` through it, both **before** the
+/// canonical-parent check at the end of `write_entry` ever ran. A workspace
+/// holding `vendor -> /some/other/tree` therefore let a patch entry for
+/// `vendor/secret` read and delete a file outside the workspace.
+///
+/// [`crate::confine::parent_stays_inside_root`] resolves the deepest existing
+/// ancestor first, so an escape is refused before any read, remove or create.
+/// A symlink that stays inside the workspace is still ordinary here — pnpm
+/// stores and vendored checkouts are full of them, and this apply path
+/// predates the delegate's stricter no-symlink contract.
 fn confined_target(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
     let relative = Path::new(rel_path);
     if relative.as_os_str().is_empty()
@@ -973,6 +988,7 @@ fn confined_target(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("path escapes workspace: {rel_path}"));
     }
+    crate::confine::parent_stays_inside_root(root, rel_path)?;
     Ok(root.join(relative))
 }
 
@@ -1040,6 +1056,74 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// [ACC:DEL-05] A patch entry that reaches through a symlinked directory
+    /// out of the workspace is refused at the filesystem layer — before the
+    /// read, and before the `remove_file` that used to delete the host's file
+    /// on its way to discovering the escape.
+    #[cfg(unix)]
+    #[test]
+    fn a_patch_entry_cannot_read_or_delete_through_a_symlinked_directory() {
+        let workspace = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("credentials");
+        fs::write(&secret, "host secret").unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("vendor")).unwrap();
+
+        let Err(read) = read_entry(workspace.path(), "vendor/credentials") else {
+            panic!("reading through a symlinked directory must be refused");
+        };
+        assert!(read.contains("escapes workspace"), "{read}");
+
+        let deleted = write_entry(workspace.path(), "vendor/credentials", None).unwrap_err();
+        assert!(deleted.contains("escapes workspace"), "{deleted}");
+
+        let created = write_entry(
+            workspace.path(),
+            "vendor/planted.txt",
+            Some(&EntryPayload {
+                bytes: b"planted".to_vec(),
+                kind: ResourceKind::File,
+                mode: None,
+            }),
+        )
+        .unwrap_err();
+        assert!(created.contains("escapes workspace"), "{created}");
+
+        assert_eq!(fs::read_to_string(&secret).unwrap(), "host secret");
+        assert!(!outside.path().join("planted.txt").exists());
+    }
+
+    /// The same rule leaves an ordinary in-workspace symlink alone: a patch
+    /// may still write through `packages/app -> ../app`, which is what a
+    /// pnpm store or a vendored checkout looks like.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_inside_the_workspace_is_still_writable() {
+        let workspace = TempDir::new().unwrap();
+        fs::create_dir_all(workspace.path().join("real")).unwrap();
+        std::os::unix::fs::symlink(
+            workspace.path().join("real"),
+            workspace.path().join("linked"),
+        )
+        .unwrap();
+
+        write_entry(
+            workspace.path(),
+            "linked/file.txt",
+            Some(&EntryPayload {
+                bytes: b"inside".to_vec(),
+                kind: ResourceKind::File,
+                mode: None,
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("real/file.txt")).unwrap(),
+            "inside"
+        );
+    }
 
     #[test]
     fn capacity_failure_requires_an_explicit_irreversible_override() {

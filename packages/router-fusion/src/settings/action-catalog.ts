@@ -36,23 +36,37 @@ import type { ActionOverride, RouterFusionSettings } from "./settings"
 export const CUSTOM_ACTION_ID_PATTERN = /^[a-z][a-z0-9_]{2,47}$/
 
 /**
- * Modes an action of the user's own may have. Delegate is DORMANT until B4 (a
- * workspace, a sandbox and an approval step): the editor shows it disabled and
- * labelled, and validation refuses it.
+ * Modes an action of the user's own may have. B4 added `delegate`: a delegate
+ * action runs in a sandboxed worktree against an approved acceptance profile,
+ * so the editor offers it like any other mode. A delegate action the router
+ * cannot serve — no sandbox tier, no approved profile — is excluded per
+ * request with `SANDBOX_UNAVAILABLE` / `ACCEPTANCE_PROFILE_MISSING`, which is a
+ * capability answer rather than a catalog one.
  */
-export const EDITABLE_ACTION_MODES: readonly ExecutionMode[] = ["direct", "cascade", "panel"]
+export const EDITABLE_ACTION_MODES: readonly ExecutionMode[] = [
+  "direct",
+  "cascade",
+  "panel",
+  "delegate",
+]
 
 /**
  * The verifier profiles an edited action may pick, per mode. `code_fixture` is
- * DORMANT until B4 supplies a runtime verifier: without one it can only ever be
- * inconclusive, so it is not offered; the built-in `cascade_code` keeps it and
- * the router excludes it until then.
+ * B4's runtime verifier (`verify/code-acceptance-host.ts`): a command the
+ * project declared and the user approved, run in the strongest sandbox tier
+ * this device has. It is the ONLY profile a delegate action may carry, which
+ * `config/compile.ts` also enforces, so the two cannot drift.
+ *
+ * It stays off the cascade list: `cascade_code` would need the same workspace
+ * and approval a delegate run has, and a cascade run carries neither, so the
+ * router still never chooses it (`run-route.ts` offers `code_fixture` only for
+ * a request whose project has both).
  */
 export const EDITABLE_PROFILES_BY_MODE: Record<ExecutionMode, readonly VerifierProfile[]> = {
   direct: ["text_basic", "text_review", "schema_fixture"],
   cascade: ["text_basic", "text_review", "schema_fixture"],
   panel: ["evidence_review"],
-  delegate: [],
+  delegate: ["code_fixture"],
 }
 
 export type ActionDraftIssue =

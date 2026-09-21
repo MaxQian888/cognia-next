@@ -26,7 +26,7 @@ import type { FusionLedgerStore } from "../db/ledger-store"
 import {
   acceptRun,
   billingOf,
-  EXECUTABLE_MODES,
+  COMPAT_EXECUTABLE_MODES,
   issuesToError,
   readRunForActor,
   readRunResult,
@@ -55,7 +55,7 @@ export async function createChatRunFromApi(
   if (scopeError) return { ok: false, error: scopeError }
   const parsed = parseChatCompatRequest(input.body)
   if (!parsed.ok) return { ok: false, error: issuesToError(parsed.issues) }
-  const mapped = chatRunInputOf(parsed.value, EXECUTABLE_MODES, deps.policy())
+  const mapped = chatRunInputOf(parsed.value, COMPAT_EXECUTABLE_MODES, await deps.policy())
   if (!mapped.ok) return { ok: false, error: issuesToError(mapped.issues) }
   return acceptRun(deps, {
     actor: input.actor,

@@ -1,24 +1,26 @@
 //! Shared task-workspace command surface for desktop and headless runtimes.
 
 use cognia_task_workspace::{
+    apply_revision_patch, read_confined_text, read_report_file, workspace_revision,
     AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
-    BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConflictResolution,
-    DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome,
-    RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
-    ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
-    TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
-    TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease,
-    WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy,
-    WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult,
-    WorkspaceRecord, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+    BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConfinedFileRead,
+    ConflictResolution, DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome,
+    ReconcileOutcome, RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind,
+    ResourceRead, ResourceTrackingPolicy, RevisionApplyOutcome, RevisionPatch, RunState,
+    ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
+    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
+    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
+    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
+    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord, WorkspaceRevision,
+    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tauri::Emitter;
@@ -218,11 +220,13 @@ impl WorktreeLifecycleSink for HookWorktreeLifecycleSink {
         let fields = worktree_hook_fields(&event);
         tauri::async_runtime::spawn(async move {
             let settings = crate::hooks::load_effective_settings(Some(&cwd));
+            let cwd_trusted = crate::hooks::trust::is_trusted(&cwd);
             let decision = crate::hooks::run_session_scoped(
                 &settings,
                 hook_event,
                 &session_id,
                 Some(&cwd),
+                cwd_trusted,
                 // Worktree lifecycle is host bookkeeping, not an agent turn —
                 // same classification the TS producer uses in lib/git/commands.ts.
                 crate::hooks::HookAgentIdentity {
@@ -944,6 +948,78 @@ pub async fn task_workspace_prune() -> Result<PruneOutcome, String> {
     blocking(TaskWorkspaceService::prune).await
 }
 
+// ── revision CAS over a workspace root (ADR-0188 B4, WP-D6's crate API) ──────
+//
+// Three local-workspace operations the TS host had no way to reach: the
+// revision a delegate patch is cut from and checked against, the compare-and-
+// swap that applies one, and the confined read that brings a file or an
+// acceptance report back out of a sandbox worktree.
+//
+// Renderer-owned on purpose (`target: "client"` in the command manifest). They
+// name a filesystem path on THIS machine and write the person's checkout, so
+// no paired device may call them: a device that wants a run's patch applied
+// asks for the run's approval, and the apply then happens here. A device's
+// read of a workspace file stays `fs_read_workspace_file`, which is confined
+// to a registered workspace root and gated by `host.observe`.
+//
+// Every one of them is filesystem work, so it runs on the blocking pool rather
+// than on the async runtime's worker.
+
+/// The revision a patch is cut from: `wsrev1:<sha256>` over the tree, and the
+/// number of files it covers.
+#[tauri::command]
+pub async fn task_workspace_revision_get(root: String) -> Result<WorkspaceRevision, String> {
+    spawn_workspace_read(move || workspace_revision(Path::new(&root))).await
+}
+
+/// Apply a whole-file patch against the revision it declares. A workspace that
+/// moved is answered `conflict` with nothing written (DEL-04); a patch this
+/// host will not take — an unknown format, a path that leaves the root — is
+/// `refused` with the reason, never a partial write.
+#[tauri::command]
+pub async fn task_workspace_revision_apply(
+    root: String,
+    patch: RevisionPatch,
+) -> Result<RevisionApplyOutcome, String> {
+    spawn_workspace_read(move || apply_revision_patch(Path::new(&root), &patch)).await
+}
+
+/// Read one file out of a workspace root, confined to it.
+///
+/// `whole: true` is the acceptance-report read: a report is parsed whole, so
+/// over its cap it answers `too_large` instead of truncating, and a command
+/// that wrote no report at all answers `missing` — which is what tells a run
+/// it is inconclusive rather than passed (DEL-02). Without it the read is the
+/// ordinary text read, which truncates at its limit and says so.
+#[tauri::command]
+pub async fn task_workspace_revision_read(
+    root: String,
+    rel_path: String,
+    max_bytes: Option<u64>,
+    whole: Option<bool>,
+) -> Result<ConfinedFileRead, String> {
+    spawn_workspace_read(move || {
+        if whole.unwrap_or(false) {
+            read_report_file(Path::new(&root), &rel_path, max_bytes)
+        } else {
+            read_confined_text(Path::new(&root), &rel_path, max_bytes)
+        }
+    })
+    .await
+}
+
+/// Run one crate call on the blocking pool. These take no service: the root is
+/// the caller's own path, confined by the crate itself.
+async fn spawn_workspace_read<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("task workspace operation panicked: {error}"))?
+}
+
 pub struct TauriResourceEventSink(pub tauri::AppHandle);
 
 impl TaskWorkspaceEventSink for TauriResourceEventSink {
@@ -1271,7 +1347,7 @@ mod tests {
         let status = task_workspace_status();
         assert!(status.available);
         assert_eq!(status.event_name, RESOURCE_EVENT);
-        assert_eq!(status.max_transfer_chunk_bytes, 24 * 1024);
+        assert_eq!(status.max_transfer_chunk_bytes, 64 * 1024);
         assert_eq!(status.text_preview_bytes, 1024 * 1024);
         assert_eq!(status.editor_bytes, 5 * 1024 * 1024);
     }
@@ -1331,6 +1407,7 @@ mod tests {
         let service = install(data.path().to_path_buf()).unwrap();
         let bundle = service
             .acquire_workspace_bundle(cognia_task_workspace::AcquireWorkspaceBundle {
+                requested_name: None,
                 owner_type: cognia_task_workspace::WorkspaceOwnerType::Session,
                 owner_ref: Some("session-test".into()),
                 // This run belongs to no Workspace and the fixture repository
@@ -1461,6 +1538,164 @@ mod tests {
     /// ADR-0176. The mirror cache root is dormant unless boot points it at the
     /// data directory: `cognia_git_mirror::root()` otherwise answers with a
     /// temp-dir fallback, and every clone would cache somewhere the day-long
+    // ── the revision commands (WP-D6's crate API, reached from TS) ───────────
+    //
+    // The crate's own suite proves the CAS and the confinement. What these pin
+    // is the command layer: that each one reaches the right crate function
+    // with the caller's arguments, that `whole` picks the report read rather
+    // than the truncating one, and that a failure comes back as a value the
+    // renderer can act on instead of a panic.
+    use cognia_task_workspace::ConfinedReadStatus;
+    use sha2::Digest as _;
+
+    fn patch(base: &str, path: &str, content: &str) -> RevisionPatch {
+        RevisionPatch {
+            format: cognia_task_workspace::REVISION_PATCH_FORMAT.to_string(),
+            base_revision: base.to_string(),
+            files: vec![cognia_task_workspace::RevisionPatchFile {
+                path: path.to_string(),
+                action: cognia_task_workspace::RevisionPatchAction::Write,
+                content: Some(content.to_string()),
+                content_sha256: Some(hex::encode(sha2::Sha256::digest(content.as_bytes()))),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn revision_get_answers_the_root_it_was_given() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(workspace.path().join("a.txt"), "one").unwrap();
+        let root = workspace.path().to_string_lossy().to_string();
+
+        let revision = task_workspace_revision_get(root.clone()).await.unwrap();
+        assert!(revision.revision.starts_with("wsrev1:"));
+        assert_eq!(revision.file_count, 1);
+
+        // The same tree is the same revision; a changed tree is not.
+        assert_eq!(
+            task_workspace_revision_get(root.clone()).await.unwrap(),
+            revision
+        );
+        std::fs::write(workspace.path().join("b.txt"), "two").unwrap();
+        let moved = task_workspace_revision_get(root).await.unwrap();
+        assert_ne!(moved.revision, revision.revision);
+        assert_eq!(moved.file_count, 2);
+    }
+
+    #[tokio::test]
+    async fn revision_apply_writes_on_its_base_and_conflicts_once_the_tree_moved() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(workspace.path().join("a.txt"), "one").unwrap();
+        let root = workspace.path().to_string_lossy().to_string();
+        let base = task_workspace_revision_get(root.clone())
+            .await
+            .unwrap()
+            .revision;
+
+        let applied = task_workspace_revision_apply(root.clone(), patch(&base, "a.txt", "two"))
+            .await
+            .unwrap();
+        assert_eq!(
+            applied.status,
+            cognia_task_workspace::RevisionApplyStatus::Applied
+        );
+        assert_eq!(applied.written, vec!["a.txt".to_string()]);
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("a.txt")).unwrap(),
+            "two"
+        );
+
+        // The same patch against the revision it was cut from no longer fits:
+        // nothing is written, and the caller is told where the tree is now.
+        let conflict = task_workspace_revision_apply(root.clone(), patch(&base, "a.txt", "three"))
+            .await
+            .unwrap();
+        assert_eq!(
+            conflict.status,
+            cognia_task_workspace::RevisionApplyStatus::Conflict
+        );
+        assert!(conflict.written.is_empty());
+        assert_eq!(
+            conflict.current_revision,
+            Some(applied.current_revision.clone().unwrap())
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("a.txt")).unwrap(),
+            "two"
+        );
+
+        // A patch this host does not speak is refused with its reason, never
+        // half-written.
+        let mut alien = patch(&base, "a.txt", "four");
+        alien.format = "someone-elses-patch".into();
+        let refused = task_workspace_revision_apply(root, alien).await.unwrap();
+        assert_eq!(
+            refused.status,
+            cognia_task_workspace::RevisionApplyStatus::Refused
+        );
+        assert!(refused.refusal.is_some());
+    }
+
+    #[tokio::test]
+    async fn revision_read_truncates_text_and_refuses_an_oversized_report() {
+        let workspace = TempDir::new().unwrap();
+        std::fs::write(workspace.path().join("notes.txt"), "abcdefghij").unwrap();
+        let root = workspace.path().to_string_lossy().to_string();
+
+        // The text read is bounded and says when it stopped early.
+        let cut = task_workspace_revision_read(root.clone(), "notes.txt".into(), Some(4), None)
+            .await
+            .unwrap();
+        assert_eq!(cut.status, ConfinedReadStatus::Ok);
+        assert_eq!(cut.content.as_deref(), Some("abcd"));
+        assert!(cut.truncated);
+        assert_eq!(cut.size_bytes, 10);
+
+        // The report read is whole or nothing: a cut JUnit file is a parse
+        // error, not a smaller report.
+        let too_large =
+            task_workspace_revision_read(root.clone(), "notes.txt".into(), Some(4), Some(true))
+                .await
+                .unwrap();
+        assert_eq!(too_large.status, ConfinedReadStatus::TooLarge);
+        assert!(too_large.content.is_none());
+
+        let whole =
+            task_workspace_revision_read(root.clone(), "notes.txt".into(), None, Some(true))
+                .await
+                .unwrap();
+        assert_eq!(whole.status, ConfinedReadStatus::Ok);
+        assert_eq!(whole.content.as_deref(), Some("abcdefghij"));
+        assert!(!whole.truncated);
+
+        // A command that wrote no report at all is `missing`, which is what
+        // lets a run be called inconclusive instead of passed (DEL-02).
+        let missing =
+            task_workspace_revision_read(root.clone(), "report.xml".into(), None, Some(true))
+                .await
+                .unwrap();
+        assert_eq!(missing.status, ConfinedReadStatus::Missing);
+
+        // And a path that leaves the root never reads anything.
+        let escape = task_workspace_revision_read(root, "../secrets.txt".into(), None, None)
+            .await
+            .unwrap();
+        assert_eq!(escape.status, ConfinedReadStatus::Refused);
+        assert!(escape.content.is_none());
+    }
+
+    #[tokio::test]
+    async fn revision_commands_answer_an_unusable_root_as_an_error() {
+        let missing = TempDir::new().unwrap().path().join("gone");
+        let root = missing.to_string_lossy().to_string();
+        assert!(task_workspace_revision_get(root.clone()).await.is_err());
+        assert!(
+            task_workspace_revision_read(root, "a.txt".into(), None, None)
+                .await
+                .is_err()
+        );
+    }
+
     /// sweep never looks. `install` is the one seam both hosts pass through, so
     /// pinning it here pins it for the desktop shell and `cognia-server` alike.
     #[test]

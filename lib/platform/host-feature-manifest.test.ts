@@ -2,6 +2,7 @@ import {
   ENVIRONMENT_CATALOG_HOST_OPERATIONS,
   HOST_FEATURE_MANIFEST_SCHEMA_VERSION,
   INBOX_RELAY_HOST_OPERATIONS,
+  ROUTER_FUSION_COMPANION_HOST_OPERATIONS,
   buildLocalHostFeatureManifest,
   parseHostFeatureManifest,
   supportsHostFeatureOperation,
@@ -691,6 +692,38 @@ describe("environment.catalog", () => {
     expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).not.toBeNull()
     expect(
       supportsHostFeatureOperation(manifest, "environment.catalog", "environment_driver_status")
+    ).toBe(true)
+  })
+})
+
+describe("router-fusion.companion", () => {
+  // ADR-0188 D36: a companion reads the host's effective switch instead of
+  // guessing. The arms ship with both execution hosts; the switch is health.
+  it("is declared by both execution hosts with the five companion operations", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["router-fusion.companion"]
+      ).toEqual({ version: 1, operations: [...ROUTER_FUSION_COMPANION_HOST_OPERATIONS] })
+    }
+    expect(
+      buildLocalHostFeatureManifest({ platform: "web" }).features["router-fusion.companion"]
+    ).toBeUndefined()
+  })
+
+  it("offers a run only while the host reports the operation healthy", () => {
+    const off = buildLocalHostFeatureManifest({
+      platform: "tauri",
+      operationHealth: {
+        execution_run_create: { healthy: false, reason: "ROUTER_FUSION_DISABLED" },
+      },
+    })
+    expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(off)))).not.toBeNull()
+    expect(
+      supportsHostFeatureOperation(off, "router-fusion.companion", "execution_run_create")
+    ).toBe(false)
+    const on = buildLocalHostFeatureManifest({ platform: "tauri" })
+    expect(
+      supportsHostFeatureOperation(on, "router-fusion.companion", "execution_run_create")
     ).toBe(true)
   })
 })

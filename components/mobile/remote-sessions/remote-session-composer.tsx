@@ -62,6 +62,10 @@ import {
   type UploadableAttachment,
 } from "@/lib/companion/attachment-upload-client"
 import type { RemoteSendOptions } from "@/hooks/data/use-remote-session-stream"
+import {
+  CompanionFusionModePicker,
+  type CompanionComposerMode,
+} from "@/components/router-fusion/companion/companion-fusion-mode-picker"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { listParamTokens } from "@/lib/chat/template/param-segments"
 
@@ -98,6 +102,12 @@ export interface RemoteSessionComposerProps {
     options?: RemoteSendOptions
   ) => Promise<void>
   onInterrupt: () => void
+  /**
+   * Start a Router + Fusion run of the message instead of sending it
+   * (ADR-0188 D25). Passed only while the host would run one for this device;
+   * absent, the composer has no run-mode entry at all.
+   */
+  onFusionRun?: (text: string, mode: "cascade" | "panel") => Promise<void>
 }
 
 export function RemoteSessionComposer({
@@ -106,8 +116,14 @@ export function RemoteSessionComposer({
   offline,
   onSend,
   onInterrupt,
+  onFusionRun,
 }: RemoteSessionComposerProps) {
   const t = useTranslations("mobile.remoteSessions.detail")
+  const tFusion = useTranslations("routerFusionCompanion.composer")
+  const [fusionMode, setFusionMode] = useState<CompanionComposerMode>("direct")
+  // The host stopped offering runs (switch off, grant revoked): the message
+  // goes out as an ordinary send again rather than into a refusal.
+  const runMode: CompanionComposerMode = onFusionRun ? fusionMode : "direct"
   const [draft, setDraft] = useState("")
   const [staged, setStaged] = useState<StagedFile[]>([])
   const [sending, setSending] = useState(false)
@@ -215,6 +231,9 @@ export function RemoteSessionComposer({
       if (!incoming || incoming.length === 0 || !uploads) return
       const prepared = await prepareComposerAttachments(Array.from(incoming), {
         maxFileSize: uploads.maxBytes,
+        // This transport retains only the bytes it uploads. Refuse an original
+        // above the Host limit rather than silently replacing it with a preview.
+        optimizeImage: async (file) => file,
       })
       if (prepared.unsupportedCount > 0) toast.warning(t("attachmentUnsupported"))
       if (prepared.tooLargeCount > 0) {
@@ -285,6 +304,30 @@ export function RemoteSessionComposer({
       toast.error(t("templateParamsUnfilled", { count: unfilled.length }))
       return
     }
+    if (runMode !== "direct" && onFusionRun) {
+      // A Cascade or Panel run reads text; attachments would be dropped on the
+      // floor, so the composer says so and keeps everything where it is.
+      if (staged.length > 0 || !text) {
+        toast.warning(tFusion("textOnly"))
+        return
+      }
+      setSending(true)
+      try {
+        await onFusionRun(text, runMode)
+        history.record(text)
+        setDraft("")
+        void clearDraft(sessionId).catch(() => undefined)
+      } catch (error) {
+        toast.error(
+          tFusion("startFailed", {
+            message: error instanceof Error ? error.message : String(error),
+          })
+        )
+      } finally {
+        setSending(false)
+      }
+      return
+    }
     const files = staged
     setSending(true)
     try {
@@ -326,7 +369,7 @@ export function RemoteSessionComposer({
     } finally {
       setSending(false)
     }
-  }, [draft, history, onSend, sending, sessionId, staged, t])
+  }, [draft, history, onFusionRun, onSend, runMode, sending, sessionId, staged, t, tFusion])
 
   const blocked = offline || sending
 
@@ -367,6 +410,13 @@ export function RemoteSessionComposer({
         </Attachments>
       ) : null}
       <div className="flex items-center gap-2">
+        {onFusionRun ? (
+          <CompanionFusionModePicker
+            mode={runMode}
+            onModeChange={setFusionMode}
+            disabled={blocked}
+          />
+        ) : null}
         {uploads ? (
           <>
             <input

@@ -71,6 +71,7 @@ export class BM25Index {
     new Map()
   private termDocFreq: Map<string, number> = new Map()
   private avgDocLength: number = 0
+  private totalDocLength: number = 0
   private k1: number
   private b: number
 
@@ -117,7 +118,8 @@ export class BM25Index {
       this.termDocFreq.set(term, (this.termDocFreq.get(term) || 0) + 1)
     }
 
-    // Update average document length
+    // Incremental length accounting keeps bulk indexing linear in corpus size.
+    this.totalDocLength += terms.length
     this.updateAvgDocLength()
   }
 
@@ -148,6 +150,7 @@ export class BM25Index {
     }
 
     this.documents.delete(id)
+    this.totalDocLength -= doc.length
     this.updateAvgDocLength()
   }
 
@@ -159,11 +162,7 @@ export class BM25Index {
       this.avgDocLength = 0
       return
     }
-    let totalLength = 0
-    for (const doc of this.documents.values()) {
-      totalLength += doc.length
-    }
-    this.avgDocLength = totalLength / this.documents.size
+    this.avgDocLength = this.totalDocLength / this.documents.size
   }
 
   /**
@@ -234,6 +233,7 @@ export class BM25Index {
   clear(): void {
     this.documents.clear()
     this.termDocFreq.clear()
+    this.totalDocLength = 0
     this.avgDocLength = 0
   }
 
@@ -275,7 +275,12 @@ export class BM25Index {
     }
     const index = new BM25Index({ k1: snapshot.k1, b: snapshot.b })
     for (const document of snapshot.documents) {
-      if (!document.id || !Number.isInteger(document.length) || document.length < 0) {
+      if (
+        !document.id ||
+        index.documents.has(document.id) ||
+        !Number.isInteger(document.length) ||
+        document.length < 0
+      ) {
         throw new Error("Invalid BM25 snapshot document")
       }
       const terms = new Map<string, number>()
@@ -287,6 +292,7 @@ export class BM25Index {
         index.termDocFreq.set(term, (index.termDocFreq.get(term) ?? 0) + 1)
       }
       index.documents.set(document.id, { content: "", terms, length: document.length })
+      index.totalDocLength += document.length
     }
     index.updateAvgDocLength()
     return index

@@ -57,11 +57,17 @@ describe("recoverRouterFusionRuns", () => {
     } as unknown as RouterFusionHost
     const utilities = { routerFusion: { enabled: true, surfaces: { utilityLedger: true } } }
     await expect(recoverRouterFusionRuns(utilities, async () => host)).resolves.toBe(1)
-    // A dormant surface switched on in stored settings still sweeps nothing.
+    // The companion surface is wired since WP-C: a run a paired phone started
+    // and a closed window left behind is swept and carried on like any other.
+    const companion = { routerFusion: { enabled: true, surfaces: { companion: true } } }
+    await expect(recoverRouterFusionRuns(companion, async () => host)).resolves.toBe(1)
+    expect(host.orchestratedRunResumer).toHaveBeenLastCalledWith(companion, ["companion"])
+    // A surface this build does not declare, switched on in stored settings,
+    // still sweeps nothing: only wired switches count.
     const loadHost = jest.fn()
     await expect(
       recoverRouterFusionRuns(
-        { routerFusion: { enabled: true, surfaces: { companion: true } } },
+        { routerFusion: { enabled: true, surfaces: { notASurface: true } } } as never,
         loadHost
       )
     ).resolves.toBeNull()
@@ -127,10 +133,17 @@ describe("Router + Fusion retention schedule", () => {
         loadHost
       )
     ).resolves.toBeNull()
-    // A dormant surface switched on in stored settings is still not wired.
+    // With the master switch off every surface is off, the companion's
+    // included, and a key the build does not declare is never a surface.
     await expect(
       pruneRouterFusionData(
-        { routerFusion: { enabled: true, surfaces: { companion: true } } },
+        { routerFusion: { enabled: false, surfaces: { companion: true } } },
+        loadHost
+      )
+    ).resolves.toBeNull()
+    await expect(
+      pruneRouterFusionData(
+        { routerFusion: { enabled: true, surfaces: { notASurface: true } } } as never,
         loadHost
       )
     ).resolves.toBeNull()

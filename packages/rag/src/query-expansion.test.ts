@@ -1,9 +1,21 @@
+// Only the generation is faked; the rest of the SDK (e.g. `cosineSimilarity`)
+// stays real, as other package modules use it.
+jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+
+import { generateText } from "ai"
+import type { LanguageModel } from "ai"
+import type { GenerationRequest, GenerationSend } from "@cognia/provider-embedding/generation-seam"
+
 /**
  * Tests for Query Expansion Module
  */
 
 import {
   extractKeywords,
+  generateHypotheticalAnswer,
+  generateStepBackQuery,
+  decomposeQuery,
+  expandQuery,
   generateSynonyms,
   expandWithSynonyms,
   mergeQueryResults,
@@ -259,5 +271,69 @@ describe("mergeQueryResults", () => {
     const merged = mergeQueryResults(resultSets, { dedup: false })
 
     expect(merged.length).toBe(2)
+  })
+})
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+// The host injects `generate` when its ledger surface is on; with nothing
+// injected the model is called exactly as it always was.
+
+const mockedGenerateText = generateText as jest.Mock
+const seamModel = { modelId: "m-1" } as unknown as LanguageModel
+
+/** A seam that reserves the call: it bounds the output and kills SDK retries. */
+function boundingSeam() {
+  const requests: GenerationRequest[] = []
+  const seam = async (request: GenerationRequest, send: GenerationSend) => {
+    requests.push(request)
+    return (await send({ maxOutputTokens: 64, maxRetries: 0 })).text
+  }
+  return { seam, requests }
+}
+
+/** The keys of the one `generateText` call, sorted. */
+function callKeys(): string[] {
+  return Object.keys(mockedGenerateText.mock.calls[0][0] as Record<string, unknown>).sort()
+}
+
+describe("query expansion generation seam", () => {
+  beforeEach(() => {
+    mockedGenerateText.mockReset()
+    mockedGenerateText.mockResolvedValue({ text: "a broader question" })
+  })
+
+  it("calls the model directly when no seam is injected", async () => {
+    await expect(generateStepBackQuery("why is the sky blue", seamModel)).resolves.toBe(
+      "a broader question"
+    )
+    expect(callKeys()).toEqual(["model", "prompt", "temperature"])
+  })
+
+  it("runs the step-back call through an injected seam, which bounds it", async () => {
+    const { seam, requests } = boundingSeam()
+    await generateStepBackQuery("why is the sky blue", seamModel, { generate: seam })
+    expect(requests[0]).toMatchObject({ stage: "rag.step-back", modelId: "m-1", temperature: 0.3 })
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64, maxRetries: 0 })
+    )
+  })
+
+  it("runs HyDE and decomposition through the seam too", async () => {
+    const { seam, requests } = boundingSeam()
+    await generateHypotheticalAnswer("q", seamModel, { generate: seam })
+    mockedGenerateText.mockResolvedValue({ text: '["a", "b"]' })
+    await decomposeQuery("q", seamModel, { generate: seam })
+    expect(requests.map((r) => r.stage)).toEqual(["rag.hyde", "rag.decompose"])
+  })
+
+  it("threads the config's seam through every stage of expandQuery", async () => {
+    mockedGenerateText.mockResolvedValue({ text: '["variant one"]' })
+    const { seam, requests } = boundingSeam()
+    await expandQuery("query terms", {
+      model: seamModel,
+      includeHypotheticalAnswer: true,
+      generate: seam,
+    })
+    expect(requests.map((r) => r.stage)).toEqual(["rag.query-variants", "rag.hyde", "rag.rewrite"])
   })
 })

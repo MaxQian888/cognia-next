@@ -12,9 +12,6 @@
  */
 
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
-import { createMappingRegistry, ProviderRoutingEngine } from "@cognia/provider-routing"
-import { buildRoutingEngineDeps } from "@cognia/provider-routing/build-preview-engine"
-import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import {
   usdToMicrousd,
   type ExecutionMode,
@@ -27,12 +24,12 @@ import { listMessages } from "@/lib/db/messages"
 import { createSession, getSession } from "@/lib/db/sessions"
 
 import { liveSettingsReader } from "../calls/live-settings"
-import { createChatRouteHost } from "../chat/chat-route-host"
 import { currentFusionStore } from "../chat/store-provider"
 import { tightestTenantLimit } from "../chat/tenant-budget"
 import { routeRunRequest } from "../routing/run-route"
 import { driveRun } from "../runtime/run-driver"
 import { webEvidenceAvailable } from "../tools/web-evidence"
+import { createRunApiRouteHost } from "./route-host"
 import {
   EXECUTABLE_MODES,
   titleFor,
@@ -44,12 +41,56 @@ import {
 } from "./run-api"
 
 /**
- * The account's own limits, as the request validator reads them. Workspaces and
- * acceptance profiles belong to delegate, which this build does not execute, so
- * they are answered honestly rather than optimistically: nothing is authorized
- * until B4 wires the real workspace trust.
+ * What a delegate request may name on this device (ADR-0188 B4, WP-D4).
+ *
+ * A workspace is "authorized" when it is a project this app knows AND its
+ * acceptance profiles could be read and approved — the same answer the router
+ * uses, so the request is refused at the same place for the same reason
+ * instead of passing validation and failing to route.
  */
-export function runRequestPolicyOf(appSettings: AppSettings): RunRequestPolicy {
+export interface DelegateRequestAuthorization {
+  /** The workspace the request named, when this device authorizes it. */
+  authorizedWorkspaceId: string | null
+  /** The profile ids approved at their current command hash (WP-D2). */
+  approvedProfileIds: readonly string[]
+}
+
+const NO_DELEGATE_AUTHORIZATION: DelegateRequestAuthorization = {
+  authorizedWorkspaceId: null,
+  approvedProfileIds: [],
+}
+
+/**
+ * Ask WP-D2 about ONE project. A request that names no workspace never gets
+ * here, so an ordinary cascade or panel call pays nothing for delegate.
+ */
+export async function delegateAuthorizationFor(
+  workspaceId: string | null | undefined
+): Promise<DelegateRequestAuthorization> {
+  if (!workspaceId) return NO_DELEGATE_AUTHORIZATION
+  try {
+    const { acceptanceProfileAvailable } = await import("../verify/acceptance-profiles")
+    const availability = await acceptanceProfileAvailable(workspaceId)
+    return {
+      authorizedWorkspaceId: availability.reason === "project_not_found" ? null : workspaceId,
+      approvedProfileIds: availability.approvedProfileIds,
+    }
+  } catch {
+    return NO_DELEGATE_AUTHORIZATION
+  }
+}
+
+/**
+ * The account's own limits, as the request validator reads them.
+ *
+ * Workspaces and acceptance profiles are delegate's (B4): answered from the
+ * project the request named, and `false` for every request that named none —
+ * honestly, rather than optimistically.
+ */
+export function runRequestPolicyOf(
+  appSettings: AppSettings,
+  delegate: DelegateRequestAuthorization = NO_DELEGATE_AUTHORIZATION
+): RunRequestPolicy {
   const settings = normalizeRouterFusionSettings(appSettings.routerFusion)
   return {
     trackedBudgetEnabled: settings.budgetMode === "tracked",
@@ -63,8 +104,8 @@ export function runRequestPolicyOf(appSettings: AppSettings): RunRequestPolicy {
             )
           )
         : usdToMicrousd(settings.runCapUsdByMode[mode]),
-    workspaceAuthorized: () => false,
-    acceptanceProfileExists: () => false,
+    workspaceAuthorized: (workspaceId) => workspaceId === delegate.authorizedWorkspaceId,
+    acceptanceProfileExists: (profileId) => delegate.approvedProfileIds.includes(profileId),
     minimumProfile: "economy",
     // A degraded result is labelled and never counted as a fusion success; a
     // caller that asks for one gets one.
@@ -104,9 +145,39 @@ export function sessionPort(): SessionPort {
   }
 }
 
+/**
+ * Which entry point a Run API run serves. `/v1/runs` is the gateway lane; a
+ * paired phone or browser reaches the same brain path over the companion RPC
+ * (`execution_run_*`, WP-C) and its run belongs to the `companion` surface, so
+ * the live checks before every reservation and the boot sweep read the
+ * companion switch, not the gateway's.
+ */
+export type RunApiLane = "gatewayRuns" | "companion"
+
+const LANE_ORIGIN: Record<RunApiLane, "gateway" | "companion"> = {
+  gatewayRuns: "gateway",
+  companion: "companion",
+}
+
+/**
+ * What a run writes into its conversation (DESIGN §12.1).
+ *
+ * `input-and-answer` is the Run API's own contract: the run appends the
+ * messages it was created with and, when it succeeds, its answer. A companion
+ * run that continues a conversation writes `answer-only`, for the reason the
+ * chat path does — the person's message is already in the transcript, put
+ * there by the surface that took it, and the run's input additionally carries
+ * the earlier turns as context, which must never be appended a second time.
+ */
+export type RunTranscriptMode = "input-and-answer" | "answer-only"
+
 export interface CreateRoutedRunOptions {
   newId?: () => string
   webToolsAvailable?: boolean
+  /** The surface and origin the run is recorded under; `gatewayRuns` when omitted. */
+  lane?: RunApiLane
+  /** What the run appends to its conversation; the Run API's own default when omitted. */
+  transcript?: RunTranscriptMode
 }
 
 /**
@@ -121,20 +192,11 @@ export async function createRoutedRun(
   options: CreateRoutedRunOptions = {}
 ): Promise<RunApiResult<{ runId: string }>> {
   const newId = options.newId ?? (() => globalThis.crypto.randomUUID())
-  const engineDeps = buildRoutingEngineDeps(appSettings)
-  const host = {
-    ...createChatRouteHost({
-      appSettings,
-      engine: new ProviderRoutingEngine(
-        createMappingRegistry(appSettings.modelMappings ?? []),
-        appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG,
-        engineDeps
-      ),
-      engineDeps,
-    }),
-    // A headless brain never loads the settings store; the snapshot stands in.
-    currentSettings: liveSettingsReader(appSettings),
-  }
+  const lane = options.lane ?? "gatewayRuns"
+  // The user's providers through the app's routing engine, with the snapshot
+  // standing in for the settings store no headless brain loads. The live smoke
+  // routes against the same host, so it is built in one place.
+  const host = createRunApiRouteHost(appSettings)
   const runId = newId()
   const route = await routeRunRequest(host, {
     runId,
@@ -168,8 +230,8 @@ export async function createRoutedRun(
     runId,
     inputArtifactId: input.inputArtifactId,
     sessionId: input.session.id,
-    surface: "gatewayRuns",
-    origin: "gateway",
+    surface: lane,
+    origin: LANE_ORIGIN[lane],
     decision: route.decision,
     actionId: route.actionId,
     ruleId: route.ruleId,
@@ -188,10 +250,18 @@ export async function createRoutedRun(
     title: titleFor(input.messages),
     expectedSessionVersion: input.request.expected_session_version ?? input.sessionVersion,
     currentSessionVersion: input.sessionVersion,
-    writesSessionTranscript: true,
+    writesSessionTranscript: (options.transcript ?? "input-and-answer") === "input-and-answer",
+    ...(options.transcript === "answer-only" ? { writesSessionAnswer: true } : {}),
     task: route.task,
     acceptanceProfile: route.acceptanceProfile,
     dataClass: route.dataClass,
+    // What a delegate run needs to verify anything (WP-D4): the project its
+    // acceptance profile and approval live on, the checkout it stages from,
+    // and the profile id itself. The route resolved all three; a non-delegate
+    // route carries none of them.
+    ...(route.projectId ? { projectId: route.projectId } : {}),
+    ...(route.workspaceRoot ? { workspaceRoot: route.workspaceRoot } : {}),
+    ...(route.acceptanceProfileId ? { acceptanceProfileId: route.acceptanceProfileId } : {}),
     // Driven from its stored input: a worker that finds it after a crash carries on.
     driver: "orchestrator",
   })
@@ -218,16 +288,22 @@ export async function createRoutedRun(
  * `snapshot` is the settings the bridge read for its gate check. The desktop
  * window's live store wins whenever it is loaded; a headless brain, which never
  * loads that store, works from the snapshot instead of from nothing.
+ *
+ * `lane` names the surface the runs it creates belong to (see {@link RunApiLane});
+ * the gateway bridge omits it.
  */
-export function runApiDeps(snapshot?: AppSettings | null): RunApiDeps {
+export function runApiDeps(
+  snapshot?: AppSettings | null,
+  options: { lane?: RunApiLane; transcript?: RunTranscriptMode } = {}
+): RunApiDeps {
   const appSettings = liveSettingsReader(snapshot)
   return {
     store: () => currentFusionStore(),
     appSettings,
-    policy: () => {
+    policy: async (policyInput) => {
       const settings = appSettings()
       if (!settings) throw new Error("Router + Fusion has no settings to validate a run against")
-      return runRequestPolicyOf(settings)
+      return runRequestPolicyOf(settings, await delegateAuthorizationFor(policyInput?.workspaceId))
     },
     session: sessionPort(),
     createRun: async (input) => {
@@ -242,7 +318,10 @@ export function runApiDeps(snapshot?: AppSettings | null): RunApiDeps {
           },
         }
       }
-      return createRoutedRun(input, settings)
+      return createRoutedRun(input, settings, {
+        ...(options.lane ? { lane: options.lane } : {}),
+        ...(options.transcript ? { transcript: options.transcript } : {}),
+      })
     },
     // `POST /v1/runs` answers 202: the run is driven after the answer goes out,
     // and the run's own lease keeps other processes out.

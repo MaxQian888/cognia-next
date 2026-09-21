@@ -80,6 +80,12 @@ export const HOST_FEATURE_IDS = [
   // while the pool is off, which is what the UI labels the surface inert
   // from.
   "environment.catalog",
+  // Router + Fusion for companions (ADR-0188 D25/D36). Its presence says this
+  // host carries the `execution_run_*` and `claude_call_reserve_respond` arms;
+  // whether it runs them right now is each operation's health, which follows
+  // the host's `companion` switch. The mobile composer offers Cascade and
+  // Panel only while `execution_run_create` is healthy.
+  "router-fusion.companion",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -238,6 +244,20 @@ export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
+] as const)
+
+/**
+ * The companion's Router + Fusion operations (ADR-0188, WP-C). Declared by
+ * every host that installs the arms (both hosts run
+ * `lib/companion/desktop-write-source.ts`); their health carries the host's
+ * `companion` switch, so a phone never offers a run the host would refuse.
+ */
+export const ROUTER_FUSION_COMPANION_HOST_OPERATIONS = Object.freeze([
+  "execution_run_create",
+  "execution_run_resume",
+  "execution_run_get",
+  "execution_run_events",
+  "claude_call_reserve_respond",
 ] as const)
 
 /**
@@ -552,6 +572,13 @@ export function buildLocalHostFeatureManifest({
     features["environment.catalog"] = {
       version: 1,
       operations: [...ENVIRONMENT_CATALOG_HOST_OPERATIONS],
+    }
+    // Router + Fusion for companions. Declared with the arms; the operations'
+    // health (from `operationHealth`, which the host fills from its companion
+    // switch) is what says whether a run would be accepted right now.
+    features["router-fusion.companion"] = {
+      version: 1,
+      operations: [...ROUTER_FUSION_COMPANION_HOST_OPERATIONS],
     }
     features["notifications.remote"] = {
       version: 1,

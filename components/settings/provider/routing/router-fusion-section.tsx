@@ -46,11 +46,18 @@ import {
 } from "@/lib/router-fusion/settings/legacy-auto-migration"
 import { saveRouterFusionSettings } from "@/lib/router-fusion/settings/save-router-fusion-settings"
 import { useSettingsStore } from "@/stores/settings"
+import { DelegateAcceptanceProfiles } from "@/components/router-fusion/delegate-acceptance-profiles"
 
 import { RouterFusionActionCatalog } from "./router-fusion-action-catalog"
+import { RouterFusionClassifierSection } from "./router-fusion-classifier-section"
 import { RouterFusionUsdField as UsdField } from "./router-fusion-usd-field"
 
 const DATA_CLASSES = ["public", "internal", "restricted"] as const
+/**
+ * The modes whose run cap this section edits with a `routerFusion` label.
+ * `delegate` is capped too (B4 brought it out of dormancy) and gets its own
+ * field below, from the delegate namespace.
+ */
 const CAPPED_MODES = ["direct", "cascade", "panel"] as const
 
 /** The in-memory trip of a surface, re-read whenever the breaker publishes. */
@@ -64,6 +71,7 @@ function useLiveTrip(surface: RouterFusionSurface): number | null {
 
 export function RouterFusionSection() {
   const t = useTranslations("routerFusion.settings")
+  const tDelegate = useTranslations("routerFusionDelegate.settings")
   const format = useFormatter()
   const raw = useSettingsStore((s) => s.settings?.routerFusion)
   const autoRouting = useSettingsStore((s) => s.settings?.autoRouting)
@@ -336,6 +344,18 @@ export function RouterFusionSection() {
         ))}
 
         <UsdField
+          id="router-fusion-delegate-cap"
+          label={tDelegate("runCap")}
+          description={tDelegate("runCapDesc")}
+          value={settings.runCapUsdByMode.delegate}
+          onCommit={(value) =>
+            persist((current) => ({
+              runCapUsdByMode: { ...current.runCapUsdByMode, delegate: value },
+            }))
+          }
+        />
+
+        <UsdField
           id="router-fusion-unknown-reserve"
           label={t("budget.unknownReserve")}
           description={t("budget.unknownReserveDesc")}
@@ -474,6 +494,10 @@ export function RouterFusionSection() {
           })}
         </ul>
       </section>
+
+      <RouterFusionClassifierSection settings={settings} persist={persist} />
+
+      <DelegateAcceptanceProfiles enabled={settings.enabled} />
 
       <RouterFusionActionCatalog settings={settings} aliases={aliases} persist={persist} />
     </div>

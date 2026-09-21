@@ -5,11 +5,13 @@
 //! Companion transport surfaces.
 
 mod bundle;
+mod confine;
 mod ledger;
 mod lifecycle;
 mod registry;
 mod remote_source;
 mod resource;
+mod revision_patch;
 mod sensitive;
 mod service;
 mod snapshot;
@@ -24,8 +26,21 @@ pub use bundle::{
     execute_bundle_apply, plan_bundle_apply, plan_bundle_composition, ApplyStep, BundleApplier,
     BundleApplyPlan, BundleError, PhysicalLeaseGroup, RootRequest,
 };
+pub use confine::{
+    normalize_workspace_path, ConfinedRoot, ConfinedTarget, PathPurpose, TargetKind,
+    WorkspaceRefusal, WorkspaceRefusalCode, CREDENTIAL_DIRECTORIES, UNCOVERED_DIRECTORIES,
+};
 pub use lifecycle::{
     WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+};
+pub use revision_patch::{
+    apply_revision_patch, list_revision_files, read_confined_text, read_report_file,
+    workspace_revision, ConfinedFileRead, ConfinedReadStatus, RevisionApplyOutcome,
+    RevisionApplyStatus, RevisionFile, RevisionFileList, RevisionPatch, RevisionPatchAction,
+    RevisionPatchFile, WorkspaceRevision, DEFAULT_CONFINED_READ_BYTES, DEFAULT_LIST_LIMIT,
+    DEFAULT_REPORT_BYTES, MAX_CONFINED_READ_BYTES, MAX_LIST_LIMIT, MAX_PATCH_FILES,
+    MAX_PATCH_FILE_BYTES, MAX_PATCH_TOTAL_BYTES, MAX_REPORT_BYTES, REVISION_PATCH_FORMAT,
+    REVISION_SCHEME,
 };
 // ADR-0176. The mirror moved to `cognia-git-mirror`, a leaf `cognia-git` can
 // also depend on. The algorithm is unchanged and these aliases are unchanged,

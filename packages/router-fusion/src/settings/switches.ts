@@ -24,6 +24,12 @@ export type RouterFusionSurface = (typeof ROUTER_FUSION_SURFACES)[number]
  * reads it yet — the settings section shows it disabled and labelled "later
  * release", and `switches.test.ts` pins the list. Turning a dormant switch on
  * by editing the stored settings changes nothing.
+ *
+ * Since ADR-0188 B2's companion RPC (WP-C) every declared surface is wired:
+ * `companion` is what a paired phone or browser reaches through
+ * `execution_run_*` and `claude_call_reserve_respond`
+ * (`lib/router-fusion/gate/companion-bridge.ts`). The dormancy mechanism stays
+ * for the next surface a release declares before it wires it.
  */
 export const WIRED_ROUTER_FUSION_SURFACES: readonly RouterFusionSurface[] = [
   "chat",
@@ -31,6 +37,7 @@ export const WIRED_ROUTER_FUSION_SURFACES: readonly RouterFusionSurface[] = [
   "gatewayPassthroughLedger",
   "utilityLedger",
   "agentsWorkflows",
+  "companion",
 ]
 
 export function isRouterFusionSurfaceWired(surface: RouterFusionSurface): boolean {

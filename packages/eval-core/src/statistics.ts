@@ -1,3 +1,4 @@
+import { createSeededRandom } from "./seeded-random"
 import type { EvalDecisionDimension } from "./types"
 
 export interface BootstrapResult {
@@ -15,17 +16,6 @@ export interface BootstrapMeanResult {
   high: number
   confidenceLevel: number
   sampleSize: number
-}
-
-function seededRandom(seed: number): () => number {
-  let value = seed >>> 0
-  return () => {
-    value += 0x6d2b79f5
-    let next = value
-    next = Math.imul(next ^ (next >>> 15), next | 1)
-    next ^= next + Math.imul(next ^ (next >>> 7), next | 61)
-    return ((next ^ (next >>> 14)) >>> 0) / 4294967296
-  }
 }
 
 function mean(values: readonly number[]): number {
@@ -50,7 +40,7 @@ export function pairedBootstrap(
   }
   const iterations = options.iterations ?? 10_000
   const confidenceLevel = options.confidenceLevel ?? 0.95
-  const random = seededRandom(options.seed)
+  const random = createSeededRandom(options.seed)
   const differences = left.map((value, index) => value - right[index])
   const resampled = new Array<number>(iterations)
   for (let iteration = 0; iteration < iterations; iteration++) {
@@ -81,7 +71,7 @@ export function bootstrapMean(
   if (values.length === 0) throw new Error("Bootstrap mean requires a non-empty sample")
   const iterations = options.iterations ?? 10_000
   const confidenceLevel = options.confidenceLevel ?? 0.95
-  const random = seededRandom(options.seed)
+  const random = createSeededRandom(options.seed)
   const resampled = new Array<number>(iterations)
   for (let iteration = 0; iteration < iterations; iteration++) {
     let sum = 0

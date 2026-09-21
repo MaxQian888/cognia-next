@@ -196,6 +196,65 @@ describe("ensureSessionExecutionBundle", () => {
     expect(acquireWorkspaceBundle).not.toHaveBeenCalled()
   })
 
+  it("forwards the caller-chosen worktree name into the acquisition", async () => {
+    await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context: { ...context, requestedWorktreeName: "feat/login" },
+      project,
+    })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedName: "feat/login" })
+    )
+  })
+
+  it("omits requestedName when the session never asked for one", async () => {
+    await ensureSessionExecutionBundle({ sessionId: "session-1", context, project })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.not.objectContaining({ requestedName: expect.anything() })
+    )
+  })
+
+  it("makes the selected root the bundle's primary lease", async () => {
+    const binding = await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context: { ...context, rootId: "docs" },
+      project,
+    })
+
+    // The chat was pointed at the "docs" repository — its worktree alias is
+    // the one the turn lands in, not the workspace's primary root.
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roots: [
+          { logicalRootId: "app", role: "additional", sourceRoot: "/repo" },
+          { logicalRootId: "docs", role: "primary", sourceRoot: "/docs" },
+        ],
+      })
+    )
+    expect(binding.primaryAlias).toBe("/isolated/docs")
+    expect(binding.primaryLogicalRootId).toBe("docs")
+  })
+
+  it("falls back to the primary root when the context's rootId went stale", async () => {
+    const binding = await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context: { ...context, rootId: "removed-root" },
+      project,
+    })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roots: [
+          { logicalRootId: "app", role: "primary", sourceRoot: "/repo" },
+          { logicalRootId: "docs", role: "additional", sourceRoot: "/docs" },
+        ],
+      })
+    )
+    expect(binding.primaryAlias).toBe("/isolated/app")
+  })
+
   it("fails closed when Project roots changed after acquisition", async () => {
     getWorkspaceBundle.mockResolvedValue({ ...bundle, leases: [bundle.leases[0]] })
 

@@ -33,3 +33,12 @@ export * from "./scorers/judge-client"
 export * from "./evaluator-spec"
 export * from "./observation"
 export * from "./online-policy"
+
+// The learned router (ADR-0188 D12): logistic heads per action, independent
+// Platt calibration, grouped time-shifted splits, the grouped bootstrap
+// promotion gate with the accepted-cost metric, and sealed manifests.
+export * from "./routing/logistic"
+export * from "./routing/platt"
+export * from "./routing/grouped-split"
+export * from "./routing/grouped-bootstrap"
+export * from "./routing/manifest"

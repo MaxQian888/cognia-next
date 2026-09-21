@@ -46,18 +46,23 @@ describe("router-fusion settings", () => {
     expect(effectiveSurface(null, "chat")).toBe(false)
   })
 
-  it("acts only on rule rows that can propose a running mode; delegate-only rows are dormant", () => {
+  it("acts only on rule rows that can propose a running mode; B4 leaves none dormant", () => {
     const modeOf = new Map(BUILTIN_ACTIONS.map((action) => [action.id, action.mode]))
     for (const row of RULE_ROWS) {
       const modes = DEFAULT_RULE_ROW_ACTIONS[row].map((id) => modeOf.get(id))
       expect(modes.every((mode) => mode !== undefined)).toBe(true)
-      const runs = modes.some((mode) => mode === "direct" || mode === "cascade" || mode === "panel")
+      const runs = modes.some(
+        (mode) => mode === "direct" || mode === "cascade" || mode === "panel" || mode === "delegate"
+      )
       expect(WIRED_RULE_ROWS.includes(row)).toBe(runs)
     }
-    expect(WIRED_RULE_ROWS).toEqual(["economy_simple", "cascade_verifiable", "panel_research"])
-    expect(RULE_ROWS.filter((row) => !WIRED_RULE_ROWS.includes(row))).toEqual([
+    expect(WIRED_RULE_ROWS).toEqual([
+      "economy_simple",
+      "cascade_verifiable",
+      "panel_research",
       "delegate_multifile",
     ])
+    expect(RULE_ROWS.filter((row) => !WIRED_RULE_ROWS.includes(row))).toEqual([])
   })
 
   it("keeps the switch leaf free of imports", () => {
@@ -94,9 +99,9 @@ describe("router-fusion settings", () => {
     expect(settings.defaultDataClass).toBe("internal")
     expect(settings.dataClassByWorkspaceId).toEqual({ w1: "restricted" })
     expect(settings.restrictedGrantProviderIds).toEqual(["anthropic"])
+    // Half a router model cannot be called: it is dropped, not kept.
     expect(settings.llmClassifier).toEqual({
       enabled: true,
-      routerModelId: "m",
       timeoutMs: 1500,
       cacheTtlSeconds: 30,
     })
@@ -193,9 +198,56 @@ describe("router-fusion settings", () => {
     expect(resolveDataClass(settings, undefined, "restricted")).toBe("restricted")
   })
 
-  it("keeps the LLM classifier setting dormant until it is wired", () => {
-    // B5 wires it. Until then a stored `enabled: true` must change nothing, so
-    // nothing outside this module may read it.
+  it("normalizes the LLM classifier: a whole router model, a TTL that may be 0, the judge migration record", () => {
+    expect(DEFAULT_ROUTER_FUSION_SETTINGS.llmClassifier).toEqual({
+      enabled: false,
+      timeoutMs: 1500,
+      cacheTtlSeconds: 600,
+    })
+    const settings = normalizeRouterFusionSettings({
+      llmClassifier: {
+        enabled: true,
+        routerProviderId: "openai",
+        routerModelId: "gpt-5-mini",
+        timeoutMs: 0,
+        cacheTtlSeconds: 0,
+        judgeMigration: {
+          capturedAt: 7,
+          judge: { judge: { enabled: true, timeoutMs: 400 } },
+          carried: ["routerModel", "made_up", "cacheTtlSeconds", "routerModel"],
+        },
+      },
+    })
+    expect(settings.llmClassifier).toEqual({
+      enabled: true,
+      routerProviderId: "openai",
+      routerModelId: "gpt-5-mini",
+      // A zero timeout would fail every call: back to the default.
+      timeoutMs: 1500,
+      // A zero TTL is "no cache", a real choice (a judge migrated with its cache off).
+      cacheTtlSeconds: 0,
+      judgeMigration: {
+        capturedAt: 7,
+        judge: { judge: { enabled: true, timeoutMs: 400 } },
+        carried: ["routerModel", "cacheTtlSeconds"],
+      },
+    })
+    expect(
+      normalizeRouterFusionSettings({
+        llmClassifier: {
+          routerProviderId: " ",
+          routerModelId: "m",
+          cacheTtlSeconds: -1,
+          judgeMigration: { capturedAt: "7" },
+        },
+      }).llmClassifier
+    ).toEqual({ enabled: false, timeoutMs: 1500, cacheTtlSeconds: 600 })
+  })
+
+  it("wires the LLM classifier: its readers are the classifier, its settings and the judge it absorbs", () => {
+    // B5 brought it out of dormancy (Rule 7). The type documents the wiring, the
+    // settings section shows it, and this pins exactly who reads it, so a new
+    // reader is a decision someone made, not an accident.
     let hits = ""
     try {
       hits = execFileSync(
@@ -220,14 +272,29 @@ describe("router-fusion settings", () => {
     } catch (error) {
       if ((error as { status?: number }).status !== 1) throw error
     }
-    const readers = hits
-      .split("\n")
-      .filter(
-        (line) =>
-          line &&
-          !/\.test\.tsx?:/.test(line) &&
-          !line.startsWith("packages/router-fusion/src/settings/settings.ts:")
-      )
-    expect(readers).toEqual([])
+    const readers = [
+      ...new Set(
+        hits
+          .split("\n")
+          .filter((line) => line && !/\.test\.tsx?:/.test(line))
+          .map((line) => line.slice(0, line.indexOf(":")))
+      ),
+    ].sort()
+    expect(readers).toEqual([
+      "components/settings/provider/routing/router-fusion-classifier-section.tsx",
+      "lib/ai/routing/difficulty-judge.ts",
+      "lib/router-fusion/routing/llm-classifier.ts",
+      "lib/router-fusion/settings/classifier-migration.ts",
+      "packages/router-fusion/src/settings/settings.ts",
+    ])
+    // …and the two Auto entry points consult what the classifier module builds.
+    const root = join(__dirname, "..", "..", "..", "..")
+    const read = (rel: string) => readFileSync(join(root, rel), "utf8")
+    expect(read("lib/router-fusion/chat/chat-route-host.ts")).toMatch(/createRouteClassifier\(/)
+    expect(read("lib/router-fusion/chat/route-chat-turn.ts")).toMatch(/host\.classify\(/)
+    expect(read("lib/router-fusion/routing/run-route.ts")).toMatch(/host\.classify\(/)
+    expect(read("components/settings/provider/routing/router-fusion-section.tsx")).toMatch(
+      /<RouterFusionClassifierSection /
+    )
   })
 })

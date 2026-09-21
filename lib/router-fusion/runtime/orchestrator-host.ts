@@ -28,15 +28,23 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import {
   answerDeliveryEvents,
+  delegateLimitsOf,
+  DELEGATE_WORK_POLICY,
+  delegatePatchSha256,
   estimateTokens,
   reserveForCall,
   runCascade,
+  runDelegateWorkflow,
   runDirect,
   runPanel,
+  SideEffectOutcomeUnknownError,
   usdToMicrousd,
   WorkflowError,
   type CompiledAction,
   type CompiledFusionConfig,
+  type DelegateDelivery,
+  type DelegatePendingApproval,
+  type DelegateRunOutcome,
   type Message,
   type PanelMember,
   type PanelMemberRole,
@@ -48,6 +56,8 @@ import {
 import { normalizeRouterFusionSettings } from "@cognia/router-fusion/settings/settings"
 
 import { createRoleCallExecutor } from "../calls/role-call-executor"
+import { createDelegateApprovalPort } from "./delegate-approvals"
+import type { DelegateHostPorts } from "./delegate-host-ports"
 import type { FusionLedgerStore } from "../db/ledger-store"
 import { drainFusionOutbox, type OutboxAppliers } from "../db/outbox"
 import { decodeRunInput, type StoredRunInput } from "../db/run-input"
@@ -71,6 +81,8 @@ const JUDGE_OUTPUT_TOKENS = 4_096
 const FINAL_CHECK_OUTPUT_TOKENS = 1_024
 const MEMBER_TOOL_CALLS = 4
 const VERIFICATION_REQUESTS = 2
+/** A delegate reviewer judges a change; it does not rewrite one. */
+const DELEGATE_REVIEW_OUTPUT_TOKENS = 2_048
 
 export interface RunTools {
   runtime: ToolRuntime | null
@@ -88,6 +100,13 @@ export interface OrchestratorDeps {
   /** Test seams. */
   executor?: RoleCallExecutor
   tools?: (store: FusionLedgerStore, run: FusionRunRow, action: CompiledAction) => Promise<RunTools>
+  /**
+   * The delegate run's four device ports, built as one so the acceptance
+   * runner verifies the very trees the workspace port staged (WP-D3). A test
+   * substitutes a fake filesystem and sandbox here; production builds them
+   * from the run's project.
+   */
+  delegatePorts?: (store: FusionLedgerStore, run: FusionRunRow) => Promise<DelegateHostPorts>
   /** A reason the deployment may not be called now (AUTH-07), or null. */
   liveRefusal?: (run: FusionRunRow, deploymentId: string) => string | null
   now?: () => number
@@ -114,6 +133,25 @@ export type FusionRunOutcome =
   | { kind: "cancelled" }
   /** Another worker holds this run's lease; it is not ours to execute. */
   | { kind: "busy" }
+  /**
+   * The run is parked on a person (delegate only, D21). It is NOT sealed: its
+   * money stays held, its journal stays replayable, and resuming it runs the
+   * same graph again from the steps it committed. `code` and `message` are
+   * carried so a caller that only knows "not succeeded" still has something
+   * true to say.
+   */
+  | {
+      kind: "waiting"
+      code: "WAITING_FOR_APPROVAL"
+      message: string
+      approval: DelegatePendingApproval
+    }
+  /**
+   * A side effect was dispatched and its outcome is unknown (REC-06). The run
+   * is in `reconciling` with a `human_handoff` interrupt — never sealed as a
+   * failure, because a patch may be on disk and tests may have run.
+   */
+  | { kind: "reconciling"; code: string; message: string }
 
 /**
  * What a run was created with. A caller that still has the messages passes
@@ -194,8 +232,26 @@ export async function hostRunTools(
   store: FusionLedgerStore,
   run: FusionRunRow,
   action: CompiledAction,
-  now: () => number
+  now: () => number,
+  /** A delegate run's ports, already built: its tools come from them. */
+  delegate?: DelegateHostPorts
 ): Promise<RunTools> {
+  if (action.config.mode === "delegate") {
+    if (!delegate) {
+      throw new WorkflowError(
+        "DELEGATE_TOOLS_UNAVAILABLE",
+        "a delegate run needs its workspace ports before its tools"
+      )
+    }
+    // One runtime, over the same workspace port the acceptance runner
+    // verifies: read, list and propose-patch under `delegate-work-1`, and
+    // nothing else — no web, no panel file reader.
+    return {
+      runtime: delegate.tools,
+      memberPolicyId: DELEGATE_WORK_POLICY,
+      verificationPolicyId: null,
+    }
+  }
   const [{ hostWebEvidence }, { hostWorkspaceReader }] = await Promise.all([
     import("../tools/web-evidence"),
     import("../tools/workspace-read"),
@@ -207,6 +263,110 @@ export async function hostRunTools(
     runtime,
     memberPolicyId: runtime.describe(PANEL_READ_POLICY).length > 0 ? PANEL_READ_POLICY : null,
     verificationPolicyId: PANEL_VERIFY_POLICY,
+  }
+}
+
+/**
+ * A delegate run's four device ports (ADR-0188 B4, WP-D3), built from what the
+ * run itself pinned: its project, its checkout, and the acceptance profile it
+ * was routed with.
+ *
+ * The journal is the durable one — `fusionDelegateSteps` through the run's own
+ * content codec — not the in-memory default. That is the difference between a
+ * run that can be resumed after an approval or a reload and one that finds no
+ * steps and refuses to repeat the ones it cannot repeat safely (REC-06).
+ */
+export async function hostDelegatePorts(
+  store: FusionLedgerStore,
+  run: FusionRunRow,
+  now: () => number,
+  newId: () => string
+): Promise<DelegateHostPorts> {
+  const context = delegateRunContext(run)
+  const [{ createDelegateHostPorts }, { createFusionDelegateStepStore }] = await Promise.all([
+    import("./delegate-host-ports"),
+    import("../db/delegate-store"),
+  ])
+  return createDelegateHostPorts({
+    runId: run.runId,
+    projectId: context.projectId,
+    workspaceRoot: context.workspaceRoot,
+    acceptanceProfileId: context.acceptanceProfileId,
+    store,
+    now,
+    newId,
+    configRoot: context.workspaceRoot,
+    journalStore: createFusionDelegateStepStore(store.db, store.contentCodec),
+  })
+}
+
+/**
+ * What a delegate run must carry before anything is delegated: the project its
+ * acceptance profile belongs to, the checkout it reads and (only with an
+ * approval) writes, and the profile id itself.
+ *
+ * The router does not offer delegate without them, so reaching here without
+ * one is a wiring fault, not a user error — it fails loudly with the field
+ * that is missing rather than running a graph that cannot verify anything.
+ */
+export function delegateRunContext(run: FusionRunRow): {
+  projectId: string
+  workspaceRoot: string
+  acceptanceProfileId: string
+} {
+  const missing: string[] = []
+  if (!run.projectId) missing.push("projectId")
+  if (!run.workspaceRoot) missing.push("workspaceRoot")
+  if (!run.acceptanceProfileId) missing.push("acceptanceProfileId")
+  if (missing.length > 0) {
+    throw new WorkflowError(
+      "WORKSPACE_REQUIRED",
+      `a delegate run needs ${missing.join(", ")}; this one has none`,
+      { missing }
+    )
+  }
+  return {
+    projectId: run.projectId as string,
+    workspaceRoot: run.workspaceRoot as string,
+    acceptanceProfileId: run.acceptanceProfileId as string,
+  }
+}
+
+/**
+ * Index the change a finished delegate run produced (`fusionPatchSets`).
+ *
+ * The patch itself is already an artifact; this row is what the review pane
+ * lists and what an approved apply marks as landed. Failing to write it must
+ * never fail a run that succeeded — the patch is still readable by its
+ * artifact id — so it is recorded best-effort and the reason is kept on the
+ * run's journal instead.
+ */
+async function recordDelegatePatchSet(
+  store: FusionLedgerStore,
+  runId: string,
+  outcome: Extract<DelegateRunOutcome, { kind: "completed" }>,
+  now: number
+): Promise<void> {
+  try {
+    const { recordPatchSet } = await import("../db/delegate-store")
+    const { PATCH_SET_TTL_MS } = await import("../db/retention")
+    const { DelegatePatchSchema } = await import("@cognia/router-fusion")
+    const stored = await store.artifactStore(runId).get(outcome.patchArtifactId)
+    if (!stored) return
+    const patch = DelegatePatchSchema.parse(JSON.parse(stored.content))
+    await recordPatchSet(store.db, {
+      runId,
+      baseRevision: patch.base_revision,
+      resultRevision: outcome.resultRevision,
+      patchSha256: delegatePatchSha256(patch),
+      patchArtifactId: outcome.patchArtifactId,
+      paths: patch.files.map((file) => file.path),
+      delivery: outcome.deliveredRevision === null ? "patch_only" : "workspace_updated",
+      now,
+      ttlMs: PATCH_SET_TTL_MS,
+    })
+  } catch {
+    // Indexing is a convenience over durable data, never the durable data.
   }
 }
 
@@ -283,6 +443,12 @@ export async function executeFusionRun(
   // `/agent-runs` once it has finished can never be stopped from there. A
   // failed apply stays pending for the seal's drain; it never stops the run.
   await drainFusionOutbox(store.db, deps.appliers, store.outboxContext()).catch(() => undefined)
+
+  // A delegate run holds two worktrees while it works. They are given back
+  // when it REACHES A TERMINAL STATE, never when it parks: a run waiting for a
+  // person still owns the tree the approval is about.
+  let delegateWorkspace: DelegateHostPorts["workspace"] | null = null
+  let parked = false
 
   const controller = new AbortController()
   const abort = () => controller.abort()
@@ -493,6 +659,113 @@ export async function executeFusionRun(
         result = outcome.result
         break
       }
+      case "delegate": {
+        const lead = run.roleDeployments.lead
+        const worker = run.roleDeployments.worker
+        if (!lead || !worker) {
+          throw new WorkflowError("ROLE_UNRESOLVABLE", "the delegate has no lead or worker role")
+        }
+        // Throws with the field that is missing rather than running a graph
+        // that could never verify anything.
+        const context = delegateRunContext(run)
+        const hostPorts = await (
+          deps.delegatePorts ?? ((s, r) => hostDelegatePorts(s, r, now, newId))
+        )(store, run)
+        delegateWorkspace = hostPorts.workspace
+        const tools = await (deps.tools ?? ((s, r, a) => hostRunTools(s, r, a, now, hostPorts)))(
+          store,
+          run,
+          action
+        )
+        if (!tools.runtime) {
+          throw new WorkflowError(
+            "DELEGATE_TOOLS_UNAVAILABLE",
+            "the delegate worker has no tool runtime"
+          )
+        }
+        const approvals = createDelegateApprovalPort({
+          store,
+          runId: input.runId,
+          projectId: context.projectId,
+          now,
+        })
+        const reviewer = run.roleDeployments.reviewer ?? null
+        const roleOf = (deploymentId: string) => ({
+          deploymentId,
+          contextLimit: config.deploymentsById[deploymentId]?.contextLimit ?? 32_000,
+        })
+        const outcome: DelegateRunOutcome = await runDelegateWorkflow(
+          {
+            ...ports,
+            tools: tools.runtime as DelegateHostPorts["tools"],
+            workspace: hostPorts.workspace,
+            acceptance: hostPorts.acceptance,
+            approvals,
+            journal: hostPorts.journal,
+          },
+          {
+            runId: input.runId,
+            lead: roleOf(lead),
+            worker: roleOf(worker),
+            ...(reviewer ? { reviewer: roleOf(reviewer) } : {}),
+            messages,
+            acceptanceProfileId: context.acceptanceProfileId,
+            outputTokens: {
+              lead: outputBound(config, lead, extension.role_output_tokens),
+              worker: outputBound(config, worker, extension.role_output_tokens),
+              reviewer: outputBound(config, reviewer ?? lead, DELEGATE_REVIEW_OUTPUT_TOKENS),
+            },
+            reserveFor: (_role, deploymentId, inputTokens, outputTokens) =>
+              reserve(deploymentId, inputTokens, outputTokens),
+            limits: delegateLimitsOf(extension.limits),
+            task,
+            allowDegraded: runInput.allowDegraded,
+            // `workspace_updated` writes into the person's own checkout and is
+            // only ever reached through an approval the DELIVER step asks for.
+            // No surface sets it yet (see `FusionRunRow.delegateDelivery`).
+            delivery: run.delegateDelivery ?? "patch_only",
+            deadlineAt: run.deadlineAt,
+            signal: controller.signal,
+          }
+        )
+        if (outcome.kind === "waiting_for_approval") {
+          // Park, do not seal: the money stays held, the journal stays
+          // replayable, and the very same input runs again when a person
+          // answers. Sealing here would tell the caller the run did nothing
+          // while a decision was still outstanding.
+          parked = true
+          const paused = await store.pauseRun(input.runId, fencingToken, "waiting_for_approval", {
+            approval: {
+              approvalId: outcome.approval.approvalId,
+              requestDigest: outcome.approval.requestDigest,
+              kind: outcome.approval.kind,
+              revision: outcome.approval.revision,
+              logicalStepId: outcome.approval.logicalStepId,
+              summary: { ...outcome.approval.summary },
+            },
+          })
+          if (!paused.ok) {
+            parked = false
+            throw new WorkflowError(
+              "RUN_NOT_PARKED",
+              `the run could not be parked for approval: ${paused.code}`
+            )
+          }
+          // Drain now: an approval nobody can see is an approval nobody gives.
+          await drainFusionOutbox(store.db, deps.appliers, store.outboxContext()).catch(
+            () => undefined
+          )
+          return {
+            kind: "waiting",
+            code: "WAITING_FOR_APPROVAL",
+            message: `the run is waiting for a person to decide ${outcome.approval.kind}`,
+            approval: outcome.approval,
+          }
+        }
+        await recordDelegatePatchSet(store, input.runId, outcome, now())
+        result = outcome.result
+        break
+      }
       default:
         throw new WorkflowError(
           "MODE_NOT_AVAILABLE",
@@ -516,6 +789,28 @@ export async function executeFusionRun(
       // whatever the database says, and recovery reconciles them.
       throw error
     }
+    // REC-06: a side effect that was dispatched and never answered. A failed
+    // seal would be a lie — a patch may be on disk and an acceptance command
+    // may have run — and a retry would be worse. The run goes to
+    // reconciliation with a handoff for a person, keeps its money held, and
+    // the step is NEVER sent again.
+    if (error instanceof SideEffectOutcomeUnknownError) {
+      const reconciled = await store.reconcileRun(input.runId, fencingToken, {
+        code: error.code,
+        logicalStepId: (error.details.logical_step_id as string | undefined) ?? null,
+        sideEffect: (error.details.side_effect as string | undefined) ?? null,
+      })
+      await drainFusionOutbox(store.db, deps.appliers, store.outboxContext()).catch(() => undefined)
+      if (reconciled.ok) {
+        // Reconciling is not terminal: the worktrees stay until a person has
+        // decided what happened to the change they may already hold.
+        parked = true
+        return { kind: "reconciling", code: error.code, message: error.message }
+      }
+      // The run could not even be moved there (fenced, or already gone): fall
+      // through to the ordinary workflow failure rather than claiming a
+      // reconciliation that is not recorded.
+    }
     if (error instanceof WorkflowError) {
       if (error.code === "CANCELLED") {
         await seal("cancelled")
@@ -531,6 +826,9 @@ export async function executeFusionRun(
     clearInterval(heartbeat)
     clearInterval(cancelWatch)
     input.signal?.removeEventListener("abort", abort)
+    if (delegateWorkspace && !parked) {
+      await delegateWorkspace.dispose().catch(() => undefined)
+    }
   }
 }
 

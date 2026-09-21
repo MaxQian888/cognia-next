@@ -350,3 +350,54 @@ describe("createHybridSearchEngine", () => {
     expect(engine).toBeDefined()
   })
 })
+
+describe("BM25 incremental corpus length", () => {
+  const docs = [
+    { id: "a", content: "memory memory" },
+    { id: "b", content: "memory retrieval has a longer mixed corpus document" },
+    { id: "c", content: "中文 memory 测试" },
+  ]
+  const build = (rows: typeof docs) => {
+    const index = new BM25Index()
+    index.addDocuments(rows)
+    return index
+  }
+  const compare = (index: BM25Index, rows: typeof docs) => {
+    const rebuilt = build(rows)
+    for (const query of ["memory", "retrieval", "中文"]) {
+      expect(index.search(query, 20)).toEqual(rebuilt.search(query, 20))
+    }
+  }
+
+  it("keeps ranking and exact scores consistent through replacement, removal, empty rows and clear", () => {
+    const index = build(docs)
+    const replacement = { id: "a", content: "memory changed to a longer updated preference" }
+    index.addDocument(replacement.id, replacement.content)
+    compare(index, [docs[1], docs[2], replacement])
+    index.removeDocument("b")
+    index.removeDocument("missing")
+    compare(index, [docs[2], replacement])
+    index.addDocument("empty", "")
+    compare(index, [docs[2], replacement, { id: "empty", content: "" }])
+    index.clear()
+    index.addDocument("new", "memory reset")
+    compare(index, [{ id: "new", content: "memory reset" }])
+    index.removeDocument("new")
+    compare(index, [])
+    index.addDocuments(docs)
+    compare(index, docs)
+  })
+
+  it("keeps restored snapshot scores correct after subsequent mutations", () => {
+    const restored = BM25Index.fromSnapshot(build(docs).exportSnapshot())
+    restored.removeDocument("a")
+    restored.addDocument("b", "memory")
+    compare(restored, [docs[2], { id: "b", content: "memory" }])
+  })
+
+  it("rejects duplicate snapshot identifiers rather than corrupting corpus statistics", () => {
+    const snapshot = build(docs).exportSnapshot()
+    snapshot.documents.push(snapshot.documents[0])
+    expect(() => BM25Index.fromSnapshot(snapshot)).toThrow("Invalid BM25 snapshot document")
+  })
+})

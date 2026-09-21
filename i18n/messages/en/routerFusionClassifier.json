@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "LLM classifier",
+    "desc": "Labels Auto requests with one small model call instead of keyword rules: Auto chat turns while chat is on, Run API and cognia/auto requests while the Run API is on. While background utilities are ledgered, it also answers for legacy Auto's difficulty judge.",
+    "enable": "Classify Auto requests with a model",
+    "needsMaster": "Takes effect once Router + Fusion and the surface are on.",
+    "costNote": "Costs one small call per routed turn. The call is ledgered like any other, and a prompt repeated within the cache lifetime costs nothing.",
+    "fallbackNote": "A timeout, an unusable answer, personal data in the prompt or an unavailable model falls back to the rules classifier. A call that was already sent stays billed.",
+    "model": "Router model",
+    "modelDesc": "A small, fast model. It only labels the request; it never answers it.",
+    "modelClear": "Clear",
+    "modelUnset": "Pick a router model. Until then every request is labelled by the rules classifier.",
+    "timeout": "Timeout (ms)",
+    "timeoutDesc": "The whole classification, reservation included, must finish within this. Default 1500.",
+    "cacheTtl": "Cache lifetime (seconds)",
+    "cacheTtlDesc": "A repeated prompt reuses its label for this long. 0 turns the cache off. Default 600.",
+    "invalidNumber": "Enter a whole number from {min} to {max}.",
+    "migrated": "Carried over from the difficulty judge: {fields}.",
+    "migratedField": {
+      "routerModel": "router model",
+      "timeoutMs": "timeout",
+      "cacheTtlSeconds": "cache lifetime"
+    }
+  }
+}

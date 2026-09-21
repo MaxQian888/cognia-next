@@ -84,10 +84,14 @@ export interface DurableCallInput {
   signal: AbortSignal
 }
 
+/**
+ * `toolCalls` is inherited from {@link CommittedCallResult}: what the model
+ * asked to run is committed with the call's text, so a replay of this step
+ * returns the same requests instead of an answer with its tool round missing.
+ */
 export interface DurableCallResult extends CommittedCallResult {
   replayed: boolean
   attempts: number
-  toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }>
 }
 
 const RETRYABLE = new Set(["rate_limited", "server_error", "not_sent"])
@@ -179,6 +183,11 @@ export async function performDurableCall(
         text: response.text,
         providerRequestId: response.providerRequestId,
         finishReason: response.finishReason,
+        // Committed with the text, so a replay hands the workflow the same
+        // tool requests this attempt received (REC-03).
+        ...(response.toolCalls && response.toolCalls.length > 0
+          ? { toolCalls: response.toolCalls }
+          : {}),
       }
       const settled = await ports.ledger.settle(prepared.attemptId, {
         status: "succeeded",
@@ -196,12 +205,7 @@ export async function performDurableCall(
           cost_status: settled.costStatus,
         },
       })
-      return {
-        ...result,
-        replayed: false,
-        attempts: attempt,
-        ...(response.toolCalls ? { toolCalls: response.toolCalls } : {}),
-      }
+      return { ...result, replayed: false, attempts: attempt }
     }
 
     lastError = response

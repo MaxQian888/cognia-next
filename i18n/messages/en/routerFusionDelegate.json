@@ -1,0 +1,161 @@
+{
+  "checks": {
+    "check": "Check",
+    "counts": "{discovered} discovered · {passed} passed · {failed} failed · {skipped} skipped",
+    "countsUnknown": "This report records no test counts.",
+    "errored": "{count} errored",
+    "executedBy": {
+      "human": "Person",
+      "model": "Model",
+      "runtime": "Runtime"
+    },
+    "exit": "Command exit",
+    "level": {
+      "human_review": "Reviewed by a person",
+      "mixed": "Mixed evidence",
+      "model_review": "Reviewed by a model",
+      "schema_only": "Shape only",
+      "tool_verified": "Verified by a tool"
+    },
+    "modelClaim": "Only a check the runtime executed is evidence. A model's claim that tests passed is not.",
+    "none": "This run recorded no acceptance report, so nothing here was verified.",
+    "outcome": "Outcome",
+    "report": "Report",
+    "revision": "Revision verified",
+    "revisionMissing": "The report names no revision, so it proves nothing about the delivered change.",
+    "status": {
+      "failed": "Failed",
+      "inconclusive": "Inconclusive",
+      "not_applicable": "Not applicable",
+      "passed": "Passed"
+    },
+    "summary": "Detail",
+    "tier": "Sandbox",
+    "tierUnattested": "Not attested. The report does not say which sandbox ran the command, so treat the isolation as unproven.",
+    "tierValue": {
+      "container": "Container",
+      "microvm": "microVM",
+      "os": "OS sandbox"
+    },
+    "title": "Acceptance checks",
+    "verifier": "Verifier"
+  },
+  "patch": {
+    "applied": "Written into your workspace at {revision}.",
+    "base": "Base revision",
+    "comparedMoved": "Your workspace has moved to {revision} since this patch was made against {base}. The comparison below is against your workspace as it is now, not against the base.",
+    "comparedNow": "Compared against your workspace, which is still at the patch's base revision.",
+    "comparedUnavailable": "Your workspace could not be read on this device, so every line is shown as added.",
+    "delivery": "Delivery",
+    "deliveryValue": {
+      "patch_only": "Patch only — your workspace was not changed",
+      "workspace_updated": "Applied to your workspace"
+    },
+    "download": "Download patch",
+    "downloadFailed": "The patch could not be saved.",
+    "downloaded": "Patch saved.",
+    "expired": "The patch document is no longer stored — patch content is kept for seven days — so it cannot be shown or downloaded.",
+    "file": {
+      "baseAbsent": "New file.",
+      "baseUnavailable": "The current file could not be read here, so every line is shown as added.",
+      "delete": "Deleted",
+      "write": "Replaced"
+    },
+    "files": "{count, plural, =1 {# file} other {# files}}",
+    "none": "This run staged no patch.",
+    "notApplied": "Not written into your workspace.",
+    "result": "Result revision",
+    "title": "Patch",
+    "unchanged": "This file's content is identical to your workspace's.",
+    "workspace": "Workspace"
+  },
+  "progress": {
+    "attempts": "Attempts",
+    "delivery": "Delivery",
+    "none": "This run recorded no delegate steps.",
+    "repairs": "Repairs",
+    "sandbox": "Sandbox",
+    "scopeExpansions": "Extra paths you approved",
+    "subtasks": "Subtasks",
+    "takeovers": "Lead takeovers",
+    "title": "Delegation",
+    "toolOperations": "Tool operations",
+    "turns": "Worker turns"
+  },
+  "review": {
+    "approval": {
+      "apply": "Apply to workspace",
+      "approve": "Approve",
+      "decidedAt": "{status} · {when}",
+      "deny": "Deny",
+      "digest": "Request digest",
+      "history": "Earlier decisions",
+      "kind": {
+        "scope_expansion": "Scope expansion",
+        "workspace_apply": "Workspace apply"
+      },
+      "mismatch": "This view is out of date: the run is waiting on a different request. Reopen the run to decide.",
+      "paths": "Paths",
+      "revision": "Revision",
+      "status": {
+        "approved": "Approved",
+        "denied": "Denied",
+        "pending": "Waiting"
+      },
+      "title": "Waiting for your decision",
+      "what": {
+        "scope_expansion": "The worker asks to change files outside the paths its subtask allowed. Approving allows exactly these paths, at exactly this revision.",
+        "workspace_apply": "The verified patch is ready to be written into your workspace. Approving applies it only while your workspace is still at the base revision; if it moved, nothing is written."
+      }
+    },
+    "applyElsewhere": "This run delivered a patch only. Applying it into your workspace needs a run that asks for it, so that the write goes through the same approval and conflict check.",
+    "loading": "Reading the delegation record…",
+    "notDelegate": "",
+    "title": "Delegation review",
+    "unavailable": "The delegation record could not be read on this device: {reason}"
+  },
+  "settings": {
+    "approve": "Approve",
+    "approveFailed": "\"{profile}\" was not approved: {reason}",
+    "approved": "Approved \"{profile}\".",
+    "approvedHash": "Approved at {hash}",
+    "desc": "A delegation is accepted only on a report produced by a command the project declares in .cognia/workspace.json, and only once you approve that exact command. Changing the command asks again.",
+    "hash": "Command {hash}",
+    "loading": "Reading…",
+    "needsMaster": "Turn on the master switch to review acceptance profiles.",
+    "noProjects": "No project yet. An acceptance profile lives in a project's workspace configuration.",
+    "project": "Project",
+    "reason": {
+      "ACCEPTANCE_PROFILE_APPROVAL_FAILED": "the approval could not be stored",
+      "ACCEPTANCE_PROFILE_CHANGED": "the command changed after it was shown; review it again",
+      "ACCEPTANCE_PROFILE_MISSING": "the project no longer declares it",
+      "ACCEPTANCE_PROFILE_UNTRUSTED": "trust this workspace before approving its commands",
+      "APPROVAL_STORE_FAILED": "the approval store could not be written",
+      "PROJECT_NOT_FOUND": "the project was not found",
+      "unknown": "{code}"
+    },
+    "revoke": "Revoke",
+    "revokeFailed": "The approval of \"{profile}\" was not withdrawn: {reason}",
+    "revoked": "Withdrew the approval of \"{profile}\".",
+    "runCap": "Delegate run cap",
+    "runCapDesc": "The most one delegation may spend, across every model call it makes. An action of its own may set a lower cap.",
+    "source": {
+      "project": "Project override",
+      "repository": "Repository"
+    },
+    "status": {
+      "approved": "Approved",
+      "changed": "Command changed",
+      "unapproved": "Not approved"
+    },
+    "title": "Acceptance profiles",
+    "unavailable": {
+      "absent": "This project declares no acceptance profile, so a delegation cannot be verified in it.",
+      "approval_pending": "Nothing is approved yet, so a delegation cannot run in this project.",
+      "fault": "The project's configuration could not be read: {message}",
+      "invalid": "The project's acceptance profiles could not be parsed: {message}",
+      "project_not_found": "The project was not found.",
+      "restricted": "This workspace is not trusted, so its configuration was not read."
+    }
+  }
+}

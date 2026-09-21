@@ -65,6 +65,26 @@ describe("performDurableCall", () => {
     expect(events.map((e) => e.type)).toEqual(["call.started", "call.finished"])
   })
 
+  it("[ACC:REC-03] commits the tool requests with the call, so a replay returns them", async () => {
+    const { ledger, ports, provider } = setup([
+      { kind: "tool_call", name: "web_fetch", arguments: { url: "https://example.com" } },
+    ])
+    const first = await performDurableCall(ports, input())
+    expect(first).toMatchObject({
+      finishReason: "tool_calls",
+      replayed: false,
+      toolCalls: [{ name: "web_fetch", arguments: { url: "https://example.com" } }],
+    })
+    // A worker that takes the run over replays the step: the same requests, the
+    // same ids, no second provider call and no second bill.
+    const spent = ledger.state.spentMicrousd
+    const replay = await performDurableCall(ports, input())
+    expect(replay).toMatchObject({ replayed: true, finishReason: "tool_calls" })
+    expect(replay.toolCalls).toEqual(first.toolCalls)
+    expect(provider.requests).toHaveLength(1)
+    expect(ledger.state.spentMicrousd).toBe(spent)
+  })
+
   it("[ACC:REC-01] replays a committed result instead of calling again", async () => {
     const { ledger, ports, provider } = setup([{ kind: "text", text: "once" }])
     await performDurableCall(ports, input())

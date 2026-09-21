@@ -1,0 +1,94 @@
+{
+  "tab": "路由",
+  "title": "路由实验",
+  "subtitle": "用已路由的运行训练学习型路由器，让它与规则路由并行观察；只有闸门通过时才允许上线。",
+  "unavailable": {
+    "title": "Router + Fusion 未开启",
+    "body": "请先在「设置 → AI 连接 → 路由」中开启任一 Router + Fusion 表面。没有已路由的运行就没有可学习的数据。"
+  },
+  "actions": {
+    "collect": "采集样本",
+    "runSimulated": "运行模拟实验",
+    "runRecorded": "在已采集样本上运行",
+    "export": "导出样本",
+    "shadow": "记录影子决策",
+    "promote": "上线",
+    "rollback": "回滚",
+    "busy": "处理中…"
+  },
+  "samples": {
+    "title": "样本",
+    "stored": "已存 {count} 条",
+    "collected": "已从 {scanned} 次运行中采集 {count} 条",
+    "skipped": "{count} 次运行无法采样",
+    "reason": {
+      "not_terminal": "仍在运行",
+      "no_decision": "没有存下路由决策",
+      "no_action_selected": "没有选中任何动作",
+      "cost_pending": "账单尚未结算",
+      "input_unavailable": "存储的输入已过期或无法读取"
+    },
+    "exported": "已导出 {count} 条样本（含选择概率）"
+  },
+  "report": {
+    "title": "报告",
+    "empty": "尚未运行过任何实验。",
+    "label": {
+      "live": "真实",
+      "simulated": "模拟"
+    },
+    "sampleCount": "样本数",
+    "acceptedCost": "每次被接受运行的成本",
+    "passRate": "被接受比例",
+    "totalCost": "总成本",
+    "undefinedCost": "没有任何运行被接受",
+    "byAction": "按动作",
+    "gate": "上线闸门",
+    "verdict": {
+      "pass": "通过",
+      "fail": "未通过",
+      "inconclusive": "无法判定",
+      "none": "未进行"
+    },
+    "gateRefusal": {
+      "DETERMINISTIC_LOGGING": "所有运行都由确定性的规则路由决定，因此无法识别出可比较的对照。",
+      "NO_PREDICTOR": "没有任何可发布的预测头，因此没有候选路由器可供比较。"
+    },
+    "caveats": "请先阅读",
+    "heads": "预测头",
+    "headCalibrated": "已校准",
+    "headWithheld": "已扣留",
+    "headSamples": "训练 {training} · 校准 {calibration} · 测试 {test}",
+    "noClaim": "本报告不对真实质量、成本或节省做出任何结论。",
+    "claimSaving": "每次被接受运行的可声明节省：{amount}"
+  },
+  "shadow": {
+    "title": "影子决策",
+    "note": "学习型路由器只在规则路由旁做预测，绝不据此采取任何行动。",
+    "agreement": "一致率",
+    "evaluated": "已评估",
+    "outOfDistribution": "超出分布",
+    "noOpinion": "没有已校准的预测头",
+    "empty": "尚未记录任何影子决策。",
+    "noPredictor": "当前没有已上线的学习型路由器，无法进行影子对比。",
+    "refused": "当前清单无法通过校验，已拒绝使用。"
+  },
+  "promotion": {
+    "title": "学习型路由器",
+    "active": "当前预测器",
+    "none": "无 —— 每次路由都由规则路由决定。",
+    "dormant": "后续版本：已上线的预测器会被记录并参与影子对比，暂时还不会改变任何路由决策。",
+    "promoted": "已上线 {version}",
+    "rolledBack": "已恢复上一个预测器",
+    "deactivated": "学习型路由器已重新关闭",
+    "refused": {
+      "SIMULATED_REPORT": "模拟报告永远不能上线：它没有面对过任何真实请求，也没有花过真实的钱。",
+      "NO_PUBLISHED_MANIFEST": "没有任何预测头在独立数据上完成校准，因此没有可发布的内容。",
+      "GATE_NOT_PASSED": "上线闸门未通过。",
+      "FEATURES_VERSION_MISMATCH": "该清单使用的特征编码与当前构建不一致。"
+    }
+  },
+  "errors": {
+    "failed": "路由实验失败：{message}"
+  }
+}

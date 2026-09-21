@@ -7,6 +7,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
+import { useSettingsStore } from "@/stores/settings"
 
 // Replace the heavy CodeMirror ExpressionField with a plain textarea so these
 // tests stay fast and focus on the new plain fields.
@@ -376,5 +377,33 @@ describe("AiPromptConfig — twin-bound character", () => {
       <AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={1} />
     )
     expect(container.querySelector('[data-field="characterId"]')).toBeNull()
+  })
+})
+
+/**
+ * The Router + Fusion action on `ai.prompt` (ADR-0188 D3). It rides `params`,
+ * so it is inside the node's config hash like every other authored field;
+ * `lib/workflow/nodes/ai/fusion-action.test.ts` pins that.
+ */
+describe("AiPromptConfig — Router + Fusion action", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: {
+        routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } },
+      } as never,
+    })
+  })
+
+  it("writes the chosen action onto the node's params", async () => {
+    const onChange = jest.fn()
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={onChange} typeVersion={2} />)
+    fireEvent.click(screen.getByTestId("fusion-action-trigger"))
+    fireEvent.click(await screen.findByRole("option", { name: /^Panel/ }))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ action: "panel" }))
+  })
+
+  it("renders on a v1 node too, whose executor honours the action as well", () => {
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={1} />)
+    expect(screen.getByTestId("fusion-action-trigger")).toHaveTextContent("Auto")
   })
 })

@@ -88,6 +88,14 @@ export function createEvalConfigurationApplicationDeps(
       if (target.targetType === "routing-policy") {
         return { ...((await dependencies.getSettings()).routingConfig ?? {}) }
       }
+      // The learned router's active manifest (ADR-0188 B6). Loaded lazily and
+      // only when a recommendation names this target, so Router + Fusion stays
+      // off the path of every other apply.
+      if (target.targetType === "routing-predictor") {
+        const { readActivePredictorPointer } =
+          await import("@/lib/router-fusion/eval/predictor-pointer")
+        return { ...(await readActivePredictorPointer()) }
+      }
       if (target.targetType === "character") {
         const character = await dependencies.getCharacter(target.targetId)
         if (!character) throw new Error(`Character ${target.targetId} not found`)
@@ -108,6 +116,14 @@ export function createEvalConfigurationApplicationDeps(
       if (target.targetType === "routing-policy") {
         await dependencies.saveSettings({
           routingConfig: value as unknown as AppSettings["routingConfig"],
+        })
+        return
+      }
+      if (target.targetType === "routing-predictor") {
+        const { parseActivePredictorPointer, writeActivePredictorPointer } =
+          await import("@/lib/router-fusion/eval/predictor-pointer")
+        await writeActivePredictorPointer(parseActivePredictorPointer(value), {
+          now: dependencies.now(),
         })
         return
       }

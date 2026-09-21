@@ -69,7 +69,14 @@ export async function ensureSessionExecutionBundle(input: {
   // bundle mounts.
   const managedRoots = managedWorkspaceRoots(context)
   const roots: readonly { id: string; path: string }[] = managedRoots ?? project.roots
-  const primaryRoot = managedRoots ? managedRoots[0] : primaryRootOf(project)
+  // The context's `rootId` is the repository the chat was pointed at; the
+  // bundle's primary lease must name that same root or the worktree alias the
+  // turn lands in is a different repository than the one the caller chose. A
+  // stale id (root since removed) falls back to primary, matching the rule
+  // `startNewSession` applied when the context was created.
+  const primaryRoot = managedRoots
+    ? managedRoots[0]
+    : (roots.find((root) => root.id === context.rootId) ?? primaryRootOf(project))
   if (!primaryRoot) throw new Error("managed execution requires at least one Project root")
   const requestedBase = context.execution?.base ?? { kind: "workingState" as const }
   const resolvedBase = await resolvePullRequestWorkspaceBase(primaryRoot.path, requestedBase)
@@ -100,6 +107,7 @@ export async function ensureSessionExecutionBundle(input: {
           sourceRoot: root.path,
         })),
         ...(provisioning ? { provisioning } : {}),
+        ...(context.requestedWorktreeName ? { requestedName: context.requestedWorktreeName } : {}),
       })
     )
   }

@@ -23,7 +23,7 @@ import { commitUsageRow } from "@/lib/usage/usage-ledger"
 import type { OutboxAppliers } from "./outbox"
 import { applySessionMessage } from "./session-transcript"
 import type { FusionOutboxRow, FusionRunOrigin } from "./types"
-import type { ExecutionRunOrigin, RunEventType } from "@/types/execution/run"
+import type { ExecutionRunInterrupt, ExecutionRunOrigin, RunEventType } from "@/types/execution/run"
 
 const SURFACE_BY_ORIGIN: Record<FusionRunOrigin, UsageSurface> = {
   chat: "chat",
@@ -88,7 +88,7 @@ export function usageRowFromOutbox(row: FusionOutboxRow): SessionUsageRow | null
 
 interface ProjectionPayload {
   runId: string
-  phase: "queued" | "running" | "terminal"
+  phase: "queued" | "running" | "waiting" | "terminal"
   origin: ExecutionRunOrigin
   title: string | null
   sessionId: string | null
@@ -99,6 +99,24 @@ interface ProjectionPayload {
   createdAt: number
   status?: string
   errorCode?: string
+  /**
+   * The decision a parked run is waiting on (`phase: "waiting"`, ADR-0188 B4).
+   *
+   * `id` is the fusion approval's own id, which is derived from the request
+   * digest, so the interrupt id a surface sends back when a person approves
+   * names exactly what was approved (API-08). `summary` is paths and counts;
+   * no file content and no model text ever travels here.
+   */
+  interrupt?: {
+    id: string
+    type: ExecutionRunInterrupt["type"]
+    requestDigest?: string
+    kind: string
+    revision: string
+    logicalStepId: string
+    summary: Record<string, unknown>
+    expiresAt: number
+  }
 }
 
 const TERMINAL_EVENT: Record<string, RunEventType> = {
@@ -157,6 +175,34 @@ export const accountDatabaseAppliers: OutboxAppliers = {
     // after the seal is skipped rather than retried forever.
     else if (["completed", "failed", "cancelled"].includes(existing.status)) return "skipped"
     if (p.phase === "queued") return "applied"
+    if (p.phase === "waiting") {
+      if (!p.interrupt) return "skipped"
+      // `createRunInterrupt` appends `interrupt.requested`, which is what moves
+      // the run to `waiting` and makes the cockpit offer approve/deny
+      // (`allowedActions` in `lib/execution/run-reducer.ts`). Replaying an
+      // effect must not raise a second interrupt for the same decision, so the
+      // id — derived from the digest — is checked first.
+      const { createRunInterrupt } = await import("@/lib/execution/run-control")
+      const existingInterrupt = await getDb().executionRunInterrupts.get(p.interrupt.id)
+      if (existingInterrupt) return "applied"
+      await createRunInterrupt({
+        id: p.interrupt.id,
+        runId: p.runId,
+        type: p.interrupt.type,
+        status: "pending",
+        title: "Router + Fusion approval",
+        ...(p.interrupt.requestDigest ? { requestDigest: p.interrupt.requestDigest } : {}),
+        subject: {
+          kind: p.interrupt.kind,
+          revision: p.interrupt.revision,
+          logicalStepId: p.interrupt.logicalStepId,
+          ...p.interrupt.summary,
+        },
+        expiresAt: p.interrupt.expiresAt,
+        createdAt: Date.now(),
+      })
+      return "applied"
+    }
     const type: RunEventType =
       p.phase === "running" ? "run.started" : (TERMINAL_EVENT[p.status ?? ""] ?? "run.failed")
     await runEventJournal.append(

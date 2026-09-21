@@ -568,6 +568,27 @@ export interface ExecutionRunInterrupt {
      * checkpoint). Nothing is replayed until a person chooses how.
      */
     | "team_recovery"
+    /**
+     * An `ask_user` tool call suspended on an interactive IM card
+     * (lib/connectors/hitl/ask-user-question.ts). Resolved approve when the
+     * person answered, deny when they skipped or the owning run aborted, and
+     * expired when the question's TTL elapsed.
+     */
+    | "ask_user"
+    /**
+     * A Router + Fusion delegate run parked on a person (ADR-0188 B4, D21):
+     * a write outside the subtask's allowed paths (`scope_expansion`), or
+     * delivering a verified patch into the user's own workspace
+     * (`workspace_apply`).
+     *
+     * Its `id` IS the run's approval id, derived from `requestDigest`, so
+     * approving this interrupt approves exactly the operation the digest
+     * covers: other arguments, or the same arguments against a workspace that
+     * moved, hash differently and are refused with `APPROVAL_MISMATCH`
+     * (API-08). `subject` carries the paths and counts a decision needs; the
+     * patch and the file content stay in the run's encrypted artifacts.
+     */
+    | "fusion_approval"
   status: ExecutionRunInterruptStatus
   title: string
   toolName?: string

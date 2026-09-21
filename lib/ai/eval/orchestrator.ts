@@ -1,4 +1,29 @@
-import type { EvalExperimentState, EvalTask, EvalTaskState } from "@cognia/eval-core"
+import type { EvalExperimentState, EvalMode, EvalTask, EvalTaskState } from "@cognia/eval-core"
+
+/**
+ * The evaluation modes the durable orchestrator drives.
+ *
+ * `model` and `agent` are `@cognia/eval-core`'s `EvalMode`: a project with
+ * variants, a dataset and a judge. `routing` (ADR-0188 D12/D28, B6) is a third
+ * kind of experiment and is declared here rather than in the package, because
+ * it has no variants, no dataset and no judge — widening `EvalMode` would put a
+ * mode into every project form and portable manifest that can never be built
+ * there. What it shares with the other two is exactly this orchestrator: tasks
+ * that reserve worst-case cost before they run, retry a rate limit and release
+ * their reservation when they fail.
+ *
+ * A routing experiment's own work is pure arithmetic over stored samples
+ * (`lib/ai/eval/routing-experiment.ts`), so it reserves nothing and costs
+ * nothing; the mode exists so a surface can say which kind of experiment it is
+ * driving without inventing a second vocabulary.
+ */
+export const DURABLE_EVAL_MODES = ["model", "agent", "routing"] as const
+export type DurableEvalMode = (typeof DURABLE_EVAL_MODES)[number]
+
+/** Every `EvalMode` the package declares is a mode this orchestrator drives. */
+export function isDurableEvalMode(value: EvalMode | string): value is DurableEvalMode {
+  return (DURABLE_EVAL_MODES as readonly string[]).includes(value)
+}
 
 export interface EvalTaskExecutionResult<T = unknown> {
   actualCost: number
@@ -56,6 +81,8 @@ export function classifyEvalRetry(error: unknown): EvalRetryDecision {
 }
 
 export interface EvalOrchestratorOptions {
+  /** Which kind of experiment this instance drives; `model` when unset. */
+  mode?: DurableEvalMode
   providerConcurrency?: Record<string, number>
   maxAttempts?: number
   baseRetryMs?: number
@@ -74,7 +101,12 @@ const TERMINAL_TASK_STATES = new Set<EvalTaskState>([
 export class DurableEvalOrchestrator<T = unknown> {
   private readonly activeControllers = new Map<string, AbortController>()
 
-  private readonly options: Required<Omit<EvalOrchestratorOptions, "providerConcurrency">> & {
+  /** Which kind of experiment this instance drives (`model`, `agent` or `routing`). */
+  readonly mode: DurableEvalMode
+
+  private readonly options: Required<
+    Omit<EvalOrchestratorOptions, "providerConcurrency" | "mode">
+  > & {
     providerConcurrency: Record<string, number>
   }
 
@@ -86,6 +118,10 @@ export class DurableEvalOrchestrator<T = unknown> {
     ) => Promise<EvalTaskExecutionResult<T>>,
     options: EvalOrchestratorOptions = {}
   ) {
+    if (options.mode !== undefined && !isDurableEvalMode(options.mode)) {
+      throw new Error(`Unknown evaluation mode ${String(options.mode)}`)
+    }
+    this.mode = options.mode ?? "model"
     this.options = {
       providerConcurrency: options.providerConcurrency ?? {},
       maxAttempts: options.maxAttempts ?? 3,

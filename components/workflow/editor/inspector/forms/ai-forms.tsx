@@ -38,10 +38,12 @@ import {
   readArrayJsonParam,
 } from "./form-support"
 import type { ConfigProps } from "./form-support"
+import { FusionActionField } from "@/components/router-fusion/fusion-action-field"
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
 export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
   const t = useTranslations("workflows.forms.aiPrompt")
+  const tFusion = useTranslations("routerFusionModes")
   const v2 = (typeVersion ?? 1) >= 2
   const mode = (readString(params, "mode") || "explicit") as "explicit" | "routed"
   const routed = v2 && mode === "routed"
@@ -95,6 +97,15 @@ export function AiPromptConfig({ params, onChange, typeVersion }: ConfigProps) {
           allowOff
         />
       ) : null}
+      {/* Router + Fusion action (ADR-0188 D3). Auto — the default — leaves the
+          node exactly as it was; the other modes run the step as a fusion run. */}
+      <Field label={tFusion("field.label")} htmlFor="ai-fusion-action" name="action">
+        <FusionActionField
+          id="ai-fusion-action"
+          value={params.action}
+          onChange={(value) => onChange(patchParam(params, "action", value))}
+        />
+      </Field>
       {v2 ? (
         <Field
           label={t("characterId.label")}

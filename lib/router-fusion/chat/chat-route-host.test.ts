@@ -61,4 +61,66 @@ describe("createChatRouteHost", () => {
   it("maps the build environment", () => {
     expect(runtimeEnvironment()).toBe("test")
   })
+
+  it("carries no classifier and no surface unless the settings and the caller ask for them", () => {
+    const host = createChatRouteHost({
+      appSettings,
+      engine: { planRoute: jest.fn() },
+      engineDeps: deps(),
+    })
+    expect(host.classify).toBeUndefined()
+    expect(host.surface).toBeUndefined()
+  })
+
+  it("carries the LLM classifier while it is on, and the surface its creator names", async () => {
+    const complete = jest.fn(
+      async () =>
+        '{"task":"text.transform","ambiguity":"low","tool_need":"none","scope":"single_item","missing_information":[]}'
+    )
+    const begin = jest.fn(async () => ({
+      kind: "granted" as const,
+      handle: {
+        runId: "r",
+        maxOutputTokens: 256,
+        succeeded: jest.fn(async () => undefined),
+        failed: jest.fn(async () => undefined),
+        unknown: jest.fn(async () => undefined),
+      },
+    }))
+    const host = createChatRouteHost({
+      appSettings: {
+        ...appSettings,
+        routerFusion: {
+          enabled: true,
+          llmClassifier: { enabled: true, routerProviderId: "openai", routerModelId: "gpt-5-mini" },
+        },
+      } as unknown as AppSettings,
+      engine: { planRoute: jest.fn() },
+      engineDeps: deps(),
+      surface: "chat",
+      classifierDeps: {
+        begin,
+        buildClient: async () => ({ complete }) as never,
+        accountKey: async () => "host-test",
+      },
+    })
+    expect(host.surface).toBe("chat")
+    expect(host.classify).toBeDefined()
+    const outcome = await host.classify!({
+      snapshot: {
+        userText: "Rewrite this sentence.",
+        trustedConstraints: [],
+        phase: "intake",
+        failedAttempts: 0,
+        verificationKinds: [],
+        sourceRevision: null,
+        missingInformation: [],
+      },
+      hints: {},
+      surface: "chat",
+      workspaceId: null,
+    })
+    expect(outcome.source).toBe("llm")
+    expect(begin).toHaveBeenCalledWith(expect.objectContaining({ surface: "chat" }))
+  })
 })

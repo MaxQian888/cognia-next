@@ -24,7 +24,22 @@
  * - Config snapshots: older than the window and compiled into no retained run.
  *   Checked in the same transaction scope run creation writes, so a run created
  *   from an old snapshot mid-sweep either keeps it or re-adds it.
+ * - Delegate patch sets: past their own `expiresAt` (the artifact window),
+ *   unless their run is still live — the same rule as the patch artifact they
+ *   index, because they are the same content.
+ * - Delegate step journals: in the run trail's transaction, with the run and
+ *   never on a window of their own (REC-06).
+ * - Routing samples and the shadow decisions annotating them: past their own
+ *   `expiresAt` on the routing-sample window, which deliberately outlives the
+ *   run trail — a sample is a text-free derived row a learned router trains
+ *   from, and it is collected long after its run was reaped.
  * - The money ledger is never reaped: it is append-only by contract.
+ * - Acceptance approvals are never reaped either: an approval is a person's
+ *   decision about their own project, kept while the project exists and
+ *   deleted with the database.
+ * - Predictor manifests are never reaped on a window either: the active
+ *   manifest and its rollback target must outlive any sweep, so
+ *   `lib/router-fusion/eval/routing-store.ts` caps that history itself.
  */
 
 import { isActiveReservation, isTerminalRunStatus } from "@cognia/router-fusion"
@@ -49,6 +64,10 @@ export const ARTIFACT_CONTENT_TTL_MS = ttlMsOf("fusionArtifacts")
 export const EVENT_HISTORY_RETENTION_MS = ttlMsOf("fusionRunEvents")
 export const RUN_TRAIL_RETENTION_MS = ttlMsOf("fusionRuns")
 export const IDEMPOTENCY_TTL_MS = ttlMsOf("fusionIdempotency")
+/** A delegate patch set is model-derived content: the artifact window (B4). */
+export const PATCH_SET_TTL_MS = ttlMsOf("fusionPatchSets")
+/** Routing samples and their shadow decisions share one window (B6). */
+export const ROUTING_SAMPLE_TTL_MS = ttlMsOf("fusionRoutingSamples")
 
 const OPEN_ATTEMPT_STATES: ReadonlySet<FusionAttemptState> = new Set([
   "PREPARED",
@@ -58,6 +77,10 @@ const OPEN_ATTEMPT_STATES: ReadonlySet<FusionAttemptState> = new Set([
 
 export interface FusionRetentionReport {
   artifacts: number
+  /** Delegate patch sets past the artifact window whose run is no longer live. */
+  patchSets: number
+  /** Delegate step-journal rows, reaped with their run and never before it. */
+  delegateSteps: number
   runs: number
   runEvents: number
   callAttempts: number
@@ -68,6 +91,10 @@ export interface FusionRetentionReport {
   idempotencyKeys: number
   feedback: number
   toolOperations: number
+  /** Routing samples past the routing-sample window. */
+  routingSamples: number
+  /** Shadow decisions past the same window, or whose sample is already gone. */
+  shadowDecisions: number
   /** Terminal runs past the window that were kept because they still pin money or an effect. */
   runsKept: number
 }
@@ -75,6 +102,8 @@ export interface FusionRetentionReport {
 function emptyReport(): FusionRetentionReport {
   return {
     artifacts: 0,
+    patchSets: 0,
+    delegateSteps: 0,
     runs: 0,
     runEvents: 0,
     callAttempts: 0,
@@ -85,6 +114,8 @@ function emptyReport(): FusionRetentionReport {
     idempotencyKeys: 0,
     feedback: 0,
     toolOperations: 0,
+    routingSamples: 0,
+    shadowDecisions: 0,
     runsKept: 0,
   }
 }
@@ -110,6 +141,20 @@ async function pruneArtifacts(db: FusionDB, now: number): Promise<number> {
     .delete()
 }
 
+/**
+ * Delegate patch sets past their own window, unless the run that produced them
+ * is still live. Same rule as artifact content, and the same reason: a live run
+ * may still deliver the patch it staged.
+ */
+async function prunePatchSets(db: FusionDB, now: number): Promise<number> {
+  const live = await liveRunIds(db)
+  return db.fusionPatchSets
+    .where("expiresAt")
+    .belowOrEqual(now)
+    .filter((patchSet) => !live.has(patchSet.runId))
+    .delete()
+}
+
 async function pruneRunBatch(
   db: FusionDB,
   runIds: readonly string[],
@@ -128,6 +173,7 @@ async function pruneRunBatch(
       db.fusionSessionLocks,
       db.fusionFeedback,
       db.fusionToolOperations,
+      db.fusionDelegateSteps,
     ],
     async () => {
       for (const runId of runIds) {
@@ -160,11 +206,37 @@ async function pruneRunBatch(
         report.outbox += await db.fusionOutbox.where("runId").equals(runId).delete()
         report.feedback += await db.fusionFeedback.where("runId").equals(runId).delete()
         report.toolOperations += await db.fusionToolOperations.where("runId").equals(runId).delete()
+        // The step journal goes in the SAME transaction as the run, never on a
+        // window of its own: a journal that outlived its run would keep
+        // workspace-derived receipts with nothing to replay, and one that went
+        // first would let a resume re-run an acceptance command or an apply
+        // (REC-06).
+        report.delegateSteps += await db.fusionDelegateSteps.where("runId").equals(runId).delete()
         await db.fusionRuns.delete(runId)
         report.runs += 1
       }
     }
   )
+}
+
+/**
+ * Routing samples past their own window, and the shadow decisions that
+ * annotate them. A shadow decision goes when its own window passed OR when the
+ * sample it compares against is no longer there: a shadow verdict with nothing
+ * to compare against is not a record, it is noise.
+ */
+async function pruneRoutingSamples(
+  db: FusionDB,
+  now: number,
+  report: FusionRetentionReport
+): Promise<void> {
+  const expired = await db.fusionRoutingSamples.where("expiresAt").belowOrEqual(now).primaryKeys()
+  const gone = new Set(expired)
+  await db.fusionRoutingSamples.bulkDelete(expired)
+  report.routingSamples = expired.length
+  report.shadowDecisions = await db.fusionShadowDecisions
+    .filter((shadow) => shadow.expiresAt <= now || gone.has(shadow.sampleId))
+    .delete()
 }
 
 async function pruneConfigSnapshots(db: FusionDB, cutoff: number): Promise<number> {
@@ -202,6 +274,7 @@ export async function pruneFusionDatabase(
 ): Promise<FusionRetentionReport> {
   const report = emptyReport()
   report.artifacts = await pruneArtifacts(db, now)
+  report.patchSets = await prunePatchSets(db, now)
   report.runEvents += await pruneExpiredJournals(db, now)
 
   const cutoff = now - RUN_TRAIL_RETENTION_MS
@@ -219,5 +292,6 @@ export async function pruneFusionDatabase(
   // An expired key stops replaying its run; a caller reusing it starts a new one.
   report.idempotencyKeys = await db.fusionIdempotency.where("expiresAt").belowOrEqual(now).delete()
   report.configSnapshots = await pruneConfigSnapshots(db, cutoff)
+  await pruneRoutingSamples(db, now, report)
   return report
 }

@@ -6,6 +6,7 @@ import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message
 import type { RoutingPlan } from "@cognia/provider-types/auto-router"
 import { RUNTIME_CAPABILITIES } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { RemoteWorkerRunInput } from "./remote-worker-runtime"
+import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
 
 const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
@@ -253,6 +254,23 @@ jest.mock("./decision-ledger", () => ({
   createDecisionLedger: () => ({ context: decisionContextMock }),
 }))
 
+// Router + Fusion (ADR-0188 D3/D21). Only the dynamic engine import and the
+// settings read are stubbed: the gate, `runMemberFusionTurn` and the dispatch
+// wiring under test are the real ones.
+let fusionSettings: unknown = {
+  routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } },
+}
+const runAgentsWorkflowsFusionMock = jest.fn()
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: async () => fusionSettings,
+}))
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: async () => ({
+    runAgentsWorkflowsFusion: (...args: unknown[]) => runAgentsWorkflowsFusionMock(...args),
+  }),
+  __resetRouterFusionHostForTesting: () => {},
+}))
+
 // ── Fixtures ────────────────────────────────────────────────────────────────
 function makeTeammate(overrides: Partial<AgentTeammate> = {}): AgentTeammate {
   return {
@@ -397,6 +415,9 @@ beforeEach(() => {
     providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
   })
   getSettingsMock.mockResolvedValue({})
+  fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } } }
+  runAgentsWorkflowsFusionMock.mockReset()
+  __resetFusionScopesForTesting()
 })
 
 describe("dispatchTeammate — text-only fallback", () => {
@@ -2019,5 +2040,93 @@ describe("dispatchTeammate — workspace isolation", () => {
       /EMPTY_OUTPUT/
     )
     expect(settleTaskWorkspaceRunMock).toHaveBeenCalledWith("task-run-default", "failed")
+  })
+})
+
+// ── Router + Fusion member action (ADR-0188 B5, D3/D21) ──────────────────
+// The Squad surface's real entry point: `dispatchTeammate` itself.
+describe("dispatchTeammate — Router + Fusion member action", () => {
+  const answered = {
+    kind: "answered" as const,
+    runId: "run-member-1",
+    mode: "cascade" as const,
+    text: "the member's checked answer",
+    qualityStatus: "accepted" as const,
+    usage: { promptTokens: 90, completionTokens: 30, totalTokens: 120 },
+    spentMicrousd: 9_000,
+    modelCalls: 2,
+    warnings: [],
+  }
+
+  it("runs the member's turn as a child fusion run and books it on the team's child account", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    runAgentsWorkflowsFusionMock.mockResolvedValue(answered)
+    const { createRunBudgetGovernor } = await import("@/lib/ai/agent/execution/run-budget-governor")
+    const { ctx, notifier, pool } = makeCtx(makeTeammate({ config: { fusionAction: "cascade" } }))
+    const governor = createRunBudgetGovernor({
+      runId: "run1",
+      limit: 0,
+      onCritical: "notify",
+      notifier: notifier as never,
+    })
+    ;(ctx as { governor?: unknown }).governor = governor
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(result.text).toBe("the member's checked answer")
+    // The fusion run replaced the member's model turn on every channel.
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(runAndCaptureMock).not.toHaveBeenCalled()
+    expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
+    expect(runAgentsWorkflowsFusionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "cascade",
+        origin: "agent",
+        featureId: "teammate:tm1",
+        hasFusionAncestor: false,
+      })
+    )
+    // D21: the member is a child of the team run's one budget authority.
+    expect(governor.children()).toEqual([
+      expect.objectContaining({ childRunId: "run1:tm1:t1", usedTokens: 120, attempts: 1 }),
+    ])
+  })
+
+  it("[ACC:OFF-AGENTS] leaves the member on its ordinary channel while the surface is off", async () => {
+    executeAgentMock.mockResolvedValue({ text: "the answer" })
+    const { ctx } = makeCtx(makeTeammate({ config: { fusionAction: "cascade" } }))
+
+    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(result.channel).toBe("text")
+    expect(result.text).toBe("the answer")
+    expect(runAgentsWorkflowsFusionMock).not.toHaveBeenCalled()
+  })
+
+  it("[ACC:OFF-AGENTS] a member on auto never reaches Router + Fusion even with the surface on", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    executeAgentMock.mockResolvedValue({ text: "the answer" })
+    const { ctx } = makeCtx(makeTeammate())
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })
+
+    expect(runAgentsWorkflowsFusionMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails the dispatch when the chosen mode is refused, instead of degrading to a plain turn", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    runAgentsWorkflowsFusionMock.mockResolvedValue({
+      kind: "refused",
+      code: "ROUTE_NO_SOLUTION",
+      reasons: ["cascade_verify:FUSION_RECURSION"],
+    })
+    const { ctx, pool } = makeCtx(makeTeammate({ config: { fusionAction: "cascade" } }))
+
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "do it" })).rejects.toMatchObject({
+      code: "ROUTE_NO_SOLUTION",
+    })
+    expect(executeAgentMock).not.toHaveBeenCalled()
+    expect(pool.recordFailure).toHaveBeenCalled()
   })
 })

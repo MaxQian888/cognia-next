@@ -59,6 +59,23 @@ export const GRANT_CAPABILITIES: Readonly<Record<DeviceGrantId, readonly string[
   }
 )
 
+/**
+ * The capability a paired device needs to start, read, resume or stop a Router
+ * + Fusion run, or to answer a call reservation, over the companion RPC
+ * (ADR-0188 D25: `execution_run_*`, `claude_call_reserve_respond`).
+ *
+ * It is the Control grant's `agent.run`, on purpose. A fusion run is agent work
+ * this host executes and bills, which is what `agent.run` already authorizes
+ * (`claude_send`, `room_send`, `bot_run_manual`), and the request path checks
+ * it from each descriptor (`remote_execution::authorize_capability`). A
+ * capability of its own would need a row in the canonical Rust table
+ * (`device_grants.rs`) and would leave every device granted Control before
+ * this release unable to use it until someone granted it again. The co-located
+ * test holds each companion Router + Fusion descriptor to this value, and the
+ * mobile composer offers a run only to a device the host says holds it.
+ */
+export const ROUTER_FUSION_COMPANION_CAPABILITY = "agent.run" as const
+
 export const DEVICE_GRANT_IDS: readonly DeviceGrantId[] = Object.freeze([
   "control",
   "agentControl",

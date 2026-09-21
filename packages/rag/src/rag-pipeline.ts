@@ -11,6 +11,7 @@
 
 import type { LanguageModel } from "ai"
 import type { DocumentChunk, ChunkingOptions } from "@cognia/provider-embedding/chunking"
+import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 import { chunkDocument } from "@cognia/provider-embedding/chunking"
 import { chunkDocumentAsync } from "@cognia/provider-embedding/chunking"
 import type { EmbeddingModelConfig } from "@cognia/vector/embedding"
@@ -125,6 +126,15 @@ export interface RAGPipelineConfig {
 
   // Optional LLM for advanced features
   model?: LanguageModel
+  /**
+   * Generation seam for every call the pipeline makes on `model` — semantic
+   * chunking, contextual retrieval, query expansion and rewriting, LLM rerank
+   * and grading (ADR-0188 D27). This is those stages' host boundary: a host
+   * that builds a pipeline with a model passes the ledgered seam
+   * (`lib/ai/ledgered-generation-seam.ts`) when its surface is on. Absent,
+   * every stage calls the model directly, exactly as before.
+   */
+  generate?: GenerationSeam
 
   // Hybrid search settings
   hybridSearch?: {
@@ -261,7 +271,10 @@ interface IndexedDocument {
  * RAG Pipeline - Unified retrieval pipeline with advanced features
  */
 export class RAGPipeline {
-  private config: Omit<Required<RAGPipelineConfig>, "model"> & { model?: LanguageModel }
+  private config: Omit<Required<RAGPipelineConfig>, "model" | "generate"> & {
+    model?: LanguageModel
+    generate?: GenerationSeam
+  }
   private contextCache: ContextCache
   private mirrorCollections: Map<string, IndexedDocument[]> = new Map()
   private embeddingCache: Map<string, number[]> = new Map()
@@ -281,6 +294,7 @@ export class RAGPipeline {
       embeddingConfig: config.embeddingConfig,
       embeddingApiKey: config.embeddingApiKey,
       model: config.model,
+      ...(config.generate ? { generate: config.generate } : {}),
       hybridSearch: {
         enabled: config.hybridSearch?.enabled ?? true,
         vectorWeight: config.hybridSearch?.vectorWeight ?? 0.5,
@@ -403,6 +417,15 @@ export class RAGPipeline {
     this.persistentStorageInitPromise = this.initializePersistentStorage()
   }
 
+  /**
+   * The host's generation seam as a spreadable option: `{ generate }` when one
+   * was injected, `{}` otherwise, so a stage's options are exactly what they
+   * were without a seam.
+   */
+  private generationSeam(): { generate?: GenerationSeam } {
+    return this.config.generate ? { generate: this.config.generate } : {}
+  }
+
   private async initializePersistentStorage(): Promise<void> {
     if (!isIndexedDBAvailable()) {
       return
@@ -520,7 +543,12 @@ export class RAGPipeline {
         strategy === "semantic" && this.config.model
           ? await chunkDocumentAsync(
               content,
-              { ...this.config.chunkingOptions, strategy, model: this.config.model },
+              {
+                ...this.config.chunkingOptions,
+                strategy,
+                model: this.config.model,
+                ...this.generationSeam(),
+              },
               documentId
             )
           : chunkDocument(content, { ...this.config.chunkingOptions, strategy }, documentId)
@@ -540,6 +568,7 @@ export class RAGPipeline {
         if (this.config.contextualRetrieval.useLLM && this.config.model) {
           const contextConfig: ContextGenerationConfig = {
             model: this.config.model,
+            ...this.generationSeam(),
             onProgress: (p) =>
               onProgress?.({ stage: "context_generation", current: p.current, total: p.total }),
           }
@@ -731,6 +760,7 @@ export class RAGPipeline {
       if (this.config.queryExpansion.enabled && this.config.model) {
         expandedQuery = await expandQuery(safeModelText(query), {
           model: this.config.model,
+          ...this.generationSeam(),
           maxVariants: this.config.queryExpansion.maxVariants,
           includeHypotheticalAnswer: this.config.queryExpansion.useHyDE,
         })
@@ -770,6 +800,7 @@ export class RAGPipeline {
       if (this.config.reranking.enabled && mergedResults.length > 0) {
         const rerankConfig: RerankConfig = {
           model: this.config.reranking.useLLM ? this.config.model : undefined,
+          ...(this.config.reranking.useLLM ? this.generationSeam() : {}),
           cohereApiKey: this.config.reranking.cohereApiKey,
           topN: this.config.topK,
         }
@@ -813,6 +844,7 @@ export class RAGPipeline {
             relevanceThreshold: this.config.correctiveRAG.relevanceThreshold,
             useLLM: this.config.correctiveRAG.useLLM,
             model: this.config.correctiveRAG.useLLM ? this.config.model : undefined,
+            ...(this.config.correctiveRAG.useLLM ? this.generationSeam() : {}),
             fallbackStrategy: this.config.correctiveRAG.fallbackStrategy,
           }
         )
@@ -909,7 +941,9 @@ export class RAGPipeline {
       // Refine query
       let refinedQuery: string
       if (this.config.model) {
-        refinedQuery = await rewriteQuery(query, this.config.model)
+        refinedQuery = this.config.generate
+          ? await rewriteQuery(query, this.config.model, { generate: this.config.generate })
+          : await rewriteQuery(query, this.config.model)
       } else {
         // Lightweight fallback: append context from first pass
         const topTerms = result.documents

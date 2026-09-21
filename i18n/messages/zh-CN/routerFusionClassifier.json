@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "LLM 分类器",
+    "desc": "用一次小模型调用代替关键词规则，为自动路由请求打标签：聊天界面开启时作用于聊天中的自动路由轮次，Run API 开启时作用于 Run API 与 cognia/auto 请求。后台工具记账开启时，它还代替旧版自动路由的难度裁判给出判断。",
+    "enable": "用模型为自动路由请求分类",
+    "needsMaster": "开启 Router + Fusion 及相应界面后生效。",
+    "costNote": "每个路由轮次会多一次小调用。该调用与其他调用一样记账；缓存有效期内重复的提示不再产生费用。",
+    "fallbackNote": "超时、回答不可用、提示中含个人数据或模型不可用时，回退到规则分类器。已经发出的调用照常计费。",
+    "model": "路由模型",
+    "modelDesc": "选择一个小而快的模型。它只为请求打标签，从不回答请求。",
+    "modelClear": "清除",
+    "modelUnset": "请选择路由模型。在此之前，每个请求都由规则分类器打标签。",
+    "timeout": "超时（毫秒）",
+    "timeoutDesc": "包括预留在内的整个分类必须在此时间内完成。默认 1500。",
+    "cacheTtl": "缓存有效期（秒）",
+    "cacheTtlDesc": "重复的提示在此期间复用其标签。设为 0 关闭缓存。默认 600。",
+    "invalidNumber": "请输入 {min} 到 {max} 之间的整数。",
+    "migrated": "已从难度裁判沿用：{fields}。",
+    "migratedField": {
+      "routerModel": "路由模型",
+      "timeoutMs": "超时",
+      "cacheTtlSeconds": "缓存有效期"
+    }
+  }
+}

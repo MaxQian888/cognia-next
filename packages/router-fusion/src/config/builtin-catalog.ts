@@ -18,7 +18,7 @@ import {
 } from "../contracts/schemas"
 import { usdToMicrousd } from "../money/microusd"
 import { ROLE_PROMPT_VERSION } from "../prompts/roles"
-import type { ActionExtension, ActionLimits } from "./types"
+import { DELEGATE_LIMIT_CEILINGS, type ActionExtension, type ActionLimits } from "./types"
 
 /** The role prompts' version: part of every action hash, so a prompt change re-hashes every action (ROUTE-05). */
 export const BUILTIN_PROMPT_VERSION = ROLE_PROMPT_VERSION
@@ -37,10 +37,12 @@ const SPEC_LIMITS = {
   panel_size: 2,
   panel_min_candidates: 2,
   panel_evidence_rounds: 1,
-  worker_model_turns: 8,
-  worker_tool_operations: 12,
-  worker_repair_rounds: 1,
-  lead_takeovers: 1,
+  // The delegate graph's bounds sit at their V1 ceilings: ≤ 8 worker turns,
+  // ≤ 12 tool operations, one repair round, one lead takeover (B4).
+  worker_model_turns: DELEGATE_LIMIT_CEILINGS.worker_model_turns,
+  worker_tool_operations: DELEGATE_LIMIT_CEILINGS.worker_tool_operations,
+  worker_repair_rounds: DELEGATE_LIMIT_CEILINGS.worker_repair_rounds,
+  lead_takeovers: DELEGATE_LIMIT_CEILINGS.lead_takeovers,
 } as const
 
 export const DEFAULT_LIMITS_BY_MODE: Record<ExecutionMode, ActionLimits> = {
@@ -49,7 +51,13 @@ export const DEFAULT_LIMITS_BY_MODE: Record<ExecutionMode, ActionLimits> = {
   direct: { ...SPEC_LIMITS, max_model_calls: 256, deadline_ms: 3_600_000 },
   cascade: { ...SPEC_LIMITS, max_model_calls: 24, deadline_ms: 120_000 },
   panel: { ...SPEC_LIMITS, max_model_calls: 24, deadline_ms: 120_000 },
-  delegate: { ...SPEC_LIMITS, max_model_calls: 24, deadline_ms: 900_000 },
+  delegate: {
+    ...SPEC_LIMITS,
+    max_model_calls: 24,
+    deadline_ms: 900_000,
+    // Only delegate plans subtasks, so only delegate carries the bound.
+    delegate_subtasks: DELEGATE_LIMIT_CEILINGS.delegate_subtasks,
+  },
 }
 
 export const DEFAULT_RUN_CAP_USD_BY_MODE: Record<ExecutionMode, string> = {

@@ -73,6 +73,106 @@ describe("runTimelineOf", () => {
     expect(timeline.phases.map((p) => p.step)).toEqual(["cheap", null, "escalate", "strong"])
   })
 
+  it("reads a delegate's attempts, turns, tools, tier, approvals and delivery, idempotently", () => {
+    const run = [
+      event("phase.changed", { phase: "delegate", step: "plan" }),
+      event("phase.changed", { phase: "delegate", step: "planned", subtasks: 2 }),
+      event("phase.changed", { phase: "delegate", step: "attempt", attempt: 1, kind: "work" }),
+      event("phase.changed", { phase: "delegate", step: "turn", attempt: 1, turn: 1 }),
+      event("phase.changed", {
+        phase: "delegate",
+        step: "tools",
+        attempt: 1,
+        turn: 1,
+        admitted: 2,
+      }),
+      event("approval.required", {
+        approval_id: "ap-1",
+        kind: "scope_expansion",
+        request_digest: "d1",
+      }),
+      event("phase.changed", {
+        phase: "delegate",
+        step: "waiting_for_approval",
+        kind: "scope_expansion",
+      }),
+    ]
+    const parked = runTimelineOf(run)
+    expect(parked.delegate).toMatchObject({
+      subtasks: { planned: 2, completed: 0 },
+      attempts: 1,
+      workerTurns: 1,
+      toolOperations: 2,
+      approvals: { requested: 1, pending: { kind: "scope_expansion" } },
+      delivery: null,
+    })
+
+    // The resumed run replays its graph: the same events again, then the rest.
+    const resumed = runTimelineOf([
+      ...run,
+      ...run.slice(0, 4),
+      event("phase.changed", {
+        phase: "delegate",
+        step: "approval_resolved",
+        approval_id: "ap-1",
+        status: "approved",
+      }),
+      event("phase.changed", { phase: "delegate", step: "turn", attempt: 1, turn: 2 }),
+      event("phase.changed", { phase: "delegate", step: "staged", attempt: 1, files: 2 }),
+      event("phase.changed", { phase: "delegate", step: "subtask_done", subtask: 1 }),
+      event("phase.changed", { phase: "delegate", step: "subtask_done", subtask: 1 }),
+      event("phase.changed", { phase: "delegate", step: "subtask_done", subtask: 2 }),
+      event("verification.completed", { status: "failed", level: "tool_verified", tier: "os" }),
+      event("phase.changed", { phase: "delegate", step: "repair", attempt: 2 }),
+      event("phase.changed", { phase: "delegate", step: "attempt", attempt: 2, kind: "repair" }),
+      event("phase.changed", { phase: "delegate", step: "turn", attempt: 2, turn: 1 }),
+      event("phase.changed", { phase: "delegate", step: "attempt", attempt: 3, kind: "takeover" }),
+      event("phase.changed", { phase: "delegate", step: "turn", attempt: 3, turn: 1 }),
+      event("approval.required", {
+        approval_id: "ap-2",
+        kind: "workspace_apply",
+        request_digest: "d2",
+      }),
+      event("phase.changed", {
+        phase: "delegate",
+        step: "delivered",
+        delivery: "workspace_updated",
+        files: 3,
+      }),
+    ])
+    expect(resumed.delegate).toEqual({
+      subtasks: { planned: 2, completed: 2 },
+      attempts: 3,
+      repairs: 1,
+      takeovers: 1,
+      workerTurns: 4,
+      toolOperations: 2,
+      sandboxTier: "os",
+      patchFiles: 3,
+      delivery: "workspace_updated",
+      approvals: { requested: 2, pending: null },
+    })
+    // Other modes carry no delegate part.
+    expect(
+      runTimelineOf([event("phase.changed", { phase: "cascade", step: "cheap" })]).delegate
+    ).toBeNull()
+    // Malformed delegate payloads count nothing.
+    expect(
+      runTimelineOf([
+        event("phase.changed", { phase: "delegate", step: "turn", attempt: 0, turn: "x" }),
+        event("phase.changed", { phase: "delegate", step: "attempt", attempt: 1 }),
+        event("phase.changed", { phase: "delegate", step: "tools", attempt: 1 }),
+        event("approval.required", {}),
+      ]).delegate
+    ).toMatchObject({
+      subtasks: { planned: null, completed: 0 },
+      attempts: 0,
+      workerTurns: 0,
+      toolOperations: 0,
+      approvals: { requested: 0, pending: null },
+    })
+  })
+
   it("keeps only the newest phases and ignores what it cannot read", () => {
     const many = Array.from({ length: MAX_TIMELINE_PHASES + 6 }, (_, i) =>
       event("phase.changed", { phase: "panel", step: `step-${i}` })

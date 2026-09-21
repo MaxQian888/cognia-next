@@ -13,6 +13,11 @@
 
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import type { RerankResult } from "./reranker"
 import { getRAGLogger } from "./runtime-adapters"
 
@@ -29,6 +34,11 @@ export interface RetrievalGraderConfig {
   useLLM: boolean
   /** LLM model for grading (required if useLLM=true) */
   model?: LanguageModel
+  /**
+   * Generation seam for the LLM grading calls (ADR-0188 D27). A host passes the
+   * ledgered seam when its surface is on; absent, the model is called directly.
+   */
+  generate?: GenerationSeam
   /** Fallback strategy when too few chunks pass grading */
   fallbackStrategy: "none" | "relax_threshold" | "keep_best"
   /** Minimum number of chunks to keep even if below threshold */
@@ -138,7 +148,11 @@ export function gradeDocumentHeuristic(query: string, document: RerankResult): n
 export async function gradeDocumentLLM(
   query: string,
   document: RerankResult,
-  model: LanguageModel
+  model: LanguageModel,
+  options: {
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
+  } = {}
 ): Promise<{ grade: number; explanation: string }> {
   try {
     const prompt = `You are a relevance grader. Given a user query and a retrieved document, determine if the document is relevant to answering the query.
@@ -161,13 +175,19 @@ Respond in this exact format:
 SCORE: <number>
 REASON: <one sentence explanation>`
 
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0,
-    })
+    const answer = await generateThroughSeam(
+      options.generate,
+      { stage: "rag.grade", modelId: modelIdOf(model), prompt, temperature: 0 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0,
+          ...overrides,
+        })
+    )
 
-    const text = result.text.trim()
+    const text = answer.trim()
     const scoreMatch = text.match(/SCORE:\s*(\d+(?:\.\d+)?)/i)
     const reasonMatch = text.match(/REASON:\s*(.+)/i)
 
@@ -211,7 +231,12 @@ export async function gradeRetrievedDocuments(
 
   for (const doc of docsToGrade) {
     if (method === "llm" && cfg.model) {
-      const llmResult = await gradeDocumentLLM(query, doc, cfg.model)
+      const llmResult = await gradeDocumentLLM(
+        query,
+        doc,
+        cfg.model,
+        cfg.generate ? { generate: cfg.generate } : {}
+      )
       graded.push({
         document: doc,
         grade: llmResult.grade,

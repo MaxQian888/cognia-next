@@ -282,6 +282,41 @@ jest.mock("@/stores/settings/settings-store", () => ({
     }),
   },
 }))
+// The LLM classifier (D18) is real; only its ledger, its router model's client
+// and its cache account are faked at the classifier's own seams.
+const mockClassifier = {
+  reply: "",
+  begins: [] as Array<{ surface: string; featureId: string; origin: string }>,
+  prompts: [] as string[],
+}
+jest.mock("@/lib/router-fusion/routing/llm-classifier", () => {
+  const actual = jest.requireActual("@/lib/router-fusion/routing/llm-classifier")
+  const handle = {
+    runId: "classifier-run",
+    maxOutputTokens: 256,
+    succeeded: async () => undefined,
+    failed: async () => undefined,
+    unknown: async () => undefined,
+  }
+  return {
+    ...actual,
+    createRouteClassifier: (appSettings: unknown, deps: Record<string, unknown> = {}) =>
+      actual.createRouteClassifier(appSettings, {
+        ...deps,
+        begin: async (input: { surface: string; featureId: string; origin: string }) => {
+          mockClassifier.begins.push(input)
+          return { kind: "granted", handle }
+        },
+        buildClient: async () => ({
+          complete: async (prompt: string) => {
+            mockClassifier.prompts.push(prompt)
+            return mockClassifier.reply
+          },
+        }),
+        accountKey: async () => "build-options-test",
+      }),
+  }
+})
 
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { listEnabledSkillsByIds, listSkillsByIds, recordSkillUsage } from "@/lib/db/skills"
@@ -294,6 +329,8 @@ import { __resetBreakerForTesting, getBreakerSnapshot } from "@/lib/router-fusio
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import { __resetChatRunsForTesting, preparedChatRoute } from "@/lib/router-fusion/chat/chat-runs"
 import { useChatFusionModeStore } from "@/stores/chat/fusion-mode-store"
+import { DEFAULT_AUTO_ROUTER_SETTINGS } from "@cognia/provider-types/auto-router"
+import { __resetClassifierCachesForTesting } from "@/lib/router-fusion/routing/llm-classifier"
 import type { AppSettings, ChatSession, SendOptions } from "@cognia/agent-config-types"
 import {
   resetProviderRoutingRuntimeAdaptersForTesting,
@@ -396,6 +433,10 @@ beforeEach(() => {
   __resetBreakerForTesting()
   __resetChatRunsForTesting()
   useChatFusionModeStore.setState({ modes: {} })
+  __resetClassifierCachesForTesting()
+  mockClassifier.reply = ""
+  mockClassifier.begins = []
+  mockClassifier.prompts = []
 })
 
 describe("resolveSendOptions — Router + Fusion off", () => {
@@ -812,5 +853,116 @@ describe("resolveSendOptions — Router + Fusion runs (B3)", () => {
     expect(comparable(off)).toEqual(comparable(baseline))
     expect(off.routerFusionRun).toBeUndefined()
     expect(mockFusionLoader.calls).toBe(0)
+  })
+})
+
+describe("resolveSendOptions — the LLM classifier (D18, B5)", () => {
+  /** A conversation on Auto: the send asks the router, not a named model. */
+  const autoTiered = (routerFusion: Record<string, unknown>): AppSettings =>
+    ({
+      ...tieredSettings(routerFusion),
+      autoRouting: { ...DEFAULT_AUTO_ROUTER_SETTINGS, enabled: true },
+    }) as AppSettings
+  const classifierOn = (extra: Record<string, unknown> = {}) => ({
+    ...ON,
+    llmClassifier: { enabled: true, routerProviderId: "openai", routerModelId: "gpt-5-mini" },
+    ...extra,
+  })
+  const labels = (task: string) =>
+    JSON.stringify({
+      task,
+      ambiguity: "low",
+      tool_need: "none",
+      scope: "single_item",
+      missing_information: [],
+    })
+
+  it("labels an Auto chat turn with one ledgered classification and routes by it", async () => {
+    const question = { promptText: "What is the capital of France?" }
+    // By the rules, a knowledge question: the baseline tier answers it.
+    const rules = await send({
+      appSettings: autoTiered({ ...ON, approvedRuleRows: ["economy_simple"] }),
+      routerFusionSurface: "chat",
+      routingContextHint: question,
+    })
+    expect(rules.routerFusion).toMatchObject({ actionId: "direct_baseline", modelId: "gpt-5" })
+    expect(mockClassifier.begins).toHaveLength(0)
+
+    mockClassifier.reply = labels("text.transform")
+    const opts = await send({
+      appSettings: autoTiered(classifierOn({ approvedRuleRows: ["economy_simple"] })),
+      routerFusionSurface: "chat",
+      routingContextHint: question,
+    })
+    expect(opts.routerFusion).toMatchObject({
+      actionId: "direct_economy",
+      ruleId: "R2_economy_simple",
+      modelId: "gpt-5-mini",
+    })
+    expect(mockClassifier.begins).toEqual([
+      expect.objectContaining({
+        surface: "chat",
+        origin: "utility",
+        featureId: "router-fusion-classifier",
+      }),
+    ])
+    expect(mockClassifier.prompts[0]).toContain("What is the capital of France?")
+    const decision = preparedChatRoute(opts.routerFusion!.runId)!.decision
+    expect(decision.classifier_version).toBe("classifier-1")
+    expect(decision.reason_codes).toEqual(
+      expect.arrayContaining(["classifier_source:llm", "selected_by:R2_economy_simple"])
+    )
+  })
+
+  it("[ACC:ROUTE-03] routes the chat turn by the rules when the classifier's answer is unusable, and says so", async () => {
+    mockClassifier.reply = "text.transform, I think"
+    const opts = await send({
+      appSettings: autoTiered(classifierOn({ approvedRuleRows: ["economy_simple"] })),
+      routerFusionSurface: "chat",
+      routingContextHint: { promptText: "What is the capital of France?" },
+    })
+    expect(opts.routerFusionBypass).toBeUndefined()
+    expect(opts.routerFusion).toMatchObject({ actionId: "direct_baseline", modelId: "gpt-5" })
+    const decision = preparedChatRoute(opts.routerFusion!.runId)!.decision
+    expect(decision.classifier_version).toBe("rules-1")
+    expect(decision.reason_codes).toEqual(
+      expect.arrayContaining([
+        "classifier_source:rules_fallback",
+        "classifier_fallback:invalid_json",
+      ])
+    )
+    expect(mockClassifier.begins).toHaveLength(1)
+  })
+
+  it("books a chat fusion selection's classification on chat too, and lets the labels pick the panel", async () => {
+    mockClassifier.reply = labels("research.synthesis")
+    const opts = await send({
+      appSettings: autoTiered(classifierOn({ approvedRuleRows: ["panel_research"] })),
+      routerFusionSurface: "chat",
+      // By the rules a knowledge question; the classifier reads research.
+      routingContextHint: { promptText: "Why does the 2025 steel tariff differ from 2024?" },
+    })
+    expect(opts.routerFusionRun).toMatchObject({
+      mode: "panel",
+      requested: "auto",
+      ruleId: "R4_panel_research",
+    })
+    expect(mockClassifier.begins.every((begin) => begin.surface === "chat")).toBe(true)
+  })
+
+  it("[ACC:OFF-02] spends nothing on classification while the classifier is off", async () => {
+    await send({
+      appSettings: autoTiered({ ...ON, approvedRuleRows: ["economy_simple"] }),
+      routerFusionSurface: "chat",
+      routingContextHint: { promptText: "What is the capital of France?" },
+    })
+    // And nothing while Router + Fusion itself is off, even with the classifier stored on.
+    await send({
+      appSettings: autoTiered({ ...classifierOn(), enabled: false }),
+      routerFusionSurface: "chat",
+      routingContextHint: { promptText: "What is the capital of France?" },
+    })
+    expect(mockClassifier.begins).toHaveLength(0)
+    expect(mockClassifier.prompts).toHaveLength(0)
   })
 })

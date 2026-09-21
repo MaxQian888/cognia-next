@@ -9,6 +9,7 @@ import { runStructuredTurn } from "./structured-turn"
 import { validateAgainstJsonSchema } from "./schema-validate"
 import { coerceToType, nonRetryable, resolveNodeApiKey } from "../shared/executor-support"
 import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
+import { runAiPromptFusionAction } from "./fusion-action"
 
 // ── ai.prompt ─────────────────────────────────────────────────────────────
 // Real LLM call via `createLlmClient` when provider + apiKey are present in
@@ -19,6 +20,12 @@ registerNodeExecutor({
   kind: "ai.prompt",
   typeVersion: 1,
   execute: async (ctx) => {
+    // Router + Fusion action (ADR-0188 D3): a node set to `cascade`, `panel`
+    // or `direct` runs as a fusion run instead of one call. `auto` — every
+    // node by default — and a switched-off surface answer null after one
+    // property read, and the executor below is untouched (D37).
+    const fusionStep = await runAiPromptFusionAction(ctx)
+    if (fusionStep) return fusionStep
     const params = ctx.params as {
       provider?: string
       model?: string
@@ -210,7 +217,14 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "ai.prompt",
   typeVersion: 2,
-  execute: async (ctx) => (await import("./ai-prompt-v2")).executeAiPromptV2(ctx),
+  execute: async (ctx) => {
+    // Same seam as v1: the action is decided before the executor's own mode
+    // (`explicit` / `routed`), because a fusion run replaces the call rather
+    // than changing how one call is routed.
+    const fusionStep = await runAiPromptFusionAction(ctx)
+    if (fusionStep) return fusionStep
+    return (await import("./ai-prompt-v2")).executeAiPromptV2(ctx)
+  },
 })
 
 // ── ai.council ────────────────────────────────────────────────────────────

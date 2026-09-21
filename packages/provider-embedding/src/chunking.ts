@@ -11,6 +11,7 @@
 
 import type { LanguageModel } from "ai"
 import { getProviderCoreLogger } from "@cognia/provider-core/providers/runtime-adapters"
+import { generateThroughSeam, modelIdOf, type GenerationSeam } from "./generation-seam"
 
 const log = getProviderCoreLogger("ai")
 
@@ -32,6 +33,12 @@ export interface ChunkingOptions {
   minChunkSize?: number
   maxChunkSize?: number
   model?: LanguageModel // For semantic chunking
+  /**
+   * Generation seam for the semantic strategy's model call (ADR-0188 D27). The
+   * host passes the ledgered seam when its surface is on; absent, the model is
+   * called directly, exactly as before. See `./generation-seam.ts`.
+   */
+  generate?: GenerationSeam
 }
 
 export interface DocumentChunk {
@@ -506,6 +513,7 @@ export async function chunkDocumentAsync(
       const semanticResult = await chunkDocumentSemantic(text, normalized.opts.model, {
         targetChunkSize: normalized.normalizedChunkSize,
         documentId,
+        ...(normalized.opts.generate ? { generate: normalized.opts.generate } : {}),
       })
 
       if (semanticResult.totalChunks > 0) {
@@ -623,9 +631,11 @@ export async function chunkDocumentSemantic(
   options: {
     targetChunkSize?: number
     documentId?: string
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<ChunkingResult> {
-  const { targetChunkSize = 1000, documentId } = options
+  const { targetChunkSize = 1000, documentId, generate } = options
   const cleanedText = text.replace(/\r\n/g, "\n").trim()
 
   if (!cleanedText || cleanedText.length <= targetChunkSize) {
@@ -661,13 +671,19 @@ Example output format: [500, 1200, 1800]
 Text to analyze:
 ${cleanedText.slice(0, 8000)}${cleanedText.length > 8000 ? "\n...[truncated]" : ""}`
 
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.1,
-    })
+    const answer = await generateThroughSeam(
+      generate,
+      { stage: "embedding.semantic-chunking", modelId: modelIdOf(model), prompt, temperature: 0.1 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.1,
+          ...overrides,
+        })
+    )
 
-    const splitPoints = parseSemanticSplitPoints(result.text, cleanedText.length)
+    const splitPoints = parseSemanticSplitPoints(answer, cleanedText.length)
 
     // If AI couldn't find good split points, fall back to heading chunking
     if (splitPoints.length === 0) {

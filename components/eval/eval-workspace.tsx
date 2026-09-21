@@ -15,30 +15,47 @@
 import { useState, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import { DatabaseIcon, GitCompareIcon, MicroscopeIcon, ScaleIcon, SettingsIcon } from "lucide-react"
+import {
+  DatabaseIcon,
+  GitCompareIcon,
+  MicroscopeIcon,
+  RouteIcon,
+  ScaleIcon,
+  SettingsIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { RoutingExperimentPanel } from "@/components/router-fusion/eval/routing-experiment-panel"
+import { routingExperimentAvailable } from "@/lib/ai/eval/routing-experiment"
 import { useEvalRunStore } from "@/stores/eval/eval-run-store"
+import { useSettingsStore } from "@/stores/settings"
 import { EvalDashboard } from "./eval-dashboard"
 import { RunsComparePanel } from "./runs-compare-panel"
 import { TraceAnnotationPanel } from "./trace-annotation-panel"
 import { CalibrationPanel } from "./calibration-panel"
 
-type EvalView = "datasets" | "compare" | "annotate" | "calibrate"
+type EvalView = "datasets" | "compare" | "annotate" | "calibrate" | "routing"
 
 export function EvalWorkspace() {
   const t = useTranslations("eval")
+  const tRouting = useTranslations("routerFusionEval")
   const router = useRouter()
   const [view, setView] = useState<EvalView>("datasets")
   const activeRun = useEvalRunStore((s) => s.active)
   const cancelRun = useEvalRunStore((s) => s.cancel)
+  // The routing experiment (ADR-0188 B6) only has something to work with while
+  // Router + Fusion routes at least one surface, so the tab appears with it.
+  const routingAvailable = useSettingsStore((s) => routingExperimentAvailable(s.settings))
 
   const TABS: { key: EvalView; label: string; icon: ComponentType<{ className?: string }> }[] = [
     { key: "datasets", label: t("tabs.datasets"), icon: DatabaseIcon },
     { key: "compare", label: t("tabs.compare"), icon: GitCompareIcon },
     { key: "annotate", label: t("tabs.annotate"), icon: MicroscopeIcon },
     { key: "calibrate", label: t("tabs.calibrate"), icon: ScaleIcon },
+    ...(routingAvailable
+      ? [{ key: "routing" as const, label: tRouting("tab"), icon: RouteIcon }]
+      : []),
   ]
 
   return (
@@ -122,6 +139,8 @@ export function EvalWorkspace() {
           <RunsComparePanel />
         ) : view === "annotate" ? (
           <TraceAnnotationPanel />
+        ) : view === "routing" ? (
+          <RoutingExperimentPanel />
         ) : (
           <CalibrationPanel />
         )}

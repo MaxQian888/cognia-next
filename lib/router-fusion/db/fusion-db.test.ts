@@ -31,11 +31,11 @@ describe("fusion database lifecycle", () => {
     for (const table of FUSION_TABLE_NAMES) expect(db[table]).toBeDefined()
   })
 
-  it("keeps every earlier store's index layout across the B2 and B3 bumps", () => {
+  it("keeps every earlier store's index layout across the B2, B3 and B4 bumps", () => {
     // The schema is one version, not a chain: an existing database takes the
     // new layout as-is. Changing an index here would silently rebuild it on
     // every device, so each bump only ADDS stores (and B2 one index).
-    expect(FUSION_DB_SCHEMA_VERSION).toBe(3)
+    expect(FUSION_DB_SCHEMA_VERSION).toBeGreaterThanOrEqual(4)
     expect(FUSION_SCHEMA.fusionRuns).toContain("actorKeyId")
     expect(FUSION_SCHEMA.fusionIdempotency).toBe("&scopedKey, runId, expiresAt")
     expect(FUSION_SCHEMA.fusionFeedback).toBe("&feedbackId, runId, createdAt")
@@ -43,6 +43,59 @@ describe("fusion database lifecycle", () => {
     expect(FUSION_SCHEMA.fusionToolOperations).toBe(
       "&operationId, runId, [runId+logicalStepId], createdAt"
     )
+    // B4 (delegate): the approval a person gave, the change a run produced, and
+    // the step journal a resumed run replays from.
+    expect(FUSION_SCHEMA.fusionAcceptanceApprovals).toBe(
+      "&id, runId, [runId+status], [runId+requestDigest], createdAt"
+    )
+    expect(FUSION_SCHEMA.fusionPatchSets).toBe(
+      "&patchSetId, runId, baseRevision, patchSha256, expiresAt"
+    )
+    expect(FUSION_SCHEMA.fusionDelegateSteps).toBe(
+      "&[runId+stepId], runId, [runId+state], kind, createdAt"
+    )
+  })
+
+  it("opens a database a B3 build created and adds delegate's stores to it", async () => {
+    const name = fusionDatabaseName("main-upgrade-b4")
+    const {
+      fusionAcceptanceApprovals: _approvals,
+      fusionPatchSets: _patchSets,
+      fusionDelegateSteps: _steps,
+      // v5's stores are WP-F2's to assert; this case is about the B3 → B4 step.
+      fusionRoutingSamples: _samples,
+      fusionPredictorManifests: _manifests,
+      fusionShadowDecisions: _shadows,
+      ...b3Schema
+    } = FUSION_SCHEMA as Record<string, string>
+    const older = new Dexie(name)
+    older.version(3).stores(b3Schema)
+    await older.open()
+    await older.table("fusionFeedback").put({ feedbackId: "f3", runId: "r3", createdAt: 1 })
+    older.close()
+
+    const upgraded = await openFusionDb("main-upgrade-b4")
+    expect(upgraded.verno).toBe(FUSION_DB_SCHEMA_VERSION)
+    // The B3 row survived the bump.
+    await expect(upgraded.fusionFeedback.get("f3")).resolves.toMatchObject({ runId: "r3" })
+    // And the delegate stores are usable, including the compound primary key.
+    await upgraded.fusionDelegateSteps.put({
+      runId: "r3",
+      stepId: "delegate:verify:1",
+      kind: "acceptance_run",
+      requestHash: "h",
+      state: "committed",
+      receipt: "{}",
+      encryptedReceipt: null,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await expect(
+      upgraded.fusionDelegateSteps.get(["r3", "delegate:verify:1"])
+    ).resolves.toMatchObject({ state: "committed" })
+    await expect(
+      upgraded.fusionAcceptanceApprovals.where("[runId+status]").equals(["r3", "pending"]).count()
+    ).resolves.toBe(0)
   })
 
   it("opens a database a B2 build created without losing a row", async () => {
@@ -59,7 +112,7 @@ describe("fusion database lifecycle", () => {
     older.close()
 
     const upgraded = await openFusionDb("main-upgrade")
-    expect(upgraded.verno).toBe(3)
+    expect(upgraded.verno).toBe(FUSION_DB_SCHEMA_VERSION)
     await expect(upgraded.fusionFeedback.get("f1")).resolves.toMatchObject({ runId: "r1" })
     await upgraded.fusionApiSessions.put({
       apiSessionId: "a1",

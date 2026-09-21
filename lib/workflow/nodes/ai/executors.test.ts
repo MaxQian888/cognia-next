@@ -35,9 +35,26 @@ jest.mock("@/lib/router-fusion/gate/utility-ledger", () => ({
     ledgerUtilityCallsMock(...(args as [unknown, unknown])),
 }))
 
+// Router + Fusion action (ADR-0188 D3). Only the dynamic engine import and
+// the settings read are stubbed; the gate and the node wiring are real.
+let fusionSettings: unknown = {
+  routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } },
+}
+const runAgentsWorkflowsFusionMock = jest.fn()
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: async () => fusionSettings,
+}))
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: async () => ({
+    runAgentsWorkflowsFusion: (...args: unknown[]) => runAgentsWorkflowsFusionMock(...args),
+  }),
+  __resetRouterFusionHostForTesting: () => {},
+}))
+
 import "@/lib/workflow/nodes/built-ins"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
 import type { StepExecutionContext } from "@/types/workflow/visual"
+import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
 
 function makeCtx(params: Record<string, unknown>): StepExecutionContext {
   return {
@@ -64,6 +81,9 @@ async function run(
 }
 
 beforeEach(() => {
+  fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } } }
+  runAgentsWorkflowsFusionMock.mockReset()
+  __resetFusionScopesForTesting()
   generateEmbeddingMock.mockClear()
   completeMock.mockClear()
   createLlmClientMock.mockClear()
@@ -425,5 +445,76 @@ describe("B4 — ai.extract typed parameter extraction", () => {
     expect(out.extracted).toBeNull()
     expect(typeof out.parseError).toBe("string")
     expect(out.valid).toBe(false)
+  })
+})
+
+// ── Router + Fusion action on ai.prompt (ADR-0188 B5, D3) ────────────────
+// The workflow surface's real entry point: the registered node executor.
+describe("ai.prompt — Router + Fusion action", () => {
+  const answered = {
+    kind: "answered" as const,
+    runId: "run-node-1",
+    mode: "panel" as const,
+    text: "the checked answer",
+    qualityStatus: "accepted" as const,
+    usage: { promptTokens: 200, completionTokens: 60, totalTokens: 260 },
+    spentMicrousd: 12_500,
+    modelCalls: 3,
+    warnings: ["one member timed out"],
+  }
+
+  it("runs the step as a fusion run instead of a model call (v1)", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    runAgentsWorkflowsFusionMock.mockResolvedValue(answered)
+    const out = await run("ai.prompt", {
+      userPrompt: "compare the tariffs",
+      systemPrompt: "cite sources",
+      action: "panel",
+    })
+    expect(out.completion).toBe("the checked answer")
+    expect(out.stub).toBe(false)
+    expect(out.fusion).toMatchObject({ runId: "run-node-1", mode: "panel", modelCalls: 3 })
+    expect(out.usage).toEqual({ inputTokens: 200, outputTokens: 60, totalTokens: 260 })
+    expect(createLlmClientMock).not.toHaveBeenCalled()
+    expect(runAgentsWorkflowsFusionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "panel", origin: "workflow", featureId: "workflow:s" })
+    )
+  })
+
+  it("runs the step as a fusion run on v2 too", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    runAgentsWorkflowsFusionMock.mockResolvedValue(answered)
+    const reg = getExecutor("ai.prompt" as never, 2)!
+    const result = await reg.execute(
+      makeCtx({ userPrompt: "compare", action: "cascade", mode: "routed", modelAlias: "fast" })
+    )
+    expect((result.output as Record<string, unknown>).completion).toBe("the checked answer")
+    expect(runAgentsWorkflowsFusionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("parses and validates the fusion answer in JSON mode", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    runAgentsWorkflowsFusionMock.mockResolvedValue({ ...answered, text: '{"ok":true}' })
+    const out = await run("ai.prompt", {
+      userPrompt: "compare",
+      action: "panel",
+      responseFormat: "json",
+      outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    })
+    expect(out.structured).toEqual({ ok: true })
+    expect(out.schemaValid).toBe(true)
+  })
+
+  it("[ACC:OFF-AGENTS] runs the ordinary executor while the surface is off", async () => {
+    const out = await run("ai.prompt", { userPrompt: "hi", action: "panel" })
+    expect(out.completion).toBe("[ai.prompt stub] hi")
+    expect(runAgentsWorkflowsFusionMock).not.toHaveBeenCalled()
+  })
+
+  it("[ACC:OFF-AGENTS] an unset action reaches the ordinary executor with no gate work", async () => {
+    fusionSettings = { routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } } }
+    const out = await run("ai.prompt", { userPrompt: "hi" })
+    expect(out.completion).toBe("[ai.prompt stub] hi")
+    expect(runAgentsWorkflowsFusionMock).not.toHaveBeenCalled()
   })
 })

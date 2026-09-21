@@ -12,6 +12,11 @@
 
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import type { RerankResult } from "./reranker"
 import { getRAGLogger } from "./runtime-adapters"
 
@@ -26,6 +31,11 @@ export interface RAGEvaluationConfig {
   useLLM: boolean
   /** LLM model for evaluation */
   model?: LanguageModel
+  /**
+   * Generation seam for the LLM judge call (ADR-0188 D27). A host passes the
+   * ledgered seam when its surface is on; absent, the model is called directly.
+   */
+  generate?: GenerationSeam
 }
 
 export interface RAGEvaluationResult {
@@ -195,7 +205,8 @@ async function evaluateWithLLM(
   query: string,
   context: string,
   answer: string,
-  model: LanguageModel
+  model: LanguageModel,
+  generate: GenerationSeam | undefined
 ): Promise<Partial<RAGEvaluationResult>> {
   try {
     const prompt = `You are a RAG quality evaluator. Rate the following on a scale of 0-10:
@@ -224,13 +235,18 @@ RECALL: <0-10>
 FAITHFULNESS: <0-10>
 RELEVANCE: <0-10>`
 
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.evaluate", modelId: modelIdOf(model), prompt, temperature: 0 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0,
+          ...overrides,
+        })
+    )
 
-    const text = result.text
     const parse = (key: string): number => {
       const match = text.match(new RegExp(`${key}:\\s*(\\d+(?:\\.\\d+)?)`, "i"))
       return match ? Math.min(1, parseFloat(match[1]) / 10) : 0.5
@@ -286,7 +302,7 @@ export async function evaluateRAG(
 
   // Override with LLM evaluation if enabled
   if (config.useLLM && config.model) {
-    const llmResult = await evaluateWithLLM(query, context, answer, config.model)
+    const llmResult = await evaluateWithLLM(query, context, answer, config.model, config.generate)
     result = {
       ...result,
       ...(llmResult.contextPrecision !== undefined

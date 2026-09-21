@@ -74,28 +74,26 @@ describe("RouterFusionSection", () => {
     expect(screen.getByRole("switch", { name: "Chat" })).not.toBeChecked()
   })
 
-  it("labels every surface this build does not wire as a later release, disabled even with the master on", () => {
+  it("offers every surface this build wires, and labels none a later release", () => {
     withSettings({ routerFusion: { enabled: true, surfaces: { companion: true } } })
     render(<RouterFusionSection />)
-    for (const surface of ["companion"]) {
-      const row = screen.getByTestId(`router-fusion-surface-${surface}`)
-      expect(row).toHaveAttribute("data-dormant", "true")
-      expect(row).toHaveTextContent("Later release")
-      expect(row.querySelector('[role="switch"]')).toBeDisabled()
-      // A stored "on" for a dormant surface is not presented as on.
-      expect(row.querySelector('[role="switch"]')).not.toBeChecked()
-    }
-    // Wired in this build (ADR-0188 B1 chat; B2 both gateway lanes, utilities
-    // and agents/workflows).
+    // Wired in this build (ADR-0188 B1 chat; B2 both gateway lanes, utilities,
+    // agents/workflows and — with the companion RPC, WP-C — companions).
+    const companion = screen.getByTestId("router-fusion-surface-companion")
+    expect(companion).not.toHaveTextContent("Later release")
+    // A stored "on" for the companion surface now reads as on.
+    expect(companion.querySelector('[role="switch"]')).toBeChecked()
     for (const surface of [
       "chat",
       "gatewayRuns",
       "gatewayPassthroughLedger",
       "utilityLedger",
       "agentsWorkflows",
+      "companion",
     ]) {
       const row = screen.getByTestId(`router-fusion-surface-${surface}`)
       expect(row).not.toHaveAttribute("data-dormant")
+      expect(row).not.toHaveTextContent("Later release")
       expect(row.querySelector('[role="switch"]')).toBeEnabled()
     }
   })
@@ -188,14 +186,21 @@ describe("RouterFusionSection", () => {
     await waitFor(() => expect(saved().runCapUsdByMode.direct).toBe("1.25"))
   })
 
-  it("labels the delegate rule row as a later release, and approves the running rows as the user's", async () => {
+  it("offers every rule row this build wires, and approves the ones the user turns on", async () => {
     const user = userEvent.setup()
     const view = render(<RouterFusionSection />)
-    const delegate = screen.getByTestId("router-fusion-rule-delegate_multifile")
-    expect(delegate).toHaveAttribute("data-dormant", "true")
-    expect(delegate.querySelector('[role="switch"]')).toBeDisabled()
-    for (const row of ["economy_simple", "cascade_verifiable", "panel_research"]) {
-      expect(screen.getByTestId(`router-fusion-rule-${row}`)).not.toHaveAttribute("data-dormant")
+    // B4 wired delegate: its rule row is editable like the rest, and nothing
+    // here is labelled a later release any more.
+    for (const row of [
+      "economy_simple",
+      "cascade_verifiable",
+      "panel_research",
+      "delegate_multifile",
+    ]) {
+      const element = screen.getByTestId(`router-fusion-rule-${row}`)
+      expect(element).not.toHaveAttribute("data-dormant")
+      expect(element).not.toHaveTextContent("Later release")
+      expect(element.querySelector('[role="switch"]')).toBeEnabled()
     }
     await user.click(screen.getByRole("switch", { name: "Economy model for simple text work" }))
     await waitFor(() => expect(saved().approvedRuleRows).toEqual(["economy_simple"]))
@@ -237,10 +242,42 @@ describe("RouterFusionSection", () => {
     })
     render(<RouterFusionSection />)
     expect(screen.getByTestId("router-fusion-actions")).toBeInTheDocument()
-    expect(screen.getByTestId("router-fusion-action-delegate_code")).toHaveAttribute(
-      "data-dormant",
-      "true"
+    // The built-in delegate action is editable since B4: it is neither marked
+    // dormant nor labelled a later release.
+    const delegate = screen.getByTestId("router-fusion-action-delegate_code")
+    expect(delegate).not.toHaveAttribute("data-dormant")
+    expect(delegate).not.toHaveTextContent("Later release")
+    expect(screen.getByRole("button", { name: "Edit delegate_code" })).toBeEnabled()
+  })
+
+  it("sets the delegate run cap, which B4 brought out of dormancy", async () => {
+    const user = userEvent.setup()
+    render(<RouterFusionSection />)
+    const field = screen.getByLabelText("Delegate run cap")
+    await user.clear(field)
+    await user.type(field, "2.50")
+    await user.tab()
+    await waitFor(() => expect(saved().runCapUsdByMode.delegate).toBe("2.50"))
+  })
+
+  it("mounts the acceptance profiles a delegation is verified by", () => {
+    render(<RouterFusionSection />)
+    expect(screen.getByTestId("router-fusion-acceptance-profiles")).toHaveTextContent(
+      "Acceptance profiles"
     )
+    // Nothing is read while the master switch is off (ADR-0188 D36).
+    expect(screen.getByTestId("router-fusion-acceptance-profiles")).toHaveTextContent(
+      "Turn on the master switch"
+    )
+  })
+
+  it("mounts the LLM classifier's settings, which save through the same writer", async () => {
+    const user = userEvent.setup()
+    render(<RouterFusionSection />)
+    expect(screen.getByTestId("router-fusion-classifier")).toHaveTextContent("LLM classifier")
+    await user.click(screen.getByRole("switch", { name: "Classify Auto requests with a model" }))
+    await waitFor(() => expect(saved().llmClassifier.enabled).toBe(true))
+    expect(saved().llmClassifier.judgeMigration).toBeDefined()
   })
 
   it("grants restricted data per configured provider", async () => {

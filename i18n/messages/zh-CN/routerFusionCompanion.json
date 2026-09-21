@@ -1,0 +1,46 @@
+{
+  "picker": {
+    "aria": "本条消息的运行方式：{mode}",
+    "title": "本条消息的运行方式",
+    "direct": "直接",
+    "directDesc": "作为普通消息发送给宿主。",
+    "cascade": "级联",
+    "cascadeDesc": "低成本模型先起草并接受检查，未通过则由强模型接手。仅文本。",
+    "panel": "评审团",
+    "panelDesc": "多个模型独立作答，由裁判比较后写出一个答案。仅文本。",
+    "hint": "在宿主上运行，受宿主自己的预算和上限约束。答案通过校验后才会显示。"
+  },
+  "composer": {
+    "textOnly": "级联和评审团只接受文本。请移除附件，或改为直接发送。",
+    "startFailed": "无法将该运行加入队列：{message}",
+    "queueLabel": "Router + Fusion {mode}运行"
+  },
+  "run": {
+    "regionAria": "从此设备发起的 Router + Fusion 运行",
+    "title": "{mode}运行",
+    "queued": "正在等待送达宿主…",
+    "starting": "正在宿主上启动…",
+    "running": "正在宿主上运行…",
+    "retrying": "连接中断，正在从第 {seq} 步重新读取…",
+    "undelivered": "该运行未能送达宿主：{reason}",
+    "refused": "宿主拒绝了该运行：{reason}",
+    "historyExpired": "宿主已不再保留该运行的部分步骤，现显示其最新状态。",
+    "answer": "答案",
+    "answerExpired": "宿主已不再保留该答案，可在上方的会话中查看。",
+    "noAnswer": "没有写出答案。",
+    "details": "运行详情",
+    "stop": "停止",
+    "stopAria": "停止该运行",
+    "stopFailed": "无法停止该运行（{reason}）。",
+    "dismiss": "关闭",
+    "dismissAria": "关闭该运行"
+  },
+  "reason": {
+    "ROUTER_FUSION_DISABLED": "宿主已为配对设备关闭 Router + Fusion，可在宿主的「设置 → AI 连接 → 路由」中开启。",
+    "SESSION_NOT_FOUND": "此设备不能在这个会话中发起运行。",
+    "COMPANION_ACTOR_REQUIRED": "宿主无法确认是哪台已配对设备发起的请求。",
+    "TRANSPORT_FAILED": "无法连接到宿主。",
+    "SCHEMA_INVALID": "宿主无法读取该请求。",
+    "unknownDelivery": "未知错误"
+  }
+}

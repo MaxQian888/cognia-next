@@ -15,12 +15,19 @@
  * model was shown is stored as an encrypted artifact, and what it read is
  * stored as evidence, pinned by its SHA-256.
  *
- * Two policies:
+ * Three policies:
  *  - `panel-read-1` — a candidate's one tool round: public pages, web search,
  *    and (when the run has a workspace the person at this device chose) files.
  *  - `panel-verify-1` — the judge's verification requests: re-read stored
  *    evidence, and re-fetch a page to check it still says the same thing.
  *    `compute` and `test` are not offered: a panel has no sandbox.
+ *  - `delegate-work-1` — a delegate worker's tools (ADR-0188 B4): read and
+ *    list the workspace AT THE RUN'S REVISION, and propose a whole-file patch.
+ *    It is the only policy with a non-read-only tool, and the exception is
+ *    narrow on purpose: `propose_patch` writes nothing anywhere. It authorises
+ *    a path against the subtask's scope and records the proposal; the patch
+ *    reaches a disk only when the workflow stages it into an isolated worktree,
+ *    and a person's workspace only through an approved compare-and-swap.
  */
 
 import {
@@ -34,16 +41,33 @@ import {
   type ToolIntent,
   type ToolReceipt,
   type ToolRuntime,
+  type DelegateToolContext,
+  type DelegateToolRuntime,
+  type WorkspaceListResult,
+  type WorkspacePort,
+  type WorkspaceReadResult as DelegateWorkspaceReadResult,
 } from "@cognia/router-fusion"
 import { z } from "zod"
 
 import { persistableText, type FusionLedgerStore } from "../db/ledger-store"
 import type { FusionToolOperationRow } from "../db/types"
+import {
+  DELEGATE_LIST_LIMIT,
+  DELEGATE_READ_MAX_BYTES,
+  DELEGATE_TOOL_NAMES,
+  DELEGATE_WORK_POLICY,
+  DelegateToolArgs,
+  delegatePatchLimitRefusal,
+  delegateWorkTools,
+  delegateWriteAllowed,
+  normalizeDelegateHostPath,
+} from "./delegate-tool-policy"
 import type { SsrfAuditEntry, WebEvidence } from "./web-evidence"
 import type { WorkspaceReader, WorkspaceReadResult } from "./workspace-read"
 
 export const PANEL_READ_POLICY = "panel-read-1"
 export const PANEL_VERIFY_POLICY = "panel-verify-1"
+export { DELEGATE_WORK_POLICY } from "./delegate-tool-policy"
 
 /** Characters of a read the model is shown; the full content is the evidence artifact. */
 export const TOOL_SUMMARY_CHARS = 6_000
@@ -118,16 +142,38 @@ const Args = {
     artifact_ids: z.array(z.string()).min(1).max(4),
     question: z.string().max(2000),
   }),
+  // `delegate-work-1`. `workspace_read` is shared with the panel: one path,
+  // and the same schema whichever policy asks.
+  workspace_list: DelegateToolArgs.workspace_list,
+  propose_patch: DelegateToolArgs.propose_patch,
 } as const
 
 type ToolName = keyof typeof Args
+
+/** The workspace a delegate run reads at a revision and proposes patches into. */
+export interface DelegateToolDeps {
+  workspace: WorkspacePort
+}
 
 export interface HostToolRuntimeDeps {
   store: FusionLedgerStore
   runId: string
   web: WebEvidence | null
   workspace: WorkspaceReader | null
+  /** Present only for a delegate run; absent, `delegate-work-1` offers nothing. */
+  delegate?: DelegateToolDeps | null
   now: () => number
+}
+
+/** The delegate context a `delegate-work-1` call must carry, or null. */
+function delegateContextOf(context: ToolContext): DelegateToolContext | null {
+  if (context.policyId !== DELEGATE_WORK_POLICY) return null
+  const candidate = context as DelegateToolContext
+  return typeof candidate.revision === "string" &&
+    candidate.revision.length > 0 &&
+    Array.isArray(candidate.allowedPaths)
+    ? candidate
+    : null
 }
 
 interface Outcome {
@@ -147,7 +193,36 @@ function refused(code: string): Outcome {
   return { status: "refused", refusalCode: code, evidence: [], summary: `refused: ${code}` }
 }
 
-export function createHostToolRuntime(deps: HostToolRuntimeDeps): ToolRuntime {
+/** What a `delegate-work-1` call read before it was decided. */
+type PreparedDelegateCall =
+  | { kind: "invalid"; code: string }
+  | { kind: "read"; path: string; read: DelegateWorkspaceReadResult }
+  | { kind: "list"; prefix: string; listing: WorkspaceListResult }
+  | {
+      kind: "patch"
+      path: string
+      action: "write" | "delete"
+      bytes: number
+      probe: DelegateWorkspaceReadResult
+    }
+
+/** The content half of a delegate operation's identity (CACHE-02). */
+function delegateIdentity(prepared: PreparedDelegateCall): string {
+  switch (prepared.kind) {
+    case "invalid":
+      return prepared.code
+    case "read":
+      return prepared.read.ok ? prepared.read.contentSha256 : prepared.read.code
+    case "list":
+      return prepared.listing.ok ? canonicalHash(prepared.listing.files) : prepared.listing.code
+    case "patch":
+      return prepared.probe.ok ? prepared.probe.contentSha256 : prepared.probe.code
+  }
+}
+
+export function createHostToolRuntime(
+  deps: HostToolRuntimeDeps
+): ToolRuntime & DelegateToolRuntime {
   const { store, runId } = deps
   const artifacts = store.artifactStore(runId)
 
@@ -162,6 +237,7 @@ export function createHostToolRuntime(deps: HostToolRuntimeDeps): ToolRuntime {
     if (policyId === PANEL_VERIFY_POLICY) {
       return [ARTIFACT_READ, ...(deps.web ? [SOURCE_CHECK] : [])]
     }
+    if (policyId === DELEGATE_WORK_POLICY) return delegateWorkTools(deps.delegate != null)
     return []
   }
 
@@ -296,7 +372,133 @@ export function createHostToolRuntime(deps: HostToolRuntimeDeps): ToolRuntime {
           summary: lines.join("\n"),
         }
       }
+      default:
+        // The `delegate-work-1` tools; they never reach here, because that
+        // policy always runs through `runDelegate`, and a policy that offers
+        // them without a delegate workspace offers nothing at all.
+        return refused("TOOL_NOT_IMPLEMENTED")
     }
+  }
+
+  /**
+   * One `delegate-work-1` call, already validated. The read happens here and
+   * in `prepareDelegate`, once: the content that names the operation is the
+   * content recorded, exactly as the panel's workspace read (CACHE-02).
+   */
+  const runDelegate = async (
+    prepared: PreparedDelegateCall,
+    context: DelegateToolContext
+  ): Promise<Outcome> => {
+    switch (prepared.kind) {
+      case "invalid":
+        return refused(prepared.code)
+      case "read": {
+        const read = prepared.read
+        if (!read.ok) {
+          return read.code === "NOT_FOUND" || read.code === "REVISION_UNKNOWN"
+            ? { status: "failed", evidence: [], summary: `${read.code}: ${read.message}` }
+            : refused(read.code)
+        }
+        const ref = await storeEvidence(
+          read.content,
+          `workspace:${context.revision}:${prepared.path}`
+        )
+        return {
+          status: "succeeded",
+          evidence: [ref],
+          summary: `${prepared.path}${read.truncated ? " (truncated)" : ""}\n\n${excerpt(read.content, ref.artifact_id)}`,
+        }
+      }
+      case "list": {
+        const listed = prepared.listing
+        if (!listed.ok) return refused(listed.code)
+        const body = listed.files.map((file) => `${file.path} (${file.sizeBytes} B)`).join("\n")
+        return {
+          status: "succeeded",
+          evidence: [],
+          summary: (body || "(no file matches)") + (listed.truncated ? "\n… (more files)" : ""),
+        }
+      }
+      case "patch": {
+        // Nothing is written: the proposal is recorded, and the workflow
+        // stages the whole patch into an isolated worktree when the session
+        // ends. A path outside the subtask's scope needs a person (DEL-07).
+        if (!delegateWriteAllowed(prepared.path, context.allowedPaths)) {
+          return refused("PATH_OUT_OF_SCOPE")
+        }
+        if (prepared.probe && !prepared.probe.ok) {
+          const code = prepared.probe.code
+          if (code !== "NOT_FOUND" && code !== "CONTENT_SENSITIVE") return refused(code)
+        }
+        const limit = delegatePatchLimitRefusal({
+          files: 1,
+          fileBytes: prepared.bytes,
+          totalBytes: prepared.bytes,
+        })
+        if (limit) return refused(limit)
+        return {
+          status: "succeeded",
+          evidence: [],
+          summary:
+            prepared.action === "write"
+              ? `proposed: write ${prepared.path} (${prepared.bytes} bytes)`
+              : `proposed: delete ${prepared.path}`,
+        }
+      }
+    }
+  }
+
+  /**
+   * Read what the call needs before it is executed, so the operation's
+   * identity covers the content it acted on and a repeat returns the stored
+   * receipt instead of reading a file that has since changed.
+   */
+  const prepareDelegate = async (
+    name: string,
+    args: unknown,
+    context: DelegateToolContext
+  ): Promise<PreparedDelegateCall> => {
+    const workspace = deps.delegate!.workspace
+    if (name === DELEGATE_TOOL_NAMES.read) {
+      const { path } = args as { path: string }
+      const normalized = normalizeDelegateHostPath(path)
+      if (!normalized.ok) return { kind: "invalid", code: normalized.code }
+      return {
+        kind: "read",
+        path: normalized.path,
+        read: await workspace.readFile({
+          path: normalized.path,
+          revision: context.revision,
+          maxBytes: DELEGATE_READ_MAX_BYTES,
+        }),
+      }
+    }
+    if (name === DELEGATE_TOOL_NAMES.list) {
+      const { prefix } = args as { prefix: string }
+      return {
+        kind: "list",
+        prefix,
+        listing: await workspace.listFiles({
+          prefix,
+          revision: context.revision,
+          limit: DELEGATE_LIST_LIMIT,
+        }),
+      }
+    }
+    const patch = args as { path: string; action: "write" | "delete"; content?: string }
+    const normalized = normalizeDelegateHostPath(patch.path)
+    if (!normalized.ok) return { kind: "invalid", code: normalized.code }
+    const bytes =
+      patch.action === "write" ? new TextEncoder().encode(patch.content ?? "").byteLength : 0
+    // A one-byte read is the cheapest way to ask the host "may this path be
+    // touched at all?" — it applies the same symlink and escape rules a real
+    // read does, without returning content.
+    const probe = await workspace.readFile({
+      path: normalized.path,
+      revision: context.revision,
+      maxBytes: 1,
+    })
+    return { kind: "patch", path: normalized.path, action: patch.action, bytes, probe }
   }
 
   const receiptOf = async (
@@ -331,15 +533,38 @@ export function createHostToolRuntime(deps: HostToolRuntimeDeps): ToolRuntime {
         tool: intent.name,
         args: argsHash,
       }
+      // `delegate-work-1` is the only policy with a write, and only for
+      // `propose_patch`, which writes nothing (see the module header).
+      const delegate = deps.delegate ? delegateContextOf(context) : null
+      const writeAllowed =
+        delegate !== null &&
+        offered?.name === DELEGATE_TOOL_NAMES.proposePatch &&
+        offered.toolClass === "sandbox_write"
       if (!offered) outcome = refused("TOOL_NOT_OFFERED")
-      else if (offered.toolClass !== "read_only") outcome = refused("WRITE_NOT_PERMITTED")
+      else if (offered.toolClass !== "read_only" && !writeAllowed) {
+        outcome = refused("WRITE_NOT_PERMITTED")
+      } else if (context.policyId === DELEGATE_WORK_POLICY && !delegate) {
+        // A delegate tool without the run's revision and write scope is a
+        // call nothing can authorise, whatever it asks for.
+        outcome = refused("TOOL_CONTEXT_INVALID")
+      }
       const parser = offered ? Args[offered.name as ToolName] : undefined
       const parsed = !outcome && parser ? parser.safeParse(intent.arguments) : null
       if (!outcome && !parsed?.success) outcome = refused("INVALID_ARGUMENTS")
 
       // A workspace read is the same operation only on the same content.
       let toolArgs: unknown = parsed?.success ? parsed.data : undefined
-      if (!outcome && offered?.name === "workspace_read") {
+      let prepared: PreparedDelegateCall | null = null
+      if (!outcome && delegate) {
+        prepared = await prepareDelegate(offered!.name, toolArgs, delegate)
+        identity = {
+          ...identity,
+          revision: delegate.revision,
+          scope: canonicalHash([...delegate.allowedPaths].sort()),
+          content: delegateIdentity(prepared),
+        }
+        if (prepared.kind === "invalid") outcome = refused(prepared.code)
+      } else if (!outcome && offered?.name === "workspace_read") {
         const read = await deps.workspace!.read((toolArgs as { path: string }).path)
         identity = { ...identity, content: read.ok ? read.contentSha256 : read.code }
         toolArgs = read
@@ -348,7 +573,10 @@ export function createHostToolRuntime(deps: HostToolRuntimeDeps): ToolRuntime {
       const existing = await store.db.fusionToolOperations.get(operationId)
       if (existing) return receiptOf(existing, intent.id)
 
-      outcome ??= await run(offered!.name as ToolName, toolArgs, context)
+      outcome ??=
+        prepared && delegate
+          ? await runDelegate(prepared, delegate)
+          : await run(offered!.name as ToolName, toolArgs, context)
       const summaryArtifact =
         outcome.status === "refused"
           ? null

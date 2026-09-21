@@ -1,6 +1,15 @@
+// Only the generation is faked; the rest of the SDK (e.g. `cosineSimilarity`)
+// stays real, as other package modules use it.
+jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+
+import { generateText } from "ai"
+import type { LanguageModel } from "ai"
+import type { GenerationRequest, GenerationSend } from "@cognia/provider-embedding/generation-seam"
+
 import type { RetrievalHit, RetrievalTraceV1 } from "./retrieval-kernel"
 import {
   attachGroundingToTrace,
+  checkGroundingLLM,
   checkGroundingHeuristic,
   checkAnswerGrounding,
   groundAnswer,
@@ -172,5 +181,62 @@ without labels. Reinforcement learning uses reward signals to guide behavior.`
         blocked: true,
       })
     })
+  })
+})
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+// The host injects `generate` when its ledger surface is on; with nothing
+// injected the model is called exactly as it always was.
+
+const mockedGenerateText = generateText as jest.Mock
+const seamModel = { modelId: "m-1" } as unknown as LanguageModel
+
+/** A seam that reserves the call: it bounds the output and kills SDK retries. */
+function boundingSeam() {
+  const requests: GenerationRequest[] = []
+  const seam = async (request: GenerationRequest, send: GenerationSend) => {
+    requests.push(request)
+    return (await send({ maxOutputTokens: 64, maxRetries: 0 })).text
+  }
+  return { seam, requests }
+}
+
+/** The keys of the one `generateText` call, sorted. */
+function callKeys(): string[] {
+  return Object.keys(mockedGenerateText.mock.calls[0][0] as Record<string, unknown>).sort()
+}
+
+describe("grounding generation seam", () => {
+  beforeEach(() => {
+    mockedGenerateText.mockReset()
+    mockedGenerateText.mockResolvedValue({
+      text: "SCORE: 8\nSUPPORTED: a\nUNSUPPORTED: none\nEXPLANATION: fine",
+    })
+  })
+
+  it("calls the model directly when no seam is injected", async () => {
+    const result = await checkGroundingLLM("an answer", "a context", seamModel)
+    expect(result.method).toBe("llm")
+    expect(callKeys()).toEqual(["model", "prompt", "temperature"])
+  })
+
+  it("runs the judge through an injected seam, which bounds the call", async () => {
+    const { seam, requests } = boundingSeam()
+    const result = await checkGroundingLLM("an answer", "a context", seamModel, { generate: seam })
+    expect(result.confidence).toBeCloseTo(0.8)
+    expect(requests[0]).toMatchObject({ stage: "rag.grounding", modelId: "m-1", temperature: 0 })
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64, maxRetries: 0 })
+    )
+  })
+
+  it("threads the config's seam through checkAnswerGrounding", async () => {
+    const { seam, requests } = boundingSeam()
+    await checkAnswerGrounding("an answer", "a context", {
+      useLLM: true,
+      model: seamModel,
+      generate: seam,
+    })
+    expect(requests).toHaveLength(1)
   })
 })

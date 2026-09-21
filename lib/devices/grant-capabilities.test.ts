@@ -5,6 +5,7 @@ import {
   DEVICE_GRANT_IDS,
   GRANT_CAPABILITIES,
   LOCKED_USE_AVAILABLE,
+  ROUTER_FUSION_COMPANION_CAPABILITY,
   buildGrantRows,
   isGrantEnabled,
   ownerPermits,
@@ -84,6 +85,30 @@ describe("GRANT_CAPABILITIES mirror", () => {
     expect(GRANT_CAPABILITIES.sshFiles).toEqual(["ssh.files"])
     expect(GRANT_CAPABILITIES.terminal).not.toContain("ssh.files")
     expect(GRANT_CAPABILITIES.sshFiles).not.toContain("terminal.open")
+  })
+})
+
+describe("ROUTER_FUSION_COMPANION_CAPABILITY", () => {
+  const COMMANDS = [
+    "execution_run_create",
+    "execution_run_resume",
+    "execution_run_get",
+    "execution_run_events",
+    "claude_call_reserve_respond",
+  ]
+
+  it("is what every companion Router + Fusion command requires, and the Control grant confers it", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol", "companion-commands.json"), "utf8")
+    ) as { commands: { name: string; capability: string; target: string }[] }
+    for (const name of COMMANDS) {
+      const descriptor = manifest.commands.find((command) => command.name === name)
+      expect(descriptor).toMatchObject({
+        capability: ROUTER_FUSION_COMPANION_CAPABILITY,
+        target: "execution",
+      })
+    }
+    expect(GRANT_CAPABILITIES.control).toContain(ROUTER_FUSION_COMPANION_CAPABILITY)
   })
 })
 

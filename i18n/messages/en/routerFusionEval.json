@@ -1,0 +1,94 @@
+{
+  "tab": "Routing",
+  "title": "Routing experiment",
+  "subtitle": "Train the learned router on routed runs, watch it beside the rules router, and promote it only when the gate agrees.",
+  "unavailable": {
+    "title": "Router + Fusion is off",
+    "body": "Turn on a Router + Fusion surface under Settings → AI connections → Routing. Without routed runs there is nothing to learn from."
+  },
+  "actions": {
+    "collect": "Collect samples",
+    "runSimulated": "Run simulated",
+    "runRecorded": "Run on collected samples",
+    "export": "Export samples",
+    "shadow": "Record shadow decisions",
+    "promote": "Promote",
+    "rollback": "Roll back",
+    "busy": "Working…"
+  },
+  "samples": {
+    "title": "Samples",
+    "stored": "{count} stored",
+    "collected": "Collected {count} of {scanned} runs",
+    "skipped": "{count} runs could not be sampled",
+    "reason": {
+      "not_terminal": "still running",
+      "no_decision": "no route decision stored",
+      "no_action_selected": "no action was selected",
+      "cost_pending": "bill not settled yet",
+      "input_unavailable": "stored input is gone or unreadable"
+    },
+    "exported": "Exported {count} samples with their propensity"
+  },
+  "report": {
+    "title": "Report",
+    "empty": "No experiment has been run yet.",
+    "label": {
+      "live": "Live",
+      "simulated": "Simulated"
+    },
+    "sampleCount": "Samples",
+    "acceptedCost": "Cost per accepted run",
+    "passRate": "Accepted share",
+    "totalCost": "Total cost",
+    "undefinedCost": "Nothing was accepted",
+    "byAction": "By action",
+    "gate": "Promotion gate",
+    "verdict": {
+      "pass": "Pass",
+      "fail": "Fail",
+      "inconclusive": "Inconclusive",
+      "none": "Not attempted"
+    },
+    "gateRefusal": {
+      "DETERMINISTIC_LOGGING": "Every run was routed by the deterministic rules router, so no comparison is identifiable.",
+      "NO_PREDICTOR": "No head could be published, so there was no candidate to compare against."
+    },
+    "caveats": "Read this first",
+    "heads": "Heads",
+    "headCalibrated": "Calibrated",
+    "headWithheld": "Withheld",
+    "headSamples": "{training} train · {calibration} calibration · {test} test",
+    "noClaim": "This report makes no claim about real quality, cost or saving.",
+    "claimSaving": "Claimed saving per accepted run: {amount}"
+  },
+  "shadow": {
+    "title": "Shadow decisions",
+    "note": "The learned router predicts beside the rules router and never acts on the result.",
+    "agreement": "Agreement",
+    "evaluated": "Evaluated",
+    "outOfDistribution": "Out of distribution",
+    "noOpinion": "No calibrated head",
+    "empty": "No shadow decision has been recorded yet.",
+    "noPredictor": "No learned router is active, so there is nothing to shadow.",
+    "refused": "The active manifest could not be verified and was not used."
+  },
+  "promotion": {
+    "title": "Learned router",
+    "active": "Active predictor",
+    "none": "None — the rules router decides every route.",
+    "dormant": "Later release: a promoted predictor is recorded and shadowed, and does not change a routing decision yet.",
+    "promoted": "Promoted {version}",
+    "rolledBack": "Restored the previous predictor",
+    "deactivated": "The learned router is off again",
+    "refused": {
+      "SIMULATED_REPORT": "A simulated report never promotes anything: it met no real request and spent no real money.",
+      "NO_PUBLISHED_MANIFEST": "No head was calibrated on independent data, so there is nothing to publish.",
+      "GATE_NOT_PASSED": "The promotion gate did not pass.",
+      "FEATURES_VERSION_MISMATCH": "The manifest was trained on a different feature encoding than this build uses."
+    }
+  },
+  "errors": {
+    "failed": "The routing experiment failed: {message}"
+  }
+}

@@ -1,9 +1,19 @@
+// Only the generation is faked; the rest of the SDK (e.g. `cosineSimilarity`)
+// stays real, as other package modules use it.
+jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+
+import { generateText } from "ai"
+import type { LanguageModel } from "ai"
+import type { GenerationRequest, GenerationSend } from "@cognia/provider-embedding/generation-seam"
+
 /**
  * Tests for Reranker Module
  */
 
 import {
   rerankWithHeuristics,
+  rerankWithLLM,
+  rerank,
   rerankWithMMR,
   filterByRelevance,
   boostByMetadata,
@@ -316,5 +326,62 @@ describe("boostByRecency", () => {
     })
 
     expect(boosted[0].rerankScore).toBeGreaterThan(0.5)
+  })
+})
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+// The host injects `generate` when its ledger surface is on; with nothing
+// injected the model is called exactly as it always was.
+
+const mockedGenerateText = generateText as jest.Mock
+const seamModel = { modelId: "m-1" } as unknown as LanguageModel
+
+/** A seam that reserves the call: it bounds the output and kills SDK retries. */
+function boundingSeam() {
+  const requests: GenerationRequest[] = []
+  const seam = async (request: GenerationRequest, send: GenerationSend) => {
+    requests.push(request)
+    return (await send({ maxOutputTokens: 64, maxRetries: 0 })).text
+  }
+  return { seam, requests }
+}
+
+/** The keys of the one `generateText` call, sorted. */
+function callKeys(): string[] {
+  return Object.keys(mockedGenerateText.mock.calls[0][0] as Record<string, unknown>).sort()
+}
+
+describe("rerank generation seam", () => {
+  const docs = [
+    { id: "d1", content: "alpha" },
+    { id: "d2", content: "beta" },
+  ]
+
+  beforeEach(() => {
+    mockedGenerateText.mockReset()
+    mockedGenerateText.mockResolvedValue({
+      text: '[{"id": "d1", "score": 9}, {"id": "d2", "score": 3}]',
+    })
+  })
+
+  it("calls the model directly when no seam is injected", async () => {
+    const results = await rerankWithLLM("query", docs, seamModel)
+    expect(results.map((r) => r.id)).toEqual(["d1", "d2"])
+    expect(callKeys()).toEqual(["model", "prompt", "temperature"])
+  })
+
+  it("runs the cross-encoder through an injected seam, which bounds the call", async () => {
+    const { seam, requests } = boundingSeam()
+    await rerankWithLLM("query", docs, seamModel, { generate: seam })
+    expect(requests[0]).toMatchObject({ stage: "rag.rerank", modelId: "m-1", temperature: 0.1 })
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64, maxRetries: 0 })
+    )
+  })
+
+  it("threads the config's seam through rerank", async () => {
+    const { seam, requests } = boundingSeam()
+    await rerank("query", docs, { model: seamModel, generate: seam })
+    expect(requests).toHaveLength(1)
   })
 })

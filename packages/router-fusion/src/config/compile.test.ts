@@ -13,7 +13,12 @@ import {
   defaultExtension,
 } from "./builtin-catalog"
 import { ConfigCompileError, compileFusionConfig } from "./compile"
-import type { FusionConfigInput } from "./types"
+import {
+  DELEGATE_LIMIT_CEILINGS,
+  DELEGATE_MIN_MODEL_CALLS,
+  SUBTASK_MAX_STEPS,
+  type FusionConfigInput,
+} from "./types"
 
 const SPEC_DIR = join(__dirname, "..", "contracts", "spec")
 
@@ -261,6 +266,90 @@ describe("compileFusionConfig", () => {
         "/extensions/panel_review/limits/panel_evidence_rounds",
       ])
     )
+  })
+
+  it("holds the delegate graph to its V1 worker ceilings, one pointer per field", () => {
+    expect(DEFAULT_LIMITS_BY_MODE.delegate).toMatchObject({
+      worker_model_turns: DELEGATE_LIMIT_CEILINGS.worker_model_turns,
+      worker_tool_operations: DELEGATE_LIMIT_CEILINGS.worker_tool_operations,
+      worker_repair_rounds: 1,
+      lead_takeovers: 1,
+    })
+    expect(DEFAULT_LIMITS_BY_MODE.delegate.delegate_subtasks).toBe(4)
+    expect(DEFAULT_LIMITS_BY_MODE.panel.delegate_subtasks).toBeUndefined()
+    expect(DELEGATE_LIMIT_CEILINGS).toEqual({
+      delegate_subtasks: 4,
+      worker_model_turns: 8,
+      worker_tool_operations: 12,
+      worker_repair_rounds: 1,
+      lead_takeovers: 1,
+    })
+    const extensions = builtinExtensions()
+    extensions.delegate_code = {
+      ...extensions.delegate_code,
+      limits: {
+        ...extensions.delegate_code.limits,
+        worker_model_turns: 9,
+        worker_tool_operations: 13,
+        delegate_subtasks: 5,
+        max_model_calls: DELEGATE_MIN_MODEL_CALLS - 1,
+      },
+    }
+    const issues = compileIssues(input({ extensions }))
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        {
+          pointer: "/extensions/delegate_code/limits/worker_model_turns",
+          message: "V1 allows at most 8",
+        },
+        {
+          pointer: "/extensions/delegate_code/limits/worker_tool_operations",
+          message: "V1 allows at most 12",
+        },
+        {
+          pointer: "/extensions/delegate_code/limits/delegate_subtasks",
+          message: "V1 allows at most 4",
+        },
+        {
+          pointer: "/extensions/delegate_code/limits/max_model_calls",
+          message: "a delegate run needs at least 2 model calls: its plan and one worker turn",
+        },
+      ])
+    )
+    // A delegate action must say how many subtasks its lead may plan.
+    const missing = builtinExtensions()
+    const { delegate_subtasks: _dropped, ...withoutSubtasks } = missing.delegate_code.limits
+    missing.delegate_code = { ...missing.delegate_code, limits: withoutSubtasks as never }
+    expect(compileIssues(input({ extensions: missing }))).toContainEqual({
+      pointer: "/extensions/delegate_code/limits/delegate_subtasks",
+      message: "a delegate action must say how many subtasks its lead may plan",
+    })
+    // Another mode may leave it out, but not get it wrong.
+    const zero = builtinExtensions()
+    zero.panel_review = {
+      ...zero.panel_review,
+      limits: { ...zero.panel_review.limits, delegate_subtasks: 0 },
+    }
+    expect(compileIssues(input({ extensions: zero }))).toContainEqual({
+      pointer: "/extensions/panel_review/limits/delegate_subtasks",
+      message: "must be a positive integer",
+    })
+    // The minimum-calls rule is delegate's own; a direct action may make one call.
+    const direct = builtinExtensions()
+    direct.direct_economy = {
+      ...direct.direct_economy,
+      limits: { ...direct.direct_economy.limits, max_model_calls: 1 },
+    }
+    expect(compileIssues(input({ extensions: direct }))).toEqual([])
+    // Every mode carries the worker bounds, so every mode is held to the ceiling.
+    direct.direct_economy = {
+      ...direct.direct_economy,
+      limits: { ...direct.direct_economy.limits, worker_model_turns: 20 },
+    }
+    expect(compileIssues(input({ extensions: direct })).map((i) => i.pointer)).toEqual([
+      "/extensions/direct_economy/limits/worker_model_turns",
+    ])
+    expect(SUBTASK_MAX_STEPS).toBe(20)
   })
 
   it("requires the third panel seat once panel_size is 3", () => {

@@ -841,6 +841,13 @@ pub struct AcquireWorkspaceBundle {
     /// every caller that has none — the overwhelmingly common case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provisioning: Option<WorkspaceProvisioning>,
+    /// Caller-chosen name for the created worktree's branch. Absent keeps the
+    /// ADR-0111 default (detached head, host-generated identity); present puts
+    /// each Git worktree in the bundle onto a branch of this name. Rejected
+    /// when no root in the bundle is a Git repository — a Shadow workspace has
+    /// no branch to name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_name: Option<String>,
 }
 
 /// A collection of `WorkspaceRootLease`s acquired atomically for one execution.

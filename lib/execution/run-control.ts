@@ -129,6 +129,11 @@ export async function createRunInterrupt(
     db.executionRunInterrupts,
     db.executionRuns,
     db.executionRunEvents,
+    // The journal append below lands in THIS transaction (Dexie zone
+    // inheritance), and since schema v227 it also touches
+    // `notificationProjectionWork` — an outer scope that omits the table fails
+    // the whole interrupt write with "not included in parent transaction".
+    db.notificationProjectionWork,
     async () => {
       await db.executionRunInterrupts.add(interrupt)
       await runEventJournal.append(

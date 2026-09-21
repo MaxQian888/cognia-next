@@ -116,8 +116,9 @@ export function toHex(bytes: Uint8Array): string {
  * guessable from their input (DESIGN §7.1, §12.4). An HMAC is not
  * anonymization: the key material and the digests stay tenant-private.
  *
- * Reserved for the LLM classifier's result cache (ADR-0188 D18, B5), whose key
- * must be computed synchronously on the routing path; nothing calls it yet.
+ * Used by the LLM classifier's result cache (ADR-0188 D18, B5,
+ * `lib/router-fusion/routing/llm-classifier.ts`), whose key must be computed
+ * synchronously on the routing path.
  * The Run API's read tokens use WebCrypto HMAC instead (`artifact-tokens.ts`).
  */
 export function hmacSha256Hex(key: string, message: string): string {

@@ -121,6 +121,13 @@ export const COGNIA_ACCEPTANCE_BATCH: Record<string, AcceptanceBatch> = {
   "ISO-04": "B1",
   /** Cross-database outbox replay is idempotent: one assistant answer after any crash window. */
   "ISO-05": "B1",
+  /**
+   * INV-09: a fusion run never nests under a fusion ancestor. The guard lives in
+   * the explicit-run gate and ships with B3's explicit modes; B5's agent, Squad
+   * and workflow surfaces are the places that would otherwise recurse, so they
+   * add evidence for the same invariant rather than a new case.
+   */
+  "INV-09": "B3",
 }
 
 /**
@@ -146,6 +153,11 @@ export const ACCEPTANCE_TEST_ROOTS = [
   "components/providers/initializers",
   "components/settings/provider/routing",
   "crates/cognia-gateway",
+  // The delegate sandbox and workspace tiers: DEL-04, DEL-05 and SAFE-02 are
+  // proven in Rust, not in Jest.
+  "crates/cognia-task-workspace",
+  "crates/cognia-sandbox-runner",
+  "crates/cognia-automation",
   "sidecar/dispatch",
   "tests/e2e",
 ] as const

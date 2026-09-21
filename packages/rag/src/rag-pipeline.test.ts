@@ -1013,4 +1013,118 @@ describe("rag-pipeline", () => {
       expect(mockRecordFeedback).not.toHaveBeenCalled()
     })
   })
+
+  // --- Generation seam (ADR-0188 D27) ----------------------------------------
+  // `RAGPipelineConfig.generate` is the host boundary for every model call the
+  // pipeline makes; no app code builds a pipeline yet, so this is where a host
+  // would hand the ledgered seam in.
+  describe("generation seam", () => {
+    const seam = jest.fn(async () => "seamed") as unknown as NonNullable<
+      RAGPipelineConfig["generate"]
+    >
+
+    const configWithSeam: RAGPipelineConfig = {
+      ...defaultConfig,
+      model: mockModel,
+      generate: seam,
+      chunkingOptions: { strategy: "semantic", chunkSize: 128 },
+      contextualRetrieval: { enabled: true, useLLM: true, cacheEnabled: false },
+      queryExpansion: { enabled: true, maxVariants: 2, useHyDE: false },
+      reranking: { enabled: true, useLLM: true },
+      correctiveRAG: { enabled: true, useLLM: true },
+      similarityThreshold: 0,
+    }
+
+    it("hands the seam to chunking and contextual retrieval while indexing", async () => {
+      const p = new RAGPipeline(configWithSeam)
+      const internals = withInternals(p)
+      internals.vectorStore = {
+        addDocuments: jest.fn().mockResolvedValue(undefined),
+        deleteDocuments: jest.fn().mockResolvedValue(undefined),
+        listCollections: jest.fn().mockResolvedValue([]),
+        searchDocuments: jest.fn().mockResolvedValue([]),
+      }
+
+      await p.indexDocument("A document to index.", {
+        collectionName: "seamed-index",
+        documentId: "doc-seam",
+        useContextualRetrieval: true,
+      })
+
+      expect(chunkDocumentAsync).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ model: mockModel, generate: seam }),
+        "doc-seam"
+      )
+      expect(addContextToChunks).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ generate: seam }),
+        undefined,
+        "doc-seam"
+      )
+    })
+
+    it("hands the seam to expansion, rerank and grading while retrieving", async () => {
+      const p = new RAGPipeline(configWithSeam)
+      const internals = withInternals(p)
+      internals.queryCache = {
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue(undefined),
+        getStats: jest.fn(),
+        invalidateCollection: jest.fn(),
+      }
+      internals.searchSingle = jest.fn().mockResolvedValue([makeResult("chunk-1", "alpha", 0.8)])
+      jest.mocked(mergeQueryResults).mockReturnValueOnce([{ id: "chunk-1", score: 0.8 }])
+      jest.mocked(rerank).mockResolvedValueOnce([makeResult("chunk-1", "alpha", 0.9)])
+      jest.mocked(gradeRetrievedDocuments).mockResolvedValueOnce({
+        allDocuments: [],
+        relevantDocuments: [makeResult("chunk-1", "alpha", 0.9)],
+        stats: {
+          totalGraded: 1,
+          totalFiltered: 0,
+          totalRelevant: 1,
+          averageGrade: 0.9,
+          fallbackUsed: false,
+          method: "llm",
+        },
+      })
+
+      await p.retrieve("seamed-retrieve", "a query")
+
+      expect(expandQuery).toHaveBeenCalledWith(
+        "a query",
+        expect.objectContaining({ generate: seam })
+      )
+      expect(rerank).toHaveBeenCalledWith(
+        "a query",
+        expect.any(Array),
+        expect.objectContaining({ generate: seam })
+      )
+      expect(gradeRetrievedDocuments).toHaveBeenCalledWith(
+        "a query",
+        expect.any(Array),
+        expect.objectContaining({ generate: seam })
+      )
+    })
+
+    it("[ACC:OFF-02] adds no seam option at all when the host injects none", async () => {
+      const p = new RAGPipeline({ ...configWithSeam, generate: undefined })
+      const internals = withInternals(p)
+      internals.queryCache = {
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue(undefined),
+        getStats: jest.fn(),
+        invalidateCollection: jest.fn(),
+      }
+      internals.searchSingle = jest.fn().mockResolvedValue([makeResult("chunk-1", "alpha", 0.8)])
+      jest.mocked(mergeQueryResults).mockReturnValueOnce([{ id: "chunk-1", score: 0.8 }])
+      jest.mocked(expandQuery).mockClear()
+
+      await p.retrieve("plain-retrieve", "a query")
+
+      const options = jest.mocked(expandQuery).mock.calls[0][1] as Record<string, unknown>
+      expect(options).not.toHaveProperty("generate")
+    })
+  })
 })

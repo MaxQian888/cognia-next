@@ -8,6 +8,11 @@ import {
 } from "@cognia/router-fusion/settings/settings"
 import type { AppSettings } from "@cognia/agent-config-types"
 
+import { RouteDecisionSchema } from "@cognia/router-fusion"
+import type { LlmClient } from "@/lib/twin/distill/llm"
+
+import type { BeginLedgeredUtilityCallInput } from "../gate/utility-ledger"
+import { createRouteClassifier } from "../routing/llm-classifier"
 import {
   chatFeatures,
   dataClassFor,
@@ -398,5 +403,205 @@ describe("route helpers", () => {
     expect(isSubscriptionEnv({ CODEX_ACCESS_TOKEN: "ct" })).toBe(true)
     expect(isSubscriptionEnv({ CLAUDE_CODE_OAUTH_TOKEN: "" })).toBe(false)
     expect(isSubscriptionEnv(undefined)).toBe(false)
+  })
+})
+
+// ── the opt-in LLM classifier (D18, B5) at the chat entry point ───────────────
+
+let classifierAccounts = 0
+
+/**
+ * The real classifier with its ledger and client faked at the seams: `begin`
+ * grants every call (the handle records how it was booked) and the router
+ * model answers with `reply`.
+ */
+function classifierFor(
+  reply: (prompt: string, options?: { abortSignal?: AbortSignal }) => Promise<string>,
+  classifier: Record<string, unknown> = {}
+) {
+  const begins: BeginLedgeredUtilityCallInput[] = []
+  const handle = {
+    runId: "classifier-run",
+    maxOutputTokens: 256,
+    succeeded: jest.fn(async () => undefined),
+    failed: jest.fn(async () => undefined),
+    unknown: jest.fn(async () => undefined),
+  }
+  const complete = jest.fn(reply)
+  const account = `chat-account-${++classifierAccounts}`
+  const classify = createRouteClassifier(
+    {
+      routerFusion: {
+        enabled: true,
+        surfaces: { chat: true },
+        llmClassifier: {
+          enabled: true,
+          routerProviderId: "openai",
+          routerModelId: "gpt-5-mini",
+          ...classifier,
+        },
+      },
+    } as unknown as AppSettings,
+    {
+      begin: async (input) => {
+        begins.push(input)
+        return { kind: "granted", handle }
+      },
+      buildClient: async () => ({ complete }) as unknown as LlmClient,
+      accountKey: async () => account,
+    }
+  )
+  if (!classify) throw new Error("the classifier should be on")
+  return { classify, begins, handle, complete }
+}
+
+const TRANSFORM = JSON.stringify({
+  task: "text.transform",
+  ambiguity: "low",
+  tool_need: "none",
+  scope: "single_item",
+  missing_information: [],
+})
+
+describe("selectChatDeployment with the LLM classifier (D18)", () => {
+  it("routes an Auto turn by the model's labels and records them in the sealed decision", async () => {
+    // By the rules this is a knowledge question: the baseline answers it.
+    const rulesOnly = makeHost({ settings: { approvedRuleRows: ["economy_simple"] } })
+    expect(await selected(rulesOnly.host, selectionInput())).toMatchObject({
+      ...GPT,
+      actionId: "direct_baseline",
+    })
+
+    const { host } = makeHost({ settings: { approvedRuleRows: ["economy_simple"] } })
+    const { classify, begins, handle } = classifierFor(async () => TRANSFORM)
+    host.classify = classify
+    const selection = await selected(host, selectionInput())
+    expect(selection).toMatchObject({
+      ...MINI,
+      actionId: "direct_economy",
+      ruleId: "R2_economy_simple",
+      features: { task: "text.transform" },
+      classification: {
+        classifierVersion: "classifier-1",
+        reasonCodes: ["classifier_source:llm"],
+      },
+    })
+    // One ledgered call, booked on the chat surface and settled.
+    expect(begins).toHaveLength(1)
+    expect(begins[0]).toMatchObject({
+      surface: "chat",
+      origin: "utility",
+      featureId: "router-fusion-classifier",
+      providerId: "openai",
+      modelId: "gpt-5-mini",
+    })
+    expect(handle.succeeded).toHaveBeenCalledTimes(1)
+
+    const seal = sealChatRoute(host, {
+      selection,
+      ...MINI,
+      lane: "ai-sdk",
+      env: { OPENAI_API_KEY: "sk" },
+      sessionId: "session-1",
+      maxOutputTokens: undefined,
+      existingMaxBudgetUsd: undefined,
+    })
+    if (seal.kind !== "stamped") throw new Error(`refused: ${seal.reasons.join(", ")}`)
+    expect(seal.decision.classifier_version).toBe("classifier-1")
+    expect(seal.decision.reason_codes).toEqual(
+      expect.arrayContaining([
+        "classifier:classifier-1",
+        "classifier_source:llm",
+        "selected_by:R2_economy_simple",
+      ])
+    )
+    // The strict contract has no room for anything else: the codes carry it.
+    const uuid = "33333333-3333-4333-8333-333333333333"
+    expect(
+      RouteDecisionSchema.parse({ ...seal.decision, decision_id: uuid, run_id: uuid })
+    ).toMatchObject({ classifier_version: "classifier-1" })
+  })
+
+  it("[ACC:ROUTE-03] routes by the rules when the classifier times out, with the call's cost kept and the reason recorded", async () => {
+    const { host } = makeHost({ settings: { approvedRuleRows: ["economy_simple"] } })
+    const { classify, handle } = classifierFor(
+      (_prompt, options) =>
+        new Promise<string>((_resolve, reject) => {
+          options?.abortSignal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          )
+        }),
+      { timeoutMs: 25 }
+    )
+    host.classify = classify
+    const started = Date.now()
+    const selection = await selected(host, selectionInput())
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(selection).toMatchObject({
+      ...GPT,
+      actionId: "direct_baseline",
+      ruleId: "R6_baseline",
+      classification: {
+        classifierVersion: "rules-1",
+        reasonCodes: ["classifier_source:rules_fallback", "classifier_fallback:timeout"],
+      },
+    })
+    // The call was sent: the ledgered client books it UNKNOWN, never free.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(handle.unknown).toHaveBeenCalledWith("aborted_before_answer")
+    expect(handle.succeeded).not.toHaveBeenCalled()
+
+    const seal = sealChatRoute(host, {
+      selection,
+      ...GPT,
+      lane: "ai-sdk",
+      env: undefined,
+      sessionId: "session-1",
+      maxOutputTokens: undefined,
+      existingMaxBudgetUsd: undefined,
+    })
+    if (seal.kind !== "stamped") throw new Error("refused")
+    expect(seal.decision.classifier_version).toBe("rules-1")
+    expect(seal.decision.reason_codes).toEqual(
+      expect.arrayContaining(["classifier_source:rules_fallback", "classifier_fallback:timeout"])
+    )
+  })
+
+  it("[ACC:ROUTE-03] routes by the rules on an invalid answer, which stays booked", async () => {
+    const { host } = makeHost({ settings: { approvedRuleRows: ["economy_simple"] } })
+    const { classify, handle } = classifierFor(async () => "{task: text.transform}")
+    host.classify = classify
+    const selection = await selected(host, selectionInput())
+    expect(selection).toMatchObject({
+      actionId: "direct_baseline",
+      classification: {
+        reasonCodes: ["classifier_source:rules_fallback", "classifier_fallback:invalid_json"],
+      },
+    })
+    expect(handle.succeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("records the classification on a refusal too", async () => {
+    // Every deployment's breaker is open: nothing can serve the turn.
+    const { host } = makeHost({ open: ["openai::gpt-5", "azure::gpt-5", "openai::gpt-5-mini"] })
+    host.classify = classifierFor(async () => TRANSFORM).classify
+    const outcome = await selectChatDeployment(host, selectionInput())
+    expect(outcome.kind).toBe("refused")
+    if (outcome.kind === "refused")
+      expect(outcome.decision?.reason_codes).toContain("classifier_source:llm")
+  })
+
+  it("never spends a classification on a pinned model or alias", async () => {
+    const { host } = makeHost()
+    const { classify, complete } = classifierFor(async () => TRANSFORM)
+    host.classify = classify
+    const manual = await selected(host, selectionInput({ selection: { kind: "manual", ...GPT } }))
+    const alias = await selected(
+      host,
+      selectionInput({ selection: { kind: "alias", alias: "fast" } })
+    )
+    expect(complete).not.toHaveBeenCalled()
+    expect(manual.classification).toBeUndefined()
+    expect(alias.classification).toBeUndefined()
   })
 })

@@ -50,13 +50,21 @@ describe("RAGCollectionManager", () => {
   describe("initialize", () => {
     it("should initialize successfully", async () => {
       const m = new RAGCollectionManager({ enablePersistence: false })
-      await expect(m.initialize()).resolves.not.toThrow()
+      try {
+        await expect(m.initialize()).resolves.not.toThrow()
+      } finally {
+        await m.destroy()
+      }
     })
 
     it("should be idempotent", async () => {
       const m = new RAGCollectionManager({ enablePersistence: false })
-      await m.initialize()
-      await expect(m.initialize()).resolves.not.toThrow()
+      try {
+        await m.initialize()
+        await expect(m.initialize()).resolves.not.toThrow()
+      } finally {
+        await m.destroy()
+      }
     })
   })
 

@@ -24,18 +24,55 @@ export type { RouterFusionSurface, RouterFusionSwitches } from "./switches"
 export type RuleRowProvenance = "user" | "migrated_legacy_auto"
 
 /**
- * The rule rows this build can act on: those with an action whose mode runs
- * (direct, cascade, panel — B3). A row whose actions are all delegate is
- * DORMANT until delegate ships (B4): approving it changes no route, because
- * every router's executable modes filter its actions out. The settings section
- * shows such a row disabled and labelled "later release", and
- * `settings.test.ts` pins that every other row proposes a running mode.
+ * The rule rows this build can act on: those with an action whose mode runs.
+ * B4 added `delegate_multifile`, so every row is wired — direct, cascade,
+ * panel and delegate all execute.
+ *
+ * `delegate_multifile` still only ever MATCHES where delegate can really run:
+ * its rule additionally requires a sandbox tier and an approved acceptance
+ * profile (`capabilities.sandboxTier`, `capabilities.acceptanceProfileAvailable`
+ * in `routing/action-router.ts`), which the host computes per request from the
+ * project the run names. Approving the row on a machine with no sandbox, or in
+ * a project with no approved profile, therefore changes no route — but it is
+ * the capability that withholds it, not this list.
+ *
+ * `settings.test.ts` pins that every row here proposes a mode this build runs,
+ * and that nothing is left dormant.
  */
 export const WIRED_RULE_ROWS: readonly RuleRowId[] = [
   "economy_simple",
   "cascade_verifiable",
   "panel_research",
+  "delegate_multifile",
 ]
+
+/**
+ * What the difficulty judge's settings were when the LLM classifier was first
+ * enabled, and which of them were carried over (D18). `autoRouting` itself is
+ * never modified, so this is provenance for the settings section, not a restore
+ * point: switching the classifier off hands the judge back its own settings.
+ */
+export interface JudgeMigrationSnapshot {
+  capturedAt: number
+  /** `autoRouting.judge`, `routerModel`, `enableCache` and `cacheTTL` as they were. */
+  judge: unknown
+  carried: Array<"routerModel" | "timeoutMs" | "cacheTtlSeconds">
+}
+
+export const JUDGE_MIGRATION_FIELDS = ["routerModel", "timeoutMs", "cacheTtlSeconds"] as const
+
+export interface LlmClassifierSettings {
+  enabled: boolean
+  /** The router model the classification call goes to; without it the rules classify. */
+  routerProviderId?: string
+  routerModelId?: string
+  /** Hard ceiling on the classification, reservation included (default 1500). */
+  timeoutMs: number
+  /** How long a successful classification is reused; 0 turns the cache off (default 600). */
+  cacheTtlSeconds: number
+  /** Set on the first enable; its presence means the judge migration already ran. */
+  judgeMigration?: JudgeMigrationSnapshot
+}
 
 export interface SurfaceTrip {
   trippedAt: number
@@ -86,18 +123,17 @@ export interface RouterFusionSettings {
    */
   trippedSurfaces: Partial<Record<RouterFusionSurface, SurfaceTrip>>
   /**
-   * The opt-in LLM classifier (D18). DORMANT until B5: it is normalized and
-   * persisted, but nothing reads it and the settings section does not show it;
-   * every turn is classified by the rules classifier. `settings.test.ts` pins
-   * that no source outside this module reads it.
+   * The opt-in LLM classifier (D18, wired in B5). Off by default: every turn
+   * is classified by the rules classifier. On, an Auto route — a chat turn
+   * (`selectChatDeployment`, `selectChatFusionRun`) or a Run API / `cognia/auto`
+   * request (`routeRunRequest`) — asks the router model once, ledgered and
+   * PII-gated, and falls back to the rules classifier on a timeout, an invalid
+   * reply, a PII hit or a fault (ROUTE-03). It also absorbs the difficulty judge
+   * on the `utilityLedger` surface. The reader is
+   * `lib/router-fusion/routing/llm-classifier.ts`, created per route host;
+   * `settings.test.ts` pins its readers.
    */
-  llmClassifier: {
-    enabled: boolean
-    routerProviderId?: string
-    routerModelId?: string
-    timeoutMs: number
-    cacheTtlSeconds: number
-  }
+  llmClassifier: LlmClassifierSettings
   /** Prior Auto settings captured at first enable, for one-click restore (D37). */
   legacyAutoSnapshot?: { capturedAt: number; autoRouting: unknown }
   migrationNoticeDismissed: boolean
@@ -184,6 +220,53 @@ function normalizeCustomActions(raw: unknown): ActionConfig[] {
     if (action) out.push(action)
   }
   return out
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function intInRange(value: unknown, fallback: number, min: number, max: number): number {
+  return Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max
+    ? (value as number)
+    : fallback
+}
+
+function normalizeJudgeMigration(raw: unknown): JudgeMigrationSnapshot | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const snapshot = raw as Partial<Record<keyof JudgeMigrationSnapshot, unknown>>
+  if (!Number.isSafeInteger(snapshot.capturedAt)) return undefined
+  const carried = Array.isArray(snapshot.carried)
+    ? JUDGE_MIGRATION_FIELDS.filter((field) => (snapshot.carried as unknown[]).includes(field))
+    : []
+  return {
+    capturedAt: snapshot.capturedAt as number,
+    judge: structuredClone(snapshot.judge ?? null),
+    carried,
+  }
+}
+
+/**
+ * The classifier's settings. A router model is kept only as a complete pair —
+ * half a deployment cannot be called — and the cache TTL may be 0 (no cache),
+ * which is how a judge migrated with its cache off keeps it off.
+ */
+function normalizeLlmClassifier(
+  raw: Record<string, unknown>,
+  defaults: LlmClassifierSettings
+): LlmClassifierSettings {
+  const model =
+    nonEmptyString(raw.routerProviderId) && nonEmptyString(raw.routerModelId)
+      ? { routerProviderId: raw.routerProviderId, routerModelId: raw.routerModelId }
+      : {}
+  const judgeMigration = normalizeJudgeMigration(raw.judgeMigration)
+  return {
+    enabled: bool(raw.enabled, false),
+    ...model,
+    timeoutMs: intInRange(raw.timeoutMs, defaults.timeoutMs, 1, 60_000),
+    cacheTtlSeconds: intInRange(raw.cacheTtlSeconds, defaults.cacheTtlSeconds, 0, 86_400),
+    ...(judgeMigration ? { judgeMigration } : {}),
+  }
 }
 
 /** Normalize whatever was persisted into a complete, valid settings object. */
@@ -273,21 +356,7 @@ export function normalizeRouterFusionSettings(raw: unknown): RouterFusionSetting
       : [],
     breakerThreshold: positiveInt(r.breakerThreshold, d.breakerThreshold, 100),
     trippedSurfaces: normalizeTrips(r.trippedSurfaces),
-    llmClassifier: {
-      enabled: bool(classifierRaw.enabled, false),
-      ...(typeof classifierRaw.routerProviderId === "string"
-        ? { routerProviderId: classifierRaw.routerProviderId }
-        : {}),
-      ...(typeof classifierRaw.routerModelId === "string"
-        ? { routerModelId: classifierRaw.routerModelId }
-        : {}),
-      timeoutMs: positiveInt(classifierRaw.timeoutMs, d.llmClassifier.timeoutMs, 60_000),
-      cacheTtlSeconds: positiveInt(
-        classifierRaw.cacheTtlSeconds,
-        d.llmClassifier.cacheTtlSeconds,
-        86_400
-      ),
-    },
+    llmClassifier: normalizeLlmClassifier(classifierRaw, d.llmClassifier),
     ...(r.legacyAutoSnapshot && typeof r.legacyAutoSnapshot === "object"
       ? {
           legacyAutoSnapshot: structuredClone(

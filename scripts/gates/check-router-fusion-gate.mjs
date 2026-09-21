@@ -63,6 +63,8 @@ export const ALLOWED_OUTSIDE = {
     "The action catalog editor is part of the Router + Fusion settings section and renders only inside the routing settings pane.",
   "components/settings/provider/routing/router-fusion-usd-field.tsx":
     "A dollar input of the Router + Fusion settings section (it validates with the package's microusd parser); settings pane only.",
+  "components/settings/provider/routing/router-fusion-classifier-section.tsx":
+    "The LLM classifier's settings (it migrates the difficulty judge's settings on first enable) are part of the Router + Fusion settings section and render only inside the routing settings pane.",
 }
 
 const IMPORT_RE =

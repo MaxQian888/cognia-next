@@ -10,6 +10,12 @@
  *
  * Never throws — any failure degrades to an empty result set (mirrors the twin /
  * memory runtimes).
+ *
+ * The LLM query expansion is a utility generation, so with Router + Fusion's
+ * `utilityLedger` surface on it runs through the ledgered generation seam
+ * (`lib/ai/ledgered-generation-seam.ts`, ADR-0188 D27): reserved before it
+ * leaves and settled from the provider's usage. Off, the expansion call is
+ * exactly what it was.
  */
 
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
@@ -20,8 +26,12 @@ import {
 } from "@cognia/vector/dimension-guard"
 import { reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { generateHypotheticalAnswer, generateStepBackQuery } from "@cognia/rag/query-expansion"
+import type { GenerationSeam } from "@cognia/provider-embedding/generation-seam"
 import type { IVectorStore } from "@cognia/vector/store"
 import type { LanguageModel } from "ai"
+import { resolveLedgeredGenerationSeam } from "@/lib/ai/ledgered-generation-seam"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
+import { routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
 import { rerank, type RerankCandidate } from "@/lib/twin/runtime/reranker"
 import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -48,8 +58,13 @@ export interface ProjectKnowledgeRuntimeDeps {
       opts?: { signal?: AbortSignal }
     ) => number[] | Promise<number[]>
   }
-  /** Optional LLM query expansion (HyDE / step-back). */
-  expansion?: { model: LanguageModel; strategy: "hyde" | "stepback" }
+  /**
+   * Optional LLM query expansion (HyDE / step-back). `providerId` is the app
+   * provider the model was built from, for the ledger's pricing; when a builder
+   * does not set it, the twin's distill LLM settings (which the twin deps build
+   * this model from) are read — only while the ledger surface is on.
+   */
+  expansion?: { model: LanguageModel; strategy: "hyde" | "stepback"; providerId?: string }
   /** Override the collection name. Defaults to `cognia_project_{projectId}`. */
   vectorCollection?: string
   vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
@@ -80,6 +95,45 @@ export interface RetrieveProjectChunksResult {
 }
 
 const EMPTY: RetrieveProjectChunksResult = { chunks: [], degraded: false }
+
+/** The utility-ledger feature id of the expansion call; the package appends its stage. */
+export const PROJECT_KNOWLEDGE_EXPANSION_FEATURE = "project-knowledge-expansion"
+
+/**
+ * The ledgered generation seam for this turn's expansion call, or `undefined`
+ * while `utilityLedger` is off — then nothing is injected and the call is the
+ * one the package always made.
+ */
+async function expansionGenerationSeam(
+  projectId: string,
+  expansion: NonNullable<ProjectKnowledgeRuntimeDeps["expansion"]>
+): Promise<GenerationSeam | undefined> {
+  let settings: Awaited<ReturnType<typeof currentRouterFusionGateSettings>>
+  try {
+    settings = await currentRouterFusionGateSettings()
+  } catch {
+    // An unreadable switch never turns Router + Fusion on.
+    return undefined
+  }
+  if (routerFusionGate(settings, "utilityLedger") !== "on") return undefined
+  return resolveLedgeredGenerationSeam({
+    surface: "utilityLedger",
+    settings,
+    resolveBinding: async () => ({
+      origin: "utility",
+      featureId: PROJECT_KNOWLEDGE_EXPANSION_FEATURE,
+      providerId: expansion.providerId ?? (await twinDistillProviderId()),
+      // The project is the workspace: its data-class policy applies (D30).
+      workspaceId: projectId,
+    }),
+  })
+}
+
+/** The twin's distill LLM provider — the one `tryBuildTwinDeps` built the expansion model from. */
+async function twinDistillProviderId(): Promise<string> {
+  const { getTwinRuntimeSettings } = await import("@/lib/db/twin-runtime-settings")
+  return (await getTwinRuntimeSettings()).llm.provider
+}
 
 export async function retrieveProjectChunks(
   input: RetrieveProjectChunksInput
@@ -126,10 +180,15 @@ export async function retrieveProjectChunks(
     if (wantExpansion && deps.expansion) {
       if (hasNoLeakingPii(userMessage)) {
         try {
+          const generate = await expansionGenerationSeam(projectId, deps.expansion)
           const expandedText =
             deps.expansion.strategy === "stepback"
-              ? await generateStepBackQuery(userMessage, deps.expansion.model)
-              : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
+              ? generate
+                ? await generateStepBackQuery(userMessage, deps.expansion.model, { generate })
+                : await generateStepBackQuery(userMessage, deps.expansion.model)
+              : generate
+                ? await generateHypotheticalAnswer(userMessage, deps.expansion.model, { generate })
+                : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
           if (expandedText.trim().length > 0) {
             const expEmbedding = (
               await generateSafeEmbedding(expandedText, {

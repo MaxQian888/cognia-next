@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
-import { sha256Hex } from "@cognia/router-fusion"
+import { MemoryWorkspace, sha256Hex } from "@cognia/router-fusion"
 
 import { fusionContentCodec } from "../db/content-codec"
 import { FusionDB } from "../db/fusion-db"
@@ -9,6 +9,7 @@ import { FusionLedgerStore } from "../db/ledger-store"
 import {
   createHostToolRuntime,
   createRunEvidenceResolver,
+  DELEGATE_WORK_POLICY,
   PANEL_READ_POLICY,
   PANEL_VERIFY_POLICY,
 } from "./tool-runtime"
@@ -352,6 +353,208 @@ describe("createHostToolRuntime", () => {
     )
     expect(checked.summary).toContain(`${evidenceId}: CHANGED at https://example.com/t`)
     expect(checked.evidence[0].content_sha256).toBe(sha256Hex("5% in 2025"))
+  })
+})
+
+describe("createHostToolRuntime under delegate-work-1", () => {
+  const FILES = {
+    "src/users/list.ts": "export const list = []\n",
+    "tests/users/list.test.ts": "test('race', () => {})\n",
+    "docs/link": "",
+  }
+
+  function delegateWorld(options: { symlinkEscapes?: string[] } = {}) {
+    const store = freshStore()
+    const workspace = new MemoryWorkspace(FILES, options)
+    const runtime = createHostToolRuntime({
+      store,
+      runId: "run-1",
+      web: null,
+      workspace: null,
+      delegate: { workspace },
+      now: () => NOW,
+    })
+    return { store, workspace, runtime }
+  }
+
+  const work = (overrides: Record<string, unknown> = {}) => ({
+    runId: "run-1",
+    logicalStepId: "delegate:s1:work:1:turn:1",
+    policyId: DELEGATE_WORK_POLICY,
+    role: "worker",
+    signal: new AbortController().signal,
+    revision: "rev-0",
+    allowedPaths: ["src/users"],
+    ...overrides,
+  })
+
+  it("offers read, list and propose-patch only to a run that has a workspace", () => {
+    const { runtime } = delegateWorld()
+    expect(runtime.describe(DELEGATE_WORK_POLICY).map((tool) => tool.name)).toEqual([
+      "workspace_read",
+      "workspace_list",
+      "propose_patch",
+    ])
+    const bare = createHostToolRuntime({
+      store: freshStore(),
+      runId: "run-1",
+      web: null,
+      workspace: null,
+      now: () => NOW,
+    })
+    expect(bare.describe(DELEGATE_WORK_POLICY)).toEqual([])
+    // The panel policies are untouched by the delegate addition.
+    expect(bare.describe(PANEL_READ_POLICY)).toEqual([])
+    expect(bare.describe(PANEL_VERIFY_POLICY).map((tool) => tool.name)).toEqual(["artifact_read"])
+  })
+
+  it("keeps the write out of every other policy", async () => {
+    const { runtime, workspace } = delegateWorld()
+    await expect(
+      runtime.execute(
+        {
+          id: "c1",
+          name: "propose_patch",
+          arguments: { path: "src/users/x.ts", action: "delete" },
+        },
+        work({ policyId: PANEL_READ_POLICY })
+      )
+    ).resolves.toMatchObject({ status: "refused", refusalCode: "TOOL_NOT_OFFERED" })
+    expect(workspace.staged).toEqual([])
+  })
+
+  it("refuses a delegate tool whose context carries no revision or write scope", async () => {
+    const { runtime } = delegateWorld()
+    await expect(
+      runtime.execute(
+        { id: "c1", name: "workspace_read", arguments: { path: "src/users/list.ts" } },
+        { ...work(), revision: "" }
+      )
+    ).resolves.toMatchObject({ status: "refused", refusalCode: "TOOL_CONTEXT_INVALID" })
+  })
+
+  it("reads at the run's revision and pins what it read as evidence", async () => {
+    const { runtime, store } = delegateWorld()
+    const receipt = await runtime.execute(
+      { id: "c1", name: "workspace_read", arguments: { path: "src/users/list.ts" } },
+      work()
+    )
+    expect(receipt.status).toBe("succeeded")
+    expect(receipt.summary).toContain("export const list = []")
+    expect(receipt.evidence[0]).toMatchObject({
+      content_sha256: sha256Hex("export const list = []\n"),
+      locator: "workspace:rev-0:src/users/list.ts",
+    })
+    const [row] = await store.db.fusionToolOperations.toArray()
+    expect(row).toMatchObject({ policyId: DELEGATE_WORK_POLICY, toolName: "workspace_read" })
+  })
+
+  it("[ACC:CACHE-02] serves a repeat from the receipt, and a new revision as a new operation", async () => {
+    const { runtime } = delegateWorld()
+    const read = () =>
+      runtime.execute(
+        { id: "c", name: "workspace_read", arguments: { path: "src/users/list.ts" } },
+        work()
+      )
+    const first = await read()
+    expect((await read()).operationId).toBe(first.operationId)
+    const other = await runtime.execute(
+      { id: "c", name: "workspace_read", arguments: { path: "src/users/list.ts" } },
+      work({ revision: "rev-1" })
+    )
+    expect(other.operationId).not.toBe(first.operationId)
+  })
+
+  it("lists the workspace at the revision and reports a missing file as a failure", async () => {
+    const { runtime } = delegateWorld()
+    const listed = await runtime.execute(
+      { id: "c1", name: "workspace_list", arguments: { prefix: "src" } },
+      work()
+    )
+    expect(listed.status).toBe("succeeded")
+    expect(listed.summary).toContain("src/users/list.ts")
+    await expect(
+      runtime.execute(
+        { id: "c2", name: "workspace_read", arguments: { path: "src/users/missing.ts" } },
+        work()
+      )
+    ).resolves.toMatchObject({ status: "failed" })
+  })
+
+  it("[ACC:DEL-07] records a proposal inside the scope and refuses one outside it", async () => {
+    const { runtime, workspace } = delegateWorld()
+    const inside = await runtime.execute(
+      {
+        id: "c1",
+        name: "propose_patch",
+        arguments: { path: "src/users/list.ts", action: "write", content: "guarded\n" },
+      },
+      work()
+    )
+    expect(inside).toMatchObject({ status: "succeeded", evidence: [] })
+    expect(inside.summary).toBe("proposed: write src/users/list.ts (8 bytes)")
+    // A proposal is not a write: nothing was staged and nothing moved.
+    expect(workspace.staged).toEqual([])
+    expect(workspace.applied).toEqual([])
+    expect(workspace.filesAt("rev-0")?.["src/users/list.ts"]).toBe("export const list = []\n")
+
+    await expect(
+      runtime.execute(
+        {
+          id: "c2",
+          name: "propose_patch",
+          arguments: { path: "config/app.json", action: "write", content: "{}\n" },
+        },
+        work()
+      )
+    ).resolves.toMatchObject({ status: "refused", refusalCode: "PATH_OUT_OF_SCOPE" })
+    // The same path becomes writable once a person has widened the scope.
+    await expect(
+      runtime.execute(
+        {
+          id: "c3",
+          name: "propose_patch",
+          arguments: { path: "config/app.json", action: "write", content: "{}\n" },
+        },
+        work({ allowedPaths: ["src/users", "config"] })
+      )
+    ).resolves.toMatchObject({ status: "succeeded" })
+  })
+
+  it("[ACC:DEL-05] refuses a proposal that escapes the workspace or names a link", async () => {
+    const { runtime, workspace } = delegateWorld({ symlinkEscapes: ["docs/link"] })
+    const propose = (path: string, scope = ["src/users", "docs", ".."]) =>
+      runtime.execute(
+        { id: `c:${path}`, name: "propose_patch", arguments: { path, action: "delete" } },
+        work({ allowedPaths: scope })
+      )
+    await expect(propose("../outside.ts")).resolves.toMatchObject({
+      status: "refused",
+      refusalCode: "PATH_TRAVERSAL",
+    })
+    await expect(propose("/etc/passwd")).resolves.toMatchObject({
+      status: "refused",
+      refusalCode: "PATH_ABSOLUTE",
+    })
+    await expect(propose(".ssh/authorized_keys")).resolves.toMatchObject({
+      status: "refused",
+      refusalCode: "PATH_SENSITIVE",
+    })
+    await expect(propose("docs/link")).resolves.toMatchObject({
+      status: "refused",
+      refusalCode: "PATH_ESCAPE",
+    })
+    expect(workspace.staged).toEqual([])
+  })
+
+  it("refuses arguments that do not parse under the delegate policy", async () => {
+    const { runtime } = delegateWorld()
+    await expect(
+      runtime.execute(
+        { id: "c1", name: "propose_patch", arguments: { path: "src/users/a.ts", action: "chmod" } },
+        work()
+      )
+    ).resolves.toMatchObject({ status: "refused", refusalCode: "INVALID_ARGUMENTS" })
   })
 })
 

@@ -57,6 +57,7 @@ import {
   type SettleOutcome,
   type StoredArtifact,
   type TaskKind,
+  type ToolIntent,
   type VerifierProfile,
   type ArtifactStore,
   type EventSink,
@@ -99,7 +100,12 @@ const PROJECTED_RUN_ORIGIN: Record<FusionRunOrigin, ExecutionRunOrigin | null> =
   agent: null,
   workflow: null,
   utility: null,
-  companion: null,
+  // A paired phone or browser asked THIS device to do the work (WP-C). No
+  // local engine stands behind it, so without a projection the run would be
+  // invisible in `/agent-runs` and unstoppable from the machine doing it.
+  // `local` rather than `gateway-api`: the companion is the same person at
+  // another screen, not an external program holding a key.
+  companion: "local",
   gateway: "gateway-api",
 }
 
@@ -107,7 +113,8 @@ const PROJECTED_RUN_ORIGIN: Record<FusionRunOrigin, ExecutionRunOrigin | null> =
  * The cockpit origin of a run, or `null` when an engine already owns its
  * execution run. A chat run the orchestrator drives is a cascade or panel turn:
  * no sidecar turn and no direct-chat execution run stand behind it, so it is
- * projected as local work the cockpit can show and stop.
+ * projected as local work the cockpit can show and stop. A companion run is
+ * projected for the same reason.
  */
 export function projectedOriginOf(
   run: Pick<FusionRunRow, "origin" | "driver">
@@ -126,6 +133,67 @@ export function ledgerWritesUsageRows(run: Pick<FusionRunRow, "origin" | "driver
 }
 
 export const TENANT_ROW_ID = "tenant" as const
+
+/**
+ * The media type of a committed call result that carries tool requests
+ * (ADR-0188 B3, REC-03).
+ *
+ * A call's committed output is one encrypted artifact. When the model ended on
+ * a tool request the artifact holds `{ text, tool_calls }` under this type
+ * instead of bare text, so a replayed step returns the same requests the first
+ * attempt got — a resumed panel would otherwise see a tool round with no calls
+ * and throw its candidate away. Plain `text/plain` results, written before this
+ * and by every call that asked for nothing, are read exactly as before: the
+ * media type, not a migration, says which one it is.
+ */
+export const CALL_RESULT_WITH_TOOLS_MEDIA_TYPE = "application/vnd.cognia.fusion-call-result+json"
+
+/** The stored envelope of a committed call that ended on tool requests. */
+interface CommittedCallEnvelope {
+  text: string
+  tool_calls: ToolIntent[]
+}
+
+export function encodeCommittedCallResult(result: CommittedCallResult): {
+  content: string
+  mediaType: string
+} {
+  if (!result.toolCalls || result.toolCalls.length === 0) {
+    return { content: result.text, mediaType: "text/plain" }
+  }
+  const envelope: CommittedCallEnvelope = { text: result.text, tool_calls: result.toolCalls }
+  return { content: JSON.stringify(envelope), mediaType: CALL_RESULT_WITH_TOOLS_MEDIA_TYPE }
+}
+
+/**
+ * The text and the tool requests back out of a stored result. A stored
+ * envelope that no longer parses, or whose tool calls are not the shape the
+ * workflow expects, is read as text with no requests: the step is still
+ * committed and is never sent again, and the workflow refuses a tool-call
+ * answer that carries no calls.
+ */
+export function decodeCommittedCallResult(
+  content: string,
+  mediaType: string
+): { text: string; toolCalls?: ToolIntent[] } {
+  if (mediaType !== CALL_RESULT_WITH_TOOLS_MEDIA_TYPE) return { text: content }
+  try {
+    const parsed = JSON.parse(content) as Partial<CommittedCallEnvelope>
+    const calls = Array.isArray(parsed.tool_calls)
+      ? parsed.tool_calls.filter(
+          (call): call is ToolIntent =>
+            typeof call?.id === "string" &&
+            typeof call.name === "string" &&
+            typeof call.arguments === "object" &&
+            call.arguments !== null
+        )
+      : []
+    const text = typeof parsed.text === "string" ? parsed.text : ""
+    return calls.length > 0 ? { text, toolCalls: calls } : { text }
+  } catch {
+    return { text: "" }
+  }
+}
 
 /** Stored in place of free text that is not a machine code. */
 export const WITHHELD_TEXT = "withheld"
@@ -185,6 +253,16 @@ export interface CreateRunInput {
   acceptanceProfile?: VerifierProfile
   dataClass?: DataClass
   workspaceRoot?: string
+  /**
+   * The app project the run belongs to (`RunRequest.workspace_id`). Delegate
+   * needs it: its acceptance profile and that profile's approval live on the
+   * project (WP-D2).
+   */
+  projectId?: string
+  /** The `.cognia/workspace.json` acceptance profile a delegate run verifies with. */
+  acceptanceProfileId?: string
+  /** See `FusionRunRow.delegateDelivery`; `patch_only` when omitted. */
+  delegateDelivery?: "patch_only" | "workspace_updated"
   /** See `FusionRunRow.driver`. */
   driver?: FusionRunDriver
 }
@@ -250,6 +328,14 @@ function snapshotOf(row: FusionReservationRow): ReservationSnapshot {
 
 export class FusionLedgerStore {
   readonly db: FusionDB
+  /**
+   * The content cipher this store's rows are sealed with. Exposed because the
+   * delegate step journal (`db/delegate-store.ts`) seals its receipts with the
+   * SAME codec `fusionArtifacts.content` uses — a second codec built from the
+   * same database name would work, but two of them is one more place for the
+   * vault's state to be read differently.
+   */
+  readonly contentCodec: FusionContentCodec
   private readonly codec: FusionContentCodec
   private readonly now: () => number
   private readonly newId: () => string
@@ -258,6 +344,7 @@ export class FusionLedgerStore {
   constructor(deps: FusionStoreDeps) {
     this.db = deps.db
     this.codec = deps.codec
+    this.contentCodec = deps.codec
     this.now = deps.now ?? (() => Date.now())
     this.newId = deps.newId ?? uuid
   }
@@ -388,6 +475,63 @@ export class FusionLedgerStore {
       createdAt: run.createdAt,
       ...extra,
     })
+  }
+
+  /**
+   * Show the person the decision their run is waiting on, wherever they are
+   * (ADR-0188 B4, D21).
+   *
+   * A parked delegate run is useless if the only place the request appears is
+   * an API snapshot: the cockpit renders `approve` / `deny` from a PENDING
+   * INTERRUPT on the execution run, so parking queues one. It travels on the
+   * same `execution_run_projection` effect as the run's own phases — it IS the
+   * run advancing — with the approval's id as the interrupt's, so the id the
+   * surface sends back names exactly the digest that was approved (API-08).
+   *
+   * A run whose execution run belongs to another engine is skipped rather than
+   * failed: its own surface owns the gate. Delegate only reaches here from the
+   * Run API and the companion, both of which project.
+   */
+  private async projectRunInterrupt(
+    run: FusionRunRow,
+    approval: {
+      approvalId: string
+      requestDigest: string
+      kind: string
+      revision: string
+      logicalStepId: string
+      summary: Record<string, unknown>
+    }
+  ): Promise<void> {
+    const origin = projectedOriginOf(run)
+    if (!origin) return
+    await this.outbox(
+      run,
+      `projection:${run.runId}:waiting:${approval.approvalId}`,
+      "execution_run_projection",
+      {
+        runId: run.runId,
+        phase: "waiting",
+        origin,
+        title: run.title,
+        sessionId: run.sessionId,
+        actorKeyId: run.actorKeyId,
+        actorKeyName: run.actorKeyName,
+        mode: run.mode,
+        actionId: run.actionId,
+        createdAt: run.createdAt,
+        interrupt: {
+          id: approval.approvalId,
+          type: "fusion_approval",
+          requestDigest: approval.requestDigest,
+          kind: approval.kind,
+          revision: approval.revision,
+          logicalStepId: approval.logicalStepId,
+          summary: approval.summary,
+          expiresAt: run.deadlineAt,
+        },
+      }
+    )
   }
 
   private async billingEvent(run: FusionRunRow): Promise<void> {
@@ -538,6 +682,9 @@ export class FusionLedgerStore {
           ...(input.acceptanceProfile ? { acceptanceProfile: input.acceptanceProfile } : {}),
           ...(input.dataClass ? { dataClass: input.dataClass } : {}),
           ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.acceptanceProfileId ? { acceptanceProfileId: input.acceptanceProfileId } : {}),
+          ...(input.delegateDelivery ? { delegateDelivery: input.delegateDelivery } : {}),
           ...(input.driver ? { driver: input.driver } : {}),
           createdAt: now,
           updatedAt: now,
@@ -655,20 +802,119 @@ export class FusionLedgerStore {
     )
   }
 
-  /** running → waiting_for_input / waiting_for_approval. The deadline keeps running. */
+  /**
+   * running → waiting_for_input / waiting_for_approval.
+   *
+   * The moment is recorded (`pausedAt`), because the deadline bounds the WORK
+   * a run may do and a person's deciding time is not work: `resumeRun` gives
+   * back exactly the wall time spent here and no more.
+   *
+   * `extra` carries what the surface needs to show the wait — the approval the
+   * run is parked on — so the projection and the run's journal describe the
+   * same thing.
+   */
   async pauseRun(
     runId: string,
     fencingToken: number,
-    to: "waiting_for_input" | "waiting_for_approval"
+    to: "waiting_for_input" | "waiting_for_approval",
+    extra: {
+      /** The approval the run is parked on (its id doubles as the interrupt's). */
+      approval?: {
+        approvalId: string
+        requestDigest: string
+        kind: string
+        revision: string
+        logicalStepId: string
+        summary: Record<string, unknown>
+      }
+    } = {}
   ): Promise<{ ok: true } | Refusal<"FENCED" | "RUN_NOT_FOUND" | "ILLEGAL_TRANSITION">> {
-    return this.db.transaction("rw", [this.db.fusionRuns, this.db.fusionRunEvents], async () => {
-      const run = await this.db.fusionRuns.get(runId)
+    const db = this.db
+    return db.transaction("rw", [db.fusionRuns, db.fusionRunEvents, db.fusionOutbox], async () => {
+      const run = await db.fusionRuns.get(runId)
       if (!run) return { ok: false as const, code: "RUN_NOT_FOUND" as const }
       if (run.fencingToken !== fencingToken) return { ok: false as const, code: "FENCED" as const }
       if (!canTransitionRun(run.status, to)) {
         return { ok: false as const, code: "ILLEGAL_TRANSITION" as const }
       }
+      run.pausedAt = this.now()
       await this.transition(run, to)
+      if (extra.approval) {
+        await this.event(run, "approval.requested", {
+          approval_id: extra.approval.approvalId,
+          request_digest: extra.approval.requestDigest,
+          kind: extra.approval.kind,
+          revision: extra.approval.revision,
+          logical_step_id: extra.approval.logicalStepId,
+          summary: extra.approval.summary,
+        })
+        await this.projectRunInterrupt(run, extra.approval)
+      }
+      await this.saveRun(run)
+      return { ok: true as const }
+    })
+  }
+
+  /**
+   * running → reconciling: a side effect was dispatched and nobody can say
+   * whether it happened (REC-06).
+   *
+   * Deliberately NOT a failed seal. A seal would release the money and tell
+   * the caller the run did nothing, while a patch may be on disk and an
+   * acceptance command may have run. `reconciling` keeps the run's money held
+   * and its trail intact, and hands the question to a person through a
+   * `human_handoff` interrupt. Nothing re-runs the step, ever.
+   */
+  async reconcileRun(
+    runId: string,
+    fencingToken: number,
+    detail: { code: string; logicalStepId: string | null; sideEffect: string | null }
+  ): Promise<{ ok: true } | Refusal<"FENCED" | "RUN_NOT_FOUND" | "ILLEGAL_TRANSITION">> {
+    const db = this.db
+    return db.transaction("rw", [db.fusionRuns, db.fusionRunEvents, db.fusionOutbox], async () => {
+      const run = await db.fusionRuns.get(runId)
+      if (!run) return { ok: false as const, code: "RUN_NOT_FOUND" as const }
+      if (run.fencingToken !== fencingToken) return { ok: false as const, code: "FENCED" as const }
+      if (!canTransitionRun(run.status, "reconciling")) {
+        return { ok: false as const, code: "ILLEGAL_TRANSITION" as const }
+      }
+      await this.transition(run, "reconciling", detail.code)
+      await this.event(run, "reconciliation.required", {
+        code: detail.code,
+        ...(detail.logicalStepId ? { logical_step_id: detail.logicalStepId } : {}),
+        ...(detail.sideEffect ? { side_effect: detail.sideEffect } : {}),
+      })
+      const origin = projectedOriginOf(run)
+      if (origin) {
+        await this.outbox(
+          run,
+          `projection:${run.runId}:handoff:${detail.logicalStepId ?? detail.code}`,
+          "execution_run_projection",
+          {
+            runId: run.runId,
+            phase: "waiting",
+            origin,
+            title: run.title,
+            sessionId: run.sessionId,
+            actorKeyId: run.actorKeyId,
+            actorKeyName: run.actorKeyName,
+            mode: run.mode,
+            actionId: run.actionId,
+            createdAt: run.createdAt,
+            interrupt: {
+              id: uuidFromName(
+                `${run.runId}\u0000handoff\u0000${detail.logicalStepId ?? detail.code}`
+              ),
+              type: "human_handoff",
+              kind: detail.code,
+              revision: "",
+              logicalStepId: detail.logicalStepId ?? "",
+              summary: { side_effect: detail.sideEffect ?? null },
+              expiresAt: run.deadlineAt,
+            },
+          }
+        )
+      }
       await this.saveRun(run)
       return { ok: true as const }
     })
@@ -711,7 +957,23 @@ export class FusionLedgerStore {
       if (!waitingFor || (options.kind && options.kind !== waitingFor)) {
         return { ok: false as const, code: "RUN_NOT_WAITING" as const }
       }
-      if (this.now() >= run.deadlineAt) {
+      // Give back exactly the wall time the run spent parked, before the
+      // deadline is checked.
+      //
+      // The deadline bounds the WORK a run may do (D29); waiting on a person
+      // is not work. Without this, a run approved an hour later would fail
+      // here, or — worse — pass this check and then fail inside
+      // `performDurableCall`, which re-reads `deadlineAt` before it REPLAYS a
+      // committed step, so a resumed run would throw away steps that already
+      // happened. REC-05's "resume never moves the deadline" still holds for
+      // what it was written about: nothing here extends the budget for work,
+      // and a run cannot gain time by parking.
+      const resumedAt = this.now()
+      if (typeof run.pausedAt === "number" && run.pausedAt > 0 && resumedAt > run.pausedAt) {
+        run.deadlineAt += resumedAt - run.pausedAt
+      }
+      run.pausedAt = null
+      if (resumedAt >= run.deadlineAt) {
         return { ok: false as const, code: "DEADLINE_EXCEEDED" as const }
       }
       if (options.inputArtifactId) run.inputArtifactId = options.inputArtifactId
@@ -1300,14 +1562,17 @@ export class FusionLedgerStore {
     if (!run0) throw new Error(`Router + Fusion run ${attempt0.runId} is unknown`)
     const config = await this.loadConfig(run0.configDigest)
     // Committed output is sealed before the transaction (WebCrypto would commit it).
-    const resultArtifact =
+    const committed =
       input.status === "succeeded" && input.result && attempt0.state !== "UNKNOWN"
-        ? await this.artifactStore(run0.runId).put(
-            input.result.text,
-            "text/plain",
-            `call:${attemptId}`
-          )
+        ? encodeCommittedCallResult(input.result)
         : null
+    const resultArtifact = committed
+      ? await this.artifactStore(run0.runId).put(
+          committed.content,
+          committed.mediaType,
+          `call:${attemptId}`
+        )
+      : null
 
     const db = this.db
     return db.transaction(
@@ -1810,10 +2075,12 @@ export class FusionLedgerStore {
     if (!committed?.resultArtifactId) return null
     const artifact = await this.artifactStore(runId).get(committed.resultArtifactId)
     if (!artifact) return null
+    const stored = decodeCommittedCallResult(artifact.content, artifact.artifact.mediaType)
     return {
-      text: artifact.content,
+      text: stored.text,
       providerRequestId: committed.providerRequestId,
       finishReason: committed.resultFinishReason ?? "stop",
+      ...(stored.toolCalls ? { toolCalls: stored.toolCalls } : {}),
     }
   }
 

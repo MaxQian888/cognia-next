@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod"
+import { FUSION_ACTION_CHOICES } from "@/lib/router-fusion/gate/explicit-run"
 import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
 import { VERIFIER_LENSES } from "@/types/agent/ultracode"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
@@ -1380,6 +1381,15 @@ const AiPromptParams = z.object({
   // Typed output (D3): validated JSON object schema + auto-fix retry.
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   onSchemaViolation: z.enum(["fail", "soft"]).optional(),
+  /**
+   * Router + Fusion action (ADR-0188 B5). `auto` (or absent) is one ordinary
+   * call; the other values run the step as a fusion run on the
+   * `agentsWorkflows` surface. The enum is all this schema can decide — that
+   * the account's settings allow the value, and that `delegate` has a
+   * workspace, is checked by `validateFusionActionChoice` in the inspector and
+   * again at execution time (`lib/workflow/nodes/ai/fusion-action.ts`).
+   */
+  action: z.enum(FUSION_ACTION_CHOICES).optional(),
 })
 
 const AiClassifyParams = z.object({

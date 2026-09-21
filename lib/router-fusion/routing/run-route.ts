@@ -13,15 +13,25 @@
  * lane: metered, bounded billing, no hidden retries. Nothing is relaxed to find
  * a route: when no action fits data scope, capabilities and budget together,
  * the request is refused with the router's reasons (ROUTE-08).
+ *
+ * An `auto` request is labelled by the rules classifier, or — with the opt-in
+ * LLM classifier on (D18, B5) — by one ledgered classification call booked on
+ * the routing surface, falling back to the rules on any failure (ROUTE-03). The
+ * decision's `classifier_version` and reason codes say which it was and why.
+ * An explicit mode is not chosen by labels, so it is never classified by a model.
  */
 
 import {
   buildClassifierInput,
   classifyWithRules,
+  ConfigCompileError,
   extractFeatures,
+  intakeSnapshot,
   isVerifierProfile,
   routeAction,
   usdToMicrousd,
+  type ClassifierInput,
+  type ClassifierLabels,
   type CompiledFusionConfig,
   type DataClass,
   type ExecutionMode,
@@ -30,6 +40,7 @@ import {
   type RouteDecision,
   type RouteRequest,
   type RoutingFeatures,
+  type RoutingSnapshot,
   type RuleId,
   type RunRequest,
   type TaskKind,
@@ -43,9 +54,17 @@ import {
   dataClassFor,
   exclusionsOf,
   factsFor,
+  routeClassificationOf,
   routeRequestFor,
+  withClassification,
 } from "../chat/route-chat-turn"
 import type { ChatRouteHost, ChatRouteRefusal } from "../chat/route-chat-turn"
+import {
+  DELEGATE_UNAVAILABLE,
+  type DelegateCapabilities,
+  type DelegateCapabilityDeps,
+} from "./delegate-capabilities"
+import type { ClassificationOutcome } from "./llm-classifier"
 import {
   buildFusionConfig,
   buildFusionRegistry,
@@ -69,6 +88,8 @@ export interface RunRouteInput {
    * request names its workspace in `request.workspace_id` instead.
    */
   workspaceId?: string | null
+  /** Test seam: what this device can do for a delegate request (WP-D4). */
+  delegateCapabilities?: DelegateCapabilityDeps
 }
 
 export type RunRoute =
@@ -87,48 +108,85 @@ export type RunRoute =
       task: TaskKind
       acceptanceProfile: VerifierProfile
       dataClass: DataClass
+      /**
+       * The project the run belongs to, and its checkout. Delegate needs both:
+       * the acceptance profile and its approval live on the project, and the
+       * sandbox stages into a worktree of that checkout. Null for every route
+       * that named no project — which is also why such a request is never
+       * routed to delegate.
+       */
+      projectId: string | null
+      workspaceRoot: string | null
+      /** The `.cognia/workspace.json` profile a delegate run must verify with. */
+      acceptanceProfileId: string | null
     }
   | ChatRouteRefusal
 
-/** Profiles this host can produce for a Run API run. Code fixtures need a sandbox (B4). */
-export function runVerifierProfiles(jsonSchema: Record<string, unknown> | null): VerifierProfile[] {
+/**
+ * Profiles this host can produce for a Run API run.
+ *
+ * `code_fixture` is offered only when this device can BOTH confine the command
+ * and find an approved one to run (B4): a profile with no runtime verifier can
+ * only ever be inconclusive, and offering it would let the router pick an
+ * action it cannot accept.
+ */
+export function runVerifierProfiles(
+  jsonSchema: Record<string, unknown> | null,
+  delegate: Pick<
+    DelegateCapabilities,
+    "sandboxTier" | "acceptanceProfileAvailable"
+  > = DELEGATE_UNAVAILABLE
+): VerifierProfile[] {
   return [
     "text_basic",
     "text_review",
     "evidence_review",
     ...(jsonSchema ? (["schema_fixture"] as VerifierProfile[]) : []),
+    ...(delegate.sandboxTier !== null && delegate.acceptanceProfileAvailable
+      ? (["code_fixture"] as VerifierProfile[])
+      : []),
   ]
 }
 
-/** Labels for the request: the caller's text is untrusted, its system turns are its constraints. */
-export function runFeatures(
+/** The request as the classifiers see it: the caller's text is untrusted, its system turns are its constraints. */
+export function runSnapshot(
   messages: readonly Message[],
   jsonSchema: Record<string, unknown> | null
-): RoutingFeatures {
+): RoutingSnapshot {
   const userText = messages
     .filter((message) => message.role === "user")
     .map((message) => message.content)
     .join("\n\n")
-  const snapshot = {
-    userText,
+  return intakeSnapshot(userText, {
     trustedConstraints: messages
       .filter((message) => message.role === "system")
       .map((message) => message.content),
-    phase: "intake" as const,
-    failedAttempts: 0,
     verificationKinds: jsonSchema ? ["json_schema"] : [],
-    sourceRevision: null,
-    missingInformation: [],
-  }
-  const input = buildClassifierInput(snapshot, CHAT_CLASSIFIER_TOKEN_CAP)
-  const features = extractFeatures(
-    snapshot,
-    classifyWithRules(input.text, { hasCode: /```/.test(userText) }),
-    input
-  )
+  })
+}
+
+/** Features from labels some classifier produced (the rules, or the model's). */
+export function runFeaturesFrom(
+  snapshot: RoutingSnapshot,
+  classified: { labels: ClassifierLabels; input: ClassifierInput }
+): RoutingFeatures {
+  const features = extractFeatures(snapshot, classified.labels, classified.input)
   // A Run API request is answered, not paused: what the model cannot know, it
   // says in its answer. Waiting for input belongs to delegate work (B4).
   return { ...features, missing_information: [] }
+}
+
+/** Labels for the request from the rules classifier. */
+export function runFeatures(
+  messages: readonly Message[],
+  jsonSchema: Record<string, unknown> | null
+): RoutingFeatures {
+  const snapshot = runSnapshot(messages, jsonSchema)
+  const input = buildClassifierInput(snapshot, CHAT_CLASSIFIER_TOKEN_CAP)
+  return runFeaturesFrom(snapshot, {
+    labels: classifyWithRules(input.text, { hasCode: /```/.test(snapshot.userText) }),
+    input,
+  })
 }
 
 function refsOfPlan(plan: RoutingPlan): DeploymentRef[] {
@@ -155,6 +213,31 @@ export async function routeRunRequest(
     (action) => action.enabled !== false && allowedModes.includes(action.mode)
   )
   const aliases = [...new Set(actions.flatMap((action) => Object.values(action.roles)))]
+  const workspaceId = input.workspaceId ?? request.workspace_id ?? null
+
+  // What this device can do for a delegate request, asked once and only when a
+  // delegate action is actually a candidate — a cascade or a panel request
+  // never pays for the sandbox probe or the project read (WP-D4).
+  const delegatePossible = actions.some((action) => action.mode === "delegate")
+  const delegate: DelegateCapabilities = delegatePossible
+    ? await (async () => {
+        const { delegateCapabilitiesFor } = await import("./delegate-capabilities")
+        return delegateCapabilitiesFor(workspaceId, input.delegateCapabilities ?? {})
+      })()
+    : DELEGATE_UNAVAILABLE
+
+  // Auto: the opt-in LLM classifier labels the request while the aliases are
+  // planned. It never throws; a failure is the rules' labels and a reason.
+  const snapshot = runSnapshot(input.messages, input.jsonSchema)
+  const classifying: Promise<ClassificationOutcome> | null =
+    request.mode === "auto" && host.classify
+      ? host.classify({
+          snapshot,
+          hints: { hasCode: /```/.test(snapshot.userText) },
+          surface: host.surface ?? "gatewayRuns",
+          workspaceId,
+        })
+      : null
 
   // Every alias the candidate actions name, resolved without any fallback.
   const baseRequest: RoutingRequest = {
@@ -182,14 +265,39 @@ export async function routeRunRequest(
     // The run is executed here with the user's API keys: metered, bounded.
     factsOf: (ref) => factsFor(host, ref, { subscription: false, lane: "ai-sdk" }),
   })
-  const { config, omittedActions } = buildFusionConfig(host.settings, registry, host.environment)
+  // A request nothing can serve is a REFUSAL with reasons, never a throw.
+  //
+  // When no alias of any candidate action resolves — no provider configured,
+  // every deployment excluded — the policy has zero actions, which the config
+  // compiler rejects (`actions` has `minItems: 1`). Letting that `ConfigCompileError`
+  // escape made `POST /v1/runs` answer 500 for something the contract calls
+  // `422 ROUTE_NO_SOLUTION`, and threw away the reasons already collected.
+  let built: ReturnType<typeof buildFusionConfig>
+  try {
+    built = buildFusionConfig(host.settings, registry, host.environment)
+  } catch (error) {
+    if (!(error instanceof ConfigCompileError)) throw error
+    return {
+      kind: "refused",
+      code: "ROUTE_NO_SOLUTION",
+      // No decision: nothing was ever assessed, and inventing an empty one
+      // would put a `RouteDecision` in the journal that describes no routing.
+      reasons: [...reasons, ...error.issues.map((issue) => `CONFIG_INVALID:${issue.pointer}`)],
+      decision: null,
+    }
+  }
+  const { config, omittedActions } = built
   const candidateIds = new Set(actions.map((action) => action.id))
   for (const omitted of omittedActions) {
     if (candidateIds.has(omitted.actionId)) reasons.push(`${omitted.actionId}:${omitted.reason}`)
   }
 
-  const features = runFeatures(input.messages, input.jsonSchema)
-  const dataClass = dataClassFor(host.settings, input.workspaceId ?? request.workspace_id ?? null)
+  const outcome = classifying ? await classifying : null
+  const classification = outcome ? routeClassificationOf(outcome) : undefined
+  const features = outcome
+    ? runFeaturesFrom(snapshot, outcome)
+    : runFeatures(input.messages, input.jsonSchema)
+  const dataClass = dataClassFor(host.settings, workspaceId)
   const promptTokens = input.messages.reduce(
     (sum, message) => sum + Math.ceil(message.content.length / 4),
     0
@@ -203,6 +311,7 @@ export async function routeRunRequest(
     hasImages: false,
     dataClass,
     refs,
+    ...(classification ? { classifierVersion: classification.classifierVersion } : {}),
   })
   const routeRequest: RouteRequest = {
     ...base,
@@ -216,9 +325,9 @@ export async function routeRunRequest(
     runAvailableMicrousd: capMicrousd,
     deadlineRemainingMs: request.deadline_ms,
     capabilities: {
-      sandboxTier: null,
-      acceptanceProfileAvailable: false,
-      verifierProfiles: runVerifierProfiles(input.jsonSchema),
+      sandboxTier: delegate.sandboxTier,
+      acceptanceProfileAvailable: delegate.acceptanceProfileAvailable,
+      verifierProfiles: runVerifierProfiles(input.jsonSchema, delegate),
       webToolsAvailable: input.webToolsAvailable,
     },
   }
@@ -228,14 +337,23 @@ export async function routeRunRequest(
     return {
       kind: "refused",
       code: "ROUTE_NO_SOLUTION",
-      reasons: [...reasons, ...exclusionsOf(result)],
-      decision: result.decision,
+      reasons: [
+        ...reasons,
+        ...exclusionsOf(result),
+        ...(delegatePossible && delegate.reason ? [`delegate:${delegate.reason}`] : []),
+      ],
+      decision: withClassification(result.decision, classification),
     }
   }
   const compiled = config.actions[selected.actionId]
   const decision: RouteDecision = {
     ...result.decision,
-    reason_codes: [...result.decision.reason_codes, "entry:run_api", "billing:metered"],
+    reason_codes: [
+      ...result.decision.reason_codes,
+      "entry:run_api",
+      "billing:metered",
+      ...(classification?.reasonCodes ?? []),
+    ],
   }
   return {
     kind: "selected",
@@ -252,5 +370,35 @@ export async function routeRunRequest(
     task: features.task,
     acceptanceProfile: result.acceptanceProfile,
     dataClass,
+    projectId: workspaceId,
+    workspaceRoot: selected.mode === "delegate" ? await projectRootOf(workspaceId) : null,
+    // The profile the run must verify with: the one the request named when it
+    // is approved, otherwise the project's only approved one. A delegate route
+    // cannot exist without at least one, so an empty answer here is not
+    // reachable — `acceptanceProfileAvailable` would have excluded the action.
+    acceptanceProfileId:
+      selected.mode === "delegate"
+        ? request.acceptance_profile_id &&
+          delegate.approvedProfileIds.includes(request.acceptance_profile_id)
+          ? request.acceptance_profile_id
+          : (delegate.approvedProfileIds[0] ?? null)
+        : null,
+  }
+}
+
+/**
+ * A project's primary root: the checkout a delegate run reads, stages from,
+ * and — only with an approval — writes into.
+ *
+ * Loaded dynamically for the same reason the capabilities are: a request that
+ * routes to cascade or panel never touches the project store.
+ */
+async function projectRootOf(projectId: string | null): Promise<string | null> {
+  if (!projectId) return null
+  try {
+    const { delegateProjectRoot } = await import("./delegate-capabilities")
+    return await delegateProjectRoot(projectId)
+  } catch {
+    return null
   }
 }

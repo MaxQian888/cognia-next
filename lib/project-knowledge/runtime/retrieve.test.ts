@@ -1,3 +1,14 @@
+// Only the generation is faked; everything else in the AI SDK stays real.
+jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: jest.fn(async () => null),
+}))
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: jest.fn(),
+}))
+jest.mock("@/lib/db/twin-runtime-settings", () => ({
+  getTwinRuntimeSettings: jest.fn(async () => ({ llm: { provider: "anthropic" } })),
+}))
 jest.mock("@cognia/provider-embedding/embedding", () => ({
   generateEmbedding: jest.fn(async () => ({ embedding: [1, 0, 0] })),
 }))
@@ -28,6 +39,19 @@ const dimGuardMock = ensureCollectionDimensionCompatible as jest.Mock
 const loadMock = getProjectChunksByVectorDocIds as jest.Mock
 const filterMock = filterByGrade as jest.Mock
 const hydeMock = generateHypotheticalAnswer as jest.Mock
+
+import { generateText } from "ai"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
+import { loadRouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
+import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
+import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import type { BeginLedgeredUtilityCallInput } from "@/lib/router-fusion/gate/utility-ledger"
+
+const mockedGenerateText = generateText as jest.Mock
+const gateSettingsMock = currentRouterFusionGateSettings as jest.Mock
+const loadHostMock = loadRouterFusionHost as jest.Mock
+const twinSettingsMock = getTwinRuntimeSettings as jest.Mock
 
 function chunkRow(vectorDocId: string, content: string) {
   return { vectorDocId, content, fileId: "file-1", contentRedacted: content }
@@ -214,5 +238,127 @@ describe("retrieveProjectChunks", () => {
       deps,
     })
     expect(filterMock).not.toHaveBeenCalled()
+  })
+})
+
+// --- Router + Fusion ledger (ADR-0188 D27) -----------------------------------
+// The expansion call is a utility generation. With `utilityLedger` on it runs
+// through the real `@cognia/rag/query-expansion`, wrapped by the host seam; off,
+// it is the call it always was, and no Router + Fusion module loads.
+
+describe("retrieveProjectChunks — ledgered query expansion", () => {
+  const actualExpansion = jest.requireActual("@cognia/rag/query-expansion") as {
+    generateHypotheticalAnswer: typeof generateHypotheticalAnswer
+  }
+  const model = { modelId: "claude-haiku-4-5" } as never
+  const ON = { routerFusion: { enabled: true, surfaces: { utilityLedger: true } } }
+  const OFF = { routerFusion: { enabled: false, surfaces: { utilityLedger: true } } }
+
+  const reserved: BeginLedgeredUtilityCallInput[] = []
+
+  beforeEach(() => {
+    __resetBreakerForTesting()
+    reserved.length = 0
+    mockedGenerateText.mockReset().mockResolvedValue({
+      text: "a hypothetical passage",
+      usage: { inputTokens: 90, outputTokens: 30 },
+    })
+    // The real package function, so the seam is exercised end to end.
+    hydeMock.mockImplementation(actualExpansion.generateHypotheticalAnswer)
+    twinSettingsMock.mockClear()
+    loadHostMock.mockReset().mockResolvedValue({
+      beginLedgeredUtilityCall: async (input: BeginLedgeredUtilityCallInput) => {
+        reserved.push(input)
+        return {
+          kind: "granted",
+          handle: {
+            runId: "run-1",
+            maxOutputTokens: 300,
+            succeeded: async () => {},
+            failed: async () => {},
+            unknown: async () => {},
+          },
+        }
+      },
+    } as unknown as RouterFusionHost)
+  })
+
+  it("reserves the expansion call on the ledger when the utility switch is on", async () => {
+    gateSettingsMock.mockResolvedValue(ON)
+    const deps = makeDeps([{ id: "v0", content: "c0", score: 1 }], {
+      expansion: { model, strategy: "hyde" },
+    })
+    loadMock.mockResolvedValue([chunkRow("v0", "c0")])
+
+    const res = await retrieveProjectChunks({
+      projectId: "p-42",
+      userMessage: "what is the rollout plan",
+      topK: 5,
+      deps,
+    })
+
+    expect(res.degraded).toBe(false)
+    expect(reserved).toHaveLength(1)
+    expect(reserved[0]).toMatchObject({
+      featureId: "project-knowledge-expansion:rag.hyde",
+      providerId: "anthropic",
+      modelId: "claude-haiku-4-5",
+      workspaceId: "p-42",
+    })
+    // The reservation's bound and no hidden retries reach the provider call.
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 300, maxRetries: 0 })
+    )
+  })
+
+  it("prefers a provider id the deps carry over a twin settings read", async () => {
+    gateSettingsMock.mockResolvedValue(ON)
+    const deps = makeDeps([{ id: "v0", content: "c0", score: 1 }], {
+      expansion: { model, strategy: "hyde", providerId: "deepseek" },
+    })
+    loadMock.mockResolvedValue([chunkRow("v0", "c0")])
+
+    await retrieveProjectChunks({ projectId: "p", userMessage: "clean query", topK: 5, deps })
+
+    expect(reserved[0]).toMatchObject({ providerId: "deepseek" })
+    expect(twinSettingsMock).not.toHaveBeenCalled()
+  })
+
+  it("[ACC:OFF-03] leaves the call untouched, and loads no ledger, while the switch is off", async () => {
+    gateSettingsMock.mockResolvedValue(OFF)
+    const deps = makeDeps([{ id: "v0", content: "c0", score: 1 }], {
+      expansion: { model, strategy: "hyde" },
+    })
+    loadMock.mockResolvedValue([chunkRow("v0", "c0")])
+
+    await retrieveProjectChunks({ projectId: "p", userMessage: "clean query", topK: 5, deps })
+
+    expect(loadHostMock).not.toHaveBeenCalled()
+    expect(twinSettingsMock).not.toHaveBeenCalled()
+    const args = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(["model", "prompt", "temperature"])
+  })
+
+  it("[ACC:ISO-01] still expands, unledgered, when the ledger faults", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    gateSettingsMock.mockResolvedValue(ON)
+    loadHostMock.mockRejectedValue(new Error("fusion database unavailable"))
+    const deps = makeDeps([{ id: "v0", content: "c0", score: 1 }], {
+      expansion: { model, strategy: "hyde" },
+    })
+    loadMock.mockResolvedValue([chunkRow("v0", "c0")])
+
+    const res = await retrieveProjectChunks({
+      projectId: "p",
+      userMessage: "clean query",
+      topK: 5,
+      deps,
+    })
+
+    expect(res.degraded).toBe(false)
+    const args = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(["model", "prompt", "temperature"])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

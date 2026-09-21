@@ -39,6 +39,8 @@ import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { transport } from "@/lib/tauri"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import { getSession } from "@/lib/db/sessions"
+import { useCompanionFusionRuns } from "@/components/router-fusion/companion/use-companion-fusion-runs"
+import { CompanionFusionRunList } from "@/components/router-fusion/companion/companion-fusion-run-view"
 
 const remoteTranscriptSource = createRemoteTranscriptSource(transport)
 
@@ -49,6 +51,10 @@ export interface RemoteSessionDetailProps {
 export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
   const t = useTranslations("mobile.remoteSessions.detail")
   const tc = useTranslations("mobile.connectionState")
+  const tFusion = useTranslations("routerFusionCompanion")
+  // Router + Fusion runs from this device (ADR-0188 D25). `available` is the
+  // host's own answer: its companion switch, and this device's grant.
+  const fusion = useCompanionFusionRuns(sessionId)
   const session = useLiveQuery(() => getSession(sessionId), [sessionId])
   const messageDisplay = useMessageDisplay(session?.messageDisplayOverride)
   const transcript = useTranscriptController(sessionId, remoteTranscriptSource)
@@ -219,6 +225,8 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
         ) : null}
       </div>
 
+      <CompanionFusionRunList runs={fusion.runs} onDismiss={fusion.dismiss} />
+
       {composable ? (
         <RemoteSessionComposer
           sessionId={sessionId}
@@ -226,6 +234,17 @@ export function RemoteSessionDetail({ sessionId }: RemoteSessionDetailProps) {
           offline={offlineLike}
           onSend={send}
           onInterrupt={() => void interrupt()}
+          {...(fusion.available
+            ? {
+                onFusionRun: async (text: string, mode: "cascade" | "panel") => {
+                  await fusion.start(
+                    text,
+                    mode,
+                    tFusion("composer.queueLabel", { mode: tFusion(`picker.${mode}`) })
+                  )
+                },
+              }
+            : {})}
         />
       ) : null}
     </div>

@@ -556,3 +556,58 @@ describe("getChunkStats", () => {
     expect(stats.avgLength).toBe(6)
   })
 })
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+
+describe("semantic chunking generation seam", () => {
+  const seamModel = { modelId: "m-1" } as unknown as LanguageModel
+
+  it("calls the model directly when no seam is injected", async () => {
+    mockedGenerateText.mockResolvedValue({ text: "[30]" })
+
+    await chunkDocumentSemantic("Sentence one ends here. Sentence two starts now.", seamModel, {
+      targetChunkSize: 20,
+    })
+
+    const args = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(["model", "prompt", "temperature"])
+    expect(args).toMatchObject({ model: seamModel, temperature: 0.1 })
+  })
+
+  it("runs the split-point call through an injected seam, which bounds it", async () => {
+    mockedGenerateText.mockResolvedValue({ text: "[30]" })
+    const requests: { stage: string; modelId: string }[] = []
+
+    const result = await chunkDocumentSemantic(
+      "Sentence one ends here. Sentence two starts now.",
+      seamModel,
+      {
+        targetChunkSize: 20,
+        generate: async (request, send) => {
+          requests.push({ stage: request.stage, modelId: request.modelId })
+          return (await send({ maxOutputTokens: 64, maxRetries: 0 })).text
+        },
+      }
+    )
+
+    expect(result.strategy).toBe("semantic")
+    expect(requests).toEqual([{ stage: "embedding.semantic-chunking", modelId: "m-1" }])
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64, maxRetries: 0 })
+    )
+  })
+
+  it("forwards the seam from chunkDocumentAsync's options", async () => {
+    mockedGenerateText.mockResolvedValue({ text: "[30]" })
+    const generate = jest.fn(async (_request, send) => (await send({})).text)
+
+    await chunkDocumentAsync("Sentence one ends here. Sentence two starts now.", {
+      strategy: "semantic",
+      chunkSize: 20,
+      model: seamModel,
+      generate,
+    })
+
+    expect(generate).toHaveBeenCalledTimes(1)
+  })
+})

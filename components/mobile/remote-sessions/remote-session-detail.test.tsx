@@ -2,6 +2,12 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { RemoteSessionDetail } from "./remote-session-detail"
+import {
+  __resetRuntimeSnapshotForTesting,
+  runtimeHostSnapshotFromManifest,
+  setRuntimeSnapshot,
+} from "@/lib/runtime/runtime-snapshot-store"
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import type { RemoteSessionStream } from "@/hooks/data/use-remote-session-stream"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
@@ -66,6 +72,18 @@ jest.mock("./session-tests-panel", () => ({
     testsPanelMock(props)
     return <div data-testid="session-tests-panel" />
   },
+}))
+
+// The Router + Fusion run client is a dynamic import behind the host's answer;
+// here it stands in for the outbound queue the run is written to.
+const mockEnqueueFusionRun = jest.fn()
+jest.mock("@/lib/router-fusion/api/companion-run-client", () => ({
+  enqueueCompanionFusionRun: (...args: unknown[]) => mockEnqueueFusionRun(...args),
+  readBackCompanionFusionRun: jest.fn(() => new Promise(() => undefined)),
+  followCompanionFusionRun: jest.fn(() => new Promise(() => undefined)),
+  cancelCompanionFusionRun: jest.fn(),
+  companionRunSummaryOf: jest.fn(),
+  companionRunAnswerOf: jest.fn(() => null),
 }))
 
 // OfflineBanner pulls usePlatform + network live queries — out of scope here.
@@ -400,6 +418,78 @@ describe("<RemoteSessionDetail />", () => {
 
       expect(screen.queryByTestId("remote-session-tabs")).not.toBeInTheDocument()
       expect(screen.getByTestId("remote-session-not-found")).toBeInTheDocument()
+    })
+  })
+
+  // ADR-0188 D25: the host's manifest decides whether this screen offers a
+  // Router + Fusion run, and a run started from the composer shows up here.
+  describe("Router + Fusion runs", () => {
+    function hostSays(operationHealth: Record<string, { healthy: boolean; reason?: string }>) {
+      setRuntimeSnapshot({
+        target: null,
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: runtimeHostSnapshotFromManifest(
+          buildLocalHostFeatureManifest({
+            platform: "tauri",
+            deviceGrants: ["host.observe", "agent.run"],
+            operationHealth,
+          })
+        ),
+      })
+    }
+
+    beforeEach(() => {
+      streamMock.mockReturnValue(baseStream())
+      mockEnqueueFusionRun.mockReset()
+    })
+
+    afterEach(() => {
+      __resetRuntimeSnapshotForTesting()
+    })
+
+    it("offers no run while the host's companion switch is off", () => {
+      hostSays({
+        execution_run_create: { healthy: false, reason: "ROUTER_FUSION_DISABLED" },
+        execution_run_get: { healthy: false, reason: "ROUTER_FUSION_DISABLED" },
+        execution_run_events: { healthy: false, reason: "ROUTER_FUSION_DISABLED" },
+      })
+      render(<RemoteSessionDetail sessionId="s1" />)
+      expect(screen.getByTestId("remote-composer-input")).toBeInTheDocument()
+      expect(screen.queryByTestId("companion-fusion-mode")).toBeNull()
+    })
+
+    it("queues a Panel run from the composer and shows it on this screen", async () => {
+      const user = userEvent.setup()
+      hostSays({})
+      mockEnqueueFusionRun.mockImplementation(async (input: { sessionId: string }) => ({
+        rowId: "row-1",
+        idempotencyKey: "companion-run:k",
+        payload: {},
+        mode: "panel",
+        sessionId: input.sessionId,
+        createdAt: 1,
+      }))
+      const stream = baseStream()
+      streamMock.mockReturnValue(stream)
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      await user.click(screen.getByTestId("companion-fusion-mode"))
+      await user.click(await screen.findByTestId("companion-fusion-mode-panel"))
+      await user.type(screen.getByTestId("remote-composer-input"), "compare the two plans")
+      await user.click(screen.getByTestId("remote-send"))
+
+      expect(await screen.findByTestId("companion-fusion-run")).toHaveAttribute(
+        "data-stage",
+        "queued"
+      )
+      expect(mockEnqueueFusionRun).toHaveBeenCalledWith({
+        sessionId: "s1",
+        text: "compare the two plans",
+        mode: "panel",
+        label: "Router + Fusion Panel run",
+      })
+      expect(stream.send).not.toHaveBeenCalled()
     })
   })
 })

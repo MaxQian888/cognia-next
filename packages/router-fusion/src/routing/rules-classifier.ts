@@ -180,3 +180,43 @@ export function classifyWithRules(
     goal: firstSentence(trimmed),
   }
 }
+
+/** The legacy Auto ladder's tiers (`@cognia/provider-types` `RoutingDifficultyTier`). */
+export type DifficultyTier = "fast" | "balanced" | "powerful"
+
+/**
+ * The legacy Auto tier a set of labels stands for (D18: the LLM classifier
+ * absorbs the difficulty judge). Deterministic, and deliberately coarse — the
+ * judge is only consulted where the ladder's own score sits on a tier boundary,
+ * so this nudges a decision that was already a toss-up:
+ *
+ * - `powerful`: hard reasoning, research synthesis, planning and agentic work,
+ *   and code work that spans files or systems or whose goal is unclear;
+ * - `fast`: a clear, tool-free transform, extraction or lookup of one item;
+ * - `balanced`: everything else a label can name.
+ *
+ * `null` when the labels do not know the task or how clear it is: the ladder's
+ * deterministic tier then stands, exactly as when the judge had no answer.
+ */
+export function difficultyTierOf(labels: ClassifierLabels): DifficultyTier | null {
+  if (labels.task === "unknown" || labels.ambiguity === "unknown") return null
+  const wide = labels.scope === "multi_file" || labels.scope === "cross_system"
+  switch (labels.task) {
+    case "reasoning.solve":
+    case "research.synthesis":
+    case "agent.plan":
+    case "agent.execute":
+      return "powerful"
+    case "code.implement":
+    case "code.debug":
+      return wide || labels.ambiguity === "high" ? "powerful" : "balanced"
+    case "code.review":
+      return wide ? "powerful" : "balanced"
+    case "text.transform":
+    case "data.extract":
+    case "qa.knowledge":
+      return labels.ambiguity === "low" && labels.tool_need === "none" && !wide
+        ? "fast"
+        : "balanced"
+  }
+}

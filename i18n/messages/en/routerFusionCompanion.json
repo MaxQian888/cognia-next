@@ -1,0 +1,46 @@
+{
+  "picker": {
+    "aria": "How this message runs: {mode}",
+    "title": "How this message runs",
+    "direct": "Direct",
+    "directDesc": "Sent to the host as an ordinary message.",
+    "cascade": "Cascade",
+    "cascadeDesc": "A cheap model drafts, the draft is checked, and a strong model takes over if it fails. Text only.",
+    "panel": "Panel",
+    "panelDesc": "Independent models answer, a judge compares them, and one answer is written. Text only.",
+    "hint": "Runs on the host with its own budget and caps. The answer appears once it is verified."
+  },
+  "composer": {
+    "textOnly": "Cascade and Panel take text only. Remove the attachments, or send it as a direct message.",
+    "startFailed": "The run could not be queued: {message}",
+    "queueLabel": "Router + Fusion {mode} run"
+  },
+  "run": {
+    "regionAria": "Router + Fusion runs started from this device",
+    "title": "{mode} run",
+    "queued": "Waiting to reach the host…",
+    "starting": "Starting on the host…",
+    "running": "Running on the host…",
+    "retrying": "Connection lost. Reading again from step {seq}…",
+    "undelivered": "The run never reached the host: {reason}",
+    "refused": "The host refused the run: {reason}",
+    "historyExpired": "The host no longer keeps part of this run's steps; showing its latest state.",
+    "answer": "Answer",
+    "answerExpired": "The host no longer keeps this answer. It is in the conversation above.",
+    "noAnswer": "No answer was written.",
+    "details": "Run details",
+    "stop": "Stop",
+    "stopAria": "Stop this run",
+    "stopFailed": "The run could not be stopped ({reason}).",
+    "dismiss": "Dismiss",
+    "dismissAria": "Dismiss this run"
+  },
+  "reason": {
+    "ROUTER_FUSION_DISABLED": "Router + Fusion is switched off for companions on the host. It can be turned on in Settings → AI connections → Routing on the host.",
+    "SESSION_NOT_FOUND": "This conversation is not one this device can run in.",
+    "COMPANION_ACTOR_REQUIRED": "The host could not tell which paired device asked.",
+    "TRANSPORT_FAILED": "The host could not be reached.",
+    "SCHEMA_INVALID": "The host could not read the request.",
+    "unknownDelivery": "unknown error"
+  }
+}

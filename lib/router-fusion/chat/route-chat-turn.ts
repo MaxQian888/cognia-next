@@ -22,22 +22,34 @@
  *
  * Neither step writes anything: the run is created by `beginChatRun` right
  * before dispatch.
+ *
+ * An Auto turn is labelled by the rules classifier, or — with the opt-in LLM
+ * classifier on (D18, B5) — by one ledgered classification call, which falls
+ * back to the rules on any failure (ROUTE-03). The selection carries which
+ * classifier labelled the turn and why, and the seal's RouteDecision records it.
+ * The classification itself is booked as its own utility run; neither step here
+ * writes it.
  */
 
 import {
   buildClassifierInput,
+  CLASSIFIER_INPUT_TOKEN_CAP,
   classifyWithRules,
   extractFeatures,
+  intakeSnapshot,
   resolveDataClass,
   RULES_CLASSIFIER_VERSION,
   routeAction,
   usdToMicrousd,
   type ActionRouteResult,
+  type ClassifierInput,
+  type ClassifierLabels,
   type DataClass,
   type DeploymentHealth,
   type RouteDecision,
   type RouteRequest,
   type RoutingFeatures,
+  type RoutingSnapshot,
   type RuleId,
   type RulesClassifierHints,
   type RuntimeEnvironment,
@@ -57,6 +69,11 @@ import type {
 } from "@cognia/provider-types/auto-router"
 import type { ModelPricing } from "@cognia/provider-types/provider"
 
+import {
+  classificationReasonCodes,
+  type ClassificationOutcome,
+  type RouteClassifier,
+} from "../routing/llm-classifier"
 import type { PreparedChatRoute } from "./chat-runs"
 import {
   buildFusionConfig,
@@ -68,7 +85,7 @@ import {
   type DeploymentRef,
 } from "./fusion-config"
 
-export const CHAT_CLASSIFIER_TOKEN_CAP = 4096
+export const CHAT_CLASSIFIER_TOKEN_CAP = CLASSIFIER_INPUT_TOKEN_CAP
 /** The action a pinned model (manual or alias pick) runs under: its caps and limits apply. */
 export const PINNED_CHAT_ACTION_ID = "direct_baseline"
 /** Environment variables that carry a subscription (quota) credential rather than a billed key. */
@@ -96,6 +113,26 @@ export interface ChatRouteHost {
   environment: RuntimeEnvironment
   now: () => number
   newId: () => string
+  /**
+   * The surface this host routes for, when its creator says so. Chat's send
+   * path sets `chat`; the Run API's host leaves it unset, so `routeRunRequest`
+   * books its classification on `gatewayRuns`. `selectChatDeployment` routes
+   * chat turns only and always books on `chat`.
+   */
+  surface?: RouterFusionSurface
+  /**
+   * INV-09: the turn this host routes already runs inside a fusion run, so the
+   * action router must exclude every non-direct action with `FUSION_RECURSION`
+   * (B5, D3). It rides the host rather than each route input because only the
+   * entry point that built the host knows whether it has a fusion ancestor;
+   * chat and the Run API leave it unset, which reads as "no ancestor".
+   */
+  hasFusionAncestor?: boolean
+  /**
+   * The opt-in LLM classifier (D18), present only while the user has it on.
+   * Absent, every request is labelled by the rules classifier, as before B5.
+   */
+  classify?: RouteClassifier
 }
 
 /**
@@ -105,6 +142,32 @@ export interface ChatRouteHost {
  * (`lib/router-fusion/calls/utility-route.ts`).
  */
 export type RouteFactsHost = Omit<ChatRouteHost, "planRoute">
+
+/** Which classifier labelled a routed request, as its RouteDecision records it. */
+export interface RouteClassification {
+  classifierVersion: string
+  /** `classifier_source:*`, `classifier_fallback:*`, … (`classificationReasonCodes`). */
+  reasonCodes: string[]
+}
+
+export function routeClassificationOf(outcome: ClassificationOutcome): RouteClassification {
+  return {
+    classifierVersion: outcome.classifierVersion,
+    reasonCodes: classificationReasonCodes(outcome),
+  }
+}
+
+/** A decision with the classification's reason codes added (no-op without one). */
+export function withClassification(
+  decision: RouteDecision,
+  classification: RouteClassification | undefined
+): RouteDecision {
+  if (!classification) return decision
+  return {
+    ...decision,
+    reason_codes: [...decision.reason_codes, ...classification.reasonCodes],
+  }
+}
 
 export interface ChatSelectionInput {
   selection: ModelRoutingSelection
@@ -137,6 +200,8 @@ export type ChatSelection =
       estimatedInputTokens: number
       hasImages: boolean
       needsTools: boolean
+      /** Set when the LLM classifier was asked (Auto with the classifier on). */
+      classification?: RouteClassification
     }
   | ChatRouteRefusal
 
@@ -165,17 +230,17 @@ export function dataClassFor(
  * asks in its reply. `missing_information` is therefore empty by construction.
  */
 export function chatFeatures(promptText: string, hints: RulesClassifierHints): RoutingFeatures {
-  const snapshot = {
-    userText: promptText,
-    trustedConstraints: [],
-    phase: "intake" as const,
-    failedAttempts: 0,
-    verificationKinds: [],
-    sourceRevision: null,
-    missingInformation: [],
-  }
+  const snapshot = intakeSnapshot(promptText)
   const input = buildClassifierInput(snapshot, CHAT_CLASSIFIER_TOKEN_CAP)
-  const features = extractFeatures(snapshot, classifyWithRules(input.text, hints), input)
+  return chatFeaturesFrom(snapshot, { labels: classifyWithRules(input.text, hints), input })
+}
+
+/** The same features from labels some classifier produced (the rules, or the model's). */
+export function chatFeaturesFrom(
+  snapshot: RoutingSnapshot,
+  classified: { labels: ClassifierLabels; input: ClassifierInput }
+): RoutingFeatures {
+  const features = extractFeatures(snapshot, classified.labels, classified.input)
   return { ...features, missing_information: [] }
 }
 
@@ -240,6 +305,8 @@ export function routeRequestFor(
     requestedActionId?: string
     solverOverride?: string
     routingPolicy?: RoutingRequest["dataPolicy"]
+    /** The classifier that produced `features`; the rules classifier when unset. */
+    classifierVersion?: string
   }
 ): RouteRequest {
   const { settings } = host
@@ -274,7 +341,7 @@ export function routeRequestFor(
     inputModalities: input.hasImages ? ["text", "image"] : ["text"],
     estimatedInputTokens: Math.max(1, input.estimatedInputTokens),
     features: input.features,
-    classifierVersion: RULES_CLASSIFIER_VERSION,
+    classifierVersion: input.classifierVersion ?? RULES_CLASSIFIER_VERSION,
     approvedRuleRows: [...settings.approvedRuleRows],
     health,
     capabilities: {
@@ -284,7 +351,7 @@ export function routeRequestFor(
       verifierProfiles: ["text_basic"],
       webToolsAvailable: false,
     },
-    hasFusionAncestor: false,
+    hasFusionAncestor: host.hasFusionAncestor ?? false,
     ...(input.solverOverride ? { roleDeploymentOverrides: { solver: input.solverOverride } } : {}),
     unknownPriceCallReserveMicrousd: usdToMicrousd(settings.unknownPriceCallReserveUsd),
   }
@@ -349,18 +416,17 @@ export async function selectChatDeployment(
   input: ChatSelectionInput
 ): Promise<ChatSelection> {
   const dataClass = dataClassFor(host.settings, input.workspaceId)
-  const labelled = chatFeatures(input.promptText, input.hints)
-  // Whether the turn can use tools is a runtime fact, not a label: a prompt that
-  // mentions files does not make a tool-less turn need a tool-capable model.
-  const features: RoutingFeatures = input.needsTools ? labelled : { ...labelled, tool_need: "none" }
   // The soft per-request cap is replaced by the run cap (D5/D31): the engine
   // must not drop or reorder candidates by it.
   const baseRequest: RoutingRequest = {
     ...input.routingRequest,
     maxCostPerRequestUsd: Number.POSITIVE_INFINITY,
   }
-  const common = {
-    features,
+  // Whether the turn can use tools is a runtime fact, not a label: a prompt that
+  // mentions files does not make a tool-less turn need a tool-capable model.
+  const withToolFact = (labelled: RoutingFeatures): RoutingFeatures =>
+    input.needsTools ? labelled : { ...labelled, tool_need: "none" }
+  const selectionFacts = {
     dataClass,
     selectionKind: input.selection.kind,
     estimatedInputTokens: input.estimatedInputTokens,
@@ -369,6 +435,12 @@ export async function selectChatDeployment(
   }
 
   if (input.selection.kind !== "auto") {
+    // A pinned model or alias is not chosen by labels: the rules label it for
+    // the decision record, and no classification call is spent on it.
+    const common = {
+      features: withToolFact(chatFeatures(input.promptText, input.hints)),
+      ...selectionFacts,
+    }
     let plan: RoutingPlan
     try {
       plan = await host.planRoute({ ...baseRequest, selection: input.selection })
@@ -397,7 +469,20 @@ export async function selectChatDeployment(
     }
   }
 
-  // Auto: resolve every tier alias a direct action can use, then let the action
+  // Auto: the opt-in LLM classifier labels the turn (it never throws; any
+  // failure is the rules' labels and a reason). It runs while the tier aliases
+  // are planned, so its bound is the only latency it can add.
+  const snapshot = intakeSnapshot(input.promptText)
+  const classifying: Promise<ClassificationOutcome> | null = host.classify
+    ? host.classify({
+        snapshot,
+        hints: input.hints,
+        surface: "chat",
+        workspaceId: input.workspaceId,
+      })
+    : null
+
+  // Resolve every tier alias a direct action can use, then let the action
   // router choose among the actions the user's approved rule rows allow.
   const directAliases = new Set<string>()
   for (const action of listFusionActions(host.settings)) {
@@ -439,6 +524,11 @@ export async function selectChatDeployment(
   for (const omitted of omittedActions) {
     if (directIds.has(omitted.actionId)) reasons.push(`${omitted.actionId}:${omitted.reason}`)
   }
+  const outcome = classifying ? await classifying : null
+  const classification = outcome ? routeClassificationOf(outcome) : undefined
+  const features = withToolFact(
+    outcome ? chatFeaturesFrom(snapshot, outcome) : chatFeatures(input.promptText, input.hints)
+  )
   const result = routeAction(
     config,
     routeRequestFor(host, {
@@ -450,8 +540,10 @@ export async function selectChatDeployment(
       dataClass,
       refs,
       routingPolicy: input.routingRequest.dataPolicy,
+      ...(classification ? { classifierVersion: classification.classifierVersion } : {}),
     })
   )
+  const decision = withClassification(result.decision, classification)
   const solverId = result.selected?.roles.solver
   const solver = solverId ? config.deploymentsById[solverId] : undefined
   if (!result.selected || !solver) {
@@ -459,7 +551,7 @@ export async function selectChatDeployment(
       kind: "refused",
       code: "ROUTE_NO_SOLUTION",
       reasons: [...reasons, ...exclusionsOf(result)],
-      decision: result.decision,
+      decision,
     }
   }
   const ref = { providerId: solver.providerId, modelId: solver.modelRevision }
@@ -470,7 +562,7 @@ export async function selectChatDeployment(
       kind: "refused",
       code: "ROUTE_NO_SOLUTION",
       reasons: [...reasons, `SOLVER_ALIAS_UNRESOLVED:${solverAlias ?? "none"}`],
-      decision: result.decision,
+      decision,
     }
   }
   return {
@@ -480,7 +572,9 @@ export async function selectChatDeployment(
     actionId: result.selected.actionId,
     ruleId: result.ruleId,
     aliasRefs,
-    ...common,
+    features,
+    ...selectionFacts,
+    ...(classification ? { classification } : {}),
   }
 }
 
@@ -564,6 +658,9 @@ export function sealChatRoute(host: ChatRouteHost, input: ChatSealInput): ChatSe
       refs: [ref, ...Object.values(selection.aliasRefs).flat()],
       requestedActionId: selection.actionId,
       solverOverride: deploymentId,
+      ...(selection.classification
+        ? { classifierVersion: selection.classification.classifierVersion }
+        : {}),
     })
   )
   const compiled = config.actions[selection.actionId]
@@ -577,7 +674,7 @@ export function sealChatRoute(host: ChatRouteHost, input: ChatSealInput): ChatSe
           .map((omitted) => `${omitted.actionId}:${omitted.reason}`),
         ...exclusionsOf(result, selection.actionId),
       ],
-      decision: result.decision,
+      decision: withClassification(result.decision, selection.classification),
     }
   }
   const deployment = config.deploymentsById[deploymentId]
@@ -596,6 +693,7 @@ export function sealChatRoute(host: ChatRouteHost, input: ChatSealInput): ChatSe
       `selection:${selection.selectionKind}`,
       ...(ruleId ? [`selected_by:${ruleId}`] : []),
       `billing:${subscription ? "subscription" : "metered"}`,
+      ...(selection.classification?.reasonCodes ?? []),
     ],
   }
   const stamp: RouterFusionTurnStamp = {

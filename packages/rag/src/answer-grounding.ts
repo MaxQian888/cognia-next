@@ -11,6 +11,11 @@
 
 import type { LanguageModel } from "ai"
 import { generateText } from "ai"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import { tokenizeMultilingual } from "./cjk-tokenizer"
 import type { RetrievalHit, RetrievalTraceV1 } from "./retrieval-kernel"
 import { getRAGLogger } from "./runtime-adapters"
@@ -26,6 +31,11 @@ export interface GroundingCheckConfig {
   useLLM: boolean
   /** LLM model for grounding check */
   model?: LanguageModel
+  /**
+   * Generation seam for the LLM grounding call (ADR-0188 D27). A host passes the
+   * ledgered seam when its surface is on; absent, the model is called directly.
+   */
+  generate?: GenerationSeam
   /** Minimum grounding confidence to consider the answer grounded (0-1) */
   confidenceThreshold: number
   /** Maximum answer length to check (characters) */
@@ -192,7 +202,11 @@ export function checkGroundingHeuristic(answer: string, context: string): Ground
 export async function checkGroundingLLM(
   answer: string,
   context: string,
-  model: LanguageModel
+  model: LanguageModel,
+  options: {
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
+  } = {}
 ): Promise<GroundingCheckResult> {
   try {
     const truncatedAnswer = answer.slice(0, DEFAULT_CONFIG.maxAnswerLength)
@@ -222,13 +236,19 @@ SUPPORTED: <comma-separated list of supported claims, or "none">
 UNSUPPORTED: <comma-separated list of unsupported claims, or "none">
 EXPLANATION: <one sentence summary>`
 
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0,
-    })
+    const answerText = await generateThroughSeam(
+      options.generate,
+      { stage: "rag.grounding", modelId: modelIdOf(model), prompt, temperature: 0 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0,
+          ...overrides,
+        })
+    )
 
-    const text = result.text.trim()
+    const text = answerText.trim()
     const scoreMatch = text.match(/SCORE:\s*(\d+(?:\.\d+)?)/i)
     const supportedMatch = text.match(/SUPPORTED:\s*(.+)/i)
     const unsupportedMatch = text.match(/UNSUPPORTED:\s*(.+)/i)
@@ -293,7 +313,8 @@ export async function checkAnswerGrounding(
     return checkGroundingLLM(
       answer.slice(0, cfg.maxAnswerLength),
       context.slice(0, cfg.maxContextLength),
-      cfg.model
+      cfg.model,
+      cfg.generate ? { generate: cfg.generate } : {}
     )
   }
 

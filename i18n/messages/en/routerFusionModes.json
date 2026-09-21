@@ -1,0 +1,25 @@
+{
+  "field": {
+    "label": "Router + Fusion action"
+  },
+  "laterRelease": "Later release",
+  "actions": {
+    "auto": "Auto",
+    "direct": "Direct",
+    "cascade": "Cascade",
+    "panel": "Panel",
+    "delegate": "Delegate"
+  },
+  "hints": {
+    "auto": "Unchanged: one model turn, the way this step has always run.",
+    "direct": "One routed model call, reserved and settled on the ledger.",
+    "cascade": "Start on a cheap model and escalate only when its answer fails the check.",
+    "panel": "Several models answer, a judge compares them, and the checked answer is returned.",
+    "delegate": "Hand the work to a bounded worker graph that proves its result in a sandbox. Needs a workspace."
+  },
+  "errors": {
+    "surfaceOff": "Router + Fusion is off for agents and workflows, so this runs as Auto. Turn it on in Settings → AI connections → Routing.",
+    "modeDormant": "This action is not available in this release.",
+    "workspaceRequired": "Delegate edits files, so it needs a workspace."
+  }
+}

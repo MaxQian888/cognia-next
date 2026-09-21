@@ -290,7 +290,7 @@ fn parse_status_paths(stdout: &[u8]) -> Vec<String> {
 /// creation by hash equality to report a rename. Hash a moved file with a
 /// different algorithm than the one Git used for its old path and the rename
 /// silently degrades into an unrelated delete-plus-create.
-fn git_blob_hash(bytes: &[u8], format: git2::ObjectFormat) -> Result<String, String> {
+pub(crate) fn git_blob_hash(bytes: &[u8], format: git2::ObjectFormat) -> Result<String, String> {
     git2::Oid::hash_object_ext(git2::ObjectType::Blob, bytes, format)
         .map(|oid| oid.to_string())
         .map_err(|error| format!("hash blob: {error}"))

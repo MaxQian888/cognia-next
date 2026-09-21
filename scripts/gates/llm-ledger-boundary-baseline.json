@@ -1,0 +1,284 @@
+{
+  "description": "Reviewed direct LLM generation call sites (ADR-0188 D27). Checked by scripts/gates/check-llm-ledger-boundary.mjs. Reasons are a fixed vocabulary (REASONS in the script); `unwrapped` rows are WP-H4 follow-ups. The list may only shrink.",
+  "files": {
+    "cli/src/eval/replay/recording-proxy.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "`cognia eval record --live` pass-through proxy: forwards real /v1/messages requests to the provider, unledgered (eval tooling only)."
+    },
+    "cli/src/eval/replay/tape-server.ts": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Loopback replay server that answers /v1/messages from recorded tapes (ADR-0118); it never calls a provider."
+    },
+    "cli/src/x/proxy-server.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:anthropic-messages", "endpoint:chat-completions", "endpoint:responses"],
+      "note": "`cognia x` Tier-1 fallback proxy used when the Rust gateway is not running: forwards /v1/messages, /v1/chat/completions and /v1/responses upstream with no passthrough ledger."
+    },
+    "components/settings/network/tabs/test-tab.tsx": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Default URL of the network proxy reachability test; the Rust `proxy_test` command sends a GET, never a generation request."
+    },
+    "components/settings/settings-nav-config.ts": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:anthropic-messages", "endpoint:chat-completions"],
+      "note": "Settings search keywords for the gateway page."
+    },
+    "hooks/canvas/use-canvas-suggestions.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateObject"],
+      "note": "Canvas AI suggestions: generateObject on the configured or custom canvas provider, never reserved or settled."
+    },
+    "lib/ai/agent/agent-executor.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:streamText"],
+      "note": "executeAgent text channel (web/mobile, or no tools requested): one streamText completion with no ledger; its sidecar channel sends carry no ledger stamp either."
+    },
+    "lib/ai/chat/standalone-engine.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:streamText"],
+      "note": "Standalone (BYOK web/mobile) chat engine: streamText in the webview with same-provider finish-reason retries; ignores SendOptions.ledger, and the chat stamp is Tauri-only, so no surface ledgers it."
+    },
+    "lib/ai/eval/targets/model.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText"],
+      "note": "Eval pure-model target: one generateText per case, no ledger."
+    },
+    "lib/ai/generation/canvas-actions.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText", "ai:streamText"],
+      "note": "Canvas AI actions (canvas UI and the plugin API): generateText/streamText, no ledger."
+    },
+    "lib/ai/operations/handlers/ai-sdk-surface.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateObject", "ai:generateText", "ai:streamText"],
+      "note": "AI operations executor throat (ADR-0163): text, object and stream operations call the AI SDK directly, no ledger."
+    },
+    "lib/ai/operations/handlers/batches.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "batches.create submits real Anthropic/OpenAI/Mistral/Gemini batch generation jobs; nothing is reserved or settled through the ledger."
+    },
+    "lib/ai/providers/bedrock-connection.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText"],
+      "note": "Bedrock connection test: one generateText probe, no ledger."
+    },
+    "lib/ai/renderer-llm-client.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "buildRendererLlmClient wraps every client with ledgerUtilityCalls (utilityLedger by default): titles, timeline labels, the /goal judge, utility and agent-role clients, AI commit messages, the room primary router."
+    },
+    "lib/ai/vision/caption.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText"],
+      "note": "Vision caption for multimodal embeddings: a generateText call (D27 applies even though it feeds an embedder), no ledger."
+    },
+    "lib/plugin/runtime/renderer-host-runtime.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:streamText"],
+      "note": "Ambient plugin host runtime (renderer, desktop, mobile): plugin model calls stream through streamText with no ledger."
+    },
+    "lib/plugin/vscode-shim/lm-handler.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText"],
+      "note": "VS Code `vscode.lm` shim: sendChatRequest runs generateText, no ledger."
+    },
+    "lib/provider-diagnostics/benchmark.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:streamText"],
+      "note": "User-run provider benchmark (PONG prompt): streamText, no ledger."
+    },
+    "lib/router-fusion/calls/role-call-executor.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText", "ai:streamText"],
+      "note": "Router + Fusion role calls: durable-call prepares each attempt and marks it DISPATCHED before this executor sends it, with maxRetries: 0."
+    },
+    "lib/router-fusion/routing/llm-classifier.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "LLM route classifier (WP-E1, in flight): wraps its client with ledgeredLlmClient and beginLedgeredUtilityCall, one session-less utility run per classification, maxRetries: 0."
+    },
+    "lib/subscription/anthropic/usage-probe.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Opt-in Claude rate-limit probe: a paid, near-empty /v1/messages request, no ledger."
+    },
+    "lib/twin/distill/index.ts": {
+      "reason": "client-factory",
+      "entries": ["llm-client:createAnthropicLlmClient"],
+      "note": "Barrel re-export of the raw client factory (listed in LLM_CLIENT_MODULES so its consumers are tracked); it calls nothing."
+    },
+    "lib/twin/distill/llm.ts": {
+      "reason": "client-factory",
+      "entries": ["ai:generateText", "ai:streamText"],
+      "note": "createLlmClient / createAnthropicLlmClient: the raw LlmClient whose complete/stream call generateText/streamText. Ledgered only where a consumer wraps it; every consumer has its own row."
+    },
+    "lib/twin/runtime/build-deps.ts": {
+      "reason": "unwrapped",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "Twin LLM reranker: createLlmClient on the twin's own LLM config, never wrapped with ledgerUtilityCalls."
+    },
+    "lib/twin/worker-runtime.ts": {
+      "reason": "unwrapped",
+      "entries": ["llm-client:createAnthropicLlmClient"],
+      "note": "Twin distillation worker: createAnthropicLlmClient on the twin's own LLM config, never wrapped with ledgerUtilityCalls."
+    },
+    "lib/wiki/rebuild-runner.ts": {
+      "reason": "unwrapped",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "Wiki rebuild: createLlmClient from the active provider row, never wrapped with ledgerUtilityCalls."
+    },
+    "lib/workflow/nodes/ai/ai-prompt-routed.ts": {
+      "reason": "unwrapped",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "ai.prompt v2 routed mode: makeClient = createLlmClient per routing candidate, unwrapped; fallback attempts are unledgered too."
+    },
+    "lib/workflow/nodes/ai/ai-prompt-v2.ts": {
+      "reason": "unwrapped",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "ai.prompt v2 explicit mode: createLlmClient, unwrapped (only the v1 executor in executors.ts is ledgered on agentsWorkflows)."
+    },
+    "lib/workflow/nodes/ai/executors.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["llm-client:createLlmClient"],
+      "note": "ai.prompt v1 wraps createLlmClient with ledgerUtilityCalls on agentsWorkflows (ai.classify and ai.extract delegate to it); v2 lives in ai-prompt-v2.ts."
+    },
+    "packages/ocr/src/providers/anthropic-vision.ts": {
+      "reason": "d27-out-of-scope",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Cloud OCR through Claude vision on /v1/messages."
+    },
+    "packages/ocr/src/providers/gemini-vision.ts": {
+      "reason": "d27-out-of-scope",
+      "entries": ["endpoint:gemini-generate-content"],
+      "note": "Cloud OCR through Gemini :generateContent."
+    },
+    "packages/ocr/src/providers/openai-vision.ts": {
+      "reason": "d27-out-of-scope",
+      "entries": ["endpoint:chat-completions"],
+      "note": "Cloud OCR through OpenAI vision on /v1/chat/completions."
+    },
+    "packages/provider-core/src/providers/api-key-login.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:chat-completions"],
+      "note": "API-key login validation: a 1-token /chat/completions POST, no ledger."
+    },
+    "packages/provider-core/src/providers/api-test.ts": {
+      "reason": "unwrapped",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Custom-provider connection test: the Anthropic protocol probe is a 1-token /v1/messages POST (the others GET /models), no ledger."
+    },
+    "packages/provider-core/src/providers/local-provider-service.ts": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:ollama-generate"],
+      "note": "stopModel posts /api/generate with keep_alive: 0 and no prompt, which unloads an Ollama model; nothing is generated."
+    },
+    "packages/provider-core/src/providers/ollama.ts": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:ollama-generate"],
+      "note": "stopOllamaModel posts /api/generate with keep_alive: 0 and no prompt, which unloads the model; nothing is generated."
+    },
+    "packages/provider-embedding/src/chunking.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Semantic chunking's split-point call. It takes the host's `generate` seam, threaded from `ChunkingOptions.generate` and `RAGPipelineConfig.generate` (its only caller); the app's ingest paths call the synchronous `chunkDocument`, which never calls a model."
+    },
+    "packages/rag/src/answer-grounding.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Self-reflective RAG grounding judge. The call takes the host's `generate` seam (WP-L2); no app path reaches it today \u2014 nothing builds a RAGPipeline and the app's grounding is heuristic \u2014 and a host that runs it takes the seam from `lib/ai/ledgered-generation-seam.ts`."
+    },
+    "packages/rag/src/contextual-retrieval.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Contextual retrieval's per-chunk context and document summary. Both take the host's `generate` seam, threaded from `RAGPipelineConfig.generate` (their only caller); no app code builds a pipeline yet, and a host that does takes the seam from `lib/ai/ledgered-generation-seam.ts`."
+    },
+    "packages/rag/src/query-expansion.ts": {
+      "reason": "unwrapped",
+      "entries": ["ai:generateText"],
+      "note": "Query expansion, HyDE and step-back. Every stage takes the host's `generate` seam (WP-L2) and the project-knowledge path passes the ledgered one (`lib/project-knowledge/runtime/retrieve.ts` via `lib/ai/ledgered-generation-seam.ts`); the twin path (`lib/twin/runtime/apply-twin-context.ts`) still calls it unledgered and is WP-L1's call site."
+    },
+    "packages/rag/src/rag-evaluator.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "RAG quality metrics with an LLM judge. The judge call takes the host's `generate` seam (WP-L2); no app path reaches it today, and a host that runs it takes the seam from `lib/ai/ledgered-generation-seam.ts`."
+    },
+    "packages/rag/src/reranker.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "LLM cross-encoder rerank. `rerankWithLLM`/`rerank` take the host's `generate` seam, threaded from `RAGPipelineConfig.generate` (their only caller); the app's own reranker is `lib/twin/runtime/reranker.ts`. The Cohere rerank API path is outside D27."
+    },
+    "packages/rag/src/retrieval-grader.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Corrective-RAG grading. `gradeDocumentLLM`/`gradeRetrievedDocuments` take the host's `generate` seam, threaded from `RAGPipelineConfig.generate`; the app's two graders (`lib/ai/retrieval/corrective-filter.ts`, `lib/external-bridge/handlers/rag.ts`) pass `useLLM: false` and call no model."
+    },
+    "packages/router-fusion/src/api/chat-compat.ts": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:chat-completions"],
+      "note": "CHAT_COMPAT_ENDPOINT names the endpoint the gateway serves for cognia/* models; no outbound call."
+    },
+    "packages/tts/src/providers/gemini.ts": {
+      "reason": "d27-out-of-scope",
+      "entries": ["endpoint:gemini-generate-content"],
+      "note": "Gemini TTS through :generateContent with an audio response modality."
+    },
+    "packages/tts/src/providers/xiaomi.ts": {
+      "reason": "d27-out-of-scope",
+      "entries": ["endpoint:chat-completions"],
+      "note": "Xiaomi MiMo TTS served on an OpenAI-shaped /v1/chat/completions endpoint."
+    },
+    "packages/web-search/src/providers/google-ai.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["endpoint:gemini-generate-content"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Gemini grounded web search: one `:generateContent` generation per search, which takes the host's `generate` seam; every app search reaches it through `lib/search/configured-search-core.ts`, which passes the ledgered seam from `lib/ai/ledgered-generation-seam.ts`. `testGoogleAIConnection` takes no seam on purpose: it is the user-initiated key probe D27 exempts."
+    },
+    "packages/web-search/src/standalone-answer.ts": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:generateText"],
+      "seam": "lib/ai/ledgered-generation-seam.ts",
+      "note": "Standalone (BYOK) cited web answer. The synthesis takes the host's `resolveGenerate` seam; the app binding `lib/search/standalone-answer.ts` returns the ledgered seam from `lib/ai/ledgered-generation-seam.ts`, bound to the provider it resolved."
+    },
+    "sidecar/dispatch/anthropic.mjs": {
+      "reason": "ledgered-entry",
+      "entries": ["agent-sdk:query"],
+      "note": "Agent SDK turns: an envelope ledger stamp engages createCallLedgerGate (tracked attempts, PreToolUse budget hooks, CLAUDE_CODE_MAX_RETRIES=0, no fallbackModel). A send without the stamp (anything but a routed Tauri chat turn) runs unledgered."
+    },
+    "sidecar/dispatch/feature-call.mjs": {
+      "reason": "unwrapped",
+      "entries": ["language-model:doGenerate", "language-model:doStream"],
+      "note": "Sidecar feature calls for providers the renderer cannot execute (Bedrock, plugin protocols): model.doGenerate/doStream and adapter streams, with no ledger stamp on this path."
+    },
+    "sidecar/dispatch/hook-native-executor.mjs": {
+      "reason": "unwrapped",
+      "entries": ["agent-sdk:query"],
+      "note": "Native prompt/agent hooks: an Agent SDK query under the hook's own $0.25 budget governor, not the CallLedger."
+    },
+    "sidecar/dispatch/live-harness.mjs": {
+      "reason": "not-a-provider-call",
+      "entries": ["endpoint:anthropic-messages"],
+      "note": "Helper for the *.live.test.mjs suites: an in-process mock of the Anthropic Messages API; it never reaches a provider."
+    },
+    "sidecar/dispatch/prewarm.mjs": {
+      "reason": "not-a-provider-call",
+      "entries": ["agent-sdk:startup"],
+      "note": "startup() spawns and initializes a Claude Code subprocess with no prompt; the model call is the query anthropic.mjs sends on the claimed warm process."
+    },
+    "sidecar/dispatch/protocol-adapters/ai-sdk-adapter.mjs": {
+      "reason": "ledgered-entry",
+      "entries": ["ai:streamText"],
+      "seam": "sidecar/dispatch/ai-sdk.mjs",
+      "note": "streamText for every sidecar AI SDK leg; for a stamped send ai-sdk.mjs reserves each leg (and compaction/optical summaries) through call-ledger-gate and passes maxRetries: 0. Unstamped sends and feature-call.mjs (its own row) are unledgered."
+    }
+  }
+}

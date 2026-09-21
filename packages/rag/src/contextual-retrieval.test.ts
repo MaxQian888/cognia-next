@@ -1,9 +1,20 @@
+// Only the generation is faked; the rest of the SDK (e.g. `cosineSimilarity`)
+// stays real, as other package modules use it.
+jest.mock("ai", () => ({ ...jest.requireActual("ai"), generateText: jest.fn() }))
+
+import { generateText } from "ai"
+import type { LanguageModel } from "ai"
+import type { GenerationRequest, GenerationSend } from "@cognia/provider-embedding/generation-seam"
+
 /**
  * Tests for Contextual Retrieval Module
  */
 
 import {
   createContextCache,
+  generateChunkContext,
+  generateDocumentSummary,
+  addContextToChunks,
   addLightweightContext,
   extractKeyEntities,
   enrichChunkWithEntities,
@@ -371,5 +382,73 @@ describe("enrichChunkWithEntities", () => {
     expect(enriched.index).toBe(5)
     expect(enriched.startOffset).toBe(100)
     expect(enriched.endOffset).toBe(124)
+  })
+})
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+// The host injects `generate` when its ledger surface is on; with nothing
+// injected the model is called exactly as it always was.
+
+const mockedGenerateText = generateText as jest.Mock
+const seamModel = { modelId: "m-1" } as unknown as LanguageModel
+
+/** A seam that reserves the call: it bounds the output and kills SDK retries. */
+function boundingSeam() {
+  const requests: GenerationRequest[] = []
+  const seam = async (request: GenerationRequest, send: GenerationSend) => {
+    requests.push(request)
+    return (await send({ maxOutputTokens: 64, maxRetries: 0 })).text
+  }
+  return { seam, requests }
+}
+
+/** The keys of the one `generateText` call, sorted. */
+function callKeys(): string[] {
+  return Object.keys(mockedGenerateText.mock.calls[0][0] as Record<string, unknown>).sort()
+}
+
+describe("contextual retrieval generation seam", () => {
+  const chunk: DocumentChunk = {
+    id: "c1",
+    content: "the chunk body",
+    index: 0,
+    startOffset: 0,
+    endOffset: 14,
+  }
+
+  beforeEach(() => {
+    mockedGenerateText.mockReset()
+    mockedGenerateText.mockResolvedValue({ text: "situating context" })
+  })
+
+  it("calls the model directly when no seam is injected", async () => {
+    await expect(
+      generateChunkContext("the whole document", chunk, { model: seamModel })
+    ).resolves.toBe("situating context")
+    expect(callKeys()).toEqual(["model", "prompt", "temperature"])
+  })
+
+  it("runs the per-chunk context and the summary through an injected seam", async () => {
+    const { seam, requests } = boundingSeam()
+    await generateChunkContext("the whole document", chunk, {
+      model: seamModel,
+      generate: seam,
+    })
+    await generateDocumentSummary("the whole document", seamModel, { generate: seam })
+    expect(requests.map((r) => r.stage)).toEqual(["rag.chunk-context", "rag.document-summary"])
+    expect(mockedGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 64, maxRetries: 0 })
+    )
+  })
+
+  it("threads the config's seam through addContextToChunks, summary included", async () => {
+    const { seam, requests } = boundingSeam()
+    const result = await addContextToChunks("the whole document", [chunk], {
+      model: seamModel,
+      includeDocumentSummary: true,
+      generate: seam,
+    })
+    expect(result[0].contextPrefix).toBe("situating context")
+    expect(requests.map((r) => r.stage)).toEqual(["rag.document-summary", "rag.chunk-context"])
   })
 })

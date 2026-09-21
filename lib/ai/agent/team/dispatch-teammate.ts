@@ -58,6 +58,7 @@ import {
   type RemoteWorkerDescriptor,
 } from "./remote-worker-runtime"
 import { requestWorkerWake, shouldAttemptWake } from "./wake-worker"
+import { runMemberFusionTurn } from "./member-fusion-turn"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
@@ -1404,6 +1405,23 @@ export async function dispatchTeammate(
         })
       }
       const executionRoot = taskWorkspaceExecutionRoot ?? dispatchWorkingDir
+      // A member configured with a Router + Fusion action answers with a
+      // fusion run instead of a model turn on any channel (ADR-0188 D3/D21).
+      // `runMemberFusionTurn` returns null after one property read for every
+      // teammate on `auto` — which is all of them by default — and while the
+      // `agentsWorkflows` surface is off, so the channels below are untouched.
+      const memberFusion = await runMemberFusionTurn({
+        runId: teamCtx.runId,
+        teammate,
+        taskId: args.taskId,
+        prompt: promptText,
+        systemPrompt,
+        ...(teamCtx.team.projectId ? { projectId: teamCtx.team.projectId } : {}),
+        ...(executionRoot ? { workingDir: executionRoot } : {}),
+        signal: combinedSignal,
+        ...(onTurnCapture ? { onCapture: onTurnCapture } : {}),
+      })
+      if (memberFusion) return memberFusion
       if (channel === "external" && externalAgentId) {
         const { getAgentTeamChildRun } = await import("@/lib/db/agent-team-runtime")
         const { parseGatewaySessionId } = await import("@/lib/ai/agent/external/gateway-task")

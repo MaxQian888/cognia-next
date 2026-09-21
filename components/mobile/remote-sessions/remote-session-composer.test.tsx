@@ -316,7 +316,19 @@ describe("RemoteSessionComposer", () => {
     const user = userEvent.setup()
     setup()
     await user.upload(screen.getByTestId("remote-attach-input"), pngFile())
-    expect(prepareMock).toHaveBeenCalledWith(expect.any(Array), { maxFileSize: 1024 })
+    expect(prepareMock).toHaveBeenCalledWith(expect.any(Array), { maxFileSize: 1024, optimizeImage: expect.any(Function) })
+  })
+
+  it("refuses an oversized original without clearing the draft or uploading a substitute", async () => {
+    prepareMock.mockImplementation(jest.requireActual("@/lib/chat/attachments/prepare").prepareComposerAttachments)
+    const user = userEvent.setup()
+    const { onSend } = setup()
+    await user.type(screen.getByTestId("remote-composer-input"), "keep my question")
+    await user.upload(screen.getByTestId("remote-attach-input"), pngFile("large.png", 2048))
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled())
+    expect(screen.getByTestId("remote-composer-input")).toHaveValue("keep my question")
+    expect(screen.queryByTestId("remote-attachment-chip")).not.toBeInTheDocument()
+    expect(onSend).not.toHaveBeenCalled()
   })
 
   it("says which files were skipped rather than dropping them silently", async () => {
@@ -426,6 +438,72 @@ describe("RemoteSessionComposer", () => {
 
       expect(onSend).toHaveBeenCalledWith("what does `{{x}}` mean", [], expect.any(Object))
       expect(toastError).not.toHaveBeenCalled()
+    })
+  })
+
+  // ADR-0188 D25: the "Run with Cascade / Panel" entry. The detail passes
+  // `onFusionRun` only while the host reports the run healthy for this device.
+  describe("Router + Fusion run entry", () => {
+    it("shows no run-mode entry unless the host offers runs", () => {
+      setup()
+      expect(screen.queryByTestId("companion-fusion-mode")).toBeNull()
+    })
+
+    it("starts a Cascade run of the message instead of sending it", async () => {
+      const user = userEvent.setup()
+      const onFusionRun = jest.fn(async () => {})
+      const { onSend } = setup({ onFusionRun })
+
+      await user.click(screen.getByTestId("companion-fusion-mode"))
+      await user.click(await screen.findByTestId("companion-fusion-mode-cascade"))
+      expect(screen.getByTestId("companion-fusion-mode")).toHaveAttribute("data-mode", "cascade")
+
+      await user.type(screen.getByTestId("remote-composer-input"), "summarise the thread")
+      await user.click(screen.getByTestId("remote-send"))
+
+      expect(onFusionRun).toHaveBeenCalledWith("summarise the thread", "cascade")
+      expect(onSend).not.toHaveBeenCalled()
+      await waitFor(() => expect(screen.getByTestId("remote-composer-input")).toHaveValue(""))
+    })
+
+    it("refuses to run a message with attachments, keeping everything in place", async () => {
+      const user = userEvent.setup()
+      const onFusionRun = jest.fn(async () => {})
+      const { onSend } = setup({ onFusionRun })
+
+      await user.click(screen.getByTestId("companion-fusion-mode"))
+      await user.click(await screen.findByTestId("companion-fusion-mode-panel"))
+      await user.upload(screen.getByTestId("remote-attach-input"), pngFile())
+      await user.type(screen.getByTestId("remote-composer-input"), "compare these")
+      await user.click(screen.getByTestId("remote-send"))
+
+      expect(onFusionRun).not.toHaveBeenCalled()
+      expect(onSend).not.toHaveBeenCalled()
+      expect(toastWarning).toHaveBeenCalledWith(
+        "Cascade and Panel take text only. Remove the attachments, or send it as a direct message."
+      )
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("compare these")
+      expect(screen.getByTestId("remote-staged-attachments")).toBeInTheDocument()
+    })
+
+    it("keeps the text when the run could not be queued", async () => {
+      const user = userEvent.setup()
+      const onFusionRun = jest.fn(async () => {
+        throw new Error("Outbound queue requires an active account and runtime target.")
+      })
+      setup({ onFusionRun })
+
+      await user.click(screen.getByTestId("companion-fusion-mode"))
+      await user.click(await screen.findByTestId("companion-fusion-mode-panel"))
+      await user.type(screen.getByTestId("remote-composer-input"), "compare these")
+      await user.click(screen.getByTestId("remote-send"))
+
+      await waitFor(() =>
+        expect(toastError).toHaveBeenCalledWith(
+          "The run could not be queued: Outbound queue requires an active account and runtime target."
+        )
+      )
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("compare these")
     })
   })
 })

@@ -1,0 +1,25 @@
+{
+  "field": {
+    "label": "Router + Fusion 动作"
+  },
+  "laterRelease": "后续版本",
+  "actions": {
+    "auto": "自动路由",
+    "direct": "直接",
+    "cascade": "级联",
+    "panel": "评审团",
+    "delegate": "委派"
+  },
+  "hints": {
+    "auto": "保持不变：仍是这一步一直以来的单次模型轮次。",
+    "direct": "一次经路由的模型调用，在账本上预留并结算。",
+    "cascade": "先用低成本模型作答，只有未通过校验时才升级。",
+    "panel": "多个模型分别作答，由裁判比较后返回通过校验的答案。",
+    "delegate": "把工作交给有界的 worker 图，在沙箱中验证其结果；需要工作区。"
+  },
+  "errors": {
+    "surfaceOff": "Router + Fusion 的智能体与工作流开关已关闭，此处按自动路由执行。可在「设置 → AI 连接 → 路由」中开启。",
+    "modeDormant": "该动作在本版本中尚不可用。",
+    "workspaceRequired": "委派需要改动文件，因此必须有工作区。"
+  }
+}

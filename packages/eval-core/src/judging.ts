@@ -1,3 +1,5 @@
+import { createChainedSeededRandom } from "./seeded-random"
+
 export interface BlindPairInput {
   pairId: string
   first: { variantId: string; sampleId: string; output: string }
@@ -16,15 +18,6 @@ export interface BlindPrivateMapping {
   rightVariantId: string
 }
 
-function seededRandom(seed: number): () => number {
-  let state = seed >>> 0
-  return () => {
-    state = Math.imul(state ^ (state >>> 15), state | 1)
-    state ^= state + Math.imul(state ^ (state >>> 7), state | 61)
-    return ((state ^ (state >>> 14)) >>> 0) / 4294967296
-  }
-}
-
 export function buildBlindAssignments(
   pairs: readonly BlindPairInput[],
   seed: number
@@ -32,7 +25,7 @@ export function buildBlindAssignments(
   publicAssignments: BlindPublicAssignment[]
   privateMapping: Record<string, BlindPrivateMapping>
 } {
-  const random = seededRandom(seed)
+  const random = createChainedSeededRandom(seed)
   const privateMapping: Record<string, BlindPrivateMapping> = {}
   const publicAssignments = pairs.map((pair, index) => {
     const swap = random() >= 0.5

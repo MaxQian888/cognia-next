@@ -12,8 +12,20 @@ import {
   type RouterFusionSettings,
 } from "@cognia/router-fusion/settings/settings"
 
+import type { AppSettings } from "@cognia/agent-config-types"
+import type { LlmClient } from "@/lib/twin/distill/llm"
+
 import type { ChatRouteHost } from "../chat/route-chat-turn"
-import { routeRunRequest, runFeatures, runVerifierProfiles, type RunRouteInput } from "./run-route"
+import type { BeginLedgeredUtilityCallInput } from "../gate/utility-ledger"
+import { createRouteClassifier } from "./llm-classifier"
+import {
+  routeRunRequest,
+  runFeatures,
+  runFeaturesFrom,
+  runSnapshot,
+  runVerifierProfiles,
+  type RunRouteInput,
+} from "./run-route"
 
 type Ref = { providerId: string; modelId: string }
 const MINI: Ref = { providerId: "openai", modelId: "gpt-5-mini" }
@@ -346,10 +358,353 @@ describe("runFeatures", () => {
   })
 })
 
+describe("runSnapshot and runFeaturesFrom", () => {
+  it("give the rules path exactly what runFeatures always gave", () => {
+    const messages = [
+      { role: "system" as const, content: "Answer in JSON." },
+      { role: "user" as const, content: "Compare Postgres and MySQL for this workload." },
+    ]
+    const snapshot = runSnapshot(messages, { type: "object" })
+    expect(snapshot).toMatchObject({
+      userText: "Compare Postgres and MySQL for this workload.",
+      trustedConstraints: ["Answer in JSON."],
+      verificationKinds: ["json_schema"],
+      phase: "intake",
+    })
+    const features = runFeatures(messages, { type: "object" })
+    expect(
+      runFeaturesFrom(snapshot, {
+        labels: {
+          task: features.task,
+          ambiguity: features.ambiguity,
+          tool_need: features.tool_need,
+          scope: features.scope,
+          missing_information: ["something"],
+          goal: features.goal,
+        },
+        input: {
+          text: "",
+          truncated: false,
+          estimatedTokens: 0,
+          routingContext: "",
+          userText: "",
+        },
+      })
+    ).toEqual(features)
+  })
+})
+
+// ── the opt-in LLM classifier (D18, B5) at the Run API entry point ────────────
+
+let classifierAccounts = 0
+
+/** The real classifier, its ledger and router model faked at the seams. */
+function classifierFor(
+  reply: (prompt: string, options?: { abortSignal?: AbortSignal }) => Promise<string>,
+  classifier: Record<string, unknown> = {}
+) {
+  const begins: BeginLedgeredUtilityCallInput[] = []
+  const handle = {
+    runId: "classifier-run",
+    maxOutputTokens: 256,
+    succeeded: jest.fn(async () => undefined),
+    failed: jest.fn(async () => undefined),
+    unknown: jest.fn(async () => undefined),
+  }
+  const complete = jest.fn(reply)
+  const account = `run-account-${++classifierAccounts}`
+  const classify = createRouteClassifier(
+    {
+      routerFusion: {
+        enabled: true,
+        surfaces: { gatewayRuns: true, chat: true },
+        llmClassifier: {
+          enabled: true,
+          routerProviderId: "openai",
+          routerModelId: "gpt-5-mini",
+          ...classifier,
+        },
+      },
+    } as unknown as AppSettings,
+    {
+      begin: async (call) => {
+        begins.push(call)
+        return { kind: "granted", handle }
+      },
+      buildClient: async () => ({ complete }) as unknown as LlmClient,
+      accountKey: async () => account,
+    }
+  )
+  if (!classify) throw new Error("the classifier should be on")
+  return { classify, begins, handle, complete }
+}
+
+const RESEARCH = JSON.stringify({
+  task: "research.synthesis",
+  ambiguity: "low",
+  tool_need: "read_only",
+  scope: "single_item",
+  missing_information: [],
+  goal: "Explain how the tariffs differ",
+})
+
+describe("routeRunRequest with the LLM classifier (D18)", () => {
+  const question = request({
+    mode: "auto",
+    allowed_modes: ["direct", "cascade", "panel"],
+    input_messages: [{ role: "user", content: "Why does the 2025 steel tariff differ from 2024?" }],
+  })
+
+  it("routes an auto request by the model's labels, booked on the Run API's surface", async () => {
+    // By the rules this is a knowledge question, so Auto keeps the baseline.
+    const rulesOnly = makeHost({ settings: { approvedRuleRows: ["panel_research"] } })
+    expect(await routeRunRequest(rulesOnly.host, input({ request: question }))).toMatchObject({
+      kind: "selected",
+      actionId: "direct_baseline",
+    })
+
+    const { host } = makeHost({ settings: { approvedRuleRows: ["panel_research"] } })
+    const { classify, begins, handle } = classifierFor(async () => RESEARCH)
+    host.classify = classify
+    const route = await routeRunRequest(host, input({ request: question }))
+    if (route.kind !== "selected") throw new Error(`refused: ${route.reasons.join(", ")}`)
+    expect(route).toMatchObject({
+      actionId: "panel_review",
+      ruleId: "R4_panel_research",
+      task: "research.synthesis",
+    })
+    expect(route.decision.classifier_version).toBe("classifier-1")
+    expect(route.decision.reason_codes).toEqual(
+      expect.arrayContaining(["classifier:classifier-1", "classifier_source:llm", "entry:run_api"])
+    )
+    expect(RouteDecisionSchema.parse(route.decision)).toEqual(route.decision)
+    expect(begins).toEqual([
+      expect.objectContaining({ surface: "gatewayRuns", origin: "utility", workspaceId: null }),
+    ])
+    expect(handle.succeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("books a chat fusion turn's classification on the chat surface", async () => {
+    const { host } = makeHost({ settings: { approvedRuleRows: ["panel_research"] } })
+    const { classify, begins } = classifierFor(async () => RESEARCH)
+    host.classify = classify
+    host.surface = "chat"
+    await routeRunRequest(host, input({ request: question, workspaceId: "project-1" }))
+    expect(begins[0]).toMatchObject({ surface: "chat", workspaceId: "project-1" })
+  })
+
+  it("[ACC:ROUTE-03] routes a timed-out classification by the rules within the bound, keeping the call's cost", async () => {
+    const { host } = makeHost({ settings: { approvedRuleRows: ["panel_research"] } })
+    const { classify, handle } = classifierFor(
+      (_prompt, options) =>
+        new Promise<string>((_resolve, reject) => {
+          options?.abortSignal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+          )
+        }),
+      { timeoutMs: 25 }
+    )
+    host.classify = classify
+    const started = Date.now()
+    const route = await routeRunRequest(host, input({ request: question }))
+    expect(Date.now() - started).toBeLessThan(1_000)
+    if (route.kind !== "selected") throw new Error("refused")
+    expect(route).toMatchObject({ actionId: "direct_baseline", ruleId: "R6_baseline" })
+    expect(route.decision.classifier_version).toBe("rules-1")
+    expect(route.decision.reason_codes).toEqual(
+      expect.arrayContaining(["classifier_source:rules_fallback", "classifier_fallback:timeout"])
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(handle.unknown).toHaveBeenCalledWith("aborted_before_answer")
+  })
+
+  it("[ACC:ROUTE-03] routes by the rules on invalid JSON, with the paid call settled", async () => {
+    const { host } = makeHost({ settings: { approvedRuleRows: ["panel_research"] } })
+    const { classify, handle } = classifierFor(async () => "research, probably")
+    host.classify = classify
+    const route = await routeRunRequest(host, input({ request: question }))
+    if (route.kind !== "selected") throw new Error("refused")
+    expect(route.actionId).toBe("direct_baseline")
+    expect(route.decision.reason_codes).toEqual(
+      expect.arrayContaining([
+        "classifier_source:rules_fallback",
+        "classifier_fallback:invalid_json",
+      ])
+    )
+    expect(handle.succeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("records the classification on a refusal", async () => {
+    const { host } = makeHost()
+    host.classify = classifierFor(async () => RESEARCH).classify
+    // A budget nothing fits under: every action is excluded.
+    const broke = { ...question, budget: { max_cost_usd: "0.000001", mode: "tracked" as const } }
+    const route = await routeRunRequest(host, input({ request: broke }))
+    expect(route.kind).toBe("refused")
+    if (route.kind === "refused")
+      expect(route.decision?.reason_codes).toContain("classifier_source:llm")
+  })
+
+  it("never classifies an explicit mode with a model", async () => {
+    const { host } = makeHost()
+    const { classify, complete } = classifierFor(async () => RESEARCH)
+    host.classify = classify
+    const route = await routeRunRequest(host, input())
+    if (route.kind !== "selected") throw new Error("refused")
+    expect(complete).not.toHaveBeenCalled()
+    expect(route.decision.classifier_version).toBe("rules-1")
+    expect(route.decision.reason_codes.some((code) => code.startsWith("classifier_source"))).toBe(
+      false
+    )
+  })
+})
+
 describe("runVerifierProfiles", () => {
-  it("never claims a code fixture, and a schema check only with a schema", () => {
+  it("claims a schema check only with a schema, and a code fixture only with both halves", () => {
     expect(runVerifierProfiles(null)).toEqual(["text_basic", "text_review", "evidence_review"])
     expect(runVerifierProfiles({})).toContain("schema_fixture")
+    // A code fixture needs a sandbox AND an approved command; one alone is not
+    // a verifier, and offering it would let the router pick what it cannot accept.
     expect(runVerifierProfiles({})).not.toContain("code_fixture")
+    expect(
+      runVerifierProfiles(null, { sandboxTier: "os", acceptanceProfileAvailable: false })
+    ).not.toContain("code_fixture")
+    expect(
+      runVerifierProfiles(null, { sandboxTier: null, acceptanceProfileAvailable: true })
+    ).not.toContain("code_fixture")
+    expect(
+      runVerifierProfiles(null, { sandboxTier: "os", acceptanceProfileAvailable: true })
+    ).toContain("code_fixture")
+  })
+})
+
+// ── delegate (WP-D4) ──────────────────────────────────────────────────────────
+
+const WITH_DELEGATE: ExecutionMode[] = ["direct", "cascade", "panel", "delegate"]
+const PROJECT = "99999999-9999-4999-8999-999999999999"
+
+function delegateRequest(overrides: Partial<RunRequest> = {}): RunRequest {
+  return request({
+    mode: "delegate",
+    allowed_modes: ["delegate"],
+    input_messages: [{ role: "user", content: "Fix the pagination race across the users module." }],
+    workspace_id: PROJECT,
+    acceptance_profile_id: "unit",
+    budget: { max_cost_usd: "5.000000", mode: "tracked" },
+    deadline_ms: 900_000,
+    ...overrides,
+  } as Partial<RunRequest>)
+}
+
+function delegateInput(
+  capabilities: {
+    sandboxTier?: "microvm" | "container" | "os" | null
+    available?: boolean
+    approved?: string[]
+    reason?: string | null
+  } = {},
+  overrides: Partial<RunRouteInput> = {}
+): RunRouteInput {
+  return input({
+    request: delegateRequest(),
+    executableModes: WITH_DELEGATE,
+    delegateCapabilities: {
+      sandboxTier: async () => ("sandboxTier" in capabilities ? capabilities.sandboxTier! : "os"),
+      acceptanceProfiles: async () => ({
+        available: capabilities.available ?? true,
+        approvedProfileIds: capabilities.approved ?? ["unit"],
+        reason: capabilities.reason ?? null,
+      }),
+    },
+    ...overrides,
+  })
+}
+
+describe("routeRunRequest for delegate", () => {
+  it("routes to the delegate action and carries the project, its checkout and the profile", async () => {
+    const { host } = makeHost()
+    const route = await routeRunRequest(host, delegateInput())
+    expect(route.kind).toBe("selected")
+    if (route.kind !== "selected") return
+    expect(route.mode).toBe("delegate")
+    expect(route.actionId).toBe("delegate_code")
+    expect(route.acceptanceProfile).toBe("code_fixture")
+    expect(route.roles).toMatchObject({ lead: expect.any(String), worker: expect.any(String) })
+    expect(route.projectId).toBe(PROJECT)
+    expect(route.acceptanceProfileId).toBe("unit")
+  })
+
+  it("refuses with SANDBOX_UNAVAILABLE when nothing here can confine generated code", async () => {
+    const { host } = makeHost()
+    const route = await routeRunRequest(host, delegateInput({ sandboxTier: null }))
+    expect(route.kind).toBe("refused")
+    if (route.kind !== "refused") return
+    expect(route.reasons).toEqual(
+      expect.arrayContaining(["delegate_code:SANDBOX_UNAVAILABLE", "delegate:no_sandbox_tier"])
+    )
+  })
+
+  it("refuses with ACCEPTANCE_PROFILE_MISSING when the project's command is not approved", async () => {
+    const { host } = makeHost()
+    const route = await routeRunRequest(
+      host,
+      delegateInput({ available: false, approved: [], reason: "approval_pending" })
+    )
+    expect(route.kind).toBe("refused")
+    if (route.kind !== "refused") return
+    expect(route.reasons).toEqual(
+      expect.arrayContaining([
+        "delegate_code:ACCEPTANCE_PROFILE_MISSING",
+        "delegate:approval_pending",
+      ])
+    )
+  })
+
+  it("never probes the device for a request that cannot reach delegate", async () => {
+    const { host } = makeHost()
+    const sandboxTier = jest.fn(async () => "os" as const)
+    const route = await routeRunRequest(host, input({ delegateCapabilities: { sandboxTier } }))
+    expect(route.kind).toBe("selected")
+    expect(sandboxTier).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the project's only approved profile when the request named an unapproved one", async () => {
+    const { host } = makeHost()
+    const route = await routeRunRequest(
+      host,
+      delegateInput({ approved: ["e2e"] }, { request: delegateRequest() })
+    )
+    expect(route.kind).toBe("selected")
+    if (route.kind !== "selected") return
+    expect(route.acceptanceProfileId).toBe("e2e")
+  })
+
+  it("carries no project, checkout or profile on a route that is not delegate", async () => {
+    const { host } = makeHost()
+    const route = await routeRunRequest(host, input())
+    expect(route.kind).toBe("selected")
+    if (route.kind !== "selected") return
+    expect(route.workspaceRoot).toBeNull()
+    expect(route.acceptanceProfileId).toBeNull()
+  })
+})
+
+describe("routeRunRequest when no alias resolves at all", () => {
+  it("refuses with ROUTE_NO_SOLUTION and its reasons, instead of throwing a config error", async () => {
+    // Nothing is configured: every alias plan raises `RoutingNoCandidatesError`,
+    // so the compiled policy would have zero actions — which the compiler
+    // rejects. That used to escape as a 500; the contract calls it 422.
+    const { host } = makeHost({ aliases: {} })
+    const route = await routeRunRequest(host, input())
+    expect(route.kind).toBe("refused")
+    if (route.kind !== "refused") return
+    expect(route.code).toBe("ROUTE_NO_SOLUTION")
+    expect(route.reasons).toEqual(
+      expect.arrayContaining([
+        "NO_CANDIDATES:alias:fast",
+        expect.stringContaining("CONFIG_INVALID:"),
+      ])
+    )
+    expect(route.decision).toBeNull()
   })
 })

@@ -128,6 +128,14 @@ export interface AcquireWorkspaceBundle {
    * the overwhelmingly common case.
    */
   provisioning?: WorkspaceProvisioning
+  /**
+   * Caller-chosen name for the created worktree's branch. Absent leaves the
+   * managed worktree on a detached head with a host-generated identity
+   * (ADR-0111); present materializes the worktree onto a branch of this name
+   * for every Git root in the bundle. Rejected when the bundle has no Git
+   * root — a Shadow workspace has no branch to name.
+   */
+  requestedName?: string
 }
 
 export interface WorkspaceBundle {

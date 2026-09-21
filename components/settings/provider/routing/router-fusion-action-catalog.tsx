@@ -8,8 +8,15 @@
 //
 // Nothing here can save a catalog that would not compile: every edit is checked
 // by the package's own validators first, and a rejected edit is explained
-// instead of saved. Delegate actions are DORMANT until a later release (a
-// sandbox and acceptance checks): shown, labelled, and not editable.
+// instead of saved.
+//
+// Every execution mode this build offers — direct, cascade, panel and, since
+// B4, delegate — is editable here; delegate's sandbox and acceptance checks
+// landed with it, so it is no longer labelled "later release". The dormancy
+// mechanism below stays for the next mode or verifier profile a release
+// declares before it wires it: an action whose mode is not in
+// `EDITABLE_ACTION_MODES` is shown, labelled and not editable, and one whose
+// verifier profile its mode cannot run is marked "not chosen" (Rule 7).
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -529,8 +536,11 @@ export function RouterFusionActionCatalog({
                       ) : null}
                     </div>
                     <p className="text-[11px] text-muted-foreground">
+                      {/* The generic dormancy sentence, not delegate's own:
+                          delegate is wired since B4, and the next mode this
+                          branch describes will not be it. */}
                       {dormant
-                        ? t("delegateDormant")
+                        ? tSettings("laterReleaseDesc")
                         : Object.entries(action.roles)
                             .map(
                               ([role, alias]) =>

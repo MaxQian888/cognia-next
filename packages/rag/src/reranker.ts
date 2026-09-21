@@ -10,6 +10,11 @@
 
 import type { LanguageModel } from "ai"
 import { cosineSimilarity } from "@cognia/provider-embedding/embedding"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import { getRAGLogger, proxyFetch } from "./runtime-adapters"
 
 const log = getRAGLogger()
@@ -32,6 +37,11 @@ export interface RerankResult {
 
 export interface RerankConfig {
   model?: LanguageModel
+  /**
+   * Generation seam for the LLM rerank call (ADR-0188 D27). A host passes the
+   * ledgered seam when its surface is on; absent, the model is called directly.
+   */
+  generate?: GenerationSeam
   topN?: number
   batchSize?: number
   cohereApiKey?: string
@@ -51,9 +61,11 @@ export async function rerankWithLLM(
   options: {
     topN?: number
     includeExplanation?: boolean
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<RerankResult[]> {
-  const { topN = 5, includeExplanation = false } = options
+  const { topN = 5, includeExplanation = false, generate } = options
 
   if (documents.length === 0) return []
 
@@ -83,14 +95,20 @@ ${documents.map((doc, i) => `[${i}] ID: ${doc.id} | ${doc.content.slice(0, 300)}
 Respond with only a JSON array like: [{"id": "doc1", "score": 8}, {"id": "doc2", "score": 5}]`
 
   try {
-    const result = await generateText({
-      model,
-      prompt: scoringPrompt,
-      temperature: 0.1,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.rerank", modelId: modelIdOf(model), prompt: scoringPrompt, temperature: 0.1 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt: scoringPrompt,
+          temperature: 0.1,
+          ...overrides,
+        })
+    )
 
     // Parse the JSON response
-    const jsonMatch = result.text.match(/\[[\s\S]*\]/)
+    const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
       log.warn("Failed to parse reranking response, returning original order")
       return documents.map((doc) => ({
@@ -375,6 +393,7 @@ export async function rerank(
     // Use LLM for reranking
     results = await rerankWithLLM(query, documents, config.model, {
       topN: topN * 2,
+      ...(config.generate ? { generate: config.generate } : {}),
     })
   } else {
     // Use heuristic reranking

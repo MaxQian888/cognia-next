@@ -18,6 +18,8 @@ import Dexie, { type Table } from "dexie"
 import { fusionDatabaseName } from "../gate/database-name"
 import { RouterFusionInfrastructureError, toInfrastructureFault } from "../gate/faults"
 import type {
+  DelegateStepRow,
+  FusionAcceptanceApprovalRow,
   FusionAccountRow,
   FusionApiSessionRow,
   FusionArtifactRow,
@@ -27,11 +29,15 @@ import type {
   FusionIdempotencyRow,
   FusionLedgerRow,
   FusionOutboxRow,
+  FusionPatchSetRow,
+  FusionPredictorManifestRow,
   FusionReservationRow,
   FusionRouteDecisionRow,
+  FusionRoutingSampleRow,
   FusionRunEventRow,
   FusionRunRow,
   FusionSessionLockRow,
+  FusionShadowDecisionRow,
   FusionToolOperationRow,
 } from "./types"
 
@@ -42,10 +48,23 @@ export { FUSION_DB_SUFFIX, fusionDatabaseName, isFusionDatabaseName } from "../g
  * API, and an `actorKeyId` index on `fusionRuns` so a gateway key sees only its
  * own runs. v3 (B3) adds `fusionApiSessions`, the Run API's UUID for a
  * conversation, and `fusionToolOperations`, the receipts of the read-only tools
- * a panel may use. Every earlier store keeps its exact schema string, so an
- * existing database upgrades without touching a row.
+ * a panel may use. v4 (B4) adds the three stores delegate needs:
+ * `fusionAcceptanceApprovals` (what a person allowed, bound to a digest),
+ * `fusionPatchSets` (the change a run produced, indexed by base revision) and
+ * `fusionDelegateSteps` (the durable step journal a resumed run replays from,
+ * REC-06). Every earlier store keeps its exact schema string, so an existing
+ * database upgrades without touching a row.
+ *
+ * v5 (B6) adds the three stores the routing experiment needs:
+ * `fusionRoutingSamples` (one routed decision with its independent acceptance
+ * label, its actual cost and the propensity it was chosen with),
+ * `fusionPredictorManifests` (sealed learned-router manifests, with exactly one
+ * active published row so promotion and rollback are a pointer move) and
+ * `fusionShadowDecisions` (what the learned router WOULD have chosen, recorded
+ * beside the rules decision and never acted on). Samples carry numbers only —
+ * never prompt or answer text — so the training set is safe to export.
  */
-export const FUSION_DB_SCHEMA_VERSION = 3
+export const FUSION_DB_SCHEMA_VERSION = 5
 
 export const FUSION_SCHEMA = {
   fusionAccount: "&id",
@@ -63,6 +82,12 @@ export const FUSION_SCHEMA = {
   fusionFeedback: "&feedbackId, runId, createdAt",
   fusionApiSessions: "&apiSessionId, sessionId, actorKeyId",
   fusionToolOperations: "&operationId, runId, [runId+logicalStepId], createdAt",
+  fusionAcceptanceApprovals: "&id, runId, [runId+status], [runId+requestDigest], createdAt",
+  fusionPatchSets: "&patchSetId, runId, baseRevision, patchSha256, expiresAt",
+  fusionDelegateSteps: "&[runId+stepId], runId, [runId+state], kind, createdAt",
+  fusionRoutingSamples: "&sampleId, runId, groupId, actionHash, decidedAt, expiresAt",
+  fusionPredictorManifests: "&manifestSha256, kind, active, createdAt",
+  fusionShadowDecisions: "&shadowId, sampleId, manifestSha256, createdAt, expiresAt",
 } as const
 
 export const FUSION_TABLE_NAMES = Object.keys(FUSION_SCHEMA) as Array<keyof typeof FUSION_SCHEMA>
@@ -83,6 +108,12 @@ export class FusionDB extends Dexie {
   fusionFeedback!: Table<FusionFeedbackRow, string>
   fusionApiSessions!: Table<FusionApiSessionRow, string>
   fusionToolOperations!: Table<FusionToolOperationRow, string>
+  fusionAcceptanceApprovals!: Table<FusionAcceptanceApprovalRow, string>
+  fusionPatchSets!: Table<FusionPatchSetRow, string>
+  fusionDelegateSteps!: Table<DelegateStepRow, [string, string]>
+  fusionRoutingSamples!: Table<FusionRoutingSampleRow, string>
+  fusionPredictorManifests!: Table<FusionPredictorManifestRow, string>
+  fusionShadowDecisions!: Table<FusionShadowDecisionRow, string>
 
   constructor(name: string) {
     super(name)

@@ -92,10 +92,23 @@ export interface RunApiError {
 export type RunApiResult<T> = { ok: true; value: T } | { ok: false; error: RunApiError }
 
 /**
- * The modes this build executes. Delegate needs a workspace, a sandbox and an
- * approval step (B4); until then it is refused, never downgraded (D38).
+ * The modes this build executes. B4 added `delegate`, which needs a workspace,
+ * a sandbox tier and an approved acceptance profile — all three are asked per
+ * request (`routing/run-route.ts`), so a delegate request the device cannot
+ * serve is refused with the router's own reasons rather than downgraded (D38).
+ *
+ * Delegate is reachable ONLY here, through `/v1/runs`. The `cognia/*` virtual
+ * models keep their `422`: a chat-completions caller has no way to name a
+ * workspace or answer an approval, so a mode that needs both has no meaning on
+ * that surface (`api/chat-compat.ts` passes this list, and the Rust
+ * `virtual_models.rs` refuses the name outright).
  */
-export const EXECUTABLE_MODES: readonly ExecutionMode[] = ["direct", "cascade", "panel"]
+export const EXECUTABLE_MODES: readonly ExecutionMode[] = ["direct", "cascade", "panel", "delegate"]
+
+/** What the compat lane executes: delegate is Run API only (D13). */
+export const COMPAT_EXECUTABLE_MODES: readonly ExecutionMode[] = EXECUTABLE_MODES.filter(
+  (mode) => mode !== "delegate"
+)
 
 /** What `POST /v1/runs` answers, plus whether an Idempotency-Key replayed it (a header in HTTP). */
 export interface RunCreated {
@@ -125,9 +138,31 @@ export interface RunApiDeps {
   /** Start executing a created run. It answers 202, so this is not awaited. */
   startRun: (runId: string) => void
   session: SessionPort
-  policy: () => RunRequestPolicy
+  /**
+   * The account's limits, for the request the caller sent.
+   *
+   * It takes the request's workspace because the delegate rules
+   * (`WORKSPACE_REQUIRED`, `ACCEPTANCE_PROFILE_REQUIRED`) are answers about
+   * ONE project — is this checkout trusted, and is its acceptance command
+   * approved — and asking them means reading that project. It may answer
+   * asynchronously for the same reason, and a request that names no workspace
+   * never pays for the read.
+   */
+  policy: (input?: RunPolicyInput) => RunRequestPolicy | Promise<RunRequestPolicy>
   now?: () => number
   newId?: () => string
+}
+
+export interface RunPolicyInput {
+  /** `RunRequest.workspace_id`, read from the raw body before it is validated. */
+  workspaceId?: string | null
+}
+
+/** The workspace a raw request names, if it names one at all. */
+export function peekWorkspaceId(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) return null
+  const value = (body as { workspace_id?: unknown }).workspace_id
+  return typeof value === "string" && value.length > 0 ? value : null
 }
 
 export interface SessionPort {
@@ -300,6 +335,12 @@ export interface AcceptRunInput {
   body: unknown
   endpoint: string
   idempotencyKey?: string
+  /**
+   * The modes this ENTRY POINT executes. `/v1/runs` gets them all; the compat
+   * lane passes {@link COMPAT_EXECUTABLE_MODES}, because a chat-completions
+   * caller cannot name a workspace or answer an approval (D13).
+   */
+  executableModes?: readonly ExecutionMode[]
 }
 
 /**
@@ -311,16 +352,17 @@ export async function acceptRun(
   deps: RunApiDeps,
   input: AcceptRunInput
 ): Promise<RunApiResult<RunCreated>> {
+  const executable = input.executableModes ?? EXECUTABLE_MODES
   const requestedModes: ExecutionMode[] =
     input.request.mode === "auto" ? [...input.request.allowed_modes] : [input.request.mode]
-  if (!requestedModes.some((mode) => EXECUTABLE_MODES.includes(mode))) {
+  if (!requestedModes.some((mode) => executable.includes(mode))) {
     return {
       ok: false,
       error: error(
         422,
         "MODE_NOT_AVAILABLE",
-        `this build executes ${EXECUTABLE_MODES.join(", ")}; delegate is not available yet`,
-        { requested: requestedModes, available: EXECUTABLE_MODES }
+        `this entry point executes ${executable.join(", ")}`,
+        { requested: requestedModes, available: executable }
       ),
     }
   }
@@ -430,7 +472,10 @@ export async function createRunFromApi(
 ): Promise<RunApiResult<RunCreated>> {
   const scopeError = requireScope(input.actor, "runs:create")
   if (scopeError) return { ok: false, error: scopeError }
-  const parsed = parseRunRequest(input.body, deps.policy())
+  const parsed = parseRunRequest(
+    input.body,
+    await deps.policy({ workspaceId: peekWorkspaceId(input.body) })
+  )
   if (!parsed.ok) return { ok: false, error: issuesToError(parsed.issues) }
   return acceptRun(deps, {
     actor: input.actor,
@@ -672,6 +717,11 @@ const RESUME_REFUSAL: Record<string, RunApiError> = {
   RUN_VERSION_CONFLICT: error(409, "RUN_VERSION_CONFLICT", "the run moved on since you read it"),
   DEADLINE_EXCEEDED: error(409, "DEADLINE_EXCEEDED", "the run's deadline has passed"),
   RUN_NOT_FOUND: NOT_FOUND,
+  APPROVAL_MISMATCH: error(
+    409,
+    "APPROVAL_MISMATCH",
+    "this decision does not name the request the run is waiting on"
+  ),
 }
 
 /**
@@ -699,9 +749,41 @@ export async function resumeRunFromApi(
   const run = await readRunForActor(store, input.runId, input.actor)
   if (!run) return { ok: false, error: NOT_FOUND }
   if (resume.kind === "approval") {
-    // Approvals belong to delegate work, which this build does not run: no run
-    // here ever waits for one, so there is nothing a decision could release.
-    return { ok: false, error: RESUME_REFUSAL.RUN_NOT_WAITING }
+    // API-08. The decision is bound to the request digest: `approval_id` is
+    // derived from it, so answering with another id — different arguments, or
+    // the same arguments against a workspace that has since moved — is
+    // refused and the standing request stays pending and undecided.
+    const { decideFusionApproval } = await import("../runtime/delegate-approvals")
+    const decided = await decideFusionApproval(store, {
+      runId: run.runId,
+      approvalId: resume.approval_id ?? null,
+      decision: resume.decision === "reject" ? "deny" : "approve",
+      expectedVersion: resume.expected_run_version,
+      now: clock(deps).now,
+    })
+    if (!decided.ok) {
+      if (decided.code === "APPROVAL_MISMATCH") {
+        return {
+          ok: false,
+          error: error(
+            409,
+            "APPROVAL_MISMATCH",
+            "this decision does not name the request the run is waiting on",
+            {
+              ...(decided.pendingApprovalId ? { approval_id: decided.pendingApprovalId } : {}),
+              ...(decided.version !== undefined ? { version: decided.version } : {}),
+            }
+          ),
+        }
+      }
+      return { ok: false, error: RESUME_REFUSAL[decided.code] ?? NOT_FOUND }
+    }
+    // A denial resumes too: the graph turns it into its own refusal
+    // (`SCOPE_EXPANSION_DENIED`), rather than something outside the graph
+    // sealing the run.
+    deps.startRun(run.runId)
+    const resumedRun = (await store.getRun(run.runId)) ?? run
+    return { ok: true, value: (await fullSnapshot(deps, store, resumedRun, input.actor)).snapshot }
   }
   let inputArtifactId: string | undefined
   if (resume.input_messages) {

@@ -42,6 +42,15 @@ export const ROUTER_FUSION_EVENT_HISTORY_DAYS = 7
  * replays its run rather than paying for a second one.
  */
 export const ROUTER_FUSION_IDEMPOTENCY_DAYS = 7
+/**
+ * Days a routing sample and the shadow decisions annotating it are kept
+ * (ADR-0188 B6). Deliberately longer than the run trail: a sample is the
+ * derived, text-free record a learned router is trained from, and a window as
+ * short as the trail's would leave the router with a month of history and no
+ * way to see a seasonal effect. It is numbers only — feature vector, action,
+ * cost, acceptance — so keeping it costs a row, not content.
+ */
+export const ROUTER_FUSION_ROUTING_SAMPLE_DAYS = 180
 
 const OWNER = "router-fusion"
 
@@ -209,6 +218,38 @@ export const ROUTER_FUSION_TABLE_CATALOG: readonly DataTableCatalogEntry[] = [
         "Tool receipts go with their run: reaped by lib/router-fusion/db/retention.ts together with the run trail; the text the model saw is an artifact with its own content window.",
     },
   }),
+  entry("fusionAcceptanceApprovals", {
+    role: "authoritative",
+    expectedScale: "medium",
+    retentionPolicy: {
+      mode: "permanent",
+      enforcement: "explicit-delete",
+      reason:
+        "What a person allowed one delegate run to do, bound to the request digest (API-08). Kept while the project exists — it is the record of a decision, and a reaped approval would make a resumed run ask again for something already answered. Deleted with the database, which goes with the account or runtime target.",
+    },
+  }),
+  entry("fusionPatchSets", {
+    role: "authoritative",
+    expectedScale: "medium",
+    retentionPolicy: {
+      mode: "ttl",
+      days: ROUTER_FUSION_ARTIFACT_CONTENT_DAYS,
+      enforcement: "domain",
+      reason:
+        "The index of a delegate run's change. It is model-derived content like the patch artifact it points at, so it carries the same expiresAt and lib/router-fusion/db/retention.ts deletes it on the artifact window once its run is no longer live.",
+    },
+  }),
+  entry("fusionDelegateSteps", {
+    role: "authoritative",
+    sensitivity: "confidential",
+    contentProtection: "encrypted-content",
+    expectedScale: "large",
+    retentionPolicy: {
+      ...RUN_TRAIL,
+      reason:
+        "The journal a resumed delegate run replays from (REC-06): reaped by lib/router-fusion/db/retention.ts in the same transaction as its run, never before it. Predeceasing the run would let a resume re-run an acceptance command or a workspace apply; outliving it would keep workspace-derived receipts with nothing to replay.",
+    },
+  }),
   entry("fusionFeedback", {
     role: "audit",
     expectedScale: "medium",
@@ -216,6 +257,38 @@ export const ROUTER_FUSION_TABLE_CATALOG: readonly DataTableCatalogEntry[] = [
       ...RUN_TRAIL,
       reason:
         "A caller's verdict is part of its run's trail and is reaped with it; the comment text is an artifact and expires on the artifact window.",
+    },
+  }),
+  entry("fusionRoutingSamples", {
+    role: "projection",
+    expectedScale: "large",
+    retentionPolicy: {
+      mode: "ttl",
+      days: ROUTER_FUSION_ROUTING_SAMPLE_DAYS,
+      enforcement: "domain",
+      reason:
+        "Each row carries its own expiresAt on the routing-sample window; lib/router-fusion/db/retention.ts deletes it once passed. Derived from the run, the route decision and the ledger, so a reaped sample is rebuilt by collecting again while its run is still there — after that it is gone, which is why the window outlives the run trail.",
+    },
+  }),
+  entry("fusionPredictorManifests", {
+    role: "authoritative",
+    expectedScale: "small",
+    retentionPolicy: {
+      mode: "permanent",
+      enforcement: "explicit-delete",
+      reason:
+        "The learned router's registry: the active published manifest and the ones it can be rolled back to. Reaping it on a window would take away the rollback target of a promotion that is still live, so lib/router-fusion/eval/routing-store.ts caps the history itself (the active row, its rollback predecessor and the most recent manifests) and deletes what falls out at seal time.",
+    },
+  }),
+  entry("fusionShadowDecisions", {
+    role: "audit",
+    expectedScale: "large",
+    retentionPolicy: {
+      mode: "ttl",
+      days: ROUTER_FUSION_ROUTING_SAMPLE_DAYS,
+      enforcement: "domain",
+      reason:
+        "What a candidate predictor would have chosen for a sample, on the same window as the sample it annotates: a shadow decision whose sample is gone can no longer be compared with anything.",
     },
   }),
 ]

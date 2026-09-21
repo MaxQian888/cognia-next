@@ -283,6 +283,33 @@ describe("createRoutedRun", () => {
     })
   })
 
+  it("records a companion run on the companion surface, so its live checks read that switch", async () => {
+    await createRoutedRun(input(), APP, { newId: ids(), lane: "companion" })
+    expect(await store.getRun(RUN_ID)).toMatchObject({
+      surface: "companion",
+      origin: "companion",
+      actorKeyId: "key-a",
+    })
+  })
+
+  it("lets a follow-up write only its answer, so its context is never appended again", async () => {
+    await createRoutedRun(input(), APP, {
+      newId: ids(),
+      lane: "companion",
+      transcript: "answer-only",
+    })
+    expect(await store.getRun(RUN_ID)).toMatchObject({
+      surface: "companion",
+      writesSessionAnswer: true,
+    })
+    expect((await store.getRun(RUN_ID))?.writesSessionTranscript).toBeUndefined()
+    // The gateway lane is unchanged: it appends its input and its answer.
+    freshStore()
+    await createRoutedRun(input(), APP, { newId: ids() })
+    expect(await store.getRun(RUN_ID)).toMatchObject({ writesSessionTranscript: true })
+    expect((await store.getRun(RUN_ID))?.writesSessionAnswer).toBeUndefined()
+  })
+
   it("hands the route everything it decides from", async () => {
     const schema = { type: "object" }
     await createRoutedRun(
@@ -375,6 +402,14 @@ describe("runApiDeps", () => {
   it("validates against the snapshot it was given, and says so when there is none", () => {
     expect(runApiDeps(APP).policy().trackedBudgetEnabled).toBe(true)
     expect(() => runApiDeps(null).policy()).toThrow("no settings")
+  })
+
+  it("creates its runs on the lane it was built for", async () => {
+    await expect(
+      runApiDeps(APP, { lane: "companion" }).createRun(input() as never)
+    ).resolves.toMatchObject({ ok: true })
+    const runs = await store.db.fusionRuns.toArray()
+    expect(runs.map((run) => [run.surface, run.origin])).toEqual([["companion", "companion"]])
   })
 
   it("refuses to create a run with no settings to route it by", async () => {

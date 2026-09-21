@@ -11,6 +11,9 @@ import {
 import { fusionContentCodec } from "./content-codec"
 import { FusionDB } from "./fusion-db"
 import {
+  CALL_RESULT_WITH_TOOLS_MEDIA_TYPE,
+  decodeCommittedCallResult,
+  encodeCommittedCallResult,
   FusionLedgerStore,
   ledgerWritesUsageRows,
   persistableText,
@@ -487,6 +490,73 @@ describe("FusionLedgerStore (fake-indexeddb)", () => {
       },
     })
     expect(await db.fusionCallAttempts.count()).toBe(1)
+  })
+
+  it("[ACC:REC-03] replays a tool round's requests, not just its text", async () => {
+    const { store, db } = harness()
+    const token = await running(store, "run-1")
+    const attemptId = await dispatch(store, "run-1", token, 300_000, "panel:member:panel_a:1")
+    const toolCalls = [
+      { id: "call_1", name: "web_fetch", arguments: { url: "https://example.com/tariffs" } },
+    ]
+    await store.settleCall(attemptId, {
+      status: "succeeded",
+      usage: usageCosting(1_000, 100),
+      semantics: SEMANTICS,
+      providerRequestId: "req-tools",
+      result: { text: "", providerRequestId: "req-tools", finishReason: "tool_calls", toolCalls },
+    })
+    const again = await store.prepareCall("run-1", token, {
+      logicalStepId: "panel:member:panel_a:1",
+      role: "panel_a",
+      deploymentId: "fake-baseline",
+      reserveMicrousd: 300_000,
+      requestHash: "hash",
+    })
+    // Without the requests a resumed panel sees a tool-call step with no calls
+    // and throws the candidate away.
+    expect(again).toEqual({
+      kind: "replay",
+      result: {
+        text: "",
+        providerRequestId: "req-tools",
+        finishReason: "tool_calls",
+        toolCalls,
+      },
+    })
+    // The requests live inside the committed result's own artifact: no new
+    // table, no new column, nothing in the journal.
+    const artifact = await db.fusionArtifacts
+      .where("runId")
+      .equals("run-1")
+      .filter((row) => row.namespace === `call:${attemptId}`)
+      .first()
+    expect(artifact?.mediaType).toBe(CALL_RESULT_WITH_TOOLS_MEDIA_TYPE)
+    expect(await db.fusionCallAttempts.count()).toBe(1)
+  })
+
+  it("keeps reading a committed result stored before tool calls were part of it", async () => {
+    const { store } = harness()
+    const token = await running(store, "run-1")
+    const attemptId = await dispatch(store, "run-1", token, 300_000, "solver:1")
+    await store.settleCall(attemptId, {
+      status: "succeeded",
+      usage: usageCosting(1_000, 1_000),
+      semantics: SEMANTICS,
+      providerRequestId: "req-plain",
+      result: { text: "plain text", providerRequestId: "req-plain", finishReason: "stop" },
+    })
+    const again = await store.prepareCall("run-1", token, {
+      logicalStepId: "solver:1",
+      role: "solver",
+      deploymentId: "fake-baseline",
+      reserveMicrousd: 300_000,
+      requestHash: "hash",
+    })
+    expect(again).toEqual({
+      kind: "replay",
+      result: { text: "plain text", providerRequestId: "req-plain", finishReason: "stop" },
+    })
   })
 
   it("[ACC:REC-02] fences a stale worker but still books the bill it observed", async () => {
@@ -1044,5 +1114,39 @@ describe("FusionLedgerStore (fake-indexeddb)", () => {
       const kinds = (await db.fusionOutbox.toArray()).map((row) => row.kind)
       expect(kinds).not.toContain("execution_run_projection")
     })
+  })
+})
+
+describe("committed call results", () => {
+  it("stores bare text when nothing was requested, and an envelope when something was", () => {
+    expect(
+      encodeCommittedCallResult({ text: "hi", providerRequestId: null, finishReason: "stop" })
+    ).toEqual({ content: "hi", mediaType: "text/plain" })
+    const withTools = encodeCommittedCallResult({
+      text: "",
+      providerRequestId: null,
+      finishReason: "tool_calls",
+      toolCalls: [{ id: "c1", name: "web_fetch", arguments: { url: "u" } }],
+    })
+    expect(withTools.mediaType).toBe(CALL_RESULT_WITH_TOOLS_MEDIA_TYPE)
+    expect(decodeCommittedCallResult(withTools.content, withTools.mediaType)).toEqual({
+      text: "",
+      toolCalls: [{ id: "c1", name: "web_fetch", arguments: { url: "u" } }],
+    })
+  })
+
+  it("reads a stored result that is not an envelope, and refuses to invent one", () => {
+    expect(decodeCommittedCallResult("plain", "text/plain")).toEqual({ text: "plain" })
+    // A corrupted envelope is still a committed step: it replays with no
+    // requests rather than being sent a second time.
+    expect(decodeCommittedCallResult("{oops", CALL_RESULT_WITH_TOOLS_MEDIA_TYPE)).toEqual({
+      text: "",
+    })
+    expect(
+      decodeCommittedCallResult(
+        JSON.stringify({ text: "t", tool_calls: [{ id: 1, name: "x" }] }),
+        CALL_RESULT_WITH_TOOLS_MEDIA_TYPE
+      )
+    ).toEqual({ text: "t" })
   })
 })

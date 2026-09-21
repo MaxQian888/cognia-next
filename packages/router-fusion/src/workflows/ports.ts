@@ -82,6 +82,13 @@ export interface CommittedCallResult {
   text: string
   providerRequestId: string | null
   finishReason: "stop" | "length" | "tool_calls"
+  /**
+   * What the model asked to run, when this call ended on a tool request. It is
+   * part of the committed result because a replay has to hand the workflow the
+   * same requests the first attempt got: without them a resumed run sees a
+   * tool-call step with no calls, and the step's work is lost (REC-03).
+   */
+  toolCalls?: ToolIntent[]
 }
 
 export type PrepareOutcome =

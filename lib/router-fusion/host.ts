@@ -98,6 +98,13 @@ export {
 } from "./runtime/orchestrator-host"
 export { createChatRouteHost } from "./chat/chat-route-host"
 export {
+  runAgentsWorkflowsFusion,
+  type AgentFusionOrigin,
+  type AgentFusionRunInput,
+  type AgentFusionRunOutcome,
+  type AgentFusionRunUsage,
+} from "./agents/agent-fusion-run"
+export {
   cancelChatFusionTurn,
   chatAutoConsidersFusion,
   selectChatFusionRun,

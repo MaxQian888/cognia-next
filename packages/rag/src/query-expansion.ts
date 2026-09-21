@@ -9,12 +9,23 @@
  */
 
 import type { LanguageModel } from "ai"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import { getRAGLogger } from "./runtime-adapters"
 
 const log = getRAGLogger()
 
 export interface QueryExpansionConfig {
   model?: LanguageModel
+  /**
+   * Generation seam for every LLM call the expansion makes (ADR-0188 D27). A
+   * host passes the ledgered seam (`lib/ai/ledgered-generation-seam.ts`) when
+   * its surface is on; absent, the model is called directly, exactly as before.
+   */
+  generate?: GenerationSeam
   maxVariants?: number
   includeSynonyms?: boolean
   includeHypotheticalAnswer?: boolean
@@ -38,9 +49,11 @@ export async function generateQueryVariants(
   options: {
     count?: number
     context?: string
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<string[]> {
-  const { count = 3, context } = options
+  const { count = 3, context, generate } = options
   const { generateText } = await import("ai")
 
   const contextSection = context ? `\nContext about the knowledge base: ${context}\n` : ""
@@ -55,13 +68,19 @@ Original query: "${query}"
 Return ONLY a JSON array of strings with the alternative queries. Example: ["query1", "query2", "query3"]`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.7,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.query-variants", modelId: modelIdOf(model), prompt, temperature: 0.7 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.7,
+          ...overrides,
+        })
+    )
 
-    const jsonMatch = result.text.match(/\[[\s\S]*\]/)
+    const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (jsonMatch) {
       const variants = JSON.parse(jsonMatch[0]) as string[]
       return variants.filter((v) => typeof v === "string" && v.length > 0)
@@ -83,9 +102,11 @@ export async function generateHypotheticalAnswer(
   options: {
     domain?: string
     maxLength?: number
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<string> {
-  const { domain, maxLength = 300 } = options
+  const { domain, maxLength = 300, generate } = options
   const { generateText } = await import("ai")
 
   const domainContext = domain ? `Domain: ${domain}\n` : ""
@@ -97,13 +118,19 @@ Question: "${query}"
 Write the hypothetical passage that answers this question:`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.3,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.hyde", modelId: modelIdOf(model), prompt, temperature: 0.3 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.3,
+          ...overrides,
+        })
+    )
 
-    return result.text.trim().slice(0, maxLength)
+    return text.trim().slice(0, maxLength)
   } catch (error) {
     log.warn("Failed to generate hypothetical answer", { error: String(error) })
     return ""
@@ -119,9 +146,11 @@ export async function rewriteQuery(
   options: {
     style?: "concise" | "detailed" | "technical" | "simple"
     context?: string
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<string> {
-  const { style = "concise", context } = options
+  const { style = "concise", context, generate } = options
   const { generateText } = await import("ai")
 
   const styleInstructions = {
@@ -141,13 +170,19 @@ Original: "${query}"
 Rewritten query (output ONLY the rewritten query, nothing else):`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.3,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.rewrite", modelId: modelIdOf(model), prompt, temperature: 0.3 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.3,
+          ...overrides,
+        })
+    )
 
-    return result.text.trim().replace(/^["']|["']$/g, "")
+    return text.trim().replace(/^["']|["']$/g, "")
   } catch (error) {
     log.warn("Failed to rewrite query", { error: String(error) })
     return query
@@ -384,10 +419,12 @@ export async function expandQuery(
 ): Promise<ExpandedQuery> {
   const {
     model,
+    generate,
     maxVariants = 3,
     includeSynonyms = true,
     includeHypotheticalAnswer = false,
   } = config
+  const seam = generate ? { generate } : {}
 
   const result: ExpandedQuery = {
     original: query,
@@ -405,16 +442,17 @@ export async function expandQuery(
   if (model) {
     const llmVariants = await generateQueryVariants(query, model, {
       count: maxVariants,
+      ...seam,
     })
     result.variants.push(...llmVariants)
 
     // Generate hypothetical answer for HyDE
     if (includeHypotheticalAnswer) {
-      result.hypotheticalAnswer = await generateHypotheticalAnswer(query, model)
+      result.hypotheticalAnswer = await generateHypotheticalAnswer(query, model, seam)
     }
 
     // Rewrite query
-    result.rewrittenQuery = await rewriteQuery(query, model)
+    result.rewrittenQuery = await rewriteQuery(query, model, seam)
   }
 
   // Deduplicate variants
@@ -426,7 +464,14 @@ export async function expandQuery(
 /**
  * Decompose complex query into sub-queries
  */
-export async function decomposeQuery(query: string, model: LanguageModel): Promise<string[]> {
+export async function decomposeQuery(
+  query: string,
+  model: LanguageModel,
+  options: {
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
+  } = {}
+): Promise<string[]> {
   const { generateText } = await import("ai")
 
   const prompt = `Decompose this complex question into simpler sub-questions that together would help answer the main question.
@@ -437,13 +482,19 @@ If the question is simple and doesn't need decomposition, return just the origin
 Return ONLY a JSON array of questions. Example: ["sub-question 1", "sub-question 2"]`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.3,
-    })
+    const text = await generateThroughSeam(
+      options.generate,
+      { stage: "rag.decompose", modelId: modelIdOf(model), prompt, temperature: 0.3 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.3,
+          ...overrides,
+        })
+    )
 
-    const jsonMatch = result.text.match(/\[[\s\S]*\]/)
+    const jsonMatch = text.match(/\[[\s\S]*\]/)
     if (jsonMatch) {
       const subQueries = JSON.parse(jsonMatch[0]) as string[]
       return subQueries.filter((q) => typeof q === "string" && q.length > 0)
@@ -458,7 +509,14 @@ Return ONLY a JSON array of questions. Example: ["sub-question 1", "sub-question
 /**
  * Generate step-back query for broader context
  */
-export async function generateStepBackQuery(query: string, model: LanguageModel): Promise<string> {
+export async function generateStepBackQuery(
+  query: string,
+  model: LanguageModel,
+  options: {
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
+  } = {}
+): Promise<string> {
   const { generateText } = await import("ai")
 
   const prompt = `Generate a more general "step-back" question that would provide useful background context for answering the specific question below.
@@ -470,13 +528,19 @@ The step-back question should ask about broader concepts, principles, or backgro
 Step-back question (output ONLY the question):`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.3,
-    })
+    const text = await generateThroughSeam(
+      options.generate,
+      { stage: "rag.step-back", modelId: modelIdOf(model), prompt, temperature: 0.3 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.3,
+          ...overrides,
+        })
+    )
 
-    return result.text.trim().replace(/^["']|["']$/g, "")
+    return text.trim().replace(/^["']|["']$/g, "")
   } catch (error) {
     log.warn("Failed to generate step-back query", { error: String(error) })
     return query

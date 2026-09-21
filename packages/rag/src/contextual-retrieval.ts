@@ -9,6 +9,11 @@
 
 import type { LanguageModel } from "ai"
 import type { DocumentChunk } from "@cognia/provider-embedding/chunking"
+import {
+  generateThroughSeam,
+  modelIdOf,
+  type GenerationSeam,
+} from "@cognia/provider-embedding/generation-seam"
 import { getRAGLogger } from "./runtime-adapters"
 
 const log = getRAGLogger()
@@ -22,6 +27,12 @@ export interface ContextualChunk extends DocumentChunk {
 
 export interface ContextGenerationConfig {
   model: LanguageModel
+  /**
+   * Generation seam for the context and summary calls (ADR-0188 D27). A host
+   * passes the ledgered seam when its surface is on; absent, the model is
+   * called directly, exactly as before.
+   */
+  generate?: GenerationSeam
   maxContextTokens?: number
   includeDocumentSummary?: boolean
   customPrompt?: string
@@ -185,13 +196,19 @@ export async function generateChunkContext(
     .replace("{CHUNK_CONTENT}", chunk.content)
 
   try {
-    const result = await generateText({
-      model: config.model,
-      prompt,
-      temperature: 0.1,
-    })
+    const text = await generateThroughSeam(
+      config.generate,
+      { stage: "rag.chunk-context", modelId: modelIdOf(config.model), prompt, temperature: 0.1 },
+      (overrides) =>
+        generateText({
+          model: config.model,
+          prompt,
+          temperature: 0.1,
+          ...overrides,
+        })
+    )
 
-    return result.text.trim()
+    return text.trim()
   } catch (error) {
     log.warn("Failed to generate context for chunk", { chunkId: chunk.id, error: String(error) })
     return ""
@@ -207,10 +224,12 @@ export async function generateDocumentSummary(
   options: {
     maxTokens?: number
     title?: string
+    /** Generation seam (ADR-0188 D27); absent, the model is called directly. */
+    generate?: GenerationSeam
   } = {}
 ): Promise<string> {
   const { generateText } = await import("ai")
-  const { maxTokens: _maxTokens = 200, title } = options
+  const { maxTokens: _maxTokens = 200, title, generate } = options
 
   const titlePrefix = title ? `Document: "${title}"\n\n` : ""
 
@@ -228,13 +247,19 @@ ${truncatedDoc}
 Summary:`
 
   try {
-    const result = await generateText({
-      model,
-      prompt,
-      temperature: 0.1,
-    })
+    const text = await generateThroughSeam(
+      generate,
+      { stage: "rag.document-summary", modelId: modelIdOf(model), prompt, temperature: 0.1 },
+      (overrides) =>
+        generateText({
+          model,
+          prompt,
+          temperature: 0.1,
+          ...overrides,
+        })
+    )
 
-    return result.text.trim()
+    return text.trim()
   } catch (error) {
     log.warn("Failed to generate document summary", { error: String(error) })
     return ""
@@ -257,7 +282,11 @@ export async function addContextToChunks(
   // Generate document summary if requested
   let documentSummary: string | undefined
   if (config.includeDocumentSummary) {
-    documentSummary = await generateDocumentSummary(documentContent, config.model)
+    documentSummary = await generateDocumentSummary(
+      documentContent,
+      config.model,
+      config.generate ? { generate: config.generate } : {}
+    )
   }
 
   // Process chunks in batches for better performance

@@ -103,6 +103,9 @@ struct BundleAcquiredRoot {
     record: WorkspaceRecord,
     source_root: PathBuf,
     execution_root: PathBuf,
+    /// Branch the worktree was created on (`-b <requested_name>`), so a
+    /// rollback removes it too — the worktree alone is not the whole artifact.
+    created_branch: Option<String>,
 }
 
 struct BorrowedExecution {
@@ -901,6 +904,8 @@ impl TaskWorkspaceService {
                     // The single-root task path carries no repository declaration:
                     // it is reached by callers that never read one.
                     None,
+                    // Pipeline runs never name their worktree.
+                    None,
                     &tracking_policy,
                 )
             };
@@ -921,6 +926,7 @@ impl TaskWorkspaceService {
                             &root,
                             &execution_root,
                             isolation_kind,
+                            None,
                             now,
                         );
                         return Err(error);
@@ -969,6 +975,7 @@ impl TaskWorkspaceService {
                         &root,
                         &execution_root,
                         isolation_kind,
+                        None,
                         now,
                     );
                 }
@@ -993,6 +1000,7 @@ impl TaskWorkspaceService {
                     &root,
                     &execution_root,
                     isolation_kind,
+                    None,
                     now,
                 );
             }
@@ -1008,6 +1016,7 @@ impl TaskWorkspaceService {
                     &root,
                     &execution_root,
                     isolation_kind,
+                    None,
                     now,
                 );
             }
@@ -1045,6 +1054,7 @@ impl TaskWorkspaceService {
                     &root,
                     &execution_root,
                     isolation_kind,
+                    None,
                     now,
                 );
             }
@@ -1969,11 +1979,23 @@ impl TaskWorkspaceService {
         if input.environment_kind == crate::WorkspaceEnvironmentKind::Imported {
             return Err("imported environments cannot be provisioned".into());
         }
+        let requested_name = input
+            .requested_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| validate_requested_worktree_name(name).map(|()| name.to_string()))
+            .transpose()?;
         let inspected = input
             .roots
             .iter()
             .map(inspect_bundle_root)
             .collect::<Result<Vec<_>, _>>()?;
+        if requested_name.is_some() && !inspected.iter().any(|root| root.git_common_dir.is_some()) {
+            return Err(
+                "a requested worktree name requires at least one Git root in the bundle".into(),
+            );
+        }
         let requests = inspected
             .iter()
             .map(|root| crate::RootRequest {
@@ -2062,13 +2084,17 @@ impl TaskWorkspaceService {
                         &blobs,
                         record.locked_by.as_deref(),
                         input.provisioning.as_ref(),
+                        requested_name.as_deref(),
                         &crate::ResourceTrackingPolicy::default(),
                     )
                 };
-                if let Err(error) = created {
-                    self.discard_managed_workspace(&record, now);
-                    return Err(error);
-                }
+                let (_isolation, requested_branch) = match created {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.discard_managed_workspace(&record, now);
+                        return Err(error);
+                    }
+                };
                 let record = match self.registry.transition(
                     &record.workspace_id,
                     record.owner_type,
@@ -2083,11 +2109,27 @@ impl TaskWorkspaceService {
                             source_root,
                             &execution_root,
                             root.isolation,
+                            requested_branch.as_deref(),
                             now,
                         );
                         return Err(error.to_string());
                     }
                 };
+                if let Some(branch) = requested_branch.as_deref() {
+                    if let Err(error) =
+                        self.record_workspace_branch(&record.workspace_id, branch, None)
+                    {
+                        self.rollback_managed_execution(
+                            Some(&record.workspace_id),
+                            source_root,
+                            &execution_root,
+                            root.isolation,
+                            Some(branch),
+                            now,
+                        );
+                        return Err(error);
+                    }
+                }
                 self.lifecycle.emit(
                     crate::lifecycle::WorktreeLifecycleKind::Created,
                     &record,
@@ -2098,6 +2140,7 @@ impl TaskWorkspaceService {
                     record,
                     source_root: source_root.to_path_buf(),
                     execution_root,
+                    created_branch: requested_branch,
                 })
             })();
             match provisioned {
@@ -2334,6 +2377,7 @@ impl TaskWorkspaceService {
                 &root.source_root,
                 &root.execution_root,
                 root.record.isolation_kind,
+                root.created_branch.as_deref(),
                 now,
             );
         }
@@ -2594,6 +2638,9 @@ impl TaskWorkspaceService {
                 // captured with. Re-provisioning here would apply a declaration the
                 // record was not created under.
                 None,
+                // Restore reproduces the recorded state; the name request only
+                // applies at first provisioning.
+                None,
                 &crate::ResourceTrackingPolicy::default(),
             )
         };
@@ -2769,16 +2816,25 @@ impl TaskWorkspaceService {
         }
     }
 
+    /// `created_branch` is the branch the worktree was created with, when the
+    /// caller named one — a `-b` worktree leaves the branch behind on removal,
+    /// and leaking it refuses the retry as a name collision.
     fn rollback_managed_execution(
         &self,
         workspace_id: Option<&str>,
         workspace_root: &Path,
         execution_root: &Path,
         isolation_kind: IsolationKind,
+        created_branch: Option<&str>,
         now: i64,
     ) {
         unlock_git_worktree(workspace_root, execution_root, isolation_kind);
-        cleanup_execution(workspace_root, execution_root, isolation_kind, None);
+        cleanup_execution(
+            workspace_root,
+            execution_root,
+            isolation_kind,
+            created_branch,
+        );
         if let Some(workspace_id) = workspace_id {
             if let Ok(Some(record)) = self.registry.get(workspace_id) {
                 self.discard_managed_workspace(&record, now);
@@ -4204,6 +4260,36 @@ fn clone_file(_source: &Path, _target: &Path) -> Result<(), ()> {
     Err(())
 }
 
+/// The name a caller asked the new worktree's branch to take. Mirrors the
+/// ruleset `cognia-git`'s `validate_branch_name` enforces — kept in step
+/// because both guard the same thing: a value interpolated into `git` argv
+/// must never parse as a flag, and a name Git would refuse should fail here
+/// with a clear message rather than mid-provisioning as a worktree-add error.
+fn validate_requested_worktree_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("requested worktree name is empty".into());
+    }
+    if name.starts_with('-') {
+        return Err(format!("worktree name may not start with '-': {name}"));
+    }
+    if name.chars().any(char::is_control)
+        || name.contains("..")
+        || name.contains(' ')
+        || name.contains('~')
+        || name.contains('^')
+        || name.contains(':')
+        || name.contains('?')
+        || name.contains('*')
+        || name.contains('[')
+        || name.contains('\\')
+        || name.ends_with('/')
+        || name.ends_with(".lock")
+    {
+        return Err(format!("not a valid worktree name: {name}"));
+    }
+    Ok(())
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "execution materialization requires each isolation input to remain explicit"
@@ -4216,6 +4302,7 @@ fn create_execution(
     blobs: &HashMap<String, Vec<u8>>,
     lock_reason: Option<&str>,
     provisioning: Option<&WorkspaceProvisioning>,
+    requested_name: Option<&str>,
     policy: &crate::ResourceTrackingPolicy,
 ) -> Result<(IsolationKind, Option<String>), String> {
     let _perf = cognia_instrument::guard("workspace.create_execution");
@@ -4228,19 +4315,22 @@ fn create_execution(
             fs::create_dir_all(parent)
                 .map_err(|error| format!("create {}: {error}", parent.display()))?;
         }
+        // A caller-named worktree takes `-b <name>` instead of `--detach`: the
+        // branch IS the user-facing name they asked for, so the ADR-0111
+        // stale-branch objection does not apply — the branch was the request,
+        // not a per-dispatch artifact.
+        let mut args: Vec<String> = vec!["worktree".into(), "add".into()];
+        match requested_name {
+            Some(name) => args.extend(["-b".into(), name.into()]),
+            None => args.push("--detach".into()),
+        }
+        args.extend(["--lock".into(), "--reason".into(), lock_reason.into()]);
+        args.push(execution_root.to_string_lossy().into_owned());
+        args.push(base_ref.clone());
         let output = Command::new("git")
             .args(["-C"])
             .arg(workspace_root)
-            .args([
-                "worktree",
-                "add",
-                "--detach",
-                "--lock",
-                "--reason",
-                lock_reason,
-            ])
-            .arg(execution_root)
-            .arg(&base_ref)
+            .args(&args)
             .output()
             .map_err(|error| format!("start git worktree add: {error}"))?;
         if !output.status.success() {
@@ -4265,7 +4355,7 @@ fn create_execution(
                 };
             if let Err(error) = result {
                 unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
-                cleanup_git_worktree(workspace_root, execution_root, "");
+                cleanup_git_worktree(workspace_root, execution_root, requested_name.unwrap_or(""));
                 return Err(error);
             }
         }
@@ -4276,13 +4366,16 @@ fn create_execution(
         if let Some(provisioning) = provisioning.filter(|value| !value.is_empty()) {
             if let Err(error) = apply_provisioning(workspace_root, execution_root, provisioning) {
                 unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
-                cleanup_git_worktree(workspace_root, execution_root, "");
+                cleanup_git_worktree(workspace_root, execution_root, requested_name.unwrap_or(""));
                 return Err(error);
             }
         }
         // The baseline now depends on this commit staying reachable.
         crate::snapshot::pin_snapshot_base(workspace_root, execution_root, baseline);
-        return Ok((IsolationKind::GitWorktree, None));
+        return Ok((
+            IsolationKind::GitWorktree,
+            requested_name.map(str::to_string),
+        ));
     }
     if *base != WorkspaceBaseSpec::WorkingState {
         return Err("non-Git workspaces only support the workingState base".into());
@@ -7408,6 +7501,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: Some("project-a".into()),
                 owner_type: WorkspaceOwnerType::Session,
@@ -7436,6 +7530,134 @@ mod tests {
     }
 
     #[test]
+    fn a_requested_name_puts_the_worktree_on_a_branch_of_that_name() {
+        let data = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+        seed_git_repository(repo.path());
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: Some("feat/login".into()),
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-named".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repo.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+
+        let record = service
+            .registry
+            .get(&bundle.leases[0].workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.branch.as_deref(), Some("feat/login"));
+        // The worktree HEAD sits on the branch, not detached.
+        let worktree = git2::Repository::open(&record.execution_root).unwrap();
+        let head = worktree.head().unwrap();
+        assert_eq!(head.shorthand().unwrap(), "feat/login");
+        assert!(head.is_branch());
+    }
+
+    #[test]
+    fn a_requested_name_is_validated_before_any_worktree_exists() {
+        let data = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+        seed_git_repository(repo.path());
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let acquire = |name: &str| {
+            service.acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: Some(name.into()),
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-bad-name".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repo.path().to_string_lossy().into_owned(),
+                }],
+            })
+        };
+        assert!(acquire("has space").is_err());
+        assert!(acquire("-flag-like").is_err());
+        assert!(acquire("bad..dots").is_err());
+        // Nothing provisioned: the rejection happened before any record existed.
+        assert!(service.registry.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_requested_name_on_a_gitless_bundle_is_refused() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "notes\n").unwrap();
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let error = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: Some("named".into()),
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-shadow".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap_err();
+        assert!(error.contains("requires at least one Git root"));
+    }
+
+    #[test]
+    fn a_requested_name_colliding_with_an_existing_branch_fails_the_acquire() {
+        let data = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+        seed_git_repository(repo.path());
+        // The name must collide with a branch the repository actually has —
+        // default-branch naming differs across environments.
+        {
+            let repository = git2::Repository::open(repo.path()).unwrap();
+            let head = repository.head().unwrap().peel_to_commit().unwrap();
+            repository.branch("taken-branch", &head, false).unwrap();
+        }
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let error = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: Some("taken-branch".into()),
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-taken".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repo.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap_err();
+        assert!(error.contains("worktree add failed") || error.contains("already exists"));
+    }
+
+    #[test]
     fn acquires_multi_repository_and_shadow_roots_as_one_bundle() {
         let data = TempDir::new().unwrap();
         let primary = TempDir::new().unwrap();
@@ -7454,6 +7676,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7533,6 +7756,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7583,6 +7807,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7620,6 +7845,7 @@ mod tests {
 
         let error = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7668,6 +7894,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7723,6 +7950,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::User,
@@ -7764,6 +7992,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -7803,6 +8032,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8117,6 +8347,7 @@ mod tests {
                 TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
             let bundle = service
                 .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                    requested_name: None,
                     provisioning: None,
                     project_id: None,
                     owner_type: WorkspaceOwnerType::Session,
@@ -8184,6 +8415,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8264,6 +8496,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8312,6 +8545,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8447,6 +8681,7 @@ mod tests {
             .unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8539,6 +8774,7 @@ mod tests {
 
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8582,6 +8818,7 @@ mod tests {
             .expect("supply");
         service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
@@ -8631,6 +8868,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                requested_name: None,
                 provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,

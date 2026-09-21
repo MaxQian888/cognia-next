@@ -1,6 +1,9 @@
 import { adoptExecutionRun, getExecutionRun, listChildExecutionRuns } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
 import type { ExecutionRun, ExecutionRunStatus, RunControlCommand } from "@/types/execution/run"
+// Type-only: erased at build time, so the gate boundary is untouched and no
+// Router + Fusion code is loaded on the off path.
+import type { ProjectedRunSurface } from "@/lib/router-fusion/gate/run-control"
 import {
   registerRunControlHandler,
   type RunControlHandler,
@@ -77,7 +80,23 @@ export interface ExecutionRunControlHandlerDeps {
    * direct call so a test can drive the handler without the fusion engine, and
    * so this shared module keeps its ONE Router + Fusion import at the gate.
    */
-  cancelRouterFusionRun?: (runId: string, surface: "gatewayRuns" | "chat") => Promise<boolean>
+  cancelRouterFusionRun?: (runId: string, surface: ProjectedRunSurface) => Promise<boolean>
+  /**
+   * Answer the approval a parked Router + Fusion delegate run is waiting on
+   * (ADR-0188 B4). The interrupt id IS the approval's, derived from the
+   * request digest, so answering names exactly what is being approved.
+   */
+  decideRouterFusionApproval?: (
+    runId: string,
+    decision: "approve" | "deny",
+    input: { surface: ProjectedRunSurface; interruptId?: string }
+  ) => Promise<void>
+  /**
+   * Which surface a projected fusion run belongs to. Two of them project as
+   * `local` — a chat cascade/panel and a companion run — and they are gated by
+   * different switches, so the origin alone cannot say.
+   */
+  routerFusionRunSurface?: (runId: string) => Promise<ProjectedRunSurface | null>
 }
 
 /**
@@ -627,12 +646,53 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
    */
   const fusion: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
-    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "fusion")
-    const surface =
-      (await getExecutionRun(command.runId))?.origin === "local" ? "chat" : "gatewayRuns"
+    if (command.action !== "stop" && command.action !== "approve" && command.action !== "deny") {
+      throw new UnsupportedForKindError(command.action, "fusion")
+    }
+    // The run's own surface wins over the projected origin: `chat` and
+    // `companion` both project as `local` and are gated by different switches,
+    // so guessing from the origin would check the wrong one. The origin is the
+    // fallback for a host that cannot read the run (every switch off).
+    const resolveSurface =
+      deps.routerFusionRunSurface ??
+      (async (runId: string) => {
+        const [{ projectedRunSurfaceOf }, { currentRouterFusionGateSettings }] = await Promise.all([
+          import("@/lib/router-fusion/gate/run-control"),
+          import("@/lib/router-fusion/gate/current-settings"),
+        ])
+        return projectedRunSurfaceOf(runId, { settings: await currentRouterFusionGateSettings() })
+      })
+    const surface: ProjectedRunSurface =
+      (await resolveSurface(command.runId)) ??
+      ((await getExecutionRun(command.runId))?.origin === "local" ? "chat" : "gatewayRuns")
+    if (command.action === "approve" || command.action === "deny") {
+      const decide =
+        deps.decideRouterFusionApproval ??
+        (async (
+          runId: string,
+          decision: "approve" | "deny",
+          input: { surface: ProjectedRunSurface; interruptId?: string }
+        ) => {
+          const [{ decideRouterFusionApproval }, { currentRouterFusionGateSettings }] =
+            await Promise.all([
+              import("@/lib/router-fusion/gate/run-control"),
+              import("@/lib/router-fusion/gate/current-settings"),
+            ])
+          await decideRouterFusionApproval(runId, decision, {
+            settings: await currentRouterFusionGateSettings(),
+            surface: input.surface,
+            ...(input.interruptId ? { interruptId: input.interruptId } : {}),
+          })
+        })
+      await decide(command.runId, command.action, {
+        surface,
+        ...(command.interruptId ? { interruptId: command.interruptId } : {}),
+      })
+      return
+    }
     const cancel =
       deps.cancelRouterFusionRun ??
-      (async (runId: string, runSurface: "gatewayRuns" | "chat") => {
+      (async (runId: string, runSurface: ProjectedRunSurface) => {
         const [{ cancelRouterFusionRun }, { currentRouterFusionGateSettings }] = await Promise.all([
           import("@/lib/router-fusion/gate/run-control"),
           import("@/lib/router-fusion/gate/current-settings"),

@@ -50,10 +50,19 @@ describe("validateActionDraft", () => {
     })
   })
 
-  it("keeps delegate dormant: an action of the user's own cannot be one", () => {
-    expect(validateActionDraft(draftActionFor("delegate", "my_delegate"), [])).toEqual([
-      { field: "mode", code: "MODE_NOT_EDITABLE" },
-    ])
+  it("offers delegate now that B4 runs it, and only with the code fixture profile", () => {
+    expect(EDITABLE_ACTION_MODES).toContain("delegate")
+    const draft = draftActionFor("delegate", "my_delegate")
+    expect(draft).toMatchObject({
+      mode: "delegate",
+      verifier_profile: "code_fixture",
+      roles: { lead: "powerful", worker: "fast" },
+    })
+    expect(validateActionDraft(draft, [])).toEqual([])
+    expect(validateActionDraft({ ...draft, verifier_profile: "text_basic" }, [])).toContainEqual({
+      field: "verifier_profile",
+      code: "PROFILE_NOT_ALLOWED",
+    })
   })
 
   it("names every role problem and a profile the mode does not offer", () => {
@@ -247,7 +256,15 @@ describe("sanitizing what was persisted", () => {
     expect(sanitizeCustomAction(custom(), ["panel_three"])).toBeNull()
     expect(sanitizeCustomAction({ ...custom(), roles: { panel_a: 1 } }, [])).toBeNull()
     expect(sanitizeCustomAction({ ...custom(), enabled: "true" }, [])).toBeNull()
-    expect(sanitizeCustomAction(draftActionFor("delegate", "my_delegate"), [])).toBeNull()
+    expect(sanitizeCustomAction(draftActionFor("delegate", "my_delegate"), [])).toEqual(
+      draftActionFor("delegate", "my_delegate")
+    )
+    expect(
+      sanitizeCustomAction(
+        { ...draftActionFor("delegate", "my_delegate"), verifier_profile: "text_basic" },
+        []
+      )
+    ).toBeNull()
     expect(sanitizeCustomAction("nope", [])).toBeNull()
   })
 

@@ -115,7 +115,14 @@ export interface EvalRecommendationRow {
 export interface EvalConfigurationApplyRow {
   id: string
   experimentId: string
-  targetType: "default-model" | "character" | "workflow" | "routing-policy"
+  /**
+   * `routing-predictor` is the learned router's active manifest (ADR-0188 B6):
+   * a 64-character pointer into the fusion database, applied and rolled back
+   * through the same mechanism as every other recommended configuration. The
+   * table is unchanged — `targetType` is a stored string, not an index — so no
+   * schema version moves for it.
+   */
+  targetType: "default-model" | "character" | "workflow" | "routing-policy" | "routing-predictor"
   targetId: string
   previousConfiguration: Record<string, unknown>
   appliedConfiguration: Record<string, unknown>

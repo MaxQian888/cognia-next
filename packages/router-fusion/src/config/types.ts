@@ -79,9 +79,34 @@ export interface ActionLimits {
   panel_evidence_rounds: number
   worker_model_turns: number
   worker_tool_operations: number
+  /**
+   * Subtasks a delegate lead may plan (≤ 4). Only `delegate` spends it, so it
+   * is absent from the other modes' defaults and from the spec's policy
+   * limits; the compiler requires it of every delegate action.
+   */
+  delegate_subtasks?: number
   worker_repair_rounds: number
   lead_takeovers: number
 }
+
+/**
+ * V1 ceilings of the delegate graph (DESIGN §10, ADR-0188 B4). The compiler
+ * refuses a limit above them (a JSON-pointer issue per field) and the workflow
+ * clamps to them again, so no edited setting can buy an unbounded worker.
+ */
+export const DELEGATE_LIMIT_CEILINGS = {
+  delegate_subtasks: 4,
+  worker_model_turns: 8,
+  worker_tool_operations: 12,
+  worker_repair_rounds: 1,
+  lead_takeovers: 1,
+} as const
+
+/** A delegate run needs at least its plan and one worker turn. */
+export const DELEGATE_MIN_MODEL_CALLS = 2
+
+/** The contract's bound on `Subtask.max_steps`. */
+export const SUBTASK_MAX_STEPS = 20
 
 /** Cognia's per-action settings beside the spec's `ActionConfig`. */
 export interface ActionExtension {

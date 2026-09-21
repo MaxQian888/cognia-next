@@ -1,0 +1,161 @@
+{
+  "checks": {
+    "check": "检查项",
+    "counts": "发现 {discovered} · 通过 {passed} · 失败 {failed} · 跳过 {skipped}",
+    "countsUnknown": "该报告没有记录测试数量。",
+    "errored": "{count} 个出错",
+    "executedBy": {
+      "human": "人工",
+      "model": "模型",
+      "runtime": "运行时"
+    },
+    "exit": "命令退出码",
+    "level": {
+      "human_review": "人工复核",
+      "mixed": "混合证据",
+      "model_review": "模型复核",
+      "schema_only": "仅结构校验",
+      "tool_verified": "工具验证"
+    },
+    "modelClaim": "只有运行时亲自执行的检查才算证据；模型声称“测试已通过”不算。",
+    "none": "本次运行没有记录验收报告，因此这里没有任何内容被验证过。",
+    "outcome": "结果",
+    "report": "报告",
+    "revision": "已验证修订",
+    "revisionMissing": "报告未标明修订号，因此无法证明交付的改动通过了验证。",
+    "status": {
+      "failed": "失败",
+      "inconclusive": "无法判定",
+      "not_applicable": "不适用",
+      "passed": "通过"
+    },
+    "summary": "详情",
+    "tier": "沙箱",
+    "tierUnattested": "未证明。报告没有说明命令在哪一层沙箱中执行，请视为隔离性未经证实。",
+    "tierValue": {
+      "container": "容器",
+      "microvm": "微虚拟机",
+      "os": "操作系统沙箱"
+    },
+    "title": "验收检查",
+    "verifier": "校验器"
+  },
+  "patch": {
+    "applied": "已在修订 {revision} 写入你的工作区。",
+    "base": "基线修订",
+    "comparedMoved": "该补丁基于 {base} 生成，而你的工作区已变为 {revision}。下面对比的是工作区当前的内容，而不是基线。",
+    "comparedNow": "与你的工作区对比；工作区仍停留在该补丁的基线修订上。",
+    "comparedUnavailable": "本设备无法读取你的工作区，因此所有行都显示为新增。",
+    "delivery": "交付方式",
+    "deliveryValue": {
+      "patch_only": "仅补丁 — 你的工作区未被改动",
+      "workspace_updated": "已应用到你的工作区"
+    },
+    "download": "下载补丁",
+    "downloadFailed": "补丁保存失败。",
+    "downloaded": "补丁已保存。",
+    "expired": "补丁文档已不再保存（补丁内容仅保留七天），因此无法展示或下载。",
+    "file": {
+      "baseAbsent": "新增文件。",
+      "baseUnavailable": "此处无法读取当前文件，因此所有行都显示为新增。",
+      "delete": "已删除",
+      "write": "已替换"
+    },
+    "files": "{count, plural, =1 {# 个文件} other {# 个文件}}",
+    "none": "本次运行没有暂存任何补丁。",
+    "notApplied": "尚未写入你的工作区。",
+    "result": "结果修订",
+    "title": "补丁",
+    "unchanged": "该文件的内容与你的工作区完全一致。",
+    "workspace": "工作区"
+  },
+  "progress": {
+    "attempts": "尝试次数",
+    "delivery": "交付方式",
+    "none": "本次运行没有记录委派步骤。",
+    "repairs": "修复轮次",
+    "sandbox": "沙箱",
+    "scopeExpansions": "你额外批准的路径",
+    "subtasks": "子任务",
+    "takeovers": "主控接管",
+    "title": "委派",
+    "toolOperations": "工具操作",
+    "turns": "工作者轮次"
+  },
+  "review": {
+    "approval": {
+      "apply": "应用到工作区",
+      "approve": "批准",
+      "decidedAt": "{status} · {when}",
+      "deny": "拒绝",
+      "digest": "请求摘要",
+      "history": "此前的决定",
+      "kind": {
+        "scope_expansion": "扩大改动范围",
+        "workspace_apply": "写入工作区"
+      },
+      "mismatch": "该视图已过期：本次运行正在等待另一个请求。请重新打开该运行再做决定。",
+      "paths": "路径",
+      "revision": "修订",
+      "status": {
+        "approved": "已批准",
+        "denied": "已拒绝",
+        "pending": "等待中"
+      },
+      "title": "等待你的决定",
+      "what": {
+        "scope_expansion": "工作者请求修改子任务允许范围之外的文件。批准仅允许这些路径，且仅在这一修订上生效。",
+        "workspace_apply": "已验证的补丁准备写入你的工作区。仅当工作区仍停留在基线修订时才会写入；若已变动，则什么都不会写。"
+      }
+    },
+    "applyElsewhere": "本次运行只交付了补丁。要把它写入工作区，需要由一次明确请求写入的运行来完成，这样写入才会经过同样的批准与冲突检查。",
+    "loading": "正在读取委派记录…",
+    "notDelegate": "",
+    "title": "委派评审",
+    "unavailable": "本设备无法读取委派记录：{reason}"
+  },
+  "settings": {
+    "approve": "批准",
+    "approveFailed": "“{profile}”未获批准：{reason}",
+    "approved": "已批准“{profile}”。",
+    "approvedHash": "已批准的哈希 {hash}",
+    "desc": "委派运行只接受项目在 .cognia/workspace.json 中声明的命令所产出的报告，并且只有在你批准了这条命令之后才会执行。命令一旦变动会重新询问。",
+    "hash": "命令 {hash}",
+    "loading": "正在读取…",
+    "needsMaster": "打开总开关后才能查看验收配置。",
+    "noProjects": "还没有项目。验收配置保存在项目的工作区配置中。",
+    "project": "项目",
+    "reason": {
+      "ACCEPTANCE_PROFILE_APPROVAL_FAILED": "批准结果无法写入存储",
+      "ACCEPTANCE_PROFILE_CHANGED": "命令在展示之后发生了变化，请重新查看",
+      "ACCEPTANCE_PROFILE_MISSING": "项目已不再声明它",
+      "ACCEPTANCE_PROFILE_UNTRUSTED": "请先信任该工作区，再批准其中的命令",
+      "APPROVAL_STORE_FAILED": "批准存储无法写入",
+      "PROJECT_NOT_FOUND": "未找到该项目",
+      "unknown": "{code}"
+    },
+    "revoke": "撤销",
+    "revokeFailed": "撤销“{profile}”的批准失败：{reason}",
+    "revoked": "已撤销对“{profile}”的批准。",
+    "runCap": "委派运行上限",
+    "runCapDesc": "一次委派在其所有模型调用上最多可花费的金额。单个动作可以设置更低的上限。",
+    "source": {
+      "project": "项目覆盖",
+      "repository": "仓库"
+    },
+    "status": {
+      "approved": "已批准",
+      "changed": "命令已变化",
+      "unapproved": "未批准"
+    },
+    "title": "验收配置",
+    "unavailable": {
+      "absent": "该项目没有声明验收配置，因此委派运行无法在其中被验证。",
+      "approval_pending": "尚未批准任何验收配置，因此委派运行无法在该项目中执行。",
+      "fault": "无法读取该项目的配置：{message}",
+      "invalid": "无法解析该项目的验收配置：{message}",
+      "project_not_found": "未找到该项目。",
+      "restricted": "该工作区未被信任，因此没有读取它的配置。"
+    }
+  }
+}

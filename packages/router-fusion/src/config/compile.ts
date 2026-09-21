@@ -16,6 +16,8 @@ import {
 } from "../contracts/schemas"
 import { canonicalHash } from "../util/sha256"
 import {
+  DELEGATE_LIMIT_CEILINGS,
+  DELEGATE_MIN_MODEL_CALLS,
   OPTIONAL_ROLES,
   REQUIRED_ROLES,
   VERIFIER_PROFILES,
@@ -141,7 +143,8 @@ function validateRegistry(
 function validateExtension(
   actionId: string,
   extension: ActionExtension | undefined,
-  issues: ConfigIssue[]
+  issues: ConfigIssue[],
+  mode?: ActionConfig["mode"]
 ): void {
   const at = (...rest: Array<string | number>) => pointer("extensions", actionId, ...rest)
   if (!extension) {
@@ -149,14 +152,14 @@ function validateExtension(
     return
   }
   const limits = extension.limits
-  const positive: Array<keyof typeof limits> = [
+  const positive = [
     "max_model_calls",
     "transport_attempts_per_call",
     "panel_size",
     "panel_min_candidates",
     "worker_model_turns",
     "worker_tool_operations",
-  ]
+  ] as const
   for (const key of positive) {
     if (!Number.isSafeInteger(limits[key]) || limits[key] < 1)
       issues.push({ pointer: at("limits", key), message: "must be a positive integer" })
@@ -187,6 +190,38 @@ function validateExtension(
   }
   for (const key of ["panel_evidence_rounds", "worker_repair_rounds", "lead_takeovers"] as const) {
     if (limits[key] > 1) issues.push({ pointer: at("limits", key), message: "V1 allows at most 1" })
+  }
+  // The delegate graph's worker bounds (B4). Every mode carries them, so every
+  // mode is held to the same ceiling; only delegate spends them.
+  for (const key of ["worker_model_turns", "worker_tool_operations"] as const) {
+    const ceiling = DELEGATE_LIMIT_CEILINGS[key]
+    if (limits[key] > ceiling)
+      issues.push({ pointer: at("limits", key), message: `V1 allows at most ${ceiling}` })
+  }
+  if (limits.delegate_subtasks !== undefined) {
+    const ceiling = DELEGATE_LIMIT_CEILINGS.delegate_subtasks
+    if (!Number.isSafeInteger(limits.delegate_subtasks) || limits.delegate_subtasks < 1) {
+      issues.push({
+        pointer: at("limits", "delegate_subtasks"),
+        message: "must be a positive integer",
+      })
+    } else if (limits.delegate_subtasks > ceiling) {
+      issues.push({
+        pointer: at("limits", "delegate_subtasks"),
+        message: `V1 allows at most ${ceiling}`,
+      })
+    }
+  } else if (mode === "delegate") {
+    issues.push({
+      pointer: at("limits", "delegate_subtasks"),
+      message: "a delegate action must say how many subtasks its lead may plan",
+    })
+  }
+  if (mode === "delegate" && limits.max_model_calls < DELEGATE_MIN_MODEL_CALLS) {
+    issues.push({
+      pointer: at("limits", "max_model_calls"),
+      message: `a delegate run needs at least ${DELEGATE_MIN_MODEL_CALLS} model calls: its plan and one worker turn`,
+    })
   }
   if (!Number.isSafeInteger(extension.run_cap_microusd) || extension.run_cap_microusd < 0) {
     issues.push({
@@ -338,7 +373,7 @@ export function compileFusionConfig(rawInput: FusionConfigInput): CompiledFusion
       })
     seen.add(action.id)
     const extension = input.extensions[action.id]
-    validateExtension(action.id, extension, issues)
+    validateExtension(action.id, extension, issues, action.mode)
     validateAction(action, index, input.registry, extension, issues)
   })
 

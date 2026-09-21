@@ -97,11 +97,12 @@ it("runs retention while chat is on, reading live settings, and stops it when ch
   expect(mockStartRetention).toHaveBeenCalledTimes(1)
 })
 
-it("sweeps and prunes for a surface other than chat, and ignores a dormant one", async () => {
+it("sweeps and prunes for a surface other than chat, and ignores a key that is no surface", async () => {
   // Since B2 a utility call, a workflow prompt or a Run API run can be left
-  // behind by a closed window just as a chat turn can.
+  // behind by a closed window just as a chat turn can. Every declared surface
+  // is wired since WP-C, so only a key the build does not declare stays inert.
   render(<RouterFusionInitializer />)
-  const dormantOnly = { routerFusion: { enabled: true, surfaces: { companion: true } } }
+  const dormantOnly = { routerFusion: { enabled: true, surfaces: { notASurface: true } } }
   setState({ loaded: true, settings: dormantOnly })
   await waitFor(() => {})
   expect(mockRecover).not.toHaveBeenCalled()

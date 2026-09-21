@@ -16,6 +16,8 @@ export interface CreateSessionExecutionContextInput {
   isGitRepository: boolean
   baseRef?: string
   base?: SessionWorkspaceBaseSpec
+  /** Caller-chosen managed-worktree branch name. Blank is treated as absent. */
+  worktreeName?: string
   bundleId?: string
   environmentKind?: "managed" | "permanent"
   rootLeases?: SessionExecutionRootLease[]
@@ -108,6 +110,8 @@ export function createSessionExecutionContext(
     projectRoot: input.projectRoot,
     rootId: input.rootId,
     environmentId: input.environmentId,
+    requestedWorktreeName:
+      location === "managedWorktree" ? input.worktreeName?.trim() || undefined : undefined,
     taskWorkspace: {
       taskId: `task-workspace:${input.sessionId}`,
       workspaceKey: managedWorkspaceId ?? input.sessionId,
