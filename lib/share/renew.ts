@@ -2,15 +2,14 @@
 //
 // Kept in its own module rather than folded into `client.ts` so it composes
 // cleanly with the create/revoke flow without enlarging that file. The small
-// owner-action auth + error-read helpers mirror `client.ts` (X-Owner-Token,
-// falling back to the upload-secret bearer for legacy shares) — including
-// `proxyFetch`, for the same reason `client.ts` uses it.
+// owner request resolver is shared with `client.ts`, so renewal uses the same
+// original endpoint and credential boundary as stats and revocation.
 
-import { getSharedLinkByCode, updateSharedLinkExpiry } from "@/lib/db/shared-links"
+import { updateSharedLinkExpiry } from "@/lib/db/shared-links"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 
-import { ShareNotConfiguredError, ShareRequestError } from "./client"
-import { resolveShareEndpoint, type ShareEndpoint } from "./config"
+import { resolveShareOwnerRequest, ShareRequestError } from "./client"
+import type { ShareEndpoint } from "./config"
 
 async function readError(res: Response): Promise<string> {
   try {
@@ -19,16 +18,6 @@ async function readError(res: Response): Promise<string> {
   } catch {
     return res.statusText
   }
-}
-
-/** Owner-only action headers — the per-share token when we have one, else the
- * upload-secret bearer (legacy shares). Requires at least one credential. */
-function ownerActionHeaders(endpoint: ShareEndpoint, ownerToken?: string): HeadersInit {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (ownerToken) headers["X-Owner-Token"] = ownerToken
-  if (endpoint.uploadSecret) headers["Authorization"] = `Bearer ${endpoint.uploadSecret}`
-  if (!ownerToken && !endpoint.uploadSecret) throw new ShareNotConfiguredError()
-  return headers
 }
 
 /**
@@ -41,11 +30,10 @@ export async function extendShareLink(
   ttlSeconds: number,
   endpoint?: ShareEndpoint
 ): Promise<number> {
-  const ep = endpoint ?? (await resolveShareEndpoint())
-  const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
+  const { baseUrl, headers } = await resolveShareOwnerRequest(code, endpoint)
+  const res = await proxyFetch(`${baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "PATCH",
-    headers: ownerActionHeaders(ep, ownerToken),
+    headers,
     body: JSON.stringify({ ttlSeconds }),
   })
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))

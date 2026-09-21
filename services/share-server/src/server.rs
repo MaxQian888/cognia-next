@@ -248,6 +248,7 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/share/{code}",
             get(handlers::read)
+                .patch(handlers::renew)
                 .delete(handlers::delete)
                 .options(handlers::options)
                 .fallback(handlers::method_not_allowed),
@@ -398,16 +399,16 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    fn test_state() -> AppState {
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("share-test-{}.sqlite", std::process::id()));
-        // Best-effort clean slate.
-        let _ = std::fs::remove_file(&path);
-        build_state(&Config::for_test(path.to_string_lossy().to_string())).unwrap()
+    fn test_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shares.sqlite");
+        let state = build_state(&Config::for_test(path.to_string_lossy().to_string())).unwrap();
+        (state, dir)
     }
 
     async fn get(uri: &str) -> (StatusCode, String) {
-        let app = router(test_state());
+        let (state, _dir) = test_state();
+        let app = router(state);
         let res = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await

@@ -19,6 +19,8 @@ import {
 import type { ExportOptions } from "./types"
 import { exportPortableRetrievalKeys, type PortableExportStore } from "./retrieval-key-backup"
 
+import { exportSessionAssetRecords, exportMessageMediaRecords } from "./session-assets-backup"
+
 type RowFilter<T> = (row: T) => boolean | Promise<boolean>
 const APP_VERSION = "0.1.0"
 
@@ -123,6 +125,7 @@ export async function* buildBackupSections(
     yield* tableSections("artifactVersions", db.artifactVersions, iterate)
     yield* tableSections("canvasDocuments", db.canvasDocuments, iterate)
     yield* tableSections("canvasVersions", db.canvasVersions, iterate)
+    yield* tableSections("canvasComments", db.canvasComments, iterate)
     yield* tableSections("contextComments", db.contextComments, iterate)
     yield* tableSections("canvasSessions", db.canvasSessions, iterate)
     yield* tableSections("a2uiApps", db.a2uiApps, iterate, (row) =>
@@ -198,6 +201,16 @@ export async function* buildBackupSections(
     yield* tableSections("sessionState", db.sessionState, iterate, (row) =>
       sessionPortable(row.sessionId)
     )
+    const portableSessionIds = new Set<string>()
+    for await (const page of iterate(db.sessions)) {
+      for (const session of page)
+        if (isSessionExposed(session, "standard-export")) portableSessionIds.add(session.id)
+    }
+    const sourceChunkBytes = extras.maxChunkBytes
+      ? Math.max(1, Math.floor(((extras.maxChunkBytes - 256) * 3) / 4))
+      : undefined
+    yield* exportSessionAssetRecords(portableSessionIds, sourceChunkBytes)
+    yield* exportMessageMediaRecords(portableSessionIds, sourceChunkBytes)
   }
 
   if (includePlugins) {

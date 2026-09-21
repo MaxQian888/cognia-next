@@ -30,6 +30,7 @@ interface TestOpenFile {
   absolutePath: string
   relPath: string
   language: string
+  monacoLanguage?: string
   savedContent: string
   draftContent: string
   draftVersion: number
@@ -145,15 +146,24 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
       openFiles,
       activePath,
       activeFile,
+      previewPath: null,
       dirtyCount: 0,
       treeRefreshToken: 0,
       selectRoot,
       openFile,
+      pinFile: jest.fn(),
       closeFile,
+      moveOpenFile: jest.fn(),
+      closeOtherFiles: jest.fn(),
+      closeFilesToRight: jest.fn(),
+      closeAllFiles: jest.fn(),
+      reopenClosedFile: jest.fn(),
       setActivePath,
       setDraft,
       saveFile,
       saveAll,
+      reloadFile: jest.fn().mockResolvedValue(undefined),
+      renameOpenFile: jest.fn().mockResolvedValue(undefined),
       pinned: editorPinned,
       resumeFollow,
     }
@@ -247,9 +257,36 @@ jest.mock("@/components/editor/project/project-monaco", () => ({
   ),
 }))
 
+// The decoration hook otherwise calls the real git transport and resolves
+// outside act(); an empty result keeps the suite quiet and badge-free.
+jest.mock("@/components/editor/project/use-project-git-status", () => ({
+  useProjectGitStatus: () => ({ branch: null, byPath: new Map() }),
+}))
+jest.mock("@/components/editor/project/project-quick-open", () => ({
+  ProjectQuickOpen: () => null,
+}))
+jest.mock("@/components/editor/project/project-editor-breadcrumbs", () => ({
+  ProjectEditorBreadcrumbs: () => null,
+}))
+jest.mock("@/components/editor/project/project-editor-status-bar", () => ({
+  ProjectEditorStatusBar: () => null,
+}))
+jest.mock("@/components/editor/project/project-file-fallback", () => ({
+  ProjectFileFallback: () => null,
+}))
+
 jest.mock("@/components/editor/project/project-context-workbench", () => ({
   ProjectContextWorkbench: () => <div data-testid="project-context-workbench" />,
   ProjectContextWorkbenchMobile: () => <div data-testid="project-context-workbench-mobile" />,
+}))
+
+// Production mounts TooltipProvider in app/layout; the bare DockWorkspace
+// render needs the tooltip primitives to pass through instead of demanding it.
+jest.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  TooltipContent: () => null,
+  TooltipProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
 jest.mock("@/stores/git/git-store", () => ({
@@ -611,6 +648,7 @@ describe("DockWorkspace", () => {
       absolutePath: "/repo/src/a.ts",
       relPath: "src/a.ts",
       language: "typescript",
+      monacoLanguage: "typescript",
       savedContent: "old",
       draftContent: "old",
       draftVersion: 1,
@@ -636,7 +674,7 @@ describe("DockWorkspace", () => {
 
     fireEvent.click(screen.getByTestId("file-tree"))
     expect(openFile).toHaveBeenCalledWith("src/tree.ts", undefined)
-    fireEvent.click(screen.getByText("searchTab"))
+    fireEvent.click(screen.getByTestId("left-tab-search"))
     fireEvent.click(screen.getByTestId("search-panel"))
     expect(openFile).toHaveBeenCalledWith("src/search.ts")
 
@@ -644,8 +682,8 @@ describe("DockWorkspace", () => {
     fireEvent.click(screen.getByTestId("action-file.copyPath"))
     fireEvent.click(screen.getByTestId("action-file.copyRelativePath"))
     fireEvent.click(screen.getByTestId("action-file.searchProject"))
-    fireEvent.click(screen.getByText("filesTab"))
-    fireEvent.click(screen.getByText("searchTab"))
+    fireEvent.click(screen.getByTestId("left-tab-files"))
+    fireEvent.click(screen.getByTestId("left-tab-search"))
 
     fireEvent.click(screen.getByText("change"))
     expect(setDraft).toHaveBeenCalledWith("src/a.ts", "updated")

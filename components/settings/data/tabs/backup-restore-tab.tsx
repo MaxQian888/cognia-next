@@ -35,6 +35,7 @@ import { useScheduler } from "@/hooks/scheduler"
 import { rotateBackupKey } from "@/lib/data/backup-key"
 import {
   buildBackupPackage,
+  BackupRequiresStreamError,
   serializePackage,
   defaultExportFileName,
 } from "@/lib/data/build-package"
@@ -143,14 +144,21 @@ function ExportBlock() {
         )
       )
       setShareScan(scan)
-      if (scan.kind === "hits") setScanOpen(true)
+      if (scan.kind === "hits" || (scan.kind === "clean" && (scan.uninspectedAttachments ?? 0) > 0))
+        setScanOpen(true)
       else setShareOpen(true)
     } catch (err) {
       loggers.export.error("backup_share_prepare_failed", undefined, {
         error: err instanceof Error ? err.message : String(err),
         encryption,
       })
-      toast.error(t("backup.shareScan.prepareFailed"))
+      toast.error(
+        t(
+          err instanceof BackupRequiresStreamError
+            ? "backup.shareScan.streamingRequired"
+            : "backup.shareScan.prepareFailed"
+        )
+      )
     } finally {
       setPreparingShare(false)
     }
@@ -283,6 +291,9 @@ function ExportBlock() {
           onOpenChange={setScanOpen}
           domains={shareScan?.kind === "hits" ? shareScan.domains : []}
           total={shareScan?.kind === "hits" ? shareScan.total : 0}
+          uninspectedAttachments={
+            shareScan && shareScan.kind !== "encrypted" ? shareScan.uninspectedAttachments : 0
+          }
           onConfirm={onScanConfirmed}
         />
         <ShareLinkDialog
@@ -296,9 +307,11 @@ function ExportBlock() {
             shareScan && shareScan.kind !== "hits" ? (
               <p
                 className="text-xs text-muted-foreground"
-                data-testid={`backup-share-note-${shareScan.kind}`}
+                data-testid={`backup-share-note-${shareScan.kind === "clean" && shareScan.uninspectedAttachments ? "binary" : shareScan.kind}`}
               >
-                {t(`backup.shareScan.${shareScan.kind}`)}
+                {shareScan.kind === "clean" && shareScan.uninspectedAttachments
+                  ? t("backup.shareScan.binaryNote")
+                  : t(`backup.shareScan.${shareScan.kind}`)}
               </p>
             ) : undefined
           }

@@ -497,7 +497,7 @@ describe("draft attachment binaries + quota", () => {
     expect(newRow!.attachments![0]!.bytes).toBeDefined()
   })
 
-  it("never evicts the session that was just written", async () => {
+  it("prioritizes the session that was just written when older rows can free enough space", async () => {
     const big = Math.ceil(DRAFT_ATTACHMENT_QUOTA_BYTES * 0.6)
     await setDraft("ses_a", "a", [
       { name: "a.png", mediaType: "image/png", size: big, bytes: bytesOf() },
@@ -509,6 +509,102 @@ describe("draft attachment binaries + quota", () => {
     ])
     expect((await getDraft("ses_b"))!.attachments![0]!.bytes).toBeDefined()
     expect((await getDraft("ses_a"))!.attachments![0]!.bytes).toBeUndefined()
+  })
+
+  it("bounds one oversized draft while keeping its newest attachment and reminder metadata", async () => {
+    const size = Math.ceil(DRAFT_ATTACHMENT_QUOTA_BYTES * 0.6)
+    await setDraft("oversized", "keep text", [
+      {
+        name: "first.png",
+        mediaType: "image/png",
+        size,
+        bytes: bytesOf(),
+        extractedText: "old",
+        ocrText: "ocr",
+        tokens: 2,
+      },
+      { name: "last.png", mediaType: "image/png", size, bytes: bytesOf() },
+    ])
+    const row = (await getDraft("oversized"))!
+    expect(row.text).toBe("keep text")
+    expect(row.attachments![0]).toEqual({ name: "first.png", mediaType: "image/png", size })
+    expect(row.attachments![1]!.bytes).toBeDefined()
+  })
+
+  it.each(["extractedText", "ocrText", "extractedContent"] as const)(
+    "accounts for %s and drops derived caches together with evicted bytes",
+    async (field) => {
+      const derived = {
+        attachmentId: "a",
+        contentHash: "a".repeat(64),
+        status: "ready" as const,
+        processor: { id: "parser", version: "1" },
+        segments: [
+          {
+            id: "s",
+            text: "derived evidence",
+            locator: { type: "text" as const, start: 0, end: 16 },
+            derivation: "text" as const,
+          },
+        ],
+      }
+      await setDraft("cached", "note", [
+        {
+          name: "file.txt",
+          mediaType: "text/plain",
+          size: DRAFT_ATTACHMENT_QUOTA_BYTES - 1,
+          bytes: bytesOf(),
+          [field]: field === "extractedContent" ? derived : "cached text",
+        },
+      ])
+      expect((await getDraft("cached"))!.attachments![0]).toEqual({
+        name: "file.txt",
+        mediaType: "text/plain",
+        size: DRAFT_ATTACHMENT_QUOTA_BYTES - 1,
+      })
+    }
+  )
+
+  it("enforces the combined budget when saving extraction caches without source bytes", async () => {
+    await setDraft("older", "old", [
+      {
+        name: "large.bin",
+        mediaType: "application/octet-stream",
+        size: DRAFT_ATTACHMENT_QUOTA_BYTES - 10,
+        bytes: bytesOf(),
+      },
+    ])
+    await setDraft("cache-only", "new", [
+      {
+        name: "document.txt",
+        mediaType: "text/plain",
+        size: 0,
+        extractedText: "Cached extraction with no recoverable binary",
+      },
+    ])
+    expect((await getDraft("older"))!.attachments![0]!.bytes).toBeUndefined()
+    expect((await getDraft("cache-only"))!.attachments![0]!.extractedText).toBeDefined()
+  })
+
+  it("rolls back an oversized draft write if quota eviction cannot be persisted", async () => {
+    const write = jest
+      .spyOn(getDb().chatDrafts, "bulkPut")
+      .mockRejectedValueOnce(new Error("storage failure"))
+    try {
+      await expect(
+        setDraft("oversized-failure", "new", [
+          {
+            name: "huge.bin",
+            mediaType: "application/octet-stream",
+            size: DRAFT_ATTACHMENT_QUOTA_BYTES + 1,
+            bytes: bytesOf(),
+          },
+        ])
+      ).rejects.toThrow("storage failure")
+    } finally {
+      write.mockRestore()
+    }
+    expect(await getDraft("oversized-failure")).toBeNull()
   })
 
   it("skips rows that carry no binary when freeing space", async () => {

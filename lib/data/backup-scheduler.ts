@@ -29,15 +29,64 @@ import {
   loadPersistedSyncPassphrase,
 } from "@/lib/webdav/passphrase-cache"
 import { notifyIfRemoteNewer } from "@/lib/webdav/remote-newer-notify"
-import type { BackupPackageV3 } from "@/lib/data/types"
+import type { BackupPackageV3, ExportOptions } from "@/lib/data/types"
 import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
+import { buildBackupStream } from "./build-stream"
 
 export const BACKUP_CHECK_INTERVAL_MS = 30 * 60 * 1000
 
 export interface BackupFilesystem {
+  /** Incremental, atomically committed file output on current desktop/headless hosts. */
+  writeStream?(path: string, source: AsyncIterable<Uint8Array>): Promise<number>
   writeTextFile(path: string, contents: string): Promise<void>
   readDirNames(path: string): Promise<string[]>
   remove(path: string): Promise<void>
+}
+
+/** Shared local file path for both interval and cron schedulers. */
+export async function writeEncryptedLocalBackup(
+  filesystem: BackupFilesystem,
+  target: string,
+  options: ExportOptions,
+  passphrase: string,
+  signal?: AbortSignal
+): Promise<{
+  sizeBytes: number
+  deviceId?: string
+  deviceLabel?: string
+  basePackage?: BackupPackageV3
+}> {
+  signal?.throwIfAborted()
+  if (filesystem.writeStream) {
+    let device: { id?: string; label?: string } | undefined
+    async function* source() {
+      let first = true
+      for await (const chunk of buildBackupStream(options, { encryption: { passphrase } })) {
+        signal?.throwIfAborted()
+        if (first) {
+          first = false
+          // The producer emits its small cleartext manifest as the first record.
+          device = JSON.parse(new TextDecoder().decode(chunk)).manifest?.device
+        }
+        yield chunk
+      }
+    }
+    const sizeBytes = await filesystem.writeStream(target, source())
+    return { sizeBytes, deviceId: device?.id, deviceLabel: device?.label }
+  }
+  // Compatibility for injected hosts that have not adopted the streaming seam.
+  // The v3 builder enforces its serialization ceiling before reading source bytes.
+  const basePackage = await buildBackupPackage(options)
+  const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
+  const body = await encryptSnapshotBody(serializePackage(pkg), pkg, passphrase)
+  signal?.throwIfAborted()
+  await filesystem.writeTextFile(target, body)
+  return {
+    sizeBytes: new TextEncoder().encode(body).byteLength,
+    deviceId: pkg.manifest.device?.id,
+    deviceLabel: pkg.manifest.device?.label,
+    basePackage,
+  }
 }
 
 export interface ScheduledBackupMessages {
@@ -84,16 +133,17 @@ export async function runScheduledBackupOnce(opts: ScheduledBackupOptions): Prom
   try {
     const passphrase = await getDefaultBackupPassphrase()
     if (!passphrase) throw new Error(opts.messages.autoKeyUnavailable)
-    const basePackage = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
-    const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
-    const plaintext = serializePackage(pkg)
-    const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
     const fileName = defaultExportFileName(opts.now?.() ?? new Date(), "encrypted")
     const sep = config.dirPath.includes("\\") ? "\\" : "/"
     const directory = config.dirPath.replace(/[/\\]+$/, "")
     const target = `${directory}${sep}${fileName}`
 
-    await opts.filesystem.writeTextFile(target, body)
+    const written = await writeEncryptedLocalBackup(
+      opts.filesystem,
+      target,
+      { includeSessions: true, includeApiKey: false },
+      passphrase
+    )
 
     try {
       const names = await opts.filesystem.readDirNames(config.dirPath)
@@ -121,18 +171,29 @@ export async function runScheduledBackupOnce(opts: ScheduledBackupOptions): Prom
       type: "scheduled",
       success: true,
       encryption: "auto-key",
-      sizeBytes: body.length,
+      sizeBytes: written.sizeBytes,
       filename: fileName,
-      deviceId: pkg.manifest.device?.id,
-      deviceLabel: pkg.manifest.device?.label,
+      deviceId: written.deviceId,
+      deviceLabel: written.deviceLabel,
     })
 
-    await maybeUploadToWebDav(
-      settings.webdavSync?.enabled === true,
-      basePackage,
-      plaintext,
-      opts.messages
-    )
+    if (settings.webdavSync?.enabled === true) {
+      try {
+        const pkg =
+          written.basePackage ??
+          (await buildBackupPackage({ includeSessions: true, includeApiKey: false }))
+        await maybeUploadToWebDav(true, pkg, "", opts.messages)
+      } catch (error) {
+        // A remote serialization limit must not invalidate the durable local stream.
+        await appendBackupHistory({
+          completedAt: Date.now(),
+          type: "scheduled",
+          success: false,
+          encryption: "passphrase",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
 
     try {
       await saveSettings({

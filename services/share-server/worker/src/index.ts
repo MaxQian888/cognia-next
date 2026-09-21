@@ -1,21 +1,25 @@
+import { DurableObject } from "cloudflare:workers"
+
 // Cloudflare Worker for the cognia public share service (zero-knowledge).
 //
 // The Worker is a blind store: it holds opaque AES-GCM envelopes in R2 and
-// per-share lifecycle counters in KV. It never sees the decryption key (that
+// per-share lifecycle counters in Durable Objects. It never sees the decryption key (that
 // rides in the URL #fragment, which browsers never send to the server) and the
 // payload's kind/mime live inside the ciphertext. Writes and deletes require a
 // bearer secret the owner configures; reads are public but lifecycle-gated
 // (TTL, max-views, burn-after-read, revoke).
 //
 // This deliberately mirrors the signaling worker's posture: free-tier friendly
-// (R2 + KV), one custom domain, observability on. It is a separate Node project
+// (R2 + KV + SQLite-backed Durable Objects), one custom domain, observability on. It is a separate Node project
 // (own package.json + lockfile), not part of the app's pnpm workspace.
 
 export interface Env {
   /** Opaque envelope bodies, keyed `share/<code>`. */
   SHARE_BUCKET: R2Bucket
-  /** Lifecycle metadata, keyed `meta:<code>`. */
+  /** Legacy metadata and eventually consistent org discovery index. */
   SHARE_KV: KVNamespace
+  /** Mandatory per-share lifecycle authority. */
+  SHARE_LIFECYCLE: DurableObjectNamespace<ShareLifecycle>
   /** Bearer secret required for POST / DELETE / stats. */
   SHARE_UPLOAD_SECRET: string
   /** Max envelope body size in bytes (string env var). Default 10 MiB. */
@@ -282,15 +286,51 @@ function orgIndexKey(orgId: string, code: string): string {
   return `org:${orgId}:${code}`
 }
 
-async function deleteShare(env: Env, code: string, orgId?: string): Promise<void> {
+type LifecycleEnv = Env & { lifecycleStorage: DurableObjectStorage }
+
+async function stageCleanup(env: LifecycleEnv, code: string, orgId?: string): Promise<void> {
+  // Persist intent before external I/O so interrupted creation/deletion is recoverable.
+  await env.lifecycleStorage.transaction(async (tx) => {
+    await tx.put({ meta: null, cleanup: { code, orgId } })
+    await tx.setAlarm(Date.now() + 1000)
+  })
+}
+
+async function deleteShare(env: LifecycleEnv, code: string, orgId?: string): Promise<void> {
+  await stageCleanup(env, code, orgId)
+  await cleanupShare(env, code, orgId)
+}
+
+async function cleanupShare(env: LifecycleEnv, code: string, orgId?: string): Promise<void> {
   await Promise.all([
     env.SHARE_BUCKET.delete(`share/${code}`),
     env.SHARE_KV.delete(`meta:${code}`),
     orgId ? env.SHARE_KV.delete(orgIndexKey(orgId, code)) : Promise.resolve(),
   ])
+  await env.lifecycleStorage.transaction(async (tx) => {
+    await tx.delete("cleanup")
+    await tx.deleteAlarm()
+  })
 }
 
-async function handleCreate(request: Request, env: Env): Promise<Response> {
+async function writeMeta(env: LifecycleEnv, code: string, meta: ShareMeta): Promise<void> {
+  await env.lifecycleStorage.transaction(async (tx) => {
+    await tx.put({ meta, code })
+    await tx.delete("cleanup")
+    if (meta.expiresAt !== undefined) await tx.setAlarm(Math.max(Date.now() + 1, meta.expiresAt))
+  })
+}
+
+async function updateOrgIndex(env: Env, code: string, meta: ShareMeta): Promise<void> {
+  if (!meta.orgId) return
+  const ttl =
+    meta.expiresAt === undefined
+      ? undefined
+      : Math.max(KV_MIN_TTL_SECONDS, Math.ceil((meta.expiresAt - Date.now()) / 1000))
+  await env.SHARE_KV.put(orgIndexKey(meta.orgId, code), "", ttl ? { expirationTtl: ttl } : {})
+}
+
+async function handleCreate(request: Request, env: LifecycleEnv, code: string): Promise<Response> {
   // A grant first, the legacy secret second. Order matters: the grant is the
   // credential that says WHO is asking, and a deployment that has both should
   // attribute the share rather than fall back to the anonymous path.
@@ -311,7 +351,7 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
   } catch {
     return json({ error: "invalid json" }, 400)
   }
-  if (!looksLikeEnvelope(body.envelope)) return json({ error: "invalid envelope" }, 400)
+  if (!body || !looksLikeEnvelope(body.envelope)) return json({ error: "invalid envelope" }, 400)
 
   const now = Date.now()
   const maxTtl = maxTtlSeconds(env)
@@ -330,7 +370,6 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
       ? Math.floor(body.maxViews)
       : undefined
 
-  const code = generateCode()
   const ownerToken = generateOwnerToken()
   const meta: ShareMeta = {
     createdAt: now,
@@ -345,78 +384,66 @@ async function handleCreate(request: Request, env: Env): Promise<Response> {
     ...(caller ? { orgId: caller.orgId, creatorUserId: caller.userId } : {}),
   }
 
+  await stageCleanup(env, code, meta.orgId)
   await env.SHARE_BUCKET.put(`share/${code}`, JSON.stringify(body.envelope), {
     httpMetadata: { contentType: "application/json" },
   })
-  const kvTtl = Math.max(ttl, KV_MIN_TTL_SECONDS)
-  await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(meta), { expirationTtl: kvTtl })
-  if (caller) {
-    // Same TTL as the metadata, so the index cannot outlive what it points at.
-    await env.SHARE_KV.put(orgIndexKey(caller.orgId, code), "", { expirationTtl: kvTtl })
-  }
+  await updateOrgIndex(env, code, meta)
+  // Publish only after external writes; commit clears cleanup and arms the TTL.
+  await writeMeta(env, code, meta)
 
   return json({ code, ownerToken, expiresAt }, 201)
 }
 
-async function readMeta(env: Env, code: string): Promise<ShareMeta | null> {
-  const raw = await env.SHARE_KV.get(`meta:${code}`)
-  return raw ? (JSON.parse(raw) as ShareMeta) : null
+async function readMeta(env: LifecycleEnv, _code: string): Promise<ShareMeta | null> {
+  return (await env.lifecycleStorage.get<ShareMeta | null>("meta")) ?? null
 }
 
-async function handleRead(env: Env, code: string, ctx: ExecutionContext): Promise<Response> {
-  const meta = await readMeta(env, code)
-  if (!meta || meta.revoked) {
-    // KV gone (expired) but R2 may linger — lazily reap the orphan.
-    ctx.waitUntil(env.SHARE_BUCKET.delete(`share/${code}`).catch(() => {}))
-    return json({ error: "not found" }, 404)
-  }
-  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
-    ctx.waitUntil(deleteShare(env, code, meta.orgId))
-    return json({ error: "not found" }, 404)
-  }
-  if (typeof meta.maxViews === "number" && meta.viewCount >= meta.maxViews) {
-    ctx.waitUntil(deleteShare(env, code, meta.orgId))
-    return json({ error: "not found" }, 404)
-  }
+function unavailable(meta: ShareMeta, now = Date.now()): boolean {
+  return (
+    meta.revoked ||
+    (meta.expiresAt !== undefined && now >= meta.expiresAt) ||
+    (meta.maxViews !== undefined && meta.viewCount >= meta.maxViews)
+  )
+}
 
+async function handleRead(env: LifecycleEnv, code: string): Promise<Response> {
+  const meta = await readMeta(env, code)
+  if (!meta) return json({ error: "not found" }, 404)
+  if (unavailable(meta)) {
+    await deleteShare(env, code, meta.orgId)
+    return json({ error: "not found" }, 404)
+  }
   const object = await env.SHARE_BUCKET.get(`share/${code}`)
   if (!object) {
-    ctx.waitUntil(env.SHARE_KV.delete(`meta:${code}`))
+    await deleteShare(env, code, meta.orgId)
     return json({ error: "not found" }, 404)
   }
   const envelopeText = await object.text()
-
-  const nextCount = meta.viewCount + 1
-  const exhausted = typeof meta.maxViews === "number" && nextCount >= meta.maxViews
-  if (exhausted) {
-    // This is the last allowed view — hand back the body, then destroy.
-    ctx.waitUntil(deleteShare(env, code, meta.orgId))
-  } else {
-    const updated: ShareMeta = { ...meta, viewCount: nextCount }
-    const remainingTtl = meta.expiresAt
-      ? Math.ceil((meta.expiresAt - Date.now()) / 1000)
-      : undefined
-    ctx.waitUntil(
-      env.SHARE_KV.put(`meta:${code}`, JSON.stringify(updated), {
-        ...(remainingTtl && remainingTtl > 0
-          ? { expirationTtl: Math.max(remainingTtl, KV_MIN_TTL_SECONDS) }
-          : {}),
-      })
-    )
+  // R2 I/O can cross expiry even while other lifecycle requests are queued.
+  if (unavailable(meta)) {
+    await deleteShare(env, code, meta.orgId)
+    return json({ error: "not found" }, 404)
   }
-
+  const nextCount = meta.viewCount + 1
+  if (meta.maxViews !== undefined && nextCount >= meta.maxViews) {
+    await deleteShare(env, code, meta.orgId)
+  } else {
+    // Counter-only writes retain the existing expiry alarm and org index.
+    await env.lifecycleStorage.put("meta", { ...meta, viewCount: nextCount })
+  }
   return new Response(`{"envelope":${envelopeText}}`, {
     status: 200,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS },
   })
 }
 
-async function handleStats(request: Request, env: Env, code: string): Promise<Response> {
+async function handleStats(request: Request, env: LifecycleEnv, code: string): Promise<Response> {
   const meta = await readMeta(env, code)
   // Ownership is checked against the share's own token, so a missing share is
   // a 404 regardless of credentials (no oracle for which codes exist).
   if (!meta) return json({ error: "not found" }, 404)
-  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+  if (unavailable(meta)) {
     await deleteShare(env, code, meta.orgId)
     return json({ error: "not found" }, 404)
   }
@@ -431,14 +458,14 @@ async function handleStats(request: Request, env: Env, code: string): Promise<Re
 
 /**
  * Extend a share's lifetime (owner-only). Sets a fresh window of `ttlSeconds`
- * from now, clamped to the hard `maxTtl` ceiling, and re-arms the KV
- * `expirationTtl` so the metadata row survives that long. Owner-token gated —
+ * from now, clamped to the hard `maxTtl` ceiling, and re-arms its durable
+ * expiry alarm and org discovery index. Owner-token gated —
  * possessing the global upload secret never renews another tenant's share.
  */
-async function handleRenew(request: Request, env: Env, code: string): Promise<Response> {
+async function handleRenew(request: Request, env: LifecycleEnv, code: string): Promise<Response> {
   const meta = await readMeta(env, code)
   if (!meta) return json({ error: "not found" }, 404)
-  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+  if (unavailable(meta)) {
     await deleteShare(env, code, meta.orgId)
     return json({ error: "not found" }, 404)
   }
@@ -451,24 +478,33 @@ async function handleRenew(request: Request, env: Env, code: string): Promise<Re
     return json({ error: "invalid json" }, 400)
   }
   const requested =
-    typeof body.ttlSeconds === "number" && body.ttlSeconds > 0 ? body.ttlSeconds : undefined
+    body &&
+    typeof body === "object" &&
+    typeof body.ttlSeconds === "number" &&
+    Number.isFinite(body.ttlSeconds) &&
+    body.ttlSeconds > 0
+      ? body.ttlSeconds
+      : undefined
   if (!requested) return json({ error: "ttlSeconds required" }, 400)
 
   const ttl = Math.min(requested, maxTtlSeconds(env))
   const expiresAt = Date.now() + ttl * 1000
   const updated: ShareMeta = { ...meta, expiresAt }
-  await env.SHARE_KV.put(`meta:${code}`, JSON.stringify(updated), {
-    expirationTtl: Math.max(ttl, KV_MIN_TTL_SECONDS),
-  })
+  if (unavailable(meta)) {
+    await deleteShare(env, code, meta.orgId)
+    return json({ error: "not found" }, 404)
+  }
+  await writeMeta(env, code, updated)
+  await updateOrgIndex(env, code, updated)
   return json({ expiresAt })
 }
 
-async function handleDelete(request: Request, env: Env, code: string): Promise<Response> {
+async function handleDelete(request: Request, env: LifecycleEnv, code: string): Promise<Response> {
   const meta = await readMeta(env, code)
   // Already gone (expired / burned / never existed) → idempotent success
   // without leaking existence or requiring a credential.
   if (!meta) return new Response(null, { status: 204, headers: CORS_HEADERS })
-  if (meta.expiresAt && Date.now() >= meta.expiresAt) {
+  if (unavailable(meta)) {
     await deleteShare(env, code, meta.orgId)
     return new Response(null, { status: 204, headers: CORS_HEADERS })
   }
@@ -491,26 +527,21 @@ async function handleListOrgShares(request: Request, env: Env, orgId: string): P
   if (caller?.orgId !== orgId) return json({ error: "unauthorized" }, 401)
 
   const index = await env.SHARE_KV.list({ prefix: `org:${orgId}:`, limit: 500 })
-  const codes = index.keys.map((key) => key.name.slice(`org:${orgId}:`.length))
-  const now = Date.now()
-  const shares = []
-  for (const code of codes) {
-    const meta = await readMeta(env, code)
-    // A dangling index entry — KV is eventually consistent — is skipped, never
-    // reported as a share that still exists.
-    if (!meta || meta.orgId !== orgId) continue
-    if (meta.expiresAt && now >= meta.expiresAt) continue
-    // No owner token and no envelope: a listing is for deciding what to
-    // revoke, and handing back the per-share secret would turn a read into a
-    // grant.
-    shares.push({
-      code,
-      createdAt: meta.createdAt,
-      expiresAt: meta.expiresAt,
-      maxViews: meta.maxViews,
-      viewCount: meta.viewCount,
-      creatorUserId: meta.creatorUserId,
-    })
+  const shares: Array<Record<string, unknown> & { createdAt: number }> = []
+  for (let offset = 0; offset < index.keys.length; offset += 16) {
+    const batch = await Promise.all(
+      index.keys.slice(offset, offset + 16).map(async (key) => {
+        const code = key.name.slice(`org:${orgId}:`.length)
+        const response = await lifecycleRequest(request, env, code, "org-list", orgId)
+        if (response.status === 404) return null
+        if (!response.ok) return response
+        return response.json<Record<string, unknown> & { createdAt: number }>()
+      })
+    )
+    for (const share of batch) {
+      if (share instanceof Response) return share
+      if (share) shares.push(share)
+    }
   }
   shares.sort((left, right) => right.createdAt - left.createdAt)
   return json({ shares })
@@ -519,7 +550,7 @@ async function handleListOrgShares(request: Request, env: Env, orgId: string): P
 /** Revoke one of an org's shares without holding its owner token. */
 async function handleDeleteOrgShare(
   request: Request,
-  env: Env,
+  env: LifecycleEnv,
   orgId: string,
   code: string
 ): Promise<Response> {
@@ -534,8 +565,124 @@ async function handleDeleteOrgShare(
   return json({ ok: true })
 }
 
+async function lifecycleRequest(
+  request: Request,
+  env: Env,
+  code: string,
+  action: string,
+  orgId?: string
+): Promise<Response> {
+  if (!env.SHARE_LIFECYCLE) return json({ error: "share lifecycle unavailable" }, 503)
+  const url = new URL(`https://lifecycle.internal/${encodeURIComponent(code)}`)
+  url.searchParams.set("action", action)
+  if (orgId !== undefined) url.searchParams.set("orgId", orgId)
+  const stub = env.SHARE_LIFECYCLE.get(env.SHARE_LIFECYCLE.idFromName(code))
+  try {
+    return await stub.fetch(new Request(url, request))
+  } catch {
+    return json({ error: "share lifecycle unavailable" }, 503)
+  }
+}
+
+/** One globally addressed authority per share, including migrated KV links.
+ * The queue includes external I/O; every transition commits before replying.
+ * Crash recovery reads committed metadata/tombstones instead of stale KV. */
+export class ShareLifecycle extends DurableObject<Env> {
+  private pending: Promise<unknown> = Promise.resolve()
+
+  private serial<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(operation)
+    this.pending = result.catch(() => {})
+    return result
+  }
+
+  private scopedEnv(): LifecycleEnv {
+    return { ...this.env, lifecycleStorage: this.ctx.storage }
+  }
+
+  private async importLegacy(code: string): Promise<void> {
+    if ((await this.ctx.storage.get("meta")) !== undefined) return
+    const raw = await this.env.SHARE_KV.get(`meta:${code}`)
+    // Negative KV reads must not delete valid R2 data during propagation.
+    if (!raw) return
+    if (new TextEncoder().encode(raw).byteLength > 64 * 1024)
+      throw new Error("oversized legacy metadata")
+    const meta: ShareMeta = JSON.parse(raw)
+    if (
+      !meta ||
+      !Number.isFinite(meta.createdAt) ||
+      !Number.isSafeInteger(meta.viewCount) ||
+      meta.viewCount < 0 ||
+      typeof meta.revoked !== "boolean" ||
+      typeof meta.burnAfterRead !== "boolean" ||
+      (meta.expiresAt !== undefined && !Number.isFinite(meta.expiresAt)) ||
+      (meta.maxViews !== undefined &&
+        (!Number.isSafeInteger(meta.maxViews) || meta.maxViews < 0)) ||
+      [meta.ownerToken, meta.orgId, meta.creatorUserId].some(
+        (value) => value !== undefined && typeof value !== "string"
+      )
+    ) {
+      throw new Error("invalid legacy metadata")
+    }
+    await writeMeta(this.scopedEnv(), code, meta)
+  }
+
+  fetch(request: Request): Promise<Response> {
+    return this.serial(async () => {
+      const url = new URL(request.url)
+      const code = decodeURIComponent(url.pathname.slice(1))
+      const action = url.searchParams.get("action")
+      const env = this.scopedEnv()
+      await this.importLegacy(code)
+      if (action === "create") {
+        if ((await this.ctx.storage.get("meta")) !== undefined)
+          return json({ error: "code collision" }, 409)
+        return handleCreate(request, env, code)
+      }
+      if (action === "read") return handleRead(env, code)
+      if (action === "stats") return handleStats(request, env, code)
+      if (action === "renew") return handleRenew(request, env, code)
+      if (action === "delete") return handleDelete(request, env, code)
+      const orgId = url.searchParams.get("orgId") ?? ""
+      if (action === "org-delete") return handleDeleteOrgShare(request, env, orgId, code)
+      if (action === "org-list") {
+        const caller = await grantCaller(request, env)
+        if (caller?.orgId !== orgId) return json({ error: "unauthorized" }, 401)
+        const meta = await readMeta(env, code)
+        if (!meta || meta.orgId !== orgId || unavailable(meta))
+          return json({ error: "not found" }, 404)
+        return json({
+          code,
+          createdAt: meta.createdAt,
+          expiresAt: meta.expiresAt,
+          maxViews: meta.maxViews,
+          viewCount: meta.viewCount,
+          creatorUserId: meta.creatorUserId,
+        })
+      }
+      return json({ error: "not found" }, 404)
+    })
+  }
+
+  alarm(): Promise<void> {
+    return this.serial(async () => {
+      const env = this.scopedEnv()
+      const cleanup = await this.ctx.storage.get<{ code: string; orgId?: string }>("cleanup")
+      if (cleanup) {
+        await cleanupShare(env, cleanup.code, cleanup.orgId)
+        return
+      }
+      const code = await this.ctx.storage.get<string>("code")
+      const meta = await this.ctx.storage.get<ShareMeta | null>("meta")
+      if (!code || !meta) return
+      if (unavailable(meta)) await deleteShare(env, code, meta.orgId)
+      else if (meta.expiresAt !== undefined) await this.ctx.storage.setAlarm(meta.expiresAt)
+    })
+  }
+}
+
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
     }
@@ -545,7 +692,7 @@ export default {
 
     // API surface.
     if (pathname === "/v1/share" && request.method === "POST") {
-      return handleCreate(request, env)
+      return lifecycleRequest(request, env, generateCode(), "create")
     }
     const orgMatch = pathname.match(/^\/v1\/orgs\/([^/]+)\/shares(?:\/([^/]+))?$/)
     if (orgMatch) {
@@ -555,7 +702,7 @@ export default {
         return handleListOrgShares(request, env, orgId)
       }
       if (code !== undefined && request.method === "DELETE") {
-        return handleDeleteOrgShare(request, env, orgId, code)
+        return lifecycleRequest(request, env, code, "org-delete", orgId)
       }
       return json({ error: "method not allowed" }, 405)
     }
@@ -565,13 +712,13 @@ export default {
       const code = decodeURIComponent(match[1])
       const isStats = Boolean(match[2])
       if (isStats) {
-        if (request.method === "GET") return handleStats(request, env, code)
+        if (request.method === "GET") return lifecycleRequest(request, env, code, "stats")
       } else if (request.method === "GET") {
-        return handleRead(env, code, ctx)
+        return lifecycleRequest(request, env, code, "read")
       } else if (request.method === "PATCH") {
-        return handleRenew(request, env, code)
+        return lifecycleRequest(request, env, code, "renew")
       } else if (request.method === "DELETE") {
-        return handleDelete(request, env, code)
+        return lifecycleRequest(request, env, code, "delete")
       }
       return json({ error: "method not allowed" }, 405)
     }

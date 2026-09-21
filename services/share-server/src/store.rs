@@ -203,11 +203,41 @@ impl Store {
         };
         if let Some(exp) = meta.expires_at {
             if now_ms >= exp {
-                conn.execute("DELETE FROM shares WHERE code = ?1", [code])?;
+                // A renewal can commit between the lookup and this cleanup.
+                // Recheck expiry in the DELETE so it cannot erase the new window.
+                conn.execute(
+                    "DELETE FROM shares WHERE code = ?1 AND expires_at <= ?2",
+                    params![code, now_ms],
+                )?;
                 return Ok(None);
             }
         }
         Ok(Some(meta))
+    }
+
+    /// Replace only the lifetime of a still-readable share. The lifecycle
+    /// predicates run in the same SQLite write as the update, so a concurrent
+    /// read, revocation, or expiry cannot be undone by a stale owner lookup.
+    pub fn renew(
+        &self,
+        code: &str,
+        ttl_ms: i64,
+        now: impl FnOnce() -> i64,
+    ) -> anyhow::Result<Option<i64>> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Sample time only after waiting for the connection and the write lock.
+        let now_ms = now();
+        let expires_at = now_ms.saturating_add(ttl_ms);
+        let updated = tx.execute(
+            "UPDATE shares SET expires_at = ?3
+             WHERE code = ?1 AND revoked = 0
+               AND (expires_at IS NULL OR expires_at > ?2)
+               AND (max_views IS NULL OR view_count < max_views)",
+            params![code, now_ms, expires_at],
+        )?;
+        tx.commit()?;
+        Ok((updated > 0).then_some(expires_at))
     }
 
     /// Hard-delete a share (owner revoke). Idempotent — deleting an absent code
@@ -458,6 +488,94 @@ mod tests {
         assert_eq!(store.count().unwrap(), 2);
         assert!(store.stats("future", 0).unwrap().is_some());
         assert!(store.stats("never", 0).unwrap().is_some());
+    }
+
+    #[test]
+    fn renewal_updates_only_expiry_and_preserves_concurrent_reads() {
+        let (store, _dir) = temp_store();
+        let mut original = meta(Some(10_000), Some(100));
+        original.org_id = Some("org_owner".into());
+        original.creator_user_id = Some("usr_owner".into());
+        store.create("renew", "{}", &original).unwrap();
+        std::thread::scope(|scope| {
+            for _ in 0..10 {
+                let store = &store;
+                scope.spawn(move || {
+                    assert_eq!(
+                        store.renew("renew", 18_000, || 2_000).unwrap(),
+                        Some(20_000)
+                    );
+                    assert!(matches!(
+                        store.read_and_advance("renew", 2_000).unwrap(),
+                        ReadOutcome::Served { .. }
+                    ));
+                });
+            }
+        });
+        original.expires_at = Some(20_000);
+        original.view_count = 10;
+        assert_eq!(store.stats("renew", 2_000).unwrap(), Some(original));
+    }
+
+    #[test]
+    fn renewal_samples_clock_under_write_lock_and_rejects_expiry() {
+        let (store, dir) = temp_store();
+        store
+            .create("expired", "{}", &meta(Some(2_000), None))
+            .unwrap();
+        assert!(store.stats("expired", 1_000).unwrap().is_some());
+        let renewed = store
+            .renew("expired", 18_000, || {
+                // The production clock callback must run after BEGIN IMMEDIATE.
+                let probe = rusqlite::Connection::open(dir.path().join("shares.sqlite")).unwrap();
+                probe.busy_timeout(std::time::Duration::ZERO).unwrap();
+                let error = probe.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+                assert_eq!(
+                    error.sqlite_error_code(),
+                    Some(rusqlite::ErrorCode::DatabaseBusy)
+                );
+                2_000
+            })
+            .unwrap();
+        assert_eq!(renewed, None);
+        assert_eq!(
+            store.read_and_advance("expired", 2_000).unwrap(),
+            ReadOutcome::NotFound
+        );
+    }
+
+    #[test]
+    fn renewal_rechecks_lifecycle_after_owner_lookup() {
+        let (store, _dir) = temp_store();
+        for (code, mut row) in [
+            ("expired", meta(Some(2_000), None)),
+            ("revoked", meta(None, None)),
+            ("exhausted", meta(None, Some(2))),
+            ("deleted", meta(None, None)),
+            ("burned", meta(None, Some(1))),
+        ] {
+            store.create(code, "{}", &row).unwrap();
+            assert!(store.stats(code, 1_000).unwrap().is_some());
+            match code {
+                "revoked" | "exhausted" => {
+                    row.revoked = code == "revoked";
+                    row.view_count = if code == "exhausted" { 2 } else { 0 };
+                    store.delete(code).unwrap();
+                    store.create(code, "{}", &row).unwrap();
+                }
+                "deleted" => store.delete(code).unwrap(),
+                "burned" => {
+                    store.read_and_advance(code, 1_000).unwrap();
+                }
+                _ => {}
+            }
+            assert_eq!(store.renew(code, 18_000, || 2_000).unwrap(), None, "{code}");
+            assert_eq!(
+                store.read_and_advance(code, 2_000).unwrap(),
+                ReadOutcome::NotFound
+            );
+        }
+        assert_eq!(store.renew("unknown", 18_000, || 2_000).unwrap(), None);
     }
 
     #[test]

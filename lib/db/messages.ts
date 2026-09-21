@@ -11,10 +11,15 @@ import {
   revokeClaimsForDeletedSession,
 } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { normalizeMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { persistMessageSessionAssets } from "./session-assets"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
-import { collectUnreferencedMessageMedia, messageMediaRefRows } from "./message-media-refs"
+import {
+  collectUnreferencedMessageMedia,
+  isMessageOwnedMediaRef,
+  messageMediaRefRows,
+} from "./message-media-refs"
 import { parseMediaRef } from "./message-media"
 import {
   isImagePart,
@@ -248,7 +253,11 @@ export async function replaceSessionTranscript(
 ): Promise<void> {
   const db = getDb()
   const now = Date.now()
-  const normalizedMessages = await Promise.all(messages.map(normalizeMessageMedia))
+  const normalizedMessages = await Promise.all(
+    messages.map(async (message) =>
+      normalizeMessageMedia(await persistMessageSessionAssets(sessionId, message))
+    )
+  )
 
   // Owning workspace for these rows (Workspace isolation, Dexie v86). Resolved
   // once per call from the session — messages inherit their session's project.
@@ -301,6 +310,7 @@ export async function replaceSessionTranscript(
               return transactionDb.messageMediaRefs
                 .where("sessionId")
                 .equals(sessionId)
+                .filter(isMessageOwnedMediaRef)
                 .toArray()
                 .then((refs) => {
                   for (const ref of refs) orphanCandidates.add(ref.hash)
@@ -308,7 +318,11 @@ export async function replaceSessionTranscript(
                     existingIds.size > 0
                       ? transactionDb.messages.bulkDelete([...existingIds])
                       : Promise.resolve(),
-                    transactionDb.messageMediaRefs.where("sessionId").equals(sessionId).delete(),
+                    transactionDb.messageMediaRefs
+                      .where("sessionId")
+                      .equals(sessionId)
+                      .filter(isMessageOwnedMediaRef)
+                      .delete(),
                   ]).then(async () => {
                     if (existingIds.size > 0) {
                       publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
@@ -389,14 +403,22 @@ export async function replaceSessionTranscript(
               )
               const oldRefs =
                 changedIds.length > 0
-                  ? transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).toArray()
+                  ? transactionDb.messageMediaRefs
+                      .where("messageId")
+                      .anyOf(changedIds)
+                      .filter(isMessageOwnedMediaRef)
+                      .toArray()
                   : Promise.resolve([])
               return oldRefs.then(async (refs) => {
                 for (const ref of refs) orphanCandidates.add(ref.hash)
                 if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
                 if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
                 if (changedIds.length > 0) {
-                  await transactionDb.messageMediaRefs.where("messageId").anyOf(changedIds).delete()
+                  await transactionDb.messageMediaRefs
+                    .where("messageId")
+                    .anyOf(changedIds)
+                    .filter(isMessageOwnedMediaRef)
+                    .delete()
                 }
                 if (replacementRefs.length > 0) {
                   await transactionDb.messageMediaRefs.bulkPut(replacementRefs)
@@ -500,7 +522,11 @@ export async function commitMessageDelta(
   const session = await db.sessions.get(sessionId)
   assertSessionWritable(session, "send-message")
   const projectId = session?.projectId ?? (await resolveScopeProjectId())
-  const normalized = await Promise.all(upserts.map(normalizeMessageMedia))
+  const normalized = await Promise.all(
+    upserts.map(async (message) =>
+      normalizeMessageMedia(await persistMessageSessionAssets(sessionId, message))
+    )
+  )
   const upsertIds = normalized.map((message) => message.id || newId())
   if (new Set(upsertIds).size !== upsertIds.length) {
     throw new Error("Message delta contains duplicate upsert ids")
@@ -560,11 +586,19 @@ export async function commitMessageDelta(
   let publishedRevision: number | null = null
 
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
-    const oldRefs = await db.messageMediaRefs.where("messageId").anyOf(changedIds).toArray()
+    const oldRefs = await db.messageMediaRefs
+      .where("messageId")
+      .anyOf(changedIds)
+      .filter(isMessageOwnedMediaRef)
+      .toArray()
     for (const ref of oldRefs) orphanCandidates.add(ref.hash)
     if (effectiveDeleteIds.length > 0) await db.messages.bulkDelete(effectiveDeleteIds)
     if (rows.length > 0) await db.messages.bulkPut(rows)
-    await db.messageMediaRefs.where("messageId").anyOf(changedIds).delete()
+    await db.messageMediaRefs
+      .where("messageId")
+      .anyOf(changedIds)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
     const replacementRefs = rows.flatMap((row) =>
       messageMediaRefRows(row.id, row.sessionId, row.parts)
     )
@@ -626,9 +660,15 @@ export async function persistStreamingMessages(
     senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
       ? senderKindRaw
       : undefined
-  const normalizedLast = await normalizeMessageMedia(last)
+  const normalizedLast = await normalizeMessageMedia(
+    await persistMessageSessionAssets(sessionId, last)
+  )
   const db = getDb()
-  const oldRefs = await db.messageMediaRefs.where("messageId").equals(last.id).toArray()
+  const oldRefs = await db.messageMediaRefs
+    .where("messageId")
+    .equals(last.id)
+    .filter(isMessageOwnedMediaRef)
+    .toArray()
   const replacementRefs = messageMediaRefRows(last.id, sessionId, normalizedLast.parts)
   const updated = await db.transaction(
     "rw",
@@ -649,7 +689,11 @@ export async function persistStreamingMessages(
         metadata: stripHoistedMeta(meta),
       })
       if (count === 0) return count
-      await db.messageMediaRefs.where("messageId").equals(last.id).delete()
+      await db.messageMediaRefs
+        .where("messageId")
+        .equals(last.id)
+        .filter(isMessageOwnedMediaRef)
+        .delete()
       if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
       return count
     }
@@ -745,11 +789,19 @@ async function dispatchChatMessageTriggers(
 export async function clearMessages(sessionId: string): Promise<void> {
   const db = getDb()
   assertSessionWritable(await db.sessions.get(sessionId), "send-message")
-  const refs = await db.messageMediaRefs.where("sessionId").equals(sessionId).toArray()
+  const refs = await db.messageMediaRefs
+    .where("sessionId")
+    .equals(sessionId)
+    .filter(isMessageOwnedMediaRef)
+    .toArray()
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
     const deleted = await db.messages.where("sessionId").equals(sessionId).delete()
-    await db.messageMediaRefs.where("sessionId").equals(sessionId).delete()
+    await db.messageMediaRefs
+      .where("sessionId")
+      .equals(sessionId)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
     if (deleted > 0) revision = await bumpTranscriptRevision(db, sessionId)
   })
   invalidatePersistSnapshot(sessionId)
@@ -777,11 +829,19 @@ export async function deleteStoredMessage(messageId: string): Promise<void> {
   if (!row) return
   assertSessionWritable(await db.sessions.get(row.sessionId), "send-message")
 
-  const refs = await db.messageMediaRefs.where("messageId").equals(messageId).toArray()
+  const refs = await db.messageMediaRefs
+    .where("messageId")
+    .equals(messageId)
+    .filter(isMessageOwnedMediaRef)
+    .toArray()
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
     await db.messages.delete(messageId)
-    await db.messageMediaRefs.where("messageId").equals(messageId).delete()
+    await db.messageMediaRefs
+      .where("messageId")
+      .equals(messageId)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
     revision = await bumpTranscriptRevision(db, row.sessionId)
   })
   invalidatePersistSnapshot(row.sessionId)
@@ -903,12 +963,14 @@ export async function truncateAfter(
       const refs = await db.messageMediaRefs
         .where("messageId")
         .anyOf(ids as string[])
+        .filter(isMessageOwnedMediaRef)
         .toArray()
       for (const ref of refs) orphanCandidates.add(ref.hash)
       await db.messages.bulkDelete(ids as string[])
       await db.messageMediaRefs
         .where("messageId")
         .anyOf(ids as string[])
+        .filter(isMessageOwnedMediaRef)
         .delete()
       revision = await bumpTranscriptRevision(db, sessionId)
     }
@@ -1062,7 +1124,11 @@ export async function appendImageEditVersion({
       await db.messages.update(messageId, { parts: nextParts })
       // Rebuilt from the whole part list rather than added to, so the ref table
       // stays a pure projection of the row it describes.
-      await db.messageMediaRefs.where("messageId").equals(messageId).delete()
+      await db.messageMediaRefs
+        .where("messageId")
+        .equals(messageId)
+        .filter(isMessageOwnedMediaRef)
+        .delete()
       const refs = messageMediaRefRows(messageId, sessionId, nextParts)
       if (refs.length > 0) await db.messageMediaRefs.bulkPut(refs)
       publishedRevision = await bumpTranscriptRevision(db, sessionId)

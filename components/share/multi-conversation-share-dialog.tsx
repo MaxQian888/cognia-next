@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
-import { buildMultiChatSharePayload } from "@/lib/share/chat-export"
+import { assertChatShareAccess, buildMultiChatSharePayload } from "@/lib/share/chat-export"
 import type { SharePayload } from "@/lib/share/types"
 import { useReducedMotionVariants } from "@/lib/ui/motion"
 
@@ -42,7 +42,10 @@ export function MultiConversationShareDialog({ sessions, open, onOpenChange }: P
   }, [open, sessions])
 
   const buildPayload = useCallback(() => {
-    if (payloadPromiseRef.current) return payloadPromiseRef.current
+    if (payloadPromiseRef.current) {
+      const cached = payloadPromiseRef.current
+      return assertChatShareAccess(sessions).then(() => cached)
+    }
 
     const promise = buildMultiChatSharePayload({
       sessions,

@@ -184,6 +184,24 @@ export async function readWorkspaceFile(
   return transport.call<string>("fs_read_workspace_file", { root, relPath, maxBytes })
 }
 
+/**
+ * Read a workspace file's raw bytes as base64 — the binary counterpart to
+ * {@link readWorkspaceFile}, for file types text cannot represent (image
+ * previews). Rejects when the file exceeds `maxBytes` (or the host's hard
+ * cap), so a caller can bound the frame before it is read.
+ */
+export async function readWorkspaceFileBase64(
+  root: string,
+  relPath: string,
+  maxBytes?: number
+): Promise<string> {
+  return transport.call<string>("fs_read_workspace_file_base64", {
+    root,
+    relPath,
+    maxBytes,
+  })
+}
+
 /** Write a text file relative to `root`, creating parent directories. */
 export async function writeWorkspaceFile(
   root: string,

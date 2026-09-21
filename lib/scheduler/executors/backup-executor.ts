@@ -1,5 +1,5 @@
 // Cron-driven backup executor. Reads the task payload (`BackupTaskPayload`),
-// builds the v3 package, encrypts with the auto-key, writes to disk under
+// streams the local package with auto-key encryption to disk under
 // `appDataDir()/backups/`, and records a `scheduled` row in `backupHistory`.
 //
 // Different from the interval-based `BackupSchedulerProvider`:
@@ -44,6 +44,7 @@ import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations
 import { resolveBackupHostFilesystem } from "@/lib/data/backup-host-filesystem"
 import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"
 import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
+import { writeEncryptedLocalBackup } from "@/lib/data/backup-scheduler"
 
 const log = loggers.scheduler
 
@@ -161,7 +162,7 @@ export async function executeBackupTask(
 
   try {
     const buildOpts = payloadToBuildOptions(payload.backupType, payload.options)
-    const basePackage = await buildBackupPackage(buildOpts)
+    let basePackage: Awaited<ReturnType<typeof buildBackupPackage>> | undefined
     const output: Record<string, unknown> = {}
     const remoteLegs = remoteLegsFor(destination)
     const localOnly = destination === undefined || destination === "local"
@@ -180,22 +181,26 @@ export async function executeBackupTask(
       } else {
         const passphrase = await getDefaultBackupPassphrase()
         if (!passphrase) throw new Error("Auto-key not available on this runtime.")
-        const pkg = await attachPortableRetrievalKeys(basePackage, passphrase)
-        const plaintext = serializePackage(pkg)
-        const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
         const filename = defaultExportFileName(new Date(), "encrypted")
         const target = host.join(dir, filename)
-        await host.filesystem.writeTextFile(target, body)
+        const written = await writeEncryptedLocalBackup(
+          host.filesystem,
+          target,
+          buildOpts,
+          passphrase,
+          _signal
+        )
+        basePackage = written.basePackage
         await appendBackupHistory({
           completedAt: Date.now(),
           type: "scheduled",
           success: true,
           encryption: "auto-key",
-          sizeBytes: body.length,
+          sizeBytes: written.sizeBytes,
           filename,
           destination: "local",
         })
-        output.local = { target, sizeBytes: body.length, filename }
+        output.local = { target, sizeBytes: written.sizeBytes, filename }
       }
     }
 
@@ -212,52 +217,63 @@ export async function executeBackupTask(
         if (!wantsLocal(destination)) return { success: false, error }
         for (const leg of remoteLegs) output[leg] = { skipped: true, error }
       } else {
-        const pkg = await attachPortableRetrievalKeys(basePackage, syncPass)
-        const plaintext = serializePackage(pkg)
-        const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
-        const filename = webdavSnapshotName(pkg.manifest.exportedAt)
-        const meta = { filename, exportedAt: pkg.manifest.exportedAt, sizeBytes: body.length }
-        let anyRemoteSucceeded = false
-        for (const leg of remoteLegs) {
-          const result = await dispatchBackupDestination(leg, body, meta)
-          if (result.ok) {
-            anyRemoteSucceeded = true
-            await appendBackupHistory({
-              completedAt: Date.now(),
-              type: "scheduled",
-              success: true,
-              encryption: "passphrase",
-              sizeBytes: body.length,
-              filename,
-              destination: leg,
-            })
-            output[leg] = { target: result.target, sizeBytes: body.length, filename }
-            if (leg === "webdav") await stampWebdavLastSync()
-          } else {
-            const error =
-              result.error ??
-              `${REMOTE_LEG_LABEL[leg as keyof typeof REMOTE_LEG_LABEL] ?? leg} upload failed.`
-            await safelyAppendFailure(error, "passphrase", leg)
-            output[leg] = { failed: true, error }
+        try {
+          basePackage ??= await buildBackupPackage(buildOpts)
+          const pkg = await attachPortableRetrievalKeys(basePackage, syncPass)
+          const plaintext = serializePackage(pkg)
+          const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
+          const filename = webdavSnapshotName(pkg.manifest.exportedAt)
+          const meta = { filename, exportedAt: pkg.manifest.exportedAt, sizeBytes: body.length }
+          let anyRemoteSucceeded = false
+          for (const leg of remoteLegs) {
+            const result = await dispatchBackupDestination(leg, body, meta)
+            if (result.ok) {
+              anyRemoteSucceeded = true
+              await appendBackupHistory({
+                completedAt: Date.now(),
+                type: "scheduled",
+                success: true,
+                encryption: "passphrase",
+                sizeBytes: body.length,
+                filename,
+                destination: leg,
+              })
+              output[leg] = { target: result.target, sizeBytes: body.length, filename }
+              if (leg === "webdav") await stampWebdavLastSync()
+            } else {
+              const error =
+                result.error ??
+                `${REMOTE_LEG_LABEL[leg as keyof typeof REMOTE_LEG_LABEL] ?? leg} upload failed.`
+              await safelyAppendFailure(error, "passphrase", leg)
+              output[leg] = { failed: true, error }
+            }
           }
-        }
-        // A single-remote task fails when its one leg failed; `all` (or a
-        // remote-only fan-out) fails only when every remote leg failed and
-        // there was no local success to report.
-        const remoteFailures = remoteLegs.filter(
-          (leg) => (output[leg] as { failed?: boolean } | undefined)?.failed
-        )
-        if (remoteFailures.length > 0 && !wantsLocal(destination) && !anyRemoteSucceeded) {
-          const first = output[remoteFailures[0]] as { error?: string }
-          return { success: false, output, error: first.error ?? "Remote upload failed." }
-        }
-        if (
-          remoteFailures.length === remoteLegs.length &&
-          remoteLegs.length === 1 &&
-          !wantsLocal(destination)
-        ) {
-          const first = output[remoteFailures[0]] as { error?: string }
-          return { success: false, output, error: first.error ?? "Remote upload failed." }
+          // A single-remote task fails when its one leg failed; `all` (or a
+          // remote-only fan-out) fails only when every remote leg failed and
+          // there was no local success to report.
+          const remoteFailures = remoteLegs.filter(
+            (leg) => (output[leg] as { failed?: boolean } | undefined)?.failed
+          )
+          if (remoteFailures.length > 0 && !wantsLocal(destination) && !anyRemoteSucceeded) {
+            const first = output[remoteFailures[0]] as { error?: string }
+            return { success: false, output, error: first.error ?? "Remote upload failed." }
+          }
+          if (
+            remoteFailures.length === remoteLegs.length &&
+            remoteLegs.length === 1 &&
+            !wantsLocal(destination)
+          ) {
+            const first = output[remoteFailures[0]] as { error?: string }
+            return { success: false, output, error: first.error ?? "Remote upload failed." }
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          for (const leg of remoteLegs) {
+            await safelyAppendFailure(message, "passphrase", leg)
+            output[leg] = { failed: true, error: message }
+          }
+          if (!output.local || (output.local as { skipped?: boolean }).skipped)
+            return { success: false, output, error: message }
         }
       }
     }

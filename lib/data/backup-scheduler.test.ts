@@ -5,6 +5,10 @@ const mockSaveSettings = jest.fn(async (_input?: unknown) => undefined)
 const mockAppendHistory = jest.fn(async (_input?: unknown) => undefined)
 const mockGetLatestSuccessful = jest.fn(async (): Promise<unknown> => undefined)
 const mockBuildPackage = jest.fn()
+const mockBuildStream = jest.fn()
+jest.mock("./build-stream", () => ({
+  buildBackupStream: (...args: unknown[]) => mockBuildStream(...args),
+}))
 const mockGetAutoKey = jest.fn(async (): Promise<string | null> => "auto-key")
 const mockShouldRun = jest.fn((_input?: unknown) => true)
 const mockPrune = jest.fn()
@@ -64,6 +68,7 @@ import {
   maybeUploadToWebDav,
   runScheduledBackupOnce,
   startBackupScheduler,
+  writeEncryptedLocalBackup,
   type ScheduledBackupMessages,
 } from "./backup-scheduler"
 
@@ -102,6 +107,99 @@ beforeEach(() => {
   mockGetSyncPassphrase.mockReturnValue(null)
   mockLoadPersistedSyncPassphrase.mockResolvedValue(false)
   mockAttachPortableRetrievalKeys.mockClear()
+})
+
+it("streams encrypted scheduled backups without constructing a legacy package", async () => {
+  const chunks = [
+    new TextEncoder().encode(JSON.stringify({ manifest: { device: { id: "device-a" } } }) + "\n"),
+    new TextEncoder().encode("encrypted-chunk\n"),
+  ]
+  mockBuildStream.mockImplementation(async function* () {
+    yield* chunks
+  })
+  const filesystem = {
+    writeTextFile: jest.fn(),
+    readDirNames: jest.fn(async () => []),
+    remove: jest.fn(),
+    writeStream: jest.fn(async (_target: string, source: AsyncIterable<Uint8Array>) => {
+      let size = 0
+      for await (const chunk of source) size += chunk.byteLength
+      return size
+    }),
+  }
+  await expect(runScheduledBackupOnce({ filesystem, messages })).resolves.toBe(true)
+  expect(mockBuildPackage).not.toHaveBeenCalled()
+  expect(filesystem.writeTextFile).not.toHaveBeenCalled()
+  expect(mockBuildStream).toHaveBeenCalledWith(
+    { includeSessions: true, includeApiKey: false },
+    { encryption: { passphrase: "auto-key" } }
+  )
+  expect(mockAppendHistory).toHaveBeenCalledWith(
+    expect.objectContaining({
+      success: true,
+      deviceId: "device-a",
+      sizeBytes: chunks.reduce((sum, value) => sum + value.byteLength, 0),
+    })
+  )
+})
+
+it("stops generating stream chunks when a scheduled task is cancelled", async () => {
+  const controller = new AbortController()
+  mockBuildStream.mockImplementation(async function* () {
+    yield new TextEncoder().encode('{"manifest":{}}\n')
+    controller.abort()
+    yield new Uint8Array([1])
+  })
+  const chunks: Uint8Array[] = []
+  await expect(
+    writeEncryptedLocalBackup(
+      {
+        writeTextFile: jest.fn(),
+        readDirNames: jest.fn(),
+        remove: jest.fn(),
+        writeStream: async (_path, source) => {
+          for await (const chunk of source) chunks.push(chunk)
+          return 1
+        },
+      },
+      "target",
+      { includeSessions: true, includeApiKey: false },
+      "pass",
+      controller.signal
+    )
+  ).rejects.toThrow()
+  expect(chunks).toHaveLength(1)
+})
+
+it("retains a completed local stream when the remote package exceeds its size limit", async () => {
+  mockPrune.mockReturnValue([])
+  mockGetSettings.mockResolvedValue({
+    backupAutoSchedule: { enabled: true, dirPath: "/srv/backups", retainCount: 2 },
+    webdavSync: { enabled: true },
+  })
+  mockBuildStream.mockImplementation(async function* () {
+    yield new TextEncoder().encode('{"manifest":{}}\n')
+  })
+  mockBuildPackage.mockRejectedValueOnce(new Error("backup_requires_streaming_export"))
+  const filesystem = {
+    writeTextFile: jest.fn(),
+    readDirNames: jest.fn(async () => []),
+    remove: jest.fn(),
+    writeStream: async (_path: string, source: AsyncIterable<Uint8Array>) => {
+      let size = 0
+      for await (const chunk of source) size += chunk.byteLength
+      return size
+    },
+  }
+  await expect(runScheduledBackupOnce({ filesystem, messages })).resolves.toBe(true)
+  expect(mockAppendHistory).toHaveBeenCalledWith(
+    expect.objectContaining({ success: true, encryption: "auto-key" })
+  )
+  expect(mockAppendHistory).toHaveBeenCalledWith(
+    expect.objectContaining({ success: false, errorMessage: "backup_requires_streaming_export" })
+  )
+  expect(mockUpload).not.toHaveBeenCalled()
+  expect(filesystem.remove).not.toHaveBeenCalled()
 })
 
 afterEach(() => {

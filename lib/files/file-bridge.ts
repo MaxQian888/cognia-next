@@ -3,6 +3,7 @@
 // anchor download). Components import the *Async helpers and don't have to
 // branch on `isTauri()` themselves.
 
+import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
 import { isTauri } from "@/lib/tauri"
 import {
   defaultExportDir,
@@ -281,4 +282,104 @@ function basename(path: string): string {
   // Handle both / and \ separators.
   const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
   return idx === -1 ? path : path.slice(idx + 1)
+}
+
+/** Re-openable bounded source, so encrypted imports can retry without retaining the file text. */
+export interface PickedStreamFile {
+  name: string
+  path: string
+  stream(): AsyncIterable<Uint8Array>
+}
+
+export async function* blobFileStream(blob: Blob): AsyncIterable<Uint8Array> {
+  for (let offset = 0; offset < blob.size; offset += 1024 * 1024)
+    yield new Uint8Array(await readBlobAsArrayBuffer(blob.slice(offset, offset + 1024 * 1024)))
+}
+
+async function* nativeFileStream(path: string): AsyncIterable<Uint8Array> {
+  const fs = await import("@tauri-apps/plugin-fs")
+  const handle = await fs.open(path, { read: true })
+  try {
+    while (true) {
+      const bytes = new Uint8Array(1024 * 1024)
+      const size = await handle.read(bytes)
+      if (size === null || size === 0) break
+      yield bytes.subarray(0, size)
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function pickStreamFiles(opts: PickFilesOptions = {}): Promise<PickedStreamFile[]> {
+  if (isTauri()) {
+    const picked = await open({
+      multiple: !!opts.multiple,
+      directory: false,
+      filters: opts.filters,
+    })
+    return (picked ? (Array.isArray(picked) ? picked : [picked]) : []).map((path) => ({
+      name: basename(path),
+      path,
+      stream: () => nativeFileStream(path),
+    }))
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.multiple = !!opts.multiple
+    if (opts.filters?.length)
+      input.accept = opts.filters
+        .flatMap((filter) => filter.extensions.map((extension) => `.${extension}`))
+        .join(",")
+    input.onchange = () =>
+      resolve(
+        Array.from(input.files ?? []).map((file) => ({
+          name: file.name,
+          path: "",
+          stream: () => blobFileStream(file),
+        }))
+      )
+    input.oncancel = () => resolve([])
+    input.click()
+  })
+}
+
+/** Write each encoded record immediately; failed output is removed, never reported as a backup. */
+export async function writeBackupStreamFile(
+  path: string,
+  source: AsyncIterable<Uint8Array>
+): Promise<number> {
+  const fs = await import("@tauri-apps/plugin-fs")
+  const { invoke } = await import("@tauri-apps/api/core")
+  const temporaryPath = await invoke<string>("backup_stream_temporary_path", { path })
+  const handle = await fs.open(temporaryPath, { write: true, createNew: true, mode: 0o600 })
+  let total = 0
+  let closed = false
+  try {
+    for await (const bytes of source) {
+      let offset = 0
+      while (offset < bytes.byteLength) {
+        const written = await handle.write(bytes.subarray(offset))
+        if (written <= 0) throw new Error("Backup file write made no progress")
+        offset += written
+        total += written
+      }
+    }
+    await handle.close()
+    closed = true
+    await fs.rename(temporaryPath, path)
+    return total
+  } catch (error) {
+    if (!closed) await handle.close().catch(() => undefined)
+    await fs.remove(temporaryPath).catch(() => undefined)
+    throw error
+  }
+}
+
+/** Browsers retain immutable Blob parts instead of joining a potentially gigabyte-sized string. */
+export async function backupStreamBlob(source: AsyncIterable<Uint8Array>): Promise<Blob> {
+  const parts: Blob[] = []
+  for await (const bytes of source) parts.push(new Blob([bytes as BlobPart]))
+  return new Blob(parts, { type: "application/x-ndjson" })
 }

@@ -108,16 +108,53 @@ function authHeaders(endpoint: ShareEndpoint): HeadersInit {
 
 /**
  * Headers for owner-only actions (stats / delete). Sends the per-share
- * `X-Owner-Token` when we have one (new shares) and the upload-secret bearer
- * when configured (legacy shares + the create gate). The worker accepts
- * whichever matches the share. Requires at least one credential.
+ * `X-Owner-Token` when we have one (new shares), otherwise the upload-secret
+ * bearer for legacy shares. Requires at least one credential.
  */
 function ownerActionHeaders(endpoint: ShareEndpoint, ownerToken?: string): HeadersInit {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (ownerToken) headers["X-Owner-Token"] = ownerToken
-  if (endpoint.uploadSecret) headers["Authorization"] = `Bearer ${endpoint.uploadSecret}`
+  else if (endpoint.uploadSecret) headers["Authorization"] = `Bearer ${endpoint.uploadSecret}`
   if (!ownerToken && !endpoint.uploadSecret) throw new ShareNotConfiguredError()
   return headers
+}
+
+/** Resolve an existing link's service, preserving ownership after settings change. */
+export async function resolveShareOwnerRequest(
+  code: string,
+  endpoint?: ShareEndpoint
+): Promise<{ baseUrl: string; headers: HeadersInit }> {
+  const [configured, row] = await Promise.all([
+    endpoint ? Promise.resolve(endpoint) : resolveShareEndpoint(),
+    getSharedLinkByCode(code),
+  ])
+  let baseUrl = configured.baseUrl.replace(/\/+$/, "")
+  let uploadSecret = configured.uploadSecret
+  if (row) {
+    let original: URL
+    try {
+      original = new URL(row.url)
+    } catch {
+      throw new ShareRequestError(400, "Invalid stored share URL")
+    }
+    // Both the current viewer and pre-Phase-4 links identify the original
+    // service, including a reverse-proxy path prefix. Never forward fragments.
+    const suffix = original.pathname.endsWith("/share/view")
+      ? "/share/view"
+      : `/v/${encodeURIComponent(code)}`
+    if (
+      !["http:", "https:"].includes(original.protocol) ||
+      original.username ||
+      original.password ||
+      !original.pathname.endsWith(suffix)
+    ) {
+      throw new ShareRequestError(400, "Invalid stored share URL")
+    }
+    const originalBase = original.origin + original.pathname.slice(0, -suffix.length)
+    if (row.ownerToken || new URL(baseUrl).href !== new URL(originalBase).href) uploadSecret = ""
+    baseUrl = originalBase
+  }
+  return { baseUrl, headers: ownerActionHeaders({ baseUrl, uploadSecret }, row?.ownerToken) }
 }
 
 /** Create a share link and mirror it locally. */
@@ -180,11 +217,10 @@ export async function createShareLink(
 
 /** Revoke a share on the worker and flag the local mirror. */
 export async function revokeShareLink(code: string, endpoint?: ShareEndpoint): Promise<void> {
-  const ep = endpoint ?? (await resolveShareEndpoint())
-  const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
+  const { baseUrl, headers } = await resolveShareOwnerRequest(code, endpoint)
+  const res = await proxyFetch(`${baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "DELETE",
-    headers: ownerActionHeaders(ep, ownerToken),
+    headers,
   })
   // 404 means it's already gone (expired/burned) — treat as success.
   if (!res.ok && res.status !== 404) {
@@ -199,11 +235,10 @@ export async function getShareStats(
   code: string,
   endpoint?: ShareEndpoint
 ): Promise<ShareStats | null> {
-  const ep = endpoint ?? (await resolveShareEndpoint())
-  const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}/stats`, {
+  const { baseUrl, headers } = await resolveShareOwnerRequest(code, endpoint)
+  const res = await proxyFetch(`${baseUrl}/v1/share/${encodeURIComponent(code)}/stats`, {
     method: "GET",
-    headers: ownerActionHeaders(ep, ownerToken),
+    headers,
   })
   if (res.status === 404) return null
   if (!res.ok) throw new ShareRequestError(res.status, await readError(res))

@@ -131,6 +131,33 @@ describe("createShareLink", () => {
 })
 
 describe("revokeShareLink", () => {
+  it("revokes on the original server after settings change without forwarding the new secret", async () => {
+    mockFetchOnce(200, { code: "ORIGINAL", ownerToken: "original-owner" })
+    await createShareLink({ payload: PAYLOAD }, { ...ENDPOINT, baseUrl: "https://share.test/team" })
+    mockFetchOnce(204, {})
+    await revokeShareLink("ORIGINAL", { baseUrl: "https://new.test", uploadSecret: "new-secret" })
+    expect(fetchMock.mock.calls[1][0]).toBe("https://share.test/team/v1/share/ORIGINAL")
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({
+      "Content-Type": "application/json",
+      "X-Owner-Token": "original-owner",
+    })
+    expect((await getSharedLinkByCode("ORIGINAL"))?.revoked).toBe(true)
+  })
+
+  it("does not falsely revoke a legacy link using another server's upload secret", async () => {
+    mockFetchOnce(200, { code: "LEGACY" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    mockFetchOnce(404, {})
+    await expect(
+      revokeShareLink("LEGACY", {
+        baseUrl: "https://new.test",
+        uploadSecret: "new-secret",
+      })
+    ).rejects.toBeInstanceOf(ShareNotConfiguredError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((await getSharedLinkByCode("LEGACY"))?.revoked).toBe(false)
+  })
+
   it("deletes on the worker and flags the local mirror", async () => {
     mockFetchOnce(200, { code: "REV" })
     await createShareLink({ payload: PAYLOAD }, ENDPOINT)
@@ -164,6 +191,42 @@ describe("revokeShareLink", () => {
 })
 
 describe("getShareStats", () => {
+  it("reads old-link stats on the original server with its owner credential", async () => {
+    mockFetchOnce(200, { code: "OLD", ownerToken: "old-owner" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    mockFetchOnce(200, { viewCount: 4, revoked: false })
+    expect(
+      await getShareStats("OLD", { baseUrl: "https://new.test", uploadSecret: "new-secret" })
+    ).toEqual({ viewCount: 4, revoked: false })
+    expect(fetchMock.mock.calls[1][0]).toBe("https://share.test/v1/share/OLD/stats")
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty("Authorization")
+  })
+
+  it("supports legacy viewer paths without sending the fragment", async () => {
+    mockFetchOnce(200, { code: "LEGACY", ownerToken: "owner" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    await getDb()
+      .sharedLinks.where("code")
+      .equals("LEGACY")
+      .modify({ url: "https://share.test/team/v/LEGACY" })
+    mockFetchOnce(200, { viewCount: 0 })
+    await getShareStats("LEGACY", ENDPOINT)
+    expect(fetchMock.mock.calls[1][0]).toBe("https://share.test/team/v1/share/LEGACY/stats")
+  })
+
+  it.each([
+    "invalid-url",
+    "file:///share/view",
+    "https://user:password@share.test/share/view",
+    "https://share.test/unrelated",
+  ])("rejects malformed persisted share locations before sending credentials: %s", async (url) => {
+    mockFetchOnce(200, { code: "BAD", ownerToken: "owner" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    await getDb().sharedLinks.where("code").equals("BAD").modify({ url })
+    await expect(getShareStats("BAD", ENDPOINT)).rejects.toMatchObject({ status: 400 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("returns stats on success", async () => {
     mockFetchOnce(200, { viewCount: 3, expiresAt: 5, revoked: false, maxViews: 10 })
     expect(await getShareStats("X", ENDPOINT)).toEqual({

@@ -41,7 +41,10 @@ fn full_headers() -> [(HeaderName, &'static str); 6] {
         (CONTENT_TYPE, "application/json"),
         (CACHE_CONTROL, "no-store"),
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        (ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, DELETE, OPTIONS"),
+        (
+            ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, PATCH, DELETE, OPTIONS",
+        ),
         (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
@@ -50,7 +53,10 @@ fn full_headers() -> [(HeaderName, &'static str); 6] {
 fn cors_only() -> [(HeaderName, &'static str); 4] {
     [
         (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-        (ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, DELETE, OPTIONS"),
+        (
+            ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, PATCH, DELETE, OPTIONS",
+        ),
         (ACCESS_CONTROL_ALLOW_HEADERS, CORS_ALLOW_HEADERS),
         (ACCESS_CONTROL_MAX_AGE, "86400"),
     ]
@@ -424,6 +430,72 @@ pub async fn stats(
         }
         other => {
             tracing::error!(target: "share", ?other, "store.stats failed");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /v1/share/:code  (owner)
+// ---------------------------------------------------------------------------
+
+pub async fn renew(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    body: Bytes,
+) -> Response {
+    if let Some(resp) = precheck(&state, peer, &headers) {
+        return resp;
+    }
+    let stats_store = state.store.clone();
+    let stats_code = code.clone();
+    let meta =
+        tokio::task::spawn_blocking(move || stats_store.stats(&stats_code, now_ms_i64())).await;
+    let meta = match meta {
+        Ok(Ok(Some(meta))) => meta,
+        Ok(Ok(None)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            return err(StatusCode::NOT_FOUND, "not found");
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.stats before renew failed");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal error");
+        }
+    };
+    if !owner_authorized(&headers, &meta, &state) {
+        state.metrics.rejected(RejectReason::Unauthorized);
+        return err(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            state.metrics.rejected(RejectReason::Invalid);
+            return err(StatusCode::BAD_REQUEST, "invalid json");
+        }
+    };
+    let Some(requested) = parsed
+        .get("ttlSeconds")
+        .and_then(Value::as_f64)
+        .filter(|ttl| ttl.is_finite() && *ttl > 0.0)
+    else {
+        state.metrics.rejected(RejectReason::Invalid);
+        return err(StatusCode::BAD_REQUEST, "ttlSeconds required");
+    };
+    let ttl_ms = (requested.min(state.max_ttl_seconds.max(1) as f64) * 1000.0) as i64;
+    let store = state.store.clone();
+    let result = tokio::task::spawn_blocking(move || store.renew(&code, ttl_ms, now_ms_i64)).await;
+    match result {
+        Ok(Ok(Some(expires_at))) => {
+            json_response(StatusCode::OK, json!({ "expiresAt": expires_at }))
+        }
+        Ok(Ok(None)) => {
+            state.metrics.rejected(RejectReason::NotFound);
+            err(StatusCode::NOT_FOUND, "not found")
+        }
+        other => {
+            tracing::error!(target: "share", ?other, "store.renew failed");
             err(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }

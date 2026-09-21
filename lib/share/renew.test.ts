@@ -13,18 +13,6 @@ jest.mock("@/lib/db/shared-links", () => ({
   updateSharedLinkExpiry: (...a: unknown[]) => updateSharedLinkExpiryMock(...a),
 }))
 
-jest.mock("./client", () => ({
-  ShareNotConfiguredError: class ShareNotConfiguredError extends Error {},
-  ShareRequestError: class ShareRequestError extends Error {
-    constructor(
-      public status: number,
-      message: string
-    ) {
-      super(message)
-    }
-  },
-}))
-
 import { extendShareLink } from "./renew"
 import { ShareNotConfiguredError, ShareRequestError } from "./client"
 
@@ -34,10 +22,26 @@ beforeEach(() => {
   jest.clearAllMocks()
   global.fetch = fetchMock as unknown as typeof fetch
   resolveShareEndpointMock.mockResolvedValue({ baseUrl: "https://s.test", uploadSecret: "up" })
-  getSharedLinkByCodeMock.mockResolvedValue({ ownerToken: "tok" })
+  getSharedLinkByCodeMock.mockResolvedValue({
+    ownerToken: "tok",
+    url: "https://s.test/share/view?c=abc#k=key",
+  })
 })
 
 describe("extendShareLink", () => {
+  it("renews at the original endpoint after settings change using only its owner token", async () => {
+    resolveShareEndpointMock.mockResolvedValue({
+      baseUrl: "https://new.test",
+      uploadSecret: "new-secret",
+    })
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ expiresAt: 999 }) })
+    await extendShareLink("abc", 3600)
+    expect(fetchMock.mock.calls[0][0]).toBe("https://s.test/v1/share/abc")
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+      "Content-Type": "application/json",
+      "X-Owner-Token": "tok",
+    })
+  })
   it("PATCHes the worker with the owner token and mirrors the new expiry", async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ expiresAt: 999 }) })
     const expiresAt = await extendShareLink("abc", 3600)

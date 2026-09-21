@@ -1,4 +1,11 @@
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
+import {
+  env,
+  createExecutionContext,
+  waitOnExecutionContext,
+  runInDurableObject,
+  runDurableObjectAlarm,
+  evictDurableObject,
+} from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import worker, { type Env } from "./index"
 
@@ -224,6 +231,16 @@ describe("renew", () => {
     expect((await run(req(`/v1/share/${code}`, patch({}, ownerToken)))).status).toBe(400)
   })
 
+  it.each([null, [], "invalid", 0, { ttlSeconds: 0 }, { ttlSeconds: -1 }, { ttlSeconds: "60" }])(
+    "rejects invalid renewal body %j",
+    async (body) => {
+      const { code, ownerToken } = await create({ ttlSeconds: 60 })
+      const response = await run(req(`/v1/share/${code}`, patch(body, ownerToken)))
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ error: "ttlSeconds required" })
+    }
+  )
+
   it("404s for an unknown code", async () => {
     expect((await run(req(`/v1/share/unknown-code`, patch({ ttlSeconds: 3600 })))).status).toBe(404)
   })
@@ -404,5 +421,193 @@ describe("org-scoped shares", () => {
     const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))
     const forged = `${payload}.${base64Url(new Uint8Array(signature))}`
     expect((await run(req("/v1/orgs/org_acme/shares", granted("GET", forged)))).status).toBe(401)
+  })
+})
+
+describe("durable lifecycle authority", () => {
+  function stub(code: string) {
+    const namespace = (env as Env).SHARE_LIFECYCLE
+    return namespace.get(namespace.idFromName(code))
+  }
+
+  it("serves at most the allowed number of concurrent views", async () => {
+    const { code } = await create({ maxViews: 3 })
+    const responses = await Promise.all(
+      Array.from({ length: 12 }, () => run(req(`/v1/share/${code}`)))
+    )
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(3)
+    expect(responses.filter((response) => response.status === 404)).toHaveLength(9)
+  })
+
+  it("preserves concurrent reads through renewal and eviction", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 60 })
+    const results = await Promise.all([
+      ...Array.from({ length: 8 }, () => run(req(`/v1/share/${code}`))),
+      run(
+        req(`/v1/share/${code}`, {
+          ...owner("PATCH", ownerToken),
+          body: JSON.stringify({ ttlSeconds: 3600 }),
+        })
+      ),
+    ])
+    expect(results.every((response) => response.status === 200)).toBe(true)
+    const renewed = await results[8].json<{ expiresAt: number }>()
+    await Promise.all(results.slice(0, 8).map((response) => response.arrayBuffer()))
+    await evictDurableObject(stub(code))
+    const response = await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))
+    expect(await response.json()).toMatchObject({ viewCount: 8, expiresAt: renewed.expiresAt })
+  })
+
+  it("never resurrects a burned share when renewal runs concurrently", async () => {
+    const { code, ownerToken } = await create({ burnAfterRead: true })
+    const responses = await Promise.all([
+      run(req(`/v1/share/${code}`)),
+      run(
+        req(`/v1/share/${code}`, {
+          ...owner("PATCH", ownerToken),
+          body: JSON.stringify({ ttlSeconds: 3600 }),
+        })
+      ),
+    ])
+    expect(responses[0].status).toBe(200)
+    expect([200, 404]).toContain(responses[1].status)
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+  })
+
+  it("imports legacy links once and retains deletion tombstones across eviction", async () => {
+    const code = `legacy-${crypto.randomUUID()}`
+    const meta = {
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      burnAfterRead: false,
+      viewCount: 4,
+      revoked: false,
+      ownerToken: "legacy-owner",
+    }
+    await (env as Env).SHARE_BUCKET.put(`share/${code}`, JSON.stringify(ENVELOPE))
+    await (env as Env).SHARE_KV.put(`meta:${code}`, JSON.stringify(meta))
+    const read = await run(req(`/v1/share/${code}`))
+    expect(read.status).toBe(200)
+    await read.arrayBuffer()
+    const stats = await run(req(`/v1/share/${code}/stats`, owner("GET", meta.ownerToken)))
+    expect(await stats.json()).toMatchObject({ viewCount: 5 })
+    expect((await run(req(`/v1/share/${code}`, owner("DELETE", meta.ownerToken)))).status).toBe(204)
+    // Simulate stale legacy KV/R2 values still visible at another edge.
+    await (env as Env).SHARE_KV.put(`meta:${code}`, JSON.stringify(meta))
+    await (env as Env).SHARE_BUCKET.put(`share/${code}`, JSON.stringify(ENVELOPE))
+    await evictDurableObject(stub(code))
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+    expect(
+      (
+        await run(
+          req(`/v1/share/${code}`, {
+            ...owner("PATCH", meta.ownerToken),
+            body: '{"ttlSeconds":60}',
+          })
+        )
+      ).status
+    ).toBe(404)
+  })
+
+  it("expiry alarms use current metadata and clean up expired bodies", async () => {
+    const { code, ownerToken } = await create({ ttlSeconds: 60 })
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect((await run(req(`/v1/share/${code}/stats`, owner("GET", ownerToken)))).status).toBe(200)
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      const meta = await state.storage.get<Record<string, unknown>>("meta")
+      await state.storage.put("meta", { ...meta, expiresAt: Date.now() - 1 })
+    })
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect(await (env as Env).SHARE_BUCKET.get(`share/${code}`)).toBeNull()
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+  })
+
+  it("does not permanently cache an absent legacy KV record", async () => {
+    const code = `late-legacy-${crypto.randomUUID()}`
+    const missing = await run(req(`/v1/share/${code}`))
+    expect(missing.status).toBe(404)
+    await missing.arrayBuffer()
+    await (env as Env).SHARE_KV.put(
+      `meta:${code}`,
+      JSON.stringify({
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        burnAfterRead: false,
+        viewCount: 0,
+        revoked: false,
+      })
+    )
+    await (env as Env).SHARE_BUCKET.put(`share/${code}`, JSON.stringify(ENVELOPE))
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
+  })
+
+  it("resumes tombstoned external cleanup after eviction", async () => {
+    const { code } = await create({})
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      await state.storage.put({ meta: null, cleanup: { code } })
+    })
+    await evictDurableObject(stub(code))
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect(await (env as Env).SHARE_BUCKET.get(`share/${code}`)).toBeNull()
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+  })
+
+  it("recovers cleanup after creation fails after writing its R2 body", async () => {
+    const code = `failed-create-${crypto.randomUUID()}`
+    await runInDurableObject(stub(code), async (instance, state) => {
+      // Inject the failure at the external storage boundary after a real put.
+      const internal = instance as unknown as { env: Env }
+      const original = internal.env
+      internal.env = {
+        ...original,
+        SHARE_BUCKET: new Proxy(original.SHARE_BUCKET, {
+          get(target, key) {
+            if (key === "put")
+              return async (...args: Parameters<R2Bucket["put"]>) => {
+                await target.put(...args)
+                throw new Error("injected failure after R2 write")
+              }
+            const value = Reflect.get(target, key)
+            return typeof value === "function" ? value.bind(target) : value
+          },
+        }),
+      }
+      try {
+        await expect(
+          instance.fetch(
+            new Request(
+              `https://lifecycle.internal/${code}?action=create`,
+              authed("POST", { envelope: ENVELOPE })
+            )
+          )
+        ).rejects.toThrow("injected failure after R2 write")
+      } finally {
+        internal.env = original
+      }
+      expect(await state.storage.get("meta")).toBeNull()
+      expect(await state.storage.get("cleanup")).toMatchObject({ code })
+      expect(await state.storage.getAlarm()).not.toBeNull()
+    })
+    expect(await (env as Env).SHARE_BUCKET.head(`share/${code}`)).not.toBeNull()
+    await evictDurableObject(stub(code))
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect(await (env as Env).SHARE_BUCKET.get(`share/${code}`)).toBeNull()
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(404)
+  })
+
+  it("clears creation cleanup intent only when live metadata commits", async () => {
+    const { code } = await create({})
+    await runInDurableObject(stub(code), async (_instance, state) => {
+      expect(await state.storage.get("cleanup")).toBeUndefined()
+      expect(await state.storage.get("meta")).toMatchObject({ revoked: false, viewCount: 0 })
+    })
+    expect(await runDurableObjectAlarm(stub(code))).toBe(true)
+    expect((await run(req(`/v1/share/${code}`))).status).toBe(200)
+  })
+
+  it("fails closed when the lifecycle binding is missing", async () => {
+    const broken = { ...env, SHARE_LIFECYCLE: undefined } as unknown as Env
+    const response = await worker.fetch(req("/v1/share/missing"), broken, createExecutionContext())
+    expect(response.status).toBe(503)
   })
 })

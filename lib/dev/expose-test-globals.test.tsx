@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto"
 import { render, waitFor, cleanup } from "@testing-library/react"
 import { ExposeTestGlobals } from "./expose-test-globals"
-import { getDb } from "@/lib/db/schema"
+import { activateAccountDatabase, getDb } from "@/lib/db/schema"
 import {
   __resetBrowserVaultForTesting,
   deleteBrowserVault,
@@ -124,6 +124,27 @@ describe("ExposeTestGlobals", () => {
     await waitFor(() => {
       expect(window.__cogniaTestGlobalsReady).toBe(true)
     })
+  })
+
+  it("__cogniaResetDb re-points at the bare account db, not the double-suffixed physical name", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    // Simulate a boot that already activated the ENCRYPTED account db — its
+    // physical name carries `-encrypted-v1`, which the reset must strip before
+    // re-activating. Passing it verbatim produced `…-encrypted-v1-encrypted-v1`
+    // and the re-seed threw "Account content cipher is locked" (E2E flake).
+    activateAccountDatabase("acct_e2e_vault")
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+
+    await window.__cogniaResetDb!()
+
+    expect(getDb().name).toBe("cognia-account-acct_e2e_vault-encrypted-v1")
+    // Settings writes go through the account content cipher — this is the
+    // call that used to throw when the doubled name was activated instead.
+    await window.__cogniaSetSettings!({ mobileRuntimeMode: "standalone" })
   })
 
   it("__cogniaE2EWebRtc.getState returns 'idle' before connect and reconnectNow returns 'no-instance'", async () => {

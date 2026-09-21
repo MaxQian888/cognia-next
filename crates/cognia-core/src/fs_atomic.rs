@@ -113,6 +113,70 @@ fn unique_backup_stamp() -> u64 {
     }
 }
 
+/// Select one non-existing temporary sibling of an already-authorized target.
+/// Scope ownership stays with the caller; this function never grants a parent
+/// directory or creates a file. Writers must still open with create_new.
+pub fn scoped_temporary_sibling(
+    target: &Path,
+    nonce: &str,
+    is_allowed: impl Fn(&Path) -> bool,
+) -> std::io::Result<PathBuf> {
+    use std::io::{Error, ErrorKind};
+    if !target.is_absolute()
+        || target
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+        || nonce.len() != 32
+        || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "invalid backup target or nonce",
+        ));
+    }
+    let name = target
+        .file_name()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "backup target must name a file"))?;
+    if !is_allowed(target) {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "backup target is outside filesystem scope",
+        ));
+    }
+    let parent = fs::canonicalize(
+        target
+            .parent()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "backup target has no parent"))?,
+    )?;
+    let resolved_target = parent.join(name);
+    if !is_allowed(&resolved_target) {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            "resolved backup target is outside filesystem scope",
+        ));
+    }
+    match fs::symlink_metadata(&resolved_target) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "backup target must be a regular file",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let temporary = parent.join(format!(".cognia-backup-{nonce}.partial"));
+    match fs::symlink_metadata(&temporary) {
+        Ok(_) => Err(Error::new(
+            ErrorKind::AlreadyExists,
+            "backup temporary path already exists",
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(temporary),
+        Err(error) => Err(error),
+    }
+}
+
 /// Atomically write `contents` to `plan.path`, optionally checking that the
 /// destination's mtime still matches what the caller observed on read.
 ///
@@ -286,6 +350,91 @@ fn mtimes_equal(a: SystemTime, b: SystemTime) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_sibling_requires_exact_target_authority() {
+        let dir = tmpdir();
+        let target = dir.join("selected.cgbk");
+        let canonical = fs::canonicalize(&dir).unwrap().join("selected.cgbk");
+        let temporary = scoped_temporary_sibling(&target, &"a".repeat(32), |path| {
+            path == target || path == canonical
+        })
+        .unwrap();
+        assert_eq!(temporary.parent(), canonical.parent());
+        assert_eq!(
+            temporary.file_name().unwrap(),
+            format!(".cognia-backup-{}.partial", "a".repeat(32)).as_str()
+        );
+        assert!(!temporary.exists());
+        assert!(!target.exists());
+        assert_eq!(
+            scoped_temporary_sibling(&target, &"b".repeat(32), |_| false)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            scoped_temporary_sibling(&target, &"b".repeat(32), |path| path == dir)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn temporary_sibling_rejects_relative_traversal_and_invalid_nonce() {
+        for target in [
+            Path::new("backup.cgbk"),
+            Path::new("/safe/../backup.cgbk"),
+            Path::new("/"),
+        ] {
+            assert!(scoped_temporary_sibling(target, &"a".repeat(32), |_| true).is_err());
+        }
+        let dir = tmpdir();
+        for nonce in ["", "../outside", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"] {
+            assert!(scoped_temporary_sibling(&dir.join("backup.cgbk"), nonce, |_| true).is_err());
+        }
+        assert!(scoped_temporary_sibling(&dir, &"a".repeat(32), |_| true).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn temporary_sibling_never_reuses_an_existing_file() {
+        let dir = tmpdir();
+        let target = dir.join("backup.cgbk");
+        fs::write(&target, "existing backup").unwrap();
+        let temp = scoped_temporary_sibling(&target, &"a".repeat(32), |_| true).unwrap();
+        fs::write(&temp, "other write").unwrap();
+        assert_eq!(
+            scoped_temporary_sibling(&target, &"a".repeat(32), |_| true)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read_to_string(target).unwrap(), "existing backup");
+        assert_eq!(fs::read_to_string(temp).unwrap(), "other write");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_sibling_resolves_parent_links_and_rejects_target_links() {
+        let dir = tmpdir();
+        let real = dir.join("real");
+        fs::create_dir(&real).unwrap();
+        let alias = dir.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let target = alias.join("backup.cgbk");
+        assert!(scoped_temporary_sibling(&target, &"a".repeat(32), |path| path == target).is_err());
+        let temp = scoped_temporary_sibling(&target, &"a".repeat(32), |_| true).unwrap();
+        assert_eq!(temp.parent().unwrap(), fs::canonicalize(&real).unwrap());
+        let destination = real.join("other.cgbk");
+        fs::write(&destination, "source").unwrap();
+        std::os::unix::fs::symlink(&destination, &target).unwrap();
+        assert!(scoped_temporary_sibling(&target, &"a".repeat(32), |_| true).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;

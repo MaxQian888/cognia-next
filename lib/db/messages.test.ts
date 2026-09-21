@@ -28,6 +28,7 @@ import {
   type ImageEditVersionV1,
 } from "@/lib/chat/image-edit/version"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
+import { putSessionAsset, getSessionAsset } from "./session-assets"
 
 jest.setTimeout(30_000)
 
@@ -72,6 +73,21 @@ function msg(
 }
 
 describe("persistMessages + listMessages", () => {
+  it("preserves session-owned source files when clearing the transcript", async () => {
+    await putSession("s-asset")
+    await putSessionAsset({
+      sessionId: "s-asset",
+      assetId: "a1",
+      filename: "notes.txt",
+      mediaType: "text/plain",
+      blob: new Blob(["source notes"]),
+    })
+    await persistMessages("s-asset", [msg("u1", "user", "read the attachment")])
+    await clearMessages("s-asset")
+    await persistMessages("s-asset", [])
+    expect(await listMessages("s-asset")).toEqual([])
+    expect(await getSessionAsset("s-asset", "a1")).toBeDefined()
+  })
   it("keeps omitted history when committing a partial delta", async () => {
     await replaceSessionTranscript("s-delta", [
       msg("old", "user", "old"),

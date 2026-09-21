@@ -1,10 +1,20 @@
 import { collectOrphanedMedia, parseMediaRef } from "./message-media"
 import { getDb } from "./schema"
+import type { SessionAsset } from "./session-assets"
+
+/** Reserved ledger owners are never chat message ids. */
+export const SESSION_ASSET_OWNER_PREFIX = "session-asset:"
 
 export interface MessageMediaRefRow {
   messageId: string
   sessionId: string
   hash: string
+  /** Session-owned sources survive message replacement and transcript clearing. */
+  sessionAsset?: SessionAsset
+}
+
+export function isMessageOwnedMediaRef(row: MessageMediaRefRow): boolean {
+  return row.sessionAsset === undefined
 }
 
 function visitMediaRefs(value: unknown, hashes: Set<string>, key?: string): void {
@@ -33,6 +43,9 @@ export function messageMediaRefRows(
   sessionId: string,
   parts: unknown
 ): MessageMediaRefRow[] {
+  if (messageId.startsWith(SESSION_ASSET_OWNER_PREFIX)) {
+    throw new Error("reserved_session_asset_owner")
+  }
   return collectMessageMediaHashes(parts).map((hash) => ({ messageId, sessionId, hash }))
 }
 

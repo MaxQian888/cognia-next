@@ -6,6 +6,7 @@ import {
   listWorkspaceDir,
   listWorkspaceRoots,
   readWorkspaceFile,
+  readWorkspaceFileBase64,
   renameWorkspaceEntry,
   searchWorkspaceContent,
   statWorkspaceFile,
@@ -141,6 +142,16 @@ describe("read/write wrappers", () => {
       root: "/repo",
       relPath: "a.txt",
       maxBytes: 1024,
+    })
+  })
+
+  it("readWorkspaceFileBase64 hits the binary command with the cap", async () => {
+    const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce("QUJD")
+    await expect(readWorkspaceFileBase64("/repo", "img.png", 512)).resolves.toBe("QUJD")
+    expect(callSpy).toHaveBeenCalledWith("fs_read_workspace_file_base64", {
+      root: "/repo",
+      relPath: "img.png",
+      maxBytes: 512,
     })
   })
 

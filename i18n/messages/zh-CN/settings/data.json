@@ -152,7 +152,13 @@
       "prepareFailed": "无法准备用于分享的备份。",
       "preparing": "正在准备备份…",
       "title": "此备份中发现个人信息",
-      "total": "共 {total} 个个人信息值，分布在 {domains} 个区域"
+      "total": "共 {total} 个个人信息值，分布在 {domains} 个区域",
+      "binaryTitle": "确认分享附件",
+      "binaryBody": "此备份包含原始文件或图片预览。文本扫描无法检查其中的内容。",
+      "uninspectedAttachments": "有 {count} 份二进制内容未经检查，其中可能包含未出现在提取文本中的个人信息。",
+      "confirmWithAttachments": "我理解此次分享会包含原始文件和预览，以及其中可能存在的个人信息。",
+      "binaryNote": "已包含原始文件和预览，文本扫描未检查其中的内容。",
+      "streamingRequired": "此备份过大，无法生成分享链接。请使用“导出备份”保存本地流式备份，完整保留所有附件。"
     },
     "showPassphrase": "显示密码短语",
     "unlockButton": "解锁并预览",

@@ -1,7 +1,23 @@
 /** @jest-environment jsdom */
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(async (_command: string, { path }: { path: string }) => `${path}.partial-test`),
+}))
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
+
+beforeAll(() => {
+  Object.defineProperty(URL, "createObjectURL", {
+    value: jest.fn(() => "blob:mock"),
+    configurable: true,
+    writable: true,
+  })
+  Object.defineProperty(URL, "revokeObjectURL", {
+    value: jest.fn(),
+    configurable: true,
+    writable: true,
+  })
+})
 
 const mockOpen = jest.fn()
 const mockSave = jest.fn()
@@ -23,9 +39,15 @@ jest.mock("@/lib/claude/ipc", () => ({
 
 const mockReadBinary = jest.fn()
 const mockWriteBinary = jest.fn()
+const mockFsOpen = jest.fn()
+const mockRename = jest.fn()
+const mockRemove = jest.fn()
 jest.mock(
   "@tauri-apps/plugin-fs",
   () => ({
+    open: (...args: unknown[]) => mockFsOpen(...args),
+    rename: (...args: unknown[]) => mockRename(...args),
+    remove: (...args: unknown[]) => mockRemove(...args),
     readFile: (...args: unknown[]) => mockReadBinary(...args),
     writeFile: (...args: unknown[]) => mockWriteBinary(...args),
   }),
@@ -41,6 +63,10 @@ import {
 } from "@/lib/claude/ipc"
 import {
   pickAndReadFiles,
+  writeBackupStreamFile,
+  backupStreamBlob,
+  blobFileStream,
+  pickStreamFiles,
   pickAndReadBinaryFiles,
   saveFileAs,
   saveBinaryFileAs,
@@ -578,5 +604,86 @@ describe("saveFilesToDir", () => {
     createSpy.mockRestore()
     URL.createObjectURL = originalCreate
     URL.revokeObjectURL = originalRevoke
+  })
+})
+
+describe("streaming backup file transport", () => {
+  beforeEach(() => {
+    mockFsOpen.mockReset()
+    mockRename.mockReset()
+    mockRemove.mockReset()
+    mockRemove.mockResolvedValue(undefined)
+  })
+  it("writes partial native writes to a temporary file, then atomically replaces the target", async () => {
+    const write = jest.fn(async (bytes: Uint8Array) => Math.min(2, bytes.length))
+    const close = jest.fn(async () => undefined)
+    mockFsOpen.mockResolvedValue({ write, close })
+    const count = await writeBackupStreamFile(
+      "/backup.cbk",
+      (async function* () {
+        yield new Uint8Array([1, 2, 3, 4, 5])
+      })()
+    )
+    expect(count).toBe(5)
+    expect(write).toHaveBeenCalledTimes(3)
+    expect(mockFsOpen).toHaveBeenCalledWith(expect.stringMatching(/^\/backup.cbk.partial-/), {
+      write: true,
+      createNew: true,
+      mode: 0o600,
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(mockRename).toHaveBeenCalledWith(expect.stringMatching(/partial-/), "/backup.cbk")
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+  it("retains the previous backup and removes only its partial file when encoding fails", async () => {
+    const close = jest.fn(async () => undefined)
+    mockFsOpen.mockResolvedValue({
+      write: jest.fn(async (bytes: Uint8Array) => bytes.length),
+      close,
+    })
+    await expect(
+      writeBackupStreamFile(
+        "/backup.cbk",
+        (async function* () {
+          yield new Uint8Array([1])
+          throw new Error("aborted")
+        })()
+      )
+    ).rejects.toThrow("aborted")
+    expect(mockRename).not.toHaveBeenCalled()
+    expect(mockRemove).toHaveBeenCalledWith(expect.stringMatching(/partial-/))
+    expect(mockRemove).not.toHaveBeenCalledWith("/backup.cbk")
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+  it("preserves Unicode and binary bytes in a browser Blob without concatenating strings", async () => {
+    const original = new Blob([
+      new TextEncoder().encode("汉字\n"),
+      new Uint8Array(1100000).fill(17),
+    ])
+    const restored = await backupStreamBlob(blobFileStream(original))
+    const pieces: Uint8Array[] = []
+    for await (const part of blobFileStream(restored)) pieces.push(part)
+    expect(restored.size).toBe(original.size)
+    expect(new TextDecoder().decode(pieces[0].slice(0, 7))).toBe("汉字\n")
+    expect(pieces[1][0]).toBe(17)
+  })
+  it("opens native import streams lazily and closes the handle on early cancellation", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockOpen.mockResolvedValue("/backup.cbk")
+    const close = jest.fn(async () => undefined)
+    mockFsOpen.mockResolvedValue({
+      read: jest.fn(async (buffer: Uint8Array) => {
+        buffer[0] = 7
+        return 1
+      }),
+      close,
+    })
+    const picked = await pickStreamFiles()
+    expect(mockFsOpen).not.toHaveBeenCalled()
+    for await (const bytes of picked[0].stream()) {
+      expect(bytes[0]).toBe(7)
+      break
+    }
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })

@@ -6,6 +6,7 @@ import {
   DEV_LOCAL_ACCOUNT_ID,
   DEV_LOCAL_ACCOUNT_PASSWORD,
   FORCE_ACCOUNT_GATE_ENV,
+  isAccountGateForced,
   isDevAutoUnlockEnabled,
   isDevLocalAccount,
   isDevLocalAccountEnabled,
@@ -105,6 +106,19 @@ describe("dev-auto-unlock", () => {
 
   it("names the force-gate env so callers and docs cannot drift", () => {
     expect(FORCE_ACCOUNT_GATE_ENV).toBe("NEXT_PUBLIC_ACCOUNT_GATE")
+  })
+})
+
+describe("isAccountGateForced", () => {
+  it("is true only for the literal '1'", () => {
+    setForceGate("1")
+    expect(isAccountGateForced()).toBe(true)
+    setForceGate("true")
+    expect(isAccountGateForced()).toBe(false)
+    setForceGate("0")
+    expect(isAccountGateForced()).toBe(false)
+    setForceGate(undefined)
+    expect(isAccountGateForced()).toBe(false)
   })
 })
 

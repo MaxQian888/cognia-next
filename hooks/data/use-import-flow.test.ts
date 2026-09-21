@@ -10,7 +10,8 @@ import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { buildBackupPackage, serializePackage } from "@/lib/data/build-package"
 import { encryptBackupPackage } from "@/lib/data/crypto"
 import { rotateBackupKey, getDefaultBackupPassphrase } from "@/lib/data/backup-key"
-import { pickAndReadFiles } from "@/lib/files/file-bridge"
+import { createBackupStream } from "@/lib/data/stream-format"
+import { pickStreamFiles } from "@/lib/files/file-bridge"
 
 const mockApplyBackupPackage = jest.fn(async (_pkg?: unknown, _options?: unknown) => ({
   added: {},
@@ -20,13 +21,13 @@ const mockApplyBackupPackage = jest.fn(async (_pkg?: unknown, _options?: unknown
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
-  pickAndReadFiles: jest.fn(),
+  pickStreamFiles: jest.fn(),
 }))
 jest.mock("@/lib/data/apply-package", () => ({
   applyBackupPackage: (pkg: unknown, options: unknown) => mockApplyBackupPackage(pkg, options),
 }))
 
-const mockedPickAndReadFiles = pickAndReadFiles as jest.MockedFunction<typeof pickAndReadFiles>
+const mockedPickStreamFiles = pickStreamFiles as jest.MockedFunction<typeof pickStreamFiles>
 
 beforeEach(async () => {
   mockApplyBackupPackage.mockClear()
@@ -57,10 +58,18 @@ async function makeEncryptedFile(passphrase: string): Promise<string> {
 }
 
 // Drive the dispatch path directly by mocking the shared file picker.
-// `pickAndReadFiles` is the only entrypoint useImportFlow uses to read a file,
+// `pickStreamFiles` is the only entrypoint useImportFlow uses to read a file,
 // so we stub it to return the test payload without involving jsdom's File API.
 async function pickFromString(raw: string, hook: { pickFile: () => Promise<void> }) {
-  mockedPickAndReadFiles.mockResolvedValueOnce([{ name: "import.cbk", path: "", content: raw }])
+  mockedPickStreamFiles.mockResolvedValueOnce([
+    {
+      name: "import.cbk",
+      path: "",
+      stream: async function* () {
+        yield new TextEncoder().encode(raw)
+      },
+    },
+  ])
   await hook.pickFile()
 }
 
@@ -163,3 +172,141 @@ describe("useImportFlow", () => {
     expect(result.current.state.status).toBe("idle")
   })
 })
+
+it("v4 encrypted file retries its source and previews all sections without a legacy text buffer", async () => {
+  await rotateBackupKey()
+  const source = () =>
+    createBackupStream({
+      manifest: {
+        traceId: "stream-import",
+        exportedAt: "2026-09-21T00:00:00Z",
+        appVersion: "test",
+        backend: "web-dexie",
+        sourceSchemaVersion: 3,
+      },
+      encryption: { passphrase: "stream-password" },
+      sections: (async function* () {
+        yield { section: "settings", rows: [{ theme: "dark" }] }
+        yield { section: "characters", rows: [{ id: "restored-character" }] }
+      })(),
+    })
+  mockedPickStreamFiles.mockResolvedValueOnce([{ name: "stream.cbk", path: "", stream: source }])
+  const { result } = renderHook(() => useImportFlow())
+  await act(async () => {
+    await result.current.pickFile()
+  })
+  expect(result.current.state.status).toBe("needsPassphrase")
+  await act(async () => {
+    await result.current.submitPassphrase("wrong")
+  })
+  expect(result.current.state.status).toBe("needsPassphrase")
+  await act(async () => {
+    await result.current.submitPassphrase("stream-password")
+  })
+  expect(result.current.state).toMatchObject({
+    status: "preview",
+    pkg: { payload: { settings: { theme: "dark" }, characters: [{ id: "restored-character" }] } },
+  })
+})
+
+async function smallStreamRecords() {
+  const records: Uint8Array[] = []
+  for await (const bytes of createBackupStream({
+    manifest: {
+      traceId: "chunked",
+      exportedAt: "2026-09-21T00:00:00Z",
+      appVersion: "test",
+      backend: "web-dexie",
+      sourceSchemaVersion: 3,
+    },
+    sections: (async function* () {
+      yield { section: "characters", rows: [{ id: "old-stream" }] }
+    })(),
+  }))
+    records.push(bytes)
+  return records
+}
+
+it("detects a stream header split across short reads", async () => {
+  const records = await smallStreamRecords()
+  mockedPickStreamFiles.mockResolvedValueOnce([
+    {
+      name: "short.cbk",
+      path: "",
+      stream: async function* () {
+        for (const record of records)
+          for (let offset = 0; offset < record.length; offset += 7)
+            yield record.subarray(offset, offset + 7)
+      },
+    },
+  ])
+  const { result } = renderHook(() => useImportFlow())
+  await act(async () => {
+    await result.current.pickFile()
+  })
+  expect(result.current.state).toMatchObject({
+    status: "preview",
+    pkg: { payload: { characters: [{ id: "old-stream" }] } },
+  })
+})
+
+it.each(["reset", "new-file"])(
+  "prevents an in-flight stream from replacing state after %s",
+  async (action) => {
+    const records = await smallStreamRecords()
+    let release!: () => void
+    let started!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const reading = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    let opens = 0
+    let closed = 0
+    mockedPickStreamFiles.mockResolvedValueOnce([
+      {
+        name: "old.cbk",
+        path: "",
+        stream: async function* () {
+          opens += 1
+          try {
+            yield records[0]
+            if (opens === 2) {
+              started()
+              await blocked
+            }
+            yield* records.slice(1)
+          } finally {
+            closed += 1
+          }
+        },
+      },
+    ])
+    const { result } = renderHook(() => useImportFlow())
+    let pending!: Promise<void>
+    await act(async () => {
+      pending = result.current.pickFile()
+      await reading
+    })
+    if (action === "reset") act(() => result.current.reset())
+    else {
+      const file = await makePlaintextFile()
+      await act(async () => {
+        await pickFromString(file, result.current)
+      })
+    }
+    await act(async () => {
+      release()
+      await pending
+    })
+    expect(closed).toBe(2)
+    if (action === "reset") expect(result.current.state.status).toBe("idle")
+    else {
+      expect(result.current.state.status).toBe("preview")
+      expect(result.current.state).not.toMatchObject({
+        pkg: { payload: { characters: [{ id: "old-stream" }] } },
+      })
+    }
+  }
+)

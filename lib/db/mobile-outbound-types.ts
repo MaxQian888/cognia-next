@@ -107,6 +107,14 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "bot_trigger_set_armed",
   "bot_run_manual",
   "bot_delivery_replay",
+  // ADR-0188 companion RPC: start a Router + Fusion run (Cascade or Panel)
+  // from the mobile remote-session composer. Queued because the Run API's
+  // create is idempotent on the row's own key (the same key and message
+  // replay the same run), so a drain retried after a lost answer never starts
+  // a second one; the run view reads the run back with that key. Resume, the
+  // reads and the call-reservation answer are NOT queued: each answers a
+  // moment that has passed by the time an offline queue would drain it.
+  "execution_run_create",
   // ADR-0149 collaboration-plane writes. These are drained by the collab
   // dispatcher, not Companion RPC, but intentionally share this durable queue.
   "collab_issue_create",

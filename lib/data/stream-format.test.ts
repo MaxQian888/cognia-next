@@ -147,3 +147,23 @@ describe("backup stream v4", () => {
     await expect(collect(readBackupStream(bytes(encoded)))).rejects.toThrow(/checksum mismatch/)
   })
 })
+
+it("fragments oversized Unicode document rows, preserving their ordering and exact text", async () => {
+  const { createBackupStream, readBackupStream } = await import("./stream-format")
+  const row = { text: '文档\n"\\😀'.repeat(10000), id: "large" }
+  const encoded = await collectBytes(
+    createBackupStream({
+      manifest,
+      sections: pages({ section: "messages", rows: [{ id: "before" }, row, { id: "after" }] }),
+      maxChunkBytes: 8192,
+    })
+  )
+  expect(encoded.every((bytes) => bytes.length < 16384)).toBe(true)
+  const decoded = await collect(readBackupStream(bytes(encoded), { maxRecordBytes: 16384 }))
+  expect(decoded.filter((event) => event.kind === "chunk").flatMap((event) => event.rows)).toEqual([
+    { id: "before" },
+    row,
+    { id: "after" },
+  ])
+  await expect(collect(readBackupStream(bytes(encoded.slice(0, -2))))).rejects.toThrow()
+})

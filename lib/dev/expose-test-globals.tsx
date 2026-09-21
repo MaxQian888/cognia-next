@@ -332,7 +332,23 @@ export function ExposeTestGlobals(): null {
         }
         __resetDbForTesting()
         if (prevName.startsWith(ACCOUNT_DB_PREFIX)) {
-          activateAccountDatabase(prevName.slice(ACCOUNT_DB_PREFIX.length))
+          // prevName is the PHYSICAL database name — `cognia-account-<id>`,
+          // `…<id>-encrypted-v1`, or `…<id>-target-<targetId>-encrypted-v1` —
+          // but activateAccountDatabase takes the bare accountId and re-appends
+          // the encryption suffix itself. Passing the whole slug produced
+          // `…-encrypted-v1-encrypted-v1`, a different database whose content
+          // cipher was never unlocked, so the re-seed below intermittently
+          // threw "Account content cipher is locked" whenever the reset ran
+          // while the encrypted account db was the active one.
+          let slug = prevName.slice(ACCOUNT_DB_PREFIX.length)
+          if (slug.endsWith("-encrypted-v1")) {
+            slug = slug.slice(0, -"-encrypted-v1".length)
+          }
+          const targetIdx = slug.indexOf("-target-")
+          activateAccountDatabase(
+            targetIdx === -1 ? slug : slug.slice(0, targetIdx),
+            targetIdx === -1 ? undefined : slug.slice(targetIdx + "-target-".length)
+          )
         }
         getDb()
         await whenSeeded()

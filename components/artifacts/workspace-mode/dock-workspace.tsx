@@ -539,6 +539,7 @@ function WorkspaceEditorBody({
             // strip still renders so the fixed "review" tab stays reachable.
             files={engine === "codeserver" ? [] : openFiles}
             activePath={visibleSurface === "file" ? activePath : null}
+            previewPath={engine === "codeserver" ? null : editor.previewPath}
             dirtyCount={engine === "codeserver" ? 0 : dirtyCount}
             onSelect={(path) => {
               setSurface("file")
@@ -546,7 +547,20 @@ function WorkspaceEditorBody({
               setActivePath(path)
             }}
             onClose={closeFile}
+            onPin={editor.pinFile}
             onSaveAll={workbench.saveAll}
+            onMove={editor.moveOpenFile}
+            onCloseOthers={editor.closeOtherFiles}
+            onCloseToRight={editor.closeFilesToRight}
+            onCloseAll={editor.closeAllFiles}
+            onReopenClosed={editor.reopenClosedFile}
+            onCopyPath={(relPath, absolute) => {
+              const target = openFiles.find((f) => f.relPath === relPath)
+              if (target) {
+                void navigator.clipboard?.writeText(absolute ? target.absolutePath : target.relPath)
+              }
+            }}
+            onRevert={(relPath) => void editor.reloadFile(relPath)}
           />
 
           {engine === "codeserver" ? (

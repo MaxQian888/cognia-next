@@ -190,7 +190,7 @@ async fn options_preflight_returns_cors() {
         res.headers()
             .get("access-control-allow-methods")
             .and_then(|v| v.to_str().ok()),
-        Some("GET, POST, DELETE, OPTIONS")
+        Some("GET, POST, PATCH, DELETE, OPTIONS")
     );
     let allow_headers = res
         .headers()
@@ -253,4 +253,212 @@ async fn healthz_and_metrics_have_expected_shape() {
     let body = res.text().await.unwrap();
     assert!(body.contains("share_created_total"));
     assert!(body.contains("share_active 0"));
+}
+
+#[tokio::test]
+async fn renewal_preserves_content_and_views_and_clamps_ttl() {
+    let (base, _dir) = start_with(|c| c.max_ttl_seconds = 60).await;
+    let client = Client::new();
+    let created: Value = client
+        .post(format!("{base}/v1/share"))
+        .bearer_auth(SECRET)
+        .json(&json!({ "envelope": valid_envelope(), "ttlSeconds": 10, "maxViews": 3 }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let url = format!("{base}/v1/share/{}", created["code"].as_str().unwrap());
+    assert_eq!(
+        client.get(&url).send().await.unwrap().status(),
+        StatusCode::OK
+    );
+    let before = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let response = client
+        .patch(&url)
+        .header("x-owner-token", created["ownerToken"].as_str().unwrap())
+        .json(&json!({ "ttlSeconds": 3600 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let renewed: Value = response.json().await.unwrap();
+    let expires_at = renewed["expiresAt"].as_i64().unwrap();
+    assert!((60_000..=61_000).contains(&(expires_at - before)));
+    assert!(expires_at > created["expiresAt"].as_i64().unwrap());
+    let stats: Value = client
+        .get(format!("{url}/stats"))
+        .header("x-owner-token", created["ownerToken"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stats["viewCount"], 1);
+    assert_eq!(stats["maxViews"], 3);
+    assert_eq!(stats["expiresAt"], expires_at);
+    let read: Value = client.get(&url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(read["envelope"], valid_envelope());
+}
+
+#[tokio::test]
+async fn renewal_requires_owner_and_valid_positive_ttl() {
+    let (base, _dir) = start().await;
+    let client = Client::new();
+    let created: Value = client
+        .post(format!("{base}/v1/share"))
+        .bearer_auth(SECRET)
+        .json(&json!({ "envelope": valid_envelope() }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let url = format!("{base}/v1/share/{}", created["code"].as_str().unwrap());
+    for credential in ["", SECRET] {
+        let response = client
+            .patch(&url)
+            .bearer_auth(credential)
+            .json(&json!({ "ttlSeconds": 60 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    for body in [
+        "{}",
+        "null",
+        "[]",
+        r#"{"ttlSeconds":0}"#,
+        r#"{"ttlSeconds":-1}"#,
+        r#"{"ttlSeconds":"60"}"#,
+    ] {
+        let response = client
+            .patch(&url)
+            .header("x-owner-token", created["ownerToken"].as_str().unwrap())
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(
+            response.json::<Value>().await.unwrap()["error"],
+            "ttlSeconds required"
+        );
+    }
+    let response = client
+        .patch(&url)
+        .header("x-owner-token", created["ownerToken"].as_str().unwrap())
+        .body("{invalid")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["error"],
+        "invalid json"
+    );
+}
+
+#[tokio::test]
+async fn renewal_uses_existing_org_authorization() {
+    let (base, _dir) = start().await;
+    let client = Client::new();
+    let grant = common::grant_for("org_owner");
+    let created: Value = client
+        .post(format!("{base}/v1/share"))
+        .bearer_auth(&grant)
+        .json(&json!({ "envelope": valid_envelope() }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let url = format!("{base}/v1/share/{}", created["code"].as_str().unwrap());
+    let response = client
+        .patch(&url)
+        .bearer_auth(common::grant_for("org_other"))
+        .json(&json!({ "ttlSeconds": 60 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = client
+        .patch(&url)
+        .bearer_auth(grant)
+        .json(&json!({ "ttlSeconds": 60 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn renewal_cannot_restore_deleted_burned_or_expired_shares() {
+    let (base, dir) = start().await;
+    let client = Client::new();
+    for lifecycle in ["deleted", "burned", "expired"] {
+        let created: Value = client
+            .post(format!("{base}/v1/share"))
+            .bearer_auth(SECRET)
+            .json(&json!({ "envelope": valid_envelope(), "burnAfterRead": lifecycle == "burned" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let code = created["code"].as_str().unwrap();
+        let url = format!("{base}/v1/share/{code}");
+        let owner = created["ownerToken"].as_str().unwrap();
+        match lifecycle {
+            "deleted" => {
+                assert_eq!(
+                    client
+                        .delete(&url)
+                        .header("x-owner-token", owner)
+                        .send()
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::NO_CONTENT
+                );
+            }
+            "burned" => {
+                assert_eq!(
+                    client.get(&url).send().await.unwrap().status(),
+                    StatusCode::OK
+                );
+            }
+            _ => {
+                let conn = rusqlite::Connection::open(dir.path().join("shares.sqlite")).unwrap();
+                conn.execute("UPDATE shares SET expires_at = 1 WHERE code = ?1", [code])
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            client
+                .patch(&url)
+                .header("x-owner-token", owner)
+                .json(&json!({ "ttlSeconds": 60 }))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND,
+            "{lifecycle}"
+        );
+        assert_eq!(
+            client.get(&url).send().await.unwrap().status(),
+            StatusCode::NOT_FOUND
+        );
+    }
 }

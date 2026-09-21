@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { setDraftDebounced, clearDraft } from "@/lib/db/chat-drafts"
 import { loggers } from "@cognia/logging"
+import { putSessionAsset, listSessionAssets } from "@/lib/db/session-assets"
 import { clearTables, clearAll } from "./clear"
 
 const fixture = createDbTestFixture({ seeded: false })
@@ -244,4 +245,26 @@ describe("clearAll", () => {
 
     expect(await Dexie.exists(fusionName)).toBe(false)
   })
+})
+
+it("clears durable and temporary attachment ownership with sessions", async () => {
+  await seedSessions()
+  await putSessionAsset({
+    sessionId: "a",
+    assetId: "durable",
+    filename: "source",
+    mediaType: "text/plain",
+    blob: new Blob(["retained"]),
+  })
+  await putSessionAsset({
+    sessionId: "a",
+    assetId: "temporary",
+    filename: "source",
+    mediaType: "text/plain",
+    blob: new Blob(["ephemeral"]),
+    temporary: true,
+  })
+  await clearTables(["sessions"])
+  expect(await listSessionAssets("a")).toEqual([])
+  expect(await getDb().messageMedia.where("hash").startsWith("original:").count()).toBe(0)
 })

@@ -6,6 +6,8 @@
 // app versions without surprise migrations: the importer reads `manifest.version`
 // and `manifest.schemaVersion` and refuses anything it doesn't understand.
 
+import type { SessionAsset } from "@/lib/db/session-assets"
+import type { SessionAssetSourceChunk, MessageMediaBackupRow } from "./session-assets-backup"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type {
   AppSettings,
@@ -105,6 +107,11 @@ export interface BackupPayloadV3 {
   sessions?: ChatSession[]
   messages?: StoredMessage[]
   sessionState?: SessionStateRow[]
+  /** Session-owned original attachments; binary payload is chunked for portable serialization. */
+  sessionAssets?: SessionAsset[]
+  sessionAssetSourceChunks?: SessionAssetSourceChunk[]
+  messageMedia?: MessageMediaBackupRow[]
+  messageMediaChunks?: SessionAssetSourceChunk[]
   trustedWorkspaces?: TrustedWorkspace[]
   ttsProviderKeys?: TtsProviderKeyRow[]
   /** Artifact tables (schema v206). Before v206 these travelled inside the

@@ -47,6 +47,7 @@ import {
 import {
   capturePendingArtifactMigration,
   clearPendingArtifactMigration,
+  getArtifactMigrationScope,
   type PendingArtifactMigration,
 } from "@/lib/artifacts/localstorage-migration"
 import { loggers } from "@cognia/logging"
@@ -58,19 +59,32 @@ import { loggers } from "@cognia/logging"
  */
 export const ARTIFACT_SYNC_DEBOUNCE_MS = 500
 
-let started = false
-let flushArtifactSync: (() => void) | null = null
-let mirroredArtifacts: Record<string, Artifact> = {}
-let mirroredVersionIds = new Set<string>()
-let mirroredDbName: string | null = null
+let activeBridge: { dispose: () => void; cancel: () => void } | null = null
+// A restarted bridge waits for its own database's final write. An unrelated
+// account must not block behind a stalled transaction in another database.
+const previousWrites = new Map<string, Promise<void>>()
 
-/** Test-only: drop the module-level mirror so suites don't leak into each other. */
+interface ArtifactSnapshot {
+  artifacts: Record<string, Artifact>
+  versions: Record<string, ArtifactVersion[]>
+}
+
+interface RetainedArtifactWrite {
+  snapshot: ArtifactSnapshot
+  deletedIds: Set<string>
+}
+
+// Failed final writes stay in the existing queue across bridge restarts. Keep
+// these account/database scoped and in memory: writing modern artifact content
+// into plaintext localStorage would bypass the account database's encryption.
+const retainedWrites = new Map<string, RetainedArtifactWrite>()
+
+/** Test-only: cancel subscriptions and timers as well as the active instance. */
 export function __resetArtifactDexieBridgeForTesting(): void {
-  started = false
-  flushArtifactSync = null
-  mirroredArtifacts = {}
-  mirroredVersionIds = new Set()
-  mirroredDbName = null
+  activeBridge?.cancel()
+  activeBridge = null
+  previousWrites.clear()
+  retainedWrites.clear()
 }
 
 /**
@@ -164,52 +178,6 @@ export function diffArtifactMirror(
 }
 
 /**
- * Push the store's artifacts into Dexie.
- *
- * Answers whether the mirror may now be advanced to `next`. `false` means the
- * write was refused, so the caller must NOT record `next` as the new baseline —
- * doing so would claim rows were persisted that never were, and the next diff
- * against that baseline would skip them.
- */
-async function syncArtifacts(
-  next: Record<string, Artifact>,
-  nextVersions: Record<string, ArtifactVersion[]>
-): Promise<boolean> {
-  const db = getDb()
-  // Rule 1 — see the module docstring. The mirror describes one database; a
-  // different one means the account changed under us and the provider is about
-  // to restart the bridge.
-  if (mirroredDbName !== null && db.name !== mirroredDbName) return false
-
-  const diff = diffArtifactMirror(mirroredArtifacts, mirroredVersionIds, next, nextVersions)
-  if (
-    diff.removedArtifactIds.length === 0 &&
-    diff.artifactUpserts.length === 0 &&
-    diff.removedVersionIds.length === 0 &&
-    diff.versionUpserts.length === 0
-  ) {
-    // Nothing to write, and the mirror already describes this database — so
-    // `next` is a legitimate baseline.
-    return true
-  }
-
-  await db.transaction("rw", db.artifacts, db.artifactVersions, async () => {
-    for (const id of diff.removedArtifactIds) {
-      await db.artifactVersions.where("artifactId").equals(id).delete()
-      await db.artifacts.delete(id)
-    }
-    if (diff.artifactUpserts.length > 0) await db.artifacts.bulkPut(diff.artifactUpserts)
-    if (diff.removedVersionIds.length > 0) {
-      await db.artifactVersions.bulkDelete(diff.removedVersionIds)
-    }
-    if (diff.versionUpserts.length > 0) await db.artifactVersions.bulkPut(diff.versionUpserts)
-  })
-
-  mirroredVersionIds = diff.seenVersionIds
-  return true
-}
-
-/**
  * Seed the store from Dexie and prime the mirror with exactly what was seeded.
  *
  * Priming matters: without it the first sync after a reload re-puts every
@@ -218,25 +186,47 @@ async function syncArtifacts(
  * primed — memory won the conflict, so the row on disk is stale and has to be
  * overwritten by the first sync.
  */
-async function hydrateFromDexie(pending: PendingArtifactMigration | null): Promise<void> {
-  const db = getDb()
+async function hydrateFromDexie(
+  db: ReturnType<typeof getDb>,
+  pending: PendingArtifactMigration | null,
+  canApply: () => boolean,
+  deletedIds: Set<string>,
+  changedIds: Set<string>,
+  retained?: RetainedArtifactWrite
+): Promise<{ artifacts: Record<string, Artifact>; versionIds: Set<string> } | null> {
   const [artifactRows, versionRows] = await Promise.all([
     db.artifacts.toArray(),
     db.artifactVersions.toArray(),
   ])
+  if (!canApply()) return null
 
   // Rows a previous, interrupted migration parked but never wrote. Restoring
   // them BEFORE the Dexie read is compared against memory means they take the
   // same "memory wins" path as anything the store rehydrated itself, and the
   // initial sync then carries them into Dexie.
-  if (pending) {
-    useArtifactStore.setState((state) => ({
-      artifacts: { ...rehydrateArtifactMap(pending.artifacts), ...state.artifacts },
-      artifactVersions: {
-        ...rehydrateVersionMap(pending.artifactVersions),
+  if (pending || retained) {
+    useArtifactStore.setState((state) => {
+      const artifacts = { ...rehydrateArtifactMap(pending?.artifacts ?? {}), ...state.artifacts }
+      const artifactVersions = {
+        ...rehydrateVersionMap(pending?.artifactVersions ?? {}),
         ...state.artifactVersions,
-      },
-    }))
+      }
+      if (retained) {
+        for (const [id, artifact] of Object.entries(retained.snapshot.artifacts)) {
+          if (changedIds.has(id)) continue
+          artifacts[id] = artifact
+          artifactVersions[id] = retained.snapshot.versions[id] ?? []
+        }
+        for (const id of retained.deletedIds) {
+          if (!changedIds.has(id)) deletedIds.add(id)
+        }
+      }
+      for (const id of deletedIds) {
+        delete artifacts[id]
+        delete artifactVersions[id]
+      }
+      return { artifacts, artifactVersions }
+    })
   }
 
   const memory = useArtifactStore.getState()
@@ -254,9 +244,17 @@ async function hydrateFromDexie(pending: PendingArtifactMigration | null): Promi
   }
 
   const artifactPatch: Record<string, Artifact> = {}
+  const deletedArtifacts: Record<string, Artifact> = {}
   const versionPatch: Record<string, ArtifactVersion[]> = {}
   const primedVersionIds = new Set<string>()
   for (const row of artifactRows) {
+    if (deletedIds.has(row.id)) {
+      // A deletion during the read wins over the database row, but the row
+      // remains in the committed baseline so the first write removes it.
+      deletedArtifacts[row.id] = artifactFromRow(row)
+      for (const version of versionsByArtifact.get(row.id) ?? []) primedVersionIds.add(version.id)
+      continue
+    }
     if (memoryArtifacts[row.id]) continue // memory wins
     const artifact = artifactFromRow(row)
     artifactPatch[row.id] = artifact
@@ -274,9 +272,7 @@ async function hydrateFromDexie(pending: PendingArtifactMigration | null): Promi
     }))
   }
 
-  mirroredArtifacts = { ...artifactPatch }
-  mirroredVersionIds = primedVersionIds
-  mirroredDbName = db.name
+  return { artifacts: { ...artifactPatch, ...deletedArtifacts }, versionIds: primedVersionIds }
 }
 
 /**
@@ -285,102 +281,208 @@ async function hydrateFromDexie(pending: PendingArtifactMigration | null): Promi
  * switch is handled (`CanvasBridgeProvider` re-runs this per account).
  */
 export function startArtifactDexieBridge(): () => void {
-  if (started || typeof window === "undefined") return () => {}
-  started = true
+  if (activeBridge || typeof window === "undefined") return () => {}
 
-  let unsubscribe: () => void = () => {}
+  const db = getDb()
+  const scope = getArtifactMigrationScope()
+  const queueKey = JSON.stringify([db.name, scope])
+  let pending = capturePendingArtifactMigration(scope)
+  const predecessor = previousWrites.get(queueKey) ?? Promise.resolve()
   let disposed = false
+  let unsubscribe: () => void = () => {}
+  let mirroredArtifacts: Record<string, Artifact> = {}
+  let mirroredVersionIds = new Set<string>()
+  let migrationCompleted = false
+  let hydrated = false
+  const deletedIds = new Set<string>()
+  const changedIds = new Set<string>()
+  let retained: RetainedArtifactWrite | undefined
+  let retryDelay = ARTIFACT_SYNC_DEBOUNCE_MS
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let inFlight: Promise<void> | null = null
+  let queued: ArtifactSnapshot | null = null
+  const initial = useArtifactStore.getState()
+  let lastSeenArtifacts = initial.artifacts
+  let lastSeenVersions = initial.artifactVersions
 
-  // Synchronous, and first: keep the replay copy as an extra recovery path for
-  // a blob left behind by an interrupted migration. The store also retains the
-  // original maps while its migration marker is set.
-  const pending = capturePendingArtifactMigration()
+  const retain = (snapshot: ArtifactSnapshot) => {
+    retained = {
+      snapshot,
+      deletedIds: new Set([
+        ...[...deletedIds].filter((id) => !snapshot.artifacts[id]),
+        ...Object.keys(pending?.artifacts ?? {}).filter((id) => !snapshot.artifacts[id]),
+        ...Object.keys(mirroredArtifacts).filter((id) => !snapshot.artifacts[id]),
+      ]),
+    }
+    retainedWrites.set(queueKey, retained)
+  }
 
-  void hydrateFromDexie(pending)
-    .then(() => {
-      if (disposed) return
-      const initial = useArtifactStore.getState()
-      void syncArtifacts(initial.artifacts, initial.artifactVersions)
-        .then((applied) => {
-          // `disposed` because the disposer clears the mirror synchronously and
-          // a late landing would repopulate it with THIS account's artifacts;
-          // `applied` because a write the db-name guard refused never happened.
-          if (disposed || !applied) return
-          mirroredArtifacts = { ...initial.artifacts }
-          completeArtifactDexieMigration()
-          // The rows are in Dexie now, so the parked copy has done its job.
-          if (pending) clearPendingArtifactMigration()
-        })
-        .catch((err) =>
-          loggers.canvas.warn("artifact dexie-bridge initial sync failed", {
-            err: String(err),
-          })
-        )
+  const ownsCurrentScope = () => {
+    try {
+      return getDb().name === db.name && getArtifactMigrationScope() === scope
+    } catch {
+      // An account can be locked between scheduling a write and starting it.
+      return false
+    }
+  }
+  const canApply = () => !disposed && activeBridge === bridge && ownsCurrentScope()
+  const clearTimer = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+  }
+  const schedule = (delay: number) => {
+    clearTimer()
+    timer = setTimeout(flush, delay)
+  }
 
-      let lastSeenArtifacts = initial.artifacts
-      let lastSeenVersions = initial.artifactVersions
-      // Named for the timer, not the migration: an outer `pending` holds the
-      // parked migration, and shadowing it here left the parked copy in
-      // localStorage forever.
-      let pendingTimer: ReturnType<typeof setTimeout> | null = null
-      let queued: {
-        artifacts: Record<string, Artifact>
-        versions: Record<string, ArtifactVersion[]>
-      } | null = null
-
-      const run = () => {
-        pendingTimer = null
-        const snapshot = queued
-        queued = null
-        if (!snapshot) return
-        void syncArtifacts(snapshot.artifacts, snapshot.versions)
-          .then((applied) => {
-            if (disposed || !applied) return
-            mirroredArtifacts = { ...snapshot.artifacts }
-          })
-          .catch((err) =>
-            loggers.canvas.warn("artifact dexie-bridge sync failed", { err: String(err) })
+  // There is only one writer per bridge. Diff computation and both mirror
+  // updates belong to the same queue, so a later deletion sees an earlier add
+  // only AFTER that add committed. Edits during a write replace the pending
+  // snapshot instead of adding one transaction per keystroke.
+  const drain = (): Promise<void> => {
+    if (inFlight) return inFlight
+    const write: Promise<void> = Promise.resolve()
+      .then(async () => {
+        while (queued) {
+          if (!ownsCurrentScope()) {
+            retain(queued)
+            queued = null
+            return
+          }
+          clearTimer()
+          const snapshot = queued
+          queued = null
+          const diff = diffArtifactMirror(
+            mirroredArtifacts,
+            mirroredVersionIds,
+            snapshot.artifacts,
+            snapshot.versions
           )
-      }
-
-      flushArtifactSync = () => {
-        if (pendingTimer !== null) {
-          clearTimeout(pendingTimer)
-          run()
+          try {
+            if (
+              diff.removedArtifactIds.length ||
+              diff.artifactUpserts.length ||
+              diff.removedVersionIds.length ||
+              diff.versionUpserts.length
+            ) {
+              await db.transaction("rw", db.artifacts, db.artifactVersions, async () => {
+                for (const id of diff.removedArtifactIds) {
+                  await db.artifactVersions.where("artifactId").equals(id).delete()
+                  await db.artifacts.delete(id)
+                }
+                if (diff.artifactUpserts.length) await db.artifacts.bulkPut(diff.artifactUpserts)
+                if (diff.removedVersionIds.length)
+                  await db.artifactVersions.bulkDelete(diff.removedVersionIds)
+                if (diff.versionUpserts.length)
+                  await db.artifactVersions.bulkPut(diff.versionUpserts)
+              })
+            }
+          } catch (err) {
+            // Keep the newest snapshot and the last COMMITTED baseline. Retrying
+            // needs no further user edit, and backoff avoids a quota-error loop.
+            queued ??= snapshot
+            retain(queued)
+            loggers.canvas.warn("artifact dexie-bridge sync failed", { err: String(err) })
+            if (canApply()) {
+              schedule(retryDelay)
+              retryDelay = Math.min(retryDelay * 2, 30_000)
+            }
+            return
+          }
+          mirroredArtifacts = snapshot.artifacts
+          mirroredVersionIds = diff.seenVersionIds
+          retryDelay = ARTIFACT_SYNC_DEBOUNCE_MS
+          if (!queued && retainedWrites.get(queueKey) === retained) retainedWrites.delete(queueKey)
+          if (!queued) {
+            // Cleanup is scoped to the committed database even if the account
+            // changed during its transaction. Only the live store's marker
+            // requires the active lifecycle guard.
+            if (pending) clearPendingArtifactMigration(scope)
+            if (canApply() && !migrationCompleted) {
+              migrationCompleted = true
+              completeArtifactDexieMigration()
+            }
+          }
         }
-      }
-
-      // The subscription is unselected — it fires on every artifact-store
-      // write, canvas edits included. Bail on identity before doing any work.
-      unsubscribe = useArtifactStore.subscribe((state) => {
-        if (state.artifacts === lastSeenArtifacts && state.artifactVersions === lastSeenVersions) {
-          return
-        }
-        lastSeenArtifacts = state.artifacts
-        lastSeenVersions = state.artifactVersions
-        queued = { artifacts: state.artifacts, versions: state.artifactVersions }
-        if (pendingTimer !== null) clearTimeout(pendingTimer)
-        pendingTimer = setTimeout(run, ARTIFACT_SYNC_DEBOUNCE_MS)
       })
+      .finally(() => {
+        inFlight = null
+        if (previousWrites.get(queueKey) === write) previousWrites.delete(queueKey)
+      })
+    inFlight = write
+    previousWrites.set(queueKey, write)
+    return write
+  }
 
-      window.addEventListener("pagehide", flushArtifactSync)
+  function flush() {
+    clearTimer()
+    if (queued) void drain()
+  }
+
+  const dispose = (flushPending: boolean) => {
+    if (disposed) return
+    disposed = true
+    unsubscribe()
+    clearTimer()
+    window.removeEventListener("pagehide", flush)
+    if (flushPending && !hydrated && changedIds.size) {
+      retain({ artifacts: lastSeenArtifacts, versions: lastSeenVersions })
+    }
+    if (flushPending) flush()
+    else queued = null
+    if (activeBridge === bridge) activeBridge = null
+  }
+  const bridge = { dispose: () => dispose(true), cancel: () => dispose(false) }
+  activeBridge = bridge
+
+  // Subscribe before the database read so a user's delete cannot be mistaken
+  // for an artifact that simply has not loaded yet.
+  unsubscribe = useArtifactStore.subscribe((state) => {
+    if (!canApply()) return
+    if (state.artifacts === lastSeenArtifacts && state.artifactVersions === lastSeenVersions) return
+    if (!hydrated) {
+      const ids = new Set([...Object.keys(lastSeenArtifacts), ...Object.keys(state.artifacts)])
+      for (const id of ids) {
+        if (
+          lastSeenArtifacts[id] === state.artifacts[id] &&
+          lastSeenVersions[id] === state.artifactVersions[id]
+        )
+          continue
+        changedIds.add(id)
+        if (state.artifacts[id]) deletedIds.delete(id)
+        else deletedIds.add(id)
+      }
+    }
+    lastSeenArtifacts = state.artifacts
+    lastSeenVersions = state.artifactVersions
+    if (!hydrated) return
+    queued = { artifacts: state.artifacts, versions: state.artifactVersions }
+    schedule(ARTIFACT_SYNC_DEBOUNCE_MS)
+  })
+
+  void predecessor
+    .then(async () => {
+      if (!canApply()) return
+      // The previous instance may have completed migration while we waited.
+      pending = capturePendingArtifactMigration(scope)
+      retained = retainedWrites.get(queueKey)
+      const mirror = await hydrateFromDexie(db, pending, canApply, deletedIds, changedIds, retained)
+      if (!mirror || !canApply()) return
+      mirroredArtifacts = mirror.artifacts
+      mirroredVersionIds = mirror.versionIds
+      hydrated = true
+      const initial = useArtifactStore.getState()
+      window.addEventListener("pagehide", flush)
+      queued = { artifacts: initial.artifacts, versions: initial.artifactVersions }
+      flush()
     })
     .catch((err) => {
-      // Rule 2 — see the module docstring. No mirror, no deletes.
+      unsubscribe()
+      // An incomplete hydration must never turn an unknown subset into deletes.
       loggers.canvas.warn("artifact dexie-bridge hydration failed; mirror disabled", {
         err: String(err),
       })
     })
 
-  return () => {
-    disposed = true
-    flushArtifactSync?.()
-    if (flushArtifactSync) window.removeEventListener("pagehide", flushArtifactSync)
-    flushArtifactSync = null
-    unsubscribe()
-    mirroredArtifacts = {}
-    mirroredVersionIds = new Set()
-    mirroredDbName = null
-    started = false
-  }
+  return bridge.dispose
 }

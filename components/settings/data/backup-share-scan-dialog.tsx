@@ -4,8 +4,8 @@
 // plaintext package that still carries recognised personal information. The
 // gate (`lib/share/backup-share-gate.ts`) never redacts a backup, so the only
 // two ways out of this dialog are cancel, or tick the confirmation and go on.
-// A clean or encrypted result never opens it: those are one-line notes inside
-// the share dialog itself.
+// Plaintext binary attachments also require confirmation because text PII
+// inspection cannot determine what their original bytes contain.
 
 import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -30,6 +30,7 @@ export interface BackupShareScanDialogProps {
   /** Domains with hits, most hits first. */
   domains: BackupShareDomainHits[]
   total: number
+  uninspectedAttachments?: number
   /** Called once the owner has ticked the confirmation and pressed continue. */
   onConfirm: () => void
 }
@@ -39,6 +40,7 @@ export function BackupShareScanDialog({
   onOpenChange,
   domains,
   total,
+  uninspectedAttachments = 0,
   onConfirm,
 }: BackupShareScanDialogProps) {
   const t = useTranslations("settings.data.backup.shareScan")
@@ -62,11 +64,16 @@ export function BackupShareScanDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlertIcon className="size-4 text-destructive" />
-            {t("title")}
+            {t(total > 0 ? "title" : "binaryTitle")}
           </DialogTitle>
-          <DialogDescription>{t("body")}</DialogDescription>
+          <DialogDescription>{t(total > 0 ? "body" : "binaryBody")}</DialogDescription>
         </DialogHeader>
 
+        {uninspectedAttachments > 0 && (
+          <p className="text-sm" data-testid="backup-share-scan-attachments">
+            {t("uninspectedAttachments", { count: uninspectedAttachments })}
+          </p>
+        )}
         <p
           className="text-xs font-medium text-muted-foreground"
           data-testid="backup-share-scan-total"
@@ -104,7 +111,7 @@ export function BackupShareScanDialog({
             onCheckedChange={(next) => setConfirmed(next === true)}
             data-testid="backup-share-scan-confirm"
           />
-          <span>{t("confirm")}</span>
+          <span>{t(uninspectedAttachments > 0 ? "confirmWithAttachments" : "confirm")}</span>
         </label>
 
         <DialogFooter className="gap-2">

@@ -6,6 +6,7 @@ import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
 import { collectUnreferencedMessageMedia } from "./message-media-refs"
+import { clearTemporarySessionAssets } from "./session-assets"
 import { clearDraft } from "./chat-drafts"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
@@ -443,7 +444,9 @@ export async function bindImportedSessionToNativeRuntime(
     .modify((session) => {
       session.importRuntimeBinding = binding
       session.importOwnership = "native-bound"
-      session.importFrozen = false
+      // Runtime events own subsequent turns; file-watch echoes use different
+      // ids and cannot safely be merged into this live transcript.
+      session.importFrozen = true
       if (binding.nativeSessionId) session.sdkSessionId = binding.nativeSessionId
       if (binding.cwd) session.workingDir = binding.cwd
       session.updatedAt = Date.now()
@@ -836,12 +839,14 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
   const orphanCandidates = new Set<string>()
+  const sessionAssetOrphans = new Set<string>()
   await db.transaction(
     "rw",
     [
       db.sessions,
       db.messages,
       db.messageMediaRefs,
+      db.messageMedia,
       db.sessionState,
       db.chatDrafts,
       db.chatInputHistory,
@@ -913,8 +918,15 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
 
       const allMessageIds: string[] = []
       const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
-      for (const ref of mediaRefs) orphanCandidates.add(ref.hash)
+      for (const ref of mediaRefs) {
+        if (ref.sessionAsset) sessionAssetOrphans.add(ref.hash)
+        else orphanCandidates.add(ref.hash)
+      }
       await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).delete()
+      for (const hash of sessionAssetOrphans) {
+        if (!(await db.messageMediaRefs.where("hash").equals(hash).count()))
+          await db.messageMedia.delete(hash)
+      }
       await db.sessionState.bulkDelete(deletedIds)
       await db.chatDrafts.bulkDelete(deletedIds)
       await db.chatInputHistory.where("sessionId").anyOf(deletedIds).delete()
@@ -947,6 +959,7 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       })
     }
   }
+  clearTemporarySessionAssets(cleanupIds)
   await cleanupScheduledLoopTasks(scheduledTaskIds)
   const sandboxReleaseErrors: unknown[] = []
   for (const id of deletedIds) {

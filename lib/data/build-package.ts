@@ -21,12 +21,15 @@ import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
 import { artifactsSnapshot } from "./snapshots/artifacts"
 import { readAllSnapshots } from "./snapshots/helpers"
 import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
+import { collectMessageMediaHashes } from "@/lib/db/message-media-refs"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 import { exportStoredProfilesRedacted } from "@/lib/db/provider-profiles"
 import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 import { createPagedTableReader } from "./paged-table-reader"
 import { redactMcpServerForExport } from "@/lib/mcp/credentials"
+
+import { exportSessionAssetRecords, exportMessageMediaRecords } from "./session-assets-backup"
 
 const APP_VERSION = "0.1.0"
 
@@ -56,6 +59,7 @@ export async function buildBackupPackage(
   opts: ExportOptions,
   extras: BuildBackupExtras = {}
 ): Promise<BackupPackageV3> {
+  await assertLegacyBackupFits(opts)
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
   const includeSettings = opts.includeSettings ?? true
@@ -287,6 +291,14 @@ export async function buildBackupPackage(
     payload.sessions = exportedSessions
     payload.messages = messages.filter((message) => exportedSessionIds.has(message.sessionId))
     payload.sessionState = sessionState.filter((state) => exportedSessionIds.has(state.sessionId))
+    for await (const record of exportSessionAssetRecords(exportedSessionIds)) {
+      if (record.section === "sessionAssets") (payload.sessionAssets ??= []).push(...record.rows)
+      else (payload.sessionAssetSourceChunks ??= []).push(...record.rows)
+    }
+    for await (const record of exportMessageMediaRecords(exportedSessionIds)) {
+      if (record.section === "messageMedia") (payload.messageMedia ??= []).push(...record.rows)
+      else (payload.messageMediaChunks ??= []).push(...record.rows)
+    }
   }
 
   if (!includeSettings) delete payload.settings
@@ -365,6 +377,7 @@ export async function buildBackupPackage(
     }
   }
 
+  assertLegacyPayloadFits(payload)
   const checksum = await sha256Hex(canonicalStringify(payload))
   // Optional provenance — restore + history surface "which device wrote this".
   const device = (await getDeviceMetadata()) ?? undefined
@@ -403,3 +416,81 @@ export function defaultExportFileName(
 }
 
 export const __TESTING__ = { APP_VERSION }
+
+/** Legacy share/remote envelopes require a contiguous JSON string and AES buffer. */
+export class BackupRequiresStreamError extends Error {
+  constructor() {
+    super(
+      "This backup is too large for a share link or this remote destination. Export a local streaming backup from Settings → Data to retain every attachment."
+    )
+    this.name = "BackupRequiresStreamError"
+  }
+}
+
+async function assertLegacyBackupFits(options: ExportOptions): Promise<void> {
+  if (!options.includeSessions) return
+  const db = getDb()
+  const sessionIds = new Set(
+    filterExposedSessions(await db.sessions.toArray(), "standard-export").map((row) => row.id)
+  )
+  const sizes = new Map<string, number>()
+  let total = 0
+  const add = (key: string, size: number) => {
+    if (sizes.has(key)) return
+    sizes.set(key, size)
+    total += size
+    // Base64, canonical JSON, ciphertext and transport serialization coexist in legacy callers.
+  }
+  await db.messageMediaRefs.each((ref) => {
+    const asset = ref.sessionAsset
+    if (asset && sessionIds.has(ref.sessionId) && asset.sourceRetained !== false)
+      add(`source:${asset.contentHash}`, asset.byteSize)
+  })
+  if (total > 32 * 1024 * 1024) throw new BackupRequiresStreamError()
+  const hashes = new Set<string>()
+  if (sessionIds.size)
+    await db.messages
+      .where("sessionId")
+      .anyOf([...sessionIds])
+      .each((message) => {
+        for (const hash of collectMessageMediaHashes(message.parts)) hashes.add(hash)
+      })
+  for (const hash of hashes) {
+    const media = await db.messageMedia.get(hash)
+    if (!media) continue // The source exporter reports missing bytes as an error.
+    add(`media:${hash}`, media.byteSize)
+    if (media.thumbBlob) add(`thumb:${hash}`, media.thumbBlob.size)
+    if (media.originalBlob) add(`original:${hash}`, media.originalBlob.size)
+    if (total > 32 * 1024 * 1024) throw new BackupRequiresStreamError()
+  }
+}
+
+function assertLegacyPayloadFits(payload: unknown): void {
+  let characters = 0
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      characters += value.length + 2
+      if (characters > 64 * 1024 * 1024) throw new BackupRequiresStreamError()
+      for (let index = 0; index < value.length; index++) {
+        const code = value.charCodeAt(index)
+        if (code < 32) characters += 5
+        else if (code === 34 || code === 92) characters += 1
+      }
+    } else if (value && typeof value === "object") {
+      characters += 2
+      if (Array.isArray(value)) {
+        for (const row of value) {
+          characters += 1
+          visit(row)
+        }
+      } else {
+        for (const [key, row] of Object.entries(value)) {
+          characters += key.length + 4
+          visit(row)
+        }
+      }
+    } else characters += 24
+    if (characters > 64 * 1024 * 1024) throw new BackupRequiresStreamError()
+  }
+  visit(payload)
+}

@@ -4,6 +4,7 @@
 import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
+import { clearTemporarySessionAssets } from "@/lib/db/session-assets"
 import { clearDraft } from "@/lib/db/chat-drafts"
 import { collectUnreferencedMessageMedia } from "@/lib/db/message-media-refs"
 import { fusionDatabaseName } from "@/lib/router-fusion/gate/database-name"
@@ -34,6 +35,7 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
       db.chatDrafts,
       db.chatInputHistory,
       db.messageMediaRefs,
+      db.messageMedia,
       db.chatTurnSummaries,
       db.chatTranscriptIndexState,
       db.syncTombstones,
@@ -54,11 +56,15 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
         for (const hash of await db.messageMediaRefs.orderBy("hash").uniqueKeys()) {
           orphanCandidates.add(String(hash))
         }
+        const sourceHashes = (
+          await db.messageMediaRefs.filter((row) => !!row.sessionAsset).toArray()
+        ).map((row) => row.hash)
         await db.messages.clear()
         await db.sessionState.clear()
         await db.chatDrafts.clear()
         await db.chatInputHistory.clear()
         await db.messageMediaRefs.clear()
+        await db.messageMedia.bulkDelete(sourceHashes)
         await db.chatTurnSummaries.clear()
         await db.chatTranscriptIndexState.clear()
         await db.sessions.clear()
@@ -75,6 +81,7 @@ export async function clearTables(names: ClearableTable[]): Promise<void> {
       if (names.includes("settings")) await db.settings.clear()
     }
   )
+  if (wantsSessions) clearTemporarySessionAssets()
   // External cleanup follows the multi-table commit so a failed reset cannot
   // cancel a live draft or remove media whose references were rolled back.
   for (const sessionId of draftSessionIds) {
@@ -106,5 +113,6 @@ export async function clearAll(): Promise<void> {
   const db = getDb()
   const fusionName = fusionDatabaseName(db.name)
   await db.delete()
+  clearTemporarySessionAssets()
   await Dexie.delete(fusionName)
 }

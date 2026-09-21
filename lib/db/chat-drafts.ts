@@ -4,6 +4,7 @@ import type { ChatTemplateBinding } from "@/lib/chat/template/binding"
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
+import type { AttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
 
 /**
  * An attachment that was staged in the composer when a draft was saved.
@@ -31,6 +32,9 @@ export interface DraftAttachmentMeta {
   bytes?: Uint8Array
   /** Cached extraction, so a restored document is not parsed a second time. */
   extractedText?: string
+  extractedContent?: AttachmentExtractedContent
+  ocrText?: string
+  includeOcr?: boolean
   tokens?: number
   /**
    * How a staged video or animated GIF was set to be sampled. Its frames are
@@ -72,13 +76,13 @@ export interface DraftAttachmentMeta {
 }
 
 /**
- * Ceiling for all persisted draft attachment binaries combined.
+ * Ceiling for persisted draft attachment binaries and extracted caches combined.
  *
  * Six attachments × 10 MB × N sessions is unbounded, and blowing the IndexedDB
  * quota on iOS gets the WHOLE database evicted by the system — conversation
  * history included. A global cap with LRU eviction keeps the failure mode
  * proportionate: the oldest session loses its binaries (and falls back to the
- * reminder chips), never the newest, and never the message log.
+ * reminder chips), prioritizing the newest, and never the message log.
  */
 export const DRAFT_ATTACHMENT_QUOTA_BYTES = 150 * 1024 * 1024
 
@@ -209,67 +213,63 @@ export async function setDraft(
   // edit land *below* what the Host already published, which regresses the
   // channel and makes the next broadcast reuse a revision. The transaction
   // serializes revision allocation across tabs and orders saves with deletes.
-  const written = await db.transaction(
-    "rw",
-    db.sessions,
-    db.syncTombstones,
-    db.chatDrafts,
-    async () => {
-      // Some callers seed a draft before their optimistic session is persisted.
-      // Reject only a known deletion, while allowing an explicitly recreated row.
-      if (
-        (await db.sessions.where("id").equals(sessionId).count()) === 0 &&
-        (await db.syncTombstones.get(["sessions", sessionId]))
-      ) {
-        return false
-      }
-      const previous = await db.chatDrafts.get(sessionId)
-      // Omitted means keep; `null` means clear. See `SetDraftOptions`.
-      const templateBinding =
-        options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
-      const foldedLinks =
-        options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
-      const contextSelections =
-        options.contextSelections === undefined
-          ? previous?.contextSelections
-          : (options.contextSelections ?? undefined)
-      // A draft is empty only when the text, the attachment list AND the staged
-      // context chips are all empty — a staged image or a `@chat:` pick with
-      // no typed words is still worth restoring. Resolved inside the
-      // transaction so the "preserve" read of `previous` cannot race a
-      // concurrent save.
-      if (text.length === 0 && attachments.length === 0 && !contextSelections?.length) {
-        await db.chatDrafts.delete(sessionId)
-        return false
-      }
-      const revision = options.revision ?? (previous?.revision ?? 0) + 1
-      await db.chatDrafts.put({
-        sessionId,
-        text,
-        updatedAt: Date.now(),
-        revision,
-        ...(templateBinding ? { templateBinding } : {}),
-        ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
-        ...(contextSelections && contextSelections.length > 0 ? { contextSelections } : {}),
-        ...(options.originClientId || hostStateRow?.clientId
-          ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
-          : {}),
-        // The content hash rides along so a draft restored after a restart can
-        // rejoin its upload instead of re-hashing and re-sending the file.
-        attachmentRefs: attachments.map(({ name, mediaType, size, hash }) => ({
-          name,
-          mediaType,
-          size,
-          ...(hash ? { hash } : {}),
-        })),
-        ...(attachments.length > 0 ? { attachments } : {}),
-      })
-      return true
+  await db.transaction("rw", db.sessions, db.syncTombstones, db.chatDrafts, async () => {
+    // Some callers seed a draft before their optimistic session is persisted.
+    // Reject only a known deletion, while allowing an explicitly recreated row.
+    if (
+      (await db.sessions.where("id").equals(sessionId).count()) === 0 &&
+      (await db.syncTombstones.get(["sessions", sessionId]))
+    ) {
+      return false
     }
-  )
-  // Enforce AFTER the write so the row just saved counts toward the total and
-  // is the one protected from eviction.
-  if (written && attachments.some((a) => a.bytes)) await enforceDraftAttachmentQuota(sessionId)
+    const previous = await db.chatDrafts.get(sessionId)
+    // Omitted means keep; `null` means clear. See `SetDraftOptions`.
+    const templateBinding =
+      options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
+    const foldedLinks =
+      options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
+    const contextSelections =
+      options.contextSelections === undefined
+        ? previous?.contextSelections
+        : (options.contextSelections ?? undefined)
+    // A draft is empty only when the text, the attachment list AND the staged
+    // context chips are all empty — a staged image or a `@chat:` pick with
+    // no typed words is still worth restoring. Resolved inside the
+    // transaction so the "preserve" read of `previous` cannot race a
+    // concurrent save.
+    if (text.length === 0 && attachments.length === 0 && !contextSelections?.length) {
+      await db.chatDrafts.delete(sessionId)
+      return false
+    }
+    const revision = options.revision ?? (previous?.revision ?? 0) + 1
+    await db.chatDrafts.put({
+      sessionId,
+      text,
+      updatedAt: Date.now(),
+      revision,
+      ...(templateBinding ? { templateBinding } : {}),
+      ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
+      ...(contextSelections && contextSelections.length > 0 ? { contextSelections } : {}),
+      ...(options.originClientId || hostStateRow?.clientId
+        ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
+        : {}),
+      // The content hash rides along so a draft restored after a restart can
+      // rejoin its upload instead of re-hashing and re-sending the file.
+      attachmentRefs: attachments.map(({ name, mediaType, size, hash }) => ({
+        name,
+        mediaType,
+        size,
+        ...(hash ? { hash } : {}),
+      })),
+      ...(attachments.length > 0 ? { attachments } : {}),
+    })
+    // Enforce in this transaction: a single oversized draft cannot be
+    // committed above the budget, even if a later sweep is interrupted.
+    if (attachments.some((a) => attachmentCacheBytes(a) > 0)) {
+      await enforceDraftAttachmentQuota(sessionId)
+    }
+    return true
+  })
 }
 
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -301,24 +301,49 @@ async function clearDraftLocal(sessionId: string): Promise<void> {
 }
 
 /**
- * Bytes of persisted binary carried by one draft row.
- *
- * Reads the explicit `size` field rather than measuring the payload: `size` is
- * recorded at staging time from the real `File.size`, so the accounting stays
- * correct regardless of how the storage layer rehydrates the typed array.
+ * Conservative UTF-16 storage accounting without making a second serialized
+ * copy of potentially large extracted text. Extraction metadata is JSON data.
  */
+function extractedValueBytes(value: unknown): number {
+  if (typeof value === "string") return value.length * 2
+  if (typeof value === "number") return 8
+  if (typeof value === "boolean") return 4
+  if (!value || typeof value !== "object") return 0
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + extractedValueBytes(item), 0)
+  return Object.entries(value).reduce(
+    (sum, [key, item]) => sum + key.length * 2 + extractedValueBytes(item),
+    0
+  )
+}
+
+function attachmentCacheBytes(attachment: DraftAttachmentMeta): number {
+  // The declared source size remains a conservative fallback for old snapshot
+  // readers, but an understated size cannot hide the actual typed-array bytes.
+  const binaryBytes = attachment.bytes
+    ? Math.max(
+        attachment.bytes.byteLength || 0,
+        Number.isFinite(attachment.size) ? attachment.size : 0
+      )
+    : 0
+  return (
+    binaryBytes +
+    extractedValueBytes(attachment.extractedText) +
+    extractedValueBytes(attachment.ocrText) +
+    extractedValueBytes(attachment.extractedContent)
+  )
+}
+
 function rowBytes(row: ChatDraftRow): number {
-  return (row.attachments ?? []).reduce((sum, a) => sum + (a.bytes ? a.size : 0), 0)
+  return (row.attachments ?? []).reduce((sum, a) => sum + attachmentCacheBytes(a), 0)
 }
 
 /**
- * Drop attachment binaries, oldest session first, until the total is back under
+ * Drop attachment binaries and derived caches, oldest session first, until the total is back under
  * {@link DRAFT_ATTACHMENT_QUOTA_BYTES}.
  *
- * Only `bytes` is stripped — name / size / extracted text stay, so an evicted
- * draft still shows its reminder chips. The row for `keepSessionId` (the one
- * just written) is never evicted, so the attachment a user just staged is
- * always the one that survives.
+ * Reminder metadata stays. The just-written session is considered last; if
+ * that session alone exceeds the quota, its earliest attachments are evicted
+ * first so recent additions survive whenever they fit by themselves.
  */
 export async function enforceDraftAttachmentQuota(keepSessionId?: string): Promise<void> {
   const db = getDb()
@@ -331,16 +356,30 @@ export async function enforceDraftAttachmentQuota(keepSessionId?: string): Promi
     if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) return
 
     const stripped: ChatDraftRow[] = []
-    for (const row of rows) {
+    const evictionOrder = [
+      ...rows.filter((row) => row.sessionId !== keepSessionId),
+      ...rows.filter((row) => row.sessionId === keepSessionId),
+    ]
+    for (const row of evictionOrder) {
       if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) break
-      if (row.sessionId === keepSessionId) continue
-      const freed = rowBytes(row)
-      if (freed === 0) continue
-      stripped.push({
-        ...row,
-        attachments: (row.attachments ?? []).map(({ bytes: _bytes, ...rest }) => rest),
+      let changed = false
+      const attachments = (row.attachments ?? []).map((attachment) => {
+        const freed = attachmentCacheBytes(attachment)
+        if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES || freed === 0) return attachment
+        const {
+          bytes: _bytes,
+          extractedText: _text,
+          extractedContent: _content,
+          ocrText: _ocr,
+          includeOcr: _includeOcr,
+          tokens: _tokens,
+          ...reminder
+        } = attachment
+        total -= freed
+        changed = true
+        return reminder
       })
-      total -= freed
+      if (changed) stripped.push({ ...row, attachments })
     }
     if (stripped.length > 0) await db.chatDrafts.bulkPut(stripped)
   })

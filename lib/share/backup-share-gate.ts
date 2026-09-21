@@ -58,6 +58,10 @@ export const BACKUP_PAYLOAD_DOMAIN: Record<keyof BackupPayloadV3, BackupShareDom
   localStorageSnapshots: "settings",
   sessions: "sessions",
   messages: "sessions",
+  sessionAssets: "sessions",
+  sessionAssetSourceChunks: "sessions",
+  messageMedia: "sessions",
+  messageMediaChunks: "sessions",
   // Tombstones travel with the memories they suppress — a shared backup must
   // keep deletions deleted on the receiving device.
   retrievalTombstones: "retrieval",
@@ -119,6 +123,8 @@ export interface BackupShareDomainHits {
 export interface BackupShareScanClean {
   kind: "clean"
   scannedDomains: number
+  /** Binary originals/previews cannot be inspected by the text detector. */
+  uninspectedAttachments?: number
 }
 
 /** Plaintext package with recognised PII, grouped by domain, hits descending. */
@@ -126,6 +132,7 @@ export interface BackupShareScanHits {
   kind: "hits"
   total: number
   domains: BackupShareDomainHits[]
+  uninspectedAttachments?: number
 }
 
 /** Encrypted envelope: the gate cannot look inside and says so. */
@@ -180,10 +187,23 @@ function domainOf(field: string): BackupShareDomain | null {
 export function scanBackupForShare(pkg: BackupPackageV3 | EncryptedEnvelopeV1): BackupShareScan {
   if (isEncryptedBackupEnvelope(pkg)) return { kind: "encrypted" }
 
+  const binaryFields = new Set(["sessionAssetSourceChunks", "messageMediaChunks"])
+  const binaryHashes = new Set<string>()
+  for (const field of binaryFields) {
+    const rows = (pkg.payload as Record<string, unknown>)[field]
+    if (Array.isArray(rows))
+      for (const [index, row] of rows.entries()) {
+        if (row && typeof row === "object" && typeof row.data === "string")
+          binaryHashes.add(
+            typeof row.contentHash === "string" ? row.contentHash : `${field}:${index}`
+          )
+      }
+  }
+  const uninspectedAttachments = binaryHashes.size
   const leavesByDomain = new Map<BackupShareDomain, string[]>()
   const payload = (pkg.payload ?? {}) as Record<string, unknown>
   for (const [field, value] of Object.entries(payload)) {
-    if (value === undefined) continue
+    if (value === undefined || binaryFields.has(field)) continue
     const domain = domainOf(field) ?? "settings"
     const bucket = leavesByDomain.get(domain) ?? []
     collectStringLeaves(value, bucket)
@@ -204,10 +224,16 @@ export function scanBackupForShare(pkg: BackupPackageV3 | EncryptedEnvelopeV1): 
     if (hits > 0) domains.push({ domain, hits, byKind })
   }
 
-  if (domains.length === 0) return { kind: "clean", scannedDomains: leavesByDomain.size }
+  if (domains.length === 0)
+    return {
+      kind: "clean",
+      scannedDomains: leavesByDomain.size,
+      ...(uninspectedAttachments ? { uninspectedAttachments } : {}),
+    }
   domains.sort((a, b) => b.hits - a.hits)
   return {
     kind: "hits",
+    ...(uninspectedAttachments ? { uninspectedAttachments } : {}),
     total: domains.reduce((sum, entry) => sum + entry.hits, 0),
     domains,
   }

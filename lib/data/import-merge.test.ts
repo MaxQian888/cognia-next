@@ -216,11 +216,29 @@ describe("applyImportedMerged", () => {
     expect(await db.chatSearchText.get("import:gemini-cli:rewind:m2")).toBeUndefined()
   })
 
-  it("keeps native-bound imports mirrored without raising a false divergence", async () => {
+  it("does not duplicate live runtime turns from a native-bound watch echo", async () => {
+    const id = "import:codex:live-native"
+    const db = getDb()
+    await applyImportedMerged([makeConv(id, {}, ["initial"])])
+    await db.sessions.update(id, { importOwnership: "native-bound", importFrozen: true })
+    await db.messages.put({
+      id: "runtime-turn-2",
+      sessionId: id,
+      role: "assistant",
+      parts: [{ type: "text", text: "runtime result" }],
+      createdAt: 2000,
+    } as StoredMessage)
+    const result = await applyImportedMerged([makeConv(id, {}, ["initial", "runtime result"])])
+    expect(result).toEqual({ sessions: 0, messages: 0 })
+    expect(await db.messages.where("sessionId").equals(id).count()).toBe(2)
+    expect((await db.sessions.get(id))?.importDiverged).toBeUndefined()
+  })
+
+  it("keeps legacy native-bound rows under runtime ownership without false divergence", async () => {
     const db = getDb()
     await applyImportedMerged([makeConv("import:codex:native", {}, ["one"])])
     await db.sessions.update("import:codex:native", {
-      importFrozen: true,
+      importFrozen: false,
       importOwnership: "native-bound",
     })
 
@@ -228,14 +246,14 @@ describe("applyImportedMerged", () => {
       makeConv("import:codex:native", { importOwnership: "source-mirror" }, ["one", "two"]),
     ])
 
-    expect(counts).toEqual({ sessions: 1, messages: 2 })
+    expect(counts).toEqual({ sessions: 0, messages: 0 })
     const session = await db.sessions.get("import:codex:native")
     expect(session).toMatchObject({ importOwnership: "native-bound" })
     expect(session?.importDiverged).toBeUndefined()
-    expect(await db.messages.where("sessionId").equals("import:codex:native").count()).toBe(2)
+    expect(await db.messages.where("sessionId").equals("import:codex:native").count()).toBe(1)
   })
 
-  it("deduplicates native-bound file-watch echoes by native session and revision", async () => {
+  it("ignores unchanged native-bound file-watch echoes without extra writes", async () => {
     const db = getDb()
     const sessionFields = {
       importSourceRevision: "rev-1",

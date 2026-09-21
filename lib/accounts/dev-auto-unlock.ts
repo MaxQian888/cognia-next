@@ -28,12 +28,21 @@
 export const FORCE_ACCOUNT_GATE_ENV = "NEXT_PUBLIC_ACCOUNT_GATE"
 
 /**
+ * True when `NEXT_PUBLIC_ACCOUNT_GATE=1` forces the real password gate back
+ * on in a build that would otherwise relax it. The literal read lives here so
+ * Next's build-time inlining still folds it; every consumer checks through
+ * this one function.
+ */
+export function isAccountGateForced(): boolean {
+  return process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1"
+}
+
+/**
  * True only for the dedicated browser E2E artifact.
  */
 export function isDevAutoUnlockEnabled(): boolean {
   if (typeof window === "undefined") return false
-  // Written out literally so Next's build-time env inlining can see it.
-  if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return false
+  if (isAccountGateForced()) return false
   return process.env.NEXT_PUBLIC_E2E === "1"
 }
 
@@ -101,7 +110,7 @@ export const DEV_LOCAL_ACCOUNT_DISPLAY_NAME = "Developer"
  */
 export function isDevLocalAccountEnabled(): boolean {
   if (typeof window === "undefined") return false
-  if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return false
+  if (isAccountGateForced()) return false
   return process.env.NODE_ENV === "development"
 }
 

@@ -85,7 +85,7 @@ function makeFakeStore(initial: StoreShape) {
         subs.delete(fn)
       }
     },
-    persist: { getOptions: () => ({ name: "cognia-artifacts" }) },
+    persist: { getOptions: () => persistOptions },
     _reset: (next: StoreShape) => {
       state = next
       subs.clear()
@@ -93,6 +93,7 @@ function makeFakeStore(initial: StoreShape) {
   }
 }
 
+const persistOptions = { name: "cognia-artifacts" }
 const artifactStore = makeFakeStore({ artifacts: {}, artifactVersions: {} })
 const completeArtifactDexieMigration = jest.fn(() => {
   artifactStore.setState((state) => ({ ...state, artifactDexieMigrationPending: false }))
@@ -129,7 +130,7 @@ import {
   diffArtifactMirror,
   startArtifactDexieBridge,
 } from "./dexie-bridge"
-import { ARTIFACT_MIGRATION_PENDING_KEY } from "./localstorage-migration"
+import { getArtifactMigrationPendingKey } from "./localstorage-migration"
 
 function artifact(id: string, overrides: Partial<Artifact> = {}): Artifact {
   return {
@@ -163,11 +164,20 @@ async function settle() {
   for (let i = 0; i < 40; i += 1) await Promise.resolve()
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   jest.useFakeTimers()
   warn.mockClear()
   completeArtifactDexieMigration.mockClear()
   window.localStorage.clear()
+  persistOptions.name = "cognia-artifacts"
   artifactsTable = fakeTable()
   artifactVersionsTable = fakeTable()
   fakeDb.artifacts = artifactsTable
@@ -236,6 +246,334 @@ describe("diffArtifactMirror", () => {
 })
 
 describe("startArtifactDexieBridge", () => {
+  it("preserves a deletion made while hydration is reading the database", async () => {
+    const a = artifact("a")
+    artifactsTable.records.push({ ...a, createdAt: 1, updatedAt: 2 })
+    artifactVersionsTable.records.push({ ...version("v1", "a"), createdAt: 1 })
+    const read = deferred<Record<string, unknown>[]>()
+    artifactsTable.toArray.mockReturnValueOnce(read.promise)
+    artifactStore._reset({ artifacts: { a }, artifactVersions: { a: [version("v1", "a")] } })
+    startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: {}, artifactVersions: {} })
+    read.resolve([...artifactsTable.records])
+    await settle()
+    expect(artifactStore.getState().artifacts).toEqual({})
+    expect(artifactsTable.records).toEqual([])
+    expect(artifactVersionsTable.records).toEqual([])
+  })
+
+  it("hands a failed final snapshot to the next bridge without losing deletions or edits", async () => {
+    artifactStore._reset({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: { b: artifact("b") }, artifactVersions: {} })
+    fakeDb.transaction.mockRejectedValueOnce(new Error("temporary close failure"))
+    dispose()
+    await settle()
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    expect(Object.keys(artifactStore.getState().artifacts)).toEqual(["b"])
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["b"])
+  })
+
+  it("keeps failed account writes isolated until their original account is reopened", async () => {
+    const disposeA = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    fakeDb.transaction.mockRejectedValueOnce(new Error("account closing"))
+    disposeA()
+    await settle()
+
+    const otherDb = {
+      ...fakeDb,
+      name: "account-b",
+      artifacts: fakeTable(),
+      artifactVersions: fakeTable(),
+    }
+    getDbImpl = () => otherDb
+    persistOptions.name = "cognia-artifacts:b"
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    const disposeB = startArtifactDexieBridge()
+    await settle()
+    expect(artifactStore.getState().artifacts).toEqual({})
+    expect(otherDb.artifacts.records).toEqual([])
+    disposeB()
+
+    getDbImpl = () => fakeDb
+    persistOptions.name = "cognia-artifacts"
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    expect(Object.keys(artifactStore.getState().artifacts)).toEqual(["a"])
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+  })
+
+  it("prefers a new edit made while restoring a failed snapshot", async () => {
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({
+      artifacts: { a: artifact("a", { content: "retained" }) },
+      artifactVersions: {},
+    })
+    fakeDb.transaction.mockRejectedValueOnce(new Error("temporary"))
+    dispose()
+    await settle()
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    const read = deferred<Record<string, unknown>[]>()
+    artifactsTable.toArray.mockReturnValueOnce(read.promise)
+    startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({
+      artifacts: { a: artifact("a", { content: "new edit" }) },
+      artifactVersions: {},
+    })
+    read.resolve([])
+    await settle()
+    expect(artifactsTable.records[0].content).toBe("new edit")
+  })
+
+  it("retains edits made before a disposed hydration completed", async () => {
+    const read = deferred<Record<string, unknown>[]>()
+    artifactsTable.toArray.mockReturnValueOnce(read.promise)
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    dispose()
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    startArtifactDexieBridge()
+    read.resolve([])
+    await settle()
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+  })
+
+  it("does not resurrect parked migration rows deleted before a failed final write", async () => {
+    window.localStorage.setItem(
+      getArtifactMigrationPendingKey(),
+      JSON.stringify({
+        artifacts: { a: artifact("a") },
+        artifactVersions: {},
+      })
+    )
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async () => {
+      await transaction.promise
+      throw new Error("interrupted migration")
+    })
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: {}, artifactVersions: {} })
+    dispose()
+    transaction.resolve()
+    await settle()
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    expect(artifactStore.getState().artifacts).toEqual({})
+    expect(artifactsTable.records).toEqual([])
+    expect(window.localStorage.getItem(getArtifactMigrationPendingKey())).toBeNull()
+  })
+
+  it("does not hydrate a disposed account into the next account", async () => {
+    const read = deferred<Record<string, unknown>[]>()
+    artifactsTable.toArray.mockReturnValueOnce(read.promise)
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    dispose()
+    const otherDb = {
+      ...fakeDb,
+      name: "account-b",
+      artifacts: fakeTable(),
+      artifactVersions: fakeTable(),
+    }
+    getDbImpl = () => otherDb
+    artifactStore._reset({ artifacts: { b: artifact("b") }, artifactVersions: {} })
+    startArtifactDexieBridge()
+    read.resolve([{ ...artifact("a"), createdAt: 1, updatedAt: 2 }])
+    await settle()
+    expect(Object.keys(artifactStore.getState().artifacts)).toEqual(["b"])
+    expect(otherDb.artifacts.records.map((row) => row.id)).toEqual(["b"])
+  })
+
+  it("hydrates another account while the previous account's transaction is still pending", async () => {
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async (...args: unknown[]) => {
+      await transaction.promise
+      await (args[args.length - 1] as () => Promise<void>)()
+    })
+    artifactStore._reset({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    const disposeA = startArtifactDexieBridge()
+    await settle()
+    disposeA()
+
+    const otherDb = {
+      ...fakeDb,
+      name: "account-b",
+      artifacts: fakeTable(),
+      artifactVersions: fakeTable(),
+    }
+    getDbImpl = () => otherDb
+    persistOptions.name = "cognia-artifacts:b"
+    artifactStore._reset({ artifacts: { b: artifact("b") }, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    expect(otherDb.artifacts.records.map((row) => row.id)).toEqual(["b"])
+
+    transaction.resolve()
+    await settle()
+    expect(Object.keys(artifactStore.getState().artifacts)).toEqual(["b"])
+    expect(otherDb.artifacts.records.map((row) => row.id)).toEqual(["b"])
+  })
+
+  it("persists a deletion made while the first add transaction is pending", async () => {
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async (...args: unknown[]) => {
+      await transaction.promise
+      await (args[args.length - 1] as () => Promise<void>)()
+    })
+    artifactStore._reset({
+      artifacts: { a: artifact("a") },
+      artifactVersions: { a: [version("v1", "a")] },
+    })
+    startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: {}, artifactVersions: {} })
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    transaction.resolve()
+    await settle()
+    expect(artifactsTable.records).toEqual([])
+    expect(artifactVersionsTable.records).toEqual([])
+  })
+
+  it("retries a failed write without requiring another user edit", async () => {
+    artifactStore._reset({
+      artifacts: { a: artifact("a") },
+      artifactVersions: {},
+      artifactDexieMigrationPending: true,
+    })
+    fakeDb.transaction.mockRejectedValueOnce(new Error("temporarily unavailable"))
+    startArtifactDexieBridge()
+    await settle()
+    expect(completeArtifactDexieMigration).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+    expect(completeArtifactDexieMigration).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces edits behind an in-flight write and retries only the newest snapshot", async () => {
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async () => {
+      await transaction.promise
+      throw new Error("temporary failure")
+    })
+    artifactStore._reset({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    for (const content of ["second", "latest"]) {
+      artifactStore.setState({ artifacts: { a: artifact("a", { content }) }, artifactVersions: {} })
+      jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+      await settle()
+    }
+    transaction.resolve()
+    await settle()
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(artifactsTable.records).toEqual([expect.objectContaining({ content: "latest" })])
+  })
+
+  it("flushes pending changes on pagehide and removes the listener on disposal", async () => {
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    window.dispatchEvent(new Event("pagehide"))
+    await settle()
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+    dispose()
+    artifactStore.setState({ artifacts: { b: artifact("b") }, artifactVersions: {} })
+    window.dispatchEvent(new Event("pagehide"))
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+  })
+
+  it("waits for a disposed bridge's final write before rehydrating the same database", async () => {
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async (...args: unknown[]) => {
+      await transaction.promise
+      await (args[args.length - 1] as () => Promise<void>)()
+    })
+    artifactStore.setState({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    dispose()
+    artifactStore._reset({ artifacts: {}, artifactVersions: {} })
+    const nextDispose = startArtifactDexieBridge()
+    dispose()
+    await settle()
+    expect(artifactStore.getState().artifacts).toEqual({})
+    transaction.resolve()
+    await settle()
+    expect(Object.keys(artifactStore.getState().artifacts)).toEqual(["a"])
+    artifactStore.setState({ artifacts: {}, artifactVersions: {} })
+    nextDispose()
+    await settle()
+    expect(artifactsTable.records).toEqual([])
+  })
+
+  it("does not complete an old account's migration when its write finishes after a switch", async () => {
+    const transaction = deferred<void>()
+    fakeDb.transaction.mockImplementationOnce(async (...args: unknown[]) => {
+      await transaction.promise
+      await (args[args.length - 1] as () => Promise<void>)()
+    })
+    artifactStore._reset({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    startArtifactDexieBridge()
+    await settle()
+    persistOptions.name = "cognia-artifacts:b"
+    artifactStore.setState({ artifacts: { b: artifact("b") }, artifactVersions: {} })
+    transaction.resolve()
+    await settle()
+    expect(completeArtifactDexieMigration).not.toHaveBeenCalled()
+    expect(artifactsTable.records.map((row) => row.id)).toEqual(["a"])
+  })
+
+  it("drops a queued write when the database is no longer accessible", async () => {
+    startArtifactDexieBridge()
+    await settle()
+    artifactStore.setState({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    getDbImpl = () => {
+      throw new Error("account locked")
+    }
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(artifactsTable.records).toEqual([])
+  })
+
+  it("backs off repeated failures and cancels retries after disposal", async () => {
+    fakeDb.transaction.mockRejectedValueOnce(new Error("first"))
+    fakeDb.transaction.mockRejectedValueOnce(new Error("second"))
+    fakeDb.transaction.mockRejectedValueOnce(new Error("third"))
+    artifactStore._reset({ artifacts: { a: artifact("a") }, artifactVersions: {} })
+    const dispose = startArtifactDexieBridge()
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(2)
+    jest.advanceTimersByTime(ARTIFACT_SYNC_DEBOUNCE_MS)
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(2)
+    dispose()
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(3)
+    jest.advanceTimersByTime(30_000)
+    await settle()
+    expect(warn).toHaveBeenCalledTimes(3)
+  })
+
   it("carries the artifacts the store rehydrated from localStorage into Dexie", async () => {
     artifactStore._reset({
       artifacts: { a: artifact("a") },
@@ -321,7 +659,7 @@ describe("startArtifactDexieBridge", () => {
 
   it("replays a migration a previous run parked but never wrote", async () => {
     window.localStorage.setItem(
-      ARTIFACT_MIGRATION_PENDING_KEY,
+      getArtifactMigrationPendingKey(),
       JSON.stringify({
         artifacts: {
           rescued: {
@@ -345,7 +683,7 @@ describe("startArtifactDexieBridge", () => {
 
     expect(artifactsTable.records.map((r) => r.id)).toEqual(["rescued"])
     // Cleared only after the write landed.
-    expect(window.localStorage.getItem(ARTIFACT_MIGRATION_PENDING_KEY)).toBeNull()
+    expect(window.localStorage.getItem(getArtifactMigrationPendingKey())).toBeNull()
     // …and the ISO strings became real Dates on the way into the store.
     expect(artifactStore.getState().artifacts.rescued.createdAt).toBeInstanceOf(Date)
   })

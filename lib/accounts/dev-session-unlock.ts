@@ -32,6 +32,7 @@
  * draws the line in the same place for the same reason.
  */
 
+import { isAccountGateForced } from "@/lib/accounts/dev-auto-unlock"
 import { isTauri } from "@/lib/platform/detect"
 
 /** `sessionStorage` key for one account's remembered secret. */
@@ -47,7 +48,7 @@ export function devSessionUnlockStorageKey(localAccountId: string): string {
  */
 export function isDevSessionUnlockEnabled(): boolean {
   if (typeof window === "undefined") return false
-  if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return false
+  if (isAccountGateForced()) return false
   if (process.env.NODE_ENV === "production") return false
   // The desktop shell reauthenticates natively. See the module docstring.
   // Deliberately the shared predicate rather than a second window check, so a

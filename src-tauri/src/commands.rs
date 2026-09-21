@@ -18,6 +18,30 @@ pub fn greet(name: &str) -> Result<String, AppError> {
     Ok(format!("Hello, {name}! Welcome to Tauri 2."))
 }
 
+/// Extend a save-dialog grant to one atomic-write sibling, never its directory.
+/// This command is intentionally absent from the companion filesystem RPC map.
+#[tauri::command]
+pub fn backup_stream_temporary_path(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    use tauri_plugin_fs::FsExt;
+    let scope = app.fs_scope();
+    let temporary = crate::fs_atomic::scoped_temporary_sibling(
+        std::path::Path::new(&path),
+        &uuid::Uuid::new_v4().simple().to_string(),
+        |target| scope.is_allowed(target),
+    )
+    .map_err(|error| error.to_string())?;
+    scope
+        .allow_file(&temporary)
+        .map_err(|error| error.to_string())?;
+    if !scope.is_allowed(&temporary) {
+        return Err("backup temporary path is denied by filesystem scope".into());
+    }
+    temporary
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "backup path is not valid UTF-8".into())
+}
+
 /// Parse a `#RRGGBB` or `#RRGGBBAA` (or unprefixed) hex string into a
 /// `tauri::window::Color` tuple. Used by `set_window_background_color`; kept
 /// pub(crate) so the unit tests in this module can drive it directly without

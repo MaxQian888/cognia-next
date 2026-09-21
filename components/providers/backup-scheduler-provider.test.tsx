@@ -29,6 +29,9 @@ jest.mock("@/lib/data/destinations/webdav", () => ({
   webdavSnapshotName: (iso: string) => `cognia-backup-${iso}.enc.cbk`,
   encryptSnapshotBody: async () => "ENC",
 }))
+jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  attachPortableRetrievalKeys: async (pkg: unknown) => pkg,
+}))
 jest.mock("@/lib/webdav/passphrase-cache", () => ({
   hasSyncPassphrase: () => hasPass,
   getSyncPassphrase: () => syncPass,

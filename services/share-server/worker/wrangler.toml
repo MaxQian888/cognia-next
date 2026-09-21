@@ -64,3 +64,20 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 [env.staging.vars]
 MAX_BODY_BYTES = "10485760"
+
+# The SQLite lifecycle authority is mandatory. Keep the migration tag forever.
+[[durable_objects.bindings]]
+name = "SHARE_LIFECYCLE"
+class_name = "ShareLifecycle"
+
+[[migrations]]
+tag = "share-lifecycle-v1"
+new_sqlite_classes = ["ShareLifecycle"]
+
+[[env.staging.durable_objects.bindings]]
+name = "SHARE_LIFECYCLE"
+class_name = "ShareLifecycle"
+
+[[env.staging.migrations]]
+tag = "share-lifecycle-v1"
+new_sqlite_classes = ["ShareLifecycle"]

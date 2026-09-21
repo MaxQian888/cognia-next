@@ -186,3 +186,38 @@ could not guarantee.
 `share_read_total`, `share_deleted_total`,
 `share_rejected_total{reason="unauthorized|too_large|invalid|not_found|rate"}`,
 the `share_active` gauge, and `share_uptime_seconds`.
+
+### Worker lifecycle authority migration
+
+The Worker now requires the `SHARE_LIFECYCLE` SQLite-backed Durable Object
+binding. The checked-in `worker/wrangler.toml` declares `ShareLifecycle` and the
+`share-lifecycle-v1` migration for both production and staging. Keep the migration
+tag and class binding on subsequent deployments. Missing/unavailable authority
+returns HTTP 503; the Worker never falls back to concurrent KV mutations.
+
+Deploy the Worker and its binding/migration together. Do not split traffic with
+an older KV-writing Worker version, and do not roll back to that version: it
+cannot observe authoritative view counters or deletion tombstones. Drain the
+old version before accepting lifecycle traffic. Keep the existing R2 and KV
+bindings and namespace IDs; there is no bucket scan or bulk data rewrite.
+
+Each existing link lazily imports at most one bounded metadata record from
+`meta:<code>` in KV. Ciphertext remains at the original R2 key, owner tokens and
+org grants retain their existing semantics, and a missing KV read is not cached
+as a tombstone or used to delete the body. Newly created links write directly to
+the durable authority, so they do not depend on KV propagation. Once imported,
+metadata is never re-imported, even after object eviction. Permanent small
+tombstones prevent stale KV values from resurrecting revoked or burned links.
+
+Read, renewal, revocation, org deletion, and expiry alarms serialize within the
+same per-share authority. The public response follows the durable state change;
+alarms reclaim expired R2 bodies and retry interrupted external cleanup. KV is
+only a discovery index for org listings after migration; listing resolves every
+candidate against its authoritative state, with bounded parallel requests.
+Renewal also refreshes the org index lifetime. Org listing remains eventually
+consistent for discovering new links, while existing-link access and lifecycle
+decisions use durable state.
+
+Verify locally with `pnpm test`, `pnpm typecheck`, and
+`pnpm exec wrangler deploy --dry-run` in `worker/`. No Cloudflare deployment is
+performed by these implementation checks.

@@ -148,9 +148,9 @@ export function importSourceDigest(
   return `src2-${hash.toString(16).padStart(8, "0")}`
 }
 
-function isCogniaOwnedImport(session: ChatSession): boolean {
+function isFrozenImport(session: ChatSession): boolean {
   if (session.importOwnership === "cognia-owned") return true
-  if (session.importOwnership === "native-bound") return false
+  if (session.importOwnership === "native-bound") return true
   return session.importFrozen === true && session.importOwnership === undefined
 }
 
@@ -187,7 +187,11 @@ export async function applyImportedMerged(
   const prepared = await Promise.all(
     conversations.map(async (conversation) => {
       const existing = await db.sessions.get(conversation.session.id)
-      if (existing && isCogniaOwnedImport(existing)) {
+      if (existing && isFrozenImport(existing)) {
+        // A verified native resume has one writer: Cognia's runtime event stream.
+        // The native log echoes those same turns with different importer ids;
+        // it must neither add duplicates nor report the echo as divergence.
+        if (existing.importOwnership === "native-bound") return null
         // Frozen means "do not mirror", not "do not look". Comparing the cheap
         // digest is what turns a silently-ignored source edit into something the
         // user can see.
@@ -202,21 +206,6 @@ export async function applyImportedMerged(
           frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: true })
         }
         return null
-      }
-      if (existing?.importOwnership === "native-bound") {
-        const incomingDigest = importSourceDigest(conversation.messages, conversation.session)
-        const sameNativeSession =
-          existing.importRuntimeBinding?.nativeSessionId !== undefined &&
-          existing.importRuntimeBinding.nativeSessionId ===
-            conversation.session.importRuntimeBinding?.nativeSessionId
-        const sameRevision =
-          existing.importSourceRevision !== undefined &&
-          existing.importSourceRevision === conversation.session.importSourceRevision
-        if (sameNativeSession && sameRevision && existing.importSourceDigest === incomingDigest) {
-          // File-watch echo of events already persisted by the resumed native
-          // runtime. Skipping it avoids a duplicate transcript revision/write.
-          return null
-        }
       }
       return {
         conversation,
@@ -238,7 +227,7 @@ export async function applyImportedMerged(
     for (const row of await db.sessions.toArray()) {
       if (!row.importGraphRootId || !incomingByGraphRoot.has(row.importGraphRootId)) continue
       if (incomingByGraphRoot.get(row.importGraphRootId)!.has(row.id)) continue
-      if (row.importOwnership === "cognia-owned" || isCogniaOwnedImport(row)) continue
+      if (row.importOwnership === "cognia-owned" || isFrozenImport(row)) continue
       staleGraphSessions.push(row)
     }
   }
@@ -254,7 +243,7 @@ export async function applyImportedMerged(
         const { conversation: conv } = entry
         const existing = await db.sessions.get(conv.session.id)
         // Frozen: the user continued this import in Cognia — leave it untouched.
-        if (existing && isCogniaOwnedImport(existing)) continue
+        if (existing && isFrozenImport(existing)) continue
         const merged = mergeImportedSession(conv.session, existing)
         const incomingMessageIds = new Set(entry.messages.map((message) => message.id))
         const existingMessages = existing

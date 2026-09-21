@@ -46,6 +46,7 @@ import {
 import { loggers } from "@cognia/logging"
 import * as chatDrafts from "./chat-drafts"
 import { commitTranscriptIndexPage } from "./chat-transcript-index"
+import { putSessionAsset, getSessionAsset, listSessionAssets } from "./session-assets"
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic
 // import — mock the scheduler singleton so no real timing engine spins up.
@@ -93,6 +94,24 @@ it("removes retained external gateway state before deleting a conversation", asy
   await deleteSession(row.id)
   expect(deleteExternalSessionMock).toHaveBeenCalledWith(link.agentId, link.sessionId)
   expect(await getSession(row.id)).toBeUndefined()
+})
+
+it("deletes fresh original assets and temporary sources with their owning session", async () => {
+  const session = await createSession({ title: "Source owner" })
+  const asset = {
+    sessionId: session.id,
+    assetId: "source",
+    filename: "source.txt",
+    mediaType: "text/plain",
+    blob: new Blob(["fresh source"]),
+  }
+  await putSessionAsset(asset)
+  await putSessionAsset({ ...asset, assetId: "temporary", temporary: true })
+  await deleteSession(session.id)
+  expect(await getSessionAsset(session.id, "source")).toBeUndefined()
+  expect(await getSessionAsset(session.id, "temporary")).toBeUndefined()
+  expect(await listSessionAssets(session.id)).toEqual([])
+  expect(await getDb().messageMedia.count()).toBe(0)
 })
 
 it("keeps the conversation link when external task cleanup fails so deletion can retry", async () => {
@@ -583,7 +602,7 @@ describe("createSession — default preset auto-apply", () => {
     })
 
     expect(await getSession("import:codex:native")).toMatchObject({
-      importFrozen: false,
+      importFrozen: true,
       importOwnership: "native-bound",
       importRuntimeBinding: {
         nativeSessionId: "thread-7",

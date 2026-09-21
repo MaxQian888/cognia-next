@@ -19,6 +19,8 @@ import {
   ARTIFACT_MIGRATION_PENDING_KEY,
   capturePendingArtifactMigration,
   clearPendingArtifactMigration,
+  getArtifactMigrationPendingKey,
+  getArtifactMigrationScope,
   readPendingArtifactMigration,
 } from "./localstorage-migration"
 
@@ -43,7 +45,7 @@ describe("capturePendingArtifactMigration", () => {
 
     expect(pending?.artifacts.art_1).toMatchObject({ id: "art_1" })
     expect(pending?.artifactVersions.art_1).toHaveLength(1)
-    expect(JSON.parse(window.localStorage.getItem(ARTIFACT_MIGRATION_PENDING_KEY)!)).toEqual(
+    expect(JSON.parse(window.localStorage.getItem(getArtifactMigrationPendingKey())!)).toEqual(
       pending
     )
   })
@@ -61,10 +63,73 @@ describe("capturePendingArtifactMigration", () => {
     expect(Object.keys(pending!.artifacts)).toEqual(["art_a"])
   })
 
+  it("does not replay or clear another account's interrupted migration", () => {
+    persistOptions.name = "cognia-artifacts:acct_a"
+    writeBlob(persistOptions.name, { artifacts: { art_a: { id: "art_a" } } })
+    capturePendingArtifactMigration()
+    window.localStorage.removeItem(persistOptions.name)
+
+    persistOptions.name = "cognia-artifacts:acct_b"
+    expect(capturePendingArtifactMigration()).toBeNull()
+    clearPendingArtifactMigration()
+
+    persistOptions.name = "cognia-artifacts:acct_a"
+    expect(Object.keys(readPendingArtifactMigration()!.artifacts)).toEqual(["art_a"])
+  })
+
+  it("clears the captured scope even after the active account changes", () => {
+    persistOptions.name = "cognia-artifacts:acct_a"
+    const scope = getArtifactMigrationScope()
+    writeBlob(scope, { artifacts: { a: { id: "a" } } })
+    capturePendingArtifactMigration(scope)
+    persistOptions.name = "cognia-artifacts:acct_b"
+    writeBlob(persistOptions.name, { artifacts: { b: { id: "b" } } })
+    capturePendingArtifactMigration()
+
+    clearPendingArtifactMigration(scope)
+
+    expect(readPendingArtifactMigration(scope)).toBeNull()
+    expect(Object.keys(readPendingArtifactMigration()!.artifacts)).toEqual(["b"])
+  })
+
+  it("retains unowned legacy recovery data without importing it into any account", () => {
+    const orphan = JSON.stringify({ artifacts: { secret: { id: "secret" } } })
+    window.localStorage.setItem(ARTIFACT_MIGRATION_PENDING_KEY, orphan)
+    for (const scope of ["cognia-artifacts", "cognia-artifacts:acct_a"]) {
+      expect(capturePendingArtifactMigration(scope)).toBeNull()
+      clearPendingArtifactMigration(scope)
+    }
+    expect(window.localStorage.getItem(ARTIFACT_MIGRATION_PENDING_KEY)).toBe(orphan)
+  })
+
+  it("recovers version-only payloads and rejects malformed maps", () => {
+    writeBlob(persistOptions.name, { artifacts: [], artifactVersions: { a: [{ id: "v1" }] } })
+    expect(capturePendingArtifactMigration()).toEqual({
+      artifacts: {},
+      artifactVersions: { a: [{ id: "v1" }] },
+    })
+    window.localStorage.setItem(getArtifactMigrationPendingKey(), "null")
+    window.localStorage.setItem(persistOptions.name, "42")
+    expect(capturePendingArtifactMigration()).toBeNull()
+  })
+
+  it("continues when browser storage denies reads or cleanup", () => {
+    const read = jest.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError")
+    })
+    expect(capturePendingArtifactMigration()).toBeNull()
+    read.mockRestore()
+    const remove = jest.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError")
+    })
+    expect(() => clearPendingArtifactMigration()).not.toThrow()
+    remove.mockRestore()
+  })
+
   it("returns null when there is nothing left to migrate", () => {
     writeBlob("cognia-artifacts", { artifactWorkspace: { scope: "session" } })
     expect(capturePendingArtifactMigration()).toBeNull()
-    expect(window.localStorage.getItem(ARTIFACT_MIGRATION_PENDING_KEY)).toBeNull()
+    expect(window.localStorage.getItem(getArtifactMigrationPendingKey())).toBeNull()
   })
 
   it("keeps an interrupted run's rows when the blob has since been cleaned", () => {
@@ -113,7 +178,7 @@ describe("capturePendingArtifactMigration", () => {
 describe("readPendingArtifactMigration / clearPendingArtifactMigration", () => {
   it("treats an empty parked payload as nothing pending", () => {
     window.localStorage.setItem(
-      ARTIFACT_MIGRATION_PENDING_KEY,
+      getArtifactMigrationPendingKey(),
       JSON.stringify({ artifacts: {}, artifactVersions: {} })
     )
     expect(readPendingArtifactMigration()).toBeNull()

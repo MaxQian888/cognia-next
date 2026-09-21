@@ -1,4 +1,8 @@
-import { buildChatSharePayload, buildMultiChatSharePayload } from "./chat-export"
+import {
+  assertChatShareAccess,
+  buildChatSharePayload,
+  buildMultiChatSharePayload,
+} from "./chat-export"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const sortBy = jest.fn().mockResolvedValue([{ id: "m1" }])
@@ -21,13 +25,24 @@ jest.mock("@/lib/export/single", () => ({
 }))
 
 const session = { id: "s1", title: "My chat" } as ChatSession
+const assertSharedSessionExport = jest.fn()
+jest.mock("@/lib/collab/shared-session-access", () => ({
+  assertSharedSessionExport: (...args: unknown[]) => assertSharedSessionExport(...args),
+}))
 
 beforeEach(() => {
   jest.clearAllMocks()
+  assertSharedSessionExport.mockResolvedValue(undefined)
   getCharacter.mockResolvedValue(undefined)
 })
 
 describe("buildChatSharePayload", () => {
+  it("rejects unauthorized shared exports before reading the local transcript", async () => {
+    assertSharedSessionExport.mockRejectedValueOnce(new Error("forbidden"))
+    await expect(buildChatSharePayload({ format: "html", session })).rejects.toThrow("forbidden")
+    expect(sortBy).not.toHaveBeenCalled()
+    expect(renderSingleExport).not.toHaveBeenCalled()
+  })
   it("fetches messages, renders, and wraps as a chat payload", async () => {
     const payload = await buildChatSharePayload({ format: "html", session })
     expect(sortBy).toHaveBeenCalledWith("createdAt")
@@ -64,6 +79,53 @@ describe("buildChatSharePayload", () => {
 })
 
 describe("buildMultiChatSharePayload", () => {
+  it("rejects the entire selection before reading any transcript when one source denies export", async () => {
+    assertSharedSessionExport
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("forbidden"))
+    await expect(
+      buildMultiChatSharePayload({
+        sessions: [session, { ...session, id: "denied" }],
+        title: "Selection",
+        copy: {
+          count: "2",
+          navigationLabel: "Conversations",
+          previous: "Previous",
+          next: "Next",
+          frameTitle: "Conversation",
+        },
+      })
+    ).rejects.toThrow("forbidden")
+    expect(anyOf).not.toHaveBeenCalled()
+    expect(renderSingleExport).not.toHaveBeenCalled()
+  })
+
+  it("bounds outstanding authorization requests for large selections", async () => {
+    const release: Array<() => void> = []
+    let active = 0
+    let peak = 0
+    assertSharedSessionExport.mockImplementation(() => {
+      active += 1
+      peak = Math.max(peak, active)
+      return new Promise<void>((resolve) =>
+        release.push(() => {
+          active -= 1
+          resolve()
+        })
+      )
+    })
+    const check = assertChatShareAccess(
+      Array.from({ length: 17 }, (_, id) => ({ ...session, id: String(id) }))
+    )
+    while (assertSharedSessionExport.mock.calls.length < 17 || release.length) {
+      release.splice(0).forEach((resolve) => resolve())
+      await Promise.resolve()
+    }
+    await check
+    expect(peak).toBeLessThanOrEqual(8)
+    expect(assertSharedSessionExport).toHaveBeenCalledTimes(17)
+  })
+
   it("preserves selection order while reusing the single-conversation renderer", async () => {
     const sessions = [
       { id: "s1", title: "First" },

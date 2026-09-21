@@ -109,3 +109,30 @@ describe("BackupShareScanDialog", () => {
     }
   })
 })
+
+it("requires informed confirmation for uninspected original bytes even with no text hits", async () => {
+  const user = userEvent.setup()
+  const onConfirm = jest.fn()
+  render(
+    <BackupShareScanDialog
+      open
+      onOpenChange={() => {}}
+      domains={[]}
+      total={0}
+      uninspectedAttachments={2}
+      onConfirm={onConfirm}
+    />
+  )
+  expect(screen.getByText("binaryTitle")).toBeInTheDocument()
+  expect(screen.getByTestId("backup-share-scan-attachments")).toHaveTextContent(
+    'uninspectedAttachments:{"count":2}'
+  )
+  expect(screen.getByTestId("backup-share-scan-continue")).toBeDisabled()
+  await user.click(screen.getByTestId("backup-share-scan-confirm"))
+  await user.click(screen.getByTestId("backup-share-scan-continue"))
+  expect(onConfirm).toHaveBeenCalledTimes(1)
+  for (const messages of [en, zh]) {
+    expect(messages.backup.shareScan.binaryTitle).toBeTruthy()
+    expect(messages.backup.shareScan.uninspectedAttachments).toContain("{count}")
+  }
+})

@@ -42,6 +42,7 @@ jest.mock("sonner", () => ({
 }))
 const mockBuildBackupPackage = jest.fn()
 jest.mock("@/lib/data/build-package", () => ({
+  BackupRequiresStreamError: class BackupRequiresStreamError extends Error {},
   buildBackupPackage: (...args: unknown[]) => mockBuildBackupPackage(...args),
   serializePackage: (pkg: unknown) => JSON.stringify(pkg),
   defaultExportFileName: (_now: Date, mode: string) => `backup.${mode}`,
@@ -272,4 +273,36 @@ describe("share link PII gate", () => {
     expect(mockToastError).toHaveBeenCalledWith("backup.shareScan.keyUnavailable")
     expect(mockBuildBackupPackage).not.toHaveBeenCalled()
   })
+})
+
+it("requires confirmation before sharing uninspected binary attachments and never calls them clean", async () => {
+  const user = userEvent.setup()
+  mockBuildBackupPackage.mockResolvedValue(
+    packageWith({
+      sessionAssetSourceChunks: [{ contentHash: "binary", offset: 0, data: "aGVsbG8=" }],
+    })
+  )
+  render(<BackupRestoreTab />)
+  await user.click(screen.getByRole("button", { name: "choose-plaintext" }))
+  await user.click(screen.getByTestId("backup-share-button"))
+  expect(await screen.findByTestId("backup-share-scan-dialog")).toBeInTheDocument()
+  expect(screen.queryByTestId("stub-share-dialog")).toBeNull()
+  await user.click(screen.getByTestId("backup-share-scan-confirm"))
+  await user.click(screen.getByTestId("backup-share-scan-continue"))
+  expect(await screen.findByTestId("stub-share-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("backup-share-note-binary")).toHaveTextContent(
+    "backup.shareScan.binaryNote"
+  )
+  expect(screen.queryByTestId("backup-share-note-clean")).toBeNull()
+})
+
+it("directs an oversized share to the lossless local export without opening a share dialog", async () => {
+  const { BackupRequiresStreamError } = await import("@/lib/data/build-package")
+  mockBuildBackupPackage.mockRejectedValueOnce(new BackupRequiresStreamError())
+  const user = userEvent.setup()
+  render(<BackupRestoreTab />)
+  await user.click(screen.getByRole("button", { name: "choose-plaintext" }))
+  await user.click(screen.getByTestId("backup-share-button"))
+  expect(mockToastError).toHaveBeenCalledWith("backup.shareScan.streamingRequired")
+  expect(screen.queryByTestId("stub-share-dialog")).toBeNull()
 })

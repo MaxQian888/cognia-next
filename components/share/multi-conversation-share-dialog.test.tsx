@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildMultiChatSharePayload = jest.fn()
+const assertChatShareAccess = jest.fn()
+let currentBuildPayload: () => Promise<unknown>
 
 jest.mock("next-intl", () => ({
   useLocale: () => "en",
@@ -12,6 +14,7 @@ jest.mock("next-intl", () => ({
 
 jest.mock("@/lib/share/chat-export", () => ({
   buildMultiChatSharePayload: (...args: unknown[]) => buildMultiChatSharePayload(...args),
+  assertChatShareAccess: (...args: unknown[]) => assertChatShareAccess(...args),
 }))
 
 jest.mock("@/components/share/share-link-dialog", () => ({
@@ -23,8 +26,9 @@ jest.mock("@/components/share/share-link-dialog", () => ({
     open?: boolean
     artifactSummary?: React.ReactNode
     buildPayload: () => Promise<unknown>
-  }) =>
-    open ? (
+  }) => {
+    currentBuildPayload = buildPayload
+    return open ? (
       <div>
         {artifactSummary}
         <button
@@ -37,7 +41,8 @@ jest.mock("@/components/share/share-link-dialog", () => ({
           build twice
         </button>
       </div>
-    ) : null,
+    ) : null
+  },
 }))
 
 import { MultiConversationShareDialog } from "./multi-conversation-share-dialog"
@@ -49,6 +54,7 @@ const sessions = [
 
 beforeEach(() => {
   jest.clearAllMocks()
+  assertChatShareAccess.mockResolvedValue(undefined)
   buildMultiChatSharePayload.mockResolvedValue({
     kind: "chat-animated",
     mime: "text/html",
@@ -79,4 +85,13 @@ test("reuses one payload snapshot across preview and create requests", async () 
       lang: "en",
     })
   )
+})
+
+test("rechecks shared export permission before publishing a cached preview", async () => {
+  render(<MultiConversationShareDialog sessions={sessions} open onOpenChange={jest.fn()} />)
+  await currentBuildPayload()
+  assertChatShareAccess.mockRejectedValueOnce(new Error("forbidden"))
+  await expect(currentBuildPayload()).rejects.toThrow("forbidden")
+  expect(buildMultiChatSharePayload).toHaveBeenCalledTimes(1)
+  expect(assertChatShareAccess).toHaveBeenCalledWith(sessions)
 })

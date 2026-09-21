@@ -49,6 +49,7 @@
 
 import { useEffect, useRef } from "react"
 
+import { isAccountGateForced } from "@/lib/accounts/dev-auto-unlock"
 import { interruptSession } from "@/lib/claude/ipc"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -67,7 +68,7 @@ const ACTIVITY_EVENTS = ["pointerdown", "keydown", "pointermove", "wheel", "touc
  * for the desktop/mobile shells, the E2E build) is `production` and still arms.
  */
 function autoLockAppliesInThisBuild(): boolean {
-  if (process.env.NEXT_PUBLIC_ACCOUNT_GATE === "1") return true
+  if (isAccountGateForced()) return true
   return process.env.NODE_ENV !== "development"
 }
 

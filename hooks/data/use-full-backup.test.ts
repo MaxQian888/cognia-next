@@ -7,15 +7,18 @@ import { renderHook, act } from "@testing-library/react"
 import { useFullBackup } from "./use-full-backup"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { listBackupHistory } from "@/lib/db/backup-history"
-import { decryptBackupPackage } from "@/lib/data/crypto"
-import { isEncryptedEnvelope } from "@/lib/data/migrate"
+import { readStreamPackage } from "@/lib/data/read-stream-package"
+import { blobFileStream } from "@/lib/files/file-bridge"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 
-const mockAttachPortableRetrievalKeys = jest.fn(async <T>(pkg: T, _passphrase?: string) => pkg)
+const mockExportPortableRetrievalKeys = jest.fn(
+  async (_passphrase?: string, _store?: unknown) => []
+)
 
 jest.mock("@/lib/data/retrieval-key-backup", () => ({
-  attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>
-    mockAttachPortableRetrievalKeys(pkg, passphrase),
+  ...jest.requireActual("@/lib/data/retrieval-key-backup"),
+  exportPortableRetrievalKeys: (passphrase: string, store?: unknown) =>
+    mockExportPortableRetrievalKeys(passphrase, store),
 }))
 
 // jsdom doesn't expose URL.createObjectURL; mock it for the web download path.
@@ -33,7 +36,7 @@ beforeAll(() => {
 })
 
 beforeEach(async () => {
-  mockAttachPortableRetrievalKeys.mockClear()
+  mockExportPortableRetrievalKeys.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   await whenSeeded()
@@ -82,7 +85,7 @@ describe("useFullBackup", () => {
       ok: false,
       error: "Plaintext backup requires explicit confirmation.",
     })
-    expect(mockAttachPortableRetrievalKeys).not.toHaveBeenCalled()
+    expect(mockExportPortableRetrievalKeys).not.toHaveBeenCalled()
   })
 
   it("auto-key export produces a decryptable encrypted envelope", async () => {
@@ -100,10 +103,7 @@ describe("useFullBackup", () => {
       })
     })
     expect(outcome?.ok).toBe(true)
-    expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.any(String)
-    )
+    expect(mockExportPortableRetrievalKeys).toHaveBeenCalledWith(expect.any(String), undefined)
     const history = await listBackupHistory()
     expect(history[0].encryption).toBe("auto-key")
   })
@@ -136,41 +136,29 @@ describe("useFullBackup", () => {
     const history = await listBackupHistory()
     expect(history[0].encryption).toBe("passphrase")
     expect(history[0].success).toBe(true)
-    expect(mockAttachPortableRetrievalKeys).toHaveBeenCalledWith(expect.any(Object), "hunter2")
+    expect(mockExportPortableRetrievalKeys).toHaveBeenCalledWith("hunter2", undefined)
   })
 
-  // Sanity: ensure the encrypted envelope produced by auto-key is structurally
-  // an EncryptedEnvelopeV1 (we can decrypt it manually by intercepting the
-  // serializer). We do this by stubbing Blob to capture the body.
-  it("auto-key payload is decryptable round-trip", async () => {
-    let captured: string | null = null
-    const RealBlob = globalThis.Blob
-    class CaptureBlob {
-      constructor(parts: BlobPart[]) {
-        captured = String(parts[0])
-      }
-    }
-    Object.defineProperty(globalThis, "Blob", { value: CaptureBlob, configurable: true })
-    try {
-      const { result } = renderHook(() => useFullBackup())
-      await act(async () => {
-        await result.current.run({
-          includeSessions: false,
-          includeApiKey: false,
-          encryption: "auto-key",
-        })
+  it("auto-key streaming payload authenticates and restores through the production reader", async () => {
+    let captured: Blob | undefined
+    jest.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      captured = blob as Blob
+      return "blob:backup"
+    })
+    const { result } = renderHook(() => useFullBackup())
+    await act(async () => {
+      const outcome = await result.current.run({
+        includeSessions: false,
+        includeApiKey: false,
+        encryption: "auto-key",
       })
-    } finally {
-      Object.defineProperty(globalThis, "Blob", { value: RealBlob, configurable: true })
-    }
-    expect(captured).toBeTruthy()
-    const env = JSON.parse(captured!)
-    expect(isEncryptedEnvelope(env)).toBe(true)
+      expect(outcome).toMatchObject({ ok: true, sizeBytes: captured?.size })
+    })
+    expect(captured).toBeDefined()
     const key = await getDefaultBackupPassphrase()
-    expect(key).toBeTruthy()
-    const plaintext = await decryptBackupPackage(env, key!)
-    const pkg = JSON.parse(plaintext)
-    expect(pkg.version).toBe("3.0")
-    expect(pkg.manifest.schemaVersion).toBe(3)
+    const restored = await readStreamPackage(blobFileStream(captured!), key!)
+    expect(restored.pkg.payload.settings).toBeDefined()
+    expect(restored.pkg.payload.providerProfileStore).toBeDefined()
+    await expect(readStreamPackage(blobFileStream(captured!), "wrong")).rejects.toThrow()
   })
 })

@@ -1542,45 +1542,80 @@ describe("HostState Agent RPC dispatcher", () => {
   })
 
   it("resolves attachment refs into real content and then frees the staged bytes", async () => {
-    const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
-    const store = await import("@/lib/db/session-attachment-uploads")
-    const { sha256Bytes } = await import("@/lib/ocr/hash")
-    const init = await store.beginAttachmentUpload({
-      sessionId: "session-1",
-      deviceId: "dev-1",
-      name: "shot.png",
-      mediaType: "image/png",
-      size: PNG.byteLength,
-      hash: await sha256Bytes(PNG),
-    })
-    await store.appendAttachmentChunk({
-      uploadId: init.uploadId,
-      deviceId: "dev-1",
-      offset: 0,
-      bytes: PNG,
-    })
-    const { ref } = await store.commitAttachmentUpload({
-      uploadId: init.uploadId,
-      deviceId: "dev-1",
-    })
-
-    await createAgentRpcHostStateDispatcher()(
-      action({
-        kind: "message.enqueue",
-        messageId: "m-1",
-        text: "look at this",
-        attachments: [{ name: "shot.png", mediaType: "image/png", size: PNG.byteLength, ref }],
+    // This suite uses jsdom's JSON-only structuredClone fallback. Preserve
+    // immutable Blobs here so fake-indexeddb exercises the browser contract.
+    const originalClone = globalThis.structuredClone
+    const withBlobs = (value: unknown): unknown => {
+      if (value === undefined || value === null || typeof value !== "object") return value
+      if (value instanceof Blob) return value
+      if (Array.isArray(value)) return value.map(withBlobs)
+      if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype)
+        return Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [key, withBlobs(item)])
+        )
+      return originalClone(value)
+    }
+    const clone = jest
+      .spyOn(globalThis, "structuredClone")
+      .mockImplementation(withBlobs as typeof structuredClone)
+    try {
+      const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
+      const store = await import("@/lib/db/session-attachment-uploads")
+      const { sha256Bytes } = await import("@/lib/ocr/hash")
+      const init = await store.beginAttachmentUpload({
+        sessionId: "session-1",
+        deviceId: "dev-1",
+        name: "shot.png",
+        mediaType: "image/png",
+        size: PNG.byteLength,
+        hash: await sha256Bytes(PNG),
       })
-    )
+      await store.appendAttachmentChunk({
+        uploadId: init.uploadId,
+        deviceId: "dev-1",
+        offset: 0,
+        bytes: PNG,
+      })
+      const { ref } = await store.commitAttachmentUpload({
+        uploadId: init.uploadId,
+        deviceId: "dev-1",
+      })
 
-    // The refs never reach the runtime — the bytes do, through the same
-    // `buildSendContent` the desktop composer runs.
-    const [, prompt] = sendPromptMock.mock.calls[0]!
-    expect(Array.isArray(prompt)).toBe(true)
-    expect(prompt).toEqual(expect.arrayContaining([expect.objectContaining({ type: "image" })]))
+      await createAgentRpcHostStateDispatcher()(
+        action({
+          kind: "message.enqueue",
+          messageId: "m-1",
+          text: "look at this",
+          attachments: [{ name: "shot.png", mediaType: "image/png", size: PNG.byteLength, ref }],
+        })
+      )
 
-    // Only after the send: before it, the staging copy is the only one there is.
-    expect(await store.resolveAttachmentRef(ref, { sessionId: "session-1" })).toBeNull()
+      // The refs never reach the runtime — the bytes do, through the same
+      // `buildSendContent` the desktop composer runs.
+      const [, prompt] = sendPromptMock.mock.calls[0]!
+      expect(Array.isArray(prompt)).toBe(true)
+      expect(prompt).toEqual(expect.arrayContaining([expect.objectContaining({ type: "image" })]))
+
+      const { getSessionAsset } = await import("@/lib/db/session-assets")
+      const saved = await getSessionAsset("session-1", ref)
+      expect(saved?.blob.size).toBe(PNG.byteLength)
+      expect(saved?.extractedContent?.attachmentId).toBe(ref)
+      const message = await getDb().messages.get("m-1")
+      expect(message?.parts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            filename: "shot.png",
+            extractedContent: expect.objectContaining({ attachmentId: ref }),
+          }),
+        ])
+      )
+      expect(sendPromptMock.mock.calls[0]?.[2]).not.toHaveProperty("attachmentManifest")
+
+      // Only after the send: the independent source survives consuming staging.
+      expect(await store.resolveAttachmentRef(ref, { sessionId: "session-1" })).toBeNull()
+    } finally {
+      clone.mockRestore()
+    }
   })
 
   it("fails the dispatch rather than sending a prompt whose attachment vanished", async () => {

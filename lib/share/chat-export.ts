@@ -10,6 +10,7 @@ import type { SharePayload } from "./types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { resolveSessionTwinProvenance } from "@/lib/twin/export-provenance"
+import { assertSharedSessionExport } from "@/lib/collab/shared-session-access"
 
 export interface BuildChatShareArgs {
   format: SingleExportFormat
@@ -41,7 +42,19 @@ export interface BuildMultiChatShareArgs extends Omit<
   lang?: string
 }
 
+/** Recheck source authority without rerendering an already previewed snapshot. */
+export async function assertChatShareAccess(sessions: readonly ChatSession[]): Promise<void> {
+  // Selection can include many sessions; bound authorization fan-out rather
+  // than opening one request per selected conversation at once.
+  for (let offset = 0; offset < sessions.length; offset += 8) {
+    await Promise.all(
+      sessions.slice(offset, offset + 8).map((session) => assertSharedSessionExport(session))
+    )
+  }
+}
+
 export async function buildChatSharePayload(args: BuildChatShareArgs): Promise<SharePayload> {
+  await assertSharedSessionExport(args.session)
   const messages = await getDb()
     .messages.where("sessionId")
     .equals(args.session.id)
@@ -79,6 +92,7 @@ export async function buildMultiChatSharePayload(
   if (args.sessions.length === 0) {
     throw new Error("At least one conversation is required to build a multi-chat share")
   }
+  await assertChatShareAccess(args.sessions)
 
   const db = getDb()
   const sessionIds = args.sessions.map((session) => session.id)

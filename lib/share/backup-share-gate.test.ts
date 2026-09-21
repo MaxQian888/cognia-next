@@ -129,3 +129,27 @@ describe("collectStringLeaves", () => {
     ).toEqual(["x", "y"])
   })
 })
+
+it("reports uninspected originals and previews separately from text PII findings", () => {
+  const result = scanBackupForShare(
+    plaintext({
+      sessionAssets: [{ filename: "alice@example.com.pdf" }],
+      sessionAssetSourceChunks: [{ contentHash: "same", offset: 0, data: "opaque binary" }],
+      messageMediaChunks: [
+        { contentHash: "same", offset: 0, data: "not text" },
+        { contentHash: "preview", offset: 0, data: "encoded" },
+      ],
+    })
+  )
+  expect(result).toMatchObject({
+    kind: "hits",
+    total: 1,
+    uninspectedAttachments: 2,
+    domains: [{ domain: "sessions", byKind: { EMAIL: 1 } }],
+  })
+  expect(
+    scanBackupForShare(
+      plaintext({ sessionAssetSourceChunks: [{ contentHash: "x", data: "alice@example.com" }] })
+    )
+  ).toEqual({ kind: "clean", scannedDomains: 0, uninspectedAttachments: 1 })
+})

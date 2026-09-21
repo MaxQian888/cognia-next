@@ -11,6 +11,8 @@ const FORMAT = "cognia-backup-stream" as const
 const VERSION = "4.0" as const
 const encoder = new TextEncoder()
 const SECTION_NAME = /^[A-Za-z][A-Za-z0-9]*$/
+const FRAGMENTS_SECTION = "backupRowFragments"
+const MAX_ROW_CHARS = 128 * 1024 * 1024
 const SHA256_HEX = /^[a-f0-9]{64}$/
 
 export interface BackupStreamManifestV4 {
@@ -127,7 +129,7 @@ export async function* createBackupStream(
   let rowCount = 0
   const sectionCounts: Record<string, number> = {}
 
-  for await (const page of options.sections) {
+  for await (const page of fragmentLargeRows(options.sections, maxChunkBytes)) {
     if (!SECTION_NAME.test(page.section))
       throw new TypeError("Backup stream section name is invalid")
     for (const rows of splitRows(page.section, page.rows, maxChunkBytes)) {
@@ -170,6 +172,7 @@ export async function* readBackupStream(
   const sectionCounts: Record<string, number> = {}
   let sawFooter = false
   let cipher: BackupChunkCipher | undefined
+  let fragmented: { section: string; length: number; total: number; parts: string[] } | undefined
 
   const maxRecordBytes = Math.floor(options.maxRecordBytes ?? 16 * 1024 * 1024)
   if (maxRecordBytes <= 0) throw new RangeError("maxRecordBytes must be greater than zero")
@@ -203,15 +206,60 @@ export async function* readBackupStream(
       expectedSequence += 1
       rowCount += chunk.rows.length
       sectionCounts[chunk.section] = (sectionCounts[chunk.section] ?? 0) + chunk.rows.length
-      yield {
-        kind: "chunk",
-        sequence: chunk.sequence,
-        section: chunk.section,
-        rows: chunk.rows,
+      if (chunk.section === FRAGMENTS_SECTION) {
+        if (chunk.rows.length !== 1) throw new TypeError("Invalid backup row fragment")
+        const fragment = chunk.rows[0] as {
+          section?: unknown
+          offset?: unknown
+          total?: unknown
+          data?: unknown
+        }
+        if (
+          !fragment ||
+          typeof fragment.section !== "string" ||
+          !SECTION_NAME.test(fragment.section) ||
+          fragment.section === FRAGMENTS_SECTION ||
+          typeof fragment.data !== "string" ||
+          !fragment.data ||
+          !Number.isSafeInteger(fragment.total) ||
+          Number(fragment.total) <= 0 ||
+          Number(fragment.total) > MAX_ROW_CHARS ||
+          !Number.isSafeInteger(fragment.offset) ||
+          fragment.offset !== (fragmented?.length ?? 0)
+        )
+          throw new TypeError("Invalid backup row fragment")
+        fragmented ??= {
+          section: fragment.section,
+          length: 0,
+          total: Number(fragment.total),
+          parts: [],
+        }
+        if (
+          fragment.section !== fragmented.section ||
+          fragment.total !== fragmented.total ||
+          fragmented.length + fragment.data.length > fragmented.total
+        )
+          throw new TypeError("Inconsistent backup row fragment")
+        fragmented.parts.push(fragment.data)
+        fragmented.length += fragment.data.length
+        if (fragmented.length === fragmented.total) {
+          const row: unknown = JSON.parse(fragmented.parts.join(""))
+          yield {
+            kind: "chunk",
+            sequence: chunk.sequence,
+            section: fragmented.section,
+            rows: [row],
+          }
+          fragmented = undefined
+        }
+      } else {
+        if (fragmented) throw new TypeError("Backup row fragment is incomplete")
+        yield { kind: "chunk", sequence: chunk.sequence, section: chunk.section, rows: chunk.rows }
       }
       continue
     }
     if (record.kind === "footer") {
+      if (fragmented) throw new TypeError("Backup row fragment is incomplete")
       const footer = parseFooter(record, expectedSequence)
       if (
         footer.chainHash !== chain ||
@@ -285,6 +333,52 @@ async function decodeRecord(
 
 function recordAdditionalData(traceId: string, sequence: number): string {
   return `${FORMAT}:${VERSION}:${traceId}:${sequence}`
+}
+
+/** Fragment oversized logical rows without increasing the physical-record parser limit. */
+async function* fragmentLargeRows(
+  sections: AsyncIterable<BackupStreamSection>,
+  maxBytes: number
+): AsyncIterable<BackupStreamSection> {
+  for await (const page of sections) {
+    if (page.section === FRAGMENTS_SECTION) throw new TypeError("Reserved backup section")
+    let rows: unknown[] = []
+    for (const row of page.rows) {
+      const serialized = canonicalStringify(row)
+      if (typeof serialized !== "string") throw new TypeError("Non-serializable backup row")
+      const rowBytes = encoder.encode(serialized).byteLength
+      const overhead = encoder.encode(
+        canonicalStringify({ section: page.section, rows: [] })
+      ).byteLength
+      if (rowBytes + overhead <= maxBytes) {
+        rows.push(row)
+        continue
+      }
+      if (serialized.length > MAX_ROW_CHARS)
+        throw new RangeError("Backup row exceeds the restore limit")
+      if (rows.length) {
+        yield { section: page.section, rows }
+        rows = []
+      }
+      // JSON escapes can grow one UTF-16 code unit to six ASCII bytes.
+      const chars = Math.floor((maxBytes - 512) / 6)
+      if (chars < 1) throw new RangeError("maxChunkBytes is too small for row fragments")
+      for (let offset = 0; offset < serialized.length; offset += chars) {
+        yield {
+          section: FRAGMENTS_SECTION,
+          rows: [
+            {
+              section: page.section,
+              offset,
+              total: serialized.length,
+              data: serialized.slice(offset, offset + chars),
+            },
+          ],
+        }
+      }
+    }
+    if (rows.length || !page.rows.length) yield { section: page.section, rows }
+  }
 }
 
 function splitRows(section: string, input: readonly unknown[], maxBytes: number): unknown[][] {

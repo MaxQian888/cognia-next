@@ -9,7 +9,7 @@
  * before Dexie access, allowing recovery from a blob already cleaned by an
  * interrupted earlier migration attempt.
  *
- * So the bridge parks a copy under {@link ARTIFACT_MIGRATION_PENDING_KEY}
+ * So the bridge parks a copy under an account-scoped recovery key
  * BEFORE it touches Dexie, and clears it only once the write has landed. A boot
  * that finds the key still present replays it: the migration is idempotent and
  * survives being interrupted at any point.
@@ -24,6 +24,7 @@ import type { Artifact, ArtifactVersion } from "@/types/artifact/artifact"
 import { ARTIFACT_STORAGE_KEY, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { loggers } from "@cognia/logging"
 
+/** Legacy unscoped recovery data has no trustworthy owner; retain it for recovery. */
 export const ARTIFACT_MIGRATION_PENDING_KEY = "cognia-artifacts:pending-migration"
 
 export interface PendingArtifactMigration {
@@ -34,9 +35,9 @@ export interface PendingArtifactMigration {
 
 function readJson(key: string): Record<string, unknown> | null {
   if (typeof window === "undefined") return null
-  const raw = window.localStorage.getItem(key)
-  if (!raw) return null
   try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
     const parsed = JSON.parse(raw) as unknown
     return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
   } catch {
@@ -51,15 +52,21 @@ function asRecord<T>(value: unknown): Record<string, T> {
 }
 
 /** The persist bucket currently in use — the account-scoped one after sign-in. */
-function activePersistKey(): string {
+export function getArtifactMigrationScope(): string {
   const name = (
     useArtifactStore as unknown as { persist?: { getOptions?: () => { name?: string } } }
   ).persist?.getOptions?.().name
   return name ?? ARTIFACT_STORAGE_KEY
 }
 
-export function readPendingArtifactMigration(): PendingArtifactMigration | null {
-  const parsed = readJson(ARTIFACT_MIGRATION_PENDING_KEY)
+export function getArtifactMigrationPendingKey(scope = getArtifactMigrationScope()): string {
+  return `${scope}:pending-migration:v2`
+}
+
+export function readPendingArtifactMigration(
+  scope = getArtifactMigrationScope()
+): PendingArtifactMigration | null {
+  const parsed = readJson(getArtifactMigrationPendingKey(scope))
   if (!parsed) return null
   const artifacts = asRecord<Artifact>(parsed.artifacts)
   const artifactVersions = asRecord<ArtifactVersion[]>(parsed.artifactVersions)
@@ -67,9 +74,13 @@ export function readPendingArtifactMigration(): PendingArtifactMigration | null 
   return { artifacts, artifactVersions }
 }
 
-export function clearPendingArtifactMigration(): void {
+export function clearPendingArtifactMigration(scope = getArtifactMigrationScope()): void {
   if (typeof window === "undefined") return
-  window.localStorage.removeItem(ARTIFACT_MIGRATION_PENDING_KEY)
+  try {
+    window.localStorage.removeItem(getArtifactMigrationPendingKey(scope))
+  } catch (err) {
+    loggers.canvas.warn("could not clear the migrated artifact recovery copy", { err: String(err) })
+  }
 }
 
 /**
@@ -80,9 +91,11 @@ export function clearPendingArtifactMigration(): void {
  * Never throws: a quota-exceeded write here must not stop the bridge from
  * starting. It narrows the crash window rather than being load-bearing.
  */
-export function capturePendingArtifactMigration(): PendingArtifactMigration | null {
-  const existing = readPendingArtifactMigration()
-  const blob = readJson(activePersistKey())
+export function capturePendingArtifactMigration(
+  scope = getArtifactMigrationScope()
+): PendingArtifactMigration | null {
+  const existing = readPendingArtifactMigration(scope)
+  const blob = readJson(scope)
   const state = blob && typeof blob.state === "object" ? asRecord<unknown>(blob.state) : null
   const legacyArtifacts = asRecord<Artifact>(state?.artifacts)
   const legacyVersions = asRecord<ArtifactVersion[]>(state?.artifactVersions)
@@ -100,7 +113,7 @@ export function capturePendingArtifactMigration(): PendingArtifactMigration | nu
 
   if (typeof window !== "undefined") {
     try {
-      window.localStorage.setItem(ARTIFACT_MIGRATION_PENDING_KEY, JSON.stringify(merged))
+      window.localStorage.setItem(getArtifactMigrationPendingKey(scope), JSON.stringify(merged))
     } catch (err) {
       loggers.canvas.warn("could not park the legacy artifact blob for migration", {
         err: String(err),

@@ -111,11 +111,14 @@ async function resolveOutboundAttachments(
   sessionId: string,
   text: string,
   attachments: readonly HostStateAttachmentRef[]
-): Promise<SendContent> {
+): Promise<{
+  content: SendContent
+  manifest?: import("@/lib/chat/attachments/dispatch").AttachmentManifestEntry[]
+}> {
   const refs = attachments.filter(
     (attachment) => typeof attachment.ref === "string" && attachment.ref.length > 0
   )
-  if (refs.length === 0) return text
+  if (refs.length === 0) return { content: text }
   const [{ resolveAttachmentRef }, { buildSendContent }, { bytesToDataUrl }] = await Promise.all([
     import("@/lib/db/session-attachment-uploads"),
     import("@/lib/chat/attachments/dispatch"),
@@ -126,13 +129,34 @@ async function resolveOutboundAttachments(
     const row = await resolveAttachmentRef(attachment.ref!, { sessionId })
     if (!row?.bytes) throw new Error("host_state_attachment_unavailable")
     files.push({
+      id: attachment.ref!,
       url: bytesToDataUrl(row.bytes, row.mediaType),
       mediaType: row.mediaType,
       filename: row.name,
     })
   }
   const built = await buildSendContent(text, files)
-  return built.content
+  if (built.rejected.length) throw new Error("host_state_attachment_processing_failed")
+  const { putSessionAsset } = await import("@/lib/db/session-assets")
+  const saved = new Set<string>()
+  for (const entry of built.manifest) {
+    if (
+      !entry?.original ||
+      !entry.extractedContent ||
+      saved.has(entry.extractedContent.attachmentId)
+    )
+      continue
+    await putSessionAsset({
+      sessionId,
+      assetId: entry.extractedContent.attachmentId,
+      blob: entry.original,
+      filename: entry.filename,
+      mediaType: entry.mediaType,
+      extractedContent: entry.extractedContent,
+    })
+    saved.add(entry.extractedContent.attachmentId)
+  }
+  return { content: built.content, manifest: built.manifest }
 }
 
 /** Release the staged bytes behind refs the runtime has now received. */
@@ -232,7 +256,21 @@ export function createAgentRpcHostStateDispatcher(
               action.action.text,
               action.action.attachments
             )
-            await sendPrompt(sessionId, prompt, options, { commandId: action.actionId })
+            if (prompt.manifest?.length) {
+              const [{ makeUserMessage }, { commitMessageDelta }] = await Promise.all([
+                import("@/lib/claude/adapter"),
+                import("@/lib/db/messages"),
+              ])
+              const message = makeUserMessage(
+                prompt.content,
+                action.action.messageId,
+                prompt.manifest
+              )
+              const existing = await getDb().messages.get(action.action.messageId)
+              if (existing?.sessionId === sessionId) message.metadata = existing.metadata
+              await commitMessageDelta(sessionId, { upserts: [message] })
+            }
+            await sendPrompt(sessionId, prompt.content, options, { commandId: action.actionId })
             // Only now: the runtime has the file, so the staging copy is dead
             // weight and the per-session staging slot should be freed. Before
             // the send it is the only copy that exists.

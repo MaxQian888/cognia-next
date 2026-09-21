@@ -152,7 +152,13 @@
       "prepareFailed": "Could not prepare the backup for sharing.",
       "preparing": "Preparing backup…",
       "title": "Personal info found in this backup",
-      "total": "{total, plural, =1 {1 personal value} other {# personal values}} across {domains, plural, =1 {1 area} other {# areas}}"
+      "total": "{total, plural, =1 {1 personal value} other {# personal values}} across {domains, plural, =1 {1 area} other {# areas}}",
+      "binaryTitle": "Confirm attachment sharing",
+      "binaryBody": "This backup contains original files or image previews. The text scan cannot inspect their contents.",
+      "uninspectedAttachments": "{count} binary payloads were not inspected. They may contain personal information that does not appear in the extracted text.",
+      "confirmWithAttachments": "I understand that the original files and previews will be included in this share, including any personal information they contain.",
+      "binaryNote": "Original files and previews are included. Their contents were not inspected by the text scan.",
+      "streamingRequired": "This backup is too large for a share link. Use Export backup to save a local streaming backup with all attachments."
     },
     "showPassphrase": "Show passphrase",
     "unlockButton": "Unlock & preview",

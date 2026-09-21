@@ -52,6 +52,8 @@ async function createTauriBackupHost(): Promise<BackupHostFilesystem> {
     kind: "tauri",
     filesystem: {
       writeTextFile: (path, contents) => fs.writeTextFile(path, contents),
+      writeStream: async (path, source) =>
+        (await import("@/lib/files/file-bridge")).writeBackupStreamFile(path, source),
       readDirNames: async (path) => (await fs.readDir(path)).map((entry) => entry.name),
       remove: (path) => fs.remove(path),
     },

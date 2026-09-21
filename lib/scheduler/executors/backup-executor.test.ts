@@ -23,6 +23,15 @@ const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean 
 const writeTextFileMock = jest.fn(async (_path: string, _body: string) => {})
 const mkdirMock = jest.fn(async (_path: string, _opts?: unknown) => {})
 const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown, _passphrase?: string) => pkg)
+jest.mock("@/lib/files/file-bridge", () => ({
+  writeBackupStreamFile: async (path: string, source: AsyncIterable<Uint8Array>) => {
+    const chunks: string[] = []
+    for await (const chunk of source) chunks.push(new TextDecoder().decode(chunk))
+    const text = chunks.join("")
+    await writeTextFileMock(path, text)
+    return new TextEncoder().encode(text).byteLength
+  },
+}))
 
 jest.mock(
   "@tauri-apps/plugin-fs",
@@ -58,6 +67,7 @@ jest.mock("@/lib/data/destinations", () => ({
   dispatchBackupDestination: (...args: unknown[]) => dispatchMock(...args),
 }))
 jest.mock("@/lib/data/retrieval-key-backup", () => ({
+  ...jest.requireActual("@/lib/data/retrieval-key-backup"),
   attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>
     attachPortableRetrievalKeysMock(pkg, passphrase),
 }))
@@ -216,10 +226,12 @@ describe("executeBackupTask", () => {
       "github",
       "googledrive",
     ])
-    expect(attachPortableRetrievalKeysMock.mock.calls.map((call) => call[1])).toEqual([
-      expect.any(String),
-      "sync-pass",
-    ])
+    // The local v4 stream wraps retrieval keys inside its encrypted records;
+    // only the legacy remote artifact uses the package-level wrapper.
+    expect(attachPortableRetrievalKeysMock.mock.calls.map((call) => call[1])).toEqual(["sync-pass"])
+    const localHeader = JSON.parse(writeTextFileMock.mock.calls[0]![1].split("\n")[0]!)
+    expect(localHeader).toMatchObject({ format: "cognia-backup-stream", version: "4.0" })
+    expect(localHeader.encryption).not.toBeNull()
     const history = await listBackupHistory()
     expect(
       history
@@ -247,6 +259,26 @@ describe("executeBackupTask", () => {
     expect((ok.output as { googledrive: { target: string } }).googledrive.target).toBe(
       "o/r:cognia-backups/x"
     )
+  })
+
+  it("keeps the local stream and reports each remote leg when remote preparation fails", async () => {
+    syncPassphrase = "sync-pass"
+    attachPortableRetrievalKeysMock.mockRejectedValueOnce(new Error("remote package unavailable"))
+    const result = await executeBackupTask(
+      makeTask({ destination: "all" }),
+      makeExecution(),
+      new AbortController().signal
+    )
+    expect(result.success).toBe(true)
+    expect(writeTextFileMock).toHaveBeenCalledTimes(1)
+    expect(dispatchMock).not.toHaveBeenCalled()
+    expect(result.output).toMatchObject({
+      local: { sizeBytes: expect.any(Number) },
+      webdav: { failed: true, error: "remote package unavailable" },
+      github: { failed: true, error: "remote package unavailable" },
+      googledrive: { failed: true, error: "remote package unavailable" },
+    })
+    expect((await listBackupHistory()).filter((row) => row.success)).toHaveLength(1)
   })
 
   it("refuses the deprecated convex destination with an actionable error", async () => {

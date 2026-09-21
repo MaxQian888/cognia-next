@@ -70,6 +70,15 @@ import type {
 } from "@/lib/db/retrieval-control-types"
 import { importPortableRetrievalKeys, type PortableImportStore } from "./retrieval-key-backup"
 
+import {
+  prepareSessionAssetBackup,
+  restoreSessionAssetBackup,
+  prepareMessageMediaBackup,
+} from "./session-assets-backup"
+
+import { collectMessageMediaHashes, messageMediaRefRows } from "@/lib/db/message-media-refs"
+import { putMessageMedia } from "@/lib/db/message-media"
+
 interface BuiltInRow {
   id: string
   isBuiltIn?: boolean
@@ -82,6 +91,9 @@ function newId(prefix: string): string {
 /** Optional knobs primarily used by tests so we can inject a stub
  * `localStorage` and bypass the Tauri `syncToAgent` projection. */
 export interface ApplyBackupExtras {
+  /** Authenticated v4 binary records, kept outside the JSON preview payload. */
+  attachmentSources?: ReadonlyMap<string, Blob>
+  previewSources?: ReadonlyMap<string, Blob>
   /** Override the `localStorage` shim. Defaults to `browserSnapshotStorage()`
    * (which itself returns `null` outside the browser). */
   storage?: SnapshotStorage | null
@@ -115,6 +127,24 @@ export async function applyBackupPackage(
   const summary = emptySummary()
   const db = getDb()
   const env = pkg.payload
+  const attachmentBackup = opts.includeSessions
+    ? await prepareSessionAssetBackup(
+        env.sessionAssets,
+        env.sessionAssetSourceChunks,
+        new Set((env.sessions ?? []).map((session) => session.id)),
+        extras.attachmentSources
+      )
+    : undefined
+  const previewMedia = opts.includeSessions
+    ? await prepareMessageMediaBackup(
+        env.messageMedia,
+        env.messageMediaChunks,
+        new Set(
+          (env.messages ?? []).flatMap((message) => collectMessageMediaHashes(message.parts))
+        ),
+        extras.previewSources
+      )
+    : []
   const importedProfiles = env.providerProfileStore
     ? validateProfilesImport(env.providerProfileStore)
     : undefined
@@ -169,6 +199,8 @@ export async function applyBackupPackage(
       db.mcpServers,
       db.sessions,
       db.messages,
+      db.messageMedia,
+      db.messageMediaRefs,
       db.sessionState,
       db.trustedWorkspaces,
       db.tts_provider_keys,
@@ -782,32 +814,61 @@ export async function applyBackupPackage(
 
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {
-        await applyCollection<ChatSession>({
-          rows: env.sessions,
-          table: db.sessions,
-          kind: "sessions",
-          opts,
-          summary,
-          idPrefix: "s",
-          respectBuiltIn: false,
-        })
-        await applyCollection<StoredMessage>({
-          rows: env.messages,
-          table: db.messages,
-          kind: "messages",
-          opts,
-          summary,
-          idPrefix: "m",
-          respectBuiltIn: false,
-        })
+        // Session ids are parents of both transcript rows and original-source owners.
+        // Duplicate restore must remap the whole bundle together.
+        const sessionMapping = new Map<string, string>()
+        for (const session of env.sessions ?? []) {
+          const existing = await db.sessions.get(session.id)
+          const id = existing && opts.mergeStrategy === "duplicate" ? newId("s") : session.id
+          sessionMapping.set(session.id, id)
+          await applyCollection<ChatSession>({
+            rows: [{ ...session, id }],
+            table: db.sessions,
+            kind: "sessions",
+            opts,
+            summary,
+            idPrefix: "s",
+            respectBuiltIn: false,
+          })
+        }
+        for (const media of previewMedia) await putMessageMedia(media)
+        for (const message of env.messages ?? []) {
+          const existing = await db.messages.get(message.id)
+          const skip = !!existing && opts.mergeStrategy === "skip"
+          const id = existing && opts.mergeStrategy === "duplicate" ? newId("m") : message.id
+          const row = {
+            ...message,
+            id,
+            sessionId: sessionMapping.get(message.sessionId) ?? message.sessionId,
+          }
+          await applyCollection<StoredMessage>({
+            rows: [row],
+            table: db.messages,
+            kind: "messages",
+            opts,
+            summary,
+            idPrefix: "m",
+            respectBuiltIn: false,
+          })
+          if (!skip) {
+            await db.messageMediaRefs.where("messageId").equals(id).delete()
+            const refs = messageMediaRefRows(id, row.sessionId, row.parts)
+            if (refs.length) await db.messageMediaRefs.bulkPut(refs)
+          }
+        }
         await applyKeyedCollection<SessionStateRow>({
-          rows: env.sessionState,
+          rows: env.sessionState?.map((state) => ({
+            ...state,
+            sessionId: sessionMapping.get(state.sessionId) ?? state.sessionId,
+          })),
           table: db.sessionState,
           kind: "sessionState",
           opts,
           summary,
           keyOf: (r) => r.sessionId,
         })
+        if (attachmentBackup)
+          await restoreSessionAssetBackup(attachmentBackup, sessionMapping, opts.mergeStrategy)
       }
     }
   )
