@@ -108,8 +108,8 @@ jest.mock("./issue-detail-panel", () => ({
     return <div data-testid="detail-stub" />
   },
 }))
-jest.mock("./create-issue-dialog", () => ({
-  CreateIssueDialog: (props: Record<string, unknown>) =>
+jest.mock("./create-issue-page", () => ({
+  CreateIssuePage: (props: Record<string, unknown>) =>
     props.open ? <div data-testid="create-dialog-stub" /> : null,
 }))
 jest.mock("./collab-refresh-stale-badge", () => ({
@@ -902,6 +902,15 @@ describe("IssueConsole", () => {
       })
       expect(screen.queryByTestId("create-dialog-stub")).not.toBeInTheDocument()
       input.remove()
+    })
+  })
+
+  describe("create surface", () => {
+    it("opens the create page from a column's add-issue affordance", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onAddIssue", "todo")
+      expect(await screen.findByTestId("create-dialog-stub")).toBeInTheDocument()
     })
   })
 })

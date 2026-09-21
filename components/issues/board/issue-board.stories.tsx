@@ -95,13 +95,33 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Every column empty, so all six render as collapsed strips. */
+/** Every column empty — all six stay expanded, each showing its empty state. */
 export const Empty: Story = {
   args: { items: [] },
 }
 
 export const Populated: Story = {
   args: { items: POPULATED },
+}
+
+/**
+ * Every populated column forced collapsed: the rail shows the status glyph,
+ * the count and a priority-coloured spine; hovering it opens the label plus
+ * clickable item rows. `in_progress` carries the running pulse.
+ */
+export const CollapsedRails: Story = {
+  args: {
+    items: POPULATED,
+    runningIds: new Set(["local:s4"]),
+    columnCollapse: {
+      backlog: true,
+      todo: true,
+      in_progress: true,
+      in_review: true,
+      done: true,
+      canceled: true,
+    },
+  },
 }
 
 /** Drag a card here: it must ride above the columns and never clip. */

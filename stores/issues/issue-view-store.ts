@@ -55,13 +55,11 @@ export interface IssueViewState {
   setLayout: (viewId: string, layout: IssueViewLayout) => void
   setDensity: (viewId: string, density: IssueListDensity) => void
   /**
-   * Flip one board column between full column and vertical strip.
-   *
-   * `itemCount` is required because the derived default is "collapse iff
-   * empty" — without it the store would flip against an absent-key default
-   * rather than against what the user can actually see.
+   * Flip one board column between full column and collapsed rail. The store
+   * resolves the column's CURRENT state from the overrides before writing
+   * the inverse, so the flip is against what the user can actually see.
    */
-  toggleColumnCollapsed: (viewId: string, status: IssueStatus, itemCount: number) => void
+  toggleColumnCollapsed: (viewId: string, status: IssueStatus) => void
 
   /** Drop every override for a view, returning it to its declared defaults. */
   resetView: (viewId: string) => void
@@ -109,13 +107,13 @@ export const useIssueViewStore = create<IssueViewState>()(
         setLayout: (viewId, layout) => patch(viewId, { layout }),
         setDensity: (viewId, density) => patch(viewId, { density }),
 
-        toggleColumnCollapsed: (viewId, status, itemCount) => {
+        toggleColumnCollapsed: (viewId, status) => {
           const current = get().overrides[viewId]?.columnCollapse ?? EMPTY_COLUMN_COLLAPSE
           patch(viewId, {
             columnCollapse: toggleColumnCollapse(
               current,
               status,
-              resolveColumnCollapsed(status, itemCount, current)
+              resolveColumnCollapsed(status, current)
             ),
           })
         },

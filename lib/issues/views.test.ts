@@ -219,24 +219,20 @@ describe("resolveIssueViewPreferences", () => {
 })
 
 describe("resolveColumnCollapsed", () => {
-  it("collapses an empty column by default", () => {
-    expect(resolveColumnCollapsed("backlog", 0, {})).toBe(true)
+  it("keeps every column expanded by default, empty or not", () => {
+    expect(resolveColumnCollapsed("backlog", {})).toBe(false)
   })
 
-  it("expands a non-empty column by default", () => {
-    expect(resolveColumnCollapsed("backlog", 3, {})).toBe(false)
+  it("lets an explicit collapse win over the expanded default", () => {
+    expect(resolveColumnCollapsed("backlog", { backlog: true })).toBe(true)
   })
 
-  it("lets an explicit expand win over the empty default", () => {
-    expect(resolveColumnCollapsed("backlog", 0, { backlog: false })).toBe(false)
-  })
-
-  it("lets an explicit collapse win over a full column", () => {
-    expect(resolveColumnCollapsed("backlog", 9, { backlog: true })).toBe(true)
+  it("lets an explicit expand win again after a collapse", () => {
+    expect(resolveColumnCollapsed("backlog", { backlog: false })).toBe(false)
   })
 
   it("scopes the override to its own column", () => {
-    expect(resolveColumnCollapsed("done", 4, { backlog: true })).toBe(false)
+    expect(resolveColumnCollapsed("done", { backlog: true })).toBe(false)
   })
 })
 
@@ -246,9 +242,8 @@ describe("toggleColumnCollapse", () => {
   })
 
   it("flips relative to the resolved state, not the absent key", () => {
-    // An empty column resolves to collapsed; toggling it must EXPAND it.
-    const collapsed = resolveColumnCollapsed("done", 0, {})
-    expect(toggleColumnCollapse({}, "done", collapsed)).toEqual({ done: false })
+    const collapsed = resolveColumnCollapsed("done", {})
+    expect(toggleColumnCollapse({}, "done", collapsed)).toEqual({ done: true })
   })
 
   it("keeps other columns' overrides", () => {

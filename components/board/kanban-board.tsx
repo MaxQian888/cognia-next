@@ -78,6 +78,40 @@ export interface KanbanDragState<TItem> {
 
 const IDLE_DRAG: KanbanDragState<never> = { activeId: null, activeItem: null, overId: null }
 
+/**
+ * Everything a custom collapsed-strip renderer needs. The board keeps owning
+ * the column's `<section>` — droppable registration, role, aria label and
+ * test ids — so a custom strip can never stop being a drop target. The
+ * renderer supplies the strip's layout classes and content.
+ */
+export interface KanbanCollapsedContext<TId extends string, TItem> {
+  columnId: TId
+  label: string
+  count: number
+  icon?: ReactNode
+  /** The column's raw items — preview material for richer strips. */
+  items: readonly TItem[]
+  isOver: boolean
+  /** Non-null while a cross-column drop targets this strip. */
+  insertionIndex: number | null
+  onExpand?: () => void
+  expandLabel: string
+  onAdd?: () => void
+  addLabel: string
+  testIdPrefix: string
+}
+
+/** What a `renderCollapsed` implementation returns. */
+export interface KanbanCollapsedStrip {
+  /**
+   * Layout classes on the column's `<section>` — width, padding, alignment.
+   * The shell's own classes (border, tint, transitions, dimmed, drag-over
+   * ring) are applied on top.
+   */
+  className?: string
+  content: ReactNode
+}
+
 export interface KanbanBoardProps<TId extends string, TItem> {
   columns: readonly KanbanColumnModel<TId, TItem>[]
   /** dnd-kit id of an item. Must be unique across the whole board. */
@@ -102,8 +136,14 @@ export interface KanbanBoardProps<TId extends string, TItem> {
   renderItemMenu?: (item: TItem, children: ReactNode) => ReactNode
   /** Whether a column renders as a vertical strip. Absent means never. */
   isCollapsed?: (column: KanbanColumnModel<TId, TItem>) => boolean
-  /** Called with the column's current item count so a flip is relative to what is shown. */
-  onToggleCollapsed?: (id: TId, itemCount: number) => void
+  /**
+   * Replaces the built-in collapsed strip's look. The board still owns the
+   * column's `<section>` — droppable, role, aria label, test ids — so a
+   * custom strip can never lose its drop-target wiring.
+   */
+  renderCollapsed?: (context: KanbanCollapsedContext<TId, TItem>) => KanbanCollapsedStrip
+  /** Flips a column between full and collapsed; the consumer writes the inverse. */
+  onToggleCollapsed?: (id: TId) => void
   onAddItem?: (id: TId) => void
   /** This column would refuse the card being dragged. */
   isDimmed?: (column: KanbanColumnModel<TId, TItem>, drag: KanbanDragState<TItem>) => boolean
@@ -181,6 +221,7 @@ export function KanbanBoard<TId extends string, TItem>({
   renderOverlay,
   renderItemMenu,
   isCollapsed,
+  renderCollapsed,
   onToggleCollapsed,
   onAddItem,
   isDimmed,
@@ -364,10 +405,10 @@ export function KanbanBoard<TId extends string, TItem>({
                 header={renderColumnHeader?.(column)}
                 className={columnClassName?.(column)}
                 collapsed={isCollapsed?.(column) ?? false}
+                renderCollapsed={renderCollapsed}
+                items={column.items}
                 onToggleCollapsed={
-                  onToggleCollapsed
-                    ? () => onToggleCollapsed(column.id, column.items.length)
-                    : undefined
+                  onToggleCollapsed ? () => onToggleCollapsed(column.id) : undefined
                 }
                 onAdd={onAddItem ? () => onAddItem(column.id) : undefined}
                 dimmed={isDimmed?.(column, drag) ?? false}
@@ -396,8 +437,8 @@ export function KanbanBoard<TId extends string, TItem>({
   )
 }
 
-interface KanbanColumnProps {
-  id: string
+interface KanbanColumnProps<TId extends string, TItem> {
+  id: TId
   dropId: string
   label: string
   count: number
@@ -405,6 +446,9 @@ interface KanbanColumnProps {
   header?: ReactNode
   className?: string
   collapsed: boolean
+  renderCollapsed?: (context: KanbanCollapsedContext<TId, TItem>) => KanbanCollapsedStrip
+  /** The column's raw items, forwarded to a custom collapsed renderer. */
+  items: readonly TItem[]
   onToggleCollapsed?: () => void
   onAdd?: () => void
   dimmed: boolean
@@ -427,7 +471,7 @@ interface KanbanColumnProps {
  * still be dropped on it and every transition stays reachable at any width.
  * That is the whole reason collapsing was chosen over hiding.
  */
-function KanbanColumn({
+function KanbanColumn<TId extends string, TItem>({
   id,
   dropId,
   label,
@@ -436,6 +480,8 @@ function KanbanColumn({
   header,
   className,
   collapsed,
+  renderCollapsed,
+  items,
   onToggleCollapsed,
   onAdd,
   dimmed,
@@ -448,7 +494,7 @@ function KanbanColumn({
   testIdPrefix,
   sortableIds,
   cards,
-}: KanbanColumnProps) {
+}: KanbanColumnProps<TId, TItem>) {
   const { setNodeRef, isOver } = useDroppable({ id: dropId, disabled: dragDisabled || dimmed })
 
   const shellClass = cn(
@@ -468,6 +514,20 @@ function KanbanColumn({
   )
 
   if (collapsed) {
+    const custom = renderCollapsed?.({
+      columnId: id,
+      label,
+      count,
+      icon,
+      items,
+      isOver,
+      insertionIndex,
+      onExpand: onToggleCollapsed,
+      expandLabel,
+      onAdd,
+      addLabel,
+      testIdPrefix,
+    })
     return (
       <section
         ref={setNodeRef}
@@ -476,42 +536,46 @@ function KanbanColumn({
         data-testid={`${testIdPrefix}-column-${id}`}
         data-collapsed="true"
         data-dimmed={dimmed || undefined}
-        className={cn(shellClass, "w-11 items-center py-2")}
+        className={cn(shellClass, custom ? custom.className : "w-11 items-center py-2")}
       >
-        {/*
-          A strip is still a landing spot, and because the usual collapse rule
-          is "collapse iff empty", dropping onto one is the MOST common
-          cross-column move. The bar spans the strip rather than sitting
-          between cards: expanding the column mid-drag would shift the layout
-          out from under the pointer.
-        */}
-        {insertionIndex !== null ? (
-          <div
-            aria-hidden
-            data-testid={`${testIdPrefix}-drop-indicator-${id}`}
-            className="mb-1.5 h-0.5 w-6 shrink-0 rounded-full bg-primary"
-          />
-        ) : null}
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-label={expandLabel}
-          title={expandLabel}
-          data-testid={`${testIdPrefix}-column-expand-${id}`}
-          className="focus-visible:ring-ring/50 flex min-h-0 flex-1 flex-col items-center gap-2 rounded-lg px-1 focus-visible:outline-none focus-visible:ring-[3px]"
-        >
-          {icon}
-          <span
-            className="text-xs tabular-nums text-muted-foreground"
-            data-testid={`${testIdPrefix}-column-${id}-count`}
-          >
-            {count}
-          </span>
-          <span className="min-h-0 flex-1 overflow-hidden text-xs font-semibold [writing-mode:vertical-rl]">
-            {label}
-          </span>
-          <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        </button>
+        {custom ? (
+          custom.content
+        ) : (
+          <>
+            {/*
+              A strip is still a landing spot. The bar spans the strip rather
+              than sitting between cards: expanding the column mid-drag would
+              shift the layout out from under the pointer.
+            */}
+            {insertionIndex !== null ? (
+              <div
+                aria-hidden
+                data-testid={`${testIdPrefix}-drop-indicator-${id}`}
+                className="mb-1.5 h-0.5 w-6 shrink-0 rounded-full bg-primary"
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              aria-label={expandLabel}
+              title={expandLabel}
+              data-testid={`${testIdPrefix}-column-expand-${id}`}
+              className="focus-visible:ring-ring/50 flex min-h-0 flex-1 flex-col items-center gap-2 rounded-lg px-1 focus-visible:outline-none focus-visible:ring-[3px]"
+            >
+              {icon}
+              <span
+                className="text-xs tabular-nums text-muted-foreground"
+                data-testid={`${testIdPrefix}-column-${id}-count`}
+              >
+                {count}
+              </span>
+              <span className="min-h-0 flex-1 overflow-hidden text-xs font-semibold [writing-mode:vertical-rl]">
+                {label}
+              </span>
+              <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </>
+        )}
       </section>
     )
   }

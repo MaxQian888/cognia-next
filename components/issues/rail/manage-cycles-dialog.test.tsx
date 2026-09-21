@@ -18,6 +18,7 @@ jest.mock("@/lib/db/issue-cycles", () => ({
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { IssueCycle } from "@/types/issues"
 import { ManageCyclesDialog } from "./manage-cycles-dialog"
 
@@ -59,9 +60,10 @@ describe("ManageCyclesDialog", () => {
   })
 
   it("creates a cycle of the chosen kind in the workspace", async () => {
+    const user = userEvent.setup()
     renderDialog([])
     fireEvent.change(screen.getByTestId("manage-cycles-name"), { target: { value: " Sprint 2 " } })
-    fireEvent.change(screen.getByTestId("manage-cycles-kind"), { target: { value: "milestone" } })
+    await user.click(screen.getByTestId("manage-cycles-kind-milestone"))
     await act(async () => {
       fireEvent.click(screen.getByTestId("manage-cycles-create"))
     })
@@ -73,19 +75,37 @@ describe("ManageCyclesDialog", () => {
   })
 
   it("prints progress and patches status, scope and name in place", async () => {
-    renderDialog()
+    const user = userEvent.setup()
+    render(
+      <ManageCyclesDialog
+        open
+        onOpenChange={jest.fn()}
+        projectId="w1"
+        cycles={[{ ...cycle, issueProjectId: "p1" }]}
+        projects={[
+          {
+            id: "p1",
+            projectId: "w1",
+            name: "Demo",
+            key: "DEMO",
+            status: "in_progress",
+            priority: "none",
+            resources: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]}
+        progress={new Map([["c1", { total: 4, done: 1, points: 8, pointsDone: 3 }]])}
+      />
+    )
     expect(screen.getByTestId("manage-cycles-progress-c1")).toHaveTextContent(
       'progress:{"done":1,"total":4,"pointsDone":3,"points":8}'
     )
-    await act(async () => {
-      fireEvent.change(screen.getByTestId("manage-cycles-status-c1"), {
-        target: { value: "active" },
-      })
-    })
+    await user.click(screen.getByTestId("manage-cycles-status-c1"))
+    await user.click(await screen.findByRole("option", { name: /statusLabel\.active/ }))
     expect(mockUpdate).toHaveBeenCalledWith("c1", { status: "active" })
-    await act(async () => {
-      fireEvent.change(screen.getByTestId("manage-cycles-scope-c1"), { target: { value: "" } })
-    })
+    await user.click(screen.getByTestId("manage-cycles-scope-c1"))
+    await user.click(await screen.findByRole("option", { name: "scopeWorkspace" }))
     expect(mockUpdate).toHaveBeenCalledWith("c1", { issueProjectId: null })
     await act(async () => {
       fireEvent.blur(screen.getByTestId("manage-cycles-name-c1"), { target: { value: "v1.1" } })

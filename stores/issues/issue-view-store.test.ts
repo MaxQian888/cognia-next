@@ -94,24 +94,24 @@ describe("useIssueViewStore", () => {
   })
 
   describe("column collapse", () => {
-    it("collapses a full column then expands it again", () => {
+    it("collapses a column then expands it again", () => {
       const result = store()
-      act(() => result.current.toggleColumnCollapsed("all", "done", 3))
+      act(() => result.current.toggleColumnCollapsed("all", "done"))
       expect(result.current.overrides.all?.columnCollapse).toEqual({ done: true })
-      act(() => result.current.toggleColumnCollapsed("all", "done", 3))
+      act(() => result.current.toggleColumnCollapsed("all", "done"))
       expect(result.current.overrides.all?.columnCollapse).toEqual({ done: false })
     })
 
-    it("expands an empty column, because empty resolves to collapsed", () => {
+    it("collapses an empty column too, because the default is expanded", () => {
       const result = store()
-      act(() => result.current.toggleColumnCollapsed("all", "done", 0))
-      expect(result.current.overrides.all?.columnCollapse).toEqual({ done: false })
+      act(() => result.current.toggleColumnCollapsed("all", "done"))
+      expect(result.current.overrides.all?.columnCollapse).toEqual({ done: true })
     })
 
     it("keeps other columns' overrides when flipping one", () => {
       const result = store()
-      act(() => result.current.toggleColumnCollapsed("all", "backlog", 2))
-      act(() => result.current.toggleColumnCollapsed("all", "done", 5))
+      act(() => result.current.toggleColumnCollapsed("all", "backlog"))
+      act(() => result.current.toggleColumnCollapsed("all", "done"))
       expect(result.current.overrides.all?.columnCollapse).toEqual({
         backlog: true,
         done: true,
@@ -120,7 +120,7 @@ describe("useIssueViewStore", () => {
 
     it("collapses per view, not globally", () => {
       const result = store()
-      act(() => result.current.toggleColumnCollapsed("all", "done", 3))
+      act(() => result.current.toggleColumnCollapsed("all", "done"))
       expect(result.current.overrides.assigned?.columnCollapse).toBeUndefined()
     })
   })

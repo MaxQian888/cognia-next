@@ -8,8 +8,9 @@
  * legality all come from the model, so the rules are unit-tested without
  * React. Illegal drop targets grey out at drag start (via the board's
  * `isDimmed`) rather than accepting the drop and failing after. Drag, the
- * collapse strip, the overlay portal and keyboard movement belong to the
- * shared primitive and are not re-implemented here.
+ * overlay portal and keyboard movement belong to the shared primitive; the
+ * collapsed strip's issue-aware rail is injected through `renderCollapsed`
+ * (`./issue-collapsed-rail.tsx`) while the board keeps the droppable shell.
  */
 
 import { useCallback, useMemo, type ReactNode } from "react"
@@ -17,6 +18,7 @@ import { useTranslations } from "next-intl"
 
 import {
   KanbanBoard,
+  type KanbanCollapsedContext,
   type KanbanColumnModel,
   type KanbanDragState,
 } from "@/components/board/kanban-board"
@@ -36,6 +38,7 @@ import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { IssueStatusIcon, STATUS_COLUMN_TINT } from "../issue-glyphs"
 import { buildIssueDndAnnouncements } from "./dnd-announcements"
+import { issueCollapsedRail } from "./issue-collapsed-rail"
 import { IssueCard, IssueCardVisual } from "./issue-card"
 
 type IssueColumn = KanbanColumnModel<IssueStatus, UnifiedIssueItem>
@@ -53,9 +56,9 @@ export interface IssueBoardProps {
   squadRuns?: ReadonlyMap<string, SquadRunRef>
   /** `unifiedId` to its planning hint (blocked, sub-issues, due). */
   planningHints?: ReadonlyMap<string, IssuePlanningHint>
-  /** Per-column collapse overrides. Absent means "collapse iff empty". */
+  /** Per-column collapse overrides. Absent means expanded — columns only collapse explicitly. */
   columnCollapse?: Readonly<Partial<Record<IssueStatus, boolean>>>
-  onToggleColumnCollapsed?: (status: IssueStatus, itemCount: number) => void
+  onToggleColumnCollapsed?: (status: IssueStatus) => void
   selectedId?: string
   onSelect?: (unifiedId: string) => void
   onDrop?: (action: IssueDropAction) => void
@@ -164,6 +167,17 @@ export function IssueBoard({
     [itemsById, isRunning, onDrop]
   )
 
+  /**
+   * The collapsed strip is an issue-aware rail: status glyph + count +
+   * priority spine, with the label and clickable item rows in a hover card.
+   * The board still owns the droppable `<section>` underneath it.
+   */
+  const renderCollapsed = useCallback(
+    (ctx: KanbanCollapsedContext<IssueStatus, UnifiedIssueItem>) =>
+      issueCollapsedRail(ctx, { runningIds, onSelect, renderItemMenu }),
+    [runningIds, onSelect, renderItemMenu]
+  )
+
   return (
     <KanbanBoard<IssueStatus, UnifiedIssueItem>
       columns={columns}
@@ -200,9 +214,8 @@ export function IssueBoard({
         </div>
       )}
       renderItemMenu={renderItemMenu}
-      isCollapsed={(column) =>
-        resolveColumnCollapsed(column.id, column.items.length, columnCollapse ?? {})
-      }
+      isCollapsed={(column) => resolveColumnCollapsed(column.id, columnCollapse ?? {})}
+      renderCollapsed={renderCollapsed}
       onToggleCollapsed={onToggleColumnCollapsed}
       onAddItem={onAddIssue}
       isDimmed={isDimmed}

@@ -190,12 +190,12 @@ export interface IssueViewPreferences {
    * Per-column collapse OVERRIDES, not the collapsed set.
    *
    * An absent key means "follow the derived default", and the derived default
-   * is `collapse iff the column is empty` — which is what stops six columns
-   * from hogging 1790px when four of them are empty. A present key is the
-   * user's explicit decision and wins in both directions, so expanding an
-   * empty column sticks and collapsing a full one sticks. One field, three
-   * states per column; a plain `collapsedColumns` array cannot express
-   * "explicitly expanded even though empty" without a second array.
+   * is expanded — every column shows, empty ones included, so the board's
+   * shape is stable instead of shifting under the user as issues move. A
+   * present key is the user's explicit decision and wins in both directions,
+   * so collapsing a full column sticks and re-expanding sticks. One field,
+   * three states per column; a plain `collapsedColumns` array cannot express
+   * "explicitly expanded again" without a second array.
    */
   columnCollapse: Readonly<Partial<Record<IssueStatus, boolean>>>
   density: IssueListDensity
@@ -226,19 +226,16 @@ export function resolveIssueViewPreferences(
 }
 
 /**
- * Is this board column rendered as a vertical strip?
+ * Is this board column rendered as a collapsed rail?
  *
- * Derived default: an empty column collapses. An explicit override — set by
- * clicking the column header — wins in both directions.
+ * Derived default: every column is expanded. An explicit override — set by
+ * clicking the column header — is the only thing that collapses one.
  */
 export function resolveColumnCollapsed(
   status: IssueStatus,
-  itemCount: number,
   overrides: Readonly<Partial<Record<IssueStatus, boolean>>>
 ): boolean {
-  const explicit = overrides[status]
-  if (explicit !== undefined) return explicit
-  return itemCount === 0
+  return overrides[status] ?? false
 }
 
 /**

@@ -171,7 +171,65 @@
     "destinationLocal": "此设备（默认）",
     "destinationShared": "共享工作区",
     "sharedUnavailable": "该共享工作区暂时无法新建议题。",
-    "subIssueOf": "{identifier} 的子议题"
+    "subIssueOf": "{identifier} 的子议题",
+    "createAnother": "继续创建下一个",
+    "moreOptions": "更多选项",
+    "write": "编辑",
+    "preview": "预览",
+    "nothingToPreview": "暂无内容可预览",
+    "descriptionPlaceholder": "添加描述（支持 Markdown）",
+    "relationships": "关联",
+    "cardPreview": "看板卡片",
+    "submitHint": "⌘↵",
+    "draftRestored": "已恢复草稿",
+    "toolbar": {
+      "heading": "标题",
+      "bold": "加粗",
+      "italic": "斜体",
+      "strikethrough": "删除线",
+      "code": "代码",
+      "link": "链接",
+      "bullet": "无序列表",
+      "number": "有序列表",
+      "task": "任务列表",
+      "quote": "引用"
+    },
+    "templates": {
+      "label": "模板",
+      "bug": "缺陷报告",
+      "feature": "功能请求",
+      "task": "任务",
+      "bugBody": "## 发生了什么\n\n\n\n## 复现步骤\n\n1. \n2. \n3. \n\n## 期望行为\n\n\n\n## 环境\n\n- ",
+      "featureBody": "## 背景与问题\n\n\n\n## 方案\n\n\n\n## 验收标准\n\n- [ ] \n- [ ] ",
+      "taskBody": "## 目标\n\n\n\n## 清单\n\n- [ ] \n- [ ] "
+    },
+    "issueRef": "引用一条 Issue",
+    "markdownHint": "支持 Markdown —— 输入 # 可引用 Issue",
+    "assignMe": "分配给我",
+    "dueQuick": {
+      "0": "今天",
+      "1": "明天",
+      "7": "下周"
+    },
+    "ai": {
+      "label": "AI 助手",
+      "draft": "根据标题生成描述",
+      "improve": "优化文字",
+      "suggest": "建议优先级、标签与预估",
+      "title": "建议标题",
+      "relations": "建议关联关系",
+      "duplicates": "可能的重复事项：",
+      "dismiss": "忽略",
+      "applied": "已应用 AI 建议",
+      "undo": "撤销",
+      "failed": "AI 助手失败，请重试。",
+      "noModel": "没有可用的模型 —— 请先配置模型提供方。",
+      "skipped": {
+        "empty": "还没有可处理的内容 —— 请先写标题或描述。",
+        "pii": "已跳过 —— 文本似乎包含敏感信息。",
+        "no-output": "模型没有返回可用结果。"
+      }
+    }
   },
   "conflicts": {
     "title": "{count, plural, other {# 项共享编辑需要处理}}",
@@ -607,6 +665,7 @@
     "cancel": "取消",
     "startsAt": "开始",
     "endsAt": "结束",
+    "clear": "清除",
     "progress": "完成 {done}/{total} · {pointsDone}/{points} 点",
     "progressBar": "迭代进度",
     "title": "迭代",

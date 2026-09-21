@@ -171,7 +171,65 @@
     "destinationLocal": "This device (default)",
     "destinationShared": "Shared workspace",
     "sharedUnavailable": "This shared workspace is not ready for new issues.",
-    "subIssueOf": "Sub-issue of {identifier}"
+    "subIssueOf": "Sub-issue of {identifier}",
+    "createAnother": "Create another",
+    "moreOptions": "More options",
+    "write": "Write",
+    "preview": "Preview",
+    "nothingToPreview": "Nothing to preview",
+    "descriptionPlaceholder": "Add a description — Markdown supported",
+    "relationships": "Relationships",
+    "cardPreview": "Board card",
+    "submitHint": "⌘↵",
+    "draftRestored": "Draft restored",
+    "toolbar": {
+      "heading": "Heading",
+      "bold": "Bold",
+      "italic": "Italic",
+      "strikethrough": "Strikethrough",
+      "code": "Code",
+      "link": "Link",
+      "bullet": "Bullet list",
+      "number": "Numbered list",
+      "task": "Task list",
+      "quote": "Quote"
+    },
+    "templates": {
+      "label": "Templates",
+      "bug": "Bug report",
+      "feature": "Feature request",
+      "task": "Task",
+      "bugBody": "## What happened\n\n\n\n## Steps to reproduce\n\n1. \n2. \n3. \n\n## Expected\n\n\n\n## Environment\n\n- ",
+      "featureBody": "## Problem\n\n\n\n## Proposal\n\n\n\n## Acceptance criteria\n\n- [ ] \n- [ ] ",
+      "taskBody": "## Goal\n\n\n\n## Checklist\n\n- [ ] \n- [ ] "
+    },
+    "issueRef": "Reference an issue",
+    "markdownHint": "Markdown supported — type # to reference an issue",
+    "assignMe": "Assign to me",
+    "dueQuick": {
+      "0": "Today",
+      "1": "Tomorrow",
+      "7": "Next week"
+    },
+    "ai": {
+      "label": "AI assist",
+      "draft": "Draft description from title",
+      "improve": "Improve writing",
+      "suggest": "Suggest priority, labels & estimate",
+      "title": "Suggest title",
+      "relations": "Suggest relationships",
+      "duplicates": "Possible duplicates:",
+      "dismiss": "Dismiss",
+      "applied": "AI suggestion applied",
+      "undo": "Undo",
+      "failed": "AI assist failed — try again.",
+      "noModel": "No model available — configure a provider first.",
+      "skipped": {
+        "empty": "Nothing to work on yet — write a title or description first.",
+        "pii": "Skipped — the text looks like it contains sensitive data.",
+        "no-output": "The model returned nothing usable."
+      }
+    }
   },
   "conflicts": {
     "title": "{count, plural, one {Shared edit needs review} other {# shared edits need review}}",
@@ -607,6 +665,7 @@
     "cancel": "Cancel",
     "startsAt": "Starts",
     "endsAt": "Ends",
+    "clear": "Clear",
     "progress": "{done}/{total} done · {pointsDone}/{points} pts",
     "progressBar": "Cycle progress",
     "title": "Cycles",

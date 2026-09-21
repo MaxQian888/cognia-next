@@ -138,17 +138,17 @@ describe("IssueBoard", () => {
   })
 
   describe("collapse", () => {
-    it("collapses an empty column by default", () => {
+    it("keeps every column expanded by default, empty ones included", () => {
       render(<IssueBoard items={[item({ status: "todo" })]} />)
-      expect(screen.getByTestId("issue-column-done")).toHaveAttribute("data-collapsed", "true")
-      expect(screen.getByTestId("issue-column-todo")).not.toHaveAttribute("data-collapsed")
+      for (const status of ISSUE_STATUSES) {
+        expect(screen.getByTestId(`issue-column-${status}`)).not.toHaveAttribute("data-collapsed")
+      }
     })
 
     it("keeps a collapsed column droppable, so no transition disappears", () => {
-      render(<IssueBoard items={[item({ status: "todo" })]} />)
-      expect(droppableCalls.map((call) => call.id)).toEqual(
-        expect.arrayContaining(ISSUE_STATUSES.map((status) => `col:${status}`))
-      )
+      render(<IssueBoard items={[item({ status: "todo" })]} columnCollapse={{ done: true }} />)
+      expect(screen.getByTestId("issue-column-done")).toHaveAttribute("data-collapsed", "true")
+      expect(droppableCalls).toContainEqual({ id: "col:done", disabled: false })
     })
 
     it("honours an explicit collapse on a populated column", () => {
@@ -156,7 +156,7 @@ describe("IssueBoard", () => {
       expect(screen.getByTestId("issue-column-todo")).toHaveAttribute("data-collapsed", "true")
     })
 
-    it("reports the column's item count when toggled, so the flip is relative to what is shown", () => {
+    it("reports the toggled column so the consumer can write the inverse", () => {
       const onToggle = jest.fn()
       render(
         <IssueBoard
@@ -165,14 +165,16 @@ describe("IssueBoard", () => {
         />
       )
       fireEvent.click(screen.getByTestId("issue-column-collapse-todo"))
-      expect(onToggle).toHaveBeenCalledWith("todo", 2)
+      expect(onToggle).toHaveBeenCalledWith("todo")
     })
 
-    it("expands from the collapsed strip", () => {
+    it("expands from the collapsed rail", () => {
       const onToggle = jest.fn()
-      render(<IssueBoard items={[]} onToggleColumnCollapsed={onToggle} />)
+      render(
+        <IssueBoard items={[]} columnCollapse={{ done: true }} onToggleColumnCollapsed={onToggle} />
+      )
       fireEvent.click(screen.getByTestId("issue-column-expand-done"))
-      expect(onToggle).toHaveBeenCalledWith("done", 0)
+      expect(onToggle).toHaveBeenCalledWith("done")
     })
 
     it("offers no collapse control without a handler", () => {
@@ -329,9 +331,9 @@ describe("IssueBoard", () => {
       expect(screen.queryByTestId("issue-drop-indicator-in_progress")).not.toBeInTheDocument()
     })
 
-    it("marks a collapsed strip too, since an empty column is the usual target", () => {
+    it("marks a collapsed rail too, since it stays a legal drop target", () => {
       const card = item({ status: "todo" })
-      render(<IssueBoard items={[card]} />)
+      render(<IssueBoard items={[card]} columnCollapse={{ done: true }} />)
       act(() => dndHandlers.onDragStart?.({ active: { id: card.unifiedId } }))
       act(() => dndHandlers.onDragOver?.({ over: { id: "col:done" } }))
       const indicator = screen.getByTestId("issue-drop-indicator-done")

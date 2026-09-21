@@ -27,6 +27,7 @@ const mockToastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => mockToastError(...a) } }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { IssueCycle } from "@/types/issues"
 import { CycleEditorList } from "./cycle-editor-list"
 
@@ -86,15 +87,62 @@ describe("CycleEditorList", () => {
     expect(screen.getByTestId("manage-cycles-name")).toHaveValue("")
   })
 
+  it("creates a milestone with the picked dates through the kind toggle", async () => {
+    const user = userEvent.setup()
+    renderList({ cycles: [] })
+    await user.click(screen.getByTestId("manage-cycles-kind-milestone"))
+    fireEvent.change(screen.getByTestId("manage-cycles-name"), { target: { value: "v2.0" } })
+    await user.click(screen.getByTestId("manage-cycles-ends-new"))
+    // Calendar day buttons carry the day number; click "15".
+    await user.click(screen.getByRole("button", { name: /15/ }))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("manage-cycles-create"))
+    })
+    expect(mockCreate).toHaveBeenCalledWith({
+      projectId: "w1",
+      kind: "milestone",
+      name: "v2.0",
+      endsAt: expect.any(Number),
+    })
+  })
+
   it("surfaces a failed write as a toast rather than swallowing it", async () => {
+    const user = userEvent.setup()
     mockUpdate.mockRejectedValueOnce(new Error("offline"))
     renderList()
-    await act(async () => {
-      fireEvent.change(screen.getByTestId("manage-cycles-status-c1"), {
-        target: { value: "completed" },
-      })
-    })
+    await user.click(screen.getByTestId("manage-cycles-status-c1"))
+    await user.click(await screen.findByRole("option", { name: /statusLabel\.completed/ }))
     expect(mockUpdate).toHaveBeenCalledWith("c1", { status: "completed" })
+    await act(async () => Promise.resolve())
     expect(mockToastError).toHaveBeenCalledWith("offline")
+  })
+
+  it("clears a row date through the date pill's clear action", async () => {
+    const user = userEvent.setup()
+    renderList({ cycles: [{ ...cycle, startsAt: Date.UTC(2026, 0, 5, 12) }] })
+    await user.click(screen.getByTestId("manage-cycles-starts-c1"))
+    await user.click(await screen.findByTestId("manage-cycles-starts-c1-clear"))
+    expect(mockUpdate).toHaveBeenCalledWith("c1", { startsAt: null })
+  })
+
+  it("changes the row scope through the select", async () => {
+    const user = userEvent.setup()
+    renderList({
+      projects: [
+        {
+          id: "p1",
+          projectId: "w1",
+          name: "Demo",
+          key: "DEMO",
+          externalRefs: [],
+          externalKeys: [],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ] as never,
+    })
+    await user.click(screen.getByTestId("manage-cycles-scope-c1"))
+    await user.click(await screen.findByRole("option", { name: "Demo" }))
+    expect(mockUpdate).toHaveBeenCalledWith("c1", { issueProjectId: "p1" })
   })
 })

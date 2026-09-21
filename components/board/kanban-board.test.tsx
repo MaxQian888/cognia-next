@@ -175,21 +175,53 @@ describe("KanbanBoard", () => {
       expect(droppableCalls).toContainEqual({ id: "col:todo", disabled: false })
     })
 
-    it("reports the column's item count when toggled from either side", () => {
+    it("reports the toggled column from either side", () => {
       const onToggleCollapsed = jest.fn()
       renderBoard([A, B], {
         isCollapsed: (column) => column.id === "done",
         onToggleCollapsed,
       })
       fireEvent.click(screen.getByTestId("k-column-collapse-todo"))
-      expect(onToggleCollapsed).toHaveBeenCalledWith("todo", 2)
+      expect(onToggleCollapsed).toHaveBeenCalledWith("todo")
       fireEvent.click(screen.getByTestId("k-column-expand-done"))
-      expect(onToggleCollapsed).toHaveBeenCalledWith("done", 0)
+      expect(onToggleCollapsed).toHaveBeenCalledWith("done")
     })
 
     it("offers no collapse control without a handler", () => {
       renderBoard([A])
       expect(screen.queryByTestId("k-column-collapse-todo")).not.toBeInTheDocument()
+    })
+
+    it("hands the column to renderCollapsed, keeping the droppable and expand wiring", () => {
+      const onToggleCollapsed = jest.fn()
+      const seen: string[] = []
+      renderBoard([A, B], {
+        isCollapsed: (column) => column.id === "todo",
+        onToggleCollapsed,
+        renderCollapsed: (ctx) => {
+          seen.push(ctx.items.map((item) => item.id).join(","))
+          return {
+            className: "w-20",
+            content: (
+              <button
+                type="button"
+                data-testid={`custom-expand-${ctx.columnId}`}
+                onClick={ctx.onExpand}
+              >
+                {ctx.label}:{ctx.count}
+              </button>
+            ),
+          }
+        },
+      })
+      const column = screen.getByTestId("k-column-todo")
+      expect(column).toHaveAttribute("data-collapsed", "true")
+      expect(column.className).toContain("w-20")
+      expect(screen.getByTestId("custom-expand-todo")).toHaveTextContent("L:todo:2")
+      expect(seen).toEqual(["a,b"])
+      expect(droppableCalls).toContainEqual({ id: "col:todo", disabled: false })
+      fireEvent.click(screen.getByTestId("custom-expand-todo"))
+      expect(onToggleCollapsed).toHaveBeenCalledWith("todo")
     })
   })
 

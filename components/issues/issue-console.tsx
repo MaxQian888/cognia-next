@@ -96,7 +96,7 @@ import { ManageCyclesDialog } from "./rail/manage-cycles-dialog"
 import { TrackerTabs } from "./tracker-tabs"
 import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
-import { CreateIssueDialog } from "./create-issue-dialog"
+import { CreateIssuePage } from "./create-issue-page"
 import { CollabConflictsPanel } from "./collab-conflicts-panel"
 import { SyncConflictsPanel } from "./sync-conflicts-panel"
 import { ImportIssuesDialog } from "./import/import-issues-dialog"
@@ -446,7 +446,6 @@ export function IssueConsole({
   const [createParent, setCreateParent] = useState<
     { id: string; identifier: string; issueProjectId: string } | undefined
   >(undefined)
-
   const openCreate = useCallback((status: IssueStatus = "backlog") => {
     setCreateParent(undefined)
     setCreateStatus(status)
@@ -591,6 +590,20 @@ export function IssueConsole({
     const column = buildIssueColumns(sorted).find((candidate) => candidate.status === item.status)
     if (!column) return
     await reorderIssues(reorderIssueColumn(column.items, action.unifiedId, action.targetIndex))
+  }
+
+  /** Shared props for the `CreateIssuePage` surface. */
+  const createSurfaceProps = {
+    open: createOpen,
+    onOpenChange: (open: boolean) => {
+      setCreateOpen(open)
+      if (!open) setCreateParent(undefined)
+    },
+    projectId: projectId ?? "",
+    projects: projects ?? [],
+    status: createStatus,
+    parent: createParent,
+    onCreated: (issueId: string) => setSelectedId(`local:${issueId}`),
   }
 
   return (
@@ -774,7 +787,7 @@ export function IssueConsole({
           squadRuns={squadRunsByUnifiedId}
           planningHints={planningHints}
           columnCollapse={prefs.columnCollapse}
-          onToggleColumnCollapsed={(status, count) => toggleColumnCollapsed(viewId, status, count)}
+          onToggleColumnCollapsed={(status) => toggleColumnCollapsed(viewId, status)}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onDrop={handleDrop}
@@ -859,17 +872,11 @@ export function IssueConsole({
       ) : null}
 
       {projectId ? (
-        <CreateIssueDialog
-          open={createOpen}
-          onOpenChange={(open) => {
-            setCreateOpen(open)
-            if (!open) setCreateParent(undefined)
-          }}
-          projectId={projectId}
-          projects={projects ?? []}
-          status={createStatus}
-          parent={createParent}
-          onCreated={(issueId) => setSelectedId(`local:${issueId}`)}
+        <CreateIssuePage
+          {...createSurfaceProps}
+          labels={writableLabels}
+          cycles={cycles ?? []}
+          issues={sorted}
         />
       ) : null}
     </FeaturePageShell>
