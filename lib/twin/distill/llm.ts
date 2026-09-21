@@ -80,8 +80,17 @@ export interface UsageDelta {
  * uses so workflow/distill costs reconcile with the chat path:
  *   • input/output taken as reported (no subtraction),
  *   • cache-read from AI SDK v6 `cachedInputTokens` (+ openai/deepseek aliases),
- *   • cache-write from Anthropic `providerMetadata.anthropic.cacheCreationInputTokens`.
+ *     else `ai@7`'s nested `usage.inputTokenDetails.cacheReadTokens`,
+ *   • cache-write from Anthropic `providerMetadata.anthropic.cacheCreationInputTokens`,
+ *     else the flat v6 field, else `ai@7`'s `inputTokenDetails.cacheWriteTokens`.
  * Every field coalesces to 0; never throws.
+ *
+ * The nested branch is not cosmetic. `ai@7` moved the cache counts off
+ * `LanguageModelUsage` and into `inputTokenDetails`, so a reader that knows
+ * only the v6 flat names books every cached token as 0 — which silently
+ * under-reports the cost of every ledgered call that hits a prompt cache, the
+ * calls where the discount is the whole point. The v6 names keep precedence so
+ * a provider that still reports both (or a recorded v6 fixture) is unchanged.
  */
 export function readUsageDelta(
   usage: Record<string, unknown> | undefined,
@@ -92,13 +101,21 @@ export function readUsageDelta(
     return Number.isFinite(num) ? num : 0
   }
   const anthropic = providerMetadata?.anthropic as Record<string, unknown> | undefined
+  const inputDetails = usage?.inputTokenDetails as Record<string, unknown> | undefined
   return {
     inputTokens: n(usage?.inputTokens ?? usage?.promptTokens),
     outputTokens: n(usage?.outputTokens ?? usage?.completionTokens),
     cacheReadTokens: n(
-      usage?.cachedInputTokens ?? usage?.cacheReadInputTokens ?? usage?.promptCacheHitTokens
+      usage?.cachedInputTokens ??
+        usage?.cacheReadInputTokens ??
+        usage?.promptCacheHitTokens ??
+        inputDetails?.cacheReadTokens
     ),
-    cacheCreationTokens: n(anthropic?.cacheCreationInputTokens ?? usage?.cacheCreationInputTokens),
+    cacheCreationTokens: n(
+      anthropic?.cacheCreationInputTokens ??
+        usage?.cacheCreationInputTokens ??
+        inputDetails?.cacheWriteTokens
+    ),
   }
 }
 

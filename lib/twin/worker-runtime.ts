@@ -1,4 +1,6 @@
 import { getTwinSource } from "@/lib/db/twin-sources"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
+import { ledgerUtilityCalls } from "@/lib/router-fusion/gate/utility-ledger"
 import { createAnthropicLlmClient } from "@/lib/twin/distill"
 import { type JobWorkerConfig, type SourceLoader } from "@/lib/twin/job-worker"
 import {
@@ -34,17 +36,32 @@ export async function buildTwinWorkerConfig(
   if (!settings.workerEnabled || !settings.llm.apiKey) return null
   const runtime = await buildTwinRuntimeAdapters(settings)
   if (!runtime.ready) return null
+  const llm = createAnthropicLlmClient({
+    provider: settings.llm.provider,
+    model: settings.llm.model,
+    apiKey: settings.llm.apiKey,
+    baseURL: settings.llm.baseURL,
+  })
   return {
     embedding: settings.embedding,
     vectorBackend: settings.storage.vectorBackend,
     store: runtime.adapters.store,
     sourceLoader: buildSourceLoader(),
     nameHints: settings.extraNameHints,
-    llm: createAnthropicLlmClient({
-      provider: settings.llm.provider,
-      model: settings.llm.model,
-      apiKey: settings.llm.apiKey,
-      baseURL: settings.llm.baseURL,
+    // Distillation is background generation, so Router + Fusion reserves and
+    // settles every sub-agent call the worker makes when `utilityLedger` is on
+    // (ADR-0188 D27). Off — the default — `ledgerUtilityCalls` hands `llm` back
+    // untouched and no Router + Fusion module is loaded.
+    llm: ledgerUtilityCalls(llm, {
+      binding: {
+        surface: "utilityLedger",
+        origin: "utility",
+        featureId: "twin-distill-worker",
+        providerId: settings.llm.provider,
+        modelId: settings.llm.model,
+        workspaceId: null,
+      },
+      settings: await currentRouterFusionGateSettings(),
     }),
   }
 }

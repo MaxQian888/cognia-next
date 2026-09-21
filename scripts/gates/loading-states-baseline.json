@@ -30,7 +30,7 @@
     "components/chat/chat-tab-strip.tsx",
     "components/chat/chat-view.tsx",
     "components/chat/composer.tsx",
-    "components/chat/composer/attachment-preview-sheet.tsx",
+    "components/chat/composer/attachment-preview-dialog.tsx",
     "components/chat/composer/attachment-preview.tsx",
     "components/chat/composer/enhance-button.tsx",
     "components/chat/computer-use-picture-in-picture.tsx",

@@ -1,5 +1,11 @@
 [
   {
+    "file": "lib/router-fusion/calls/role-call-executor.ts",
+    "boundaries": ["ai"],
+    "reason": "Router + Fusion role call: one AI SDK request to one pinned deployment for a cascade, panel or delegate step (ADR-0188).",
+    "protection": "Gated upstream, not here: a chat fusion transcript is checked with hasNoLeakingPiiDeep before any run exists (lib/router-fusion/chat/chat-fusion-turn.ts, PII_BLOCKED); workspace evidence is checked with hasNoLeakingPii after the read (lib/router-fusion/tools/workspace-read.ts, CONTENT_SENSITIVE). Run API and compat input is the external caller's own content, like passthrough (ADR-0188 B3 PII decision)."
+  },
+  {
     "file": "hooks/canvas/use-canvas-actions.ts",
     "boundaries": ["ai"],
     "reason": "User explicitly requests canvas generation.",

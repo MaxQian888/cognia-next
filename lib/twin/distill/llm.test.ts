@@ -377,4 +377,64 @@ describe("readUsageDelta", () => {
   it("preserves a genuine 0 input without swallowing it via ??", () => {
     expect(readUsageDelta({ inputTokens: 0, promptTokens: 99 }).inputTokens).toBe(0)
   })
+
+  // ai@7 moved the cache counts into `usage.inputTokenDetails`. Before WP-L1
+  // this reader knew only the v6 flat names, so on ai@7 every cached token was
+  // booked as 0 and every ledgered call that hit a prompt cache under-reported
+  // its cost.
+  it("reads the ai@7 nested cache counts from inputTokenDetails", () => {
+    expect(
+      readUsageDelta({
+        inputTokens: 1000,
+        outputTokens: 40,
+        inputTokenDetails: { noCacheTokens: 300, cacheReadTokens: 700, cacheWriteTokens: 120 },
+        outputTokenDetails: { textTokens: 40, reasoningTokens: 0 },
+        totalTokens: 1040,
+      })
+    ).toEqual({
+      inputTokens: 1000,
+      outputTokens: 40,
+      cacheReadTokens: 700,
+      cacheCreationTokens: 120,
+    })
+  })
+
+  it("keeps the v6 flat fields ahead of the nested ones when a provider reports both", () => {
+    expect(
+      readUsageDelta(
+        {
+          inputTokens: 10,
+          outputTokens: 5,
+          cachedInputTokens: 3,
+          cacheCreationInputTokens: 4,
+          inputTokenDetails: { cacheReadTokens: 999, cacheWriteTokens: 888 },
+        },
+        { anthropic: { cacheCreationInputTokens: 22 } }
+      )
+    ).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 3,
+      cacheCreationTokens: 22,
+    })
+  })
+
+  it("tolerates an ai@7 result whose detail fields are undefined", () => {
+    expect(
+      readUsageDelta({
+        inputTokens: 7,
+        outputTokens: 2,
+        inputTokenDetails: {
+          noCacheTokens: undefined,
+          cacheReadTokens: undefined,
+          cacheWriteTokens: undefined,
+        },
+      })
+    ).toEqual({
+      inputTokens: 7,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    })
+  })
 })

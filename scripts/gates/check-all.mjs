@@ -230,6 +230,9 @@ const REGISTRY = [
   // ADR-0188: Router + Fusion is opt-in, so shared modules may reach it only
   // through its gate; a static import would put it on every user's send path.
   { script: "audit:router-fusion-gate", group: "audit" },
+  // ADR-0188 D27: every direct LLM generation call sits behind a ledgered seam
+  // or on a reviewed baseline row. The baseline may only shrink.
+  { script: "audit:llm-ledger-boundary", group: "audit" },
   // ADR-0149: "account" means four different things and none of them is a
   // person. The counts may only shrink.
   { script: "audit:identity-vocabulary", group: "audit" },
@@ -282,6 +285,8 @@ const REGISTRY = [
   { script: "pet:compat:test", group: "gate-tests" },
   { script: "audit:workspace-attribution:test", group: "gate-tests" },
   { script: "audit:router-fusion-gate:test", group: "gate-tests" },
+  { script: "audit:llm-ledger-boundary:test", group: "gate-tests" },
+  { script: "router-fusion:live-smoke:test", group: "gate-tests" },
   // `node --test` over mobile/scripts/ — the iOS project/plist configurators
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
   // no runner at all and their assertions never executed.

@@ -5,6 +5,11 @@ import {
   embeddingProviderRequiresBaseURL,
 } from "@cognia/provider-embedding/embedding-catalog"
 import { createLlmRerankScorer, lexicalRerankScorer } from "./reranker"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
+import {
+  ledgerUtilityCalls,
+  type LedgerUtilityCallsInput,
+} from "@/lib/router-fusion/gate/utility-ledger"
 import { createLlmClient, createTwinLanguageModel } from "@/lib/twin/distill/llm"
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { TwinRuntimeSettings } from "@/types/twin"
@@ -132,7 +137,13 @@ export async function buildTwinRuntimeAdapters(
   if (!storeConfig) return { ready: false, reason: "incomplete-storage" }
   try {
     const store = createVectorStore(storeConfig)
-    const reranker = buildReranker(settings)
+    // The LLM reranker is background generation: Router + Fusion reserves and
+    // settles each rerank call when `utilityLedger` is on (ADR-0188 D27). The
+    // read is here rather than in `buildReranker` because the gate settings
+    // live behind an await and the builder is synchronous; off, it is one
+    // property read and the scorer's client comes back untouched.
+    const gateSettings = await currentRouterFusionGateSettings()
+    const reranker = buildReranker(settings, gateSettings)
     const expansion = await buildExpansion(settings)
     return {
       ready: true,
@@ -202,7 +213,10 @@ type TwinSettings = Awaited<ReturnType<typeof getTwinRuntimeSettings>>
  * reranking is off. See the call site in `tryBuildTwinDeps` for the strategy
  * matrix (lexical vs LLM, with graceful fallback).
  */
-function buildReranker(settings: TwinSettings): TwinDepsForBuild["reranker"] {
+function buildReranker(
+  settings: TwinSettings,
+  gateSettings: LedgerUtilityCallsInput["settings"]
+): TwinDepsForBuild["reranker"] {
   const rr = settings.reranker
   if (!rr?.enabled) return undefined
 
@@ -221,12 +235,25 @@ function buildReranker(settings: TwinSettings): TwinDepsForBuild["reranker"] {
     return { model: "lexical", overFetch: 3, scorer: lexicalRerankScorer }
   }
 
-  const client = createLlmClient({
-    provider: llm.provider,
-    model: llm.model,
-    apiKey: llm.apiKey,
-    baseURL: llm.baseURL,
-  })
+  const client = ledgerUtilityCalls(
+    createLlmClient({
+      provider: llm.provider,
+      model: llm.model,
+      apiKey: llm.apiKey,
+      baseURL: llm.baseURL,
+    }),
+    {
+      binding: {
+        surface: "utilityLedger",
+        origin: "utility",
+        featureId: "twin-rerank",
+        providerId: llm.provider,
+        modelId: llm.model,
+        workspaceId: null,
+      },
+      settings: gateSettings,
+    }
+  )
   return {
     model: rr.model,
     // Wider pool for the LLM to choose from; one batched call re-ranks it.
