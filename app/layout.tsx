@@ -41,6 +41,7 @@ import { StoragePersistenceInitializer } from "@/components/providers/initialize
 import { ProjectStoreInitializer } from "@/components/providers/initializers/project-store-initializer"
 import { IssueTrackerInitializer } from "@/components/providers/initializers/issue-tracker-initializer"
 import { PlanNotificationInitializer } from "@/components/providers/initializers/plan-notification-initializer"
+import { ImNotifyInitializer } from "@/components/providers/initializers/im-notify-initializer"
 import { WindowTitleInitializer } from "@/components/providers/initializers/window-title-initializer"
 import { ContextKeysInitializer } from "@/components/providers/initializers/context-keys-initializer"
 import { SessionFocusInitializer } from "@/components/providers/initializers/session-focus-initializer"
@@ -292,6 +293,10 @@ export default async function RootLayout({
                               {/* Handler for the Approve / Discard buttons on a
                                * plan-awaiting-approval notification (ADR-0045). */}
                               <PlanNotificationInitializer />
+                              {/* Armed sessions ping their bound IM conversation
+                                  on settle — armed by the context-bar bell on
+                                  the welcome composer. */}
+                              <ImNotifyInitializer />
                               {/* Capability-scoped dynamic boundaries keep optional
                                * subsystem graphs out of the main profile's initial
                                * compile. Production/eager requests every group;

@@ -18,6 +18,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { listUsageForSession, type SessionUsageRow } from "@/lib/db/session-usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import {
@@ -64,39 +65,41 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compac
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "inline-flex h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground",
-            "hover:bg-muted/50 focus-visible:bg-muted/50"
-          )}
-          aria-label={t("trigger")}
-          data-testid="session-cost-trigger"
-          data-compact={compact || undefined}
-        >
-          <CircleDollarSignIcon className="size-3.5" />
-          {compact ? (
-            <span
-              className="font-mono"
-              title={t("tokensTitle", { input: inputs, output: outputs })}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "inline-flex h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground",
+                "hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/50"
+              )}
+              aria-label={t("trigger")}
+              data-testid="session-cost-trigger"
+              data-compact={compact || undefined}
             >
-              {cost > 0
-                ? `$${cost.toFixed(2)}`
-                : tokensLabel(formatTokens(inputs), formatTokens(outputs))}
-            </span>
-          ) : (
-            <>
-              <span title={t("tokensTitle", { input: inputs, output: outputs })}>
-                {tokensLabel(formatTokens(inputs), formatTokens(outputs))}
-              </span>
-              {cost > 0 && <span className="font-mono">· ${cost.toFixed(4)}</span>}
-            </>
-          )}
-        </Button>
-      </PopoverTrigger>
+              <CircleDollarSignIcon className="size-3.5" />
+              {compact ? (
+                <span className="font-mono">
+                  {cost > 0
+                    ? `$${cost.toFixed(2)}`
+                    : tokensLabel(formatTokens(inputs), formatTokens(outputs))}
+                </span>
+              ) : (
+                <>
+                  <span>{tokensLabel(formatTokens(inputs), formatTokens(outputs))}</span>
+                  {cost > 0 && <span className="font-mono">· ${cost.toFixed(4)}</span>}
+                </>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {t("tokensTitle", { input: inputs, output: outputs })}
+        </TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
         <div className="space-y-1">
           <p className="text-sm font-medium">{t("title")}</p>

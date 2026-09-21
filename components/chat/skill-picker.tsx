@@ -2,40 +2,40 @@
 
 import { useTranslations } from "next-intl"
 import { CheckIcon, SparklesIcon } from "lucide-react"
-import { useLiveQueryState } from "@/hooks/ui/use-live-query-state"
 import {
-  CommandDialog,
   CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { useLiveQueryState } from "@/hooks/ui/use-live-query-state"
 import { listSkills } from "@/lib/db/skills"
 
-interface Props {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+interface SkillPickerContentProps {
+  /** Live-reads the skills table only while this is `true`. */
+  active: boolean
   value: string[]
   onChange: (ids: string[]) => void
 }
 
 /**
- * Multi-select command dialog for attaching one or more skills to the next
- * outgoing message. Modeled on `components/chat/character-picker.tsx`.
- * Filters to enabled, non-builtin skills.
+ * The searchable grouped skill list, without its container — the composer's
+ * skills flyout renders it inside its own `Command` + `Popover` (see
+ * `components/chat/composer/skills-menu-entry.tsx`). Multi-select: picking a
+ * row toggles its id in `value`.
  */
-export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
+export function SkillPickerContent({ active, value, onChange }: SkillPickerContentProps) {
   const t = useTranslations("skills.composer.skillPicker")
-  // Only observe the (whole) skills table while the dialog is open — the
-  // picker stays mounted for the toolbar trigger, and the table is written on
-  // every send (usage telemetry), so an always-on liveQuery would re-render
-  // the closed dialog on each message.
+  // Only observe the (whole) skills table while the host is open — the
+  // picker stays mounted inside the composer's `+` menu row, and the table is
+  // written on every send (usage telemetry), so an always-on liveQuery would
+  // re-render the closed flyout on each message.
   // `?? []` here used to collapse "not read yet" into "there are none", so the
-  // dialog opened onto its "no skills" copy and then popped the list in.
+  // flyout opened onto its "no skills" copy and then popped the list in.
   const { data: skills, isLoading } = useLiveQueryState(
-    () => (open ? listSkills() : Promise.resolve([])),
-    [open]
+    () => (active ? listSkills() : Promise.resolve([])),
+    [active]
   )
   const enabled = (skills ?? []).filter((s) => (s.status ?? "enabled") === "enabled")
   const custom = enabled.filter((s) => !s.isBuiltIn)
@@ -58,12 +58,7 @@ export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
   )
 
   return (
-    <CommandDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t("title")}
-      description={t("description")}
-    >
+    <>
       <CommandInput placeholder={t("searchPlaceholder")} />
       <CommandList>
         {/* Suppressed while the read is in flight — cmdk renders this whenever
@@ -76,6 +71,6 @@ export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
           <CommandGroup heading={t("builtinGroupHeading")}>{builtin.map(renderItem)}</CommandGroup>
         )}
       </CommandList>
-    </CommandDialog>
+    </>
   )
 }

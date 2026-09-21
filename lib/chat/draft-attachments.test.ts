@@ -45,6 +45,54 @@ describe("draftAttachmentsFromFiles", () => {
   })
 
   describe("with staged state", () => {
+    it("restores the original MIME type when the delivery preview was transcoded", () => {
+      const rows = draftAttachmentsFromFiles(
+        [{ id: "a", filename: "source.png", mediaType: "image/jpeg" }],
+        new Map([
+          [
+            "a",
+            {
+              sizeBytes: 3,
+              bytes: new Uint8Array(3),
+              extracted: { tokens: 1, original: new Blob(["png"], { type: "image/png" }) },
+            },
+          ],
+        ])
+      )
+      expect(rows[0]?.mediaType).toBe("image/png")
+    })
+    it("retains located derived content and the image OCR opt-in across draft saves", () => {
+      const extractedContent = {
+        attachmentId: "asset",
+        contentHash: "a".repeat(64),
+        status: "partial" as const,
+        segments: [
+          {
+            id: "caption",
+            text: "diagram",
+            locator: { type: "image" as const },
+            derivation: "description" as const,
+          },
+        ],
+        processor: { id: "vision", version: "1" },
+      }
+      const rows = draftAttachmentsFromFiles(
+        [{ id: "a", filename: "diagram.png" }],
+        new Map([
+          [
+            "a",
+            {
+              sizeBytes: 4,
+              bytes: new Uint8Array(4),
+              ocrText: "caption",
+              includeOcr: true,
+              extracted: { tokens: 4, extractedContent },
+            },
+          ],
+        ])
+      )
+      expect(rows[0]).toMatchObject({ extractedContent, ocrText: "caption", includeOcr: true })
+    })
     // Staged attachments carry blob: URLs, for which the URL estimate is always
     // 0 — which is exactly why the composer's size hint never used to render.
     it("prefers the real staged size over the URL estimate", () => {

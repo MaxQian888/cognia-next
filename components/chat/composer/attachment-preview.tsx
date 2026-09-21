@@ -1,30 +1,48 @@
 "use client"
 
 /**
- * Staged-attachment chips above the textarea.
+ * Staged-attachment tiles, inside the composer card's first row.
  *
- * Built ON the vendored `ai-elements/attachments` primitives rather than
- * re-implementing them. That is not just reuse — the vendored `inline` variant
- * is a fixed `h-8` flex row whose remove button sits IN the flex flow, which
- * structurally fixes two long-standing defects of the old hand-rolled markup:
- * an 80px image square next to 28px text chips blew the bar's height up, and an
- * absolutely-positioned remove button permanently covered the tail of the
- * filename on touch (where there is no hover to reveal it).
+ * Uniform 112×80 landscape tiles on the vendored `ai-elements/attachments`
+ * `grid` variant: media shows a real cover thumbnail (`AttachmentPreview` fills the
+ * tile; a video shows its sampled poster, not the source `<video>` — a 500 MB
+ * file does not need a second decoder for a thumbnail), and documents get a
+ * same-footprint icon tile with a middle-truncated filename so the extension
+ * always survives (Finder convention).
+ *
+ * Click routing follows the attachment type:
+ *   - image           → `ImageLightbox` over every staged image (the model
+ *                       audit stays reachable from its "Model view" action,
+ *                       which swaps into the preview dialog's model tab)
+ *   - video / document / rejected → `AttachmentPreviewDialog` (file tab),
+ *                       which also carries OCR, redaction and video-sampling
+ *                       controls on the model tab
+ *
+ * While a tile is in flight (`extracting`, or before its staged entry exists)
+ * its content dims and a type-specific cue rides on top: a scan sweep for
+ * images, a real progress bar + hidden play badge for videos, a spinner badge
+ * for documents. Rejection flips the border to destructive.
  *
  * `<AnimatePresence>` is mounted UNCONDITIONALLY — above any "no attachments"
  * early return. Returning null first would unmount the presence boundary along
- * with the chip that is trying to leave, so removing the LAST attachment popped
+ * with the tile that is trying to leave, so removing the LAST attachment popped
  * instead of animating out while removing any other one animated correctly.
- *
- * A video chip shows the sampled poster rather than the vendored inline
- * `<video>`: that element points at the source blob, and a 500 MB file does not
- * need a second decoder running for a 20px thumbnail.
  */
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { AnimatePresence, motion } from "motion/react"
-import { AlertTriangleIcon, FileVideoIcon, Loader2Icon } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import {
+  AlertTriangleIcon,
+  FileTextIcon,
+  FileVideoIcon,
+  GlobeIcon,
+  Loader2Icon,
+  Music2Icon,
+  PaperclipIcon,
+  PlayIcon,
+  ScanTextIcon,
+} from "lucide-react"
 import {
   DndContext,
   KeyboardSensor,
@@ -44,22 +62,26 @@ import { CSS } from "@dnd-kit/utilities"
 
 import {
   Attachment,
-  AttachmentInfo,
   AttachmentPreview as AttachmentMediaPreview,
   AttachmentRemove,
   Attachments,
+  getMediaCategory,
   type AttachmentData,
+  type AttachmentMediaCategory,
 } from "@/components/ai-elements/attachments"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
 import { AnalyzingImage } from "@/components/loading-ui/analyzing-image"
+import { ImageLightbox, type ImageLightboxItem } from "@/components/chat/renderers/image-lightbox"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { applyOrder, resolveDragEnd } from "@/lib/chat/attachments/reorder"
 import type { RejectReason } from "@/lib/chat/attachments/dispatch"
 import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
 import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
+import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { useStagedAttachments, type StagedAttachmentState } from "./staged-attachment-store"
-import { AttachmentPreviewSheet, type PreviewTarget } from "./attachment-preview-sheet"
+import { AttachmentPreviewDialog, type PreviewTarget } from "./attachment-preview-dialog"
 
 export interface AttachmentPreviewProps {
   /** Runs OCR for an image attachment (invoked from the preview panel). */
@@ -71,7 +93,7 @@ export interface AttachmentPreviewProps {
   /** Appends the OCR text to the draft instead of attaching it to the payload. */
   onExtractOcrToInput?: (attachmentId: string) => void | Promise<void>
   /**
-   * When true, render only the chips (no padded container) so a parent bar can
+   * When true, render only the tiles (no padded container) so a parent bar can
    * lay attachments and references out in a single flex flow.
    */
   bare?: boolean
@@ -92,6 +114,14 @@ const REJECT_KEY: Record<RejectReason, string> = {
   "video-undecodable": "videoUndecodable",
   "video-too-large": "videoTooLarge",
   "video-unprocessed": "videoUnprocessed",
+  "audio-unprocessed": "audioUnprocessed",
+}
+
+const FILE_TILE_ICONS: Partial<Record<AttachmentMediaCategory, typeof FileTextIcon>> = {
+  audio: Music2Icon,
+  document: FileTextIcon,
+  source: GlobeIcon,
+  unknown: PaperclipIcon,
 }
 
 export function AttachmentPreview(props: AttachmentPreviewProps) {
@@ -100,9 +130,12 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
   const staged = useStagedAttachments()
   const transition = useReducedMotionTransition(mobileTransition("fast"))
   const [previewId, setPreviewId] = useState<string | null>(null)
+  const [previewTab, setPreviewTab] = useState<"file" | "model">("file")
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const tileTriggerRef = useRef<HTMLElement | null>(null)
 
-  // Chips follow the user's drag order, not insertion order — and so does the
+  // Tiles follow the user's drag order, not insertion order — and so does the
   // outbound payload (see `buildAttachmentBlocks`).
   const ordered = useMemo(
     () => applyOrder(attachments.files, staged.order),
@@ -116,7 +149,36 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
       : null
   }, [ordered, previewId])
 
-  // `distance: 4` is what lets a chip be both draggable and clickable: a press
+  // The lightbox only walks images — a video blob can't render in an <img>,
+  // and documents have nothing to zoom. Videos and files keep the dialog.
+  const imageItems: ImageLightboxItem[] = useMemo(
+    () =>
+      ordered
+        .filter(
+          (f) =>
+            f.url &&
+            (f.mediaType ?? "").startsWith("image/") &&
+            !isVideoDescriptor({
+              name: ("filename" in f ? f.filename : undefined) ?? "",
+              mediaType: f.mediaType ?? "",
+            })
+        )
+        .map((f) => ({
+          id: f.id,
+          src: f.url!,
+          filename: "filename" in f ? f.filename : undefined,
+          alt: ("filename" in f ? f.filename : undefined) ?? t("fallbackName"),
+        })),
+    [ordered, t]
+  )
+
+  const openModelView = (attachmentId: string) => {
+    setPreviewTab("model")
+    setPreviewId(attachmentId)
+    setLightboxIndex(null)
+  }
+
+  // `distance: 4` is what lets a tile be both draggable and clickable: a press
   // with no movement never starts a drag, so the preview button and the remove
   // button still receive their click.
   const sensors = useSensors(
@@ -151,7 +213,19 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
               // fight over the settle; framer keeps enter/exit either way.
               animateLayout={activeDragId === null}
               transition={transition}
-              onOpenPreview={() => setPreviewId(f.id)}
+              triggerRef={tileTriggerRef}
+              onOpenPreview={() => {
+                // Rejected attachments always go to the dialog — that's where
+                // the reason lives. Healthy images go fullscreen.
+                const rejected = staged.byId.get(f.id)?.status === "rejected"
+                const imageIndex = rejected ? -1 : imageItems.findIndex((i) => i.id === f.id)
+                if (imageIndex >= 0) {
+                  setLightboxIndex(imageIndex)
+                } else {
+                  setPreviewTab("file")
+                  setPreviewId(f.id)
+                }
+              }}
               onRemove={() => attachments.remove(f.id)}
               t={t}
             />
@@ -161,41 +235,71 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
     </DndContext>
   )
 
-  const sheet = (
-    <AttachmentPreviewSheet
-      open={previewId !== null}
-      onOpenChange={(next) => {
-        if (!next) setPreviewId(null)
-      }}
-      target={target}
-      state={previewId ? staged.byId.get(previewId) : undefined}
-      onRunOcr={props.onRunOcr}
-      ocrBusy={props.ocrBusy}
-      onViewOcrDetail={props.onViewOcrDetail}
-      onExtractOcrToInput={props.onExtractOcrToInput}
-      onToggleIncludeOcr={staged.toggleIncludeOcr}
-      videoRoute={props.videoRoute}
-      onApplyVideoSettings={staged.applyVideoSettings}
-    />
+  const activeImage = lightboxIndex !== null ? imageItems[lightboxIndex] : undefined
+
+  const overlays = (
+    <>
+      <ImageLightbox
+        items={imageItems}
+        open={lightboxIndex !== null}
+        activeIndex={lightboxIndex ?? 0}
+        returnFocusRef={tileTriggerRef}
+        onActiveIndexChange={setLightboxIndex}
+        onOpenChange={(open) => {
+          if (!open) setLightboxIndex(null)
+        }}
+        headerActions={
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="size-8 text-white hover:bg-white/15 hover:text-white"
+            onClick={() => activeImage && openModelView(activeImage.id)}
+            aria-label={t("preview.modelTab")}
+            tooltip={t("preview.modelTab")}
+          >
+            <ScanTextIcon className="size-4" />
+          </TooltipIconButton>
+        }
+      />
+      <AttachmentPreviewDialog
+        open={previewId !== null}
+        onOpenChange={(next) => {
+          if (!next) setPreviewId(null)
+        }}
+        target={target}
+        initialTab={previewTab}
+        state={previewId ? staged.byId.get(previewId) : undefined}
+        onRunOcr={props.onRunOcr}
+        ocrBusy={props.ocrBusy}
+        onViewOcrDetail={props.onViewOcrDetail}
+        onExtractOcrToInput={props.onExtractOcrToInput}
+        onToggleIncludeOcr={staged.toggleIncludeOcr}
+        videoRoute={props.videoRoute}
+        onApplyVideoSettings={staged.applyVideoSettings}
+        onProcessMedia={staged.processMedia}
+        onCancelProcessing={staged.cancelProcessing}
+        onRetry={staged.retry}
+      />
+    </>
   )
 
-  // `<Attachments>` is required in BOTH modes: it is what publishes
-  // `variant: "inline"` to the primitives below it. Without it they fall back to
-  // the context default of `"grid"`, which renders 96px squares and drops the
-  // filename entirely (`AttachmentInfo` returns null for grid). In bare mode it
-  // is `display: contents` so the chips still participate in the parent bar's
-  // flex flow rather than forming a nested row.
-  //
-  // `has-[>*]:pt-2` rather than a conditional return: the padding only applies
-  // while a chip is actually mounted, so an empty (or fully exited) row
-  // collapses to a true zero height without unmounting the presence boundary
-  // that the exit animation needs.
+  // Bare mode renders NO container at all: `DndContext`, `SortableContext` and
+  // `AnimatePresence` are all DOM-free, so the tiles land as direct children of
+  // the context row's flow — which keeps that flow's `:empty` / `:has(>*)`
+  // checks honest (a `display: contents` wrapper still counts as an element
+  // child and would defeat them). `Attachment` still resolves `variant: "grid"`
+  // — that is the context default, the wrapper only re-published it. The
+  // non-bare path keeps `<Attachments>` for its own padded row.
   return (
     <>
-      <Attachments variant="inline" className={props.bare ? "contents" : "px-2 has-[>*]:pt-2"}>
-        {chips}
-      </Attachments>
-      {sheet}
+      {props.bare ? (
+        chips
+      ) : (
+        <Attachments variant="grid" className="ml-0 w-full px-2 has-[>*]:pt-2">
+          {chips}
+        </Attachments>
+      )}
+      {overlays}
     </>
   )
 }
@@ -203,14 +307,16 @@ export function AttachmentPreview(props: AttachmentPreviewProps) {
 type ChipTranslator = ReturnType<typeof useTranslations<"chat.composer.attachments">>
 
 /**
- * One draggable chip. The dnd-kit transform goes on an inner wrapper so it never
- * collides with the framer `layout` transform on the outer motion element.
+ * One draggable tile. The dnd-kit transform goes on an inner wrapper so it
+ * never collides with the framer `layout` transform on the outer motion
+ * element.
  */
 function SortableChip({
   file,
   state,
   animateLayout,
   transition,
+  triggerRef,
   onOpenPreview,
   onRemove,
   t,
@@ -219,6 +325,7 @@ function SortableChip({
   state: StagedAttachmentState | undefined
   animateLayout: boolean
   transition: ReturnType<typeof useReducedMotionTransition>
+  triggerRef: React.RefObject<HTMLElement | null>
   onOpenPreview: () => void
   onRemove: () => void
   t: ChipTranslator
@@ -236,6 +343,10 @@ function SortableChip({
     name: ("filename" in file ? file.filename : undefined) ?? "",
     mediaType: file.mediaType ?? "",
   })
+  const isImage = (file.mediaType ?? "").startsWith("image/") && !isVideo
+  // A tile is "in flight" before its staged entry exists and while it is being
+  // extracted — the visuals dim and the type-specific progress cue rides on top.
+  const extracting = !state || state.status === "extracting"
 
   return (
     <motion.div
@@ -256,27 +367,51 @@ function SortableChip({
         <Attachment
           data={file}
           onRemove={onRemove}
-          className={cn(state?.status === "rejected" && "border-destructive/60 bg-destructive/5")}
+          className={cn(
+            "border bg-muted/40 transition-colors",
+            state?.status === "rejected" && "border-destructive/60 bg-destructive/5"
+          )}
+          // Horizontal rectangles, slightly smaller than the grid's square
+          // (112×80 vs 96×96): media crops to a landscape thumb and file tiles
+          // get real width for their name — the shape photos and documents
+          // actually are. Inline style wins over the variant's `size-24`.
+          style={{ width: "7rem", height: "5rem" }}
           data-testid="composer-attachment-chip"
         >
           <button
             type="button"
             aria-label={t("openPreviewAria", { filename: displayName })}
-            onClick={onOpenPreview}
-            className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+            onClick={(e) => {
+              triggerRef.current = e.currentTarget
+              onOpenPreview()
+            }}
+            className={cn(
+              "block size-full cursor-pointer overflow-hidden rounded-[inherit] text-left outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring/70",
+              extracting && "opacity-70"
+            )}
           >
             {isVideo ? (
-              <VideoThumb poster={state?.video?.result?.poster} />
+              <VideoTile poster={state?.video?.result?.poster} processing={extracting} />
+            ) : isImage ? (
+              <AttachmentMediaPreview className="size-full" />
             ) : (
-              <AttachmentMediaPreview />
+              <FileTileContent
+                name={displayName}
+                category={getMediaCategory(file)}
+                sizeLabel={state ? formatBytesCompact(state.sizeBytes) : undefined}
+              />
             )}
-            <AttachmentInfo />
           </button>
-          <StatusBadge state={state} isImage={(file.mediaType ?? "").startsWith("image/")} t={t} />
+          {/* In-flight cues ride above the dimmed content, below the badges. */}
+          {extracting && isImage ? <ScanSweep /> : null}
+          {extracting && isVideo ? <VideoProgressBar fraction={state?.video?.progress} /> : null}
+          <div className="absolute bottom-1 left-1 flex max-w-[calc(100%-8px)] items-center rounded-md bg-background/85 px-1 py-0.5 backdrop-blur-sm empty:hidden">
+            <StatusBadge state={state} isImage={isImage} t={t} />
+          </div>
           <AttachmentRemove
             label={t("removeAria", { filename: displayName })}
-            // Always visible: these chips have room for it in the flex flow, and
-            // touch devices have no hover to reveal an opacity-0 button.
+            // Visible without hover, like the old chips: touch devices have no
+            // hover to reveal an opacity-0 button with.
             className="opacity-60 transition-opacity hover:opacity-100"
           />
         </Attachment>
@@ -285,13 +420,17 @@ function SortableChip({
   )
 }
 
-/** Same box as the vendored inline preview, holding the sampled poster. */
-function VideoThumb({ poster }: { poster?: { mediaType: string; base64: string } }) {
+/** Poster + play badge — the video tile never mounts the source `<video>`. */
+function VideoTile({
+  poster,
+  processing,
+}: {
+  poster?: { mediaType: string; base64: string }
+  /** While sampling runs there is nothing to play yet — the badge would lie. */
+  processing?: boolean
+}) {
   return (
-    <div
-      className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded bg-background"
-      data-testid="attachment-video-thumb"
-    >
+    <span className="relative block size-full" data-testid="attachment-video-thumb">
       {poster ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -300,16 +439,100 @@ function VideoThumb({ poster }: { poster?: { mediaType: string; base64: string }
           className="size-full object-cover"
         />
       ) : (
-        <FileVideoIcon className="size-3 text-muted-foreground" aria-hidden />
+        <span className="flex size-full items-center justify-center bg-muted">
+          <FileVideoIcon className="size-5 text-muted-foreground" aria-hidden />
+        </span>
       )}
-    </div>
+      {!processing ? (
+        <span
+          className="absolute inset-0 flex items-center justify-center"
+          aria-hidden
+          data-testid="attachment-play-badge"
+        >
+          <PlayIcon className="size-7 rounded-full bg-black/55 p-1.5 text-white" />
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * A shine band sweeping the tile — the "analyzing" idea from the status badge
+ * scaled up to tile size. Reduced motion gets the dim alone; the badge still
+ * announces the wait to screen readers.
+ */
+function ScanSweep() {
+  const reduce = useReducedMotion()
+  if (reduce) return null
+  return (
+    <span
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      aria-hidden
+      data-testid="attachment-scan-sweep"
+    >
+      <motion.span
+        className="absolute inset-x-0 h-9 bg-gradient-to-b from-transparent via-white/25 to-transparent dark:via-white/15"
+        animate={{ y: ["-150%", "380%"] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+      />
+    </span>
+  )
+}
+
+/** Real sampling progress as a bottom-edge bar — Telegram-style. */
+function VideoProgressBar({ fraction }: { fraction?: number }) {
+  return (
+    <span
+      className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15"
+      aria-hidden
+      data-testid="attachment-video-progress-bar"
+    >
+      <span
+        className="block h-full bg-primary transition-[width] duration-300 ease-out"
+        style={{ width: `${Math.min(100, Math.max(0, Math.round((fraction ?? 0) * 100)))}%` }}
+      />
+    </span>
+  )
+}
+
+/**
+ * Document tile — same footprint as the media tiles so the strip stays one
+ * uniform row. The filename middle-truncates: the stem ellipsis-collapses but
+ * the extension always survives (the ".pd / f" mid-word break is what this
+ * replaces).
+ */
+function FileTileContent({
+  name,
+  category,
+  sizeLabel,
+}: {
+  name: string
+  category: AttachmentMediaCategory
+  sizeLabel?: string
+}) {
+  const Icon = FILE_TILE_ICONS[category] ?? PaperclipIcon
+  const dot = name.lastIndexOf(".")
+  // Only a short tail counts as an extension — "archive.2026.notes" has a dot
+  // but ".notes" is not the interesting part to pin.
+  const hasExt = dot > 0 && name.length - dot <= 6
+  return (
+    <span className="flex size-full flex-col items-center justify-center gap-1 px-1.5 pb-1">
+      <Icon className="size-6 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="flex w-full min-w-0 items-baseline justify-center text-center text-[10px] leading-tight">
+        <span className="truncate">{hasExt ? name.slice(0, dot) : name}</span>
+        {hasExt ? <span className="shrink-0 text-muted-foreground">{name.slice(dot)}</span> : null}
+      </span>
+      {sizeLabel ? (
+        <span className="text-[9px] leading-none text-muted-foreground">{sizeLabel}</span>
+      ) : null}
+    </span>
   )
 }
 
 /**
  * What a sampled video will be sent as, e.g. "9 frames", once its run lands.
  * `native` only when the original file was actually prepared: a failed
- * preparation sends the storyboard, so the chip says so.
+ * preparation sends the storyboard, so the tile says so.
  */
 function videoChipLabel(state: StagedAttachmentState, t: ChipTranslator): string | null {
   const result = state.video?.result
@@ -321,7 +544,7 @@ function videoChipLabel(state: StagedAttachmentState, t: ChipTranslator): string
     : t("video.chipStoryboard", { count })
 }
 
-/** Extraction state as a compact trailing badge: spinner → token count → error. */
+/** Extraction state as a compact overlay badge: spinner → token count → error. */
 function StatusBadge({
   state,
   isImage,
@@ -336,7 +559,7 @@ function StatusBadge({
     const percent = Math.round((state.video.progress ?? 0) * 100)
     return (
       <span
-        className="flex shrink-0 items-center gap-1 tabular-nums text-[10px] text-muted-foreground"
+        className="flex items-center gap-1 tabular-nums text-[10px] text-muted-foreground"
         title={t("video.processing")}
         data-testid="attachment-video-progress"
       >
@@ -363,7 +586,7 @@ function StatusBadge({
     }
     return (
       <span
-        className="shrink-0 text-muted-foreground"
+        className="text-muted-foreground"
         title={t("extracting")}
         data-testid="attachment-extracting"
       >
@@ -376,7 +599,7 @@ function StatusBadge({
     const label = reason ? t(`rejectReason.${REJECT_KEY[reason]}` as never) : ""
     return (
       <span
-        className="flex shrink-0 items-center text-destructive"
+        className="flex items-center text-destructive"
         title={label}
         data-testid="attachment-rejected"
       >
@@ -385,12 +608,12 @@ function StatusBadge({
     )
   }
   // A video's text tokens are its one-line description; the frames' image
-  // cost is estimated in the panel. The chip says what goes out instead.
+  // cost is estimated in the panel. The tile says what goes out instead.
   const videoLabel = videoChipLabel(state, t)
   if (videoLabel) {
     return (
       <span
-        className="shrink-0 tabular-nums text-[10px] text-muted-foreground"
+        className="tabular-nums text-[10px] text-muted-foreground"
         data-testid="attachment-video-summary"
       >
         {videoLabel}
@@ -401,7 +624,7 @@ function StatusBadge({
   if (tokens <= 0) return null
   return (
     <span
-      className="shrink-0 tabular-nums text-[10px] text-muted-foreground"
+      className="tabular-nums text-[10px] text-muted-foreground"
       data-testid="attachment-tokens"
     >
       {t("tokenBadge", { tokens })}

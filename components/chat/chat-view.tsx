@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation"
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
   type Ref,
@@ -68,6 +70,9 @@ import { useCharacter } from "@/lib/data-hooks/context"
 import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
+import { SessionSummaryPopover } from "@/components/context-workbench/session-summary-popover"
+import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { useTitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -238,10 +243,26 @@ interface ChatPaneProps {
   onSetModel?: (model: string) => Promise<void>
   onResetRuntime?: () => Promise<void>
   onCreate: () => void
+  /**
+   * "Chat as a character" door — opens the character picker. Distinct from
+   * `onCreate` (the pane's new-conversation action): the character-missing
+   * banner uses it for its "pick another" button. Defaults to `onCreate`.
+   */
+  onPickCharacter?: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
+  /**
+   * Context bar fused onto the welcome hero composer's top edge — execution
+   * environment, base/branch, IM notify (`composer/context-bar.tsx`).
+   */
+  welcomeContextBarSlot?: ReactNode
+  /**
+   * Extra controls prepended into the welcome hero composer's toolbar row
+   * (before `BottomToolbar`) — currently the character-entry button.
+   */
+  welcomeComposerToolbar?: ReactNode
   /**
    * Dispatch a first turn from the welcome screen's hero composer: create the
    * session, then send into it. Mirrors `onUseSample` but takes full
@@ -342,9 +363,12 @@ export function ChatPane({
   onSetModel,
   onResetRuntime,
   onCreate,
+  onPickCharacter,
   onUseSample,
   onOpenSettings,
   newChatExecutionControls,
+  welcomeContextBarSlot,
+  welcomeComposerToolbar,
   recentSessions,
   onResumeSession,
   composerRef,
@@ -365,6 +389,7 @@ export function ChatPane({
   const tHistory = useTranslations("chat.history")
   const tConcurrent = useTranslations("chat.concurrent")
   const tInlineErr = useTranslations("chat.inlineError")
+  const tEmpty = useTranslations("chat.empty")
   const router = useRouter()
   // The pane is bound to its own session slice (defaulting to the focused
   // session) so a background pane reads + streams its own state independently.
@@ -406,6 +431,10 @@ export function ChatPane({
   const atCapacity = useIsAtStreamCap(boundId)
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
+  // Inside the workspace's projection scope the summary opener leaves the
+  // title bar and floats on the pane surface (`chat-surface-stage` below);
+  // embedded hosts keep it on their own header row, so this stays scoped.
+  const inScope = useTitleBarProjectionScope()
 
   // Split panes, Workflow Chat and Workbench can bind a session without
   // making it the global activeSessionId. Negotiate per mounted pane so those
@@ -602,10 +631,30 @@ export function ChatPane({
   const isMobileShell = usePlatform() === "mobile" || compactLayout
   const storedWelcomeStyle = useSettingsStore((s) => s.settings?.welcomeStyle)
   const userName = useSettingsStore((s) => s.settings?.userName)
+  const customHints = useSettingsStore((s) => s.settings?.welcomeHints)
   const welcomeStyle: WelcomeStyle = isMobileShell ? "minimal" : (storedWelcomeStyle ?? "rich")
   const handleToggleWelcomeStyle = useCallback((next: WelcomeStyle) => {
     void useSettingsStore.getState().save({ welcomeStyle: next })
   }, [])
+
+  // Typewriter hints inside the hero composer. The user's own list (Settings →
+  // Appearance → Personalization) replaces the generated pool entirely — a
+  // custom list that still mixed in generic prompts would read as noise the
+  // user explicitly removed. Otherwise: AI starters and character exemplars
+  // first (they personalise), then the curated hint list, with the dev-tool
+  // samples as the floor so the carousel never runs empty.
+  const heroHints = useMemo(() => {
+    const custom = (customHints ?? []).map((p) => p.trim()).filter((p) => p.length > 0)
+    if (custom.length > 0) return Array.from(new Set(custom)).slice(0, 10)
+    const dynamic = [...(aiStarters ?? []), ...(characterSamples ?? [])]
+    const curated = Array.from({ length: 8 }, (_, i) => tEmpty(`hints.h${i + 1}`))
+    const samples = (["explore", "review", "draft", "tests"] as const).map((id) =>
+      tEmpty(`samples.${id}Prompt`)
+    )
+    return Array.from(
+      new Set([...dynamic, ...curated, ...samples].map((p) => p.trim()).filter((p) => p.length > 0))
+    ).slice(0, 10)
+  }, [aiStarters, characterSamples, customHints, tEmpty])
 
   // Usage dashboard — only on the generic chat welcome. Surfaces that replace
   // the welcome copy entirely (the workflow-editor chat tab passes
@@ -654,16 +703,31 @@ export function ChatPane({
         // `onHeroSend` creates the session, then sends into it.
         composerSlot={
           onHeroSend && !emptyState ? (
-            <Composer
-              placement="hero"
-              session={null}
-              onStartNewSession={() => onCreate()}
-              onOpenSettings={(tab) => onOpenSettings(tab)}
-              onSend={onHeroSend}
-              onStop={() => void onStop()}
-              disabled={composerDisabled}
-              mobileMentionMembers={mobileMentionMembers}
-            />
+            <div className="flex w-full flex-col" data-ctxbar-scope>
+              {/* Context bar fused onto the hero composer's top edge, wrapped
+                  in the same reading-column geometry (`max-w-[52rem]` +
+                  `px-3 sm:px-5`) the Composer applies inside itself, so the
+                  strip shares the card's exact side edges. `data-ctxbar-scope`
+                  on the parent is the hook the strip's scoped CSS targets. */}
+              {welcomeContextBarSlot ? (
+                <div className="mx-auto w-full max-w-[52rem] px-3 sm:px-5">
+                  {welcomeContextBarSlot}
+                </div>
+              ) : null}
+              <Composer
+                placement="hero"
+                defaultSkin="dense"
+                placeholderHints={heroHints}
+                session={null}
+                onStartNewSession={() => onCreate()}
+                onOpenSettings={(tab) => onOpenSettings(tab)}
+                onSend={onHeroSend}
+                onStop={() => void onStop()}
+                disabled={composerDisabled}
+                mobileMentionMembers={mobileMentionMembers}
+                toolbar={welcomeComposerToolbar}
+              />
+            </div>
           ) : undefined
         }
       />
@@ -816,7 +880,10 @@ export function ChatPane({
           nothing when the character resolves or the id is a plain Dexie
           row that's simply missing. */}
       <ChatColumn className="mt-2">
-        <CharacterMissingBanner characterId={activeSession.characterId} onPickAnother={onCreate} />
+        <CharacterMissingBanner
+          characterId={activeSession.characterId}
+          onPickAnother={onPickCharacter ?? onCreate}
+        />
       </ChatColumn>
       {/* ADR-0123 — explains a turn that was durably accepted but is waiting,
           held offline, or stopped for human recovery. Renders nothing when a
@@ -835,6 +902,13 @@ export function ChatPane({
           top"). This wrapper is the positioned offset parent that popLayout
           pins the exiting branch against; keep it `relative`. */}
       <div className="relative flex min-h-0 flex-1 flex-col" data-slot="chat-surface-stage">
+        {/* The summary opener moved off the title bar onto the pane surface:
+            it floats at the stage's top-right, beside the right-hand column the
+            card opens into, and outside the scroll lane so it never scrolls
+            with the messages or overlaps the gates/notices above the stage.
+            Scoped to the workspace — embedded hosts keep it on their header.
+            Split panes each get their own, bound to that pane's session. */}
+        {inScope ? <ChatSummaryTrigger session={activeSession} /> : null}
         <AnimatePresence
           mode="popLayout"
           initial={false}
@@ -970,6 +1044,29 @@ export function ChatPane({
           )}
         </AnimatePresence>
       </div>
+    </>
+  )
+}
+
+/**
+ * The summary opener now lives on the pane surface rather than the title bar:
+ * a floating button pinned to the stage's top-right corner, next to the
+ * right-hand column the card opens into. It owns the `SessionSettingsSheet`
+ * the card's Manage action needs, so the opener and its settings sheet stay
+ * one self-contained unit wherever the workspace mounts a `ChatPane`.
+ */
+function ChatSummaryTrigger({ session }: { session: ChatSession }) {
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  return (
+    <>
+      <div className="absolute right-3 top-3 z-20 sm:right-4" data-testid="chat-summary-trigger">
+        <SessionSummaryPopover
+          key={session.id}
+          session={session}
+          onManage={() => setSettingsOpen(true)}
+        />
+      </div>
+      <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   )
 }

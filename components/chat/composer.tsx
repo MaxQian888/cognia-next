@@ -20,7 +20,7 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus, UIMessage } from "ai"
-import { FileTextIcon, SparklesIcon, XIcon } from "lucide-react"
+import { FileTextIcon, XIcon } from "lucide-react"
 import {
   ChangeEvent,
   forwardRef,
@@ -87,6 +87,7 @@ import { ComposerBox } from "./composer/composer-box"
 import {
   resolveComposerSkin,
   toolbarSitsInBox,
+  type ComposerSkinId,
   type ResolvedComposerSkin,
 } from "@/lib/chat/composer-skin"
 import { resolveStylePack } from "@/types/appearance/style-pack"
@@ -112,6 +113,7 @@ import { expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
 import { useElementHeight } from "@/hooks/use-element-height"
 import { Button } from "@/components/ui/button"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   detectTrigger,
   spliceToken,
@@ -280,7 +282,7 @@ import { WebSearchToggle } from "./composer/web-search-toggle"
 import { RoomTargetPicker } from "./composer/room-target-picker"
 import { clearComposerTyping, noteComposerTyping } from "@/stores/chat/composer-typing-store"
 import { roomTargetsOf } from "@/stores/chat/room-target-store"
-import { SkillPicker } from "./skill-picker"
+import { SkillsMenuEntry } from "./composer/skills-menu-entry"
 import { ComposerSessionProvider } from "./composer/composer-session-context"
 
 interface Props {
@@ -347,6 +349,25 @@ interface Props {
    * no list above it to fade from — see the class branch in the wrapper.
    */
   placement?: "docked" | "hero"
+  /**
+   * Per-surface default skin, used only when the user has NOT picked one
+   * (`composerBehavior.skin` still wins, then this, then the style pack's).
+   * The welcome hero passes `"dense"`: a first-run page should show the
+   * tighter, mono box rather than whatever the pack default happens to be.
+   */
+  defaultSkin?: ComposerSkinId
+  /**
+   * Rotating example prompts shown inside the empty box (the welcome hero's
+   * hint carousel). Painted as an overlay, never as a real placeholder — so
+   * the caret, focus and the chip/ghost layers are untouched, and the first
+   * keystroke hides it instantly. Omit for the static placeholder.
+   */
+  placeholderHints?: readonly string[]
+  /**
+   * Extra controls rendered inside the input card's control row, ahead of the
+   * status toolbar — e.g. the welcome surface's character-entry button.
+   */
+  toolbar?: ReactNode
 }
 
 /**
@@ -399,7 +420,18 @@ const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("chat")].jo
 // Plus videos, which are sampled into frames at staging time. Not offered in a
 // conversation bound to an IM platform: those files go to a person as they
 // are, and the intake refuses a video there anyway.
-const MOTION_ATTACHMENT_ACCEPT = [ATTACHMENT_ACCEPT, "video/*"].join(",")
+const MOTION_ATTACHMENT_ACCEPT = [
+  ATTACHMENT_ACCEPT,
+  "video/*",
+  "audio/*",
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".ogg",
+  ".opus",
+  ".flac",
+  ".aac",
+].join(",")
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
@@ -467,6 +499,8 @@ interface InnerProps {
   placeholder?: string
   mobileMentionMembers?: readonly Character[]
   workflowMention?: ComposerWorkflowMention
+  /** Rotating hints for the empty box — see `ComposerBoxProps`. */
+  placeholderHints?: readonly string[]
   /** Compact mode embeds the model and agent controls into the input surface. */
   compactLayout?: boolean
   /** Resolved by the outer `Composer` so one read feeds the whole tree. */
@@ -530,6 +564,7 @@ function ComposerInner(props: InnerProps) {
         session={props.session}
         status={props.status}
         disabled={props.disabled}
+        onOpenSettings={props.onOpenSettings}
       />
     )
 
@@ -592,6 +627,12 @@ function ComposerInner(props: InnerProps) {
   const chipOverlayRef = useRef<HTMLDivElement>(null)
   const shellDiagnosticOverlayRef = useRef<HTMLDivElement>(null)
   const ghostOverlayRef = useRef<HTMLDivElement>(null)
+  // The hint the carousel is currently showing — kept in a ref so Tab-accept
+  // in onKeyDown reads it without re-subscribing the keydown handler.
+  const activeHintRef = useRef("")
+  const noteActiveHint = useCallback((hint: string) => {
+    activeHintRef.current = hint
+  }, [])
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
   // Measured composer height — feeds the mobile @-mention popover so it floats
   // exactly above the composer instead of a hardcoded guess (which broke once
@@ -817,6 +858,9 @@ function ComposerInner(props: InnerProps) {
       ),
     [customCommands, pluginCommands]
   )
+  // Name → provenance for the chip overlay's pill tint. A callback (not the
+  // map) so the overlay never holds the command objects, only the answer.
+  const commandScope = useCallback((name: string) => commandMap.get(name)?.scope, [commandMap])
 
   // A pasted URL is FOLDED to its short label in the text, with the full URL
   // held aside (`lib/chat/link-fold.ts`). Every consumer below therefore has to
@@ -1189,32 +1233,6 @@ function ComposerInner(props: InnerProps) {
     history: history.entries,
     commands: ghostCommands,
   })
-  // Translated badge for where the active suggestion came from. A history hit
-  // is exact and free; a model hit is a guess that cost a call — the two look
-  // identical as dim text, so the source has to be stated.
-  const ghostSourceLabel = useMemo(() => {
-    switch (ghost.suggestion?.source) {
-      case "history":
-        return t("ghostSourceHistory")
-      case "command":
-        return t("ghostSourceCommand")
-      case "ai":
-        return t("ghostSourceAi")
-      case "agent":
-        return t("ghostSourceAgent")
-      // Unreachable today: no plugin can register an inline-completion
-      // provider (no SDK surface, and the provider list is built from the
-      // built-in factories), so nothing ever produces this source. Kept — with
-      // its label — so the branch is ready when that surface lands rather than
-      // being rediscovered then. Pinned by
-      // `lib/chat/completion/inline/types.test.ts`.
-      case "plugin":
-        return t("ghostSourcePlugin")
-      default:
-        return undefined
-    }
-  }, [ghost.suggestion?.source, t])
-
   // Lets `detectTrigger` tell a chained command (`/compact /cl`) from a path
   // argument (`/add-dir /usr/loc`): only a token that could still become a real
   // command name takes the popover anchor.
@@ -2042,8 +2060,8 @@ function ComposerInner(props: InnerProps) {
 
   // Accept the inline ghost-text suggestion: write the completed value back
   // into the textarea and park the caret at the end. Shared by the keyboard
-  // (Tab) path below and the mobile tap affordance (`MobileGhostAccept`), since
-  // touch devices have no Tab key. Returns false when there was nothing to
+  // (Tab) path below and the suggestion card's accept button, since touch
+  // devices have no Tab key. Returns false when there was nothing to
   // accept so the Tab keystroke can fall through to its default behavior.
   const acceptGhost = useCallback((): boolean => {
     const next = ghost.accept()
@@ -2102,6 +2120,32 @@ function ComposerInner(props: InnerProps) {
         e.preventDefault()
         const next = nextPermissionMode(permissionMode)
         setPermissionMode(next, props.session?.id ?? null)
+        return
+      }
+      // Tab on an empty box accepts the typewriter hint like a ghost
+      // completion — the whole hint lands in the input, caret at the end.
+      if (
+        e.key === "Tab" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        controller.textInput.value === "" &&
+        activeHintRef.current !== "" &&
+        !isComposing &&
+        !e.nativeEvent.isComposing
+      ) {
+        e.preventDefault()
+        const hint = activeHintRef.current
+        controller.textInput.setInput(hint)
+        setCaret(hint.length)
+        // A controlled textarea restores the pre-edit caret (position 0)
+        // once React commits the new value — park it at the end instead.
+        const el = e.currentTarget
+        requestAnimationFrame(() => {
+          if (document.activeElement === el) {
+            el.selectionStart = el.selectionEnd = el.value.length
+          }
+        })
         return
       }
       // While an IME composition is active, Enter / Arrow / Tab / Escape belong
@@ -2241,7 +2285,11 @@ function ComposerInner(props: InnerProps) {
       if (
         !completionTrigger &&
         e.altKey &&
-        e.key === "\\" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        // `e.code`, not `e.key`: on macOS Option+\ produces `«`, and an IME may
+        // swallow or translate the key — the physical key is the stable signal.
+        e.code === "Backslash" &&
         ghost.manualAvailable &&
         turnStatus !== "streaming"
       ) {
@@ -2252,20 +2300,26 @@ function ComposerInner(props: InnerProps) {
       // Tab accepts the dim continuation; Esc dismisses it; Alt+]/Alt+[ walk
       // the ranked alternatives (the same bindings VS Code uses for cycling
       // inline suggestions). All fall through to existing behavior when there
-      // is no ghost to act on.
-      if (!completionTrigger && ghost.ghost) {
-        if (e.key === "Tab" && !e.shiftKey) {
+      // is no ghost to act on — except Esc, which also cancels a thinking or
+      // failed round (the card is open and the user wants it gone).
+      if (!completionTrigger && (ghost.ghost || ghost.querying || ghost.completionError)) {
+        if (e.key === "Tab" && !e.shiftKey && ghost.ghost) {
           if (acceptGhost()) {
             e.preventDefault()
             return
           }
         }
-        if (e.altKey && (e.key === "]" || e.key === "[")) {
+        // `e.code` (physical key), not `e.key`: on macOS Option+] produces `‘`
+        // and an IME may emit `】`, so the character never matches. `!ctrlKey`
+        // keeps AltGr (Ctrl+Alt on Windows/Linux layouts) typing a real bracket.
+        if (e.altKey && !e.ctrlKey && !e.metaKey) {
+          const forward = e.code === "BracketRight" || e.key === "]"
+          const backward = e.code === "BracketLeft" || e.key === "["
           // Only meaningful with something to cycle to; otherwise let the
           // keystroke through so it still types a bracket.
-          if (ghost.candidates.length > 1) {
+          if ((forward || backward) && ghost.candidates.length > 1) {
             e.preventDefault()
-            if (e.key === "]") ghost.cycleNext()
+            if (forward) ghost.cycleNext()
             else ghost.cyclePrev()
             return
           }
@@ -2529,13 +2583,19 @@ function ComposerInner(props: InnerProps) {
                 status: "ready" as const,
                 sizeBytes: a.size,
                 bytes: a.bytes,
+                restoredContent: a.extractedContent,
+                ocrText: a.ocrText,
+                includeOcr: a.includeOcr,
                 ...(a.extractedText
                   ? {
                       extracted: {
-                        kind: "document" as const,
+                        kind: a.mediaType.startsWith("audio/")
+                          ? ("audio" as const)
+                          : ("document" as const),
                         block: { type: "text" as const, text: a.extractedText },
                         tokens: a.tokens ?? 0,
                         text: a.extractedText,
+                        extractedContent: a.extractedContent,
                       },
                     }
                   : {}),
@@ -2787,10 +2847,11 @@ function ComposerInner(props: InnerProps) {
     // model and not just the chrome.
     <ComposerSessionProvider value={props.session?.id ?? null}>
       <div ref={setContainerEl}>
-        {/* Every band stacked above the textarea shares one scroll container with
-          a height cap. Six attachments plus an active goal, an open loop and the
-          plan-mode banner could otherwise push the input off the bottom of the
-          screen. Each band still animates its own height inside it. */}
+        {/* Every band stacked above the input card shares one scroll container
+          with a height cap. Restored attachments, an active goal, an open loop
+          and the plan-mode banner could otherwise push the input off the
+          bottom of the screen. Each band still animates its own height inside
+          it. (Staged attachments live INSIDE the card — `contextRow`.) */}
         <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
           {pendingLaunchSpec ? (
             <TemplateLaunchDiffBar
@@ -2802,20 +2863,6 @@ function ComposerInner(props: InnerProps) {
               className="mb-1"
             />
           ) : null}
-          {/* One row, and only for what has no form in the text: attachments,
-              @-references, artifacts — plus any command that FAILED. Commands
-              and links show up in the text itself. */}
-          <ContextChipBar
-            videoRoute={props.videoRoute}
-            onRunOcr={handleRunOcrForPanel}
-            ocrBusy={ocr.status === "running"}
-            onExtractOcrToInput={handleExtractOcrToInput}
-            onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
-            preparingImageCount={preparingImageCount}
-            segments={segments}
-            commandErrors={commandErrors}
-            onRemoveCommand={removeCommandSegment}
-          />
           <Collapse>
             <DraftRestoredAttachments
               items={restoredAttachments}
@@ -2914,6 +2961,8 @@ function ComposerInner(props: InnerProps) {
           disabled={props.disabled}
           permissionMode={permissionMode}
           placeholder={props.placeholder}
+          placeholderHints={props.placeholderHints}
+          onActiveHintChange={noteActiveHint}
           textInput={controller.textInput}
           textareaRef={textareaRef}
           chipOverlayRef={chipOverlayRef}
@@ -2929,6 +2978,7 @@ function ComposerInner(props: InnerProps) {
           onSelect={onSelect}
           onMouseUp={onTextareaMouseUp}
           paramState={paramPillState}
+          commandScope={commandScope}
           preview={preview}
           saveAsTemplate={
             controller.textInput.value.trim().length > 0 ? () => setSaveTemplateOpen(true) : null
@@ -2955,7 +3005,6 @@ function ComposerInner(props: InnerProps) {
           onCopy={linkFolding.onCopy}
           onCut={linkFolding.onCut}
           ghost={ghost}
-          ghostSourceLabel={ghostSourceLabel}
           acceptGhost={acceptGhost}
           fileInputRef={fileInputRef}
           attachmentAccept={
@@ -2995,6 +3044,23 @@ function ComposerInner(props: InnerProps) {
               <VoiceTranscriptionBridge disabled={props.disabled} />
               <ComposerAppendBridge sessionId={props.session?.id} />
             </>
+          }
+          contextRow={
+            // One row, and only for what has no form in the text: attachments,
+            // @-references, artifacts — plus any command that FAILED. Commands
+            // and links show up in the text itself. Rendered INSIDE the input
+            // card so staged media reads as part of the message being written.
+            <ContextChipBar
+              videoRoute={props.videoRoute}
+              onRunOcr={handleRunOcrForPanel}
+              ocrBusy={ocr.status === "running"}
+              onExtractOcrToInput={handleExtractOcrToInput}
+              onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
+              preparingImageCount={preparingImageCount}
+              segments={segments}
+              commandErrors={commandErrors}
+              onRemoveCommand={removeCommandSegment}
+            />
           }
           t={t}
           tAttach={tAttach}
@@ -3167,16 +3233,13 @@ function ComposerCapabilityMenu({
   session,
   status,
   disabled,
+  onOpenSettings,
 }: {
   session?: ChatSession | null
   status: PromptStatus
   disabled?: boolean
+  onOpenSettings: (tab: SettingsTab) => void
 }) {
-  const ephemeralSkillIds = useComposerEphemeralSkillIds(session?.id ?? null) ?? []
-  const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
-  const tSkill = useTranslations("skills.composer.skillPicker")
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const isMobile = usePlatform() === "mobile"
   const isStreaming = status === "streaming"
   const controlsDisabled = disabled || isStreaming
 
@@ -3186,28 +3249,13 @@ function ComposerCapabilityMenu({
           box, so it belongs ON the box: it now sits beside the save-as-template
           bookmark in the input's corner, in the same icon-button style, where
           it is visible without opening a menu first. */}
-      <div className="flex flex-wrap items-center gap-2" data-testid="composer-capability-menu">
-        <WebSearchToggle disabled={controlsDisabled} />
+      {/* Each capability is a CapabilityRow — a full-width menu row matching
+          the menus' own entries, not a toolbar chip. */}
+      <div data-testid="composer-capability-menu">
+        <WebSearchToggle disabled={controlsDisabled} onOpenSettings={onOpenSettings} />
         <RoomTargetPicker session={session} disabled={controlsDisabled} />
-        <Button
-          type="button"
-          size="icon"
-          variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
-          onClick={() => setPickerOpen(true)}
-          aria-label={tSkill("trigger")}
-          disabled={controlsDisabled}
-          className={cn("size-7", isMobile && "touch-target")}
-          data-testid="composer-skill-trigger"
-        >
-          <SparklesIcon className="size-3.5" />
-        </Button>
+        <SkillsMenuEntry session={session} disabled={controlsDisabled} />
       </div>
-      <SkillPicker
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        value={ephemeralSkillIds}
-        onChange={(ids) => setEphemeralSkillIds(ids, session?.id ?? null)}
-      />
     </>
   )
 }
@@ -3229,6 +3277,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     mobileMentionMembers,
     workflowMention,
     placement = "docked",
+    defaultSkin,
+    placeholderHints,
+    toolbar,
   },
   ref
 ) {
@@ -3263,8 +3314,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // (ADR-0148).
   const packSkin = resolveStylePack(stylePack).composerSkin
   const skin = useMemo(
-    () => resolveComposerSkin(composerBehavior, { isMobile: isMobileShell, packSkin }),
-    [composerBehavior, isMobileShell, packSkin]
+    () =>
+      resolveComposerSkin(
+        { ...composerBehavior, skin: composerBehavior?.skin ?? defaultSkin },
+        { isMobile: isMobileShell, packSkin }
+      ),
+    [composerBehavior, isMobileShell, packSkin, defaultSkin]
   )
   const compactLayout = skin.compactLayout
   // `compactLayout` (the legacy desktop setting) has always put the row inside
@@ -3713,10 +3768,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
         (Array.isArray(content) && content.length === 0)
-      if (isEmpty) return true
       if (rejected.length > 0) {
-        toast.warning(tAttach("skipped", { count: rejected.length }))
+        toast.error(tAttach("processing.rejected", { count: rejected.length }))
+        return false
       }
+      if (isEmpty) return true
       if (linkContext.rejected.length > 0) {
         toast.warning(tAttach("linkSkipped", { count: linkContext.rejected.length }))
       }
@@ -3832,127 +3888,142 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         className="mx-auto w-full max-w-[52rem] px-3 sm:px-5"
         data-slot="composer-reading-column"
       >
-        <PromptInputProvider>
-          {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
+        {/* Scope the shared hover delay to the composer: every tooltip on the
+            box, its toolbar, and the detached toolbar row waits 500ms before
+            opening, so a pointer sweeping the strip no longer fires a wall of
+            instant popovers. The app-level provider stays at its default. */}
+        <TooltipProvider delayDuration={500}>
+          <PromptInputProvider>
+            {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
               the prompt-input provider: it derives everything from that
               provider's file list. */}
-          <StagedAttachmentsProvider motion={!session?.platformBinding}>
-            {session?.platformBinding && (
-              <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                <PlatformBadge platform={session.platformBinding.platform} />
-                <span className="min-w-0 flex-1 truncate">
-                  {tPlatform("destination", {
-                    platform: tPlatformName.has(session.platformBinding.platform)
-                      ? tPlatformName(session.platformBinding.platform)
-                      : session.platformBinding.platform,
-                    destination: session.title ?? session.platformBinding.conversationKey,
-                  })}
-                </span>
-                <PlatformReplyAssistance key={session.id} session={session} disabled={disabled} />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setDraftDialogOpen(true)}
-                >
-                  {tPlatform("reviewDrafts", { count: pendingDrafts.length })}
-                </Button>
-                <CannedResponsePicker
-                  conversationKey={session.platformBinding.conversationKey}
-                  context={{
-                    conversation: {
-                      title: session.title,
-                      platform: session.platformBinding.platform,
-                    },
-                    contact: { platform: session.platformBinding.platform },
-                  }}
-                />
-                <InboxComposerActionsHost
-                  conversationKey={session.platformBinding.conversationKey}
-                  adapterId={session.platformBinding.adapterId}
-                  platform={session.platformBinding.platform}
-                  sessionId={session.id}
-                  className="flex shrink-0 items-center gap-1 empty:hidden"
-                />
-              </div>
-            )}
-            {commandProgress && (
-              <div className="flex items-center gap-3 px-3 py-2 text-sm">
-                <div role="status" className="min-w-0 flex-1" aria-live="polite">
-                  <span className="block truncate">
-                    {commandProgress.message ||
-                      tCommands("running", { command: commandProgress.command })}
-                  </span>
-                  {commandProgress.value !== undefined && (
-                    <progress
-                      className="h-1 w-full"
-                      aria-label={tCommands("progress", { command: commandProgress.command })}
-                      max={1}
-                      value={commandProgress.value}
-                    />
-                  )}
-                </div>
-                <Button type="button" size="sm" variant="ghost" onClick={cancelPluginCommand}>
-                  {tCommands("cancel")}
-                </Button>
-              </div>
-            )}
-            <ComposerInner
-              session={session}
-              videoRoute={videoRoute}
-              status={promptStatus}
-              disabled={disabled}
-              onSubmit={handleSubmit}
-              attachmentCitations={attachmentCitations}
-              onStop={commandProgress ? cancelPluginCommand : onStop}
-              commandRunning={!!commandProgress}
-              onCommand={handleSlashCommand}
-              onSubmitMemory={handleMemorySubmit}
-              onSubmitShell={handleBashSubmit}
-              onOpenCheatsheet={() => setCheatsheetOpen(true)}
-              onOpenSettings={onOpenSettings}
-              handleRef={ref}
-              mentionMode={mentionMode}
-              mentionables={mentionables}
-              placeholder={
-                session?.platformBinding
-                  ? tPlatform("destination", {
+            <StagedAttachmentsProvider motion={!session?.platformBinding}>
+              {session?.platformBinding && (
+                <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <PlatformBadge platform={session.platformBinding.platform} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {tPlatform("destination", {
                       platform: tPlatformName.has(session.platformBinding.platform)
                         ? tPlatformName(session.platformBinding.platform)
                         : session.platformBinding.platform,
                       destination: session.title ?? session.platformBinding.conversationKey,
-                    })
-                  : placeholder
-              }
-              mobileMentionMembers={mobileMentionMembers}
-              workflowMention={workflowMention}
-              compactLayout={compactLayout}
-              skin={skin}
-              toolbar={
-                // The skin decides WHERE the status row sits. `detached` keeps
-                // it below the box (today's desktop default); every other
-                // arrangement puts it inside, and the toolbar itself decides
-                // how much of the roster is spelled out vs. folded.
-                toolbarInBox ? (
-                  <BottomToolbar
-                    session={session ?? null}
-                    status={status}
-                    variant={skin.toolbarLayout === "detached" ? "embedded" : skin.toolbarLayout}
-                    onOpenProviderSettings={() => onOpenSettings("api-key")}
+                    })}
+                  </span>
+                  <PlatformReplyAssistance key={session.id} session={session} disabled={disabled} />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setDraftDialogOpen(true)}
+                  >
+                    {tPlatform("reviewDrafts", { count: pendingDrafts.length })}
+                  </Button>
+                  <CannedResponsePicker
+                    conversationKey={session.platformBinding.conversationKey}
+                    context={{
+                      conversation: {
+                        title: session.title,
+                        platform: session.platformBinding.platform,
+                      },
+                      contact: { platform: session.platformBinding.platform },
+                    }}
                   />
-                ) : null
-              }
-            />
-            {toolbarInBox ? null : (
-              <BottomToolbar
-                session={session ?? null}
-                status={status}
-                onOpenProviderSettings={() => onOpenSettings("api-key")}
+                  <InboxComposerActionsHost
+                    conversationKey={session.platformBinding.conversationKey}
+                    adapterId={session.platformBinding.adapterId}
+                    platform={session.platformBinding.platform}
+                    sessionId={session.id}
+                    className="flex shrink-0 items-center gap-1 empty:hidden"
+                  />
+                </div>
+              )}
+              {commandProgress && (
+                <div className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <div role="status" className="min-w-0 flex-1" aria-live="polite">
+                    <span className="block truncate">
+                      {commandProgress.message ||
+                        tCommands("running", { command: commandProgress.command })}
+                    </span>
+                    {commandProgress.value !== undefined && (
+                      <progress
+                        className="h-1 w-full"
+                        aria-label={tCommands("progress", { command: commandProgress.command })}
+                        max={1}
+                        value={commandProgress.value}
+                      />
+                    )}
+                  </div>
+                  <Button type="button" size="sm" variant="ghost" onClick={cancelPluginCommand}>
+                    {tCommands("cancel")}
+                  </Button>
+                </div>
+              )}
+              <ComposerInner
+                session={session}
+                videoRoute={videoRoute}
+                status={promptStatus}
+                disabled={disabled}
+                onSubmit={handleSubmit}
+                attachmentCitations={attachmentCitations}
+                onStop={commandProgress ? cancelPluginCommand : onStop}
+                commandRunning={!!commandProgress}
+                onCommand={handleSlashCommand}
+                onSubmitMemory={handleMemorySubmit}
+                onSubmitShell={handleBashSubmit}
+                onOpenCheatsheet={() => setCheatsheetOpen(true)}
+                onOpenSettings={onOpenSettings}
+                handleRef={ref}
+                mentionMode={mentionMode}
+                mentionables={mentionables}
+                placeholder={
+                  session?.platformBinding
+                    ? tPlatform("destination", {
+                        platform: tPlatformName.has(session.platformBinding.platform)
+                          ? tPlatformName(session.platformBinding.platform)
+                          : session.platformBinding.platform,
+                        destination: session.title ?? session.platformBinding.conversationKey,
+                      })
+                    : placeholder
+                }
+                mobileMentionMembers={mobileMentionMembers}
+                workflowMention={workflowMention}
+                placeholderHints={placeholderHints}
+                compactLayout={compactLayout}
+                skin={skin}
+                toolbar={
+                  // The skin decides WHERE the status row sits. `detached` keeps
+                  // it below the box (today's desktop default); every other
+                  // arrangement puts it inside, and the toolbar itself decides
+                  // how much of the roster is spelled out vs. folded. A host
+                  // `toolbar` always renders inside the box, ahead of it.
+                  toolbar || toolbarInBox ? (
+                    <>
+                      {toolbar}
+                      {toolbarInBox ? (
+                        <BottomToolbar
+                          session={session ?? null}
+                          status={status}
+                          variant={
+                            skin.toolbarLayout === "detached" ? "embedded" : skin.toolbarLayout
+                          }
+                          onOpenProviderSettings={() => onOpenSettings("api-key")}
+                        />
+                      ) : null}
+                    </>
+                  ) : null
+                }
               />
-            )}
-            <HelperHints onOpenCheatsheet={() => setCheatsheetOpen(true)} />
-          </StagedAttachmentsProvider>
-        </PromptInputProvider>
+              {toolbarInBox ? null : (
+                <BottomToolbar
+                  session={session ?? null}
+                  status={status}
+                  onOpenProviderSettings={() => onOpenSettings("api-key")}
+                />
+              )}
+              <HelperHints onOpenCheatsheet={() => setCheatsheetOpen(true)} />
+            </StagedAttachmentsProvider>
+          </PromptInputProvider>
+        </TooltipProvider>
       </div>
 
       <ComposerCheatsheet open={cheatsheetOpen} onOpenChange={setCheatsheetOpen} />

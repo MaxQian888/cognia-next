@@ -40,7 +40,32 @@ export const COMPOSER_VIDEO_SOURCE_MAX_BYTES = 500 * 1024 * 1024
  */
 export const ATTACHMENT_UPLOAD_CHUNK_BYTES = 32 * 1024
 
+export function audioMediaTypeOf(descriptor: { name: string; mediaType: string }): string | null {
+  if (descriptor.mediaType.startsWith("audio/")) return descriptor.mediaType
+  const extension = descriptor.name.split(".").at(-1)?.toLowerCase()
+  const types: Record<string, string> = {
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    m4a: "audio/mp4",
+    ogg: "audio/ogg",
+    oga: "audio/ogg",
+    opus: "audio/ogg",
+    flac: "audio/flac",
+    aac: "audio/aac",
+  }
+  return types[extension ?? ""] ?? null
+}
+
+const originalComposerAttachments = new WeakMap<File, File>()
+
+/** Prepared previews retain their immutable source while either File is staged. */
+export function getOriginalComposerAttachment(file: File): File {
+  return originalComposerAttachments.get(file) ?? file
+}
+
 export interface PrepareComposerAttachmentsOptions {
+  /** Only the local composer has a staged transcription configuration UI. */
+  audio?: boolean
   maxFileSize: number
   optimizeImage?: (file: File) => Promise<File>
   /**
@@ -113,6 +138,12 @@ export async function prepareComposerAttachments(
 
   for (const original of incoming) {
     const descriptor = { name: original.name, mediaType: original.type }
+    // Source retention has its own ceiling: optimizing a giant preview must
+    // not admit an original that the source store can never retain.
+    if (original.type.startsWith("image/") && original.size > COMPOSER_VIDEO_SOURCE_MAX_BYTES) {
+      tooLargeCount++
+      continue
+    }
     const videoType = options.motion ? videoMediaTypeOf(descriptor) : null
     if (options.motion && videoType) {
       if (original.size > options.motion.maxSourceBytes) {
@@ -121,14 +152,16 @@ export async function prepareComposerAttachments(
       }
       // A picker that reported no type still yields a `video/*` file, so every
       // later step classifies it the same way. Re-wrapping a Blob copies nothing.
-      files.push(
+      const candidate =
         original.type === videoType
           ? original
           : new File([original], original.name, {
               type: videoType,
               lastModified: original.lastModified,
             })
-      )
+      if (candidate !== original)
+        originalComposerAttachments.set(candidate, getOriginalComposerAttachment(original))
+      files.push(candidate)
       continue
     }
     if (options.motion && isGifDescriptor(descriptor) && original.size > options.maxFileSize) {
@@ -142,11 +175,20 @@ export async function prepareComposerAttachments(
       }
       // A still GIF falls through to the ordinary image rescue below.
     }
-    if (!isSupportedComposerAttachment(original)) {
+    if (
+      !isSupportedComposerAttachment(original) &&
+      !(options.audio && audioMediaTypeOf(descriptor))
+    ) {
       unsupportedCount++
       continue
     }
     let candidate = original
+    const audioType = audioMediaTypeOf(descriptor)
+    if (audioType && candidate.type !== audioType)
+      candidate = new File([candidate], candidate.name, {
+        type: audioType,
+        lastModified: candidate.lastModified,
+      })
     if (original.type.startsWith("image/") && original.size > options.maxFileSize) {
       try {
         candidate = await optimizeImage(original)
@@ -159,6 +201,8 @@ export async function prepareComposerAttachments(
       tooLargeCount++
       continue
     }
+    if (candidate !== original)
+      originalComposerAttachments.set(candidate, getOriginalComposerAttachment(original))
     files.push(candidate)
   }
 

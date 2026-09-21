@@ -40,6 +40,8 @@ import { isBashToolPart } from "@/components/chat/message-parts/tool-detail-body
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
+import { AttachmentSourceActions } from "@/components/chat/message-parts/attachment-source-actions"
+import { readAttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
 import {
   MessageImageGallery,
   type MessageImageGalleryProps,
@@ -875,16 +877,35 @@ function MessageRendererInner({
                         key={`${message.id}-video-${video.info.groupId}`}
                         attachment={video}
                         idPrefix={message.id}
+                        sessionId={branchSessionId ?? undefined}
                       />
                     )
                   }
                   if (messageImageGallery.partIndexes.has(index)) {
                     if (index !== messageImageGallery.firstPartIndex) return null
                     return (
-                      <MessageImageGallery
-                        key={`${message.id}-image-gallery`}
-                        items={messageImageGallery.items}
-                      />
+                      <div key={`${message.id}-image-gallery`}>
+                        <MessageImageGallery items={messageImageGallery.items} />
+                        {branchSessionId
+                          ? [
+                              ...new Set(
+                                [...messageImageGallery.partIndexes].flatMap((partIndex) => {
+                                  const content = readAttachmentExtractedContent(
+                                    (message.parts[partIndex] as { extractedContent?: unknown })
+                                      ?.extractedContent
+                                  )
+                                  return content ? [content.attachmentId] : []
+                                })
+                              ),
+                            ].map((assetId) => (
+                              <AttachmentSourceActions
+                                key={`${branchSessionId}:${assetId}`}
+                                sessionId={branchSessionId}
+                                assetId={assetId}
+                              />
+                            ))
+                          : null}
+                      </div>
                     )
                   }
                   // Tool cards and reasoning read the display mode only through their
@@ -2043,17 +2064,22 @@ function renderPart(
     }
 
     // A document the user attached: the model got its extracted text, and that
-    // text rides along on the part (there is no `url` — the original binary is
-    // deliberately not persisted). Render it as a collapsed file card instead
+    // text rides along on the part; the original is held in session assets.
+    // Render it as a collapsed file card instead
     // of spilling the whole document into the bubble.
     const attachedText = (part as { text?: string }).text
-    if (!url && attachedText) {
+    const extraction = readAttachmentExtractedContent(
+      (part as { extractedContent?: unknown }).extractedContent
+    )
+    if (!url && (attachedText || extraction)) {
       return (
         <AttachmentTextCard
           key={key}
           filename={filename ?? t("attachmentAlt")}
           mediaType={mediaType}
-          text={attachedText}
+          text={attachedText ?? ""}
+          sessionId={sessionId}
+          assetId={extraction?.attachmentId}
         />
       )
     }

@@ -10,6 +10,11 @@ jest.mock("@cognia/document/document-processor", () => {
   )
   return { ...actual, processDocumentAsync: jest.fn() }
 })
+jest.mock("./pdf-ocr-fallback", () => ({
+  ...jest.requireActual("./pdf-ocr-fallback"),
+  runAttachmentPdfExtraction: jest.fn(),
+}))
+import { runAttachmentPdfExtraction } from "./pdf-ocr-fallback"
 
 import { processDocumentAsync } from "@cognia/document/document-processor"
 import { clearCustomImporters, createImportAPI } from "@/lib/plugin/api/import-api"
@@ -93,10 +98,34 @@ describe("buildAttachmentBlocks — images", () => {
     expect((blocks[1] as { text: string }).text).toContain("<EMAIL_001>")
     expect((blocks[1] as { text: string }).text).not.toContain("alice@example.com")
     expect(manifest).toEqual([
-      { filename: "receipt.png", mediaType: "image/png", kind: "image" },
-      { filename: "receipt.png", mediaType: "image/png", kind: "image" },
+      expect.objectContaining({
+        filename: "receipt.png",
+        mediaType: "image/png",
+        kind: "image",
+        original: expect.any(Blob),
+        extractedContent: expect.objectContaining({ attachmentId: "image-with-ocr" }),
+      }),
+      expect.objectContaining({
+        filename: "receipt.png",
+        mediaType: "image/png",
+        kind: "image",
+        original: expect.any(Blob),
+        extractedContent: expect.objectContaining({ attachmentId: "image-with-ocr" }),
+      }),
     ])
     expect(tokens).toBeGreaterThan(0)
+  })
+
+  it("preserves image token costs without double-counting replacement OCR", async () => {
+    const file = { id: "image", url: PNG_1PX, filename: "chart.png", mediaType: "image/png" }
+    const staged = { ...(await extractAttachment(file)), tokens: 1000 }
+    const first = withImageOcrText(staged, file.filename, "First recognition")
+    const replaced = withImageOcrText(first, file.filename, "Corrected recognition")
+    expect(replaced.tokens).toBe(1000 + replaced.ocr!.tokens)
+    const sent = await buildAttachmentBlocks([file], {
+      precomputed: new Map([[file.id, replaced]]),
+    })
+    expect(sent.tokens).toBe(replaced.tokens)
   })
 })
 
@@ -174,14 +203,77 @@ describe("buildAttachmentBlocks — documents", () => {
   it("passes a real ArrayBuffer to the processor for binary documents", async () => {
     await buildAttachmentBlocks([
       {
-        url: dataUrl("application/pdf", "%PDF-1.4"),
-        mediaType: "application/pdf",
-        filename: "x.pdf",
+        url: dataUrl(
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "DOCX"
+        ),
+        mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename: "x.docx",
       },
     ])
     expect(processMock).toHaveBeenCalledTimes(1)
     const dataArg = processMock.mock.calls[0][2]
     expect(dataArg).toBeInstanceOf(ArrayBuffer)
+  })
+
+  it("routes PDF pages through the incremental extractor with explicit missing-page coverage", async () => {
+    jest.mocked(runAttachmentPdfExtraction).mockResolvedValueOnce({
+      status: "partial",
+      text: "Page two is readable",
+      totalPages: 3,
+      processedPages: 3,
+      pages: [{ pageNumber: 2, text: "Page two is readable", fromTextLayer: false }],
+      errors: [{ pageNumber: 1, error: "unreadable" }],
+    } as never)
+    const result = await extractAttachment({
+      url: dataUrl("application/pdf", "%PDF-1.4"),
+      filename: "scan.pdf",
+    })
+    expect(processMock).not.toHaveBeenCalled()
+    expect(runAttachmentPdfExtraction).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      expect.anything()
+    )
+    expect(result.extractedContent).toMatchObject({
+      status: "partial",
+      segments: [{ id: "page-2", locator: { type: "page", page: 2 }, derivation: "ocr" }],
+      coverage: { processed: 3, total: 3, unit: "pages" },
+    })
+    expect(result.text).toContain("missing pages are not represented")
+  })
+
+  it("redacts filename and source locator metadata added while selecting long-document excerpts", async () => {
+    const file = {
+      id: "source",
+      filename: "alice@example.com.txt",
+      url: dataUrl("text/plain", "source"),
+    }
+    const sourceText = "The project uses pnpm. ".repeat(2000)
+    const cached: ExtractedAttachment = {
+      kind: "document",
+      block: { type: "text", text: sourceText },
+      text: sourceText,
+      tokens: 10000,
+      extractedContent: {
+        attachmentId: "source",
+        contentHash: "a".repeat(64),
+        status: "ready",
+        processor: { id: "text", version: "1" },
+        segments: [
+          { id: "sheet", text: sourceText, locator: { type: "sheet", sheet: "bob@example.com" } },
+        ],
+      },
+    }
+    const { blocks, tokens } = await buildAttachmentBlocks([file], {
+      inlineTokenBudget: 1000,
+      query: "pnpm",
+      precomputed: new Map([["source", cached]]),
+    })
+    const outbound = (blocks[0] as { text: string }).text
+    expect(outbound).toContain("pnpm")
+    expect(outbound).not.toContain("alice@example.com")
+    expect(outbound).not.toContain("bob@example.com")
+    expect(tokens).toBeLessThanOrEqual(1000)
   })
 
   it("decodes text documents to a string for the processor sync path", async () => {

@@ -34,15 +34,18 @@ export interface PdfPage {
   /** Render the page to a data URL at the requested DPI. */
   renderToDataUrl(opts: {
     dpi: number
+    signal?: AbortSignal
   }): Promise<{ dataUrl: string; width: number; height: number }>
   getTextContent(): Promise<PdfTextContent>
+  cleanup?: () => void | Promise<void>
 }
 export interface PdfDocument {
   numPages: number
   getPage(pageNumber: number): Promise<PdfPage>
+  destroy?: () => void | Promise<void>
 }
 
-export type PdfLoader = (input: { bytes: Uint8Array }) => Promise<PdfDocument>
+export type PdfLoader = (input: { bytes: Uint8Array; signal?: AbortSignal }) => Promise<PdfDocument>
 
 export interface PdfRouterDeps {
   loadPdf: PdfLoader
@@ -73,6 +76,11 @@ export interface PdfRouterDeps {
   writePage?: (pageNumber: number, page: OcrPage) => Promise<void>
   onPage?: (page: OcrPage, doneCount: number, total: number) => void
   signal?: AbortSignal
+  /** Document metadata before page work begins. */
+  onDocument?: (totalPages: number) => void
+  /** Opt-in partial extraction: report failed pages and continue later pages. */
+  continueOnPageError?: boolean
+  onPageError?: (error: unknown, pageNumber: number, doneCount: number, total: number) => void
 }
 
 export interface PdfRouterInput {
@@ -90,9 +98,13 @@ export async function extractPdf(input: PdfRouterInput, deps: PdfRouterDeps): Pr
   const settings = deps.settings ?? deps.extractDeps.settings
   const ocrProviderId = deps.ocrProviderId
 
+  const checkAborted = () => {
+    if (deps.signal?.aborted) throw new OcrError("aborted", "pdf-router", "PDF OCR cancelled.")
+  }
+  checkAborted()
   let doc: PdfDocument
   try {
-    doc = await deps.loadPdf({ bytes: input.bytes })
+    doc = await deps.loadPdf({ bytes: input.bytes, signal: deps.signal })
   } catch (err) {
     throw new OcrError(
       "invalid_input",
@@ -102,61 +114,89 @@ export async function extractPdf(input: PdfRouterInput, deps: PdfRouterDeps): Pr
     )
   }
 
-  const pagesToRead = parsePageRange(input.pageRange, doc.numPages) ?? rangeOf(doc.numPages)
+  let disposal: Promise<void> | undefined
+  const dispose = () =>
+    (disposal ??= Promise.resolve().then(async () => {
+      await doc.destroy?.()
+    }))
+  const cancelDocument = () => {
+    void dispose().catch(() => undefined)
+  }
+  deps.signal?.addEventListener("abort", cancelDocument, { once: true })
   const pages: OcrPage[] = []
   const start = Date.now()
-  for (const pageNumber of pagesToRead) {
-    if (deps.signal?.aborted) {
-      throw new OcrError("aborted", "pdf-router", "PDF OCR cancelled.")
-    }
-    // Resume — a previously-cached page skips both text-layer read and OCR.
-    const cached = deps.readPage ? await deps.readPage(pageNumber) : null
-    if (cached) {
-      pages.push(cached)
-      deps.onPage?.(cached, pages.length, pagesToRead.length)
-      continue
-    }
-    const page = await doc.getPage(pageNumber)
-    const textContent = await page.getTextContent()
-    const text = joinPdfText(textContent)
-    let pageOut: OcrPage
-    if (text.replace(/\s+/g, "").length >= threshold) {
-      pageOut = { pageNumber, markdown: synthesizeMarkdown(text), text, fromTextLayer: true }
-    } else {
-      const rasterized = await page.renderToDataUrl({ dpi })
-      const ocrResult = await ocrFn(
-        {
-          source: { kind: "data-url", dataUrl: rasterized.dataUrl, mimeType: "image/png" },
-          providerId: ocrProviderId,
-          languages: input.languages ?? settings.defaultLanguages,
-          useCache: false,
-        },
-        deps.extractDeps
-      )
-      const firstPage = ocrResult.pages[0]
-      pageOut = {
-        pageNumber,
-        markdown: firstPage?.markdown ?? "",
-        text: firstPage?.text ?? "",
-        blocks: firstPage?.blocks,
-        width: rasterized.width,
-        height: rasterized.height,
-        fromTextLayer: false,
+  try {
+    checkAborted()
+    deps.onDocument?.(doc.numPages)
+    const pagesToRead = parsePageRange(input.pageRange, doc.numPages) ?? rangeOf(doc.numPages)
+    for (const [index, pageNumber] of pagesToRead.entries()) {
+      checkAborted()
+      let page: PdfPage | undefined
+      try {
+        const cached = deps.readPage ? await deps.readPage(pageNumber) : null
+        checkAborted()
+        if (cached) {
+          pages.push(cached)
+          deps.onPage?.(cached, index + 1, pagesToRead.length)
+          continue
+        }
+        page = await doc.getPage(pageNumber)
+        checkAborted()
+        const textContent = await page.getTextContent()
+        checkAborted()
+        const text = joinPdfText(textContent)
+        let pageOut: OcrPage
+        if (text.replace(/\s+/g, "").length >= threshold) {
+          pageOut = { pageNumber, markdown: synthesizeMarkdown(text), text, fromTextLayer: true }
+        } else {
+          const rasterized = await page.renderToDataUrl({ dpi, signal: deps.signal })
+          checkAborted()
+          const ocrResult = await ocrFn(
+            {
+              source: { kind: "data-url", dataUrl: rasterized.dataUrl, mimeType: "image/png" },
+              providerId: ocrProviderId,
+              languages: input.languages ?? settings.defaultLanguages,
+              useCache: false,
+              signal: deps.signal,
+            },
+            deps.extractDeps
+          )
+          checkAborted()
+          const firstPage = ocrResult.pages[0]
+          pageOut = {
+            pageNumber,
+            markdown: firstPage?.markdown ?? "",
+            text: firstPage?.text ?? "",
+            blocks: firstPage?.blocks,
+            width: rasterized.width,
+            height: rasterized.height,
+            fromTextLayer: false,
+          }
+        }
+        if (deps.writePage) await deps.writePage(pageNumber, pageOut)
+        checkAborted()
+        pages.push(pageOut)
+        deps.onPage?.(pageOut, index + 1, pagesToRead.length)
+      } catch (error) {
+        checkAborted()
+        if (!deps.continueOnPageError) throw error
+        deps.onPageError?.(error, pageNumber, index + 1, pagesToRead.length)
+      } finally {
+        await page?.cleanup?.()
       }
     }
-    if (deps.writePage) await deps.writePage(pageNumber, pageOut)
-    pages.push(pageOut)
-    deps.onPage?.(pageOut, pages.length, pagesToRead.length)
-  }
-
-  return {
-    providerId: ocrProviderId ?? "pdf-router",
-    pages,
-    combinedMarkdown: combinePageMarkdown(pages),
-    combinedText: combinePageText(pages),
-    languages: input.languages ?? settings.defaultLanguages,
-    durationMs: Date.now() - start,
-    cached: false,
+    return {
+      providerId: ocrProviderId ?? "pdf-router",
+      pages,
+      combinedMarkdown: combinePageMarkdown(pages),
+      combinedText: combinePageText(pages),
+      languages: input.languages ?? settings.defaultLanguages,
+      durationMs: Date.now() - start,
+      cached: false,
+    }
+  } finally {
+    deps.signal?.removeEventListener("abort", cancelDocument)
+    await dispose()
   }
 }
 
@@ -181,18 +221,39 @@ function synthesizeMarkdown(text: string): string {
  * tree-shaker can keep pdfjs out of the static export when no caller invokes
  * the PDF router (browser bundle savings).
  */
-export const defaultPdfLoader: PdfLoader = async ({ bytes }) => {
+export const defaultPdfLoader: PdfLoader = async ({ bytes, signal }) => {
+  signal?.throwIfAborted()
   const pdfjs = (await import(
     /* webpackIgnore: true */ "pdfjs-dist"
   )) as typeof import("pdfjs-dist")
-  const loadingTask = pdfjs.getDocument({ data: bytes })
-  const document = await loadingTask.promise
+  signal?.throwIfAborted()
+  const loadingTask = pdfjs.getDocument({ data: bytes.slice() })
+  let destruction: Promise<void> | undefined
+  const destroy = () => (destruction ??= loadingTask.destroy())
+  const cancelLoading = () => {
+    void destroy().catch(() => undefined)
+  }
+  signal?.addEventListener("abort", cancelLoading, { once: true })
+  let document
+  try {
+    document = await loadingTask.promise
+    signal?.throwIfAborted()
+  } catch (error) {
+    await destroy()
+    throw error
+  } finally {
+    signal?.removeEventListener("abort", cancelLoading)
+  }
   return {
     numPages: document.numPages,
+    destroy,
     async getPage(pageNumber: number) {
       const page = await document.getPage(pageNumber)
       return {
         pageNumber: page.pageNumber,
+        cleanup: () => {
+          page.cleanup()
+        },
         async renderToDataUrl({ dpi }) {
           const viewport = page.getViewport({ scale: dpi / 72 })
           const canvas = document?.constructor // narrow types: document doesn't expose DOM

@@ -4,6 +4,7 @@
 
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
@@ -35,6 +36,9 @@ const PAUSED = {
 
 const session = { id: "s1", title: "t", createdAt: 1, updatedAt: 1 } as ChatSession
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderChip = (ui: React.ReactElement) => render(<TooltipProvider>{ui}</TooltipProvider>)
+
 beforeEach(() => {
   mockTauri = true
   mockSettings = ON
@@ -52,7 +56,7 @@ describe("FusionModeChip", () => {
       { routerFusion: { enabled: true, surfaces: {} } },
     ]) {
       mockSettings = settings
-      const view = render(<FusionModeChip session={session} builtinRuntime />)
+      const view = renderChip(<FusionModeChip session={session} builtinRuntime />)
       expect(screen.queryByTestId("fusion-mode-chip")).toBeNull()
       view.unmount()
     }
@@ -67,7 +71,7 @@ describe("FusionModeChip", () => {
     ]
     for (const [candidate, builtin, tauri] of cases) {
       mockTauri = tauri
-      const view = render(<FusionModeChip session={candidate} builtinRuntime={builtin} />)
+      const view = renderChip(<FusionModeChip session={candidate} builtinRuntime={builtin} />)
       expect(screen.queryByTestId("fusion-mode-chip")).toBeNull()
       view.unmount()
     }
@@ -75,7 +79,7 @@ describe("FusionModeChip", () => {
 
   it("shows Auto as a glyph and records the conversation's choice", async () => {
     const user = userEvent.setup()
-    render(<FusionModeChip session={session} builtinRuntime />)
+    renderChip(<FusionModeChip session={session} builtinRuntime />)
     const chip = screen.getByTestId("fusion-mode-chip")
     expect(chip).toHaveAttribute("data-mode", "auto")
     expect(chip).toHaveAccessibleName("Router + Fusion run mode: Auto")
@@ -100,7 +104,7 @@ describe("FusionModeChip", () => {
     const user = userEvent.setup()
     mockSettings = PAUSED
     useChatFusionModeStore.getState().setMode("s1", "cascade")
-    render(<FusionModeChip session={session} builtinRuntime />)
+    renderChip(<FusionModeChip session={session} builtinRuntime />)
     const chip = screen.getByTestId("fusion-mode-chip")
     expect(chip.className).toContain("text-amber-600")
     await user.click(chip)
@@ -113,7 +117,7 @@ describe("FusionModeChip", () => {
   // still reads through the icon flag and the accessible name.
   it("drops a non-default mode's label but keeps the flag in glyph form", () => {
     useChatFusionModeStore.getState().setMode("s1", "cascade")
-    render(<FusionModeChip session={session} builtinRuntime glyph />)
+    renderChip(<FusionModeChip session={session} builtinRuntime glyph />)
     const chip = screen.getByTestId("fusion-mode-chip")
     expect(chip).toHaveAttribute("data-mode", "cascade")
     expect(chip).not.toHaveTextContent("Cascade")
@@ -122,7 +126,7 @@ describe("FusionModeChip", () => {
   })
 
   it("cannot be opened while a turn is in flight", () => {
-    render(<FusionModeChip session={session} builtinRuntime disabled />)
+    renderChip(<FusionModeChip session={session} builtinRuntime disabled />)
     expect(screen.getByTestId("fusion-mode-chip")).toBeDisabled()
   })
 })

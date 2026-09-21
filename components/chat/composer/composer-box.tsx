@@ -37,12 +37,15 @@ import {
   type ParamPillState,
 } from "../composer-chip-overlay"
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
+import type { SlashScope } from "@/lib/slash-commands/builtin"
+import type { InlineSuggestion } from "@/lib/chat/completion/inline/types"
 import type { ShellDiagnostic } from "@/lib/shell-intelligence/types"
 import { ComposerGhostText } from "./composer-ghost-text"
+import { ComposerGhostCard } from "./composer-ghost-card"
+import { ComposerHintCarousel } from "./composer-hint-carousel"
 import { ShellDiagnosticOverlay } from "./shell-diagnostic-overlay"
 import { CharCounter } from "./char-counter"
 import { DragOverlay } from "./drag-overlay"
-import { MobileGhostAccept } from "./mobile-ghost-accept"
 import { ComposerAttachMenu } from "./attach-menu"
 import { ComposerPlusMenu } from "@/components/mobile/chat/composer-plus-menu"
 import type { ComposerAttachment } from "@/components/mobile/chat/composer-attachment"
@@ -81,6 +84,17 @@ export interface ComposerBoxProps {
    *  Null before the session's mode has hydrated. */
   permissionMode: PermissionMode | null
   placeholder?: string
+  /**
+   * Rotating example prompts painted as an overlay while the input is empty
+   * (the welcome hero's hint carousel). When provided AND visible, the
+   * textarea's own `placeholder` is suppressed so the two never double-print.
+   */
+  placeholderHints?: readonly string[]
+  /**
+   * Reports the full text of the hint the carousel is currently showing —
+   * the parent uses it for Tab-to-accept on an empty input.
+   */
+  onActiveHintChange?: (hint: string) => void
 
   // ── text ────────────────────────────────────────────────────────────────
   textInput: { value: string; setInput: (next: string) => void }
@@ -124,6 +138,8 @@ export interface ComposerBoxProps {
   isComposing?: boolean
   /** How to paint each `{{parameter}}` chip. See `ComposerChipOverlay`. */
   paramState?: (paramId: string) => ParamPillState
+  /** Command name → scope lookup for the overlay's pill tint. See `ComposerChipOverlay`. */
+  commandScope?: (name: string) => SlashScope | undefined
   /**
    * Read-only rendering of the message with its parameters substituted, and the
    * control that toggles it.
@@ -152,15 +168,27 @@ export interface ComposerBoxProps {
   // ── inline completion ───────────────────────────────────────────────────
   ghost: {
     ghost: string
-    candidates: readonly unknown[]
+    suggestion: InlineSuggestion | null
+    candidates: readonly InlineSuggestion[]
     index: number
+    /** A model-tier call is actually in flight (post-debounce). */
+    querying: boolean
+    /** The active candidate is still receiving tokens. */
+    streaming: boolean
+    /** The last model round failed or timed out. */
+    completionError: boolean
     dismiss: () => void
+    cycleNext: () => void
+    cyclePrev: () => void
+    /** Jump to a candidate — the card's dots call this. */
+    cycleTo: (index: number) => void
+    /** Re-run a failed model round — the card's retry button. */
+    retry: () => void
     /** True when the agent tier is reachable, i.e. its key is worth advertising. */
     manualAvailable?: boolean
     /** True while the requested agent turn is running. */
     manualPending?: boolean
   }
-  ghostSourceLabel?: string
   acceptGhost: () => void
 
   // ── attachment intake ───────────────────────────────────────────────────
@@ -193,6 +221,11 @@ export interface ComposerBoxProps {
   toolbar?: ReactNode
   /** Voice + append bridges — they subscribe to stores, so they stay outside. */
   bridges?: ReactNode
+  /** Staged attachments / reference chips — the one row of context that has
+      no textual form. Rendered as the box's first full-width row so staged
+      media reads as part of the message being written (ChatGPT, Telegram,
+      iMessage all keep it inside the input card). */
+  contextRow?: ReactNode
 
   t: (key: string, values?: Record<string, string | number | Date>) => string
   tAttach: (key: string, values?: Record<string, string | number | Date>) => string
@@ -205,6 +238,8 @@ export function ComposerBox({
   disabled,
   permissionMode,
   placeholder,
+  placeholderHints,
+  onActiveHintChange,
   textInput,
   textareaRef,
   chipOverlayRef,
@@ -226,11 +261,11 @@ export function ComposerBox({
   onCut,
   isComposing,
   paramState,
+  commandScope,
   preview,
   saveAsTemplate,
   enhance,
   ghost,
-  ghostSourceLabel,
   acceptGhost,
   fileInputRef,
   attachmentAccept,
@@ -254,6 +289,7 @@ export function ComposerBox({
   onStop,
   toolbar,
   bridges,
+  contextRow,
   t,
   tAttach,
 }: ComposerBoxProps) {
@@ -305,6 +341,26 @@ export function ComposerBox({
   // their own, or the first line of the message runs under the buttons.
   const padEndClass = takenSlots >= 3 ? "pe-20" : takenSlots === 2 ? "pe-14" : "pe-10"
 
+  // The hint carousel is the placeholder while it is on screen — an empty,
+  // editable, non-previewing, non-composing box. Anything else (typed text,
+  // the param preview, an IME candidate, a disabled composer) needs the native
+  // placeholder or nothing, never a second layer of text.
+  const showHintCarousel =
+    !disabled &&
+    !preview?.on &&
+    !isComposing &&
+    textInput.value === "" &&
+    (placeholderHints?.length ?? 0) > 0
+
+  // The floating suggestion card opens when there is something to show: a
+  // ranked candidate, a model call in flight (post-debounce — the armed timer
+  // alone does not count, or the card would flap on every keystroke), or a
+  // failed round offering retry.
+  const ghostCardOpen =
+    !disabled &&
+    preview?.on !== true &&
+    (ghost.candidates.length > 0 || ghost.querying || ghost.completionError)
+
   return (
     <div
       className={cn(
@@ -339,6 +395,22 @@ export function ComposerBox({
     >
       <DragOverlay visible={isDragging} />
 
+      <ComposerGhostCard
+        open={ghostCardOpen}
+        querying={ghost.querying}
+        streaming={ghost.streaming}
+        error={ghost.completionError}
+        ghost={ghost.ghost}
+        suggestion={ghost.suggestion}
+        candidates={ghost.candidates}
+        index={ghost.index}
+        isMobile={isMobile}
+        onAccept={acceptGhost}
+        onDismiss={ghost.dismiss}
+        onCycleTo={ghost.cycleTo}
+        onRetry={ghost.retry}
+      />
+
       <input
         accept={attachmentAccept}
         aria-label={t("ariaUploadImage")}
@@ -348,6 +420,18 @@ export function ComposerBox({
         ref={fileInputRef}
         type="file"
       />
+
+      {/* First in-flow row on every layout: default order 0 sorts it before
+          the textarea (order-1) and the control cluster (order-2) on narrow
+          boxes, and DOM order does the same once `@sm` drops the orders. Its
+          `w-full` forces a wrap so it can never share a line with the input.
+          Hidden while the row inside is empty — an always-mounted full-width
+          line would still consume one row-gap of the box at zero height. */}
+      {contextRow ? (
+        <div className="w-full min-w-0 self-start has-[[data-chip-flow]:empty]:hidden">
+          {contextRow}
+        </div>
+      ) : null}
 
       <div
         className={cn(
@@ -444,6 +528,7 @@ export function ComposerBox({
           value={textInput.value}
           segments={overlaySegments}
           paramState={paramState}
+          commandScope={commandScope}
           // Same family as the textarea, or the pills drift out from under the
           // glyphs on a mono skin.
           mono={skin.mono}
@@ -470,29 +555,28 @@ export function ComposerBox({
             hidden={isComposing || preview?.on === true}
           />
         ) : null}
+        {/* Painted BEFORE the textarea so the caret (drawn by the textarea at
+            z-[1]) sits over the hint glyphs, same as a native placeholder. */}
+        {showHintCarousel ? (
+          <ComposerHintCarousel
+            hints={placeholderHints ?? []}
+            onActiveHint={onActiveHintChange}
+            mono={skin.mono}
+            padEndClass={padEndClass}
+            compactLayout={compactLayout}
+          />
+        ) : null}
         <ComposerGhostText
           ref={ghostOverlayRef}
           value={textInput.value}
           // Same reason as the chip overlay above: nothing may paint over the
           // preview's substituted text.
           ghost={preview?.on ? "" : ghost.ghost}
+          // The suggestion card owns the text + source/position/hints; inline
+          // keeps only the pulse caret marking where the suggestion anchors.
+          caret={preview?.on !== true && ghostCardOpen}
           mono={skin.mono}
           padEndClass={padEndClass}
-          sourceLabel={ghostSourceLabel}
-          // Position + cycle hint only make sense with an alternative to
-          // move to, and Alt+] is unreachable on touch.
-          positionLabel={
-            ghost.candidates.length > 1
-              ? t("ghostPosition", {
-                  index: ghost.index + 1,
-                  total: ghost.candidates.length,
-                })
-              : undefined
-          }
-          cycleHint={!isMobile && ghost.candidates.length > 1 ? t("ghostCycleHint") : undefined}
-          // The "Tab" hint is meaningless on touch — mobile gets the tappable
-          // accept/dismiss control below instead.
-          acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
           // Advertise the agent tier's key only where it can be pressed (not
           // touch) and only once there is a draft worth continuing — over an
           // empty box it is noise, and the tier refuses a too-short draft
@@ -557,7 +641,13 @@ export function ComposerBox({
           }}
           onMouseUp={onMouseUp}
           onSelect={onSelect}
-          placeholder={disabled ? t("placeholderDisabled") : (placeholder ?? t("placeholder"))}
+          placeholder={
+            disabled
+              ? t("placeholderDisabled")
+              : showHintCarousel
+                ? ""
+                : (placeholder ?? t("placeholder"))
+          }
           ref={textareaRef}
           rows={1}
           style={{ maxHeight: `${maxHeightRem}rem` }}
@@ -628,14 +718,13 @@ export function ComposerBox({
           </span>
         ) : null}
         <CharCounter />
-        <MobileGhostAccept
-          visible={isMobile && !!ghost.ghost}
-          onAccept={acceptGhost}
-          onDismiss={ghost.dismiss}
-        />
       </div>
 
-      {toolbar ? <div className="order-2 min-w-0 flex-1 self-center">{toolbar}</div> : null}
+      {/* `flex` so a host-pinned `toolbar` ReactNode can sit on the same line
+          as the skin's own BottomToolbar. */}
+      {toolbar ? (
+        <div className="order-2 flex min-w-0 flex-1 items-center gap-1 self-center">{toolbar}</div>
+      ) : null}
 
       <div
         className={cn(

@@ -3,7 +3,11 @@ import type { StoredMessage } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { isMediaRef } from "@/lib/db/message-media"
-import { normalizeMessageMedia, normalizeStoredMessageMedia } from "./normalize-message-media"
+import {
+  normalizeMessageMedia,
+  normalizeStoredMessageMedia,
+  materializeMessageMedia,
+} from "./normalize-message-media"
 
 jest.setTimeout(30_000)
 
@@ -18,6 +22,37 @@ function message(parts: UIMessage["parts"]): UIMessage {
 }
 
 describe("normalizeMessageMedia", () => {
+  it("materializes cached image bytes for a handoff without mutating stored references", async () => {
+    const normalized = await normalizeMessageMedia(
+      message([
+        {
+          type: "file",
+          url: "data:image/png;base64,aGVsbG8=",
+          mediaType: "image/png",
+          filename: "evidence.png",
+        },
+      ])
+    )
+    const portable = await materializeMessageMedia(normalized)
+    expect(portable.parts[0]).toMatchObject({
+      url: "data:image/png;base64,aGVsbG8=",
+      filename: "evidence.png",
+    })
+    expect(isMediaRef((normalized.parts[0] as { url: string }).url)).toBe(true)
+  })
+
+  it("refuses missing canonical attachment bytes rather than exporting a broken reference", async () => {
+    await expect(
+      materializeMessageMedia(
+        message([{ type: "file", url: `cognia-media:${"a".repeat(64)}`, mediaType: "image/png" }])
+      )
+    ).rejects.toThrow("handoff_attachment_unavailable")
+  })
+
+  it("leaves already portable messages unchanged", async () => {
+    const original = message([{ type: "text", text: "hello" }])
+    await expect(materializeMessageMedia(original)).resolves.toBe(original)
+  })
   it("moves image data URLs out of message parts into the media store", async () => {
     const source = message([
       {

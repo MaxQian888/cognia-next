@@ -3,7 +3,10 @@
 import { useState } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
-import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
+import {
+  useTitleBarProjection,
+  useTitleBarProjectionScope,
+} from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
 import { Columns2Icon, ExternalLinkIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -21,7 +24,6 @@ import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
-import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { PlatformConversationHeader } from "@/components/inbox/platform-conversation-context"
@@ -46,10 +48,10 @@ interface Props {
 }
 
 /**
- * One title-bar row. A right-side toolbar action opens a lightweight summary;
- * environment, sharing and settings live there, keeping the two pane toggles
- * as the default header's only other controls. Contextual lineage, team and
- * plugin controls still appear when this conversation needs them.
+ * One title-bar row. A floating action at the pane's top-right opens a
+ * lightweight summary; environment, sharing and settings live there, keeping
+ * the two pane toggles as the default header's only other controls. Contextual
+ * lineage and plugin controls still appear when this conversation needs them.
  *
  * The summary mounts its data readers only when opened and never expands the
  * dock until the user follows a result or chooses View details. Runtime and
@@ -85,10 +87,17 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   // columns and the conversation title belongs on it. Anywhere else — the
   // mobile shell, a host outside the projection scope — it draws its own row.
   const outlet = useTitleBarProjection("center")
+  // The `toolbar.*` plugin slots normally live in the title bar's zones. When
+  // this header draws inline *inside the workspace scope* — the bar-less web
+  // shell (`webTitleBarEnabled` off) — it is the column header that hosts them
+  // instead. Outside the scope (inbox detail, Canvas sidechat, mobile Sheet)
+  // the header is not the shell's chrome and stays plain.
+  const inScope = useTitleBarProjectionScope()
+  const hostsToolbarSlots = inScope && !outlet
   const activeSessionId = useChatStore((state) => state.activeSessionId)
-  const ownsSummary = !outlet || !activeSessionId || activeSessionId === session.id
-  const summaryOutlet = useTitleBarProjection("actions", { active: ownsSummary })
-  const summaryControl = (
+  const ownsActions = !outlet || !activeSessionId || activeSessionId === session.id
+  const actionsOutlet = useTitleBarProjection("actions", { active: ownsActions })
+  const paneActions = (
     <>
       {onSplitView && (
         <Button
@@ -114,11 +123,17 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         </Button>
       )}
 
-      <SessionSummaryPopover
-        key={session.id}
-        session={session}
-        onManage={() => setSettingsOpen(true)}
-      />
+      {/* The summary opener left the title bar. The workspace floats it at the
+          pane's top-right (see `chat-surface-stage` in `chat-view.tsx`); only a
+          host outside the projection scope — an embedded chat surface — still
+          keeps it on this row. The card itself is unchanged either way. */}
+      {inScope ? null : (
+        <SessionSummaryPopover
+          key={session.id}
+          session={session}
+          onManage={() => setSettingsOpen(true)}
+        />
+      )}
     </>
   )
 
@@ -129,6 +144,15 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           those are on every route, so they own the two actions there and this
           row would only double them up. */}
       {outlet ? null : <ConversationListToggle />}
+
+      {/* `toolbar.left` — the bar's start-zone slot. Inline it follows the
+          list toggle, the row's own start chrome. */}
+      {hostsToolbarSlots ? (
+        <PluginExtensionSlot
+          point="toolbar.left"
+          className="flex items-center gap-1 empty:hidden"
+        />
+      ) : null}
 
       <div className="flex flex-1 items-center gap-2 truncate">
         {character && (
@@ -171,12 +195,16 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           target={sessionBacklinkTarget(session.id)}
           excludeSessionId={session.id}
         />
-        {/* Self-hides unless this conversation has more than one participant.
-            The fifth question in this row, and the one the header could not
-            answer at all: a team of agents, a shared session and an IM group
-            all looked exactly like a conversation with one counterpart. */}
-        <RoomParticipantsChip session={session} />
       </div>
+
+      {/* `toolbar.center` — in the bar it trails the centre outlet (this
+          title); inline it keeps that same position. */}
+      {hostsToolbarSlots ? (
+        <PluginExtensionSlot
+          point="toolbar.center"
+          className="flex items-center gap-1 empty:hidden"
+        />
+      ) : null}
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the
           synthetic `solo:<sessionId>` team has no tasks, so it only appears once
@@ -186,6 +214,15 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
       {session.platformBinding && <PlatformConversationHeader session={session} />}
+
+      {/* `toolbar.right` — in the bar it heads the right chrome, ahead of the
+          end-zone items and the actions outlet (the summary controls below). */}
+      {hostsToolbarSlots ? (
+        <PluginExtensionSlot
+          point="toolbar.right"
+          className="flex items-center gap-1 empty:hidden"
+        />
+      ) : null}
 
       {isTauri() ? (
         <Button
@@ -205,10 +242,10 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         </Button>
       ) : null}
 
-      {ownsSummary
-        ? summaryOutlet
-          ? createPortal(summaryControl, summaryOutlet)
-          : summaryControl
+      {ownsActions
+        ? actionsOutlet
+          ? createPortal(paneActions, actionsOutlet)
+          : paneActions
         : null}
 
       {/* Inline only, for the same reason as the conversation-list toggle
@@ -220,7 +257,16 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         <ArtifactDockToggle className={cn(HEADER_ICON_BUTTON, "hidden md:inline-flex")} />
       )}
 
-      <SessionSettingsSheet session={session} open={settingsOpen} onOpenChange={setSettingsOpen} />
+      {/* The settings sheet backs the inline summary opener above, so it mounts
+          only on the same non-workspace surfaces; inside the scope the pane's
+          own trigger (`chat-view.tsx`) hosts its sheet instead. */}
+      {inScope ? null : (
+        <SessionSettingsSheet
+          session={session}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
+      )}
     </>
   )
 

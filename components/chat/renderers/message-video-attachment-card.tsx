@@ -3,12 +3,11 @@
 /**
  * A sent video or animated GIF, as the transcript keeps it (decision D7).
  *
- * The original file is never stored. What a message row holds is what the
+ * Original sources are stored separately from the transcript. A message holds what the
  * model received — a storyboard, separate frames, or, for an original video,
  * the poster that stands in for it — plus the one-line description, every part
  * tagged with the same {@link VideoAttachmentInfo}. This card folds those parts
- * back into the one attachment the user sent, and says plainly that the file
- * itself is gone, so nobody goes looking for a play button.
+ * back into one attachment, with source access when the owning session retains it.
  */
 
 import { useTranslations } from "next-intl"
@@ -25,8 +24,12 @@ import {
 } from "@/lib/chat/attachments/video/timeline"
 import { MessageImageGallery } from "./message-image-gallery"
 import type { ImageLightboxItem } from "./image-lightbox"
+import { readAttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
+import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
 
 export interface MessageVideoAttachment {
+  assetId?: string
+  derivedText?: string
   info: VideoAttachmentInfo
   /** Index of the attachment's first part: where the card renders. */
   firstPartIndex: number
@@ -60,6 +63,13 @@ export function collectMessageVideoAttachments(parts: readonly unknown[]): Messa
       byGroup.set(info.groupId, attachment)
     }
     const file = part as { type?: unknown; url?: unknown; mediaType?: unknown }
+    const provenance = readAttachmentExtractedContent(
+      (part as { extractedContent?: unknown }).extractedContent
+    )
+    if (provenance) attachment.assetId = provenance.attachmentId
+    const text = (part as { text?: unknown }).text
+    if (typeof text === "string" && text)
+      attachment.derivedText = [attachment.derivedText, text].filter(Boolean).join("\n\n")
     if (
       file.type === "file" &&
       typeof file.url === "string" &&
@@ -82,11 +92,13 @@ export interface MessageVideoAttachmentCardProps {
   attachment: MessageVideoAttachment
   /** Prefix for the gallery item ids; the message id keeps them unique. */
   idPrefix: string
+  sessionId?: string
 }
 
 export function MessageVideoAttachmentCard({
   attachment,
   idPrefix,
+  sessionId,
 }: MessageVideoAttachmentCardProps) {
   const t = useTranslations("chat.message.videoCard")
   const { info, images } = attachment
@@ -149,7 +161,17 @@ export function MessageVideoAttachmentCard({
           className={items.length > 2 ? "grid-cols-3 gap-1" : undefined}
         />
       ) : null}
-      <p className="text-[11px] text-muted-foreground">{t("notStored")}</p>
+      {attachment.assetId || attachment.derivedText ? (
+        <AttachmentTextCard
+          filename={info.filename}
+          text={attachment.derivedText ?? ""}
+          sessionId={sessionId}
+          assetId={attachment.assetId}
+        />
+      ) : null}
+      {!attachment.assetId ? (
+        <p className="text-[11px] text-muted-foreground">{t("notStored")}</p>
+      ) : null}
     </figure>
   )
 }

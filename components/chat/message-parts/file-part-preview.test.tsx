@@ -110,6 +110,26 @@ describe("FilePartPreview", () => {
     expect(screen.getByTestId("markdown-preview")).toBeInTheDocument()
   })
 
+  it("renders HTML attachments live in the artifact sandbox frame", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<h1>Hello</h1><script>alert(1)</script>"),
+    } as Response)
+    render(<FilePartPreview url="blob:html" mediaType="text/html" filename="page.html" />)
+
+    const frame = (await screen.findByTestId("file-preview-html-frame")) as HTMLIFrameElement
+    // Same policy as the static artifact preview: same-origin so the parent
+    // can write contentDocument, and the sanitize inside renderHTML strips
+    // scripts before they ever reach the frame.
+    expect(frame).toHaveAttribute("sandbox", "allow-same-origin")
+    await waitFor(() => expect(frame.contentDocument?.body.innerHTML).toContain("Hello"))
+    expect(frame.contentDocument?.body.innerHTML).not.toContain("script")
+
+    await userEvent.click(screen.getByRole("tab", { name: "source" }))
+    expect(screen.getByTestId("code-block")).toHaveTextContent("<h1>Hello</h1>")
+    expect(screen.getByTestId("code-block")).toHaveAttribute("data-language", "html")
+  })
+
   it("keeps CSV attachments in the existing code preview", async () => {
     fetchMock.mockResolvedValue({
       ok: true,

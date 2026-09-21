@@ -39,6 +39,7 @@ import { extendsDraft } from "./rank"
 import type {
   InlineCompletionContext,
   InlineCompletionProvider,
+  InlineEmitFn,
   InlineSuggestion,
   InlineSuggestionSource,
 } from "./types"
@@ -58,9 +59,49 @@ export type InlineCompleteFn = (args: {
   signal: AbortSignal
 }) => Promise<string | null>
 
+/**
+ * The streaming variant of {@link InlineCompleteFn}: returns an async iterable
+ * of text DELTAS as the model produces them, or `null`/`undefined` when the
+ * resolved client cannot stream — the provider then falls back to `complete`
+ * for that call, so a non-streaming deployment degrades rather than breaks.
+ * The iterable MUST end (or throw) when `signal` aborts.
+ */
+export type InlineStreamFn = (args: {
+  system: string
+  prompt: string
+  signal: AbortSignal
+}) => AsyncIterable<string> | null | undefined
+
+/** One retry on top of the first attempt — transient transport blips only. */
+const MAX_ATTEMPTS = 2
+/** Pause between attempts; abortable, so a cancelled retry costs nothing. */
+const RETRY_DELAY_MS = 700
+
+/** Sleep that resolves early on abort, so retry latency never outlives the keystroke that cancelled it. */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
+
 export interface AiCompletionProviderOptions {
   /** Runs the model. MUST honour `signal`; may throw (errors become `[]`). */
   complete: InlineCompleteFn
+  /**
+   * Streaming variant — when it returns an iterable, the provider sanitises
+   * each accumulated prefix and emits it through the engine's progress
+   * channel, so the suggestion appears token by token instead of all at once.
+   * Returning `null`/`undefined` falls back to `complete` for that call.
+   */
+  stream?: InlineStreamFn
   /** Provider id. Defaults to {@link AI_PROVIDER_ID}. */
   id?: string
   /** Human label for settings / diagnostics. Defaults to `"AI"`. */
@@ -95,6 +136,7 @@ export function createAiCompletionProvider(
 ): InlineCompletionProvider {
   const {
     complete,
+    stream,
     id = AI_PROVIDER_ID,
     label = "AI",
     detail = label,
@@ -113,7 +155,8 @@ export function createAiCompletionProvider(
     manual,
     async getCompletions(
       context: InlineCompletionContext,
-      signal: AbortSignal
+      signal: AbortSignal,
+      emit?: InlineEmitFn
     ): Promise<InlineSuggestion[]> {
       const { draft } = context
       if (draft.trim().length < minChars) return []
@@ -131,11 +174,58 @@ export function createAiCompletionProvider(
       // conversation context that would travel with it.
       if (!isPiiSafe(prompt)) return []
 
-      let raw: string | null
-      try {
-        raw = await complete({ system, prompt, signal })
-      } catch {
-        return []
+      // One candidate per provider, so its identity is just the provider's —
+      // the engine pins and routes partials by it while `text` keeps mutating.
+      const candidate = (text: string): InlineSuggestion => ({
+        id: `${id}:0`,
+        text,
+        source,
+        providerId: id,
+        detail,
+        score,
+      })
+
+      // Paint what has arrived so far. `sanitizeGhost` runs on the ACCUMULATED
+      // text (the same cleanup the final answer gets — fences stripped, echoed
+      // prefix cut, first line only), so a mid-stream chunk that sanitises to
+      // nothing simply isn't painted yet.
+      const emitPartial = (accumulated: string) => {
+        if (!emit || signal.aborted) return
+        const suffix = sanitizeGhost(accumulated, draft)
+        if (suffix === null) return
+        const text = draft + suffix
+        if (extendsDraft(text, draft)) emit([candidate(text)])
+      }
+
+      const attempt = async (): Promise<string | null> => {
+        const iterable = stream?.({ system, prompt, signal })
+        if (!iterable) return complete({ system, prompt, signal })
+        let accumulated = ""
+        for await (const delta of iterable) {
+          if (signal.aborted) return null
+          accumulated += delta
+          emitPartial(accumulated)
+        }
+        return accumulated
+      }
+
+      // One retry for transient failures (dropped connection, 5xx): cheap
+      // insurance for a call that already costs a round-trip. NOT retried:
+      // an abort (the user moved on — that is the desired outcome, not a
+      // failure), and a second failure (whatever broke is not a blip).
+      // A final failure RETHROWS so the engine can flag the round as failed
+      // and offer retry — swallowing it would read as "no suggestion".
+      let raw: string | null = null
+      for (let tries = 0; ; tries++) {
+        try {
+          raw = await attempt()
+          break
+        } catch (err) {
+          if (signal.aborted) return []
+          if (tries + 1 >= MAX_ATTEMPTS) throw err
+          await abortableDelay(RETRY_DELAY_MS, signal)
+          if (signal.aborted) return []
+        }
       }
       if (signal.aborted || raw === null) return []
 
@@ -146,7 +236,7 @@ export function createAiCompletionProvider(
       // returns pure whitespace would still yield a no-op "completion".
       if (!extendsDraft(text, draft)) return []
 
-      return [{ text, source, providerId: id, detail, score }]
+      return [candidate(text)]
     },
   }
 }

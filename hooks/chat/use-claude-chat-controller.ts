@@ -1,11 +1,14 @@
 "use client"
 
+import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/preset-identity"
+
 import { useCallback, useEffect, useRef, useState } from "react"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { useTranslations } from "next-intl"
 import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
 import { isCogniaProjectedTool } from "@/lib/ai/agent/external/tool-preapproval"
 import type { UnlistenFn } from "@tauri-apps/api/event"
+import { persistMessageSessionAssets } from "@/lib/db/session-assets"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
@@ -112,7 +115,7 @@ import { endSpan, recordEvent, startSpan } from "@cognia/agent-trace/emitter"
 import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
-import { compositionForSession } from "@/stores/agent/agent-runtime-store"
+import { compositionForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import {
   markTaskWorkspaceTurnCancelled,
   markTaskWorkspaceTurnUnowned,
@@ -248,6 +251,27 @@ import {
  * the first one is when the user can still change their mind cheaply.
  */
 const sharedReferenceWarnedSessions = new Set<string>()
+
+/** Plugins receive only the user-authored block following the attachment manifest. */
+export function userPromptText(content: SendContent, attachmentCount = 0): string {
+  if (typeof content === "string") return content
+  const block = content.find((entry, index) => index >= attachmentCount && entry.type === "text")
+  return block?.type === "text" ? block.text : ""
+}
+
+export function rewriteUserPromptText(
+  content: SendContent,
+  text: string,
+  attachmentCount = 0
+): SendContent {
+  if (typeof content === "string") return text
+  const index = content.findIndex(
+    (entry, position) => position >= attachmentCount && entry.type === "text"
+  )
+  return content.map((block, position) =>
+    position === index && block.type === "text" ? { ...block, text } : block
+  )
+}
 
 export function resolveChatTurnAttemptIdentity(input: {
   sessionId: string
@@ -815,6 +839,21 @@ export function useClaudeChat() {
         return
       }
 
+      const persistAttachments = async (message: UIMessage): Promise<UIMessage | null> => {
+        try {
+          return await persistMessageSessionAssets(sessionId, message)
+        } catch (error) {
+          store
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(error, { source: "chat", meta: { sessionId } })
+            )
+          rejectSend(error)
+          return null
+        }
+      }
+
       const sharedTarget = await getSession(sessionId)
       // Only a NEW user turn is published to the shared transcript. The
       // internal re-entries (regenerate / routing fallback pass
@@ -845,6 +884,22 @@ export function useClaudeChat() {
             block.type === "document"
               ? [
                   {
+                    ...makeUserMessage(
+                      [block],
+                      undefined,
+                      sharedManifest?.[index] ? [sharedManifest[index]] : undefined
+                    ).parts[0],
+                    ...(sharedManifest?.[index]
+                      ? {
+                          filename: sharedManifest[index].filename,
+                          ...(sharedManifest[index].extractedContent
+                            ? { extractedContent: sharedManifest[index].extractedContent }
+                            : {}),
+                          ...(sharedManifest[index].original
+                            ? { attachmentOriginal: sharedManifest[index].original }
+                            : {}),
+                        }
+                      : {}),
                     type: "file" as const,
                     mediaType: block.source.media_type,
                     url: `data:${block.source.media_type};base64,${block.source.data}`,
@@ -880,9 +935,11 @@ export function useClaudeChat() {
           sharedReferenceWarnedSessions.add(sessionId)
           toast.info(tCollab("shareReferencesLiveToast"))
         }
+        const persistedMessage = await persistAttachments(message)
+        if (!persistedMessage) return
         await sendSharedSessionMessage(sharedTarget, {
-          id: message.id,
-          parts: message.parts,
+          id: persistedMessage.id,
+          parts: persistedMessage.parts,
           ...(Object.keys(sharedMetadata).length > 0 ? { metadata: sharedMetadata } : {}),
         })
         return
@@ -911,9 +968,14 @@ export function useClaudeChat() {
       if (!callOptions?.skipUserAppend && !callOptions?.steerDrain) {
         const st = sessionStatusOf(sessionId)
         if (st === "streaming" || st === "awaiting_approval") {
-          const text = steerTextOf(content)
-          const blocks = steerBlocksOf(content)
+          const text = steerTextOf(content, callOptions?.attachmentManifest?.length ?? 0)
+          const blocks = steerBlocksOf(content, callOptions?.attachmentManifest?.length ?? 0)
           if (!text && blocks.length === 0) return
+
+          const optimistic = await persistAttachments(
+            makeUserMessage(content, undefined, callOptions?.attachmentManifest)
+          )
+          if (!optimistic) return
 
           // A new instruction supersedes the context the pending approvals
           // were asked under (Codex 0.154 parity): deny each through its own
@@ -936,7 +998,6 @@ export function useClaudeChat() {
           // delivered follow-up from one that never arrived.
           const entryId = crypto.randomUUID()
           const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
-          const optimistic = makeUserMessage(content)
           // The normal send path's reference stamp, applied here too: a steer
           // still cites what its chips/tokens named, whether it is delivered
           // live, replayed from the queue, or never delivered at all.
@@ -1053,6 +1114,13 @@ export function useClaudeChat() {
             id: entryId,
             text,
             blocks: blocks.length > 0 ? blocks : undefined,
+            ...(callOptions?.attachmentManifest?.length
+              ? {
+                  attachmentManifest: callOptions.attachmentManifest.map(
+                    ({ original: _original, ...entry }) => entry
+                  ),
+                }
+              : {}),
             webSearchContext: callOptions?.webSearchContext,
             ...(callOptions?.replyTo ? { replyTo: callOptions.replyTo } : {}),
             // The queue copy rides a replay onto whichever writer persists the
@@ -1082,7 +1150,62 @@ export function useClaudeChat() {
         )
       }
 
-      const session = await getSession(sessionId)
+      let session = await getSession(sessionId)
+      let builtinHandoffContext: string | undefined
+      if (
+        session?.importOwnership === "native-bound" &&
+        runtimeRefForSession(sessionId).kind === "builtin"
+      ) {
+        const { buildHandoffContext, prepareHandoffContext } =
+          await import("@/lib/chat/handoff-context")
+        const history = await listMessages(sessionId)
+        const imported = session.importCanonicalState
+        const state = imported
+          ? {
+              tasks: imported.tasks,
+              plans: imported.plans,
+              goals: imported.goals,
+              checkpoints: imported.checkpoints,
+              interAgentMessages: imported.interAgentMessages,
+            }
+          : undefined
+        const projected = buildHandoffContext(history, { state })
+        if (projected.losses.some((loss) => loss.kind === "budget")) {
+          const { buildAgentBackedLlmClient } =
+            await import("@/lib/ai/generation/agent-backed-client")
+          builtinHandoffContext = (
+            await prepareHandoffContext(history, {
+              state,
+              client: await buildAgentBackedLlmClient({
+                session,
+                appSettings: useSettingsStore.getState().settings,
+                featureId: "handoff",
+                label: "Summarize task handoff",
+              }),
+            })
+          ).text
+        } else builtinHandoffContext = projected.text
+        const patch = {
+          sdkSessionId: undefined,
+          sdkSessionStorage: undefined,
+          forkedFromSdkSessionId: undefined,
+          externalAgentSession: undefined,
+          importOwnership: "cognia-owned" as const,
+          importFrozen: true,
+          branchSeed: builtinHandoffContext
+            ? { kind: "transcript" as const, content: builtinHandoffContext }
+            : undefined,
+        }
+        await updateSession(sessionId, patch)
+        session = { ...session, ...patch }
+        const {
+          verifiedNativeResume: _verified,
+          verifiedNativeResumeAgentId: _agentId,
+          ...composition
+        } = compositionForSession(sessionId)
+        useAgentRuntimeStore.getState().setSessionComposition(sessionId, composition)
+        await releaseExternalToolHost(sessionId)
+      }
       const identityMessages = store.getState().sessions[sessionId]?.messages ?? []
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
       const executionRunId = runIdForTurn(sessionId, chatRunId)
@@ -1186,6 +1309,21 @@ export function useClaudeChat() {
               toDiagnostic(error, { source: "chat", meta: { sessionId } })
           )
         throw error
+      }
+      if (builtinHandoffContext !== undefined) {
+        // Explicit send overrides must not smuggle the external runtime handle
+        // into the builtin SDK. The resolver may already have injected the seed.
+        sendOptions = { ...sendOptions }
+        delete sendOptions.resumeSessionId
+        delete sendOptions.forkFromSessionId
+        if (
+          builtinHandoffContext &&
+          !sendOptions.appendSystemPrompt?.includes(builtinHandoffContext)
+        ) {
+          sendOptions.appendSystemPrompt = [sendOptions.appendSystemPrompt, builtinHandoffContext]
+            .filter(Boolean)
+            .join("\n\n")
+        }
       }
       sendOptions = {
         ...sendOptions,
@@ -1321,11 +1459,7 @@ export function useClaudeChat() {
       }
 
       let effectiveContent: SendContent = turnContent
-      const promptText =
-        typeof turnContent === "string"
-          ? turnContent
-          : ((turnContent.find((b) => b.type === "text") as { text?: string } | undefined)?.text ??
-            "")
+      const promptText = userPromptText(turnContent, turnManifest?.length ?? 0)
       const promptDecision = await dispatchPluginUserPromptSubmit(
         promptText,
         sessionId,
@@ -1346,18 +1480,11 @@ export function useClaudeChat() {
       }
       if (promptDecision.action === "modify") {
         if (typeof promptDecision.modifiedPrompt === "string") {
-          if (typeof turnContent === "string") {
-            effectiveContent = promptDecision.modifiedPrompt
-          } else {
-            // Replace the first text block with the modified prompt and keep
-            // the rest of the content (attachments, etc.) intact.
-            effectiveContent = turnContent.map((block) => {
-              if (block.type === "text") {
-                return { ...block, text: promptDecision.modifiedPrompt as string } as typeof block
-              }
-              return block
-            })
-          }
+          effectiveContent = rewriteUserPromptText(
+            turnContent,
+            promptDecision.modifiedPrompt,
+            turnManifest?.length ?? 0
+          )
         }
         const additionalContext = (promptDecision as { additionalContext?: string })
           .additionalContext
@@ -1377,24 +1504,18 @@ export function useClaudeChat() {
       // attachments and non-text blocks are untouched. Runs AFTER
       // onUserPromptSubmit so a block decision wins over a rewrite.
       {
-        const outboundText =
-          typeof effectiveContent === "string"
-            ? effectiveContent
-            : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
-                ?.text ?? "")
+        const outboundText = userPromptText(effectiveContent, turnManifest?.length ?? 0)
         const piped = await dispatchPluginMessageSend({
           id: `${sessionId}:outbound`,
           role: "user",
           content: outboundText,
         })
         if (typeof piped?.content === "string" && piped.content !== outboundText) {
-          if (typeof effectiveContent === "string") {
-            effectiveContent = piped.content
-          } else {
-            effectiveContent = effectiveContent.map((block) =>
-              block.type === "text" ? ({ ...block, text: piped.content } as typeof block) : block
-            )
-          }
+          effectiveContent = rewriteUserPromptText(
+            effectiveContent,
+            piped.content,
+            turnManifest?.length ?? 0
+          )
         }
       }
 
@@ -1408,7 +1529,7 @@ export function useClaudeChat() {
       // existing user anchor stays the single source of truth for that turn.
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
-      const userMsg = makeUserMessage(effectiveContent, frozenTurnId, turnManifest)
+      let userMsg = makeUserMessage(effectiveContent, frozenTurnId, turnManifest)
       // Structured mention capture: persist the message's inline `@…` tokens
       // as `metadata.mentions: ContextRef[]` so mentions are queryable without
       // regex re-parsing. Known subagent handles resolve to their kind; other
@@ -1480,6 +1601,14 @@ export function useClaudeChat() {
       // them. They diverge only on the *other* effects of a user turn — see
       // `steerDrain`'s doc on the option type.
       const skipAppend = callOptions?.skipUserAppend === true || callOptions?.steerDrain === true
+      // Claim imported history before the first write or dispatch. Otherwise a
+      // file-watch refresh can replace the user's continuation while it runs.
+      if (sessionId.startsWith("import:") && session?.importOwnership !== "native-bound") {
+        await freezeImportedSession(sessionId)
+      }
+      const persistedUserMessage = await persistAttachments(userMsg)
+      if (!persistedUserMessage) return
+      userMsg = persistedUserMessage
       const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
       const displayContent = effectiveContent
       // The reply line goes to the provider only. The transcript row above
@@ -2738,7 +2867,7 @@ export function useClaudeChat() {
           let externalSessionWriteError: unknown
           const persistExternalSession = (nativeId?: string) => {
             const hosted = externalToolHostsRef.current.get(sessionId)
-            if (hosted && nativeId) hosted.nativeSessionId = nativeId
+            if (hosted?.agentId === extAgentId && nativeId) hosted.nativeSessionId = nativeId
             if (!nativeId?.startsWith("cognia-gateway:") || nativeId === persistedExternalSessionId)
               return
             persistedExternalSessionId = nativeId
@@ -2925,10 +3054,27 @@ export function useClaudeChat() {
           const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
           let externalContinuationContext: string | undefined
           let resetExternalSession = false
+          let verifiedNativeResume = false
+          // A stale tool host belongs to the previous runtime, including when
+          // the new target cannot host MCP and would otherwise skip cleanup.
+          const previousHost = externalToolHostsRef.current.get(sessionId)
+          if (previousHost && (hostSelection || previousHost.agentId !== extAgentId)) {
+            await releaseExternalToolHost(sessionId)
+          }
           if (!hostSelection) {
             const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
             const manager = getExternalAgentManager()
             const agentConfig = manager.getAgent(extAgentId)?.config
+            const composition = compositionForSession(sessionId)
+            verifiedNativeResume = Boolean(
+              sessionId.startsWith("import:") &&
+              composition.verifiedNativeResume &&
+              composition.verifiedNativeResumeAgentId === extAgentId &&
+              session?.importOwnership === "native-bound" &&
+              session.importRuntimeBinding?.nativeSessionId &&
+              agentConfig &&
+              session?.importRuntimeBinding?.presetId === externalAgentPresetIdOf(agentConfig)
+            )
             const { buildDeclaredCapabilityProfile } =
               await import("@/lib/ai/agent/external/capability-profile")
             const profile =
@@ -3032,6 +3178,69 @@ export function useClaudeChat() {
               externalMcpServers.unshift(...hosted.mcpServers)
             }
           }
+          if (!verifiedNativeResume && compositionForSession(sessionId).verifiedNativeResume) {
+            // Once another runtime takes a turn the original native history no
+            // longer contains the full conversation. Returning to it needs a
+            // fresh contextual handoff, not the stale verification marker.
+            const {
+              verifiedNativeResume: _verified,
+              verifiedNativeResumeAgentId: _agentId,
+              ...composition
+            } = compositionForSession(sessionId)
+            useAgentRuntimeStore.getState().setSessionComposition(sessionId, composition)
+          }
+          const hostedSession = externalToolHostsRef.current.get(sessionId)
+          const matchingHostedNativeSessionId =
+            hostedSession?.agentId === extAgentId ? hostedSession.nativeSessionId : undefined
+          const hasMatchingExternalSession =
+            session?.externalAgentSession?.agentId === extAgentId ||
+            !!matchingHostedNativeSessionId ||
+            verifiedNativeResume
+          if (
+            resetExternalSession ||
+            externalContinuationContext !== undefined ||
+            !hasMatchingExternalSession
+          ) {
+            const { buildHandoffContext, prepareHandoffContext } =
+              await import("@/lib/chat/handoff-context")
+            const history = (await listMessages(sessionId)).filter(
+              (message) => message.id !== userMsg.id
+            )
+            const imported = session?.importCanonicalState
+            const state = imported
+              ? {
+                  tasks: imported.tasks,
+                  plans: imported.plans,
+                  goals: imported.goals,
+                  checkpoints: imported.checkpoints,
+                  interAgentMessages: imported.interAgentMessages,
+                }
+              : undefined
+            const projected = buildHandoffContext(history, { state })
+            if (projected.losses.some((loss) => loss.kind === "budget")) {
+              const { buildAgentBackedLlmClient } =
+                await import("@/lib/ai/generation/agent-backed-client")
+              externalContinuationContext = (
+                await prepareHandoffContext(history, {
+                  state,
+                  client: await buildAgentBackedLlmClient({
+                    session,
+                    appSettings,
+                    featureId: "handoff",
+                    label: "Summarize task handoff",
+                  }),
+                  signal: gatewayController?.signal,
+                })
+              ).text
+            } else {
+              externalContinuationContext = projected.text || undefined
+            }
+          }
+          // All adapters consume prompt text. The custom context field alone
+          // is only understood by some runtimes and cannot carry the handoff.
+          const externalExecutionPrompt = externalContinuationContext
+            ? `${externalContinuationContext}\n\nCurrent user request:\n${externalSendText}`
+            : externalSendText
           // Reuse the completed instruction pipeline, including selected skills,
           // project context and per-turn additions, on the external lane too.
           const externalSystemPrompt = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
@@ -3045,13 +3254,16 @@ export function useClaudeChat() {
           // is shared rather than duplicated per lane.
           const result =
             hostSelection && executeOnRemoteHostAgent && remoteRunId
-              ? await executeOnRemoteHostAgent(externalSendText, {
+              ? await executeOnRemoteHostAgent(externalExecutionPrompt, {
                   stamp: {
                     configId: hostSelection.configId,
                     revision: hostSelection.revision,
                     lifecycleGeneration: hostSelection.lifecycleGeneration,
                   },
                   chatSessionId: sessionId,
+                  ...(session?.externalAgentSession?.agentId === extAgentId
+                    ? { externalSessionId: session.externalAgentSession.sessionId }
+                    : {}),
                   newRunId: () => remoteRunId,
                   ...externalModelAxes,
                   systemPrompt: externalSystemPrompt || undefined,
@@ -3059,23 +3271,21 @@ export function useClaudeChat() {
                   mcpServers: externalMcpServers,
                   onEvent: handleExternalEvent,
                 })
-              : await executeOnExternalAgent(externalSendText, {
+              : await executeOnExternalAgent(externalExecutionPrompt, {
                   agentId: extAgentId,
                   ...(gatewayController ? { signal: gatewayController.signal } : {}),
                   ...(!resetExternalSession && session?.externalAgentSession?.agentId === extAgentId
                     ? { sessionId: session.externalAgentSession.sessionId }
                     : {}),
-                  ...(!resetExternalSession &&
-                  externalToolHostsRef.current.get(sessionId)?.nativeSessionId
-                    ? { sessionId: externalToolHostsRef.current.get(sessionId)!.nativeSessionId }
+                  ...(!resetExternalSession && matchingHostedNativeSessionId
+                    ? { sessionId: matchingHostedNativeSessionId }
                     : {}),
                   // Resume the agent's own native session, but only for an
                   // import whose binding has been verified. The id comes from
                   // the session row, which is where it has always lived. The
                   // composition carries the verification decision, nothing more.
                   ...(!resetExternalSession &&
-                  sessionId.startsWith("import:") &&
-                  compositionForSession(sessionId).verifiedNativeResume &&
+                  verifiedNativeResume &&
                   session?.importRuntimeBinding?.nativeSessionId
                     ? { sessionId: session.importRuntimeBinding.nativeSessionId }
                     : {}),

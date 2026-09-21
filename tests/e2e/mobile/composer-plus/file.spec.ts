@@ -3,7 +3,7 @@
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { resetCogniaDb } from "../../helpers/db-reset"
+import { resetCogniaDb, setCogniaSettings } from "../../helpers/db-reset"
 import { injectCapacitor } from "../../helpers/inject-capacitor"
 
 test.describe("mobile composer plus — file", () => {
@@ -11,26 +11,31 @@ test.describe("mobile composer plus — file", () => {
     await injectCapacitor(page, { platform: "android" })
     await page.goto("/")
     await resetCogniaDb(page)
+    // The reset also clears `mobileRuntimeMode` and `onboardingProgress`, and
+    // the ADR-0122 gate routes a session-less account into the first-run flow —
+    // the `+` sheet only exists once both say "already set up".
+    await setCogniaSettings(page, {
+      mobileRuntimeMode: "standalone",
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
   })
 
-  test("tapping file picks an item from the filesystem mock", async ({ page }) => {
-    await page.evaluate(() => {
-      const mock = (
-        window as unknown as {
-          __cogniaCapMock: { setFilesystemEntry: (p: string, d: string) => void }
-        }
-      ).__cogniaCapMock
-      mock.setFilesystemEntry("/Documents/sample.pdf", "base64data")
-    })
+  test("picking a file attaches it to the composer", async ({ page }) => {
     await page.goto("/")
-    await page
-      .getByRole("button", { name: /\+|plus|attach/i })
-      .first()
-      .click()
-    await page
-      .getByRole("button", { name: /file|文件/i })
-      .first()
-      .click()
-    await expect(page.getByTestId("composer-attachment").first()).toBeVisible({ timeout: 10_000 })
+    await page.getByTestId("composer-plus-toggle").click()
+    // The file tile is a <label> over a real <input type=file> (Capacitor v7
+    // has no unified picker), so the honest drive is setInputFiles, not a tap.
+    await page.getByTestId("composer-plus-file-input").setInputFiles({
+      name: "sample.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("base64data"),
+    })
+    await expect(page.getByTestId("composer-attachment-chip").first()).toBeVisible({
+      timeout: 10_000,
+    })
   })
 })

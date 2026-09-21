@@ -112,6 +112,29 @@ describe("enforceVideoDeliveryForRoute", () => {
     expect(out.dropped).toBe(0)
   })
 
+  it("retains original and source-located evidence when the final route needs a storyboard", () => {
+    const turn = nativeTurn()
+    const original = new Blob(["video"], { type: "video/mp4" })
+    const extractedContent = {
+      attachmentId: "video-a",
+      contentHash: "a".repeat(64),
+      status: "partial" as const,
+      processor: { id: "video", version: "1" },
+      segments: [
+        {
+          id: "scene-1",
+          text: "screen demo",
+          locator: { type: "time" as const, startSec: 0, endSec: 5 },
+        },
+      ],
+    }
+    Object.assign(turn.manifest[1]!, { original, extractedContent })
+    const out = enforceVideoDeliveryForRoute(turn.content, turn.manifest, claude)
+    expect(out.manifest?.[1]?.original).toBe(original)
+    expect(out.manifest?.[1]?.extractedContent).toBe(extractedContent)
+    expect(out.manifest?.[2]).toBe(out.manifest?.[1])
+  })
+
   it("drops a native video that has no fallback instead of sending it", () => {
     const turn = nativeTurn()
     delete turn.manifest[1]!.video!.fallback

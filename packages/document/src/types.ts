@@ -54,6 +54,16 @@ export interface DocumentChunk {
   metadata?: Record<string, unknown>
 }
 
+export interface DocumentSourceSegment {
+  id: string
+  text: string
+  locator:
+    | { type: "page"; page: number }
+    | { type: "sheet"; sheet: string; range?: string }
+    | { type: "slide"; slide: number }
+    | { type: "text"; start: number; end: number }
+}
+
 export interface ProcessedDocument {
   id: string
   filename: string
@@ -62,6 +72,7 @@ export interface ProcessedDocument {
   embeddableContent: string
   metadata: DocumentMetadata
   chunks?: DocumentChunk[]
+  sourceSegments?: DocumentSourceSegment[]
   parseResult?:
     | PDFParseResult
     | WordParseResult

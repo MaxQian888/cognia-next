@@ -60,7 +60,7 @@ jest.mock("@/stores/chat", () => {
     getState: () => typeof chatStoreState
   }
   hook.getState = () => chatStoreState
-  return { useChatStore: hook }
+  return { useChatStore: hook, useSessionStatus: () => chatStoreState.status }
 })
 
 jest.mock("@/stores/settings", () => ({

@@ -3,12 +3,17 @@ import { buildGhostPrompt, sanitizeGhost, MAX_GHOST_LEN } from "./ghost-prompt"
 describe("buildGhostPrompt", () => {
   it("includes the draft and a system prompt", () => {
     const { system, prompt } = buildGhostPrompt({ draft: "write a function that" })
-    expect(system).toMatch(/inline autocomplete/i)
+    expect(system).toMatch(/inline completions/i)
     expect(prompt).toContain("Partial message to continue:")
     expect(prompt).toContain("write a function that")
   })
 
-  it("adds recent conversation context with role labels", () => {
+  it("marks the insertion point with the caret marker", () => {
+    const { prompt } = buildGhostPrompt({ draft: "write a function that" })
+    expect(prompt).toContain("write a function that▍")
+  })
+
+  it("adds recent conversation context as tagged turns, not role labels", () => {
     const { prompt } = buildGhostPrompt({
       draft: "and then",
       recentMessages: [
@@ -17,8 +22,11 @@ describe("buildGhostPrompt", () => {
       ],
     })
     expect(prompt).toContain("Recent conversation:")
-    expect(prompt).toContain("User: hello")
-    expect(prompt).toContain("Assistant: hi there")
+    // Tagged turns cannot be confused with message content that itself
+    // contains "User:"/"Assistant:" (quoted transcripts happen).
+    expect(prompt).toContain('<turn who="user">hello</turn>')
+    expect(prompt).toContain('<turn who="assistant">hi there</turn>')
+    expect(prompt).not.toContain("User: hello")
   })
 
   it("keeps only the most recent messages and drops blanks", () => {
@@ -64,6 +72,11 @@ describe("sanitizeGhost", () => {
 
   it("strips an echoed input prefix", () => {
     expect(sanitizeGhost("hello world and more", "hello world")).toBe(" and more")
+  })
+
+  it("strips an echoed caret marker", () => {
+    expect(sanitizeGhost("draft▍ and more", "draft")).toBe(" and more")
+    expect(sanitizeGhost(" and more ▍", "draft")).toBe(" and more")
   })
 
   it("returns null when the model only echoes the input", () => {

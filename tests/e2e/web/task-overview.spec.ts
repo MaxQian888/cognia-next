@@ -2,7 +2,12 @@ import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { ensureCogniaAccount, setCogniaSettings, waitForTestGlobals } from "../helpers/db-reset"
 
 async function openOverview(page: Page) {
-  await page.getByRole("button", { name: "Task summary", exact: true }).click()
+  // The opener floats on the chat pane surface (`chat-summary-trigger`), not
+  // in the title bar.
+  await page
+    .getByTestId("chat-summary-trigger")
+    .getByRole("button", { name: "Task summary", exact: true })
+    .click()
   await page
     .getByTestId("session-summary")
     .getByRole("button", { name: "View details", exact: true })
@@ -11,6 +16,20 @@ async function openOverview(page: Page) {
 }
 
 async function prepareConversations(page: Page) {
+  // This spec exercises the title bar itself — opt the web shell back into it
+  // (`webTitleBarEnabled` is off by default). An init script runs before the
+  // app's JS on every navigation, so the flag is in place before the ui-store
+  // rehydrates; the guard keeps it a one-time seed so later reloads preserve
+  // whatever else the test changed in the store.
+  await page.addInitScript(() => {
+    const raw = window.localStorage.getItem("cognia-ui")
+    const persisted = raw
+      ? (JSON.parse(raw) as { state?: Record<string, unknown>; version?: number })
+      : { state: {}, version: 3 }
+    if (persisted.state?.webTitleBarEnabled === true) return
+    persisted.state = { ...persisted.state, webTitleBarEnabled: true }
+    window.localStorage.setItem("cognia-ui", JSON.stringify(persisted))
+  })
   await page.goto("/")
   await ensureCogniaAccount(page)
   await page.goto("about:blank")
@@ -75,8 +94,15 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
   const conversation = page.getByRole("log")
   await expect(conversation).toBeVisible()
   const bounds = await conversation.boundingBox()
+  // The opener lives on the pane surface now — the title bar's actions outlet
+  // no longer carries it.
+  await expect(
+    page
+      .getByTestId("title-bar-outlet-actions")
+      .getByRole("button", { name: "Task summary", exact: true })
+  ).toHaveCount(0)
   const trigger = page
-    .getByTestId("title-bar-outlet-actions")
+    .getByTestId("chat-summary-trigger")
     .getByRole("button", { name: "Task summary", exact: true })
   await expect(trigger).toBeVisible()
   const triggerBounds = await trigger.boundingBox()
@@ -95,7 +121,6 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
       return (
         region.width >= 250 &&
         region.width <= 290 &&
-        region.y >= triggerBounds!.y + triggerBounds!.height &&
         chat.x + chat.width <= region.x + 1 &&
         Math.abs(bounds.width - chat.width - region.width) <= 2 &&
         region.x + region.width <= page.viewportSize()!.width
@@ -152,7 +177,10 @@ test("@smoke task summary reserves narrow space and opens the selected task deta
   await expect(
     page.getByRole("banner").getByText("Overview second task", { exact: true })
   ).toBeVisible()
-  await page.getByRole("button", { name: "Task summary", exact: true }).click()
+  await page
+    .getByTestId("chat-summary-trigger")
+    .getByRole("button", { name: "Task summary", exact: true })
+    .click()
   await expect(summary).toBeVisible()
   await summary.getByRole("button", { name: "View details", exact: true }).click()
   await expect(summary).toBeHidden()

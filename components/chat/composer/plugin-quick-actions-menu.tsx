@@ -20,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
 import { runQuickAction } from "@/lib/plugin/registries/quick-action-registry"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
@@ -33,18 +34,23 @@ export function PluginQuickActionsMenu({ disabled }: { disabled?: boolean }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label={t("quickActions")}
-          disabled={disabled}
-          className="size-7"
-        >
-          <ZapIcon className="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={t("quickActions")}
+              disabled={disabled}
+              className="size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
+            >
+              <ZapIcon className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("quickActions")}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" className="max-w-72">
         {actions.map((action) => (
           <DropdownMenuItem

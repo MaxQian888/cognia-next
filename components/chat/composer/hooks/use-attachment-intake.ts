@@ -141,6 +141,7 @@ export function useAttachmentIntake({
       try {
         const prepared = await prepareComposerAttachments(list, {
           maxFileSize: MAX_FILE_SIZE,
+          audio: acceptMotion,
           ...(acceptMotion ? { motion: { maxSourceBytes: COMPOSER_VIDEO_SOURCE_MAX_BYTES } } : {}),
         })
         if (prepared.unsupportedCount > 0) {

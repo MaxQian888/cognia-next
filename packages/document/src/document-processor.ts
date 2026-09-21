@@ -41,6 +41,7 @@ import type {
 } from "./types"
 
 export interface ProcessingOptions {
+  signal?: AbortSignal
   extractEmbeddable?: boolean
   generateChunks?: boolean
   chunkingOptions?: Partial<ChunkingOptions>
@@ -251,6 +252,13 @@ export function processDocument(
     metadata,
     parseSummary,
     parseDiagnostics: [],
+    sourceSegments: [
+      {
+        id: `${id}:text`,
+        text: embeddableContent,
+        locator: { type: "text", start: 0, end: embeddableContent.length },
+      },
+    ],
   }
 
   // Generate chunks if requested
@@ -274,6 +282,7 @@ export async function processDocumentAsync(
   data: string | ArrayBuffer,
   options: ProcessingOptions = {}
 ): Promise<ProcessedDocument> {
+  options.signal?.throwIfAborted()
   const opts = {
     ...DEFAULT_PROCESSING_OPTIONS,
     ...options,
@@ -306,7 +315,7 @@ export async function processDocumentAsync(
       // Dynamic import to reduce bundle size and memory usage
       const { parsePDF, extractPDFEmbeddableContent } = await import("./parsers/pdf-parser")
       const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
-      const parsed = await parsePDF(buffer)
+      const parsed = await parsePDF(buffer, { signal: opts.signal })
       content = parsed.text
       embeddableContent = opts.extractEmbeddable ? extractPDFEmbeddableContent(parsed) : content
       metadata = {
@@ -334,7 +343,7 @@ export async function processDocumentAsync(
           await import("./parsers/anydoc-parser")
         try {
           const parsed = await parseLegacyOfficeWithAnyDoc(buffer, "doc", {
-            signal: opts.anyDoc.signal,
+            signal: opts.signal ?? opts.anyDoc.signal,
             timeoutMs: opts.anyDoc.timeoutMs,
           })
           content = parsed.markdown
@@ -462,7 +471,7 @@ export async function processDocumentAsync(
           await import("./parsers/anydoc-parser")
         try {
           const parsed = await parseLegacyOfficeWithAnyDoc(buffer, "ppt", {
-            signal: opts.anyDoc.signal,
+            signal: opts.signal ?? opts.anyDoc.signal,
             timeoutMs: opts.anyDoc.timeoutMs,
           })
           content = parsed.markdown
@@ -641,6 +650,52 @@ export async function processDocumentAsync(
     parseResult,
     parseSummary,
     parseDiagnostics,
+  }
+
+  opts.signal?.throwIfAborted()
+  if (parseResult && "pages" in parseResult) {
+    result.sourceSegments = parseResult.pages.map((page) => ({
+      id: `${id}:page:${page.pageNumber}`,
+      text: page.text,
+      locator: { type: "page" as const, page: page.pageNumber },
+    }))
+  } else if (parseResult && "sheets" in parseResult) {
+    result.sourceSegments = parseResult.sheets.map((sheet, index) => {
+      let column = sheet.columnCount
+      let lastColumn = ""
+      while (column > 0) {
+        column -= 1
+        lastColumn = String.fromCharCode(65 + (column % 26)) + lastColumn
+        column = Math.floor(column / 26)
+      }
+      return {
+        id: `${id}:sheet:${index + 1}`,
+        text: sheet.data
+          .map((row) => row.map((cell) => JSON.stringify(cell ?? "")).join("\t"))
+          .join("\n"),
+        locator: {
+          type: "sheet" as const,
+          sheet: sheet.name,
+          ...(sheet.rowCount > 0 && lastColumn
+            ? { range: `A1:${lastColumn}${sheet.rowCount}` }
+            : {}),
+        },
+      }
+    })
+  } else if (parseResult && "slides" in parseResult) {
+    result.sourceSegments = parseResult.slides.map((slide) => ({
+      id: `${id}:slide:${slide.slideNumber}`,
+      text: slide.text,
+      locator: { type: "slide" as const, slide: slide.slideNumber },
+    }))
+  } else {
+    result.sourceSegments = [
+      {
+        id: `${id}:text`,
+        text: embeddableContent,
+        locator: { type: "text", start: 0, end: embeddableContent.length },
+      },
+    ]
   }
 
   // Generate chunks if requested

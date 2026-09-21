@@ -46,6 +46,12 @@ export interface ChatPaneGroupProps {
   setModel?: (sessionId: string, model: string) => Promise<void>
   resetRuntime?: (sessionId: string) => Promise<void>
   onCreate: () => void
+  /**
+   * "Chat as a character" door — opens the character picker. Distinct from
+   * `onCreate` (which navigates to the welcome surface): the character-missing
+   * banner uses it to offer a replacement pick. Defaults to `onCreate`.
+   */
+  onPickCharacter?: () => void
   onUseSample: (text: string) => void
   /** First turn from the welcome hero composer — creates the session, then sends. */
   onHeroSend?: (
@@ -57,6 +63,10 @@ export interface ChatPaneGroupProps {
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
+  /** Context bar fused onto the welcome hero composer's top edge (`composer/context-bar.tsx`). */
+  welcomeContextBarSlot?: ReactNode
+  /** Extra controls prepended into the welcome hero composer's toolbar row. */
+  welcomeComposerToolbar?: ReactNode
   recentSessions?: readonly RecentSessionEntry[]
   onResumeSession?: (id: string) => void
   composerRef?: Ref<ComposerHandle>
@@ -85,10 +95,13 @@ export function ChatPaneGroup({
   setModel,
   resetRuntime,
   onCreate,
+  onPickCharacter,
   onUseSample,
   onHeroSend,
   onOpenSettings,
   newChatExecutionControls,
+  welcomeContextBarSlot,
+  welcomeComposerToolbar,
   recentSessions,
   onResumeSession,
   composerRef,
@@ -155,10 +168,13 @@ export function ChatPaneGroup({
         onSetModel={sessionId && setModel ? (model) => setModel(sessionId, model) : undefined}
         onResetRuntime={sessionId && resetRuntime ? () => resetRuntime(sessionId) : undefined}
         onCreate={onCreate}
+        onPickCharacter={onPickCharacter}
         onUseSample={onUseSample}
         onHeroSend={onHeroSend}
         onOpenSettings={onOpenSettings}
         newChatExecutionControls={newChatExecutionControls}
+        welcomeContextBarSlot={welcomeContextBarSlot}
+        welcomeComposerToolbar={welcomeComposerToolbar}
         onSplitView={onSplitView}
         onExitSplit={onExitSplit}
         recentSessions={recentSessions}

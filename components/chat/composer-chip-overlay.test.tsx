@@ -42,6 +42,50 @@ describe("ComposerChipOverlay", () => {
     expect(container.textContent).toBe("/review ////////")
   })
 
+  it("repaints the '/' cell as the prompt sigil without moving a glyph", () => {
+    const { container } = render(
+      <ComposerChipOverlay value="/help now" segments={segs("/help now")} />
+    )
+    const pill = container.querySelector('[data-chip="command"]')!
+    const sigil = pill.querySelector("[data-command-sigil]")!
+    // The cell still owns exactly one real character — the mirror stays
+    // glyph-for-glyph — it is only painted as the bolt mark, never retyped.
+    expect(sigil.textContent).toBe("/")
+    expect(sigil.className).toContain("text-transparent")
+    expect(sigil.className).toContain("-mx-0.5")
+    expect(sigil.getAttribute("style")).toContain("mask-image")
+    expect(pill.textContent).toBe("/help")
+    // The capsule breathes past its text without moving it: each padding
+    // must keep its matching negative margin or the mirror drifts, and the
+    // leading pair stays smaller so a column-0 command's ring does not ride
+    // out past the text margin into the box's padding.
+    expect(pill.className).toContain("ps-[3px]")
+    expect(pill.className).toContain("-ms-[3px]")
+    expect(pill.className).toContain("pe-1")
+    expect(pill.className).toContain("-me-1")
+    expect(container.textContent).toBe("/help now")
+  })
+
+  it("tints the pill and sigil by the command's scope", () => {
+    const value = "/help /model"
+    const scopeOf = (name: string): "plugin" | "project" | undefined =>
+      name === "help" ? "plugin" : name === "model" ? "project" : undefined
+    const { container } = render(
+      <ComposerChipOverlay value={value} segments={segs(value)} commandScope={scopeOf} />
+    )
+    const pills = container.querySelectorAll('[data-chip="command"]')
+    expect(pills[0].getAttribute("data-scope")).toBe("plugin")
+    expect(pills[0].className).toContain("bg-emerald-500/[0.08]")
+    expect(pills[0].querySelector("[data-command-sigil]")!.className).toContain("bg-emerald-600/75")
+    expect(pills[1].getAttribute("data-scope")).toBe("project")
+    expect(pills[1].className).toContain("bg-blue-500/[0.08]")
+    // A command the lookup misses paints as the neutral builtin default.
+    const { container: bare } = render(
+      <ComposerChipOverlay value="/help" segments={segs("/help")} commandScope={() => undefined} />
+    )
+    expect(bare.querySelector('[data-chip="command"]')!.getAttribute("data-scope")).toBe("builtin")
+  })
+
   it("renders no pills for plain prose", () => {
     const value = "just a normal message"
     const { container } = render(<ComposerChipOverlay value={value} segments={segs(value)} />)

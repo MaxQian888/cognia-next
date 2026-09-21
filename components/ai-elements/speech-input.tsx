@@ -53,7 +53,7 @@ declare global {
   }
 }
 
-type SpeechInputMode = "speech-recognition" | "media-recorder" | "none"
+export type SpeechInputMode = "speech-recognition" | "media-recorder" | "none"
 
 export type SpeechInputProps = Omit<ComponentProps<typeof Button>, "onError"> & {
   onTranscriptionChange?: (text: string) => void
@@ -75,7 +75,7 @@ export type SpeechInputProps = Omit<ComponentProps<typeof Button>, "onError"> & 
   lang?: string
 }
 
-const detectSpeechInputMode = (): SpeechInputMode => {
+export const detectSpeechInputMode = (): SpeechInputMode => {
   if (typeof window === "undefined") {
     return "none"
   }
@@ -93,6 +93,7 @@ const detectSpeechInputMode = (): SpeechInputMode => {
 
 export const SpeechInput = ({
   className,
+  disabled,
   onTranscriptionChange,
   onAudioRecorded,
   onListeningChange,
@@ -290,7 +291,15 @@ export const SpeechInput = ({
       if (isListening) {
         recognitionRef.current.stop()
       } else {
-        recognitionRef.current.start()
+        // `start()` throws InvalidStateError on a fast second click before the
+        // `start` event has landed and flipped `isListening` — the session is
+        // already running, so "already started" is success, not a failure.
+        try {
+          recognitionRef.current.start()
+        } catch {
+          // InvalidStateError — recognition already started; the pending
+          // `start`/`end` events own the listening state from here.
+        }
       }
     } else if (mode === "media-recorder") {
       if (isListening) {
@@ -301,8 +310,13 @@ export const SpeechInput = ({
     }
   }, [mode, isListening, startMediaRecorder, stopMediaRecorder])
 
-  // Determine if button should be disabled
+  // Determine if button should be disabled. The caller's own `disabled` is
+  // destructured out of `props` and OR-ed in here — spreading it over
+  // `disabled={isDisabled}` would let a `disabled={undefined}` wipe out the
+  // computed flag and leave an enabled-but-dead button on unsupported
+  // browsers (media-recorder mode without an `onAudioRecorded` backend).
   const isDisabled =
+    disabled === true ||
     mode === "none" ||
     (mode === "speech-recognition" && !isRecognitionReady) ||
     (mode === "media-recorder" && !onAudioRecorded) ||

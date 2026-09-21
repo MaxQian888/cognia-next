@@ -78,6 +78,7 @@ import {
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useChatStore, useComposerPermissionMode } from "@/stores/chat"
 import { useComposerSessionId } from "@/components/chat/composer/composer-session-context"
+import { ComposerMenuCloseProvider } from "@/components/chat/composer/composer-menu-context"
 import { listDocsProviders } from "@/lib/docs-providers/registry"
 import { docsProviderReach } from "@/lib/docs-providers/reach"
 import { useHostProfile } from "@/hooks/use-host-profile"
@@ -530,9 +531,12 @@ export function ComposerPlusMenu({
                     testId="composer-plus-goal"
                   />
                 ) : null}
-                {capabilities ? (
-                  <div className="flex flex-wrap items-center gap-2 px-2 py-2">{capabilities}</div>
-                ) : null}
+                {/* Same contract as the desktop menu: an injected row that
+                    navigates away (unconfigured web search → Settings) closes
+                    the sheet behind it. */}
+                <ComposerMenuCloseProvider value={closeMenu}>
+                  {capabilities}
+                </ComposerMenuCloseProvider>
 
                 <GroupLabel className="mt-2 border-t border-border pt-3">
                   {tMenu("extendGroup")}

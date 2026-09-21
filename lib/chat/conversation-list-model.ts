@@ -87,6 +87,12 @@ export type ConversationSection =
       group: ConversationGroup
       sessions: ChatSession[]
       collapsed: boolean
+      /**
+       * Rows cut from view by the renderer's preview cap ("Show more"). Never
+       * set by the model itself — `applyTeamGroupPreviewCaps` annotates the
+       * sections it slices so the row count and the expander agree.
+       */
+      previewHidden?: number
     }
 
 export interface BuildSectionsOptions {
@@ -136,6 +142,17 @@ export interface BuildSectionsOptions {
    * representable too.
    */
   groupCollapseOverrides?: Readonly<Record<string, boolean>>
+  /**
+   * Emit every supplied group even when it holds no rows. Off by default —
+   * "Empty group sections are omitted" — because on the workspace/agent axes a
+   * group is just a bucket of whatever matched. On surfaces where the group
+   * headers are navigation entities in their own right (the merged rail's
+   * scope tree: Chats plus one collapsible header per squad), a team with no
+   * conversations still needs its header — for its context menu, its "new
+   * conversation" affordance, and as the drop target of the tree. The
+   * ungrouped bucket is emitted too, for the same reason.
+   */
+  emitEmptyGroups?: boolean
   /**
    * Optional set of session ids whose message *content* matched the query
    * (resolved async by the caller). In search mode a session matches when its
@@ -533,13 +550,22 @@ function orderWorkspaces(
 
 /**
  * Split sessions into the caller-supplied groups, preserving `order` and
- * appending an ungrouped bucket for anything that didn't resolve.
+ * keeping an ungrouped bucket for anything that didn't resolve.
+ *
+ * `ungroupedFirst` puts that bucket ahead of the named groups instead of
+ * trailing them: on the team axis it is not leftovers — it holds the direct
+ * chats, the surface's own primary group. `emitEmpty` emits every group in
+ * `order` even with zero rows (navigation-entity semantics — see
+ * `BuildSectionsOptions.emitEmptyGroups`), and emits the ungrouped bucket on
+ * the same terms.
  */
 function groupSessions(
   sessions: readonly ChatSession[],
   order: readonly ConversationGroup[],
-  groupIdOf: (session: ChatSession) => string | null | undefined
+  groupIdOf: (session: ChatSession) => string | null | undefined,
+  opts: { ungroupedFirst?: boolean; emitEmpty?: boolean } = {}
 ): Array<{ group: ConversationGroup; sessions: ChatSession[] }> {
+  const { ungroupedFirst = false, emitEmpty = false } = opts
   const known = new Map(order.map((g) => [g.id, g]))
   const buckets = new Map<string, ChatSession[]>()
   for (const session of sessions) {
@@ -550,6 +576,14 @@ function groupSessions(
     else buckets.set(id, [session])
   }
   const result: Array<{ group: ConversationGroup; sessions: ChatSession[] }> = []
+  const pushUngrouped = () => {
+    const ungrouped = buckets.get(UNGROUPED_ID) ?? []
+    // `name` is empty on purpose: the renderer supplies a translated label
+    // rather than the model inventing an English one.
+    if (ungrouped.length || emitEmpty)
+      result.push({ group: { id: UNGROUPED_ID, name: "" }, sessions: [...ungrouped] })
+  }
+  if (ungroupedFirst) pushUngrouped()
   // A group id repeated in `order` (the caller's project / character list) must
   // not emit the same section — and the same rows — twice: the section key is
   // `${axis}:${id}`, so a repeat is a duplicate React key on top of a doubled
@@ -558,13 +592,10 @@ function groupSessions(
   for (const group of order) {
     if (emitted.has(group.id)) continue
     emitted.add(group.id)
-    const list = buckets.get(group.id)
-    if (list?.length) result.push({ group, sessions: list })
+    const list = buckets.get(group.id) ?? []
+    if (list.length || emitEmpty) result.push({ group, sessions: [...list] })
   }
-  const ungrouped = buckets.get(UNGROUPED_ID)
-  // `name` is empty on purpose: the renderer supplies a translated label rather
-  // than the model inventing an English one.
-  if (ungrouped?.length) result.push({ group: { id: UNGROUPED_ID, name: "" }, sessions: ungrouped })
+  if (!ungroupedFirst) pushUngrouped()
   return result
 }
 
@@ -612,6 +643,7 @@ export function buildConversationSections(
     teams = EMPTY_GROUPS,
     activeWorkspaceId = null,
     groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
+    emitEmptyGroups = false,
     contentMatchIds,
     searchIncludesArchived = false,
     sortBy = "recent",
@@ -747,8 +779,14 @@ export function buildConversationSections(
         : axis === "agent"
           ? [...agents]
           : [...teams]
-    const grouped = groupSessions(loose, order, (s) =>
-      axis === "workspace" ? s.projectId : axis === "agent" ? s.characterId : s.teamId
+    const grouped = groupSessions(
+      loose,
+      order,
+      (s) => (axis === "workspace" ? s.projectId : axis === "agent" ? s.characterId : s.teamId),
+      // Team axis is a scope tree: the ungrouped bucket ("Chats") is the first
+      // group, not a trailing bucket of leftovers, and with `emitEmptyGroups`
+      // every squad keeps a header even when it holds no rows.
+      { ungroupedFirst: axis === "team", emitEmpty: emitEmptyGroups }
     )
     for (const { group, sessions: members } of grouped) {
       const key = `${axis}:${group.id}`

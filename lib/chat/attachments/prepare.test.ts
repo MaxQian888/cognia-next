@@ -6,6 +6,7 @@ import {
   isSupportedAttachmentDescriptor,
   isSupportedComposerAttachment,
   prepareComposerAttachments,
+  getOriginalComposerAttachment,
 } from "./prepare"
 
 function sizedFile(name: string, type: string, size: number): File {
@@ -70,6 +71,7 @@ describe("prepareComposerAttachments", () => {
 
     expect(optimizeImage).toHaveBeenCalledWith(original)
     expect(result.files).toEqual([optimized])
+    expect(getOriginalComposerAttachment(result.files[0]!)).toBe(original)
     expect(result.optimizedCount).toBe(1)
     expect(result.tooLargeCount).toBe(0)
   })
@@ -238,4 +240,38 @@ describe("shared attachment ceilings", () => {
     expect(COMPOSER_MAX_ATTACHMENT_BYTES).toBe(10 * 1024 * 1024)
     expect(COMPOSER_VIDEO_SOURCE_MAX_BYTES).toBe(500 * 1024 * 1024)
   })
+})
+
+describe("attachment source and audio capabilities", () => {
+  it("requires an explicit local transcription capability for audio", async () => {
+    const file = sizedFile("meeting.mp3", "", 10)
+    expect(isSupportedAttachmentDescriptor({ name: file.name, mediaType: file.type })).toBe(false)
+    const remote = await prepareComposerAttachments([file], { maxFileSize: 100 })
+    expect(remote.files).toEqual([])
+    expect(remote.unsupportedCount).toBe(1)
+    const local = await prepareComposerAttachments([file], { maxFileSize: 100, audio: true })
+    expect(local.files[0]?.type).toBe("audio/mpeg")
+    expect(getOriginalComposerAttachment(local.files[0]!)).toBe(file)
+  })
+
+  it("keeps different originals distinct even when their previews have identical names and bytes", async () => {
+    const one = sizedFile("same.png", "image/png", 200)
+    const two = sizedFile("same.png", "image/png", 201)
+    const prepared = await prepareComposerAttachments([one, two], {
+      maxFileSize: 100,
+      optimizeImage: async () => sizedFile("same.png", "image/png", 10),
+    })
+    expect(getOriginalComposerAttachment(prepared.files[0]!)).toBe(one)
+    expect(getOriginalComposerAttachment(prepared.files[1]!)).toBe(two)
+  })
+})
+
+it("rejects originals above source quota before image optimization", async () => {
+  const source = sizedFile("giant.png", "image/png", 1)
+  Object.defineProperty(source, "size", { value: COMPOSER_VIDEO_SOURCE_MAX_BYTES + 1 })
+  const optimizeImage = jest.fn(async () => sizedFile("giant.png", "image/png", 1))
+  const result = await prepareComposerAttachments([source], { maxFileSize: 100, optimizeImage })
+  expect(result.tooLargeCount).toBe(1)
+  expect(result.files).toEqual([])
+  expect(optimizeImage).not.toHaveBeenCalled()
 })

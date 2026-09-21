@@ -49,6 +49,7 @@ import { useTranslations } from "next-intl"
 import { MoreHorizontalIcon, UsersIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
@@ -340,23 +341,20 @@ function GenericBottomToolbar({
   // Every control wears the same quiet chip (`TOOLBAR_CHIP`): no fill, no
   // border, hover-only affordance, and shrinkable so a squeezed row ellipsizes
   // labels instead of letting them spill over the next zone.
-  const runConfigChildren = (inMenu: boolean) => (
-    <>
-      {/* A Squad answers "which model, how deeply" per teammate, from each
-          member's own configuration. Leaving the two pickers on the row would
-          offer a choice this turn does not take — the shape of the old team
-          chat tab, where the model picker was a dead chip and the effort
-          selector silently rendered nothing. Say so instead. */}
-      {executor.squadId ? (
+  // A Squad answers "which model, how deeply" per teammate, from each member's
+  // own configuration. In place of those pickers the row says so — extracted
+  // so the folded "⋯" form can show the same sentence as a captioned row.
+  const squadSummary = (
+    <Tooltip>
+      <TooltipTrigger asChild>
         <span
-          // `inline-flex` is load-bearing: the inner `truncate` only clips
-          // inside a flex/grid parent. As a plain inline span the squad name
-          // ignored the `max-w` and painted over the status cluster.
+          // `inline-flex` is load-bearing: the inner `truncate` only clips inside
+          // a flex/grid parent. As a plain inline span the squad name ignored the
+          // `max-w` and painted over the status cluster.
           className={cn(
             TOOLBAR_CHIP,
             "inline-flex max-w-[11rem] cursor-default items-center gap-1"
           )}
-          title={tComposition("runsOnSquad")}
           data-testid="composer-executor-summary"
         >
           <UsersIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
@@ -364,13 +362,30 @@ function GenericBottomToolbar({
             {executor.squadName ?? tComposition("squadMissing")}
           </span>
         </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">{tComposition("runsOnSquad")}</TooltipContent>
+    </Tooltip>
+  )
+
+  const modelChip = (inMenu: boolean) => (
+    <ModelPicker
+      session={session}
+      disabled={isStreaming}
+      className={cn(TOOLBAR_CHIP, !inMenu && tier >= 3 ? "max-w-[7rem]" : "max-w-[11rem]")}
+    />
+  )
+
+  const runConfigChildren = (inMenu: boolean) => (
+    <>
+      {/* Leaving the model/effort pickers on the row of a Squad-bound
+          conversation would offer a choice this turn does not take — the
+          shape of the old team chat tab, where the model picker was a dead
+          chip and the effort selector silently rendered nothing. */}
+      {executor.squadId ? (
+        squadSummary
       ) : (
         <>
-          <ModelPicker
-            session={session}
-            disabled={isStreaming}
-            className={cn(TOOLBAR_CHIP, !inMenu && tier >= 3 ? "max-w-[7rem]" : "max-w-[11rem]")}
-          />
+          {modelChip(inMenu)}
           {/* Thinking level sits immediately after the model because it qualifies
           it — the pair reads as one answer to "how deeply will this run". It
           self-hides on a surface with no depth control, which is why it can
@@ -426,50 +441,37 @@ function GenericBottomToolbar({
     />
   )
 
+  // One captioned row per folded control — see `ToolbarMenuRow`. A row whose
+  // control renders nothing (no session, no presets, no plugin contributions)
+  // collapses itself, so this list can name every possible occupant without
+  // re-checking each control's own visibility rules.
+  const menuRow = (label: string, control: ReactNode) => (
+    <ToolbarMenuRow key={label} label={label}>
+      {control}
+    </ToolbarMenuRow>
+  )
+
   // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode
   // selector and the plugin slots own their own overlays, and re-mounting
   // those inside a `DropdownMenuItem` desyncs their open state. Every folded
   // control renders its FULL labelled form inside — there is always room in a
   // popover, and a glyph in a menu teaches nothing.
+  //
+  // `ambientOnRail` is the `full` skin's carve-out: it gives cost, credential
+  // and context a rail of their own under the row, so they are left out here.
   const foldGroups = (ambientOnRail: boolean) => (
-    <div className="flex flex-col gap-2">
-      {fusionFolded && <div className="flex flex-wrap items-center gap-2">{fusionChip(true)}</div>}
-      <div className="flex flex-wrap items-center gap-2 empty:hidden">
-        {presetControl}
-        {modeFolded && modeChip(true)}
-        {sandboxIndicator}
-      </div>
-      {costFolded && !ambientOnRail && (
-        <div className="flex flex-wrap items-center gap-2 empty:hidden">{costBadge(false)}</div>
-      )}
-      <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
+    <div className="flex flex-col gap-0.5">
+      {fusionFolded && menuRow(t("moreMenu.routing"), fusionChip(true))}
+      {modeFolded && menuRow(t("moreMenu.mode"), modeChip(true))}
+      {menuRow(t("moreMenu.preset"), presetControl)}
+      {menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
+      {costFolded && !ambientOnRail && menuRow(t("moreMenu.cost"), costBadge(false))}
+      {menuRow(t("moreMenu.plugins"), pluginSlots)}
     </div>
   )
-  const detachedMenu = (ambientOnRail: boolean) => (
+  const overflowMenu = (ambientOnRail: boolean) => (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
       {foldGroups(ambientOnRail)}
-    </ToolbarMoreMenu>
-  )
-
-  // The in-box layouts pack the same tail unconditionally — that is their
-  // design, not the tier's — so this menu exists at every width and the tiers
-  // only add to it.
-  const packedMenu = (
-    <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
-      <div className="flex flex-col gap-2">
-        {fusionFolded && (
-          <div className="flex flex-wrap items-center gap-2">{fusionChip(true)}</div>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          {presetControl}
-          {modeChip(true)}
-          {sandboxIndicator}
-        </div>
-        {costFolded && (
-          <div className="flex flex-wrap items-center gap-2 empty:hidden">{costBadge(false)}</div>
-        )}
-        <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
-      </div>
     </ToolbarMoreMenu>
   )
 
@@ -479,20 +481,25 @@ function GenericBottomToolbar({
   // their full labelled forms.
   const foldedMenu = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">{runConfigChildren(true)}</div>
-        <div className="flex flex-wrap items-center gap-2">
-          {presetControl}
-          {modeChip(true)}
-          {runtimeChip(false)}
-          {sandboxIndicator}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {costBadge(false)}
-          {credentialBadge}
-          {contextChip(false)}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 empty:hidden">{pluginSlots}</div>
+      <div className="flex w-64 flex-col gap-0.5">
+        {executor.squadId ? (
+          menuRow(tComposition("label"), squadSummary)
+        ) : (
+          <>
+            {menuRow(t("moreMenu.model"), modelChip(true))}
+            {menuRow(t("moreMenu.thinking"), effortDialSlot(false))}
+            {menuRow(t("moreMenu.routing"), fusionChip(true))}
+          </>
+        )}
+        {menuRow(t("moreMenu.permission"), permissionChip(true))}
+        {menuRow(t("moreMenu.mode"), modeChip(true))}
+        {menuRow(t("moreMenu.runtime"), runtimeChip(false))}
+        {menuRow(t("moreMenu.preset"), presetControl)}
+        {menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
+        {menuRow(t("moreMenu.cost"), costBadge(false))}
+        {menuRow(t("moreMenu.credential"), credentialBadge)}
+        {menuRow(t("moreMenu.context"), contextChip(false))}
+        {menuRow(t("moreMenu.plugins"), pluginSlots)}
       </div>
     </ToolbarMoreMenu>
   )
@@ -507,6 +514,7 @@ function GenericBottomToolbar({
         data-testid="composer-toolbar-embedded"
         data-toolbar-layout="folded"
       >
+        {leading}
         <ModelPicker
           session={session}
           disabled={isStreaming}
@@ -526,8 +534,12 @@ function GenericBottomToolbar({
   // left a dead gap the width of half the composer between the "+" and the
   // model picker, with the ambient numbers crowding the send key. Controls
   // start where the icons end; the read-only tail is pinned right by the auto
-  // margin. The fold ladder still applies inside — chips glyph and the cost
-  // badge folds as the pane narrows.
+  // margin.
+  //
+  // The fold ladder applies here exactly as on the detached row: a wide box
+  // spells the session shape out inline and renders no "⋯" at all — a menu
+  // holding two chips inside the input box read as a stray floating card —
+  // while a narrow one packs the tail into the disclosure in stages.
   if (layout === "embedded" || layout === "rail") {
     return (
       <div
@@ -540,9 +552,20 @@ function GenericBottomToolbar({
         data-toolbar-layout={layout}
         data-toolbar-tier={tier}
       >
+        {leading}
         {runConfigGroup}
         <ToolbarDivider />
+        {shapeInline && modeChip(false)}
         {runtimeChip(glyphChips)}
+        {!sessionFolded && presetControl}
+        {!sessionFolded && (
+          <div
+            className={cn("flex shrink-0 items-center gap-1 empty:hidden", ZONE_RULE)}
+            data-toolbar-zone="plugins"
+          >
+            {pluginSlots}
+          </div>
+        )}
         <div
           className={cn("ms-auto flex shrink-0 items-center gap-0.5 ps-2", ZONE_RULE)}
           data-testid="composer-status-cluster"
@@ -550,7 +573,8 @@ function GenericBottomToolbar({
           {!costFolded && costBadge(costShort)}
           {credentialBadge}
           {contextChip(ringOnly)}
-          {packedMenu}
+          {!sessionFolded && sandboxIndicator}
+          {sessionFolded && overflowMenu(false)}
         </div>
       </div>
     )
@@ -622,7 +646,7 @@ function GenericBottomToolbar({
         {!ambientOnRail && credentialBadge}
         {!ambientOnRail && contextChip(ringOnly)}
         {!sessionFolded && sandboxIndicator}
-        {sessionFolded && detachedMenu(ambientOnRail)}
+        {sessionFolded && overflowMenu(ambientOnRail)}
       </div>
     </div>
   )
@@ -683,6 +707,34 @@ const ZONE_RULE =
   "before:me-1.5 before:h-3.5 before:w-px before:shrink-0 before:bg-border before:content-['']"
 
 /**
+ * One folded control inside the "⋯" panel: a muted caption naming what the
+ * control governs, then the control itself in its full labelled form. The
+ * caption is what turns a floating handful of chips into a panel — a bare
+ * "Standard" card parked over the input reads as a stray element; "Agent mode
+ * — Standard" reads as a setting.
+ *
+ * The row hides itself when its control renders nothing (no session, no
+ * presets, plugin slots with no contributions): the slot is then `:empty`,
+ * and `has-[]:hidden` collapses the caption with it — callers never
+ * duplicate each control's own visibility rules.
+ */
+function ToolbarMenuRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 px-1.5 py-0.5 has-[[data-toolbar-menu-slot]:empty]:hidden">
+      <span className="w-20 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+        {label}
+      </span>
+      <div
+        data-toolbar-menu-slot
+        className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Compact "⋯ More" popover holding the toolbar controls that don't fit on a
  * narrow composer (e.g. inside the workflow chat sidebar). A `Popover` — not a
  * `DropdownMenu` — so the nested popover-trigger controls inside it keep their
@@ -702,23 +754,48 @@ function ToolbarMoreMenu({
   const isMobile = usePlatform() === "mobile"
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label={label}
-          disabled={disabled}
-          data-testid="composer-toolbar-more"
-          className={cn("relative size-7", isMobile && "touch-target")}
-        >
-          <MoreHorizontalIcon className="size-3.5" />
-          {active && (
-            <span aria-hidden className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" side="top" sideOffset={8} className="w-auto max-w-[80vw] p-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={label}
+              disabled={disabled}
+              data-testid="composer-toolbar-more"
+              className={cn(
+                "relative size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60",
+                isMobile && "touch-target"
+              )}
+            >
+              <MoreHorizontalIcon className="size-3.5" />
+              {active && (
+                <span
+                  aria-hidden
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        align="end"
+        side="top"
+        sideOffset={8}
+        className="w-64 max-w-[80vw] p-1.5"
+        onOpenAutoFocus={(event) => {
+          // The rows inside are captioned chips that carry their own tooltips,
+          // and Radix fires a tooltip on FOCUS — instantly, ignoring the
+          // provider's delayDuration. The default mount-autofocus lands on the
+          // first chip, so opening the menu would pop that chip's tooltip.
+          // Focus the shell instead; Tab still walks the rows in order.
+          event.preventDefault()
+          if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus()
+        }}
+      >
         {children}
       </PopoverContent>
     </Popover>

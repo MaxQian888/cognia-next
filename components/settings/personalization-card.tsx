@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import type { WelcomeStyle } from "@/components/chat/empty-state"
@@ -41,10 +42,31 @@ export function PersonalizationCard() {
     setName(settings?.userName ?? "")
   }, [settings?.userName])
 
+  // Welcome hints — one prompt per line, committed on blur like the name.
+  const [hints, setHints] = useState((settings?.welcomeHints ?? []).join("\n"))
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHints((settings?.welcomeHints ?? []).join("\n"))
+  }, [settings?.welcomeHints])
+
   function commitName() {
     const trimmed = name.trim()
     if (trimmed === (settings?.userName ?? "")) return
     void save({ userName: trimmed || undefined })
+  }
+
+  function commitHints() {
+    const lines = Array.from(
+      new Set(
+        hints
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+      )
+    )
+    const stored = settings?.welcomeHints ?? []
+    if (lines.length === stored.length && lines.every((line, i) => line === stored[i])) return
+    void save({ welcomeHints: lines.length > 0 ? lines : undefined })
   }
 
   return (
@@ -94,6 +116,22 @@ export function PersonalizationCard() {
           ))}
         </div>
         <p className="text-[11px] text-muted-foreground">{t("personalization.styleHint")}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="settings-welcome-hints" className="text-xs">
+          {t("personalization.hintsLabel")}
+        </Label>
+        <Textarea
+          id="settings-welcome-hints"
+          value={hints}
+          onChange={(e) => setHints(e.target.value)}
+          onBlur={commitHints}
+          placeholder={t("personalization.hintsPlaceholder")}
+          rows={4}
+          className="max-w-md resize-none"
+        />
+        <p className="text-[11px] text-muted-foreground">{t("personalization.hintsHelp")}</p>
       </div>
 
       {hasHidden ? (

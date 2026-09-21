@@ -30,6 +30,7 @@ import { startNewSession, type NewSessionInput } from "@/lib/chat/start-session"
 import { getDb } from "@/lib/db/schema"
 import { closeSession } from "@/lib/claude/ipc"
 import { useChatStore } from "@/stores/chat"
+import { useImNotifyStore } from "@/stores/chat/im-notify-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
@@ -339,6 +340,9 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
         }
       }
       await deleteSession(id)
+      // A deleted session can never settle — drop its armed entry rather than
+      // waiting for the registry's age cap to evict it.
+      useImNotifyStore.getState().disarmSession(id)
       emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
       if (useChatStore.getState().activeSessionId === id) {
         setActiveSession(null)
@@ -377,6 +381,7 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
         )
       }
       await bulkDeleteSessions(ids)
+      for (const id of ids) useImNotifyStore.getState().disarmSession(id)
       for (const id of ids) emitSystemBusEvent(SystemEvents.SESSION_DELETED, { sessionId: id })
       const current = useChatStore.getState().activeSessionId
       if (current && ids.includes(current)) {

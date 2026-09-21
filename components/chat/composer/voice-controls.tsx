@@ -8,7 +8,7 @@
 // Safari) get a disabled button per AI Elements default; we don't ship a
 // transcription backend in this app.
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { AudioLinesIcon, LanguagesIcon, Settings2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -24,7 +24,7 @@ import {
   MicSelectorTrigger,
   MicSelectorValue,
 } from "@/components/ai-elements/mic-selector"
-import { SpeechInput } from "@/components/ai-elements/speech-input"
+import { detectSpeechInputMode, SpeechInput } from "@/components/ai-elements/speech-input"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -48,6 +48,14 @@ interface VoiceControlsProps {
   onTranscription: (text: string) => void
   disabled?: boolean
 }
+
+// Environment support never changes after load, so the subscribe is a no-op;
+// the point of `useSyncExternalStore` is the SERVER snapshot — reporting
+// "usable" there keeps the hydration render identical to the prerendered HTML,
+// then the real capability lands on the first post-hydration pass.
+const noopSubscribe = () => () => {}
+const speechUsableSnapshot = () => detectSpeechInputMode() === "speech-recognition"
+const usableOnServer = () => true
 
 export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps) {
   const t = useTranslations("chat.composer.voice")
@@ -111,7 +119,36 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
     [t]
   )
 
-  const speechLabel = listening ? t("stopListening") : t("startListening")
+  // `media-recorder` mode counts as unusable here — it only records a blob for
+  // an `onAudioRecorded` transcription backend this app doesn't ship, so the
+  // button is disabled in every non-SpeechRecognition environment.
+  const speechUsable = useSyncExternalStore(noopSubscribe, speechUsableSnapshot, usableOnServer)
+
+  const speechLabel = !speechUsable
+    ? t("errors.unsupported")
+    : listening
+      ? t("stopListening")
+      : t("startListening")
+
+  const speechInput = (
+    <SpeechInput
+      aria-label={speechLabel}
+      className={cn(
+        "size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
+        listening
+          ? "bg-destructive! text-white! hover:bg-destructive/80! hover:text-white!"
+          : "bg-transparent! text-muted-foreground! hover:bg-muted/60! hover:text-foreground!"
+      )}
+      disabled={disabled}
+      lang={lang}
+      onError={onSpeechError}
+      onListeningChange={setListening}
+      onTranscriptionChange={onTranscription}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+    />
+  )
 
   return (
     <div className="flex items-center gap-1">
@@ -131,23 +168,10 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <SpeechInput
-            aria-label={speechLabel}
-            className={cn(
-              "size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
-              listening
-                ? "bg-destructive! text-white! hover:bg-destructive/80! hover:text-white!"
-                : "bg-transparent! text-muted-foreground! hover:bg-accent! hover:text-foreground!"
-            )}
-            disabled={disabled}
-            lang={lang}
-            onError={onSpeechError}
-            onListeningChange={setListening}
-            onTranscriptionChange={onTranscription}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          />
+          {/* A disabled button swallows pointer events, which is exactly when
+              the tooltip matters — it carries the "why" on browsers without
+              Speech Recognition. */}
+          {speechUsable ? speechInput : <span className="inline-flex">{speechInput}</span>}
         </TooltipTrigger>
         <TooltipContent>{speechLabel}</TooltipContent>
       </Tooltip>
@@ -160,7 +184,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
             <PopoverTrigger asChild>
               <Button
                 aria-label={t("voiceSettings")}
-                className="size-8 shrink-0"
+                className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
                 disabled={disabled}
                 size="icon"
                 type="button"

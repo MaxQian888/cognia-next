@@ -60,6 +60,15 @@ export type InlineSuggestionSource = "history" | "command" | "ai" | "agent" | "p
  * dim tail after the caret and accepting can never rewrite typed characters.
  */
 export interface InlineSuggestion {
+  /**
+   * Stable identity across partial updates. A STREAMING provider MUST set it:
+   * its `text` grows token by token, so identity cannot ride on the value —
+   * the engine pins a cycled-to candidate by this key and routes each emitted
+   * partial back to it. Namespace it by provider (e.g. `"builtin:ai:0"`).
+   * Providers that only ever return settled suggestions may omit it; identity
+   * then falls back to `text`, which is stable for them by definition.
+   */
+  id?: string
   /** The complete draft after acceptance (always extends the context draft). */
   text: string
   /** Origin — ranking key and badge label source. */
@@ -117,11 +126,25 @@ export interface InlineCompletionContext {
 }
 
 /**
+ * Reports a provider's current best candidates while `getCompletions` is still
+ * in flight — the streaming channel. Each call replaces that provider's WHOLE
+ * contribution for the round: the engine re-ranks and repaints, so a streaming
+ * provider calls it with the suggestion grown so far (an accumulated value,
+ * never a delta). The resolved return value stays authoritative — anything
+ * emitted here is a preview of it, never a substitute, and a candidate marked
+ * by a stable {@link InlineSuggestion.id} keeps its pin across emissions.
+ */
+export type InlineEmitFn = (partials: readonly InlineSuggestion[]) => void
+
+/**
  * A completion provider.
  *
- * Providers MUST NOT throw — the engine isolates errors, but returning `[]` is
- * the contract for "nothing to suggest". Async providers MUST honour the
- * `AbortSignal` and abandon in-flight work when it fires.
+ * Providers MUST honour the `AbortSignal` and abandon in-flight work when it
+ * fires. Returning `[]` is the contract for "nothing to suggest". Throwing is
+ * the contract for "the round FAILED" — the engine isolates the error from
+ * sibling providers and surfaces a retry affordance, so a provider that
+ * already retried internally should rethrow rather than swallow (a swallowed
+ * failure is indistinguishable from "no suggestions" and cannot be retried).
  *
  * `sync: true` marks a provider as cheap and instantaneous (pure computation
  * over the context — history, command names). The engine runs those on every
@@ -165,7 +188,11 @@ export interface InlineCompletionProvider {
    * treated as manual.
    */
   manual?: boolean
-  getCompletions(context: InlineCompletionContext, signal: AbortSignal): Promise<InlineSuggestion[]>
+  getCompletions(
+    context: InlineCompletionContext,
+    signal: AbortSignal,
+    emit?: InlineEmitFn
+  ): Promise<InlineSuggestion[]>
 }
 
 /**

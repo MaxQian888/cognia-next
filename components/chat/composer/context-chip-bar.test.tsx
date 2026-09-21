@@ -32,6 +32,9 @@ jest.mock("./staged-attachment-store", () => ({
     toggleIncludeOcr: jest.fn(),
     applyVideoSettings: jest.fn(),
     seedIncoming: jest.fn(),
+    processMedia: jest.fn(),
+    cancelProcessing: jest.fn(),
+    retry: jest.fn(),
   }),
 }))
 
@@ -100,7 +103,10 @@ describe("ContextChipBar", () => {
     const group = screen.getByRole("group", { name: /attached files, links, and references/i })
     expect(group).toBeInTheDocument()
     expect(screen.getByText("src/index.ts")).toBeInTheDocument()
-    expect(screen.getByText("doc.pdf")).toBeInTheDocument()
+    // The document tile middle-truncates its filename: stem and extension are
+    // rendered as separate spans so the extension always survives.
+    expect(screen.getByText("doc")).toBeInTheDocument()
+    expect(screen.getByText(".pdf")).toBeInTheDocument()
   })
 
   // The old implementation summed `estimateDataUrlBytes(f.url)`, which only

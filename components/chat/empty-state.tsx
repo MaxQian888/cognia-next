@@ -279,21 +279,11 @@ export function EmptyChatState({
 
   // Where the "New chat" action lives. The fullscreen welcome has no session,
   // so a live composer already creates one on first send — a second, louder
-  // button for the same outcome is redundant (and throws away a draft). It is
-  // demoted to a ghost under the composer there, and stays the hero's primary
-  // action only on surfaces that render no composer at all.
+  // button for the same outcome is redundant (and throws away a draft). It
+  // stays the primary action only on surfaces that render no composer at all.
   const showHeroAction = variant === "fullscreen" && !composerSlot && !hideCreateAction
-  // The row survives `hideCreateAction` only when the execution picker needs a
-  // home; an empty flex row would still cost its `gap` on the welcome column.
-  // Both clauses keep the `fullscreen` guard: the inline variant renders no
-  // secondary action row at all, and dropping the guard from the second one
-  // would have started rendering one there the day a caller passed execution
-  // controls to an inline empty state.
-  const isFullscreenComposer = variant === "fullscreen" && !!composerSlot
-  const showDemotedCreate = isFullscreenComposer && !hideCreateAction
-  const showDemotedActions = showDemotedCreate || (isFullscreenComposer && !!executionControlsSlot)
 
-  return (
+  const content = (
     <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 @2xl:py-10">
       {/* Inline rich/minimal switch (desktop only — the pane omits the handler
           on mobile, where the style is force-minimal). */}
@@ -416,24 +406,6 @@ export function EmptyChatState({
                   {subheading}
                 </p>
               </div>
-
-              {/* Only surfaces WITHOUT a composer keep the creation button up
-                  here as their primary action (the workflow-editor chat tab).
-                  When the composer is present it is demoted below it — see
-                  `showDemotedActions`. */}
-              {showHeroAction ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  {executionControlsSlot}
-                  <Button
-                    onClick={onCreate}
-                    variant={rich ? "default" : "outline"}
-                    className="gap-2"
-                  >
-                    <PlusIcon className="size-4" aria-hidden />
-                    {t("newChat")}
-                  </Button>
-                </div>
-              ) : null}
             </div>
           </motion.section>
 
@@ -443,32 +415,6 @@ export function EmptyChatState({
           {composerSlot ? (
             <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="welcome-composer">
               {composerSlot}
-            </motion.div>
-          ) : null}
-
-          {/* Secondary actions, under the composer instead of above it. On this
-              surface there is no session, so the composer IS "new chat" — the
-              first send creates one. Keeping a filled button that does the same
-              thing (and discards whatever was typed) above the real affordance
-              made the redundant control the loudest one on the page. */}
-          {showDemotedActions ? (
-            <motion.div
-              className="flex w-full flex-wrap items-center gap-2 pt-0.5"
-              variants={STAGGER_CHILD}
-              data-testid="welcome-actions"
-            >
-              {executionControlsSlot}
-              {showDemotedCreate ? (
-                <Button
-                  onClick={onCreate}
-                  variant="ghost"
-                  size="sm"
-                  className="ms-auto h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <PlusIcon className="size-3.5" aria-hidden />
-                  {t("newChat")}
-                </Button>
-              ) : null}
             </motion.div>
           ) : null}
         </motion.div>
@@ -616,4 +562,227 @@ export function EmptyChatState({
       </motion.div>
     </div>
   )
+
+  // ── Fullscreen: the centered welcome (mainstream AI entry — greeting, one
+  // big composer, one wrap of prompt chips). Prototype variant A, promoted.
+  // Every section below the composer is compressed so the box is the only
+  // thing competing for the eye; the usage dashboard sits below the fold.
+  if (variant === "fullscreen") {
+    const quietRecents = recents.slice(0, 3)
+    const showChips = aiPrompts.length > 0 || charPrompts.length > 0 || showStarters
+    return (
+      <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        {/* Inline rich/minimal switch (desktop only). */}
+        {onToggleStyle ? (
+          <div className="absolute right-3 top-3 z-20 sm:right-5 sm:top-5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+              onClick={() => onToggleStyle(rich ? "minimal" : "rich")}
+              aria-label={t("style.toggleLabel")}
+            >
+              <Settings2Icon className="size-3.5" aria-hidden />
+              {t(rich ? "style.minimal" : "style.rich")}
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Ambient bloom — texture only, carries no information. Rich style
+            only; minimal keeps the same layout with no decorative media. */}
+        {rich ? (
+          <div
+            aria-hidden
+            data-testid="welcome-bloom"
+            className="pointer-events-none absolute left-1/2 top-[22%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.06] blur-3xl"
+          />
+        ) : null}
+
+        {headerExtraSlot}
+
+        <motion.div
+          className="relative z-10 m-auto flex w-full max-w-[46rem] flex-col items-center gap-6 px-4 py-10"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
+          <motion.div
+            className="flex flex-col items-center gap-6"
+            variants={STAGGER_CHILD}
+            data-testid="welcome-hero"
+          >
+            <div className="flex items-center gap-2.5">
+              <Image
+                src="/icons/icon-512.png"
+                alt=""
+                width={28}
+                height={28}
+                className="size-7 rounded-lg"
+              />
+              <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {t("brandAlt")}
+              </span>
+            </div>
+            {/* One line, one job: the greeting IS the headline. No generic
+                subtitle — the composer's typewriter hints do that work. An
+                override subtitle is deliberate per-surface copy, so it still
+                renders. */}
+            <h2
+              className={cn(
+                "text-balance text-center font-semibold leading-[1.08] tracking-tight",
+                rich ? "text-4xl @lg:text-5xl" : "text-2xl @lg:text-3xl"
+              )}
+            >
+              {heading}
+            </h2>
+            {override?.subtitle ? (
+              <p className="-mt-3 text-center text-sm text-muted-foreground text-pretty">
+                {override.subtitle}
+              </p>
+            ) : null}
+          </motion.div>
+
+          {/* The primary affordance: the live composer (floored at ~4 lines —
+              this surface's only job is that box), or the New chat button on
+              surfaces that render no composer. */}
+          {composerSlot || showHeroAction || executionControlsSlot ? (
+            <motion.div
+              className="w-full [&_textarea]:min-h-24 [&_[data-testid=composer-param-preview]]:min-h-24"
+              variants={STAGGER_CHILD}
+              data-testid={composerSlot ? "welcome-composer" : undefined}
+            >
+              {composerSlot ?? (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {executionControlsSlot}
+                  {showHeroAction ? (
+                    <Button onClick={onCreate} className="gap-2">
+                      <PlusIcon className="size-4" aria-hidden />
+                      {t("newChat")}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            </motion.div>
+          ) : null}
+
+          {/* Every prompt surface compressed into one wrapped chip row: AI
+              starters and character exemplars first, then the generic
+              starters, then the ✕ that dismisses the starter group. */}
+          {showChips ? (
+            <motion.div
+              className="flex flex-wrap items-center justify-center gap-2"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-chips"
+            >
+              {aiPrompts.map((prompt, i) => (
+                <Suggestion
+                  key={`ai-${i}-${prompt.slice(0, 24)}`}
+                  suggestion={prompt}
+                  onClick={onUseSample}
+                  aria-label={prompt}
+                  className="max-w-[20rem] gap-2"
+                >
+                  <SparklesIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+                  <span className="truncate">{prompt}</span>
+                </Suggestion>
+              ))}
+              {charPrompts.map((prompt, i) => (
+                <Suggestion
+                  key={`char-${i}-${prompt.slice(0, 24)}`}
+                  suggestion={prompt}
+                  onClick={onUseSample}
+                  aria-label={prompt}
+                  className="max-w-[20rem] gap-2"
+                >
+                  <SparklesIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="truncate">{prompt}</span>
+                </Suggestion>
+              ))}
+              {showStarters
+                ? starters.map(({ key, icon: Icon, title, prompt }) => (
+                    <Suggestion
+                      key={key}
+                      suggestion={prompt}
+                      onClick={onUseSample}
+                      aria-label={title}
+                      className="gap-2 text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon className="size-3.5 shrink-0" aria-hidden />
+                      <span className="truncate">{title}</span>
+                    </Suggestion>
+                  ))
+                : null}
+              {showStarters && onDismissSection ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => onDismissSection("tryPrompt")}
+                  aria-label={t("dismiss")}
+                  className="size-6 shrink-0 text-muted-foreground/70 hover:text-foreground"
+                >
+                  <XIcon className="size-3.5" aria-hidden />
+                </Button>
+              ) : null}
+            </motion.div>
+          ) : null}
+
+          {quickActionsSlot ? (
+            <motion.div className="w-full" variants={STAGGER_CHILD}>
+              {quickActionsSlot}
+            </motion.div>
+          ) : null}
+
+          {/* Execution controls park under the composer they configure — no
+              "New chat" button here: the first send already creates the
+              session, so a second control for the same outcome is redundant
+              and discards the draft. */}
+          {composerSlot && executionControlsSlot ? (
+            <motion.div
+              className="flex w-full flex-wrap items-center justify-center gap-2"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-actions"
+            >
+              {executionControlsSlot}
+            </motion.div>
+          ) : null}
+
+          {/* Recents demoted to one quiet line — present but never competing
+              with the composer for the eye. */}
+          {showRecents ? (
+            <motion.div
+              className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+              variants={STAGGER_CHILD}
+              data-testid="welcome-recents"
+            >
+              <span>{t("sections.continue")}:</span>
+              {quietRecents.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => onResumeSession?.(s.id)}
+                  className="max-w-[14rem] truncate underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                >
+                  {s.title}
+                </button>
+              ))}
+            </motion.div>
+          ) : null}
+        </motion.div>
+
+        {/* Usage dashboard below the fold — the centered column stays the
+            first impression; the panel keeps its wider reading measure. */}
+        {statsSlot ? (
+          <div
+            className="mx-auto w-full max-w-[52rem] px-3 pb-8 sm:px-5"
+            data-testid="welcome-stats-slot"
+          >
+            {statsSlot}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+  return content
 }

@@ -70,6 +70,9 @@ jest.mock("./staged-attachment-store", () => ({
     toggleIncludeOcr: jest.fn(),
     applyVideoSettings: jest.fn(),
     seedIncoming: jest.fn(),
+    processMedia: jest.fn(),
+    cancelProcessing: jest.fn(),
+    retry: jest.fn(),
   }),
 }))
 

@@ -48,6 +48,7 @@ import {
   DEFAULT_INLINE_MAX_CANDIDATES,
   type InlineCompletionContext,
   type InlineCompletionProvider,
+  type InlineEmitFn,
   type InlineSuggestion,
 } from "./types"
 
@@ -108,6 +109,20 @@ export interface InlineEngineView {
   /** True while an async provider query is in flight for the current draft. */
   pending: boolean
   /**
+   * True while a model-tier call (debounced or manual) is actually in flight —
+   * the debounce timer alone does NOT set this, so a surface can show a
+   * "thinking" state without flashing it on every keystroke.
+   */
+  querying: boolean
+  /** True while the ACTIVE candidate's provider is still emitting partials. */
+  streaming: boolean
+  /**
+   * The latest model round failed or timed out. A surfaced error state — with
+   * a retry affordance bound to {@link InlineCompletionEngine.retry} — beats
+   * the silence that used to make a dead provider look like "no suggestion".
+   */
+  completionError: boolean
+  /**
    * True when a `manual` provider is registered, i.e. there is something for
    * {@link InlineCompletionEngine.requestManual} to run. Surfaces use this to
    * decide whether to advertise the "ask the model" affordance at all.
@@ -123,6 +138,9 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  querying: false,
+  streaming: false,
+  completionError: false,
   manualAvailable: false,
   manualPending: false,
 }
@@ -139,10 +157,25 @@ export class InlineCompletionEngine {
   private manualSuggestions: InlineSuggestion[] = []
   private candidates: InlineSuggestion[] = []
   private index = 0
-  /** Text of a candidate the user explicitly cycled to, so re-ranks respect it. */
-  private pinnedText: string | null = null
+  /**
+   * Identity of a candidate the user explicitly cycled to, so re-ranks respect
+   * it. Keyed by `id` when the provider gives one (a streaming candidate's
+   * `text` mutates token by token and cannot carry identity), else by `text`.
+   */
+  private pinnedKey: string | null = null
   private pending = false
   private manualPending = false
+  /**
+   * Providers with an unsettled call right now (either tier). Live-narrow
+   * relaxes for their candidates: a partial that is still a PREFIX of the new
+   * draft is a stream the user typed ahead of, not a dead suggestion.
+   */
+  private readonly inFlight = new Set<string>()
+  /** Providers that have emitted at least one partial this run — `view.streaming`. */
+  private readonly emitting = new Set<string>()
+  /** The last async/manual round had a provider fail or time out. */
+  private asyncFailed = false
+  private manualFailed = false
   private timer: unknown = null
   private asyncAbort: AbortController | null = null
   private manualAbort: AbortController | null = null
@@ -232,20 +265,29 @@ export class InlineCompletionEngine {
       draft.length > prevDraft.length &&
       draft.startsWith(prevDraft)
     ) {
-      const survivors = prevCandidates.filter((c) => extendsDraft(c.text, draft))
+      // Relaxed for in-flight providers: their emitted-so-far `text` is a
+      // partial, so typing PAST its edge makes it a prefix of the new draft —
+      // not a mismatch. Keeping it lets the stream catch up and keep painting
+      // where a strict `extendsDraft` would kill the candidate mid-flight.
+      const survives = (s: InlineSuggestion) =>
+        extendsDraft(s.text, draft) || (this.inFlight.has(s.providerId) && draft.startsWith(s.text))
+      const survivors = prevCandidates.filter(survives)
       if (survivors.length > 0) {
-        this.cancelAsync()
+        // Do NOT cancel an in-flight run here: a streaming provider's future
+        // chunks still extend the narrowed draft (they were conditioned on the
+        // prefix it shares), and aborting would re-bill the model on the next
+        // query anyway. Emits self-filter through `extendsDraft` on arrival.
         this.cancelTimer()
-        this.pending = false
+        this.pending = this.asyncAbort !== null
         // Keep the tiers coherent with the narrowed view so a later re-merge
         // (e.g. an async arrival) doesn't resurrect candidates that no longer
         // match the draft.
-        this.syncSuggestions = this.syncSuggestions.filter((s) => extendsDraft(s.text, draft))
-        this.asyncSuggestions = this.asyncSuggestions.filter((s) => extendsDraft(s.text, draft))
+        this.syncSuggestions = this.syncSuggestions.filter(survives)
+        this.asyncSuggestions = this.asyncSuggestions.filter(survives)
         // A manually-requested suggestion is the most expensive thing the
         // engine holds, so it survives typing-along exactly like the others —
         // narrowing must never silently re-bill an agent turn.
-        this.manualSuggestions = this.manualSuggestions.filter((s) => extendsDraft(s.text, draft))
+        this.manualSuggestions = this.manualSuggestions.filter(survives)
         this.setCandidates(survivors)
         this.onChange()
         return
@@ -257,7 +299,9 @@ export class InlineCompletionEngine {
     this.syncSuggestions = []
     this.asyncSuggestions = []
     this.manualSuggestions = []
-    this.pinnedText = null
+    this.pinnedKey = null
+    this.asyncFailed = false
+    this.manualFailed = false
     this.setCandidates([])
     this.cancelAsync()
     // Keep an in-flight manual run whose answer can still apply: the user asked
@@ -294,6 +338,11 @@ export class InlineCompletionEngine {
   accept(): string | null {
     const active = this.candidates[this.index]
     if (!active) return null
+    // A candidate caught mid-stream can be a PREFIX of the draft (the user
+    // typed ahead of it and live-narrow kept it alive) — accepting that would
+    // write back fewer characters than the composer holds. Nothing to accept
+    // until the stream catches up.
+    if (!extendsDraft(active.text, this.draft)) return null
     const next = active.text
     this.draft = next
     this.reset()
@@ -309,6 +358,41 @@ export class InlineCompletionEngine {
   /** Move to the previous candidate (wraps). No-op with fewer than two candidates. */
   cyclePrev(): void {
     this.cycleBy(-1)
+  }
+
+  /** Jump straight to a candidate — the card's clickable candidate dots use it. */
+  cycleTo(index: number): void {
+    if (index === this.index || index < 0 || index >= this.candidates.length) return
+    this.index = index
+    this.pinnedKey = this.keyOf(this.candidates[index])
+    this.onChange()
+  }
+
+  /**
+   * Re-run whichever model tier failed, for the current draft — the surface's
+   * retry affordance. Bypasses the debounce (the user already asked) and can
+   * never serve a stale answer, because a failed round is never written to
+   * the cache. No-op when nothing failed, a run is already in flight, or the
+   * draft is below the floor.
+   */
+  retry(): void {
+    if (this.disposed) return
+    if (!this.asyncFailed && !this.manualFailed) return
+    if (this.draft.trim().length < this.minChars) return
+    if (this.asyncFailed && this.asyncProviders.length > 0 && this.asyncAbort === null) {
+      this.asyncFailed = false
+      this.pending = true
+      // Start BEFORE notifying: `runAsyncProviders` sets `asyncAbort`
+      // synchronously, so the pushed view already reports `querying` — firing
+      // `onChange` first would snapshot a frame where nothing looks in flight
+      // and the card would flicker closed until the first token.
+      void this.runAsyncProviders(this.draft)
+      this.onChange()
+    }
+    if (this.manualFailed) {
+      this.manualFailed = false
+      this.requestManual()
+    }
   }
 
   /** Dismiss the suggestion (Esc / blur), keeping the draft. */
@@ -348,12 +432,15 @@ export class InlineCompletionEngine {
 
     this.manualPending = true
     this.manualDraft = draft
+    this.manualFailed = false
     this.onChange()
     void this.runManualProviders(draft)
   }
 
   getView(): InlineEngineView {
     const manualAvailable = this.manualProviders.length > 0
+    const querying = this.asyncAbort !== null || this.manualPending
+    const completionError = this.asyncFailed || this.manualFailed
     const suggestion = this.candidates[this.index] ?? null
     if (!suggestion) {
       // Reuse the last empty view when nothing about it changed. Both surfaces
@@ -364,6 +451,8 @@ export class InlineCompletionEngine {
       if (
         cached !== null &&
         cached.pending === this.pending &&
+        cached.querying === querying &&
+        cached.completionError === completionError &&
         cached.manualAvailable === manualAvailable &&
         cached.manualPending === this.manualPending
       ) {
@@ -372,6 +461,8 @@ export class InlineCompletionEngine {
       const next: InlineEngineView = {
         ...EMPTY_VIEW,
         pending: this.pending,
+        querying,
+        completionError,
         manualAvailable,
         manualPending: this.manualPending,
       }
@@ -384,6 +475,9 @@ export class InlineCompletionEngine {
       candidates: this.candidates,
       index: this.index,
       pending: this.pending,
+      querying,
+      streaming: this.emitting.has(suggestion.providerId),
+      completionError,
       manualAvailable,
       manualPending: this.manualPending,
     }
@@ -409,7 +503,38 @@ export class InlineCompletionEngine {
     if (this.candidates.length < 2) return
     const size = this.candidates.length
     this.index = (this.index + delta + size) % size
-    this.pinnedText = this.candidates[this.index]?.text ?? null
+    const active = this.candidates[this.index]
+    this.pinnedKey = active ? this.keyOf(active) : null
+    this.onChange()
+  }
+
+  /** Candidate identity for pinning: stable `id` when the provider gave one. */
+  private keyOf(suggestion: InlineSuggestion): string {
+    return suggestion.id ?? suggestion.text
+  }
+
+  /**
+   * Apply a provider's emitted partials — the streaming path. Replaces that
+   * provider's slice of its tier with the grown candidates, re-ranks, and
+   * repaints. Only the run that issued the query may report into it: a stale
+   * or aborted run's late partials must not resurrect dropped candidates.
+   */
+  private applyPartial(
+    tier: "async" | "manual",
+    providerId: string,
+    run: AbortController,
+    partials: readonly InlineSuggestion[]
+  ): void {
+    const active = tier === "async" ? this.asyncAbort : this.manualAbort
+    if (active !== run || this.disposed) return
+    const usable = partials.filter((s) => extendsDraft(s.text, this.draft))
+    const next =
+      tier === "async"
+        ? [...this.asyncSuggestions.filter((s) => s.providerId !== providerId), ...usable]
+        : [...this.manualSuggestions.filter((s) => s.providerId !== providerId), ...usable]
+    if (tier === "async") this.asyncSuggestions = next
+    else this.manualSuggestions = next
+    this.merge()
     this.onChange()
   }
 
@@ -435,30 +560,41 @@ export class InlineCompletionEngine {
 
   /** Run the expensive providers for `draft` after the debounce elapsed. */
   private async runAsyncProviders(draft: string): Promise<void> {
-    this.timer = null
+    // `retry()` reaches this directly while a debounce timer may still be
+    // armed — clear it rather than just nilling the handle, or the stale
+    // callback fires later and runs a second, redundant round.
+    this.cancelTimer()
     this.cancelAsync()
     const controller = new AbortController()
     this.asyncAbort = controller
     const context = this.buildContext(draft)
 
     const results = await Promise.all(
-      this.asyncProviders.map((p) => this.callProvider(p, context, controller.signal, true))
+      this.asyncProviders.map((p) =>
+        this.callProvider(p, context, controller.signal, true, (partials) =>
+          this.applyPartial("async", p.id, controller, partials)
+        )
+      )
     )
 
+    for (const p of this.asyncProviders) this.emitting.delete(p.id)
     if (this.disposed || controller.signal.aborted) return
-    // Staleness guard: the draft moved while we waited, so this answer is for
-    // a question nobody is asking any more.
-    if (this.draft !== draft) return
+    if (this.asyncAbort === controller) this.asyncAbort = null
+    this.pending = false
 
     const flat = results.flatMap((r) => r.suggestions)
-    // Only a completed round is worth remembering. A timeout resolves as `[]`,
-    // which is indistinguishable from a genuine "no suggestions" once flattened
-    // — caching it would answer the identical draft from a miss for the whole
-    // TTL, so a slow provider would look permanently empty rather than slow.
-    if (!results.some((r) => r.timedOut)) this.writeCache(this.cache, draft, flat)
-    this.asyncSuggestions = flat
-    this.pending = false
-    if (this.asyncAbort === controller) this.asyncAbort = null
+    // Only a completed round is worth remembering. A timeout or a thrown
+    // error resolves as `[]`, which is indistinguishable from a genuine
+    // "no suggestions" once flattened — caching it would answer the identical
+    // draft from a miss for the whole TTL, so a flaky provider would look
+    // permanently empty rather than retryable.
+    if (!results.some((r) => r.failed)) this.writeCache(this.cache, draft, flat)
+    this.asyncFailed = results.some((r) => r.failed)
+    // The live-narrow path no longer kills an in-flight run, so the draft may
+    // have moved forward WHILE we streamed — the answer was computed against
+    // the earlier draft but candidates that still extend the current one stay
+    // valid. Filter rather than drop the whole round.
+    this.asyncSuggestions = flat.filter((s) => extendsDraft(s.text, this.draft))
     this.merge()
     this.onChange()
   }
@@ -478,9 +614,14 @@ export class InlineCompletionEngine {
     const context = this.buildContext(draft)
 
     const results = await Promise.all(
-      this.manualProviders.map((p) => this.callProvider(p, context, controller.signal, true))
+      this.manualProviders.map((p) =>
+        this.callProvider(p, context, controller.signal, true, (partials) =>
+          this.applyPartial("manual", p.id, controller, partials)
+        )
+      )
     )
 
+    for (const p of this.manualProviders) this.emitting.delete(p.id)
     if (this.disposed || controller.signal.aborted) return
     if (this.manualAbort === controller) this.manualAbort = null
     this.manualPending = false
@@ -500,8 +641,9 @@ export class InlineCompletionEngine {
     // ranks through `extendsDraft`, which drops anything that no longer extends
     // the current draft.
     const flat = results.flatMap((r) => r.suggestions)
-    if (!results.some((r) => r.timedOut)) this.writeCache(this.manualCache, draft, flat)
-    this.manualSuggestions = flat
+    if (!results.some((r) => r.failed)) this.writeCache(this.manualCache, draft, flat)
+    this.manualFailed = results.some((r) => r.failed)
+    this.manualSuggestions = flat.filter((s) => extendsDraft(s.text, this.draft))
     this.merge()
     this.onChange()
   }
@@ -512,23 +654,27 @@ export class InlineCompletionEngine {
    * than taking the whole query down — the same contract the terminal
    * completion registry enforces.
    *
-   * `timedOut` is reported rather than folded into the empty result because the
-   * caller must not cache a timeout, and because the provider's own request has
-   * to be aborted: losing the race does not stop the work behind it, so an
-   * un-aborted call keeps running (and, for a model-backed provider, keeps
-   * billing) long after nothing is listening.
+   * `failed` is reported rather than folded into the empty result because the
+   * caller must not cache a failed round, must not leave in-flight work
+   * running (a losing call still bills), and should surface a retry
+   * affordance instead of silence.
+   *
+   * The timeout is a WATCHDOG, not a deadline: every emitted partial re-arms
+   * it, so it bounds the silence between chunks rather than total stream
+   * duration — a model mid-token is healthy, one that went quiet is not.
    */
   private async callProvider(
     provider: InlineCompletionProvider,
     context: InlineCompletionContext,
     signal: AbortSignal,
-    withTimeout: boolean
-  ): Promise<{ suggestions: InlineSuggestion[]; timedOut: boolean }> {
+    withTimeout: boolean,
+    emit?: InlineEmitFn
+  ): Promise<{ suggestions: InlineSuggestion[]; failed: boolean }> {
     try {
       if (!withTimeout) {
         return {
-          suggestions: (await provider.getCompletions(context, signal)) ?? [],
-          timedOut: false,
+          suggestions: (await provider.getCompletions(context, signal, emit)) ?? [],
+          failed: false,
         }
       }
       // A controller per provider, chained to the run's signal: aborting the
@@ -539,25 +685,46 @@ export class InlineCompletionEngine {
       if (signal.aborted) own.abort()
       else signal.addEventListener("abort", onAbort, { once: true })
 
-      const call = provider.getCompletions(context, own.signal)
+      this.inFlight.add(provider.id)
+
       let timedOut = false
       let timeoutHandle: unknown = null
+      let fireTimeout: (() => void) | null = null
       const timeout = new Promise<InlineSuggestion[]>((resolve) => {
+        fireTimeout = () => resolve([])
+      })
+      const arm = () => {
+        if (timeoutHandle !== null) this.scheduler.clear(timeoutHandle)
         timeoutHandle = this.scheduler.set(() => {
           timedOut = true
-          resolve([])
+          // Losing the race does not stop the work behind it — abort so an
+          // un-aborted call cannot keep running (and billing) with nothing
+          // listening.
+          own.abort()
+          fireTimeout?.()
         }, this.providerTimeoutMs)
-      })
+      }
+      arm()
+      const emitWrapped = emit
+        ? (partials: readonly InlineSuggestion[]) => {
+            if (own.signal.aborted || timedOut || this.disposed) return
+            this.emitting.add(provider.id)
+            arm()
+            emit(partials)
+          }
+        : undefined
+
+      const call = provider.getCompletions(context, own.signal, emitWrapped)
       try {
         const suggestions = (await Promise.race([call, timeout])) ?? []
-        if (timedOut) own.abort()
-        return { suggestions: timedOut ? [] : suggestions, timedOut }
+        return { suggestions: timedOut ? [] : suggestions, failed: timedOut }
       } finally {
         if (timeoutHandle !== null) this.scheduler.clear(timeoutHandle)
         signal.removeEventListener("abort", onAbort)
+        this.inFlight.delete(provider.id)
       }
     } catch {
-      return { suggestions: [], timedOut: false }
+      return { suggestions: [], failed: true }
     }
   }
 
@@ -575,13 +742,18 @@ export class InlineCompletionEngine {
   private setCandidates(next: InlineSuggestion[]): void {
     this.candidates = next
     // Honour an explicit cycle: if the user picked a candidate and it survived
-    // the re-rank, keep showing it. Otherwise fall back to the best one.
-    const pinnedIndex = this.pinnedText ? next.findIndex((c) => c.text === this.pinnedText) : -1
+    // the re-rank, keep showing it. The pin rides on `id` for streaming
+    // candidates (whose `text` mutates mid-flight), on `text` otherwise — and
+    // survives a temporary absence, so a narrowed-out stream that catches up
+    // re-pins rather than resetting the selection.
+    const pinnedIndex = this.pinnedKey
+      ? next.findIndex((c) => this.keyOf(c) === this.pinnedKey)
+      : -1
     if (pinnedIndex >= 0) {
       this.index = pinnedIndex
     } else {
       this.index = 0
-      if (next.length === 0) this.pinnedText = null
+      if (next.length === 0) this.pinnedKey = null
     }
   }
 
@@ -591,9 +763,11 @@ export class InlineCompletionEngine {
     this.manualSuggestions = []
     this.candidates = []
     this.index = 0
-    this.pinnedText = null
+    this.pinnedKey = null
     this.pending = false
     this.manualPending = false
+    this.asyncFailed = false
+    this.manualFailed = false
     this.syncRun++
     this.cancelAsync()
     this.cancelManual()
@@ -605,12 +779,20 @@ export class InlineCompletionEngine {
       this.asyncAbort.abort()
       this.asyncAbort = null
     }
+    for (const p of this.asyncProviders) {
+      this.inFlight.delete(p.id)
+      this.emitting.delete(p.id)
+    }
   }
 
   private cancelManual(): void {
     if (this.manualAbort) {
       this.manualAbort.abort()
       this.manualAbort = null
+    }
+    for (const p of this.manualProviders) {
+      this.inFlight.delete(p.id)
+      this.emitting.delete(p.id)
     }
     this.manualPending = false
     this.manualDraft = null

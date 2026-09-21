@@ -554,7 +554,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
         <TooltipTrigger asChild>
           <Button
             aria-label={t("startLive")}
-            className="size-8 shrink-0"
+            className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
             disabled={triggerDisabled}
             onClick={() => void startSession()}
             size="icon"

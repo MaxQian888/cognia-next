@@ -11,18 +11,17 @@
 // `innerRef` (no React state, no re-render on scroll), exactly like the chip
 // overlay.
 //
-// Beyond the ghost itself the badge row tells the user WHERE the suggestion
-// came from (history / a command / the model), because the two tiers behave
-// differently and look identical otherwise: a history completion is exact and
-// free, a model completion is a guess that cost a call. When more than one
-// candidate is ranked it also shows the position and the cycle hint.
-//
 // The overlay also paints WITHOUT a ghost, for one case: `manualHint`. The
 // agent tier only runs when asked, so its key has to be discoverable at the
 // moment it is useful — which is precisely when the cheap tiers produced
 // nothing and there is no ghost to hang a hint off.
+//
+// In `caret` mode the floating suggestion card owns the suggestion text and
+// every chrome badge (source, position, hints), so this layer keeps only the
+// transparent copy of `value` for alignment plus a pulse caret at the anchor.
 
 import { forwardRef, memo } from "react"
+import { motion } from "motion/react"
 import { cn } from "@/lib/utils"
 import {
   TEXTAREA_TYPOGRAPHY,
@@ -33,16 +32,17 @@ import {
 interface ComposerGhostTextProps {
   /** The full textarea value the ghost trails. */
   value: string
-  /** Dim continuation rendered after `value`. Empty → nothing painted. */
+  /**
+   * Dim continuation rendered after `value` — or, when {@link caret} is set,
+   * just the anchor position for it: the suggestion card paints the text
+   * itself, and the inline layer shows only a pulse caret where it trails.
+   */
   ghost: string
-  /** Translated "Tab" accept hint shown as a small badge. Omit to hide. */
-  acceptHint?: string
-  /** Translated source label (e.g. "history", "AI"). Omit to hide. */
-  sourceLabel?: string
-  /** Translated `n/total` position, shown only when more than one candidate. */
-  positionLabel?: string
-  /** Translated "Alt+] to cycle" hint. Omit to hide. */
-  cycleHint?: string
+  /**
+   * Caret-only mode: paint a pulsing block at the end of `value` instead of
+   * the ghost text, which the floating suggestion card now owns.
+   */
+  caret?: boolean
   /**
    * Translated hint for the manually-requested agent tier — or its in-flight
    * label; the caller picks which, so this component stays a pure view. Shown
@@ -64,28 +64,14 @@ const BADGE_CLASS =
   "ml-2 whitespace-nowrap rounded border border-border/60 bg-muted/70 px-1 text-[10px] leading-tight text-muted-foreground"
 
 const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>(
-  function ComposerGhostText(
-    {
-      value,
-      ghost,
-      acceptHint,
-      sourceLabel,
-      positionLabel,
-      cycleHint,
-      manualHint,
-      mono,
-      padEndClass,
-    },
-    innerRef
-  ) {
-    if (!ghost && !manualHint) return null
+  function ComposerGhostText({ value, ghost, caret, manualHint, mono, padEndClass }, innerRef) {
+    if (!ghost && !caret && !manualHint) return null
     return (
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
         data-testid="composer-ghost-text"
         data-ghost={ghost}
-        data-ghost-source={sourceLabel}
       >
         <div
           ref={innerRef}
@@ -98,23 +84,18 @@ const ComposerGhostTextBase = forwardRef<HTMLDivElement, ComposerGhostTextProps>
           style={{ fontSize: OVERLAY_FONT_SIZE }}
         >
           <span className="text-transparent">{value}</span>
-          <span className="text-muted-foreground/50">{ghost}</span>
-          {sourceLabel ? (
-            <span className={BADGE_CLASS} data-testid="composer-ghost-source">
-              {sourceLabel}
-            </span>
-          ) : null}
-          {positionLabel ? (
-            <span className={BADGE_CLASS} data-testid="composer-ghost-position">
-              {positionLabel}
-            </span>
-          ) : null}
-          {acceptHint ? <span className={BADGE_CLASS}>{acceptHint}</span> : null}
-          {cycleHint ? (
-            <span className={BADGE_CLASS} data-testid="composer-ghost-cycle">
-              {cycleHint}
-            </span>
-          ) : null}
+          {caret ? (
+            // The suggestion card owns the text; inline keeps only a live
+            // edge marker where the ghost would trail.
+            <motion.span
+              aria-hidden
+              className="ms-px inline-block h-[1.05em] w-[2px] translate-y-[0.18em] rounded-full bg-primary/60"
+              animate={{ opacity: [1, 0.2, 1] }}
+              transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+            />
+          ) : (
+            <span className="text-muted-foreground/50">{ghost}</span>
+          )}
           {manualHint ? (
             <span className={BADGE_CLASS} data-testid="composer-ghost-manual">
               {manualHint}

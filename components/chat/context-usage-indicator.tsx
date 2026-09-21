@@ -234,7 +234,11 @@ export function ContextUsageIndicator({
         maxTokens={win.max}
         modelId={modelId}
         usedTokens={win.used}
-        openDelay={80}
+        // Deliberate hover: wait for the pointer to settle before opening so a
+        // sweep across the toolbar does not flash the card, then close only
+        // after the pointer has had time to cross into the card (Radix's
+        // safe-polygon bridge covers the gap between trigger and content).
+        openDelay={500}
         closeDelay={200}
       >
         <ContextTrigger>
@@ -242,7 +246,7 @@ export function ContextUsageIndicator({
             type="button"
             variant="ghost"
             className={cn(
-              "h-6 gap-1.5 px-1.5 text-[11px] font-normal",
+              "h-6 gap-1.5 px-1.5 text-[11px] font-normal hover:bg-muted/60 hover:text-foreground",
               win.reported ? LEVEL_TEXT[win.level] : "text-muted-foreground",
               triggerClassName
             )}

@@ -43,7 +43,12 @@ import {
   type ExtractedAttachment,
   type RejectReason,
 } from "@/lib/chat/attachments/dispatch"
-import { COMPOSER_MAX_ATTACHMENT_BYTES } from "@/lib/chat/attachments/prepare"
+import {
+  COMPOSER_MAX_ATTACHMENT_BYTES,
+  getOriginalComposerAttachment,
+  prepareComposerAttachments,
+} from "@/lib/chat/attachments/prepare"
+import { DRAFT_ATTACHMENT_QUOTA_BYTES } from "@/lib/db/chat-drafts"
 import { applyOrder, reorderIds } from "@/lib/chat/attachments/reorder"
 import { isMotionDescriptor } from "@/lib/chat/attachments/video/classify"
 import {
@@ -59,8 +64,22 @@ import {
   type VideoPreprocessSettings,
 } from "@/lib/chat/attachments/video/settings"
 import { loggers } from "@cognia/logging"
+import { hashSessionAssetSource } from "@/lib/db/session-assets"
+import { runAttachmentProcessing } from "@/lib/chat/attachments/processing-queue"
+import {
+  processAttachmentMedia,
+  restoreDerivedAttachment,
+  type AttachmentMediaOptions,
+} from "@/lib/chat/attachments/media-extraction"
+import {
+  readAttachmentExtractedContent,
+  type AttachmentExtractedContent,
+} from "@cognia/agent-config-types/attachment"
 
 export interface StagedAttachmentState {
+  restoredContent?: AttachmentExtractedContent
+  processing?: { processed: number; total: number }
+  processingError?: string
   /** `extracting` until the parse settles; `rejected` carries `extracted.rejectReason`. */
   status: "extracting" | "ready" | "rejected"
   /** Byte size of the staged blob. Real, unlike the old data-URL estimate. */
@@ -97,6 +116,12 @@ export interface StagedVideoState {
 }
 
 export interface StagedAttachmentsValue {
+  processMedia: (
+    id: string,
+    options: Pick<AttachmentMediaOptions, "method" | "providerId" | "modelId">
+  ) => void
+  cancelProcessing: (id: string) => void
+  retry: (id: string) => void
   byId: ReadonlyMap<string, StagedAttachmentState>
   /** Attachment ids in the user's chosen order. */
   order: readonly string[]
@@ -191,6 +216,12 @@ async function blobUrlToDataUrl(
   url: string
 ): Promise<{ dataUrl: string; size: number; bytes: Uint8Array | undefined }> {
   const blob = await (await fetch(url)).blob()
+  return blobToDataUrl(blob)
+}
+
+async function blobToDataUrl(
+  blob: Blob
+): Promise<{ dataUrl: string; size: number; bytes: Uint8Array | undefined }> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
@@ -229,11 +260,16 @@ export function StagedAttachmentsProvider({
   const [results, setResults] = useState<ReadonlyMap<string, StagedAttachmentState>>(new Map())
   /** User-defined chip order. Written only from `reorder`, i.e. an event. */
   const [orderOverride, setOrderOverride] = useState<readonly string[]>([])
+  const [retryEpoch, setRetryEpoch] = useState(0)
   // Ids whose extraction has been kicked off, so a re-render mid-flight cannot
   // schedule the same parse twice.
   const startedRef = useRef<Set<string>>(new Set())
   // Restored-draft extractions awaiting the file they belong to.
   const seedQueueRef = useRef<SeedEntry[]>([])
+  const restoredContentRef = useRef<Map<string, AttachmentExtractedContent>>(new Map())
+  const restoredOcrRef = useRef<Map<string, Pick<StagedAttachmentState, "ocrText" | "includeOcr">>>(
+    new Map()
+  )
   // The motion run in flight per attachment id, so a re-apply or a removal can
   // cancel it instead of letting a stale result land.
   const motionRunsRef = useRef<Map<string, AbortController>>(new Map())
@@ -249,7 +285,7 @@ export function StagedAttachmentsProvider({
    */
   const runMotion = useCallback(
     (
-      file: { id: string; url?: string; filename?: string; mediaType?: string },
+      file: { id: string; url?: string; filename?: string; mediaType?: string; sourceFile?: File },
       settings: VideoPreprocessSettings,
       imageFallback: () => void
     ) => {
@@ -260,10 +296,12 @@ export function StagedAttachmentsProvider({
       const isCurrent = () =>
         motionRunsRef.current.get(file.id) === controller && !controller.signal.aborted
 
-      void (async () => {
+      void runAttachmentProcessing(async () => {
         let sizeBytes = 0
         try {
-          const blob = await (await fetch(file.url ?? "")).blob()
+          const blob = file.sourceFile
+            ? getOriginalComposerAttachment(file.sourceFile)
+            : await (await fetch(file.url ?? "")).blob()
           sizeBytes = blob.size
           if (!isCurrent()) return
           setResults((prev) => {
@@ -308,13 +346,34 @@ export function StagedAttachmentsProvider({
           const bytes =
             blob.size <= COMPOSER_MAX_ATTACHMENT_BYTES ? await readBlobBytes(blob) : undefined
           if (!isCurrent()) return
+          const sourceHash = await hashSessionAssetSource(blob)
+          if (!isCurrent()) return
+          let extracted = extractedFromVideoResult(outcome.result, { filename, groupId: file.id })
+          extracted.original = blob
+          extracted.extractedContent = {
+            attachmentId: file.id,
+            contentHash: sourceHash,
+            status: "partial",
+            segments: [],
+            processor: { id: "cognia-video", version: "2" },
+            issues: ["video-visual-sampling", "audio-not-transcribed"],
+          }
+          const restoredContent = restoredContentRef.current.get(file.id)
+          if (restoredContent) {
+            extracted = restoreDerivedAttachment(
+              extracted,
+              { ...restoredContent, attachmentId: file.id },
+              filename
+            )
+            restoredContentRef.current.delete(file.id)
+          }
           motionRunsRef.current.delete(file.id)
           setResults((prev) =>
             new Map(prev).set(file.id, {
               status: "ready",
               sizeBytes,
               ...(bytes ? { bytes } : {}),
-              extracted: extractedFromVideoResult(outcome.result, { filename, groupId: file.id }),
+              extracted,
               video: { settings: outcome.result.settings, result: outcome.result },
             })
           )
@@ -348,7 +407,7 @@ export function StagedAttachmentsProvider({
             })
           )
         }
-      })()
+      }, controller.signal).catch(() => {})
     },
     []
   )
@@ -364,6 +423,20 @@ export function StagedAttachmentsProvider({
       controller.abort()
       motionRunsRef.current.delete(id)
     })
+    restoredContentRef.current.forEach((_, id) => {
+      if (!live.has(id)) restoredContentRef.current.delete(id)
+    })
+    restoredOcrRef.current.forEach((_, id) => {
+      if (!live.has(id)) restoredOcrRef.current.delete(id)
+    })
+    // Removed large sources must not stay retained in the settled result cache.
+    // Defer the state write; use the current started set if more files arrive.
+    void Promise.resolve().then(() =>
+      setResults((prev) => {
+        const next = new Map([...prev].filter(([id]) => startedRef.current.has(id)))
+        return next.size === prev.size ? prev : next
+      })
+    )
 
     // Whether a result still has a chip to land on. NOT a per-run `cancelled`
     // flag: this effect re-runs every time a file is added, and a flag flipped
@@ -385,22 +458,50 @@ export function StagedAttachmentsProvider({
       // A restored draft's extraction, matched on filename because the vendored
       // provider mints ids internally and `add()` returns nothing.
       const seedIdx = seedQueueRef.current.findIndex((e) => e.filename === file.filename)
-      if (seedIdx >= 0 && isMotion) {
+      const entry = seedIdx >= 0 ? seedQueueRef.current.splice(seedIdx, 1)[0] : undefined
+      const restoredContent = readAttachmentExtractedContent(entry?.state.restoredContent)
+      if (restoredContent) restoredContentRef.current.set(file.id, restoredContent)
+      if (entry?.state.ocrText)
+        restoredOcrRef.current.set(file.id, {
+          ocrText: entry.state.ocrText,
+          includeOcr: entry.state.includeOcr,
+        })
+      if (entry && isMotion) {
         // Sampled frames are not persisted with a draft, only the settings that
         // produced them: re-run with those.
-        const [entry] = seedQueueRef.current.splice(seedIdx, 1)
         runMotion(file, entry!.state.video?.settings ?? DEFAULT_VIDEO_SETTINGS, () =>
           extractAsDocumentOrImage(file)
         )
         continue
       }
-      if (seedIdx >= 0) {
-        const [entry] = seedQueueRef.current.splice(seedIdx, 1)
+      const cachedContent = readAttachmentExtractedContent(entry?.state.extracted?.extractedContent)
+      if (entry?.state.extracted && cachedContent) {
         // Deferred to a microtask so this is not a synchronous setState in the
         // effect body — same reason as the async paths below.
-        void Promise.resolve().then(() => {
+        void (async () => {
+          const blob = file.sourceFile
+            ? getOriginalComposerAttachment(file.sourceFile)
+            : await (await fetch(file.url ?? "")).blob()
+          const hash = await hashSessionAssetSource(blob)
           if (!stillStaged(file.id)) return
-          setResults((prev) => new Map(prev).set(file.id, entry!.state))
+          if (hash !== cachedContent.contentHash) {
+            extractAsDocumentOrImage(file)
+            return
+          }
+          if (!stillStaged(file.id)) return
+          const extracted = entry!.state.extracted!
+          setResults((prev) =>
+            new Map(prev).set(file.id, {
+              ...entry!.state,
+              extracted: {
+                ...extracted,
+                original: blob,
+                extractedContent: { ...extracted.extractedContent!, attachmentId: file.id },
+              },
+            })
+          )
+        })().catch(() => {
+          if (stillStaged(file.id)) extractAsDocumentOrImage(file)
         })
         continue
       }
@@ -413,25 +514,99 @@ export function StagedAttachmentsProvider({
     }
 
     function extractAsDocumentOrImage(file: (typeof files)[number]) {
+      const controller = new AbortController()
+      motionRunsRef.current.get(file.id)?.abort()
+      motionRunsRef.current.set(file.id, controller)
       const isImage = (file.mediaType ?? "").startsWith("image/")
-      void (async () => {
+      void runAttachmentProcessing(async () => {
         try {
-          const url = file.url ?? ""
-          const { dataUrl, size, bytes } = url.startsWith("blob:")
-            ? await blobUrlToDataUrl(url)
-            : { dataUrl: url, size: 0, bytes: undefined }
-          const extracted = await extractAttachment({
-            url: dataUrl,
-            mediaType: file.mediaType,
-            filename: file.filename,
-            id: file.id,
-          })
-          if (!stillStaged(file.id)) return
+          controller.signal.throwIfAborted()
           setResults((prev) =>
             new Map(prev).set(file.id, {
+              status: "extracting",
+              sizeBytes: prev.get(file.id)?.sizeBytes ?? 0,
+            })
+          )
+          const url = file.url ?? ""
+          const source = file.sourceFile
+            ? getOriginalComposerAttachment(file.sourceFile)
+            : undefined
+          const restoredLargeImage =
+            isImage && file.sourceFile && file.sourceFile.size > COMPOSER_MAX_ATTACHMENT_BYTES
+          let payload: Awaited<ReturnType<typeof blobToDataUrl>>
+          let payloadMediaType = file.mediaType
+          if (restoredLargeImage) {
+            const prepared = await prepareComposerAttachments([file.sourceFile!], {
+              maxFileSize: COMPOSER_MAX_ATTACHMENT_BYTES,
+            })
+            if (!prepared.files[0]) throw new Error("attachment_image_preparation_failed")
+            payloadMediaType = prepared.files[0].type
+            payload = await blobToDataUrl(prepared.files[0])
+          } else {
+            payload = url.startsWith("blob:")
+              ? await blobUrlToDataUrl(url)
+              : { dataUrl: url, size: 0, bytes: undefined }
+          }
+          const { dataUrl, size, bytes } = payload
+          controller.signal.throwIfAborted()
+          let extracted = await extractAttachment(
+            {
+              url: dataUrl,
+              mediaType: payloadMediaType,
+              filename: file.filename,
+              id: file.id,
+            },
+            {
+              signal: controller.signal,
+              onProgress: (processing) => {
+                if (controller.signal.aborted || !stillStaged(file.id)) return
+                setResults((prev) =>
+                  new Map(prev).set(file.id, {
+                    ...(prev.get(file.id) ?? { status: "extracting", sizeBytes: size }),
+                    processing,
+                  })
+                )
+              },
+            }
+          )
+          // Preparation may resize an image for the model. Bind provenance to
+          // the actual uploaded source, which the provider retains by identity.
+          const original =
+            source && (source !== file.sourceFile || restoredLargeImage) ? source : undefined
+          let sourceBytes = bytes
+          if (original && extracted.extractedContent) {
+            extracted = {
+              ...extracted,
+              original,
+              extractedContent: {
+                ...extracted.extractedContent,
+                contentHash: await hashSessionAssetSource(original),
+              },
+            }
+            sourceBytes =
+              original.size <= DRAFT_ATTACHMENT_QUOTA_BYTES
+                ? await readBlobBytes(original)
+                : undefined
+          }
+          const restoredContent = restoredContentRef.current.get(file.id)
+          if (restoredContent) {
+            extracted = restoreDerivedAttachment(
+              extracted,
+              { ...restoredContent, attachmentId: file.id },
+              file.filename ?? "attachment"
+            )
+            restoredContentRef.current.delete(file.id)
+          }
+          if (!stillStaged(file.id) || controller.signal.aborted) return
+          motionRunsRef.current.delete(file.id)
+          const restoredOcr = restoredOcrRef.current.get(file.id)
+          restoredOcrRef.current.delete(file.id)
+          setResults((prev) =>
+            new Map(prev).set(file.id, {
+              ...restoredOcr,
               status: extracted.block ? "ready" : "rejected",
-              sizeBytes: size,
-              bytes,
+              sizeBytes: original?.size ?? size,
+              bytes: sourceBytes,
               extracted,
             })
           )
@@ -439,7 +614,8 @@ export function StagedAttachmentsProvider({
           loggers.chat.warn("attachment extraction failed", {
             err: err instanceof Error ? err.message : String(err),
           })
-          if (!stillStaged(file.id)) return
+          if (!stillStaged(file.id) || controller.signal.aborted) return
+          motionRunsRef.current.delete(file.id)
           setResults((prev) =>
             new Map(prev).set(file.id, {
               status: "rejected",
@@ -453,18 +629,28 @@ export function StagedAttachmentsProvider({
             })
           )
         }
-      })()
+      }, controller.signal).catch(() => {})
     }
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileKey])
+  }, [fileKey, retryEpoch])
 
   // Cancel every run on unmount.
   useEffect(() => {
     const runs = motionRunsRef.current
+    const started = startedRef.current
+    const restored = restoredContentRef.current
+    const restoredOcr = restoredOcrRef.current
+    const seeds = seedQueueRef.current
+    const waiters = settleWaitersRef.current
     return () => {
+      started.clear()
+      restored.clear()
+      restoredOcr.clear()
+      seeds.splice(0)
       runs.forEach((controller) => controller.abort())
       runs.clear()
+      waiters.splice(0).forEach((resolve) => resolve())
     }
   }, [])
 
@@ -520,8 +706,7 @@ export function StagedAttachmentsProvider({
   useEffect(() => {
     isExtractingRef.current = isExtracting
     if (isExtracting) return
-    const waiters = settleWaitersRef.current
-    settleWaitersRef.current = []
+    const waiters = settleWaitersRef.current.splice(0)
     waiters.forEach((resolve) => resolve())
   }, [isExtracting])
 
@@ -544,6 +729,71 @@ export function StagedAttachmentsProvider({
 
   const value = useMemo<StagedAttachmentsValue>(
     () => ({
+      processMedia: (id, options) => {
+        const current = results.get(id)
+        const file = files.find((entry) => entry.id === id)
+        if (!current?.extracted || !file) return
+        motionRunsRef.current.get(id)?.abort()
+        const controller = new AbortController()
+        motionRunsRef.current.set(id, controller)
+        setResults((prev) =>
+          new Map(prev).set(id, {
+            ...current,
+            status: "extracting",
+            processing: { processed: 0, total: 1 },
+            processingError: undefined,
+          })
+        )
+        void runAttachmentProcessing(
+          () =>
+            processAttachmentMedia(current.extracted!, file.filename ?? "attachment", {
+              ...options,
+              signal: controller.signal,
+              onProgress: (processing) => {
+                if (controller.signal.aborted) return
+                mutateResult(id, (cur) => ({ ...cur, processing }))
+              },
+            }),
+          controller.signal
+        )
+          .then((extracted) => {
+            if (motionRunsRef.current.get(id) !== controller || !startedRef.current.has(id)) return
+            motionRunsRef.current.delete(id)
+            setResults((prev) =>
+              new Map(prev).set(id, {
+                ...current,
+                extracted,
+                status: extracted.block ? "ready" : "rejected",
+                processingError: extracted.extractedContent?.issues?.find(
+                  (issue) => issue.startsWith("attachment_") || issue === "processing-cancelled"
+                ),
+              })
+            )
+          })
+          .catch(() => {
+            if (motionRunsRef.current.get(id) !== controller) return
+            motionRunsRef.current.delete(id)
+            setResults((prev) =>
+              new Map(prev).set(id, { ...current, processingError: "processing-failed" })
+            )
+          })
+      },
+      cancelProcessing: (id) => {
+        motionRunsRef.current.get(id)?.abort()
+        motionRunsRef.current.delete(id)
+        mutateResult(id, (cur) => ({
+          ...cur,
+          status: cur.extracted?.block ? "ready" : "rejected",
+          processingError: "processing-cancelled",
+        }))
+      },
+      retry: (id) => {
+        const content = results.get(id)?.extracted?.extractedContent
+        if (content) restoredContentRef.current.set(id, content)
+        motionRunsRef.current.get(id)?.abort()
+        startedRef.current.delete(id)
+        setRetryEpoch((epoch) => epoch + 1)
+      },
       byId,
       order,
       isExtracting,
@@ -560,6 +810,8 @@ export function StagedAttachmentsProvider({
       applyVideoSettings: (id, settings) => {
         const file = files.find((f) => f.id === id)
         if (!file) return
+        const content = results.get(id)?.extracted?.extractedContent
+        if (content) restoredContentRef.current.set(id, content)
         runMotion(file, settings, () => {
           // A still GIF never reaches the panel's controls; nothing to re-run.
         })
@@ -578,6 +830,7 @@ export function StagedAttachmentsProvider({
       whenSettled,
       mutateResult,
       files,
+      results,
       runMotion,
     ]
   )

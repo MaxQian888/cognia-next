@@ -18,15 +18,24 @@ import { useTranslations } from "next-intl"
 import { ChevronRightIcon, FileTextIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { AttachmentSourceActions } from "./attachment-source-actions"
 
 export interface AttachmentTextCardProps {
   filename: string
   mediaType?: string
   /** The extracted text exactly as the model received it. */
   text: string
+  sessionId?: string
+  assetId?: string
 }
 
-export function AttachmentTextCard({ filename, mediaType, text }: AttachmentTextCardProps) {
+export function AttachmentTextCard({
+  filename,
+  mediaType,
+  text,
+  sessionId,
+  assetId,
+}: AttachmentTextCardProps) {
   const t = useTranslations("chat.filePreview")
   const [open, setOpen] = useState(false)
   const bodyId = useId()
@@ -55,6 +64,13 @@ export function AttachmentTextCard({ filename, mediaType, text }: AttachmentText
           {t("extractedChars", { count: text.length })}
         </span>
       </button>
+      {sessionId && assetId ? (
+        <AttachmentSourceActions
+          key={`${sessionId}:${assetId}`}
+          sessionId={sessionId}
+          assetId={assetId}
+        />
+      ) : null}
       {open ? (
         <pre
           id={bodyId}

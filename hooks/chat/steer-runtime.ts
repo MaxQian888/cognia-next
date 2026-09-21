@@ -27,6 +27,7 @@ import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-con
 import type { UIMessage } from "ai"
 import { promptPreambleOfParts, type PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { mergeContextRefs } from "@/lib/chat/mentions/merge-refs"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { ContextRef } from "@/lib/chat/mentions/types"
 
 /** Sessions whose imminent settle must drain the steer queue even if the turn
@@ -270,6 +271,7 @@ export function discardPendingSteer(sessionId: string, entryId: string): void {
  * each entry's optimistic bubble already holds the same metadata.
  */
 export interface SteerDrainReferences {
+  attachmentManifest?: AttachmentManifestEntry[]
   citations?: ContextRef[]
   promptPreamble?: PromptPreambleSummary
 }
@@ -280,7 +282,24 @@ function mergeSteerReferences(queue: readonly SteerEntry[]): SteerDrainReference
     queue.flatMap((entry) => entry.citations ?? [])
   )
   const summaries = queue.flatMap((entry) => (entry.promptPreamble ? [entry.promptPreamble] : []))
-  if (citations.length === 0 && summaries.length === 0) return undefined
+  const attachmentManifest = queue.some((entry) => entry.attachmentManifest?.length)
+    ? queue.flatMap((entry) =>
+        (entry.blocks ?? []).map((block, index): AttachmentManifestEntry => {
+          const known = entry.attachmentManifest?.[index]
+          if (known) {
+            const { original: _original, ...metadata } = known
+            return metadata
+          }
+          return {
+            filename: "attachment",
+            mediaType: block.type === "text" ? "text/plain" : block.source.media_type,
+            kind: block.type === "image" ? "image" : "document",
+          }
+        })
+      )
+    : undefined
+  if (citations.length === 0 && summaries.length === 0 && !attachmentManifest?.length)
+    return undefined
   const promptPreamble: PromptPreambleSummary | undefined = summaries.length
     ? {
         sections: [...new Set(summaries.flatMap((summary) => summary.sections))],
@@ -288,6 +307,7 @@ function mergeSteerReferences(queue: readonly SteerEntry[]): SteerDrainReference
       }
     : undefined
   return {
+    ...(attachmentManifest?.length ? { attachmentManifest } : {}),
     ...(citations.length ? { citations } : {}),
     ...(promptPreamble ? { promptPreamble } : {}),
   }

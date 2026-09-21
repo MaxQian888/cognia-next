@@ -15,6 +15,7 @@ interface SliceLike {
     id: string
     text: string
     blocks?: unknown[]
+    attachmentManifest?: import("@/lib/chat/attachments/dispatch").AttachmentManifestEntry[]
     webSearchContext?: WebSearchContext
     replyTo?: { messageId: string; preview: string }
     citations?: ContextRef[]
@@ -577,4 +578,40 @@ it("keeps a rejected room steer recoverable without an unhandled rejection", asy
   )
   await Promise.resolve()
   expect(statesOf("s1")).toEqual(["failed"])
+})
+
+it("drains full text attachments with aligned provenance and strips raw originals", () => {
+  const attachment = { type: "text", text: "[Attachment source] document content" }
+  const original = new Blob(["source"])
+  const descriptor = {
+    filename: "report.txt",
+    mediaType: "text/plain",
+    kind: "document" as const,
+    original,
+  }
+  state.sessions["s1"] = {
+    steerQueue: [
+      { id: "a", text: "use this", blocks: [attachment], attachmentManifest: [descriptor] },
+      {
+        id: "b",
+        text: "also inspect this image",
+        blocks: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "image" } },
+        ],
+      },
+    ],
+    messages: [],
+  }
+  const replay = jest.fn()
+  maybeDrainSteer("s1", replay)
+  const [payload, , , references] = replay.mock.calls[0]
+  expect(payload[0]).toEqual(attachment)
+  expect(payload[2].text).toContain("use this")
+  expect(references.attachmentManifest).toHaveLength(2)
+  expect(references.attachmentManifest[0]).toEqual({
+    filename: "report.txt",
+    mediaType: "text/plain",
+    kind: "document",
+  })
+  expect(references.attachmentManifest[1]).toMatchObject({ kind: "image", mediaType: "image/png" })
 })

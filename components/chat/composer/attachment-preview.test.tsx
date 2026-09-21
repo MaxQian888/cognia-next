@@ -44,6 +44,9 @@ jest.mock("./staged-attachment-store", () => ({
     toggleIncludeOcr: mockToggleIncludeOcr,
     applyVideoSettings: mockApplyVideoSettings,
     seedIncoming: jest.fn(),
+    processMedia: jest.fn(),
+    cancelProcessing: jest.fn(),
+    retry: jest.fn(),
   }),
 }))
 
@@ -82,19 +85,44 @@ beforeEach(() => {
   stage([])
 })
 
-describe("AttachmentPreview — chip rendering", () => {
-  it("renders an image thumbnail and a document chip", () => {
+describe("AttachmentPreview — tile rendering", () => {
+  it("renders an image thumbnail and a document tile", () => {
     stage([
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "b", mediaType: "application/pdf", filename: "doc.pdf" },
     ])
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     expect(screen.getByAltText("pic.png")).toBeInTheDocument()
-    expect(screen.getByText("doc.pdf")).toBeInTheDocument()
+    // The document tile middle-truncates: stem and extension are separate
+    // spans so the extension always survives.
+    expect(screen.getByText("doc")).toBeInTheDocument()
+    expect(screen.getByText(".pdf")).toBeInTheDocument()
     expect(screen.getAllByTestId("composer-attachment-chip")).toHaveLength(2)
   })
 
-  it("renders chips in the store's order, not the file list's", () => {
+  it("lays every attachment out as a compact landscape tile", () => {
+    stage([
+      { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
+      { id: "b", mediaType: "application/pdf", filename: "doc.pdf" },
+    ])
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    // 112×80: wider than tall, smaller than the grid variant's square —
+    // media crops to a landscape thumb, files get width for their name.
+    for (const chip of screen.getAllByTestId("composer-attachment-chip")) {
+      expect(chip).toHaveStyle({ width: "7rem", height: "5rem" })
+    }
+  })
+
+  it("keeps the extension pinned while the stem truncates", () => {
+    stage([{ id: "b", mediaType: "application/pdf", filename: "quarterly-report-final.pdf" }])
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    const ext = screen.getByText(".pdf")
+    expect(ext).toBeInTheDocument()
+    // The stem carries the truncation, not the extension.
+    expect(ext.previousSibling).toHaveClass("truncate")
+  })
+
+  it("renders tiles in the store's order, not the file list's", () => {
     mockState.files = [
       { id: "a", type: "file", filename: "first.txt" },
       { id: "b", type: "file", filename: "second.txt" },
@@ -106,8 +134,8 @@ describe("AttachmentPreview — chip rendering", () => {
     ])
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const chips = screen.getAllByTestId("composer-attachment-chip")
-    expect(within(chips[0]!).getByText("second.txt")).toBeInTheDocument()
-    expect(within(chips[1]!).getByText("first.txt")).toBeInTheDocument()
+    expect(within(chips[0]!).getByText("second")).toBeInTheDocument()
+    expect(within(chips[1]!).getByText("first")).toBeInTheDocument()
   })
 
   it("removes an attachment when its remove button is clicked", () => {
@@ -117,14 +145,14 @@ describe("AttachmentPreview — chip rendering", () => {
     expect(mockRemove).toHaveBeenCalledWith("b")
   })
 
-  // Regression guard for the touch defect: the remove button used to be
-  // absolutely positioned over the filename and hidden until hover.
+  // Regression guard for the touch defect: the remove button must stay
+  // visible — on touch there is no hover to reveal an opacity-0 button.
+  // (On tiles it sits in the corner by design; visibility is the contract.)
   it("keeps the remove button visible rather than hover-gated", () => {
     stage([{ id: "b", filename: "doc.pdf" }])
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     const remove = screen.getByRole("button", { name: /Remove doc\.pdf/i })
     expect(remove.className).not.toContain("opacity-0")
-    expect(remove.className).not.toContain("absolute")
   })
 })
 
@@ -229,10 +257,55 @@ describe("AttachmentPreview — extraction status badges", () => {
     expect(screen.getByLabelText("Couldn't parse this file")).toBeInTheDocument()
     expect(screen.getByLabelText("Couldn't read this file")).toBeInTheDocument()
   })
+
+  it("dims an extracting image tile and sweeps a scan band over it", () => {
+    stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
+      a: { status: "extracting", sizeBytes: 0 },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.getByTestId("attachment-scan-sweep")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Preview p\.png/i }).className).toContain(
+      "opacity-70"
+    )
+  })
+
+  it("shows no scan band once the image settles", () => {
+    stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
+      a: { status: "ready", sizeBytes: 10, extracted: { kind: "image", block: null, tokens: 0 } },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.queryByTestId("attachment-scan-sweep")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Preview p\.png/i }).className).not.toContain(
+      "opacity-70"
+    )
+  })
+
+  it("bars real sampling progress along the video tile's edge and hides the play badge", () => {
+    stage([{ id: "v", mediaType: "video/mp4", filename: "clip.mp4", url: "blob:v" }], {
+      v: {
+        status: "extracting",
+        sizeBytes: 0,
+        video: { settings: DEFAULT_VIDEO_SETTINGS, progress: 0.5 },
+      },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    const bar = screen.getByTestId("attachment-video-progress-bar")
+    expect(bar.firstChild).toHaveStyle({ width: "50%" })
+    expect(screen.queryByTestId("attachment-play-badge")).not.toBeInTheDocument()
+  })
+
+  it("restores the play badge and drops the bar once sampling settles", () => {
+    stage([{ id: "v", mediaType: "video/mp4", filename: "clip.mp4", url: "blob:v" }], {
+      v: { status: "ready", sizeBytes: 10 },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    expect(screen.getByTestId("attachment-play-badge")).toBeInTheDocument()
+    expect(screen.queryByTestId("attachment-video-progress-bar")).not.toBeInTheDocument()
+  })
 })
 
 describe("AttachmentPreview — preview panel", () => {
-  it("opens the preview sheet for the clicked chip", () => {
+  it("opens the preview dialog for a clicked document tile", () => {
     stage([{ id: "a", filename: "notes.txt", url: "data:text/plain;base64,eA==" }], {
       a: ready({ text: 'Attached file "notes.txt":\n\nbody', tokens: 12 }),
     })
@@ -264,6 +337,33 @@ describe("AttachmentPreview — preview panel", () => {
     expect(screen.getByTestId("redaction-note")).toBeInTheDocument()
   })
 
+  it("opens the lightbox for a clicked image tile, not the audit dialog", () => {
+    stage([
+      { id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" },
+      { id: "b", mediaType: "image/png", filename: "q.png", url: "blob:y" },
+    ])
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
+    expect(screen.getByTestId("image-lightbox-active-image")).toHaveAttribute("src", "blob:x")
+    // Both staged images are navigable inside the lightbox.
+    expect(screen.getByRole("button", { name: /Next/ })).toBeInTheDocument()
+  })
+
+  it("routes a rejected image to the dialog, not the lightbox", () => {
+    stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
+      a: {
+        status: "rejected",
+        sizeBytes: 0,
+        extracted: { kind: "image", block: null, tokens: 0, rejectReason: "not-data-url" },
+      },
+    })
+    renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
+    fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByRole("tab", { name: "Model view" })).toBeInTheDocument()
+    expect(screen.queryByTestId("image-lightbox-active-image")).not.toBeInTheDocument()
+  })
+
   it("offers to run OCR for an image and hides the note when nothing was redacted", async () => {
     const onRunOcr = jest.fn()
     stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], {
@@ -280,7 +380,8 @@ describe("AttachmentPreview — preview panel", () => {
     })
     renderPreview(<AttachmentPreview onRunOcr={onRunOcr} videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    // The lightbox's Model view action swaps into the audit dialog's model tab.
+    await user().click(screen.getByRole("button", { name: "Model view" }))
     expect(screen.getByTestId("model-view-image")).toBeInTheDocument()
     await user().click(screen.getByRole("button", { name: "Run OCR" }))
     expect(onRunOcr).toHaveBeenCalledWith("a")
@@ -306,7 +407,7 @@ describe("AttachmentPreview — preview panel", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("button", { name: "Model view" }))
 
     expect(screen.getByText("recognised words")).toBeInTheDocument()
     await user().click(screen.getByRole("switch"))
@@ -352,7 +453,8 @@ describe("AttachmentPreview — container modes", () => {
     stage([{ id: "b", filename: "doc.pdf" }])
     const { container } = renderPreview(<AttachmentPreview bare videoRoute={ROUTE} />)
     expect((container.firstChild as HTMLElement)?.className ?? "").not.toContain("has-[>*]:pt-2")
-    expect(screen.getByText("doc.pdf")).toBeInTheDocument()
+    expect(screen.getByText("doc")).toBeInTheDocument()
+    expect(screen.getByText(".pdf")).toBeInTheDocument()
   })
 
   it("falls back to a generic label for a file with no filename", () => {

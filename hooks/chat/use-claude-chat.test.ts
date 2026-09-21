@@ -13,6 +13,15 @@ import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import type { StartSquadRunInput, StartSquadRunResult } from "@/lib/ai/agent/team/start-squad-run"
 import type { WatchSquadRunInput } from "@/lib/ai/agent/team/watch-squad-run"
 
+const persistSessionAssetsMock = jest.fn(
+  async (_sessionId: string, message: import("ai").UIMessage) => message
+)
+jest.mock("@/lib/db/session-assets", () => ({
+  ...jest.requireActual("@/lib/db/session-assets"),
+  persistMessageSessionAssets: (...args: Parameters<typeof persistSessionAssetsMock>) =>
+    persistSessionAssetsMock(...args),
+}))
+
 const backgroundDrainMock = jest.fn()
 const peerDrainMock = jest.fn(async () => undefined)
 jest.mock("./background-result-runtime", () => ({
@@ -360,6 +369,8 @@ const closeExternalSessionMock = jest.fn(async (..._args: unknown[]) => {})
 const setSessionHostFactsMock = jest.fn()
 const respondExternalPermissionMock = jest.fn(async (..._args: unknown[]) => {})
 const externalProtocolMock = { value: "acp" }
+const externalPresetMock = { value: "" }
+const externalMcpLevelMock = { value: "native" }
 jest.mock("@/lib/ai/agent/external/renderer-tool-host", () => ({
   RENDERER_TOOL_HOST_APPROVAL_PREFIX: "external-tool-host:",
   createRendererToolHost: (...args: unknown[]) => createRendererToolHostMock(...args),
@@ -395,7 +406,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     getConnectedAgents: () => getConnectedAgentsMock(),
     getAgentCapabilityProfile: () => ({
       effective: {
-        mcp: { level: "native" },
+        mcp: { level: externalMcpLevelMock.value },
         "tools.ordinary": { level: "native" },
         "tools.results": { level: "native" },
         "session.resume": {
@@ -406,7 +417,12 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     closeSession: (...args: unknown[]) => closeExternalSessionMock(...args),
     setSessionHostFacts: (...args: unknown[]) => setSessionHostFactsMock(...args),
     respondToPermission: (...args: unknown[]) => respondExternalPermissionMock(...args),
-    getAgent: () => ({ config: { protocol: externalProtocolMock.value } }),
+    getAgent: () => ({
+      config: {
+        protocol: externalProtocolMock.value,
+        metadata: { preset: externalPresetMock.value },
+      },
+    }),
     checkDelegation: (...a: unknown[]) => checkDelegationMock(...(a as [])),
     setDelegationRules: (...a: unknown[]) => setDelegationRulesMock(...(a as [])),
   }),
@@ -833,6 +849,7 @@ import {
 jest.setTimeout(30_000)
 
 beforeEach(() => {
+  persistSessionAssetsMock.mockReset().mockImplementation(async (_sessionId, message) => message)
   chatState.paneIdsBySession = {}
   useSubagentRuntimeStore.setState({ subAgents: {} })
   resetComputerUseSessionGrants()
@@ -991,6 +1008,8 @@ beforeEach(() => {
   closeExternalSessionMock.mockClear()
   setSessionHostFactsMock.mockClear()
   externalProtocolMock.value = "acp"
+  externalPresetMock.value = ""
+  externalMcpLevelMock.value = "native"
   respondExternalPermissionMock.mockClear()
   getConnectedAgentsMock.mockReset().mockReturnValue([])
   checkDelegationMock.mockReset().mockReturnValue({ shouldDelegate: false })
@@ -1852,12 +1871,17 @@ describe("useClaudeChat — actions", () => {
   })
 
   it("reuses a verified imported native session on the external lane", async () => {
+    externalPresetMock.value = "codex"
     useAgentRuntimeStore.setState({
       runtimeRef: { kind: "external", agentId: "ext-1" },
       sessionCompositions: {
         // The marker, not the id. The native session id lives on the session
         // row, which is where the resume reads it from.
-        "import:codex:thread-1": { presetId: "standard", verifiedNativeResume: true },
+        "import:codex:thread-1": {
+          presetId: "standard",
+          verifiedNativeResume: true,
+          verifiedNativeResumeAgentId: "ext-1",
+        },
       },
     })
     getSessionMock.mockResolvedValue({
@@ -1885,6 +1909,108 @@ describe("useClaudeChat — actions", () => {
     )
     expect(clearBranchSeedMock).toHaveBeenCalledWith("import:codex:thread-1")
     expect(freezeImportedSessionMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["different instance", "ext-2", "codex"],
+    ["different preset", "ext-1", "claude-code"],
+  ])("does not reuse imported native context for a %s", async (_case, agentId, preset) => {
+    externalPresetMock.value = preset
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "external", agentId },
+      sessionCompositions: {
+        "import:codex:thread-1": {
+          presetId: "standard",
+          verifiedNativeResume: true,
+          verifiedNativeResumeAgentId: "ext-1",
+        },
+      },
+    })
+    getSessionMock.mockResolvedValue({
+      id: "import:codex:thread-1",
+      title: "Imported",
+      importOwnership: "native-bound",
+      importRuntimeBinding: { nativeSessionId: "thread-1", presetId: "codex" },
+    })
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "old-goal",
+        role: "user",
+        parts: [{ type: "text", text: "Preserve the original requirements" }],
+      },
+    ])
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "continued" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: "import:codex:thread-1" })
+      expect(
+        useAgentRuntimeStore.getState().sessionCompositions["import:codex:thread-1"]
+          .verifiedNativeResume
+      ).toBeUndefined()
+    })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      expect.stringContaining("Preserve the original requirements"),
+      expect.not.objectContaining({ sessionId: "thread-1" })
+    )
+  })
+
+  it("hands native-bound history to builtin without reusing the external SDK session", async () => {
+    const id = "import:codex:thread-1"
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "builtin" },
+      sessionCompositions: {
+        [id]: {
+          presetId: "standard",
+          verifiedNativeResume: true,
+          verifiedNativeResumeAgentId: "ext-1",
+        },
+      },
+    })
+    getSessionMock.mockResolvedValue({
+      id,
+      title: "Imported",
+      importOwnership: "native-bound",
+      sdkSessionId: "external-native",
+      importRuntimeBinding: { nativeSessionId: "external-native", presetId: "codex" },
+      externalAgentSession: { agentId: "ext-1", sessionId: "external-native" },
+    })
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "prior",
+        role: "user",
+        parts: [{ type: "text", text: "Keep the full task requirements" }],
+      },
+    ])
+    resolveSendOptionsMock.mockResolvedValue({
+      model: "sonnet",
+      systemPrompt: "sys",
+      resumeSessionId: "external-native",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: id })
+    })
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      id,
+      "continue",
+      expect.objectContaining({
+        appendSystemPrompt: expect.stringContaining("Keep the full task requirements"),
+      })
+    )
+    expect(sendPromptMock.mock.calls[0][2]).not.toHaveProperty("resumeSessionId")
+    expect(updateSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        sdkSessionId: undefined,
+        importOwnership: "cognia-owned",
+        externalAgentSession: undefined,
+      })
+    )
+    expect(
+      useAgentRuntimeStore.getState().sessionCompositions[id].verifiedNativeResume
+    ).toBeUndefined()
   })
 
   // Verification is what unlocks the resume. Without it the turn must start a
@@ -1942,6 +2068,64 @@ describe("useClaudeChat — actions", () => {
   // so the readiness check is told the session's project, its environment
   // definition and the root it runs in. A session with no project is told
   // nothing (the plain-lane tests above), which is the Q39 off path.
+  it.each([undefined, { agentId: "previous-agent", sessionId: "previous-native" }])(
+    "hands earlier constraints and tool evidence to a fresh external agent (%j)",
+    async (externalAgentSession) => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      chatState.activeSessionId = "sess-1"
+      getSessionMock.mockResolvedValue({ id: "sess-1", title: "Handoff", externalAgentSession })
+      listMessagesMock.mockResolvedValue([
+        {
+          id: "goal",
+          role: "user",
+          parts: [{ type: "text", text: "Only analyze; never edit production" }],
+        },
+        {
+          id: "evidence",
+          role: "assistant",
+          parts: [
+            {
+              type: "dynamic-tool",
+              toolName: "test",
+              toolCallId: "test-1",
+              state: "output-available",
+              input: {},
+              output: "Parser test failed at line 42",
+            },
+          ],
+        },
+      ])
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "continued" })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("continue")
+      })
+      const [prompt] = executeOnExternalAgentMock.mock.calls[0]
+      expect(prompt).toContain("Only analyze; never edit production")
+      expect(prompt).toContain("Parser test failed at line 42")
+      expect(prompt).toContain("Current user request:\ncontinue")
+    }
+  )
+
+  it("does not dispatch imported continuation if claiming history ownership fails", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "import:codex:ownership"
+    getSessionMock.mockResolvedValue({
+      id: "import:codex:ownership",
+      title: "Imported",
+      importOwnership: "source-mirror",
+    })
+    freezeImportedSessionMock.mockRejectedValueOnce(new Error("ownership-write-failed"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(result.current.send("continue")).rejects.toThrow("ownership-write-failed")
+    })
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
   it("readies an external agent for the session's project and environment", async () => {
     useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     chatState.activeSessionId = "sess-1"
@@ -2221,6 +2405,39 @@ describe("useClaudeChat — actions", () => {
     expect(text.length).toBeGreaterThanOrEqual(50)
     // Final persist happened for this session.
     expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", expect.any(Array))
+  })
+
+  it("does not reuse a previous agent's hosted native id when the new agent cannot host MCP", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "done",
+      sessionId: "native-first",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("first")
+    })
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-2" } })
+    externalMcpLevelMock.value = "unsupported"
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "old-goal",
+        role: "user",
+        parts: [{ type: "text", text: "Keep the prior constraints" }],
+      },
+    ])
+    await act(async () => {
+      await result.current.send("continue")
+    })
+    expect(executeOnExternalAgentMock.mock.calls[1][0]).toContain("Keep the prior constraints")
+    expect(executeOnExternalAgentMock.mock.calls[1][1]).toMatchObject({ agentId: "ext-2" })
+    expect(executeOnExternalAgentMock.mock.calls[1][1]).not.toHaveProperty(
+      "sessionId",
+      "native-first"
+    )
+    expect(closeExternalSessionMock).toHaveBeenCalledWith("ext-1", "native-first")
   })
 
   it("retains one Cognia tool host across external turns and closes its native session on chat disposal", async () => {
@@ -5491,4 +5708,138 @@ describe("shared chat runtime", () => {
     expect(onClaudeMessageMock).toHaveBeenCalledTimes(1)
     expect(result.current[0]).toBe(result.current[1])
   })
+})
+
+describe("attachment source persistence before dispatch", () => {
+  it.each(["idle", "streaming"])(
+    "rejects source persistence errors before sending in %s state",
+    async (status) => {
+      chatState.status = status as typeof chatState.status
+      persistSessionAssetsMock.mockRejectedValueOnce(new Error("session_asset_quota_exceeded"))
+      const { result } = renderHook(useClaudeChat)
+      await flush()
+      await act(async () => {
+        await expect(
+          result.current.send("attached source", undefined, { throwOnError: true })
+        ).rejects.toThrow("session_asset_quota_exceeded")
+      })
+      expect(chatState.setSessionDiagnostic).toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(steerSessionMock).not.toHaveBeenCalled()
+      expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("persists originals before publishing a shared document and sends only sanitized parts", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Shared",
+      collaboration: {
+        orgId: "o",
+        workspaceId: "w",
+        sessionId: "shared",
+        policyRevision: 1,
+        syncCursor: 0,
+      },
+    })
+    const realMakeUserMessage = jest.requireActual("@/lib/claude/adapter").makeUserMessage
+    const adapter = jest.requireMock("@/lib/claude/adapter") as { makeUserMessage: jest.Mock }
+    adapter.makeUserMessage
+      .mockImplementationOnce(realMakeUserMessage)
+      .mockImplementationOnce(realMakeUserMessage)
+    const original = new Blob(["document bytes"], { type: "application/pdf" })
+    persistSessionAssetsMock.mockImplementationOnce(async (_sessionId, message) => ({
+      ...message,
+      parts: message.parts.map((part) => {
+        const { attachmentOriginal: _original, ...safe } = part as unknown as Record<
+          string,
+          unknown
+        >
+        return safe as unknown as typeof part
+      }),
+    }))
+    const { result } = renderHook(useClaudeChat)
+    await flush()
+    await act(async () => {
+      await result.current.send(
+        [
+          {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: "ZG9j" },
+          },
+        ],
+        undefined,
+        {
+          attachmentManifest: [
+            { kind: "document", filename: "report.pdf", mediaType: "application/pdf", original },
+          ],
+        }
+      )
+    })
+    expect(persistSessionAssetsMock.mock.calls[0]?.[1].parts[0]).toHaveProperty(
+      "attachmentOriginal",
+      original
+    )
+    const published = sendSharedSessionMessageMock.mock.calls.at(-1)?.[1] as { parts: unknown[] }
+    expect(published.parts[0]).not.toHaveProperty("attachmentOriginal")
+    expect(published.parts[0]).toHaveProperty("filename", "report.pdf")
+    expect(persistSessionAssetsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      sendSharedSessionMessageMock.mock.invocationCallOrder.at(-1)!
+    )
+  })
+
+  it("refuses shared publishing when original persistence fails", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Shared",
+      collaboration: {
+        orgId: "o",
+        workspaceId: "w",
+        sessionId: "shared",
+        policyRevision: 1,
+        syncCursor: 0,
+      },
+    })
+    persistSessionAssetsMock.mockRejectedValueOnce(new Error("source-disk-failed"))
+    const { result } = renderHook(useClaudeChat)
+    await flush()
+    const before = sendSharedSessionMessageMock.mock.calls.length
+    await act(async () => {
+      await expect(
+        result.current.send("source", undefined, { throwOnError: true })
+      ).rejects.toThrow("source-disk-failed")
+    })
+    expect(sendSharedSessionMessageMock.mock.calls.length).toBe(before)
+  })
+})
+
+it("queues attachment text as an attachment and preserves only the user request as steer prose", async () => {
+  chatState.status = "streaming"
+  steerSessionMock.mockRejectedValue(new Error("input_closed"))
+  const original = new Blob(["report"])
+  const descriptor = {
+    filename: "report.txt",
+    mediaType: "text/plain",
+    kind: "document" as const,
+    original,
+  }
+  const attachment = { type: "text" as const, text: "[Attachment source] extracted report" }
+  const { result } = renderHook(useClaudeChat)
+  await flush()
+  await act(async () => {
+    await result.current.send(
+      [attachment, { type: "text", text: "compare this report" }],
+      undefined,
+      { attachmentManifest: [descriptor] }
+    )
+  })
+  expect(chatState.enqueueSteer).toHaveBeenCalledWith(
+    "sess-1",
+    expect.objectContaining({
+      text: "compare this report",
+      blocks: [attachment],
+      attachmentManifest: [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }],
+    })
+  )
 })

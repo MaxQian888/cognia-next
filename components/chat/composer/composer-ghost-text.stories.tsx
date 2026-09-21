@@ -27,12 +27,13 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Dim continuation trailing the typed text.
+// Dim continuation trailing the typed text (non-caret fallback mode — in
+// production the suggestion card owns the text and `caret` is set instead).
 export const Default: Story = {}
 
-// With the "Tab" accept hint badge.
-export const WithAcceptHint: Story = {
-  args: { acceptHint: "Tab" },
+// Caret mode: only the pulse anchor where the card's suggestion trails.
+export const Caret: Story = {
+  args: { caret: true },
 }
 
 // Empty ghost → renders nothing (null).

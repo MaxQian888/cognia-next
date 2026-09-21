@@ -980,7 +980,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                   {header ? (
                     <li
                       aria-hidden
-                      className="sticky top-0 mt-2 bg-popover/95 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm"
+                      // Opaque bg + bottom rule: rows slide under a readable bar,
+                      // not a translucent band that lets a half-covered row bleed
+                      // through (and avoids a backdrop-filter composite layer).
+                      className="sticky top-0 z-10 mt-2 border-b border-border/60 bg-popover px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
                     >
                       {header}
                     </li>
@@ -989,7 +992,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
                     data-index={idx}
                     data-active={idx === highlight ? "true" : undefined}
                     className={cn(
-                      "group/row flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
+                      // scroll-mt-10 clears the ~35px stuck header, so keyboard
+                      // navigation never parks a row's name line underneath it.
+                      "group/row flex scroll-mt-10 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
                       idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
                     )}
                     onMouseEnter={() => setHighlight(idx)}

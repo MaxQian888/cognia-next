@@ -47,11 +47,13 @@ function baseProps() {
 }
 
 describe("<EmptyChatState />", () => {
-  it("renders the time-of-day greeting header + subtitle", () => {
+  it("renders the time-of-day greeting as the headline (no generic subtitle)", () => {
     render(<EmptyChatState {...baseProps()} />)
     // Heading is now the greeting slot (key echoed by the mocked translator).
+    // The generic subtitle is gone — the composer's typewriter hints do that
+    // work. An override subtitle still renders (see the override tests).
     expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
-    expect(screen.getByText("subtitle")).toBeInTheDocument()
+    expect(screen.queryByText("subtitle")).not.toBeInTheDocument()
   })
 
   it("weaves the userName into the greeting via the named key", () => {
@@ -60,45 +62,36 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Welcome style (rich vs minimal) ───────────────────────────────────
-  it("renders the workspace illustration in the rich style, as decoration", () => {
+  it("renders the ambient bloom in the rich style, as decoration", () => {
     render(<EmptyChatState {...baseProps()} />)
-    const art = screen.getByTestId("welcome-illustration")
-    expect(art).toBeInTheDocument()
-    // The artwork sits BEHIND the copy at low opacity — it repeats nothing the
-    // greeting does not already say, so it is decoration: aria-hidden, empty
-    // alt, and absent from the accessibility tree entirely.
-    expect(art).toHaveAttribute("aria-hidden", "true")
-    expect(art.querySelector("img")).toHaveAttribute("loading", "eager")
-    expect(screen.queryByRole("img", { name: "illustrationAlt" })).not.toBeInTheDocument()
+    const bloom = screen.getByTestId("welcome-bloom")
+    // Texture only — it repeats nothing the copy says, so it is aria-hidden
+    // and absent from the accessibility tree entirely.
+    expect(bloom).toBeInTheDocument()
+    expect(bloom).toHaveAttribute("aria-hidden", "true")
   })
 
-  it("adapts the rich hero to its pane width instead of the viewport width", () => {
+  it("adapts the welcome to its pane width instead of the viewport width", () => {
     const { container } = render(<EmptyChatState {...baseProps()} />)
     const scroller = container.firstElementChild
-    const art = screen.getByTestId("welcome-illustration")
 
     // Split view keeps the browser viewport wide while each ChatPane is narrow.
-    // The artwork must therefore appear/resize from its own container width;
-    // a viewport `md:` class would bleed it across a narrow pane's copy.
+    // The layout must therefore respond to its own container width; a viewport
+    // `md:` class would misfire inside a narrow pane.
     expect(scroller).toHaveClass("@container")
-    expect(art).toHaveClass("@xl:block")
-    expect(art).not.toHaveClass("md:block")
+    expect(screen.getByRole("heading", { level: 2 }).className).toContain("@lg:text-5xl")
   })
 
-  it("keeps the greeting and the composer on one left edge (no two-column hero)", () => {
+  it("centers the hero — no two-column split", () => {
     render(<EmptyChatState {...baseProps()} />)
     const hero = screen.getByTestId("welcome-hero")
-    // The copy used to live in the 1fr track of a two-column grid, so it ended
-    // at ~60% width while the composer below spanned the full reading column —
-    // a visible step between two stacked elements. The artwork is positioned
-    // out of flow now, so there is only one column and one edge.
-    expect(hero).not.toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+    expect(hero.className).toContain("items-center")
     expect(hero.className).not.toMatch(/\bgrid\b/)
   })
 
-  it("drops the workspace illustration in the minimal style", () => {
+  it("drops the ambient bloom in the minimal style", () => {
     render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
-    expect(screen.queryByTestId("welcome-illustration")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-bloom")).not.toBeInTheDocument()
   })
 
   it("shows the style toggle only when onToggleStyle is provided and fires the opposite style", async () => {
@@ -143,8 +136,9 @@ describe("<EmptyChatState />", () => {
     const user = userEvent.setup()
     render(<EmptyChatState {...props} aiSamples={["Plan my week", "  ", "Draft an email"]} />)
     // Blank entries are filtered out; only the two real prompts become chips.
-    expect(screen.getByTestId("ai-starters")).toBeInTheDocument()
-    expect(screen.getByText("sections.aiPrompts")).toBeInTheDocument()
+    const chips = screen.getByTestId("welcome-chips")
+    expect(chips).toContainElement(screen.getByRole("button", { name: "Plan my week" }))
+    expect(chips).toContainElement(screen.getByRole("button", { name: "Draft an email" }))
     await user.click(screen.getByRole("button", { name: "Plan my week" }))
     expect(props.onUseSample).toHaveBeenCalledWith("Plan my week")
   })
@@ -154,7 +148,6 @@ describe("<EmptyChatState />", () => {
     const props = baseProps()
     const user = userEvent.setup()
     render(<EmptyChatState {...props} />)
-    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
     const starter = screen.getByRole("button", { name: /samples.exploreTitle/ })
     expect(starter).toHaveAttribute("data-slot", "button")
     await user.click(starter)
@@ -190,10 +183,10 @@ describe("<EmptyChatState />", () => {
     expect(screen.queryByRole("button", { name: "dismiss" })).not.toBeInTheDocument()
   })
 
-  it("hides Try a prompt when hiddenSections.tryPrompt is set", () => {
+  it("hides the starter chips when hiddenSections.tryPrompt is set", () => {
     render(<EmptyChatState {...baseProps()} hiddenSections={{ tryPrompt: true }} />)
-    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "dismiss" })).not.toBeInTheDocument()
   })
 
   // ── Surface-specific override (workflow editor chat tab) ─────────────
@@ -215,13 +208,11 @@ describe("<EmptyChatState />", () => {
         }}
       />
     )
-    // Custom heading / subtitle / section heading replace the generic copy.
+    // Custom heading / subtitle / starter chips replace the generic copy.
     expect(
       screen.getByRole("heading", { name: "Build or refine this workflow" })
     ).toBeInTheDocument()
     expect(screen.getByText("Describe a flow to scaffold")).toBeInTheDocument()
-    expect(screen.getByText("Workflow starters")).toBeInTheDocument()
-    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
     // Generic dev-tool starters are gone; workflow starters are shown.
     expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /Scaffold a workflow/ }))
@@ -232,11 +223,10 @@ describe("<EmptyChatState />", () => {
     const samples: StarterSample[] = [
       { key: "build", icon: SparklesIcon, title: "Scaffold a workflow", prompt: "Build it" },
     ]
-    // Only `samples` provided — heading/subtitle/section keep the generic copy.
+    // Only `samples` provided — heading/subtitle keep the generic copy.
     render(<EmptyChatState {...baseProps()} override={{ samples }} />)
     expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
-    expect(screen.getByText("subtitle")).toBeInTheDocument()
-    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
+    expect(screen.queryByText("subtitle")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Scaffold a workflow/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
   })
@@ -246,16 +236,15 @@ describe("<EmptyChatState />", () => {
     const props = baseProps()
     const user = userEvent.setup()
     render(<EmptyChatState {...props} characterSamples={["Explain recursion", "Draft a haiku"]} />)
-    expect(screen.getByText("sections.characterPrompts")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /Draft a haiku/ }))
     expect(props.onUseSample).toHaveBeenCalledWith("Draft a haiku")
   })
 
-  it("hides the character group when characterSamples is empty or only blanks", () => {
+  it("hides the character chips when characterSamples is empty or only blanks", () => {
     const { rerender } = render(<EmptyChatState {...baseProps()} characterSamples={[]} />)
-    expect(screen.queryByText("sections.characterPrompts")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Explain recursion/ })).not.toBeInTheDocument()
     rerender(<EmptyChatState {...baseProps()} characterSamples={["   ", ""]} />)
-    expect(screen.queryByText("sections.characterPrompts")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Explain recursion/ })).not.toBeInTheDocument()
   })
 
   it("activates a character prompt card via Enter / Space", async () => {
@@ -285,15 +274,12 @@ describe("<EmptyChatState />", () => {
         onResumeSession={onResumeSession}
       />
     )
-    expect(screen.getByText("sections.continue")).toBeInTheDocument()
-    // Timestamps go through next-intl's locale-aware relativeTime (no
-    // hard-coded English), anchored to an explicit render-time "now".
-    expect(mockRelativeTime).toHaveBeenCalledWith(recentSessions[0].updatedAt, MOCK_NOW)
+    expect(screen.getByText("sections.continue:")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /Refactor auth/ }))
     expect(onResumeSession).toHaveBeenCalledWith("s1")
   })
 
-  it("caps the recent list at four entries", () => {
+  it("caps the quiet recent line at three entries", () => {
     const recentSessions: RecentSessionEntry[] = Array.from({ length: 7 }, (_, i) => ({
       id: `s${i}`,
       title: `Session ${i}`,
@@ -307,75 +293,66 @@ describe("<EmptyChatState />", () => {
       />
     )
     expect(screen.getByRole("button", { name: /Session 0/ })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Session 3/ })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Session 4/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Session 2/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Session 3/ })).not.toBeInTheDocument()
   })
 
-  it("hides the continue group when the recent list is empty", () => {
+  it("hides the continue line when the recent list is empty", () => {
     render(<EmptyChatState {...baseProps()} recentSessions={[]} onResumeSession={jest.fn()} />)
-    expect(screen.queryByText("sections.continue")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-recents")).not.toBeInTheDocument()
   })
 
-  it("hides the continue group when onResumeSession is absent", () => {
+  it("hides the continue line when onResumeSession is absent", () => {
     render(
       <EmptyChatState {...baseProps()} recentSessions={[{ id: "s1", title: "X", updatedAt: 1 }]} />
     )
-    expect(screen.queryByText("sections.continue")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-recents")).not.toBeInTheDocument()
   })
 
   // ── New chat button ───────────────────────────────────────────────────
-  it("keeps New chat in the hero when the surface has no composer", async () => {
+  it("keeps New chat as the primary action when the surface has no composer", async () => {
     const props = baseProps()
     const user = userEvent.setup()
     render(<EmptyChatState {...props} variant="fullscreen" />)
     // No composer (the workflow-editor chat tab) — creating a session is the
-    // only way in, so the button stays the hero's primary action.
+    // only way in, so the button holds the composer's slot.
     const button = screen.getByRole("button", { name: /newChat/ })
-    expect(screen.getByTestId("welcome-hero")).toContainElement(button)
     expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
     await user.click(button)
     expect(props.onCreate).toHaveBeenCalled()
   })
 
-  it("demotes New chat below the composer when one is present, and still fires onCreate", async () => {
-    const props = baseProps()
-    const user = userEvent.setup()
+  it("renders NO New chat button when a composer is present — the first send creates the session", () => {
     render(
       <EmptyChatState
-        {...props}
+        {...baseProps()}
         variant="fullscreen"
         composerSlot={<div data-testid="hero-composer" />}
       />
     )
-    // The composer already creates a session on its first send, so a filled
-    // button doing the same thing must not outrank it. It moves out of the
-    // hero, below the box.
-    const button = screen.getByRole("button", { name: /newChat/ })
+    // The composer already creates a session on its first send, so a second
+    // button doing the same thing is redundant (and discards the draft).
+    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
+  })
+
+  it("parks the execution controls under the composer they configure", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="fullscreen"
+        composerSlot={<div data-testid="hero-composer" />}
+        executionControlsSlot={<div data-testid="exec-controls" />}
+      />
+    )
     const actions = screen.getByTestId("welcome-actions")
-    expect(actions).toContainElement(button)
-    expect(screen.getByTestId("welcome-hero")).not.toContainElement(button)
+    expect(actions).toContainElement(screen.getByTestId("exec-controls"))
     expect(screen.getByTestId("welcome-composer").compareDocumentPosition(actions)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    await user.click(button)
-    expect(props.onCreate).toHaveBeenCalled()
   })
 
-  it("moves the execution controls down with it, beside the composer they configure", () => {
-    render(
-      <EmptyChatState
-        {...baseProps()}
-        variant="fullscreen"
-        composerSlot={<div data-testid="hero-composer" />}
-        executionControlsSlot={<div data-testid="exec-controls" />}
-      />
-    )
-    expect(screen.getByTestId("welcome-actions")).toContainElement(
-      screen.getByTestId("exec-controls")
-    )
-  })
-
-  it("keeps the execution controls in the hero when there is no composer", () => {
+  it("keeps the execution controls beside New chat when there is no composer", () => {
     render(
       <EmptyChatState
         {...baseProps()}
@@ -383,7 +360,8 @@ describe("<EmptyChatState />", () => {
         executionControlsSlot={<div data-testid="exec-controls" />}
       />
     )
-    expect(screen.getByTestId("welcome-hero")).toContainElement(screen.getByTestId("exec-controls"))
+    expect(screen.getByTestId("exec-controls")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /newChat/ })).toBeInTheDocument()
   })
 
   it("hides the New chat button in the inline variant", () => {
@@ -461,10 +439,10 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Mobile home slots (hideSamples / header / quick actions) ──────────
-  it("suppresses the dev-tool starters when hideSamples is set", () => {
+  it("suppresses the dev-tool starter chips when hideSamples is set", () => {
     render(<EmptyChatState {...baseProps()} hideSamples />)
-    expect(screen.queryByText("sections.tryPrompt")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /samples.exploreTitle/ })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-chips")).not.toBeInTheDocument()
   })
 
   it("renders headerExtraSlot above the greeting", () => {
@@ -483,13 +461,11 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Usage dashboard slot ──────────────────────────────────────────────
-  it("renders statsSlot under the hero and above the starter prompts", () => {
+  it("renders statsSlot below the fold, after the centered column", () => {
     render(<EmptyChatState {...baseProps()} statsSlot={<div data-testid="stats" />} />)
     const stats = screen.getByTestId("stats")
-    const hero = screen.getByTestId("welcome-hero")
-    const starters = screen.getByText("sections.tryPrompt")
-    expect(hero.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(stats.compareDocumentPosition(starters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const chips = screen.getByTestId("welcome-chips")
+    expect(chips.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("omits the stats section entirely when no slot is passed", () => {
@@ -528,7 +504,7 @@ describe("<SectionHeading />", () => {
     mockUseReducedMotion.mockReturnValue(true)
     render(<EmptyChatState {...baseProps()} />)
     expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
-    expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /samples.exploreTitle/ })).toBeInTheDocument()
   })
 })
 
@@ -539,12 +515,12 @@ describe("<EmptyChatState /> — hero composer", () => {
     expect(screen.getByTestId("hero-composer")).toBeInTheDocument()
   })
 
-  it("places it above the starter cards — the box is what the page is for", () => {
+  it("places it above the prompt chips — the box is what the page is for", () => {
     render(<EmptyChatState {...baseProps()} composerSlot={<div data-testid="hero-composer" />} />)
     const composer = screen.getByTestId("welcome-composer")
-    const starters = screen.getByText("sections.tryPrompt")
-    // DOCUMENT_POSITION_FOLLOWING === the starters come after the composer.
-    expect(composer.compareDocumentPosition(starters)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    const chips = screen.getByTestId("welcome-chips")
+    // DOCUMENT_POSITION_FOLLOWING === the chips come after the composer.
+    expect(composer.compareDocumentPosition(chips)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
   it("renders nothing extra when no composer is supplied", () => {

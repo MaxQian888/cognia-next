@@ -39,6 +39,21 @@ import {
 } from "@/lib/chat/template/resource-kinds"
 import type { TemplateResourceSearch } from "@/hooks/chat/use-template-resource-search"
 
+/**
+ * Arrow-key walk for an option list: ↓/↑ move focus between the listbox's
+ * options, wrapping at the ends — the same gesture a `/` or `@` menu takes.
+ * Focus enters the list the ordinary way (Tab), so this only runs once the
+ * user is already inside it.
+ */
+function moveOptionFocus(event: React.KeyboardEvent<HTMLElement>) {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'))
+  const index = items.indexOf(document.activeElement as HTMLElement)
+  if (index < 0 || items.length === 0) return
+  event.preventDefault()
+  items[(index + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus()
+}
+
 export interface TemplateParamPopoverProps {
   /** Parameter id being edited, or null when none is. */
   paramId: string | null
@@ -135,7 +150,13 @@ export function TemplateParamPopover({
               }}
             />
           ) : options.length > 0 ? (
-            <div className="flex flex-col gap-1" role="listbox">
+            // A closed list: capped like the resource picker, arrows walk it
+            // like a palette, Enter on the focused option confirms.
+            <div
+              className="flex max-h-52 flex-col gap-0.5 overflow-y-auto"
+              role="listbox"
+              onKeyDown={moveOptionFocus}
+            >
               {options.map((option) => (
                 <button
                   key={option}
@@ -143,7 +164,8 @@ export function TemplateParamPopover({
                   role="option"
                   aria-selected={text === option}
                   className={cn(
-                    "flex items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+                    "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                    "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
                     text === option && "bg-accent/60"
                   )}
                   onClick={() => {
@@ -230,16 +252,45 @@ function ResourcePicker({ resourceKind, search, selectedId, onPick }: ResourcePi
     [state.loading, state.items.length]
   )
 
+  const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
   return (
     <div className="space-y-1.5">
       <Input
+        ref={inputRef}
         value={query}
         autoFocus
         placeholder={t("searchPlaceholder")}
         data-testid="template-param-search"
         onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          // Palette gesture: ↓ from the query box steps into the results.
+          if (event.key === "ArrowDown") {
+            event.preventDefault()
+            listRef.current?.querySelector<HTMLElement>('[role="option"]')?.focus()
+          }
+        }}
       />
-      <div className="max-h-52 overflow-y-auto" role="listbox">
+      <div
+        ref={listRef}
+        className="max-h-52 overflow-y-auto"
+        role="listbox"
+        onKeyDown={(event) => {
+          // ↑ on the first result returns to the query rather than wrapping —
+          // the list's top edge is the input, not the last item.
+          if (
+            event.key === "ArrowUp" &&
+            document.activeElement ===
+              listRef.current?.querySelector<HTMLElement>('[role="option"]')
+          ) {
+            event.preventDefault()
+            inputRef.current?.focus()
+            return
+          }
+          moveOptionFocus(event)
+        }}
+      >
         {state.loading && state.items.length === 0 ? (
           <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
             <Spinner className="size-3.5" />
@@ -255,7 +306,8 @@ function ResourcePicker({ resourceKind, search, selectedId, onPick }: ResourcePi
               role="option"
               aria-selected={option.id === selectedId}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
                 option.id === selectedId && "bg-accent/60"
               )}
               onClick={() => onPick(option)}

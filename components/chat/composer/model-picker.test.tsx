@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { NextIntlClientProvider } from "next-intl"
 import { ModelPicker, __testing__ } from "./model-picker"
 import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
@@ -273,7 +274,9 @@ describe("trigger rendering (narrow-container truncation)", () => {
   function renderPicker(session: ChatSession | null) {
     return render(
       <NextIntlClientProvider locale="en" messages={{}}>
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
   }
@@ -321,7 +324,9 @@ describe("trigger rendering (narrow-container truncation)", () => {
   it("opens an anchored popover without a modal dialog overlay", () => {
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
 
@@ -341,7 +346,9 @@ describe("friendly name rendering", () => {
   function renderPicker(session: ChatSession | null) {
     return render(
       <NextIntlClientProvider locale="en" messages={{}}>
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
   }
@@ -446,7 +453,9 @@ describe("active model positioning", () => {
 
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
 
@@ -493,7 +502,9 @@ describe("active model positioning", () => {
 
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={{ ...session, model: "auto", providerOverride: undefined }} />
+        <TooltipProvider>
+          <ModelPicker session={{ ...session, model: "auto", providerOverride: undefined }} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
 
@@ -559,7 +570,9 @@ describe("reasoning effort is not restated here", () => {
           },
         }}
       >
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
   }
@@ -593,7 +606,9 @@ describe("explicit Auto routing selection", () => {
   const renderPicker = (value: ChatSession = session) =>
     render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={value} />
+        <TooltipProvider>
+          <ModelPicker session={value} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
 
@@ -690,13 +705,15 @@ describe("live model switch", () => {
   ) {
     return render(
       <NextIntlClientProvider locale="en" messages={{}}>
-        {controls ? (
-          <ChatScopeProvider sessionId={session.id} {...controls}>
+        <TooltipProvider>
+          {controls ? (
+            <ChatScopeProvider sessionId={session.id} {...controls}>
+              <ModelPicker session={session} />
+            </ChatScopeProvider>
+          ) : (
             <ModelPicker session={session} />
-          </ChatScopeProvider>
-        ) : (
-          <ModelPicker session={session} />
-        )}
+          )}
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
   }
@@ -849,7 +866,9 @@ describe("an external agent's own models", () => {
   function renderPicker(s: ChatSession | null = session) {
     return render(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={s} />
+        <TooltipProvider>
+          <ModelPicker session={s} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
   }
@@ -955,7 +974,9 @@ describe("an external agent's own models", () => {
     mockAgentModels.loading = true
     rerender(
       <NextIntlClientProvider locale="en" messages={enMessages}>
-        <ModelPicker session={session} />
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
       </NextIntlClientProvider>
     )
     expect(screen.getByRole("button", { name: /refresh models/i })).toBeDisabled()

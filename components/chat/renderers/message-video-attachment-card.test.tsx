@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import type { VideoAttachmentInfo } from "@/lib/chat/attachments/video/attachment-info"
 import {
   collectMessageVideoAttachments,
@@ -58,6 +58,32 @@ const image = (url: string, videoAttachment?: unknown) => ({
 })
 
 describe("collectMessageVideoAttachments", () => {
+  it("keeps located transcription text visible inside the grouped video card", () => {
+    const descriptor = info()
+    const result = collectMessageVideoAttachments([
+      {
+        type: "file",
+        mediaType: "text/plain",
+        text: "[0:10–0:20] The release is scheduled for Friday.",
+        videoAttachment: descriptor,
+        extractedContent: {
+          attachmentId: "video-asset",
+          contentHash: "a".repeat(64),
+          status: "partial",
+          segments: [],
+          processor: { id: "transcriber", version: "1" },
+        },
+      },
+      image("data:preview", descriptor),
+    ])
+    expect(result.attachments[0]?.assetId).toBe("video-asset")
+    render(<MessageVideoAttachmentCard attachment={result.attachments[0]!} idPrefix="m" />)
+    expect(screen.queryByText("The original file isn't saved.")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /clip.mp4/ }))
+    expect(screen.getByTestId("attachment-text-card-body")).toHaveTextContent(
+      "The release is scheduled for Friday."
+    )
+  })
   it("groups tagged parts by groupId at the first part's position", () => {
     const a = info()
     const b = info({ groupId: "g2", filename: "loop.gif", kind: "gif", delivery: "frames" })
@@ -108,7 +134,9 @@ describe("MessageVideoAttachmentCard", () => {
     const i = info()
     renderCard([text(i), image("data:board", i)])
     const card = screen.getByTestId("message-video-attachment")
-    expect(within(card).getByTitle("clip.mp4")).toHaveTextContent("clip.mp4")
+    expect(within(card.querySelector("figcaption")!).getByTitle("clip.mp4")).toHaveTextContent(
+      "clip.mp4"
+    )
     expect(within(card).getByText("Video")).toBeInTheDocument()
     expect(
       within(card).getByText("1:30 · 1920×1080 · Storyboard of 9 frames evenly spaced")

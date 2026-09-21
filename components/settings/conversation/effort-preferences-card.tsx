@@ -162,23 +162,29 @@ export function EffortPreferencesCard() {
             const visible = !hidden.includes(tier)
             const ultra = tier === "ultracode"
             return (
-              <button
+              <Button
                 key={tier}
                 type="button"
+                variant="ghost"
+                size="sm"
                 role="checkbox"
                 aria-checked={visible}
                 onClick={() => toggleTier(tier)}
                 data-testid={`effort-tier-toggle-${tier}`}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-pill border px-2.5 py-1 text-xs",
+                  "h-auto gap-1 rounded-pill border px-2.5 py-1 text-xs font-normal",
                   // Same motion vocabulary as the composer's ladder: the press
                   // gives, the check pops in, and the top tier glows because it
                   // is a change in kind rather than one more notch.
                   "transition-[color,background-color,border-color,box-shadow,scale] duration-200 active:scale-[0.97]",
+                  // Ghost's hover wash is re-asserted per state below — the
+                  // selected chip keeps its own fill on hover, the unselected
+                  // one only brightens its text.
+                  "hover:bg-transparent dark:hover:bg-transparent",
                   visible
                     ? ultra
-                      ? "border-effort-ultra/40 bg-effort-ultra-muted text-effort-ultra shadow-[0_0_12px_-4px_var(--effort-ultra)]"
-                      : "border-transparent bg-accent text-accent-foreground"
+                      ? "border-effort-ultra/40 bg-effort-ultra-muted text-effort-ultra shadow-[0_0_12px_-4px_var(--effort-ultra)] hover:bg-effort-ultra-muted hover:text-effort-ultra"
+                      : "border-transparent bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground"
                     : "border-dashed border-border text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -192,7 +198,7 @@ export function EffortPreferencesCard() {
                   )}
                 />
                 {tLevel(tier as "off")}
-              </button>
+              </Button>
             )
           })}
         </div>

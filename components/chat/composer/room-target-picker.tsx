@@ -5,10 +5,10 @@
  *
  * Two surfaces over one store (`stores/chat/room-target-store.ts`):
  *
- * - `RoomTargetPicker` is the button in the composer's capability row. It
- *   opens a list of the room's members to tick. A `manual` team has no other
- *   way to get a reply. Every other team gets a way to override its routing
- *   for a turn without typing an `@`.
+ * - `RoomTargetPicker` is the row in the composer's `+` menu capability
+ *   group. It opens a list of the room's members to tick. A `manual` team has
+ *   no other way to get a reply. Every other team gets a way to override its
+ *   routing for a turn without typing an `@`.
  * - `RoomTargetChip` sits in the context row with the attachments and the
  *   reply target: it names the standing pick and clears it, and when there is
  *   no pick it says why the room may stay quiet (asleep, mention only, or a
@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils"
 import { useRoomTargetStore, useRoomTargets } from "@/stores/chat/room-target-store"
 import type { ChatSession, Team, TeamOrchestration } from "@cognia/agent-config-types"
 import { useComposerSessionId } from "./composer-session-context"
+import { CapabilityRow } from "./capability-row"
 
 /** Why the next send may get no reply, or `null` when somebody will answer. */
 export type RoomReplyHint = "asleep" | "mention_only" | "manual"
@@ -101,19 +102,18 @@ export function RoomTargetPicker({ session, disabled = false }: RoomTargetPicker
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          size="icon"
-          variant={targets.length > 0 ? "default" : "ghost"}
+        <CapabilityRow
+          icon={<UsersIcon className="size-4" />}
+          label={t("trigger")}
+          chevron
+          active={targets.length > 0}
           disabled={disabled || asleep}
           aria-label={t("trigger")}
+          hint={asleep ? t("asleepDisabled") : undefined}
           title={asleep ? t("asleepDisabled") : t("trigger")}
-          className="size-7"
           data-testid="composer-room-target-trigger"
           data-picked={targets.length > 0 ? targets.length : undefined}
-        >
-          <UsersIcon className="size-3.5" />
-        </Button>
+        />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-2" data-testid="composer-room-target-menu">
         <p className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">{t("title")}</p>

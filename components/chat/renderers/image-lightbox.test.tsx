@@ -191,13 +191,13 @@ describe("ImageLightbox", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Rotate" }))
     expect(screen.getByTestId("image-lightbox-active-image")).toHaveStyle({
-      transform: "scale(1.25) rotate(90deg)",
+      transform: "translate(0px, 0px) scale(1.25) rotate(90deg)",
     })
 
     fireEvent.click(screen.getByTestId("image-lightbox-stage"))
     expect(screen.getByText("100%")).toBeInTheDocument()
     expect(screen.getByTestId("image-lightbox-active-image")).toHaveStyle({
-      transform: "scale(1) rotate(0deg)",
+      transform: "translate(0px, 0px) scale(1) rotate(0deg)",
     })
   })
 
@@ -307,9 +307,132 @@ describe("ImageLightbox", () => {
     expect(screen.getByText("50%")).toBeInTheDocument()
     expect(zoomOut).toBeDisabled()
 
-    for (let index = 0; index < 10; index += 1) fireEvent.click(zoomIn)
-    expect(screen.getByText("300%")).toBeInTheDocument()
+    for (let index = 0; index < 20; index += 1) fireEvent.click(zoomIn)
+    expect(screen.getByText("400%")).toBeInTheDocument()
     expect(zoomIn).toBeDisabled()
+  })
+
+  it("zooms on a trackpad pinch (ctrl+wheel) and pans while zoomed", () => {
+    renderGallery()
+    const stage = screen.getByTestId("image-lightbox-stage")
+    const image = screen.getByTestId("image-lightbox-active-image")
+
+    // Chromium delivers a trackpad pinch as wheel + ctrlKey.
+    fireEvent.wheel(stage, { ctrlKey: true, deltaY: -40 })
+    expect(screen.getByText("108%")).toBeInTheDocument()
+
+    // Zoomed in, a two-finger scroll pans instead of navigating.
+    fireEvent.wheel(stage, { deltaX: -24, deltaY: -12 })
+    expect(image.style.transform).toContain("translate(24px, 12px)")
+    expect(screen.getByText("1 of 2")).toBeInTheDocument()
+  })
+
+  it("navigates on a decisive horizontal swipe but ignores a light one", () => {
+    renderGallery()
+    const stage = screen.getByTestId("image-lightbox-stage")
+
+    // 180px of horizontal travel is below the 320px threshold.
+    fireEvent.wheel(stage, { deltaX: 180, deltaY: 2 })
+    expect(screen.getByText("1 of 2")).toBeInTheDocument()
+
+    fireEvent.wheel(stage, { deltaX: 160, deltaY: 0 })
+    fireEvent.wheel(stage, { deltaX: 170, deltaY: 0 })
+    expect(screen.getByTestId("image-lightbox-active-image")).toHaveAttribute("src", items[1].src)
+    expect(screen.getByText("2 of 2")).toBeInTheDocument()
+  })
+
+  it("closes on a committed pull-down and snaps back otherwise", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ImageLightbox
+            items={items}
+            open
+            activeIndex={0}
+            onActiveIndexChange={jest.fn()}
+            onOpenChange={onOpenChange}
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    const stage = screen.getByTestId("image-lightbox-stage")
+    const image = screen.getByTestId("image-lightbox-active-image")
+
+    // A short pull below the commit distance snaps back on release.
+    fireEvent.pointerDown(stage, { pointerId: 1, clientX: 400, clientY: 300 })
+    fireEvent.pointerMove(stage, { pointerId: 1, clientX: 400, clientY: 380 })
+    fireEvent.pointerUp(stage, { pointerId: 1, clientX: 400, clientY: 380 })
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(image).toHaveStyle({ transform: "translate(0px, 0px) scale(1) rotate(0deg)" })
+
+    // Dragging past the commit distance dismisses the viewer.
+    fireEvent.pointerDown(stage, { pointerId: 1, clientX: 400, clientY: 300 })
+    fireEvent.pointerMove(stage, { pointerId: 1, clientX: 400, clientY: 470 })
+    fireEvent.pointerUp(stage, { pointerId: 1, clientX: 400, clientY: 470 })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("leaves navigation buttons clickable — a press starting on a button is not a stage drag", () => {
+    // Regression: pointer capture on the stage used to retarget the click to
+    // the stage element in real browsers, so Next/Previous never fired. jsdom
+    // cannot emulate capture retargeting, so the assertion is that a press on
+    // the button never enters gesture tracking (no pull, no close) and the
+    // click still navigates.
+    const onOpenChange = jest.fn()
+    const onActiveIndexChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ImageLightbox
+            items={items}
+            open
+            activeIndex={0}
+            onActiveIndexChange={onActiveIndexChange}
+            onOpenChange={onOpenChange}
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    const stage = screen.getByTestId("image-lightbox-stage")
+    const image = screen.getByTestId("image-lightbox-active-image")
+    const nextButton = screen.getByRole("button", { name: "Next image" })
+
+    fireEvent.pointerDown(nextButton, { pointerId: 1, clientX: 400, clientY: 300, button: 0 })
+    fireEvent.pointerMove(stage, { pointerId: 1, clientX: 400, clientY: 470 })
+    expect(image).toHaveStyle({ transform: "translate(0px, 0px) scale(1) rotate(0deg)" })
+    fireEvent.pointerUp(stage, { pointerId: 1, clientX: 400, clientY: 470 })
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    fireEvent.click(nextButton)
+    expect(onActiveIndexChange).toHaveBeenCalledWith(1)
+  })
+
+  it("toggles zoom on double-click", () => {
+    renderGallery()
+    const image = screen.getByTestId("image-lightbox-active-image")
+    fireEvent.doubleClick(image)
+    expect(screen.getByText("200%")).toBeInTheDocument()
+    fireEvent.doubleClick(image)
+    expect(screen.getByText("100%")).toBeInTheDocument()
+  })
+
+  it("renders optional header actions before the close button", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ImageLightbox
+            items={items}
+            open
+            activeIndex={0}
+            onActiveIndexChange={jest.fn()}
+            onOpenChange={jest.fn()}
+            headerActions={<button type="button">Model view</button>}
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("button", { name: "Model view" })).toBeInTheDocument()
   })
 
   it("honors reduced-motion preferences", () => {

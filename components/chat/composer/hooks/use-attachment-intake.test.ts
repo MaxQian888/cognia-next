@@ -133,6 +133,7 @@ describe("acceptFiles — the single gate", () => {
     expect(prepared).toHaveBeenCalledWith(expect.any(Array), {
       maxFileSize: 1024,
       motion: { maxSourceBytes: 4 * 1024 * 1024 },
+      audio: true,
     })
   })
 
@@ -141,7 +142,7 @@ describe("acceptFiles — the single gate", () => {
     await act(async () => {
       await view.result.current.acceptFiles([file("clip.mp4", "video/mp4")])
     })
-    expect(prepared).toHaveBeenCalledWith(expect.any(Array), { maxFileSize: 1024 })
+    expect(prepared).toHaveBeenCalledWith(expect.any(Array), { maxFileSize: 1024, audio: false })
   })
 
   it("warns with the video ceiling in megabytes", async () => {

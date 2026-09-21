@@ -31,15 +31,33 @@ export interface GhostContext {
   recentMessages?: readonly GhostMessage[]
 }
 
-const SYSTEM_PROMPT = [
-  "You are an inline autocomplete engine for a chat message box, like GitHub",
-  "Copilot but for prose. Given the recent conversation and a partial message",
-  "the user is typing TO an assistant, predict the most likely continuation of",
-  "that message. Respond with ONLY the continuation text that comes immediately",
-  "after the partial input — do NOT restate what they already typed, no quotes,",
-  "no markdown, no commentary. Include a leading space if the continuation",
-  "starts a new word. If you cannot confidently continue, respond with nothing.",
-].join(" ")
+/**
+ * The completion prompt. Output contract as numbered rules rather than prose —
+ * models follow constraints more reliably — plus the rules the paragraph
+ * never stated: match the draft's language/register (a Chinese draft must not
+ * grow an English tail), complete the apparent intent instead of trailing off
+ * into polite filler, and stop at the first clause boundary so the 48-token
+ * cap stays a backstop rather than the thing shaping the sentence. One
+ * few-shot anchors the format better than another sentence of description.
+ */
+const SYSTEM_PROMPT = `You write inline completions for a chat composer — ghost text that trails what the user is typing TO an assistant, like Copilot for prose.
+
+You are given the recent conversation and the user's partial message. Predict the most likely continuation.
+
+Rules:
+- Reply with ONLY the characters that follow the partial input. No preamble, quotes, markdown, or explanation.
+- Never repeat the partial input. Start mid-word if that is where the text breaks; add a leading space only when the next token is a new word.
+- Match the draft's language, register and formatting — a Chinese draft gets a Chinese continuation, a technical draft stays technical.
+- Complete the user's apparent intent. Prefer the concrete object the sentence is reaching for over generic filler.
+- Finish the current clause or sentence — typically 3–20 words — and stop at the first natural boundary. Never start a second sentence.
+- If the partial input is a slash command, already a complete thought, or you cannot predict a likely continuation, reply with nothing.
+
+Example:
+Conversation:
+<turn who="user">can you pick up the deploy fix?</turn>
+<turn who="assistant">merged an hour ago</turn>
+Partial message: "can you also cherry-pick it▍"
+Correct reply: " onto the release branch before tonight's cut?"`
 
 /** Build the `{ system, prompt }` pair for `LlmClient.complete`. */
 export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: string } {
@@ -49,14 +67,19 @@ export function buildGhostPrompt(ctx: GhostContext): { system: string; prompt: s
     .filter((m) => m.text.trim().length > 0)
   if (recent.length > 0) {
     lines.push("Recent conversation:")
+    // Tagged turns, not "User:"/"Assistant:" labels — a draft can itself
+    // contain those words (quoted transcripts happen), and a tag the model
+    // was told the format of cannot be confused with message content.
     for (const m of recent) {
-      const label = m.role === "assistant" ? "Assistant" : "User"
-      lines.push(`${label}: ${m.text.slice(0, MESSAGE_SNIPPET)}`)
+      lines.push(`<turn who="${m.role}">${m.text.slice(0, MESSAGE_SNIPPET)}</turn>`)
     }
     lines.push("")
   }
+  // The ▍ marks the insertion point — "continue" is otherwise ambiguous
+  // about where the text ends, and a model that echoes the marker is cleaned
+  // up by `sanitizeGhost`.
   lines.push("Partial message to continue:")
-  lines.push(ctx.draft)
+  lines.push(`${ctx.draft}▍`)
   return { system: SYSTEM_PROMPT, prompt: lines.join("\n") }
 }
 
@@ -73,7 +96,11 @@ function stripFences(raw: string): string {
  */
 export function sanitizeGhost(raw: string, input: string): string | null {
   if (!raw) return null
-  let s = stripFences(raw).replace(/^[\r\n]+/, "")
+  // The caret marker belongs to the prompt, not the reply — a model that
+  // echoes it must not leak it into the composer.
+  let s = stripFences(raw)
+    .replace(/▍/g, "")
+    .replace(/^[\r\n]+/, "")
   const nl = s.search(/[\r\n]/)
   if (nl >= 0) s = s.slice(0, nl)
   // Model echoed (part of) the input — keep only what comes after it.

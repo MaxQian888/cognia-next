@@ -1,11 +1,13 @@
 "use client"
 
-// Manage saved chat templates: rename, rewrite, duplicate, retire, and move one
-// between this machine, a file, and a checkout.
+// The template library: a searchable rail of saved messages on the left, the
+// selected template's actual content — with live fill-in slots — on the right.
 //
-// This exists because saving one was previously a one-way door: a typo in a
-// template body was permanent, and `updateChatTemplate` / `deleteChatTemplate`
-// had no caller at all.
+// The previous layout was a column of action cards that hid the one thing a
+// template IS (the message) behind an Edit button. This one puts the body in
+// the detail pane with its `{{tokens}}` rendered as clickable chips, filled
+// through the same `TemplateParamPopover` the composer opens — so the page
+// teaches the real interaction instead of describing it in copy.
 //
 // Editing the body re-derives the parameter declarations from it, keeping any
 // label or requirement someone took the trouble to write (`deriveParams`), and
@@ -17,8 +19,8 @@
 // derives every token as required free text, which is right for a phrase you
 // typed once. Turning one into a workspace-file reference or a closed list of
 // choices is a decision about a template you intend to reuse, and it belongs
-// next to the body it describes rather than in a popover you are trying to type
-// past.
+// next to the body it describes rather than in a popover you are trying to
+// type past.
 //
 // ## Portability
 //
@@ -34,16 +36,26 @@
 // off disk arrived from somewhere too, and a permission mode is not something a
 // file gets to raise.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, FileCode2Icon, GitBranchIcon, Trash2Icon } from "lucide-react"
+import {
+  CopyIcon,
+  DownloadIcon,
+  FileCode2Icon,
+  FileUpIcon,
+  GitBranchIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  SearchIcon,
+  SendIcon,
+  SlashSquareIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 import { downloadBlob } from "@cognia/plugin-sdk/api/download"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -56,20 +68,38 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  SettingsListDetail,
+  useSettingsListDensity,
+} from "@/components/settings/common/settings-master-detail"
+import {
   createChatTemplate,
   deleteChatTemplate,
   listChatTemplates,
-  updateChatTemplate,
   type ChatTemplateRow,
 } from "@/lib/db/chat-templates"
-import {
-  deriveParams,
-  paramKindChange,
-  templateSlug,
-  type ChatTemplateParam,
-  type ChatTemplateParamKind,
-} from "@/lib/chat/template/template"
-import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "@/lib/chat/template/resource-kinds"
+import { seedParamValues, templateSlug } from "@/lib/chat/template/template"
+import { isParamFilled, type ChatTemplateParamValue } from "@/lib/chat/template/binding"
+import { listParamTokens } from "@/lib/chat/template/param-segments"
+import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { renderParamTokens } from "@/lib/chat/template/render-params"
+import { createSession } from "@/lib/db/sessions"
+import { setDraft } from "@/lib/db/chat-drafts"
+import { useChatStore } from "@/stores/chat"
+import type { ChatTemplateLaunchSpec } from "@/lib/chat/template/launch-spec"
 import {
   REPO_TEMPLATE_DIR,
   REPO_TEMPLATE_MAX_BYTES,
@@ -79,21 +109,23 @@ import {
 } from "@/lib/chat/template/repo-templates"
 import { saveChatTemplateToRepository } from "@/lib/chat/template/repo-template-write"
 import { loadRepoChatTemplates } from "@/hooks/chat/use-repo-chat-templates"
+import { useTemplateResourceSearch } from "@/hooks/chat/use-template-resource-search"
+import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
+import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
 import { ChatTemplateShareButton } from "@/components/share/chat-template-share-button"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { TemplateParamPopover } from "@/components/chat/composer/template-param-popover"
+import { ChatTemplateBodyPreview } from "./chat-templates/body-preview"
+import { ChatTemplateEditor } from "./chat-templates/template-editor"
 import { cn } from "@/lib/utils"
 
 export interface ChatTemplatesSectionProps {
   /** When true, switch to the single-column mobile layout. */
   mobile?: boolean
 }
+
+/** A row in the rail: a personal template or a repository one. */
+type ListedTemplate =
+  { source: "personal"; row: ChatTemplateRow } | { source: "repo"; row: RepoChatTemplate }
 
 /**
  * Which directory "save to repository" writes into.
@@ -126,18 +158,70 @@ function readFileText(file: File): Promise<string> {
   })
 }
 
+/** "plan mode · claude-opus-4-6" — the suggestion a launch spec carries, in one line. */
+function launchSpecSummary(spec: ChatTemplateLaunchSpec | undefined): string | null {
+  if (!spec) return null
+  const parts: string[] = []
+  if (spec.agentModeId) parts.push(`${spec.agentModeId} mode`)
+  if (spec.model) parts.push(spec.model)
+  if (spec.characterId) parts.push(`as ${spec.characterId}`)
+  if (spec.squadId) parts.push(`squad ${spec.squadId}`)
+  if (spec.workingDir) parts.push(spec.workingDir)
+  if (spec.permissionMode) parts.push(`${spec.permissionMode} permissions`)
+  if (spec.effort) parts.push(`${spec.effort} effort`)
+  return parts.length > 0 ? parts.join(" · ") : null
+}
+
 export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionProps) {
   const t = useTranslations("chatTemplatesSettings")
   const [rows, setRows] = useState<ChatTemplateRow[]>([])
   const [repoRows, setRepoRows] = useState<RepoChatTemplate[]>([])
   const [root, setRoot] = useState<string | null>(null)
   const [epoch, setEpoch] = useState(0)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState(false)
   /** The write that is waiting on "yes, replace the file that is already there". */
   const [overwriting, setOverwriting] = useState<{ row: ChatTemplateRow; path: string } | null>(
     null
   )
+  /** The delete that is waiting on confirmation — the row is gone for good. */
+  const [deleting, setDeleting] = useState<ChatTemplateRow | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Rehearsal state for the detail preview — the same fill-in interaction the
+  // composer performs, against seeded defaults + last-used values.
+  const [tryValues, setTryValues] = useState<Record<string, ChatTemplateParamValue>>({})
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+  const [filling, setFilling] = useState<string | null>(null)
+  const [previewBox, setPreviewBox] = useState<HTMLDivElement | null>(null)
+  const router = useRouter()
+
+  // The picker's sources: workspace files under the same root repo writes use,
+  // and the mentionable subagents. Team-room sources (mentionables, members)
+  // have no context on a settings page — the hook treats them as empty rather
+  // than absent, exactly like a composer outside a team room.
+  const mentionableSubagents = useMentionableSubagents()
+  const markdownAgents = useMarkdownChatAgents(root, true)
+  const chatAgents = useMemo(() => {
+    if (markdownAgents.length === 0) return mentionableSubagents
+    const seen = new Set(mentionableSubagents.map((target) => target.id))
+    return [...mentionableSubagents, ...markdownAgents.filter((a) => !seen.has(a.id))]
+  }, [mentionableSubagents, markdownAgents])
+  const searchResources = useTemplateResourceSearch({ cwd: root, chatAgents })
+
+  // Same "no evidence either way" rule the composer applies: an empty source
+  // list means this surface cannot judge, not that the target is gone.
+  const isResourceResolvable = useCallback(
+    (value: Extract<ChatTemplateParamValue, { kind: "resource" }>) => {
+      if (value.resourceKind === "subagent") {
+        return chatAgents.length === 0 || chatAgents.some((a) => a.handle === value.id)
+      }
+      return true
+    },
+    [chatAgents]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -183,6 +267,9 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
   const remove = useCallback(
     async (row: ChatTemplateRow) => {
       await deleteChatTemplate(row.id)
+      // The deleted row may be the one in the editor — leaving `editing` set
+      // would drop the NEXT selected row into edit mode for no reason.
+      setEditing(false)
       toast.success(t("deleted", { name: row.name }))
       reload()
     },
@@ -264,6 +351,67 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
     [reload, root, t]
   )
 
+  /**
+   * The rehearsal values, filtered to parameters the body still declares.
+   * tryValues is reseeded per selection+revision, so this is the composed
+   * answer set — the same thing a draft's binding would hold after the user
+   * finished filling the composer chips.
+   */
+  const rehearsalBindingParams = useCallback(
+    (row: { params: { id: string }[] }) => {
+      const declared = new Set(row.params.map((param) => param.id))
+      return Object.fromEntries(Object.entries(tryValues).filter(([id]) => declared.has(id)))
+    },
+    [tryValues]
+  )
+
+  // The detail pane's terminal actions: hand the rehearsed message to the
+  // composer as a real draft, or put it on the clipboard. Both carry the
+  // values the user just filled in — copying `{{module}}` verbatim would be
+  // exporting the question, not the answer.
+  const copyMessage = useCallback(
+    async (row: ListedTemplate["row"]) => {
+      const rendered = renderParamTokens(
+        row.body,
+        listParamTokens(row.body, computeCodeRanges(row.body)),
+        {
+          templateId: row.id,
+          version: String(row.revision),
+          params: rehearsalBindingParams(row),
+          insertedAt: Date.now(),
+        }
+      )
+      try {
+        await navigator.clipboard.writeText(rendered.text)
+        toast.success(t("copied"))
+      } catch {
+        toast.error(t("copyFailed"))
+      }
+    },
+    [rehearsalBindingParams, t]
+  )
+
+  const openInChat = useCallback(
+    async (row: ListedTemplate["row"]) => {
+      try {
+        const session = await createSession()
+        await setDraft(session.id, row.body, [], {
+          templateBinding: {
+            templateId: row.id,
+            version: String(row.revision),
+            params: rehearsalBindingParams(row),
+            insertedAt: Date.now(),
+          },
+        })
+        useChatStore.getState().setActiveSession(session.id)
+        router.push("/")
+      } catch {
+        toast.error(t("useInChatFailed"))
+      }
+    },
+    [rehearsalBindingParams, router, t]
+  )
+
   const adopt = useCallback(
     async (row: RepoChatTemplate) => {
       // The launch spec was already demoted on the way out of the file, and the
@@ -282,19 +430,123 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
     [reload, t]
   )
 
-  return (
-    <div className="space-y-3" data-testid="chat-templates-section">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("importHint")}</p>
+  // ---- Derived view state ------------------------------------------------
+
+  const items: ListedTemplate[] = [
+    ...rows.map((row): ListedTemplate => ({ source: "personal", row })),
+    ...repoRows.map((row): ListedTemplate => ({ source: "repo", row })),
+  ]
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? items.filter(
+        ({ row }) =>
+          row.name.toLowerCase().includes(q) ||
+          row.body.toLowerCase().includes(q) ||
+          (row.description ?? "").toLowerCase().includes(q)
+      )
+    : items
+  const personalItems = filtered.filter((i) => i.source === "personal")
+  const repoItems = filtered.filter((i) => i.source === "repo")
+  const selected = items.find((i) => i.row.id === selectedId) ?? filtered[0] ?? null
+
+  // Re-seed the rehearsal values when the selection — or the template's own
+  // content — changes: last-used values first, then declared defaults, exactly
+  // like the composer does on insert. Keyed on revision so saving an edit
+  // drops stale values for parameters the new body no longer has.
+  // Both row kinds carry a revision (a counter for personal rows, a content
+  // hash for repository ones), so the key doubles for both.
+  const seedKey = selected ? `${selected.row.id}@${selected.row.revision}` : null
+  if (selected && seedKey && seededFor !== seedKey) {
+    setSeededFor(seedKey)
+    setTryValues(
+      seedParamValues(
+        selected.row.params,
+        selected.source === "personal" ? selected.row.lastParams : undefined
+      )
+    )
+    setFilling(null)
+  }
+
+  const missing = selected
+    ? selected.row.params.filter((param) => param.required && !isParamFilled(tryValues[param.id]))
+        .length
+    : 0
+
+  const select = (item: ListedTemplate) => {
+    setSelectedId(item.row.id)
+    setEditing(false)
+    setCreating(false)
+    setFilling(null)
+  }
+
+  // The rail in two pieces: the stacked tier keeps the header and swaps the
+  // scroll list for the picker, which is why they are separate expressions
+  // rather than one fragment (a fragment is not Array-checkable).
+  const railHeader = (
+    <div className="shrink-0 space-y-2 border-b p-2">
+      <div className="relative">
+        <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
+          className="h-8 pl-8 text-xs"
+        />
+      </div>
+      <div className="flex gap-1.5">
         <Button
-          variant="outline"
           size="sm"
-          className="shrink-0"
+          className="h-7 flex-1 gap-1 px-2 text-[11px]"
+          onClick={() => {
+            setCreating(true)
+            setEditing(false)
+          }}
+        >
+          <PlusIcon className="size-3.5" />
+          {t("newTemplate")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-[11px]"
           onClick={() => fileInputRef.current?.click()}
         >
+          <FileUpIcon className="size-3.5" />
           {t("importAction")}
         </Button>
       </div>
+    </div>
+  )
+  const railList = (
+    <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <TemplateGroup
+        title={t("mineHeading")}
+        items={personalItems}
+        selectedId={selected?.row.id ?? null}
+        onSelect={select}
+      />
+      {repoItems.length > 0 ? (
+        <div data-testid="repo-chat-templates">
+          <TemplateGroup
+            title={t("repoHeading")}
+            badge={t("repoReadOnly")}
+            items={repoItems}
+            selectedId={selected?.row.id ?? null}
+            onSelect={select}
+          />
+        </div>
+      ) : null}
+      {filtered.length === 0 ? (
+        <p className="p-3 text-xs text-muted-foreground">
+          {query ? t("noMatches") : t("emptyRail")}
+        </p>
+      ) : null}
+    </div>
+  )
+
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-testid="chat-templates-section">
       <input
         ref={fileInputRef}
         type="file"
@@ -310,102 +562,199 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
         }}
       />
 
-      {rows.length === 0 ? (
-        <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">{t("empty")}</CardContent>
-        </Card>
-      ) : (
-        rows.map((row) =>
-          editingId === row.id ? (
-            <TemplateEditor
-              key={row.id}
-              row={row}
-              mobile={mobile}
-              onCancel={() => setEditingId(null)}
-              onSaved={() => {
-                setEditingId(null)
-                reload()
-              }}
-            />
-          ) : (
-            <Card key={row.id}>
-              <CardHeader
-                className={cn(
-                  "flex gap-3 space-y-0",
-                  mobile ? "flex-col items-stretch" : "flex-row items-start"
-                )}
-              >
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <FileCode2Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="text-base">{row.name}</CardTitle>
-                    {row.description ? (
-                      <p className="text-sm text-muted-foreground">{row.description}</p>
+      <SettingsListDetail listWidth={280} className="min-h-0 flex-1">
+        <RailWrapper
+          railHeader={railHeader}
+          railList={railList}
+          items={filtered}
+          selectedId={selected?.row.id ?? null}
+          onSelect={select}
+          chooseLabel={t("chooseTemplate")}
+        />
+
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
+          {creating ? (
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <div className="mx-auto max-w-2xl">
+                <h3 className="mb-1 text-sm font-semibold">{t("newTemplateTitle")}</h3>
+                <p className="mb-4 text-xs text-muted-foreground">{t("newTemplateHint")}</p>
+                <ChatTemplateEditor
+                  mobile={mobile}
+                  onCancel={() => setCreating(false)}
+                  onSaved={(row) => {
+                    setCreating(false)
+                    reload()
+                    setSelectedId(row.id)
+                  }}
+                />
+              </div>
+            </div>
+          ) : selected ? (
+            <>
+              <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    {selected.source === "repo" ? (
+                      <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <h3 className="truncate text-sm font-semibold">{selected.row.name}</h3>
+                    {selected.source === "repo" ? (
+                      <Badge variant="outline" className="gap-1 text-[10px]">
+                        {t("repoReadOnly")}
+                      </Badge>
                     ) : null}
                   </div>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {selected.row.description ??
+                      (selected.source === "repo" ? selected.row.sourcePath : "")}
+                  </p>
+                  {launchSpecSummary(selected.row.launchSpec) ? (
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {t("suggestsSetup", {
+                        summary: launchSpecSummary(selected.row.launchSpec) ?? "",
+                      })}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="flex flex-wrap items-center gap-1">
-                  <Button variant="outline" size="sm" onClick={() => setEditingId(row.id)}>
-                    {t("edit")}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void duplicate(row)}>
-                    {t("duplicate")}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => exportOne(row)}>
-                    <DownloadIcon className="size-3.5" />
-                    {t("exportAction")}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void saveToRepo(row)}>
-                    <GitBranchIcon className="size-3.5" />
-                    {t("saveToRepo")}
-                  </Button>
-                  {/* The third destination. A file crosses to a machine you can
-                      reach, a checkout crosses to a team that has the clone, a
-                      link crosses to anyone. The launch spec is demoted before
-                      it goes, for the same reason a checkout's is demoted on
-                      the way in. */}
-                  <ChatTemplateShareButton template={row} />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("delete")}
-                    onClick={() => void remove(row)}
-                  >
-                    <Trash2Icon className="size-4" />
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <pre className="max-h-32 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap">
-                  {row.body}
-                </pre>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {row.params.map((param) => (
-                    <Badge key={param.id} variant="secondary" className="font-mono text-xs">
-                      {param.id}
-                    </Badge>
-                  ))}
-                  {row.launchSpec ? <Badge variant="outline">{t("hasSetup")}</Badge> : null}
-                  <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-                    {t("used", { count: row.usageCount })}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          )
-        )
-      )}
-
-      <RepoTemplateList mobile={mobile} rows={repoRows} onAdopt={(row) => void adopt(row)} />
+                <DetailActions
+                  item={selected}
+                  onUseInChat={() => void openInChat(selected.row)}
+                  onCopy={() => void copyMessage(selected.row)}
+                  onEdit={() => {
+                    setFilling(null)
+                    setEditing(true)
+                  }}
+                  onAdopt={() => selected.source === "repo" && void adopt(selected.row)}
+                  onDuplicate={() => selected.source === "personal" && void duplicate(selected.row)}
+                  onExport={() => selected.source === "personal" && exportOne(selected.row)}
+                  onSaveToRepo={() =>
+                    selected.source === "personal" && void saveToRepo(selected.row)
+                  }
+                  onDelete={() => selected.source === "personal" && setDeleting(selected.row)}
+                />
+              </header>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {editing && selected.source === "personal" ? (
+                  <div className="mx-auto max-w-2xl">
+                    <ChatTemplateEditor
+                      key={selected.row.id}
+                      row={selected.row}
+                      mobile={mobile}
+                      onCancel={() => setEditing(false)}
+                      onSaved={() => {
+                        setEditing(false)
+                        reload()
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="mx-auto max-w-2xl space-y-5">
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {t("messagePreview")}
+                        </p>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px]",
+                            missing === 0
+                              ? "border-emerald-500/40 text-emerald-600"
+                              : "border-amber-500/40 text-amber-600"
+                          )}
+                        >
+                          {missing === 0 ? t("readyToSend") : t("requiredLeft", { count: missing })}
+                        </Badge>
+                      </div>
+                      <div ref={setPreviewBox}>
+                        <ChatTemplateBodyPreview
+                          body={selected.row.body}
+                          values={tryValues}
+                          onParamClick={(id) => setFilling(id)}
+                          isResolvable={isResourceResolvable}
+                        />
+                      </div>
+                      {selected.row.params.length > 0 ? (
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {t("clickSlotHint")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <SlashSquareIcon className="size-3.5 shrink-0" />
+                        <span className="truncate">
+                          {t("useHint", { name: selected.row.name })}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        {selected.source === "repo"
+                          ? selected.row.sourcePath
+                          : t("used", { count: selected.row.usageCount })}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+              <FileCode2Icon className="size-8 text-muted-foreground/50" />
+              <div className="max-w-md space-y-1">
+                <p className="text-sm font-medium">{t("emptyTitle")}</p>
+                <p className="text-xs text-muted-foreground">{t("empty")}</p>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" className="gap-1" onClick={() => setCreating(true)}>
+                  <PlusIcon className="size-3.5" />
+                  {t("emptyCreate")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FileUpIcon className="size-3.5" />
+                  {t("importAction")}
+                </Button>
+              </div>
+            </div>
+          )}
+        </section>
+      </SettingsListDetail>
 
       {/*
-        Where repository templates live, said out loud. A settings page that
-        appeared to OWN them would be lying about where an edit goes: they are
-        files, edited with the editor and reviewed in a pull request.
+        The two portability facts, said out loud once rather than per card:
+        imported files get the same launch-spec demotion a checkout gets, and
+        repository templates are files — edited with an editor, reviewed in a
+        pull request, and only offered in workspaces the user trusts.
       */}
-      <p className="px-1 text-xs text-muted-foreground">
+      <p className="shrink-0 px-1 pt-2 text-[11px] text-muted-foreground">
         {t("repoHint", { path: REPO_TEMPLATE_DIR + "/*.md" })}
       </p>
+
+      {/* The composer's own chip editor, anchored to the preview box. */}
+      <TemplateParamPopover
+        paramId={filling}
+        param={selected?.row.params.find((p) => p.id === filling) ?? null}
+        value={filling ? tryValues[filling] : undefined}
+        anchor={filling ? previewBox : null}
+        searchResources={searchResources}
+        position={(() => {
+          if (!filling || !selected) return undefined
+          const index = selected.row.params.findIndex((p) => p.id === filling)
+          // A token the saved declarations no longer carry still opens the
+          // popover — it just does not get a "2 of 4" counter.
+          return index >= 0 ? { index, total: selected.row.params.length } : undefined
+        })()}
+        onChange={(value) => {
+          if (filling) setTryValues((values) => ({ ...values, [filling]: value }))
+        }}
+        onClose={() => setFilling(null)}
+      />
 
       <AlertDialog
         open={overwriting !== null}
@@ -430,282 +779,213 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteTitle", { name: deleting?.name ?? "" })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleting) void remove(deleting)
+                setDeleting(null)
+              }}
+            >
+              {t("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
 
 /**
- * The checkout's own templates, listed read-only.
- *
- * They were previously not shown at all, on the grounds that a settings page
- * cannot own a file. That is still true, and nothing here edits one: the single
- * action is to take a COPY into the local table, which is a write to the local
- * table and not to the repository. Seeing them is what makes the copy possible,
- * and what stops "why is this template in my picker" from being unanswerable.
+ * At the split tier the rail is a bordered column. At the stacked tier
+ * (<560px pane) the grid's first row is `auto`, so the scrollable list would
+ * eat the pane — it collapses to the pinned header plus a compact picker for
+ * the detail below, the same job the Sheet trigger does in
+ * SettingsMasterDetail for nav rails.
  */
-function RepoTemplateList({
-  mobile,
-  rows,
-  onAdopt,
+function RailWrapper({
+  railHeader,
+  railList,
+  items,
+  selectedId,
+  onSelect,
+  chooseLabel,
 }: {
-  mobile: boolean
-  rows: readonly RepoChatTemplate[]
-  onAdopt(row: RepoChatTemplate): void
+  railHeader: ReactNode
+  railList: ReactNode
+  items: ListedTemplate[]
+  selectedId: string | null
+  onSelect(item: ListedTemplate): void
+  chooseLabel: string
 }) {
-  const t = useTranslations("chatTemplatesSettings")
-  if (rows.length === 0) return null
-  return (
-    <div className="space-y-2" data-testid="repo-chat-templates">
-      <h3 className="px-1 text-xs font-medium text-muted-foreground">{t("repoHeading")}</h3>
-      {rows.map((row) => (
-        <Card key={row.id}>
-          <CardHeader
-            className={cn(
-              "flex gap-3 space-y-0",
-              mobile ? "flex-col items-stretch" : "flex-row items-start"
-            )}
+  const density = useSettingsListDensity()
+  if (density === "stacked") {
+    return (
+      <div className="space-y-2 rounded-lg border">
+        {/* The rail's pinned header only — the scroll list is replaced by the
+            picker so the auto-height row stays small. */}
+        {railHeader}
+        <div className="border-t p-2">
+          <Select
+            value={selectedId ?? ""}
+            onValueChange={(id) => {
+              const next = items.find((i) => i.row.id === id)
+              if (next) onSelect(next)
+            }}
           >
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <GitBranchIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <CardTitle className="text-base">{row.name}</CardTitle>
-                <p className="truncate font-mono text-xs text-muted-foreground">{row.sourcePath}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-1">
-              <Badge variant="outline">{t("repoReadOnly")}</Badge>
-              <Button variant="outline" size="sm" onClick={() => onAdopt(row)}>
-                {t("adopt")}
-              </Button>
-            </div>
-          </CardHeader>
-        </Card>
+            <SelectTrigger className="h-8 text-xs" aria-label={chooseLabel}>
+              <SelectValue placeholder={chooseLabel} />
+            </SelectTrigger>
+            <SelectContent>
+              {items.map((i) => (
+                <SelectItem key={i.row.id} value={i.row.id} className="text-xs">
+                  {i.row.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+      {railHeader}
+      {railList}
+    </aside>
+  )
+}
+
+function TemplateGroup({
+  title,
+  badge,
+  items,
+  selectedId,
+  onSelect,
+}: {
+  title: string
+  badge?: string
+  items: ListedTemplate[]
+  selectedId: string | null
+  onSelect(item: ListedTemplate): void
+}) {
+  if (items.length === 0) return null
+  return (
+    <div className="pt-1.5">
+      <div className="flex items-center gap-2 px-2 pb-1">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </span>
+        {badge ? (
+          <Badge variant="outline" className="h-4 px-1 text-[9px]">
+            {badge}
+          </Badge>
+        ) : null}
+      </div>
+      {items.map((item) => (
+        <button
+          key={item.row.id}
+          type="button"
+          onClick={() => onSelect(item)}
+          className={cn(
+            "flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent",
+            selectedId === item.row.id && "bg-accent"
+          )}
+        >
+          <span className="truncate text-xs font-medium">{item.row.name}</span>
+          <span className="truncate font-mono text-[10px] text-muted-foreground">
+            {item.row.body.split("\n")[0]}
+          </span>
+        </button>
       ))}
     </div>
   )
 }
 
-function TemplateEditor({
-  row,
-  mobile,
-  onCancel,
-  onSaved,
+function DetailActions({
+  item,
+  onUseInChat,
+  onCopy,
+  onEdit,
+  onAdopt,
+  onDuplicate,
+  onExport,
+  onSaveToRepo,
+  onDelete,
 }: {
-  row: ChatTemplateRow
-  mobile: boolean
-  onCancel(): void
-  onSaved(): void
+  item: ListedTemplate
+  onUseInChat(): void
+  onCopy(): void
+  onEdit(): void
+  onAdopt(): void
+  onDuplicate(): void
+  onExport(): void
+  onSaveToRepo(): void
+  onDelete(): void
 }) {
   const t = useTranslations("chatTemplatesSettings")
-  const [name, setName] = useState(row.name)
-  const [description, setDescription] = useState(row.description ?? "")
-  const [body, setBody] = useState(row.body)
-  const [saving, setSaving] = useState(false)
-  /**
-   * Declarations edited so far, by id.
-   *
-   * Kept beside the body rather than in place of it: the BODY decides which
-   * parameters exist and in what order (`deriveParams`), and this only carries
-   * what a token cannot say about itself. A declaration for a token that has
-   * since been deleted simply stops being merged, and comes back if the token
-   * does, which is what makes deleting a line and undoing it harmless.
-   */
-  const [edited, setEdited] = useState<Record<string, ChatTemplateParam>>({})
-  // Shown live so the consequence of editing the body, which parameters this
-  // template will ask for, is visible before saving rather than discovered
-  // later.
-  const params = deriveParams(body, row.params).map((param) => edited[param.id] ?? param)
-
-  const patchParam = (id: string, patch: Partial<ChatTemplateParam>) =>
-    setEdited((prev) => {
-      const base = prev[id] ?? params.find((param) => param.id === id)
-      if (!base) return prev
-      return { ...prev, [id]: { ...base, ...patch } }
-    })
-
-  const save = async () => {
-    if (!name.trim() || saving) return
-    setSaving(true)
-    try {
-      await updateChatTemplate(row.id, {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        body,
-        params,
-      })
-      toast.success(t("saved"))
-      onSaved()
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
-    <Card data-testid="chat-template-editor">
-      <CardContent className="space-y-3 pt-6">
-        <div className="space-y-1.5">
-          <Label htmlFor={`tpl-name-${row.id}`}>{t("name")}</Label>
-          <Input
-            id={`tpl-name-${row.id}`}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`tpl-desc-${row.id}`}>{t("description")}</Label>
-          <Input
-            id={`tpl-desc-${row.id}`}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`tpl-body-${row.id}`}>{t("body")}</Label>
-          <Textarea
-            id={`tpl-body-${row.id}`}
-            className="min-h-32 font-mono text-xs"
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-medium">{t("parameters")}</span>
-            {params.length === 0 ? (
-              <span className="text-xs text-muted-foreground">{t("noParameters")}</span>
-            ) : null}
-          </div>
-          {params.length > 0 ? (
-            <>
-              <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>
-              {params.map((param) => (
-                <ParamDeclarationRow
-                  key={param.id}
-                  param={param}
-                  mobile={mobile}
-                  onPatch={(patch) => patchParam(param.id, patch)}
-                />
-              ))}
-            </>
-          ) : null}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onCancel}>
-            {t("cancel")}
-          </Button>
-          <Button disabled={!name.trim() || saving} onClick={() => void save()}>
-            {t("save")}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-/** The declaration controls for one `{{token}}` in the body. */
-function ParamDeclarationRow({
-  param,
-  mobile,
-  onPatch,
-}: {
-  param: ChatTemplateParam
-  mobile: boolean
-  onPatch(patch: Partial<ChatTemplateParam>): void
-}) {
-  const t = useTranslations("chatTemplatesSettings")
-
-  return (
-    <div className="space-y-2 rounded-md border p-2" data-testid={`param-row-${param.id}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary" className="shrink-0 font-mono text-xs">
-          {param.id}
-        </Badge>
-        <Input
-          className={cn("h-8 min-w-0", mobile ? "w-full" : "flex-1")}
-          aria-label={t("paramLabel")}
-          value={param.label}
-          onChange={(event) => onPatch({ label: event.target.value })}
-        />
-        <Select
-          value={param.kind}
-          onValueChange={(kind) => onPatch(paramKindChange(param, kind as ChatTemplateParamKind))}
-        >
-          <SelectTrigger className="h-8 w-32" aria-label={t("paramKind")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="string">{t("kindString")}</SelectItem>
-            <SelectItem value="enum">{t("kindEnum")}</SelectItem>
-            <SelectItem value="resource">{t("kindResource")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <label className="flex shrink-0 items-center gap-1.5 text-xs">
-          <Checkbox
-            checked={param.required}
-            onCheckedChange={(checked) => onPatch({ required: checked === true })}
-          />
-          {t("paramRequired")}
-        </label>
-      </div>
-      {param.kind === "resource" ? (
-        <Select
-          value={param.resourceKind ?? "file"}
-          onValueChange={(resourceKind) =>
-            onPatch({ resourceKind: resourceKind as ResourceParamKind })
-          }
-        >
-          <SelectTrigger
-            className={cn("h-8", mobile ? "w-full" : "w-48")}
-            aria-label={t("paramResource")}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {RESOURCE_PARAM_KINDS.map((kind) => (
-              <SelectItem key={kind} value={kind}>
-                {t(
-                  `resource${kind.charAt(0).toUpperCase()}${kind.slice(1)}` as
-                    "resourceFile" | "resourceAgent" | "resourceSubagent" | "resourceMember"
-                )}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : param.kind === "enum" ? (
-        <div className="space-y-1">
-          <Textarea
-            className="min-h-16 text-xs"
-            aria-label={t("paramOptions")}
-            value={(param.options ?? []).join("\n")}
-            onChange={(event) =>
-              onPatch({
-                options: event.target.value
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-          <p className="text-xs text-muted-foreground">{t("paramOptionsHint")}</p>
-        </div>
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Button size="sm" className="h-8 gap-1 text-xs" onClick={onUseInChat}>
+        <SendIcon className="size-3.5" />
+        {t("useInChat")}
+      </Button>
+      {item.source === "repo" ? (
+        <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={onAdopt}>
+          <CopyIcon className="size-3.5" />
+          {t("adopt")}
+        </Button>
       ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            className={cn("h-8 min-w-0", mobile ? "w-full" : "flex-1")}
-            aria-label={t("paramDefault")}
-            placeholder={t("paramDefault")}
-            value={param.defaultValue ?? ""}
-            onChange={(event) => onPatch({ defaultValue: event.target.value || undefined })}
-          />
-          <label className="flex shrink-0 items-center gap-1.5 text-xs">
-            <Checkbox
-              checked={param.multiline === true}
-              onCheckedChange={(checked) => onPatch({ multiline: checked === true })}
-            />
-            {t("paramMultiline")}
-          </label>
-        </div>
+        <>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onEdit}>
+            {t("edit")}
+          </Button>
+          <ChatTemplateShareButton template={item.row} size="sm" className="h-8 text-xs" />
+        </>
       )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8" aria-label={t("moreActions")}>
+            <MoreHorizontalIcon className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onCopy}>
+            <CopyIcon className="size-3.5" />
+            {t("copyMessage")}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={item.source === "repo"} onClick={onDuplicate}>
+            <CopyIcon className="size-3.5" />
+            {t("duplicate")}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={item.source === "repo"} onClick={onExport}>
+            <DownloadIcon className="size-3.5" />
+            {t("exportAction")}
+          </DropdownMenuItem>
+          {item.source === "personal" ? (
+            <DropdownMenuItem onClick={onSaveToRepo}>
+              <GitBranchIcon className="size-3.5" />
+              {t("saveToRepo")}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive"
+            disabled={item.source === "repo"}
+            onClick={onDelete}
+          >
+            <Trash2Icon className="size-3.5" />
+            {t("delete")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }

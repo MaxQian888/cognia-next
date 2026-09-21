@@ -84,6 +84,9 @@ const EMPTY_VIEW: InlineEngineView = {
   candidates: [],
   index: 0,
   pending: false,
+  querying: false,
+  streaming: false,
+  completionError: false,
   manualAvailable: false,
   manualPending: false,
 }
@@ -107,8 +110,14 @@ export interface UseComposerGhostTextResult {
   candidates: readonly InlineSuggestion[]
   /** Index of the active candidate. */
   index: number
-  /** True while a model query is in flight. */
+  /** True while a model query is armed or in flight. */
   pending: boolean
+  /** True while a model-tier call is actually in flight (post-debounce). */
+  querying: boolean
+  /** True while the active candidate is still receiving streamed tokens. */
+  streaming: boolean
+  /** The latest model round failed or timed out — show a retry affordance. */
+  completionError: boolean
   /**
    * True when an agent turn is reachable, i.e. `requestManual` will do
    * something. False in a pure-web tab with no paired companion, where there
@@ -119,11 +128,15 @@ export interface UseComposerGhostTextResult {
   manualPending: boolean
   /** Ask the agent tier for a continuation now. Bound to a key by the composer. */
   requestManual: () => void
+  /** Re-run whichever model tier failed — the card's retry affordance. */
+  retry: () => void
   feed: (value: string, opts?: { suppress?: boolean }) => void
   /** Accept the active suggestion; returns the new full textarea value, or null. */
   accept: () => string | null
   cycleNext: () => void
   cyclePrev: () => void
+  /** Jump straight to a candidate — the card's candidate dots call this. */
+  cycleTo: (index: number) => void
   dismiss: () => void
 }
 
@@ -176,24 +189,35 @@ export function useComposerGhostText(
       providers.push(createCommandProvider())
     }
     if (aiEnabled) {
+      // Client resolution stays inside the call (not memoised) so a settings
+      // change is picked up by the next query without rebuilding the engine.
+      const callOptions = (system: string, signal: AbortSignal) => ({
+        system,
+        temperature: 0.2,
+        maxTokens: MAX_GHOST_TOKENS,
+        abortSignal: signal,
+      })
+      const buildClient = () => {
+        const settings = useSettingsStore.getState().settings as AppSettings | undefined
+        return buildUtilityLlmClient({
+          session: sessionRef.current ?? null,
+          appSettings: settings,
+          override: settings?.composerAssistance?.model,
+          featureId: "composer-ghost",
+        })
+      }
       providers.push(
         createAiCompletionProvider({
           complete: async ({ system, prompt, signal }) => {
-            const settings = useSettingsStore.getState().settings as AppSettings | undefined
-            const client = buildUtilityLlmClient({
-              session: sessionRef.current ?? null,
-              appSettings: settings,
-              override: settings?.composerAssistance?.model,
-              featureId: "composer-ghost",
-            })
+            const client = buildClient()
             if (!client) return null
-            return client.complete(prompt, {
-              system,
-              temperature: 0.2,
-              maxTokens: MAX_GHOST_TOKENS,
-              abortSignal: signal,
-            })
+            return client.complete(prompt, callOptions(system, signal))
           },
+          // `stream` exists on production clients (`createLlmClient` /
+          // `ledgerUtilityCalls` forwards it) but not on sidecar-only
+          // protocols — returning null there falls back to `complete`.
+          stream: ({ system, prompt, signal }) =>
+            buildClient()?.stream?.(prompt, callOptions(system, signal)) ?? null,
         })
       )
     }
@@ -217,6 +241,18 @@ export function useComposerGhostText(
               abortSignal: signal,
             })
           },
+          // The agent turn streams via `deltasFromRunningTotal` — partial
+          // assistant text forwarded as it accumulates.
+          stream: ({ system, prompt, signal }) =>
+            buildHeadlessTurnLlmClient({
+              session: sessionRef.current ?? null,
+              label: AGENT_TURN_LABEL,
+            })?.stream?.(prompt, {
+              system,
+              temperature: 0.2,
+              maxTokens: MAX_GHOST_TOKENS,
+              abortSignal: signal,
+            }) ?? null,
         })
       )
     }
@@ -258,8 +294,10 @@ export function useComposerGhostText(
 
   const accept = useCallback((): string | null => engineRef.current?.accept() ?? null, [])
   const requestManual = useCallback(() => engineRef.current?.requestManual(), [])
+  const retry = useCallback(() => engineRef.current?.retry(), [])
   const cycleNext = useCallback(() => engineRef.current?.cycleNext(), [])
   const cyclePrev = useCallback(() => engineRef.current?.cyclePrev(), [])
+  const cycleTo = useCallback((index: number) => engineRef.current?.cycleTo(index), [])
   const dismiss = useCallback(() => engineRef.current?.dismiss(), [])
 
   return {
@@ -269,13 +307,18 @@ export function useComposerGhostText(
     candidates: view.candidates,
     index: view.index,
     pending: view.pending,
+    querying: view.querying,
+    streaming: view.streaming,
+    completionError: view.completionError,
     manualAvailable: view.manualAvailable,
     manualPending: view.manualPending,
     requestManual,
+    retry,
     feed,
     accept,
     cycleNext,
     cyclePrev,
+    cycleTo,
     dismiss,
   }
 }

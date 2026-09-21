@@ -1328,3 +1328,43 @@ describe("new document type detection", () => {
     expect(detectDocumentType("book.epub")).toBe("epub")
   })
 })
+
+describe("complete source locators", () => {
+  it("preserves all PDF page numbers and exact page text", async () => {
+    const result = await processDocumentAsync("pdf", "document.pdf", new ArrayBuffer(8))
+    expect(result.sourceSegments).toEqual([
+      { id: "pdf:page:1", text: "PDF page one", locator: { type: "page", page: 1 } },
+      { id: "pdf:page:2", text: "PDF page two", locator: { type: "page", page: 2 } },
+    ])
+  })
+  it("preserves spreadsheet sheet names and cell ranges", async () => {
+    const result = await processDocumentAsync("book", "book.xlsx", new ArrayBuffer(8))
+    expect(result.sourceSegments?.[0]).toEqual({
+      id: "book:sheet:1",
+      text: '"Value"',
+      locator: { type: "sheet", sheet: "Sheet1", range: "A1:A1" },
+    })
+  })
+  it("preserves all slide numbers and slide text", async () => {
+    const result = await processDocumentAsync("deck", "deck.pptx", new ArrayBuffer(8))
+    expect(result.sourceSegments).toEqual([
+      { id: "deck:slide:1", text: "Slide 1 content", locator: { type: "slide", slide: 1 } },
+      { id: "deck:slide:2", text: "Slide 2 content", locator: { type: "slide", slide: 2 } },
+    ])
+  })
+  it("preserves text offsets for nonstructural document formats", async () => {
+    const result = await processDocumentAsync("text", "notes.txt", "Complete note")
+    expect(result.sourceSegments).toEqual([
+      { id: "text:text", text: "Complete note", locator: { type: "text", start: 0, end: 13 } },
+    ])
+  })
+  it("does not parse documents already cancelled", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      processDocumentAsync("cancelled", "document.pdf", new ArrayBuffer(8), {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+  })
+})

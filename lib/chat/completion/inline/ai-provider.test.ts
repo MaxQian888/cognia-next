@@ -52,7 +52,7 @@ describe("createAiCompletionProvider", () => {
       signal()
     )
     const { prompt, system } = complete.mock.calls[0][0]
-    expect(system).toContain("autocomplete")
+    expect(system).toContain("inline completions")
     expect(prompt).toContain("Build is red.")
     expect(prompt).toContain("fix ")
   })
@@ -109,14 +109,50 @@ describe("createAiCompletionProvider", () => {
     expect(complete).not.toHaveBeenCalled()
   })
 
-  it("returns nothing when the model throws", async () => {
-    const provider = createAiCompletionProvider({
-      complete: async () => {
-        throw new Error("upstream down")
-      },
-      isPiiSafe: () => true,
+  it("retries a failed call once, then rethrows so the engine can flag the round", async () => {
+    // Swallowing the error would read as "no suggestions" and could neither be
+    // surfaced nor retried — the engine owns the error state, so the provider
+    // reports the failure after its one transient-failure retry is spent.
+    const complete = jest.fn(constantComplete(null)).mockRejectedValue(new Error("upstream down"))
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    await expect(provider.getCompletions(ctx("fix "), signal())).rejects.toThrow("upstream down")
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("recovers when the retry succeeds", async () => {
+    const complete = jest
+      .fn<ReturnType<InlineCompleteFn>, Parameters<InlineCompleteFn>>()
+      .mockRejectedValueOnce(new Error("blip"))
+      .mockResolvedValue("the build")
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    const out = await provider.getCompletions(ctx("fix "), signal())
+    expect(out[0].text).toBe("fix the build")
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retry a call that was aborted", async () => {
+    // An abort is the user moving on — the desired outcome, not a failure.
+    const controller = new AbortController()
+    const complete = jest.fn(async () => {
+      controller.abort()
+      throw new Error("aborted mid-flight")
     })
-    expect(await provider.getCompletions(ctx("fix "), signal())).toEqual([])
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    expect(await provider.getCompletions(ctx("fix "), controller.signal)).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns nothing when the signal aborts during the retry delay", async () => {
+    const controller = new AbortController()
+    const complete = jest.fn(async () => {
+      // Reject, then abort while the provider waits out its backoff — the
+      // delay is abortable, so this resolves fast instead of after 700ms.
+      setTimeout(() => controller.abort(), 0)
+      throw new Error("blip")
+    })
+    const provider = createAiCompletionProvider({ complete, isPiiSafe: () => true })
+    expect(await provider.getCompletions(ctx("fix "), controller.signal)).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it("returns nothing when the model yields null", async () => {
@@ -164,6 +200,130 @@ describe("createAiCompletionProvider", () => {
     })
     const out = await provider.getCompletions(ctx("fix "), signal())
     expect(out[0].score).toBe(0.42)
+  })
+
+  describe("streaming", () => {
+    /** An async iterable from a list of deltas — the `LlmClient.stream` shape. */
+    function streamOf(deltas: string[]): () => AsyncIterable<string> {
+      return async function* () {
+        for (const d of deltas) yield d
+      }
+    }
+
+    it("emits the accumulated, sanitised text as it streams, then returns it settled", async () => {
+      const emitted: string[][] = []
+      const provider = createAiCompletionProvider({
+        complete: constantComplete(null),
+        stream: () => streamOf(["the ", "build", " please"])(),
+        isPiiSafe: () => true,
+      })
+      const out = await provider.getCompletions(ctx("fix "), signal(), (partials) =>
+        emitted.push(partials.map((s) => s.text))
+      )
+      // Each emit is the whole grown candidate, not a delta. `sanitizeGhost`
+      // trims a trailing space mid-stream, so "the " paints as "the" and the
+      // space lands with the next chunk.
+      expect(emitted).toEqual([["fix the"], ["fix the build"], ["fix the build please"]])
+      expect(out[0].text).toBe("fix the build please")
+      // The candidate's identity is stable across emissions — the engine pins
+      // by it while `text` mutates.
+      expect(out[0].id).toBe(`${AI_PROVIDER_ID}:0`)
+    })
+
+    it("skips emissions that sanitise to nothing but still settles on the final text", async () => {
+      const emitted: string[][] = []
+      const provider = createAiCompletionProvider({
+        complete: constantComplete(null),
+        // A leading newline chunk sanitises to null — nothing painted yet.
+        stream: () => streamOf(["\n", "the build"])(),
+        isPiiSafe: () => true,
+      })
+      const out = await provider.getCompletions(ctx("fix "), signal(), (partials) =>
+        emitted.push(partials.map((s) => s.text))
+      )
+      expect(emitted).toEqual([["fix the build"]])
+      expect(out[0].text).toBe("fix the build")
+    })
+
+    it("falls back to `complete` when the client cannot stream", async () => {
+      const complete = jest.fn(constantComplete("the build"))
+      const provider = createAiCompletionProvider({
+        complete,
+        stream: () => null,
+        isPiiSafe: () => true,
+      })
+      const emit = jest.fn()
+      const out = await provider.getCompletions(ctx("fix "), signal(), emit)
+      expect(out[0].text).toBe("fix the build")
+      expect(complete).toHaveBeenCalledTimes(1)
+      expect(emit).not.toHaveBeenCalled()
+    })
+
+    it("still returns the settled suggestion when no emit channel is given", async () => {
+      const provider = createAiCompletionProvider({
+        complete: constantComplete(null),
+        stream: () => streamOf(["the build"])(),
+        isPiiSafe: () => true,
+      })
+      const out = await provider.getCompletions(ctx("fix "), signal())
+      expect(out[0].text).toBe("fix the build")
+    })
+
+    it("returns nothing when the stream produces no usable text", async () => {
+      const provider = createAiCompletionProvider({
+        complete: constantComplete(null),
+        stream: () => streamOf(["", "  ", "\n"])(),
+        isPiiSafe: () => true,
+      })
+      expect(await provider.getCompletions(ctx("fix "), signal())).toEqual([])
+    })
+
+    it("stops reading the stream once aborted", async () => {
+      const controller = new AbortController()
+      const emitted: string[][] = []
+      const provider = createAiCompletionProvider({
+        complete: constantComplete(null),
+        stream: async function* () {
+          yield "the "
+          controller.abort()
+          yield "build"
+        },
+        isPiiSafe: () => true,
+      })
+      const out = await provider.getCompletions(ctx("fix "), controller.signal, (p) =>
+        emitted.push(p.map((s) => s.text))
+      )
+      // The abort cut the stream before "build" was accumulated or emitted.
+      expect(emitted).toEqual([["fix the"]])
+      expect(out).toEqual([])
+    })
+
+    it("retries a stream that fails mid-flight", async () => {
+      let calls = 0
+      const provider = createAiCompletionProvider({
+        complete: constantComplete("fallback answer"),
+        stream: () => {
+          calls += 1
+          if (calls === 1) {
+            return (async function* () {
+              yield "the "
+              throw new Error("connection reset")
+            })()
+          }
+          return streamOf(["the build"])()
+        },
+        isPiiSafe: () => true,
+      })
+      const emitted: string[][] = []
+      const out = await provider.getCompletions(ctx("fix "), signal(), (p) =>
+        emitted.push(p.map((s) => s.text))
+      )
+      expect(calls).toBe(2)
+      // Attempt one's partial stayed painted through the retry — the card
+      // never blanks — and the final candidate is the settled retry answer.
+      expect(emitted[0]).toEqual(["fix the"])
+      expect(out[0].text).toBe("fix the build")
+    })
   })
 })
 

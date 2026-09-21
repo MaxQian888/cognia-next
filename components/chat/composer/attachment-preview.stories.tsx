@@ -9,10 +9,10 @@ import {
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input"
 
-// The chips render from the PromptInput attachments context, so we seed it
+// The tiles render from the PromptInput attachments context, so we seed it
 // through its public `add(File[])` API. `StagedAttachmentsProvider` then runs
 // the same staging-time extraction the composer does, which is what produces
-// the token badges and the preview panel's "model view".
+// the token badges and the preview dialog's "model view".
 const PNG_1x1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
@@ -64,7 +64,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Mixed media at one uniform chip height — the case that used to blow the bar
+// Mixed media at one uniform tile size — the case that used to blow the bar
 // up to 80px because images rendered as squares next to 28px text chips.
 export const ImageAndDocument: Story = {
   decorators: [
@@ -76,8 +76,8 @@ export const ImageAndDocument: Story = {
   ],
 }
 
-// A document long enough to carry a visible token badge; clicking the chip
-// opens the preview panel with the File / Model view tabs.
+// A document long enough to carry a visible token badge; clicking the tile
+// opens the preview dialog with the File / Model view tabs.
 export const WithTokenBadge: Story = {
   decorators: [
     withFiles([textFile("report.md", "# Report\n\n" + "lorem ipsum dolor sit amet. ".repeat(200))]),

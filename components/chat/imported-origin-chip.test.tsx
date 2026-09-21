@@ -155,6 +155,7 @@ describe("ImportedOriginChip", () => {
     expect(setSessionComposition).toHaveBeenCalledWith(imported.id, {
       presetId: "standard",
       verifiedNativeResume: true,
+      verifiedNativeResumeAgentId: "agent-1",
     })
     // One write picks the lane AND the agent, so the chip can no longer leave
     // the composer on an external lane with nothing selected.

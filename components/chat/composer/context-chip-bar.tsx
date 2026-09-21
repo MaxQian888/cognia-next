@@ -75,11 +75,16 @@ export function ContextChipBar(props: ContextChipBarProps) {
 
   return (
     <Collapse>
-      <div className="relative px-2">
+      <div className="relative px-1">
         <div
           ref={flowRef}
           role="group"
           aria-label={t("ariaLabel")}
+          // Emptiness marker for the composer box's context-row slot: the bar
+          // is always mounted (Collapse animates its height), so the slot
+          // hides itself via `:has([data-chip-flow]:empty)` rather than paying
+          // a row-gap for a zero-height line.
+          data-chip-flow
           data-folded={folded || undefined}
           className={cn(
             "flex flex-wrap items-center gap-2 has-[>*]:pt-2",

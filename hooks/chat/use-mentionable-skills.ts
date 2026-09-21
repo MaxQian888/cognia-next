@@ -7,7 +7,7 @@
  * see `composer.tsx`'s `onPickPopoverItem`.
  *
  * Only ENABLED skills are surfaced (disabled rows would enable to a no-op),
- * mirroring the toolbar `SkillPicker` (`components/chat/skill-picker.tsx`).
+ * mirroring the composer's skill flyout (`components/chat/skill-picker.tsx`).
  * The list is a thin projection over `listSkills()`; `useLiveQuery` keeps it
  * current as the user adds / removes / toggles skills in Settings.
  */

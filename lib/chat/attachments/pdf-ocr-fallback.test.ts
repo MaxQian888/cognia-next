@@ -1,181 +1,183 @@
-/**
- * Tests for the scanned-PDF OCR fallback used by the composer attachment
- * dispatch. The pure `maybeAttachmentPdfOcr` is exercised with injected
- * `extractPdf` + `loadPdf` stubs (no real pdfjs/tesseract); the production
- * `runAttachmentPdfOcr` wrapper is checked with the heavy modules mocked.
- */
-
 const extractPdfMock = jest.fn()
 const getSettingsMock = jest.fn()
 jest.mock("@/lib/ocr/pdf-router", () => ({
-  extractPdf: (...a: unknown[]) => extractPdfMock(...a),
+  extractPdf: (...args: unknown[]) => extractPdfMock(...args),
 }))
-jest.mock("@/lib/ocr/pdf-loader", () => ({
-  // Returns a callable loader yielding a 1-page doc so the pre-count step
-  // in maybeAttachmentPdfOcr succeeds.
-  createPdfLoader: () => async () => ({ numPages: 1, getPage: jest.fn() }),
-}))
+jest.mock("@/lib/ocr/pdf-loader", () => ({ createPdfLoader: () => jest.fn() }))
 jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({ settings: {} }) }))
 jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettingsMock() }))
 
 import {
+  extractAttachmentPdf,
   maybeAttachmentPdfOcr,
+  runAttachmentPdfExtraction,
   runAttachmentPdfOcr,
-  ATTACHMENT_OCR_MIN_TEXT_CHARS,
-  ATTACHMENT_OCR_MAX_PAGES,
   type AttachmentPdfOcrDeps,
 } from "./pdf-ocr-fallback"
-import type { OcrResult } from "@/types/ocr"
-import type { PdfDocument } from "@/lib/ocr/pdf-router"
+import type { OcrPage, OcrResult } from "@/types/ocr"
+import type { PdfRouterDeps } from "@/lib/ocr/pdf-router"
 
-function ocrResult(text: string): OcrResult {
-  return {
-    providerId: "tesseract-wasm",
-    pages: [{ pageNumber: 1, markdown: text, text }],
-    combinedMarkdown: text,
-    combinedText: text,
-    languages: ["en"],
-    durationMs: 1,
-    cached: false,
-  }
-}
+const bytes = new Uint8Array([1, 2, 3])
+const page = (
+  pageNumber: number,
+  text = `Page ${pageNumber} text content`,
+  fromTextLayer = true
+): OcrPage => ({ pageNumber, text, markdown: text, fromTextLayer })
+const result = (pages: OcrPage[]): OcrResult => ({
+  providerId: "test",
+  pages,
+  combinedText: pages.map((p) => p.text).join("\n"),
+  combinedMarkdown: "",
+  languages: ["en"],
+  durationMs: 1,
+  cached: false,
+})
+const deps = (extractPdf: AttachmentPdfOcrDeps["extractPdf"]): AttachmentPdfOcrDeps => ({
+  extractPdf,
+  buildPdfRouterDeps: () => ({ extractDeps: {} }) as PdfRouterDeps,
+})
 
-const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46])
-
-function deps(over: Partial<AttachmentPdfOcrDeps> = {}, numPages = 2): AttachmentPdfOcrDeps {
-  const fakeDoc: PdfDocument = {
-    numPages,
-    getPage: jest.fn(),
-  }
-  return {
-    extractPdf: jest.fn(async () => ocrResult("OCR TEXT")),
-    buildPdfRouterDeps: () =>
-      ({
-        loadPdf: jest.fn(async () => fakeDoc),
-        extractDeps: {} as never,
-      }) as never,
-    ...over,
-  }
-}
-
-describe("maybeAttachmentPdfOcr", () => {
-  it("returns null when the text layer already has enough text", async () => {
-    const ex = jest.fn()
-    const text = "x".repeat(ATTACHMENT_OCR_MIN_TEXT_CHARS + 5)
-    expect(await maybeAttachmentPdfOcr(bytes, text, deps({ extractPdf: ex }))).toBeNull()
-    expect(ex).not.toHaveBeenCalled()
-  })
-
-  it("OCRs a low-text PDF and returns the extracted text", async () => {
-    const ex = jest.fn(async () => ocrResult("SCANNED CONTENT"))
-    const out = await maybeAttachmentPdfOcr(bytes, "  \n ", deps({ extractPdf: ex }))
-    expect(out).toEqual({
-      text: "SCANNED CONTENT",
-      totalPages: 2,
-      ocrPages: 2,
+describe("complete PDF attachment extraction", () => {
+  it("processes every page after page 20, retaining mixed text/OCR locators and progress", async () => {
+    const progress = jest.fn()
+    const extractPdf = jest.fn(async (_input, router: PdfRouterDeps) => {
+      router.onDocument?.(25)
+      const pages = Array.from({ length: 25 }, (_, i) =>
+        page(i + 1, `Content ${i + 1}`, i % 2 === 0)
+      )
+      pages.forEach((p, index) => router.onPage?.(p, index + 1, 25))
+      return result(pages)
+    })
+    const outcome = await extractAttachmentPdf(bytes, { onProgress: progress }, deps(extractPdf))
+    expect(extractPdf.mock.calls[0][0]).toEqual({ bytes })
+    expect(outcome).toMatchObject({
+      totalPages: 25,
+      processedPages: 25,
+      ocrPages: 12,
+      status: "complete",
       capped: false,
     })
-    expect(ex).toHaveBeenCalledWith({ bytes: expect.any(Uint8Array) }, expect.anything())
+    expect(outcome.pages).toHaveLength(25)
+    expect(outcome.text).toContain("[Page 25]\nContent 25")
+    expect(progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ totalPages: 25, processedPages: 25 })
+    )
   })
 
-  it("does not pass a pageRange when the PDF is within the cap", async () => {
-    const ex = jest.fn(async () => ocrResult("WITHIN CAP"))
-    await maybeAttachmentPdfOcr(bytes, "", deps({ extractPdf: ex }, ATTACHMENT_OCR_MAX_PAGES))
-    expect(ex).toHaveBeenCalledWith({ bytes: expect.any(Uint8Array) }, expect.anything())
-  })
-
-  it("caps a very large PDF, logs the cap, and surfaces it in the text", async () => {
-    const ex = jest.fn(async () => ocrResult("FIRST PAGES"))
-    const log = jest.fn()
-    const out = await maybeAttachmentPdfOcr(
+  it("never treats rich aggregate text as proof that all PDF pages were extracted", async () => {
+    const extractPdf = jest.fn(async () => result([page(1), page(2, "Scanned appendix", false)]))
+    const outcome = await maybeAttachmentPdfOcr(
       bytes,
-      "",
-      deps({ extractPdf: ex, maxPages: 3, log }, 50)
+      "Digital cover ".repeat(100),
+      deps(extractPdf)
     )
-    expect(ex).toHaveBeenCalledWith(
-      { bytes: expect.any(Uint8Array), pageRange: "1-3" },
-      expect.anything()
-    )
-    expect(out).toMatchObject({ totalPages: 50, ocrPages: 3, capped: true })
-    expect(out!.text).toContain("first 3 of 50 pages")
-    expect(out!.text).toContain("FIRST PAGES")
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("capped"),
-      expect.objectContaining({ totalPages: 50, maxPages: 3 })
+    expect(extractPdf).toHaveBeenCalledTimes(1)
+    expect(outcome?.text).toContain("Scanned appendix")
+  })
+
+  it("reuses only substantive known text pages and routes sparse pages to OCR", async () => {
+    await extractAttachmentPdf(
+      bytes,
+      { textPages: [page(1, "Long digital document page text"), page(2, "")] },
+      deps(async (_input, router) => {
+        expect(await router.readPage?.(1)).toMatchObject({
+          fromTextLayer: true,
+          text: "Long digital document page text",
+        })
+        expect(await router.readPage?.(2)).toBeNull()
+        expect(await router.readPage?.(3)).toBeNull()
+        return result([])
+      })
     )
   })
 
-  it("uses the custom minTextChars threshold", async () => {
-    const ex = jest.fn(async () => ocrResult("OCR"))
-    // 10 chars present, threshold 5 → no OCR.
+  it("retains good pages and explicit failed-page gaps while later pages continue", async () => {
+    const outcome = await extractAttachmentPdf(
+      bytes,
+      {},
+      deps(async (_input, router) => {
+        router.onDocument?.(3)
+        router.onPage?.(page(1), 1, 3)
+        router.onPageError?.(new Error("OCR engine failed"), 2, 2, 3)
+        router.onPage?.(page(3), 3, 3)
+        return result([page(1), page(3)])
+      })
+    )
+    expect(outcome).toMatchObject({
+      status: "partial",
+      processedPages: 3,
+      errors: [{ pageNumber: 2, message: "OCR engine failed" }],
+    })
+    expect(outcome.pages.map((p) => p.pageNumber)).toEqual([1, 3])
+  })
+
+  it("retains partial pages when cancelled and does not report completed extraction", async () => {
+    const controller = new AbortController()
+    const outcome = await extractAttachmentPdf(
+      bytes,
+      { signal: controller.signal },
+      deps(async (_input, router) => {
+        router.onDocument?.(3)
+        router.onPage?.(page(1), 1, 3)
+        controller.abort()
+        throw new DOMException("cancelled", "AbortError")
+      })
+    )
+    expect(outcome).toMatchObject({ status: "cancelled", processedPages: 1, totalPages: 3 })
+    expect(outcome.pages).toHaveLength(1)
+  })
+
+  it("reports loader and zero-success errors without hiding the failure", async () => {
+    const outcome = await extractAttachmentPdf(
+      bytes,
+      {},
+      deps(async () => {
+        throw new Error("bad PDF")
+      })
+    )
+    expect(outcome).toMatchObject({ status: "failed", pages: [], errors: [{ message: "bad PDF" }] })
+  })
+
+  it("does not start work for an already-cancelled attachment", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const extractPdf = jest.fn()
     expect(
-      await maybeAttachmentPdfOcr(bytes, "0123456789", deps({ extractPdf: ex, minTextChars: 5 }))
-    ).toBeNull()
-    expect(ex).not.toHaveBeenCalled()
-  })
-
-  it("returns null when the document reports zero pages", async () => {
-    const ex = jest.fn(async () => ocrResult("never"))
-    expect(await maybeAttachmentPdfOcr(bytes, "", deps({ extractPdf: ex }, 0))).toBeNull()
-    expect(ex).not.toHaveBeenCalled()
-  })
-
-  it("returns null (non-fatal) when loadPdf throws", async () => {
-    const out = await maybeAttachmentPdfOcr(bytes, "", {
-      extractPdf: jest.fn(async () => ocrResult("unused")),
-      buildPdfRouterDeps: () =>
-        ({
-          loadPdf: jest.fn(async () => {
-            throw new Error("bad pdf")
-          }),
-          extractDeps: {} as never,
-        }) as never,
-    })
-    expect(out).toBeNull()
-  })
-
-  it("returns null (non-fatal) when extractPdf throws", async () => {
-    const ex = jest.fn(async () => {
-      throw new Error("ocr boom")
-    })
-    expect(await maybeAttachmentPdfOcr(bytes, "", deps({ extractPdf: ex }))).toBeNull()
-  })
-
-  it("returns null when OCR yields blank text", async () => {
-    const ex = jest.fn(async () => ocrResult("   "))
-    expect(await maybeAttachmentPdfOcr(bytes, "", deps({ extractPdf: ex }))).toBeNull()
-  })
-
-  it("defaults the logger to the media logger when none is injected", async () => {
-    // No `log` override + a capped doc exercises the default logger branch
-    // without asserting on the singleton (it must simply not throw).
-    const ex = jest.fn(async () => ocrResult("BODY"))
-    const out = await maybeAttachmentPdfOcr(bytes, "", deps({ extractPdf: ex, maxPages: 1 }, 9))
-    expect(out).toMatchObject({ capped: true })
+      await extractAttachmentPdf(bytes, { signal: controller.signal }, deps(extractPdf))
+    ).toMatchObject({ status: "cancelled" })
+    expect(extractPdf).not.toHaveBeenCalled()
   })
 })
 
-describe("runAttachmentPdfOcr (production wrapper)", () => {
+describe("production wrappers", () => {
   beforeEach(() => {
-    extractPdfMock.mockReset().mockResolvedValue(ocrResult("FROM SETTINGS"))
-    getSettingsMock.mockReset().mockResolvedValue({ ocrSettings: undefined })
+    extractPdfMock.mockReset().mockResolvedValue(result([page(1, "Full attachment text", false)]))
+    getSettingsMock.mockReset().mockResolvedValue({})
   })
-
-  it("runs the OCR fallback for a low-text PDF and returns its text", async () => {
-    const out = await runAttachmentPdfOcr(bytes, "")
-    expect(out).toBe("FROM SETTINGS")
-    expect(extractPdfMock).toHaveBeenCalledTimes(1)
+  it("returns structured extraction through the production OCR settings", async () => {
+    expect(await runAttachmentPdfExtraction(bytes)).toMatchObject({
+      status: "complete",
+      ocrPages: 1,
+    })
   })
-
-  it("returns null when the text layer is already rich (no OCR)", async () => {
-    const out = await runAttachmentPdfOcr(bytes, "y".repeat(100))
-    expect(out).toBeNull()
-    expect(extractPdfMock).not.toHaveBeenCalled()
+  it("keeps the legacy string facade with page locators", async () => {
+    expect(await runAttachmentPdfOcr(bytes, "rich cover".repeat(20))).toBe(
+      "[Page 1]\nFull attachment text"
+    )
   })
-
-  it("defaults gracefully when settings can't be read", async () => {
-    getSettingsMock.mockRejectedValue(new Error("no dexie"))
-    const out = await runAttachmentPdfOcr(bytes, "")
-    expect(out).toBe("FROM SETTINGS")
+  it("uses defaults when settings are unavailable", async () => {
+    getSettingsMock.mockRejectedValue(new Error("offline"))
+    expect(await runAttachmentPdfExtraction(bytes)).toMatchObject({ status: "complete" })
+  })
+  it("adds an explicit notice for legacy callers receiving a partial result", async () => {
+    extractPdfMock.mockImplementation(async (_input, router) => {
+      router.onDocument(2)
+      router.onPage(page(1), 1, 2)
+      router.onPageError(new Error("broken"), 2, 2, 2)
+      return result([page(1)])
+    })
+    expect(await runAttachmentPdfOcr(bytes, "")).toContain(
+      "PDF extraction partial: 1 of 2 pages available"
+    )
   })
 })

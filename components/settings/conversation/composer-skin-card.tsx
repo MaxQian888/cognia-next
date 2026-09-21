@@ -19,6 +19,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
@@ -206,13 +207,15 @@ export function ComposerSkinCard() {
       <p className="text-[11px] text-muted-foreground">{t("reachabilityNote")}</p>
 
       {Object.keys(overrides).length > 0 && !isClassic ? (
-        <button
+        <Button
           type="button"
-          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-xs font-normal text-muted-foreground underline-offset-2"
           onClick={() => update({ skinOverrides: undefined })}
         >
           {t("resetOverrides", { skin: t(`skins.${skinId}.label`) })}
-        </button>
+        </Button>
       ) : null}
 
       <p className="sr-only" data-testid="composer-skin-resolved">

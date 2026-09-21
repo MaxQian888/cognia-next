@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 import { groupPresets } from "@/lib/presets/group-presets"
 import { cn } from "@/lib/utils"
@@ -106,33 +107,37 @@ export function ChatHeaderPresetPill({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="secondary"
-          size="sm"
-          className={cn(
-            "h-7 min-w-0 shrink gap-1.5 px-2 text-xs",
-            triggerClassName,
-            // Idle state is a glyph. "No preset" is the shipped value of a
-            // session-level control, so spelling it out on every turn spent
-            // ~90px of the composer's status line saying nothing — and it was
-            // the chip that overflowed its group and printed through its
-            // neighbour. A preset the user actually picked earns its name.
-            !activePreset && "w-7 justify-center px-0"
-          )}
-          // The accessible name carries the state the glyph drops.
-          aria-label={`${t("ariaLabel")} — ${activePreset?.name ?? t("none")}`}
-          title={activePreset?.name ?? t("none")}
-          data-testid="chat-header-preset-pill"
-          data-active-preset={activePreset?.id}
-          disabled={disabled}
-        >
-          <SparklesIcon className="size-3 shrink-0" />
-          {activePreset ? (
-            <span className="min-w-0 max-w-[14ch] truncate">{activePreset.name}</span>
-          ) : null}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="secondary"
+              size="sm"
+              className={cn(
+                "h-7 min-w-0 shrink gap-1.5 px-2 text-xs",
+                triggerClassName,
+                // Idle state is a glyph. "No preset" is the shipped value of a
+                // session-level control, so spelling it out on every turn spent
+                // ~90px of the composer's status line saying nothing — and it was
+                // the chip that overflowed its group and printed through its
+                // neighbour. A preset the user actually picked earns its name.
+                !activePreset && "w-7 justify-center px-0"
+              )}
+              // The accessible name carries the state the glyph drops.
+              aria-label={`${t("ariaLabel")} — ${activePreset?.name ?? t("none")}`}
+              data-testid="chat-header-preset-pill"
+              data-active-preset={activePreset?.id}
+              disabled={disabled}
+            >
+              <SparklesIcon className="size-3 shrink-0" />
+              {activePreset ? (
+                <span className="min-w-0 max-w-[14ch] truncate">{activePreset.name}</span>
+              ) : null}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{activePreset?.name ?? t("none")}</TooltipContent>
+      </Tooltip>
       <PopoverContent align={align} className="w-[min(22rem,calc(100vw-1rem))] p-0">
         <div className="border-b p-2">
           <Input

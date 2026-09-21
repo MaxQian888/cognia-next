@@ -1,6 +1,8 @@
 import type { UIMessage } from "ai"
 import type { StoredMessage } from "@cognia/agent-config-types"
-import { isMediaRef } from "@/lib/db/message-media"
+import { isMediaRef, parseMediaRef, getMessageMedia } from "@/lib/db/message-media"
+import { readBlobAsArrayBuffer } from "@cognia/ocr/blob-utils"
+import { bytesToBase64 } from "@/lib/ocr/image-prep"
 import { ingestImageDataUrl } from "./ingest-media"
 
 interface FileLikePart {
@@ -10,6 +12,31 @@ interface FileLikePart {
   width?: unknown
   height?: unknown
   byteSize?: unknown
+}
+
+/** Export actual cached bytes; a private media-store key is not portable. */
+export async function materializeMessageMedia(message: UIMessage): Promise<UIMessage> {
+  let changed = false
+  const parts = await Promise.all(
+    message.parts.map(async (part) => {
+      const file = part as FileLikePart
+      if ((file.type !== "file" && file.type !== "image") || typeof file.url !== "string")
+        return part
+      const hash = parseMediaRef(file.url)
+      if (!hash) return part
+      const media = await getMessageMedia(hash)
+      if (!media || media.canonicalAvailable === false)
+        throw new Error("handoff_attachment_unavailable")
+      const bytes = new Uint8Array(await readBlobAsArrayBuffer(media.blob))
+      changed = true
+      return {
+        ...part,
+        url: `data:${media.mediaType};base64,${bytesToBase64(bytes)}`,
+        mediaType: media.mediaType,
+      } as typeof part
+    })
+  )
+  return changed ? { ...message, parts } : message
 }
 
 function isImageDataUrl(value: unknown): value is string {

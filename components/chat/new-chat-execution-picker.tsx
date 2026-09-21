@@ -20,7 +20,21 @@ import type { GitRef } from "@/types/git"
 import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
 
 export interface NewChatExecutionSelection {
+  /**
+   * ProjectEnvironment the chat runs under. `undefined` follows the
+   * workspace's `defaultEnvironmentId`; `""` explicitly runs with no
+   * environment even when the workspace has a default.
+   */
+  environmentId?: string
+  /** Workspace root the chat runs against. `undefined` = the primary root. */
+  rootId?: string
   location: SessionExecutionLocation
+  /**
+   * Caller-chosen name for the managed worktree's branch. Undefined or blank
+   * leaves naming to the host (detached head, generated identity); non-blank
+   * makes the worktree materialize onto a branch of this name.
+   */
+  worktreeName?: string
   base: SessionWorkspaceBaseSpec
 }
 

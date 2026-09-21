@@ -92,6 +92,13 @@ export interface SessionExecutionContext {
   projectRoot: string
   rootId?: string
   environmentId?: string
+  /**
+   * Creation-time request: the caller-chosen name for the managed worktree's
+   * branch. Only meaningful while `location` is `managedWorktree`; consumed by
+   * `ensureSessionExecutionBundle`, which forwards it to the host as
+   * `requestedName`. Absent leaves naming to the host.
+   */
+  requestedWorktreeName?: string
   taskWorkspace: TaskWorkspaceBinding
   baseRef?: string
   branch?: string

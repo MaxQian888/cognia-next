@@ -207,6 +207,9 @@ export function useTeamChat() {
             steerDrain: true,
             webSearchContext,
             ...(replyTo ? { replyTo } : {}),
+            ...(references?.attachmentManifest
+              ? { attachmentManifest: references.attachmentManifest }
+              : {}),
             ...(references?.citations ? { citations: references.citations } : {}),
             ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
           }),

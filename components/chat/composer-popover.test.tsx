@@ -1164,6 +1164,31 @@ describe("ComposerPopover — highlight, grouping & pinning", () => {
     }
   })
 
+  it("pins section headers as opaque bars and clears them for scrolled rows", () => {
+    setupSlash(slashTrigger(""), {
+      pinnedCommands: ["model"],
+      recentCommands: ["cost"],
+      onTogglePin: jest.fn(),
+    })
+
+    // A stuck header must read as a bar: opaque surface, bottom rule, painted
+    // above the rows sliding beneath. A translucent band lets a half-covered
+    // row bleed through and reads as a broken empty strip.
+    for (const label of ["Pinned", "Recent", "Other"]) {
+      const header = screen.getByText(label).closest("li")
+      expect(header).toHaveClass("sticky", "top-0", "z-10", "border-b", "bg-popover")
+      expect(header).not.toHaveClass("bg-popover/95", "backdrop-blur-sm")
+    }
+
+    // scrollIntoView tops a row at scroll-margin — ~40px clears the ~35px
+    // stuck header so the row's name line is never parked underneath it.
+    const rows = document.querySelectorAll("li[data-index]")
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row).toHaveClass("scroll-mt-10")
+    }
+  })
+
   it("keyboard nav skips headers — confirm() at index 0 picks the pinned command", () => {
     const { ref, onPick } = setupSlash(slashTrigger(""), {
       pinnedCommands: ["model"],

@@ -27,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
@@ -74,31 +75,36 @@ export function FusionModeChip({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          aria-label={t("aria", { mode: label })}
-          data-testid="fusion-mode-chip"
-          data-mode={mode}
-          className={cn(
-            "gap-1",
-            tripped && mode !== "auto" && "text-amber-600 dark:text-amber-400",
-            glyph && "w-7 justify-center px-0",
-            className
-          )}
-        >
-          {tripped && mode !== "auto" ? (
-            <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-          ) : (
-            <Route className="size-3.5 shrink-0 opacity-70" aria-hidden />
-          )}
-          {/* Label only when not the default, like the other shape chips. */}
-          {mode !== "auto" && !glyph ? <span className="truncate">{label}</span> : null}
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              aria-label={t("aria", { mode: label })}
+              data-testid="fusion-mode-chip"
+              data-mode={mode}
+              className={cn(
+                "gap-1",
+                tripped && mode !== "auto" && "text-amber-600 dark:text-amber-400",
+                glyph && "w-7 justify-center px-0",
+                className
+              )}
+            >
+              {tripped && mode !== "auto" ? (
+                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+              ) : (
+                <Route className="size-3.5 shrink-0 opacity-70" aria-hidden />
+              )}
+              {/* Label only when not the default, like the other shape chips. */}
+              {mode !== "auto" && !glyph ? <span className="truncate">{label}</span> : null}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("aria", { mode: label })}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" side="top" className="w-72" data-testid="fusion-mode-menu">
         <DropdownMenuLabel className="text-xs">{t("title")}</DropdownMenuLabel>
         <DropdownMenuRadioGroup

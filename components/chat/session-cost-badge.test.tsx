@@ -1,6 +1,7 @@
 // Coverage for the per-session cost badge popover.
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import userEvent from "@testing-library/user-event"
 import { SessionCostBadge } from "./session-cost-badge"
 
@@ -24,9 +25,13 @@ beforeEach(() => {
   liveQueryReturn = undefined
 })
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("SessionCostBadge — collapsed", () => {
   it("renders in-memory totals + cost when known", () => {
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{
@@ -42,7 +47,7 @@ describe("SessionCostBadge — collapsed", () => {
   })
 
   it("hides the cost suffix when totalCostUsd is 0", () => {
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ inputTokens: 0, outputTokens: 0, totalCostUsd: 0 }}
@@ -53,7 +58,7 @@ describe("SessionCostBadge — collapsed", () => {
   })
 
   it("falls back to 0 when usage fields are undefined", () => {
-    render(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
+    renderUI(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
     expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("Tokens 0/0")
   })
 
@@ -61,7 +66,7 @@ describe("SessionCostBadge — collapsed", () => {
   // narrow sidebar inside a wide window. Visibility is now the toolbar fold
   // tier's call; the badge itself just renders.
   it("renders at every viewport — width is the container's business, not a media query's", () => {
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ inputTokens: 5, outputTokens: 2, totalCostUsd: 0.01 }}
@@ -74,7 +79,7 @@ describe("SessionCostBadge — collapsed", () => {
   })
 
   it("renders the compact `$x.xx` form when the toolbar fold tier is short on room", () => {
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ inputTokens: 1500, outputTokens: 700, totalCostUsd: 0.1234 }}
@@ -89,7 +94,7 @@ describe("SessionCostBadge — collapsed", () => {
   })
 
   it("falls back to the compact token pair in the short form before the first billed turn", () => {
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ inputTokens: 1500, outputTokens: 700, totalCostUsd: 0 }}
@@ -105,7 +110,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
   it("renders the empty state when no rows are persisted", async () => {
     liveQueryReturn = []
     const user = userEvent.setup()
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ totalCostUsd: 0.01 }}
@@ -156,7 +161,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
       },
     ]
     const user = userEvent.setup()
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ inputTokens: 350, outputTokens: 175, totalCostUsd: 0.57 }}
@@ -191,7 +196,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
       },
     ]
     const user = userEvent.setup()
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ totalCostUsd: 0.05 }}
@@ -222,7 +227,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
       },
     ]
     const user = userEvent.setup()
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ totalCostUsd: 0.01 }}
@@ -236,7 +241,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
 
   it("falls back to empty breakdown when useLiveQuery is still pending", () => {
     liveQueryReturn = undefined
-    render(
+    renderUI(
       <SessionCostBadge
         sessionId="s1"
         inMemoryUsage={{ totalCostUsd: 0.01 }}
@@ -263,7 +268,7 @@ describe("SessionCostBadge — popover with persisted rows", () => {
       },
     ]
     const user = userEvent.setup()
-    render(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
+    renderUI(<SessionCostBadge sessionId="s1" inMemoryUsage={{}} tokensLabel={tokens} />)
     fireEvent.click(screen.getByTestId("session-cost-trigger"))
     void user
     const list = await screen.findByTestId("cost-popover-by-model")

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { ReactNode } from "react"
 import { ComposerPresetChip } from "./preset-chip"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -68,10 +69,14 @@ const presets: SystemPromptPreset[] = [
   },
 ]
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("ComposerPresetChip", () => {
   it("self-hides when there are no presets", () => {
     const Wrapper = withAdapter(makeAdapter())
-    render(
+    renderUI(
       <Wrapper>
         <ComposerPresetChip session={mkSession()} />
       </Wrapper>
@@ -85,7 +90,7 @@ describe("ComposerPresetChip", () => {
     const Wrapper = withAdapter(
       makeAdapter({ usePresets: () => presets, updateSession, recordPresetUsage })
     )
-    render(
+    renderUI(
       <Wrapper>
         <ComposerPresetChip
           session={mkSession({ systemPrompt: undefined, model: undefined })}
@@ -112,7 +117,7 @@ describe("ComposerPresetChip", () => {
   it("routes a conflicting pick to the settings sheet instead of overwriting", async () => {
     const updateSession = jest.fn(async () => undefined)
     const Wrapper = withAdapter(makeAdapter({ usePresets: () => presets, updateSession }))
-    render(
+    renderUI(
       <Wrapper>
         <ComposerPresetChip
           session={mkSession({ systemPrompt: "Existing prompt", model: "other" })}
@@ -129,7 +134,7 @@ describe("ComposerPresetChip", () => {
 
   it("is inert while a turn streams", () => {
     const Wrapper = withAdapter(makeAdapter({ usePresets: () => presets }))
-    render(
+    renderUI(
       <Wrapper>
         <ComposerPresetChip session={mkSession()} disabled />
       </Wrapper>

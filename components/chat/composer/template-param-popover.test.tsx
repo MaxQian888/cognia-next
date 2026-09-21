@@ -187,6 +187,115 @@ describe("TemplateParamPopover — declared kinds", () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it("steps ↓ from the query into results and ↑ back out at the top", async () => {
+    const search = jest.fn().mockResolvedValue([
+      { id: "a.ts", label: "a.ts", raw: "@a.ts" },
+      { id: "b.ts", label: "b.ts", raw: "@b.ts" },
+    ])
+
+    render(
+      <TemplateParamPopover
+        paramId="target"
+        param={resourceParam}
+        value={undefined}
+        anchor={anchorEl()}
+        searchResources={search}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+
+    await screen.findByText("a.ts", undefined, { timeout: 3000 })
+    const input = screen.getByTestId("template-param-search")
+    const [first, second] = screen.getAllByRole("option")
+
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(second)
+    // ↑ on the first result returns to the query, not the last result.
+    fireEvent.keyDown(second, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(input)
+  })
+
+  it("marks the already-bound resource as selected", async () => {
+    render(
+      <TemplateParamPopover
+        paramId="target"
+        param={resourceParam}
+        value={{
+          kind: "resource",
+          resourceKind: "file",
+          id: "a.ts",
+          label: "a.ts",
+        }}
+        anchor={anchorEl()}
+        searchResources={jest.fn().mockResolvedValue([{ id: "a.ts", label: "a.ts", raw: "@a.ts" }])}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+
+    await screen.findByText("a.ts", undefined, { timeout: 3000 })
+    expect(screen.getByRole("option")).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("shows the position counter when the caller knows it", () => {
+    render(
+      <TemplateParamPopover
+        paramId="module"
+        value={undefined}
+        anchor={anchorEl()}
+        position={{ index: 1, total: 3 }}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+
+    expect(screen.getByText("position")).toBeInTheDocument()
+  })
+
+  it("uses a textarea for a declared multi-line parameter", () => {
+    const onChange = jest.fn()
+    const onClose = jest.fn()
+    render(
+      <TemplateParamPopover
+        paramId="notes"
+        param={{ id: "notes", label: "Notes", required: false, kind: "string", multiline: true }}
+        value={{ kind: "text", value: "line one" }}
+        anchor={anchorEl()}
+        onChange={onChange}
+        onClose={onClose}
+      />
+    )
+
+    const field = within(screen.getByTestId("template-param-popover")).getByRole("textbox")
+    expect(field.tagName).toBe("TEXTAREA")
+    fireEvent.change(field, { target: { value: "line one\nline two" } })
+    expect(onChange).toHaveBeenCalledWith({ kind: "text", value: "line one\nline two" })
+    // Enter still confirms rather than forcing a newline.
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it("says so when a search returns nothing", async () => {
+    render(
+      <TemplateParamPopover
+        paramId="target"
+        param={resourceParam}
+        value={undefined}
+        anchor={anchorEl()}
+        searchResources={jest.fn().mockResolvedValue([])}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+
+    expect(await screen.findByText("noMatches", undefined, { timeout: 3000 })).toBeInTheDocument()
+  })
+
   // Without a search source there is nothing to pick from, and an empty picker
   // that can never fill in would be a dead end — free text still works.
   it("falls back to free text when the composer has no picker to offer", () => {
@@ -232,6 +341,40 @@ describe("TemplateParamPopover — declared kinds", () => {
 
     fireEvent.click(options[1])
     expect(onChange).toHaveBeenCalledWith({ kind: "text", value: "production" })
+  })
+
+  it("walks a closed list with arrow keys and wraps at the ends", () => {
+    render(
+      <TemplateParamPopover
+        paramId="env"
+        param={{
+          id: "env",
+          label: "Environment",
+          required: true,
+          kind: "enum",
+          options: ["staging", "production", "preview"],
+        }}
+        value={undefined}
+        anchor={anchorEl()}
+        onChange={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+
+    const options = screen.getAllByRole("option")
+    options[0].focus()
+    fireEvent.keyDown(options[0], { key: "ArrowDown" })
+    expect(document.activeElement).toBe(options[1])
+    fireEvent.keyDown(options[1], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(options[0])
+    // Past the last item wraps to the first.
+    fireEvent.keyDown(options[0], { key: "ArrowUp" })
+    expect(document.activeElement).toBe(options[2])
+    // A non-arrow key is none of the list's business — focus stays put.
+    // (Tab is deliberately not tested: Radix's focus scope owns it and loops
+    // focus back to the first option, which is the correct popover behavior.)
+    fireEvent.keyDown(options[2], { key: "x" })
+    expect(document.activeElement).toBe(options[2])
   })
 
   it("shows the declared label and description rather than the raw token", () => {

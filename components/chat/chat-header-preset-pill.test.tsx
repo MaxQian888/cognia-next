@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -48,6 +49,10 @@ function session(
   }
 }
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("resolveActivePreset", () => {
   const presets = [
     preset({ id: "a", name: "Alpha", content: "alpha body" }),
@@ -81,7 +86,7 @@ describe("ChatHeaderPresetPill", () => {
   ]
 
   it("renders the active preset's name in the pill button", () => {
-    render(
+    renderUI(
       <ChatHeaderPresetPill
         session={session({ activePresetId: "b" })}
         presets={presets}
@@ -95,19 +100,22 @@ describe("ChatHeaderPresetPill", () => {
   // spelling it out cost ~90px of the composer's status line on every turn.
   // The state still has to be readable without sight of the icon, so it moves
   // into the accessible name and the tooltip.
-  it("drops to a glyph with an accessible name when no preset is active", () => {
-    render(
+  it("drops to a glyph with an accessible name when no preset is active", async () => {
+    renderUI(
       <ChatHeaderPresetPill session={session({})} presets={presets} onSelectPreset={jest.fn()} />
     )
     const pill = screen.getByTestId("chat-header-preset-pill")
     expect(pill).not.toHaveTextContent("none")
     expect(pill).toHaveAttribute("aria-label", expect.stringContaining("none"))
-    expect(pill).toHaveAttribute("title", "none")
+    // The state is also readable on hover — the styled tooltip carries it now
+    // that every composer-row control reports the same way.
+    fireEvent.pointerMove(pill)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("none")
   })
 
   // ...and an actual choice earns the label back.
   it("spells out a preset the user picked", () => {
-    render(
+    renderUI(
       <ChatHeaderPresetPill
         session={session({ activePresetId: "b" })}
         presets={presets}
@@ -120,7 +128,7 @@ describe("ChatHeaderPresetPill", () => {
   })
 
   it("opens the popover and renders grouped presets on click", () => {
-    render(
+    renderUI(
       <ChatHeaderPresetPill session={session({})} presets={presets} onSelectPreset={jest.fn()} />
     )
     fireEvent.click(screen.getByTestId("chat-header-preset-pill"))
@@ -132,7 +140,7 @@ describe("ChatHeaderPresetPill", () => {
 
   it("invokes onSelectPreset when a row is clicked", () => {
     const onSelectPreset = jest.fn()
-    render(
+    renderUI(
       <ChatHeaderPresetPill
         session={session({})}
         presets={presets}
@@ -146,7 +154,7 @@ describe("ChatHeaderPresetPill", () => {
   })
 
   it("filters presets by the search input", () => {
-    render(
+    renderUI(
       <ChatHeaderPresetPill session={session({})} presets={presets} onSelectPreset={jest.fn()} />
     )
     fireEvent.click(screen.getByTestId("chat-header-preset-pill"))
@@ -156,7 +164,7 @@ describe("ChatHeaderPresetPill", () => {
   })
 
   it("renders the 'manage all' footer link with the configured href", () => {
-    render(
+    renderUI(
       <ChatHeaderPresetPill
         session={session({})}
         presets={presets}

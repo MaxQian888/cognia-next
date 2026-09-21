@@ -80,6 +80,8 @@ export function enforceVideoDeliveryForRoute(
         filename: native.filename,
         mediaType: fallback.info.sourceMediaType,
         kind: "video",
+        ...(native.original ? { original: native.original } : {}),
+        ...(native.extractedContent ? { extractedContent: native.extractedContent } : {}),
         video: { info: fallback.info },
       }
       for (const fallbackBlock of fallback.blocks) {

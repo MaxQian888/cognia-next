@@ -2,6 +2,7 @@
 // active session's in-memory usage and hides itself when there is none.
 
 import { render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import type { UIMessage } from "ai"
 import { SessionCostBadgeLive, aggregateUsage } from "./session-cost-badge-live"
 
@@ -35,10 +36,14 @@ beforeEach(() => {
   storeState = { messages: [] }
 })
 
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
+
 describe("SessionCostBadgeLive", () => {
   it("renders nothing when no message carries usage", () => {
     storeState = { messages: [{ id: "u1", role: "user", parts: [] } as unknown as UIMessage] }
-    const { container } = render(<SessionCostBadgeLive sessionId="s1" tokensLabel={tokens} />)
+    const { container } = renderUI(<SessionCostBadgeLive sessionId="s1" tokensLabel={tokens} />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -49,7 +54,7 @@ describe("SessionCostBadgeLive", () => {
         msgWithUsage("b", { inputTokens: 500, outputTokens: 500, totalCostUsd: 0.07 }),
       ],
     }
-    render(<SessionCostBadgeLive sessionId="s1" tokensLabel={tokens} />)
+    renderUI(<SessionCostBadgeLive sessionId="s1" tokensLabel={tokens} />)
     // 1500 in / 700 out, 0.12 cost.
     expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("Tokens 1.5k/700")
     expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("$0.1200")

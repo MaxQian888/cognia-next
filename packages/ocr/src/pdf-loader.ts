@@ -46,31 +46,64 @@ export function createPdfLoader(opts?: {
       return canvas
     })
 
-  return async ({ bytes }): Promise<PdfDocument> => {
+  return async ({ bytes, signal }): Promise<PdfDocument> => {
+    signal?.throwIfAborted()
     const pdfjsLib = await loadPdfjs()
-    const doc = await pdfjsLib.getDocument({ data: bytes }).promise
+    signal?.throwIfAborted()
+    const loadingTask = pdfjsLib.getDocument({ data: bytes.slice() })
+    let destruction: Promise<void> | undefined
+    const destroy = () => (destruction ??= loadingTask.destroy())
+    const cancelLoading = () => {
+      void destroy().catch(() => undefined)
+    }
+    signal?.addEventListener("abort", cancelLoading, { once: true })
+    let doc
+    try {
+      doc = await loadingTask.promise
+      signal?.throwIfAborted()
+    } catch (error) {
+      await destroy()
+      throw error
+    } finally {
+      signal?.removeEventListener("abort", cancelLoading)
+    }
     return {
       numPages: doc.numPages,
+      destroy,
       async getPage(pageNumber: number) {
         const page = await doc.getPage(pageNumber)
         return {
           pageNumber,
+          cleanup: () => {
+            page.cleanup()
+          },
           async getTextContent() {
             const content = (await page.getTextContent()) as { items: Array<{ str?: string }> }
             return { items: content.items.map((i) => ({ str: i.str ?? "" })) }
           },
-          async renderToDataUrl({ dpi }: { dpi: number }) {
+          async renderToDataUrl({ dpi, signal }: { dpi: number; signal?: AbortSignal }) {
+            signal?.throwIfAborted()
             const viewport = page.getViewport({ scale: dpi / 72 })
             const width = Math.ceil(viewport.width)
             const height = Math.ceil(viewport.height)
             const canvas = makeCanvas(width, height)
             const canvasContext = canvas.getContext("2d")
-            await page.render({
+            const task = page.render({
               canvas: canvas as unknown as HTMLCanvasElement,
               canvasContext: canvasContext as CanvasRenderingContext2D,
               viewport,
-            }).promise
-            return { dataUrl: canvas.toDataURL("image/png"), width, height }
+            })
+            const cancelRender = () => task.cancel()
+            signal?.addEventListener("abort", cancelRender, { once: true })
+            try {
+              await task.promise
+              signal?.throwIfAborted()
+              return { dataUrl: canvas.toDataURL("image/png"), width, height }
+            } finally {
+              signal?.removeEventListener("abort", cancelRender)
+              canvas.width = 0
+              canvas.height = 0
+            }
           },
         }
       },

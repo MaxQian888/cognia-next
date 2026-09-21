@@ -24,6 +24,16 @@ function folderSection(id: string, ids: string[]): ConversationSection {
   }
 }
 
+function groupSection(axis: "team" | "workspace", id: string, ids: string[]): ConversationSection {
+  return {
+    kind: "group",
+    axis,
+    group: { id, name: id },
+    sessions: ids.map((r) => row(r)),
+    collapsed: false,
+  }
+}
+
 describe("mergeFrozenOrder", () => {
   it("passes the live order straight through when nothing is frozen", () => {
     const live = ["a", "b"]
@@ -138,6 +148,25 @@ describe("projectFrozenSections", () => {
     const frozen = freezeConversationLayout([folderSection("f1", ["a"])])
     const live = [folderSection("f1", [])]
     const out = projectFrozenSections(frozen, live)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.sessions).toEqual([])
+  })
+
+  it("drops an emptied group section by default", () => {
+    // A group that no longer holds anything is not a list entity — outside the
+    // scope tree it has no header worth holding under the pointer.
+    const frozen = freezeConversationLayout([groupSection("workspace", "w1", ["a"])])
+    const live = [groupSection("workspace", "w1", [])]
+    expect(projectFrozenSections(frozen, live)).toHaveLength(0)
+  })
+
+  it("holds an emptied group when preserveEmptyGroups is on — the scope-tree headers", () => {
+    // A squad header is navigation chrome: folding, its context menu and its
+    // "new conversation" affordance stay put even while every row inside is
+    // filtering or archiving out from under the pointer.
+    const frozen = freezeConversationLayout([groupSection("team", "t1", ["a"])])
+    const live = [groupSection("team", "t1", [])]
+    const out = projectFrozenSections(frozen, live, { preserveEmptyGroups: true })
     expect(out).toHaveLength(1)
     expect(out[0]!.sessions).toEqual([])
   })

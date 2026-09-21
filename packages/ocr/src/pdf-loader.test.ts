@@ -2,7 +2,9 @@
  * @jest-environment jsdom
  */
 
-const renderMock = jest.fn(() => ({ promise: Promise.resolve() }))
+const destroyMock = jest.fn(async () => {})
+const cleanupMock = jest.fn()
+const renderMock = jest.fn(() => ({ promise: Promise.resolve(), cancel: () => {} }))
 const getTextContentMock = jest.fn(async () => ({
   items: [{ str: "hello" }, { str: " world" }, {}],
 }))
@@ -10,10 +12,13 @@ jest.mock("pdfjs-dist", () => ({
   version: "4.0.0",
   GlobalWorkerOptions: {} as { workerSrc?: string },
   getDocument: jest.fn(() => ({
+    destroy: destroyMock,
     promise: Promise.resolve({
       numPages: 3,
+      destroy: destroyMock,
       getPage: jest.fn(async (n: number) => ({
         pageNumber: n,
+        cleanup: cleanupMock,
         getTextContent: getTextContentMock,
         getViewport: ({ scale }: { scale: number }) => ({ width: 120 * scale, height: 80 * scale }),
         render: renderMock,
@@ -65,8 +70,8 @@ describe("createPdfLoader", () => {
       const out = await page.renderToDataUrl({ dpi: 72 })
       expect(spy).toHaveBeenCalledWith("canvas")
       expect(out.dataUrl).toBe("data:image/png;base64,DOMFAKE")
-      expect(fake.width).toBe(120)
-      expect(fake.height).toBe(80)
+      expect(fake.width).toBe(0)
+      expect(fake.height).toBe(0)
     } finally {
       spy.mockRestore()
     }
@@ -88,4 +93,36 @@ describe("createPdfLoader", () => {
     expect(out).toEqual({ dataUrl: "data:image/png;base64,FAKE", width: 240, height: 160 })
     expect(renderMock).toHaveBeenCalled()
   })
+})
+
+it("exposes cleanup hooks for page and document resources", async () => {
+  const doc = await createPdfLoader({ createCanvas: () => fakeCanvas() })({
+    bytes: new Uint8Array(),
+  })
+  const page = await doc.getPage(1)
+  await page.cleanup?.()
+  await doc.destroy?.()
+  expect(cleanupMock).toHaveBeenCalled()
+  expect(destroyMock).toHaveBeenCalled()
+})
+
+it("cancels a running rasterization and releases its canvas", async () => {
+  const controller = new AbortController()
+  const canvas = fakeCanvas()
+  let rejectRender!: (error: Error) => void
+  const cancel = jest.fn(() => rejectRender(new DOMException("cancelled", "AbortError")))
+  renderMock.mockReturnValueOnce({
+    promise: new Promise<void>((_, reject) => {
+      rejectRender = reject
+    }),
+    cancel,
+  })
+  const doc = await createPdfLoader({ createCanvas: () => canvas })({ bytes: new Uint8Array() })
+  const page = await doc.getPage(1)
+  const pending = page.renderToDataUrl({ dpi: 144, signal: controller.signal })
+  controller.abort()
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(cancel).toHaveBeenCalledTimes(1)
+  expect(canvas.width).toBe(0)
+  expect(canvas.height).toBe(0)
 })

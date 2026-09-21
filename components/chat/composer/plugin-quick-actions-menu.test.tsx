@@ -5,6 +5,7 @@
  * lists composer-surface actions, dispatches through runQuickAction.
  */
 import { render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
@@ -24,7 +25,7 @@ const messages = {
 }
 
 function wrap(ui: React.ReactNode) {
-  return render(
+  return renderUI(
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
       {ui}
     </NextIntlClientProvider>
@@ -35,6 +36,10 @@ afterEach(() => {
   __resetQuickActionsForTesting()
   __resetCommandRegistryForTesting()
 })
+
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
 
 describe("PluginQuickActionsMenu", () => {
   it("renders nothing when no plugin contributed composer actions", () => {

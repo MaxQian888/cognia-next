@@ -506,6 +506,9 @@ describe("BottomToolbar — Router + Fusion mode chip", () => {
 
 describe("BottomToolbar — narrow-width More menu", () => {
   it("embeds primary controls and keeps advanced controls in overflow for compact composer mode", () => {
+    // The in-box layouts ride the same fold ladder as the detached row now —
+    // pin the narrow end so the tail actually has something to fold.
+    mockToolbarWidth = 300
     render(<BottomToolbar session={session} variant="embedded" />)
 
     expect(screen.getByTestId("composer-toolbar-embedded")).toBeInTheDocument()
@@ -514,6 +517,70 @@ describe("BottomToolbar — narrow-width More menu", () => {
 
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+  })
+
+  // The width that used to render "Standard" + a bare shield as a floating
+  // card inside the input box. At this width nothing needs to fold, so the
+  // roster sits on the row itself and no "⋯" exists to open.
+  it("spells the roster out inline at tier 0 instead of parking it in a floating card", () => {
+    mockToolbarWidth = 900
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} variant="embedded" />)
+      expect(screen.getByTestId("composer-toolbar-embedded")).toHaveAttribute(
+        "data-toolbar-tier",
+        "0"
+      )
+      expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+      expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "split")
+      expect(screen.getByTestId("composer-preset-chip")).toBeInTheDocument()
+      expect(screen.getByTestId("composer-status-cluster")).toContainElement(
+        screen.getByTestId("sandbox-shield")
+      )
+    } finally {
+      movedControlsVisible = false
+    }
+  })
+
+  // Folded controls render as captioned rows — the caption is what keeps a
+  // folded chip from reading as a stray floating element inside the box.
+  it("captions each folded control inside the embedded disclosure", () => {
+    mockToolbarWidth = 600
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} variant="embedded" />)
+      // Tier 1 still holds the mode on the row; preset + sandbox fold.
+      expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "split")
+      fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+      expect(screen.getByText("moreMenu.preset")).toBeInTheDocument()
+      expect(screen.getByText("moreMenu.sandbox")).toBeInTheDocument()
+      expect(screen.getByTestId("composer-preset-chip")).toBeInTheDocument()
+      expect(screen.getByTestId("sandbox-shield")).toBeInTheDocument()
+    } finally {
+      movedControlsVisible = false
+    }
+  })
+
+  // Radix fires a tooltip on FOCUS — instantly, ignoring delayDuration — so
+  // the disclosure must not land mount-focus on a folded chip: opening "⋯"
+  // would pop that chip's tooltip before the pointer even moved. Focus goes
+  // to the popover shell instead; Tab still walks the rows in order.
+  it("focuses the disclosure shell on open, not a folded chip", () => {
+    mockToolbarWidth = 300
+    render(<BottomToolbar session={session} variant="embedded" />)
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    const shell = document.querySelector('[data-slot="popover-content"]')
+    expect(shell).not.toBeNull()
+    expect(document.activeElement).toBe(shell)
+  })
+
+  it("folds the mode chip into the embedded disclosure, captioned, at tier 2", () => {
+    mockToolbarWidth = 450
+    render(<BottomToolbar session={session} variant="embedded" />)
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByText("moreMenu.mode")).toBeInTheDocument()
+    expect(screen.getByTestId("composition-chip")).toHaveAttribute("data-layout", "combined")
   })
 
   // Every width shows the SAME roster — the branches differ only in how the row

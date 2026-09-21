@@ -13,6 +13,7 @@
 import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
 import type { DraftAttachmentMeta } from "@/lib/db/chat-drafts"
 import type { ContextRef } from "@/lib/chat/mentions/types"
+import type { AttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
 
 export interface DraftSourceFile {
   id: string
@@ -25,7 +26,14 @@ export interface DraftSourceFile {
 export interface DraftSourceState {
   sizeBytes: number
   bytes?: Uint8Array
-  extracted?: { text?: string; tokens: number }
+  ocrText?: string
+  includeOcr?: boolean
+  extracted?: {
+    text?: string
+    tokens: number
+    extractedContent?: AttachmentExtractedContent
+    original?: Blob
+  }
   video?: { settings: VideoPreprocessSettings }
 }
 
@@ -64,10 +72,14 @@ export function draftAttachmentsFromFiles(
     const size = state?.sizeBytes ?? estimateDataUrlBytes(f.url)
     return {
       name: f.filename ?? "attachment",
-      mediaType: f.mediaType ?? "application/octet-stream",
+      mediaType: state?.extracted?.original?.type || f.mediaType || "application/octet-stream",
       size,
       ...(state?.bytes ? { bytes: state.bytes } : {}),
+      ...(state?.ocrText ? { ocrText: state.ocrText, includeOcr: state.includeOcr ?? false } : {}),
       ...(state?.extracted?.text ? { extractedText: state.extracted.text } : {}),
+      ...(state?.extracted?.extractedContent
+        ? { extractedContent: state.extracted.extractedContent }
+        : {}),
       ...(state?.extracted?.tokens ? { tokens: state.extracted.tokens } : {}),
       ...(state?.video ? { videoSettings: state.video.settings } : {}),
       ...(citation ? { citation } : {}),

@@ -69,7 +69,10 @@ function installPdfjsDocument(pageText = "pdfjs text content here") {
     getMetadata: jest.fn().mockResolvedValue({ info: {} }),
     getOutline: jest.fn().mockResolvedValue(null),
   }
-  mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdf) } as never)
+  mockGetDocument.mockReturnValue({
+    promise: Promise.resolve(pdf),
+    destroy: jest.fn(async () => {}),
+  } as never)
   return pdf
 }
 
@@ -328,5 +331,50 @@ describe("PDF convenience parsers", () => {
     const params = mockGetDocument.mock.calls[0][0] as { data: ArrayBuffer; password: string }
     expect([...new Uint8Array(params.data)]).toEqual([1, 2, 3, 4])
     expect(params.password).toBe("secret")
+  })
+})
+
+describe("PDF cancellation and resource lifetime", () => {
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(false)
+    mockGetDocument.mockReset()
+  })
+  it("releases each parsed page and the document without transferring caller-owned bytes", async () => {
+    const pdf = installPdfjsDocument()
+    const cleanup = jest.fn()
+    const destroy = jest.fn(async () => {})
+    const page = await pdf.getPage(1)
+    Object.assign(page, { cleanup })
+    mockGetDocument.mockReturnValue({ promise: Promise.resolve(pdf), destroy } as never)
+    const buffer = new ArrayBuffer(8)
+    await parsePDF(buffer)
+    expect(mockGetDocument.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ data: expect.any(ArrayBuffer) })
+    )
+    expect((mockGetDocument.mock.calls[0][0] as { data: ArrayBuffer }).data).not.toBe(buffer)
+    expect(cleanup).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+  it("stops after cancellation during a page read and releases resources", async () => {
+    const pdf = installPdfjsDocument()
+    const controller = new AbortController()
+    const page = await pdf.getPage(1)
+    const cleanup = jest.fn()
+    const destroy = jest.fn(async () => {})
+    Object.assign(page, { cleanup })
+    Object.assign(pdf, { destroy, numPages: 3 })
+    page.getTextContent.mockImplementation(async () => {
+      controller.abort()
+      return { items: [] }
+    })
+    mockGetDocument.mockReturnValue({
+      promise: Promise.resolve(pdf),
+      destroy,
+    } as never)
+    await expect(parsePDF(new ArrayBuffer(8), { signal: controller.signal })).rejects.toMatchObject(
+      { name: "AbortError" }
+    )
+    expect(cleanup).toHaveBeenCalledTimes(1)
+    expect(destroy).toHaveBeenCalledTimes(1)
   })
 })

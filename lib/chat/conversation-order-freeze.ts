@@ -127,11 +127,15 @@ export function freezeConversationLayout(
  * still appears.
  *
  * A frozen section that has emptied out is dropped, except folders, which the
- * model always emits so their headers and empty states can render.
+ * model always emits so their headers and empty states can render — and,
+ * with `preserveEmptyGroups`, `group` sections too: in the scope tree an
+ * empty squad group is a navigation entity (its header still folds, serves
+ * its menu and takes drops), so it must not flicker out under the pointer.
  */
 export function projectFrozenSections(
   frozen: FrozenConversationLayout,
-  live: readonly ConversationSection[]
+  live: readonly ConversationSection[],
+  opts: { preserveEmptyGroups?: boolean } = {}
 ): readonly ConversationSection[] {
   // Identity is preserved in the common case: this runs on every live-query
   // emit and feeds the render memos below it.
@@ -186,7 +190,10 @@ export function projectFrozenSections(
       ? mergeFrozenOrder(surviving, [...liveOrder, ...elsewhere])
       : surviving
     const sessions = ids.map((id) => rowById.get(id)!).filter(Boolean)
-    if (sessions.length === 0 && entry.section.kind !== "folder") continue
+    const keepEmpty =
+      entry.section.kind === "folder" ||
+      (opts.preserveEmptyGroups && entry.section.kind === "group")
+    if (sessions.length === 0 && !keepEmpty) continue
     // Carry the live section's own metadata (a folder rename, a collapse the
     // user just toggled) rather than the snapshot's.
     const base = liveByKey.get(key) ?? entry.section

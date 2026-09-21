@@ -16,9 +16,11 @@
 // one layer and one dismiss path, and it is the only shape that works
 // unchanged on touch.
 //
-// The turn-capability chips (web search, Skills) are injected by the composer
-// as `capabilities` and land in THIS TURN; the mobile composer injects the same
-// node into `ComposerPlusMenu`, so placement stays consistent across platforms.
+// The turn-capability rows (web search, skills, room target) are injected by
+// the composer as `capabilities` and land in THIS TURN; the mobile composer
+// injects the same node into `ComposerPlusMenu`, so placement stays consistent
+// across platforms. Each renders itself as a CapabilityRow — the same anatomy
+// as PanelItem — so they mount bare, with no wrapping strip.
 //
 // A Popover, not a DropdownMenu, so the panel composes with the nested dialogs
 // the attach branches raise (the large-folder confirm) without fighting Radix's
@@ -82,6 +84,7 @@ import { listExternalCapabilities } from "@/lib/external-services/catalog"
 import { openRecorder } from "@/stores/skills/recorder-store"
 import { useRecorderAvailable } from "@/hooks/skills/use-skill-recorder"
 import { useComposerSessionId } from "./composer-session-context"
+import { ComposerMenuCloseProvider } from "./composer-menu-context"
 
 export interface ComposerAttachMenuProps {
   disabled?: boolean
@@ -166,7 +169,10 @@ export function ComposerAttachMenu({
     onInsert?.(text)
   }
 
-  const triggerClassName = cn("size-9 text-muted-foreground hover:text-foreground", className)
+  const triggerClassName = cn(
+    "size-9 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60",
+    className
+  )
 
   const add = (summary: FolderSummary) =>
     addReferencedPath(folderReference(summary), composerSessionId)
@@ -361,9 +367,12 @@ export function ComposerAttachMenu({
                   }}
                 />
               ) : null}
-              {capabilities ? (
-                <div className="flex flex-wrap items-center gap-2 px-2 py-1">{capabilities}</div>
-              ) : null}
+              {/* Injected capability rows that LEAVE the menu (web search's
+                  unconfigured state goes to Settings) close it through this —
+                  their own render site cannot reach `closeMenu`. */}
+              <ComposerMenuCloseProvider value={closeMenu}>
+                {capabilities}
+              </ComposerMenuCloseProvider>
 
               <PanelLabel className="mt-1 border-t border-border pt-2">
                 {t("attachMenu.extendGroup")}

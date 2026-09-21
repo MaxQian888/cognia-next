@@ -106,4 +106,29 @@ describe("useConversationOrderFreeze", () => {
     rerender({ sections: [bucket("today", ["b", "a"])], hovering: true, disabled: true })
     expect(idsOf(result.current)).toEqual(["b", "a"])
   })
+
+  it("keeps an emptied group section when preserveEmptyGroups is on", () => {
+    // The scope tree's squad headers are chrome, not content: while the
+    // pointer is inside the list an emptied squad must not flicker out —
+    // its header is where folding, the menu and "new conversation" live.
+    const team = (ids: string[]): ConversationSection => ({
+      kind: "group",
+      axis: "team",
+      group: { id: "t1", name: "Squad" },
+      sessions: ids.map(row),
+      collapsed: false,
+    })
+    const { result, rerender } = renderHook(
+      (props: { sections: ConversationSection[] }) =>
+        useConversationOrderFreeze({
+          sections: props.sections,
+          hovering: true,
+          preserveEmptyGroups: true,
+        }),
+      { initialProps: { sections: [team(["a"])] } }
+    )
+    rerender({ sections: [team([])] })
+    expect(result.current).toHaveLength(1)
+    expect(result.current[0]!.sessions).toEqual([])
+  })
 })

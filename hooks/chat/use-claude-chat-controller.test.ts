@@ -1,4 +1,9 @@
-import { resolveChatTurnAttemptIdentity, useClaudeChat } from "./use-claude-chat-controller"
+import {
+  resolveChatTurnAttemptIdentity,
+  useClaudeChat,
+  userPromptText,
+  rewriteUserPromptText,
+} from "./use-claude-chat-controller"
 
 describe("Claude chat controller seam", () => {
   it("exports the public hook implementation", () => {
@@ -38,4 +43,27 @@ describe("Claude chat controller seam", () => {
   // HostState send/steer/abort/approval branches are exercised by the public
   // hook contract suite in `use-claude-chat.test.ts`; this seam test remains
   // intentionally dependency-free so import regressions fail quickly.
+})
+
+describe("attachment prompt hook isolation", () => {
+  const content = [
+    { type: "text" as const, text: "PRIVATE ATTACHMENT BODY" },
+    { type: "text" as const, text: "Summarize the report" },
+    { type: "text" as const, text: "Unrelated appended context" },
+  ]
+  it("selects only the authored block after attachment provenance", () => {
+    expect(userPromptText(content, 1)).toBe("Summarize the report")
+    expect(userPromptText(content.slice(0, 1), 1)).toBe("")
+  })
+  it("rewrites only authored prose and preserves every attachment/context block", () => {
+    expect(rewriteUserPromptText(content, "Rewritten request", 1)).toEqual([
+      content[0],
+      { type: "text", text: "Rewritten request" },
+      content[2],
+    ])
+    expect(rewriteUserPromptText(content.slice(0, 1), "Do not replace the file", 1)).toEqual(
+      content.slice(0, 1)
+    )
+    expect(rewriteUserPromptText("original", "new")).toBe("new")
+  })
 })

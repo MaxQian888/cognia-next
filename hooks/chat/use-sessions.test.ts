@@ -99,6 +99,10 @@ const isTauriMock = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).
 const isCapacitorMock = jest.fn().mockReturnValue(false)
 jest.mock("@/lib/platform/detect", () => ({
   isCapacitor: () => isCapacitorMock(),
+  // `capabilities.hasHostRuntime` (reached via `startNewSession`'s managed
+  // workspace path) resolves through `detectPlatform` / `isTauri`.
+  detectPlatform: () => "web" as const,
+  isTauri: () => isTauriMock(),
 }))
 
 const hasWebCompanionTargetMock = jest.fn().mockReturnValue(false)
@@ -599,6 +603,25 @@ describe("useSessions", () => {
       await result.current.remove("s1")
     })
     expect(deleteSessionMock).toHaveBeenCalledWith("s1")
+  })
+
+  it("remove disarms the session's IM notify entry", async () => {
+    const { useImNotifyStore } = await import("@/stores/chat/im-notify-store")
+    useImNotifyStore.setState({
+      enabled: true,
+      armed: {
+        s1: {
+          conversationKey: null,
+          events: { done: true, error: true, attention: false },
+          armedAt: 1,
+        },
+      },
+    })
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.remove("s1")
+    })
+    expect(useImNotifyStore.getState().armed).not.toHaveProperty("s1")
   })
 
   it("remove skips closeSession outside Tauri", async () => {

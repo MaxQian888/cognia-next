@@ -1,11 +1,12 @@
 "use client"
 
 // Inline preview for non-image `file` message parts. Markdown files use the
-// shared rendered/source surfaces, other text files keep the existing
-// copyable CodeBlock, and PDFs embed via <object>. Binary or unknown files and
-// fetch failures retain the plain download fallback.
+// shared rendered/source surfaces, HTML files render live in the same
+// sanitized sandbox iframe the static artifact preview uses, other text files
+// keep the existing copyable CodeBlock, and PDFs embed via <object>. Binary
+// or unknown files and fetch failures retain the plain download fallback.
 
-import { memo, useEffect, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon } from "lucide-react"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
@@ -13,6 +14,12 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  DIAGRAM_DESIGN_THEME_DEFAULTS,
+  DIAGRAM_DESIGN_THEME_KEYS,
+  renderHTML,
+} from "@/lib/artifacts"
+import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 
 export interface FilePartPreviewProps {
   url: string
@@ -44,6 +51,35 @@ function isMarkdown(mediaType: string | undefined, filename: string | undefined)
   return (
     /(?:^|[/+.-])(?:markdown|mdx)(?:$|[;+.-])/i.test(mediaType ?? "") ||
     /\.(?:md|markdown|mdx)$/i.test(filename ?? "")
+  )
+}
+
+function isHtml(mediaType: string | undefined, filename: string | undefined): boolean {
+  return mediaType === "text/html" || /\.html?$/i.test(filename ?? "")
+}
+
+/**
+ * Live render for an HTML file, through the exact machinery the static
+ * artifact preview uses: DOMPurify-sanitized markup written into a
+ * `sandbox="allow-same-origin"` iframe (same-origin because the parent writes
+ * `contentDocument`), with the app's theme variables injected so an unstyled
+ * document still matches dark/light. Scripts and forms never reach the frame.
+ */
+function HtmlPreviewFrame({ html, title }: { html: string; title: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const themeVariables = useThemeCssVars(DIAGRAM_DESIGN_THEME_KEYS, DIAGRAM_DESIGN_THEME_DEFAULTS)
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (doc) renderHTML(doc, html, { themeVariables })
+  }, [html, themeVariables])
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-same-origin"
+      title={title}
+      className="h-64 w-full rounded-md border bg-background sm:h-80 md:h-96"
+      data-testid="file-preview-html-frame"
+    />
   )
 }
 
@@ -98,6 +134,7 @@ export const FilePartPreview = memo(function FilePartPreview({
   const pdf = isPdf(mediaType, filename)
   const textLike = !pdf && isTextLike(mediaType, filename)
   const markdown = textLike && isMarkdown(mediaType, filename)
+  const html = textLike && isHtml(mediaType, filename)
   const text = useFileText(url, textLike)
 
   if (pdf) {
@@ -129,6 +166,33 @@ export const FilePartPreview = memo(function FilePartPreview({
           <Loader2Icon className="size-3.5 shrink-0 animate-spin" aria-hidden />
           <span className="truncate">{t("loading", { name: displayName })}</span>
         </p>
+      )
+    }
+    if (html) {
+      // Same Preview/Source split as Markdown: an HTML attachment's point is
+      // the page it paints, not its markup — the source stays one tab away.
+      return (
+        <Tabs
+          key={url}
+          defaultValue="preview"
+          className="my-1 gap-1"
+          data-testid="file-preview-html"
+        >
+          <TabsList variant="line" className="h-7">
+            <TabsTrigger value="preview" className="px-2 text-xs">
+              {t("preview")}
+            </TabsTrigger>
+            <TabsTrigger value="source" className="px-2 text-xs">
+              {t("source")}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="preview">
+            <HtmlPreviewFrame html={text} title={displayName} />
+          </TabsContent>
+          <TabsContent value="source" className="max-h-96 overflow-auto">
+            <CodeBlock code={text} language="html" filename={filename} />
+          </TabsContent>
+        </Tabs>
       )
     }
     if (markdown) {

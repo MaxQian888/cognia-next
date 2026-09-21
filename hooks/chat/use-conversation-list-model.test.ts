@@ -96,4 +96,27 @@ describe("useConversationListModel", () => {
       expect(result.current.orderedIds).toEqual([])
     })
   })
+
+  it("passes emitEmptyGroups through to the team axis", () => {
+    // The merged rail's scope tree leans on this: every squad is a header even
+    // when it has nothing to show.
+    const teams = [
+      { id: "t1", name: "Alpha" },
+      { id: "t2", name: "Beta" },
+    ]
+    const { result } = renderHook(() =>
+      useConversationListModel({
+        sessions: [session("a", { kind: "team", teamId: "t1" })],
+        query: "",
+        now: NOW,
+        groupBy: "team",
+        teams,
+        emitEmptyGroups: true,
+      })
+    )
+    const keys = result.current.sections
+      .filter((s) => s.kind === "group")
+      .map((s) => (s.kind === "group" ? s.group.id : ""))
+    expect(keys).toEqual(["__ungrouped__", "t1", "t2"])
+  })
 })

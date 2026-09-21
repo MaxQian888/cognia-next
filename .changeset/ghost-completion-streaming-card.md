@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+The chat composer's AI completion is now streamed and shown in a floating suggestion card above the input. Suggestions appear token by token instead of popping in all at once; the card shows the source (history / command / model / agent), candidate dots you can click or cycle with ⌥] / ⌥[, and a retry button when a completion fails or times out — plus real accept/dismiss buttons on touch devices. The inline layer keeps only a pulse caret at the anchor point. Under the hood, model completions stream through `LlmClient.stream` (with a `complete()` fallback where streaming is unavailable and one retry on transient failures), a per-chunk watchdog bounds silence rather than total duration, and cycling a still-streaming candidate stays pinned to it. The built-in prompt was rewritten for better continuations: it matches the draft's language and register, completes the apparent intent, stops at the first clause boundary, and stays silent on slash commands and complete thoughts. Also fixes ⌥] / ⌥[ / ⌥\ shortcuts that could not fire on macOS because Option produces alternate characters (now keyed by physical key code).

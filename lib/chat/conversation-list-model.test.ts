@@ -285,13 +285,45 @@ describe("groupBy: team", () => {
   it("puts direct conversations in the ungrouped bucket rather than dropping them", () => {
     // The mobile list has no guild rail, so team mode used to show it a list
     // that was not grouped at all. Direct chats carry no teamId — they belong
-    // in a bucket the renderer labels, not in a team's section.
+    // in a bucket the renderer labels, not in a team's section. The bucket
+    // leads the axis: "Chats" is the scope the user already knows, the squads
+    // read as additions beneath it.
     const sessions = [session("dm"), session("team", { kind: "team", teamId: "t1" })]
     const { sections } = buildConversationSections(sessions, [], opts({ groupBy: "team", teams }))
     expect(sections.map((s) => conversationSectionKey(s))).toEqual([
-      "team:t1",
       `team:${UNGROUPED_ID}`,
+      "team:t1",
     ])
+  })
+
+  it("keeps squads with no sessions when emitEmptyGroups is on", () => {
+    // The scope tree draws every squad as a header — empty or not — because
+    // the header is where "new conversation here" and the scope menu live.
+    // The ungrouped "Chats" bucket leads even with nothing in it: the tree's
+    // first group is fixed chrome, not a section that comes and goes.
+    const { sections } = buildConversationSections(
+      [session("team", { kind: "team", teamId: "t1" })],
+      [],
+      opts({ groupBy: "team", teams, emitEmptyGroups: true })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual([
+      `team:${UNGROUPED_ID}`,
+      "team:t1",
+      "team:t2",
+    ])
+    for (const key of [`team:${UNGROUPED_ID}`, "team:t2"]) {
+      const section = sections.find((s) => conversationSectionKey(s) === key)!
+      expect(section.kind === "group" && section.sessions).toEqual([])
+    }
+  })
+
+  it("drops squads with no sessions by default — the axis names what it holds", () => {
+    const { sections } = buildConversationSections(
+      [session("team", { kind: "team", teamId: "t1" })],
+      [],
+      opts({ groupBy: "team", teams })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["team:t1"])
   })
 
   it("does not collapse anything by default — only the workspace axis does that", () => {

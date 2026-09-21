@@ -16,6 +16,7 @@ import { brandIconAsset } from "@/components/icons/brand-icon"
 import { brandIdForHost } from "@/lib/chat/link-display"
 import { LINK_MARKER } from "@/lib/chat/link-fold"
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
+import type { SlashScope } from "@/lib/slash-commands/builtin"
 
 /**
  * Typography + box metrics shared by the textarea and this overlay. MUST stay
@@ -137,6 +138,82 @@ const PARAM_PILL_CLASS: Record<ParamPillState, string> = {
   unresolved: "bg-amber-500/10 ring-1 ring-amber-500/40 ring-inset",
 }
 
+/**
+ * The command sigil, painted into the token's `/` cell as a mask so the mark
+ * can take a Tailwind background colour and track the theme — a
+ * background-image data URI cannot (the SVG document cannot see this one's
+ * CSS variables, which is why {@link genericLinkIcon} ships one variant per
+ * theme instead).
+ *
+ * A lightning bolt rather than the slash the user typed: the pill is the
+ * affordance, so the sigil can spend its one cell saying "this executes"
+ * instead of restating the punctuation.
+ */
+const COMMAND_SIGIL_MASK = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="black">' +
+    '<path d="M13.2 2.2 4.6 14.1h6.2l-1.6 7.7 8.8-11.9h-6.2l1.4-7.7z"/></svg>'
+)}")`
+
+/**
+ * Pill + sigil tones per command scope — where the command comes from is the
+ * one fact a token in the text cannot otherwise tell you. `builtin` stays
+ * neutral: it is the native default and colouring it would paint most pills.
+ * Amber is deliberately absent — it already means "unresolved parameter".
+ *
+ * The fill is a whisper and the ring does the outlining: a heavier wash
+ * (`bg-primary/10`-and-up) paints a milky slab over the composer's tinted
+ * surface, which reads as a stray rectangle rather than a token. Text and the
+ * sigil carry the colour; the box just bounds them.
+ */
+const COMMAND_SCOPE_TONE: Record<SlashScope, { pill: string; sigil: string }> = {
+  builtin: {
+    pill: "bg-foreground/[0.045] ring-foreground/15",
+    sigil: "bg-foreground/55",
+  },
+  project: {
+    pill: "bg-blue-500/[0.08] text-blue-700 ring-blue-500/35 dark:text-blue-300",
+    sigil: "bg-blue-600/75 dark:bg-blue-400/75",
+  },
+  user: {
+    pill: "bg-violet-500/[0.08] text-violet-700 ring-violet-500/35 dark:text-violet-300",
+    sigil: "bg-violet-600/75 dark:bg-violet-400/75",
+  },
+  plugin: {
+    pill: "bg-emerald-500/[0.08] text-emerald-700 ring-emerald-500/35 dark:text-emerald-300",
+    sigil: "bg-emerald-600/75 dark:bg-emerald-400/75",
+  },
+}
+
+/**
+ * A command token's `/` cell, repainted as the scope-tinted bolt. The glyph
+ * itself is transparent — the cell only reserves its exact advance so this
+ * layer stays a character-for-character mirror of the textarea — and the mask
+ * paints the mark over it. Same trick as {@link LinkMarker}: padding widens
+ * the paint box for a mark slightly wider than `/`, and the matching negative
+ * margin gives that width back so the next glyph does not move. `py` matches
+ * the pill's so the mark centres in the capsule, not in the bare line box.
+ */
+function CommandSigil({ tone }: { tone: string }) {
+  return (
+    <span
+      data-command-sigil
+      className={cn("-mx-0.5 px-0.5 py-[3px] text-transparent", tone)}
+      style={{
+        WebkitMaskImage: COMMAND_SIGIL_MASK,
+        maskImage: COMMAND_SIGIL_MASK,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskSize: "0.75em 0.75em",
+        maskSize: "0.75em 0.75em",
+      }}
+    >
+      /
+    </span>
+  )
+}
+
 interface ComposerChipOverlayProps {
   value: string
   /** Segments parsed with `{ mentions: true }` so `@mention` pills paint too. */
@@ -148,6 +225,12 @@ interface ComposerChipOverlayProps {
    * inserted.
    */
   paramState?: (paramId: string) => ParamPillState
+  /**
+   * Command name → its scope (`builtin`/`project`/`user`/`plugin`), so the
+   * pill can tint by provenance. Omitting it paints every command as builtin —
+   * the neutral default a caller with no command map can safely fall back to.
+   */
+  commandScope?: (name: string) => SlashScope | undefined
   /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
   mono?: boolean
   /**
@@ -170,7 +253,7 @@ interface ComposerChipOverlayProps {
 
 const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
   function ComposerChipOverlay(
-    { value, segments, paramState, mono, hidden, padEndClass },
+    { value, segments, paramState, commandScope, mono, hidden, padEndClass },
     innerRef
   ) {
     // Nothing to paint when there are no pill segments — render an invisible
@@ -210,16 +293,38 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
                   // `/reset ////////` shows a tight `/reset` chip instead of one
                   // huge pill over the slashes. `box-decoration-clone` keeps the
                   // rounded background intact if the chip ever wraps a line.
+                  //
+                  // `py` is the capsule's height: vertical padding on an inline
+                  // box paints past the line box without moving a glyph, which
+                  // is the only direction this mirror may grow in. `ps`/`pe` +
+                  // `-ms`/`-me` is the horizontal version of the same trick —
+                  // the capsule borrows pixels of the whitespace beside it so
+                  // the label does not touch the ring, while net advance stays
+                  // zero and the mirror still lines up. The leading side borrows
+                  // less than the trailing one: a command at column 0 would
+                  // otherwise push its left ring past the text margin and into
+                  // the box's padding, flush against the composer edge. The `/`
+                  // cell renders as {@link CommandSigil} and the name takes the
+                  // scope's text tone, so the two halves read icon-then-label.
+                  // The radius follows the skin's inner curve but stays capped:
+                  // a pill the size of a text line should look squared-off like
+                  // the box around it, never a full capsule.
                   const headLen = 1 + seg.name.length // leading "/" + name
-                  const head = seg.raw.slice(0, headLen)
                   const rest = seg.raw.slice(headLen)
+                  const scope = commandScope?.(seg.name) ?? "builtin"
+                  const tone = COMMAND_SCOPE_TONE[scope]
                   return (
                     <Fragment key={`${seg.start}-${i}`}>
                       <span
                         data-chip="command"
-                        className="box-decoration-clone rounded-md bg-primary/10 ring-1 ring-primary/15 ring-inset"
+                        data-scope={scope}
+                        className={cn(
+                          "-ms-[3px] -me-1 box-decoration-clone rounded-[min(4px,var(--composer-inner-radius,4px))] ps-[3px] pe-1 py-[3px] ring-1 ring-inset",
+                          tone.pill
+                        )}
                       >
-                        {head}
+                        <CommandSigil tone={tone.sigil} />
+                        {seg.name}
                       </span>
                       {rest ? <span>{rest}</span> : null}
                     </Fragment>

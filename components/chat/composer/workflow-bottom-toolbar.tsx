@@ -228,7 +228,7 @@ function QuickActionButton({
           onClick={onClick}
           aria-label={ariaLabel}
           data-testid={testId}
-          className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground"
+          className="h-6 gap-1 px-1.5 text-[11px] font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
         >
           {icon}
           <span className="@max-sm/composer:hidden">{label}</span>

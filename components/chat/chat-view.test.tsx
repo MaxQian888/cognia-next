@@ -59,6 +59,23 @@ jest.mock("./composer", () => {
 jest.mock("./chat-header", () => ({
   ChatHeader: jest.fn(() => null),
 }))
+// The summary opener is heavy (chat + artifact stores); the pane test only
+// needs to see it mount on the stage, scoped to the workspace.
+jest.mock("@/components/context-workbench/session-summary-popover", () => ({
+  SessionSummaryPopover: ({ session }: { session: { id: string } }) => (
+    <button data-testid="summary-trigger" data-session={session.id} />
+  ),
+}))
+jest.mock("@/components/chat/session-settings-sheet", () => ({
+  SessionSettingsSheet: () => null,
+}))
+// Controllable workspace-scope flag — `useTitleBarProjection` stays real for
+// any child that still calls it.
+let inScopeMock = false
+jest.mock("@/components/shell/title-bar-outlets", () => ({
+  ...jest.requireActual("@/components/shell/title-bar-outlets"),
+  useTitleBarProjectionScope: () => inScopeMock,
+}))
 jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
@@ -359,6 +376,23 @@ describe("ChatPane", () => {
       mode: "timeline",
     })
     clearComputerUsePipState()
+    inScopeMock = false
+  })
+
+  it("floats the summary opener on the pane surface inside the workspace scope", () => {
+    inScopeMock = true
+    render(<ChatPane {...makeProps()} />)
+    const stage = document.querySelector('[data-slot="chat-surface-stage"]')
+    const trigger = screen.getByTestId("chat-summary-trigger")
+    expect(stage).toContainElement(trigger)
+    expect(trigger).toContainElement(screen.getByTestId("summary-trigger"))
+  })
+
+  it("keeps the summary opener off the pane surface outside the workspace scope", () => {
+    inScopeMock = false
+    render(<ChatPane {...makeProps()} />)
+    expect(screen.queryByTestId("chat-summary-trigger")).toBeNull()
+    expect(screen.queryByTestId("summary-trigger")).toBeNull()
   })
 
   it("shows one connection recovery panel instead of a second history error", () => {

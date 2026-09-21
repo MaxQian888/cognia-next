@@ -49,6 +49,33 @@ describe("PersonalizationCard", () => {
     expect(save).not.toHaveBeenCalled()
   })
 
+  it("commits welcome hints on blur, one per line, trimmed + deduped", async () => {
+    const user = userEvent.setup()
+    render(<PersonalizationCard />)
+    const input = screen.getByPlaceholderText("personalization.hintsPlaceholder")
+    await user.type(input, "Summarize this week\n\n  Summarize this week  \nDraft a post")
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({
+      welcomeHints: ["Summarize this week", "Draft a post"],
+    })
+  })
+
+  it("clears welcome hints to undefined when the box is emptied", () => {
+    storeState.settings = { welcomeHints: ["Summarize this week"] }
+    render(<PersonalizationCard />)
+    const input = screen.getByPlaceholderText("personalization.hintsPlaceholder")
+    fireEvent.change(input, { target: { value: "  \n" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ welcomeHints: undefined })
+  })
+
+  it("does not write when the hints are unchanged", () => {
+    storeState.settings = { welcomeHints: ["A", "B"] }
+    render(<PersonalizationCard />)
+    fireEvent.blur(screen.getByPlaceholderText("personalization.hintsPlaceholder"))
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it("switches the welcome style on click", async () => {
     const user = userEvent.setup()
     render(<PersonalizationCard />)

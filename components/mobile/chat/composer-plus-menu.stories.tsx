@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
+import { GlobeIcon, SparklesIcon } from "lucide-react"
 import { expect, fn, userEvent, within } from "storybook/test"
 
+import { CapabilityRow } from "@/components/chat/composer/capability-row"
 import { ComposerPlusMenu } from "./composer-plus-menu"
 
 // The mobile composer "+" — a bottom sheet with three groups: a tile grid for
@@ -50,15 +52,17 @@ export const Opened: Story = {
 /**
  * As the chat composer mounts it: voice belongs to the transcription bridge
  * (speech → text), so the sheet's record-as-attachment tile is hidden and the
- * grid is three across.
+ * grid is three across. The `capabilities` slot shows the real injected shape —
+ * `CapabilityRow` entries, the same rows THIS TURN carries in product.
  */
 export const InChatComposer: Story = {
   args: {
     showVoice: false,
     capabilities: (
-      <span className="rounded-pill border border-border px-2 py-1 text-xs text-muted-foreground">
-        Web search · Skills
-      </span>
+      <>
+        <CapabilityRow icon={<GlobeIcon className="size-4" />} label="Web" checkable />
+        <CapabilityRow icon={<SparklesIcon className="size-4" />} label="Attach skill" chevron />
+      </>
     ),
   },
   play: async ({ canvasElement }) => {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
@@ -49,6 +49,11 @@ export interface ImageLightboxProps {
   returnFocusRef?: RefObject<HTMLElement | null>
   onActiveIndexChange: (index: number) => void
   onOpenChange: (open: boolean) => void
+  /**
+   * Extra buttons rendered in the header before the close button (e.g. the
+   * composer's "Model view" audit entry). Message rendering leaves it unset.
+   */
+  headerActions?: ReactNode
 }
 
 function clampIndex(index: number, length: number): number {
@@ -63,6 +68,19 @@ function canOpenExternally(src: string): boolean {
   return /^https?:\/\//i.test(src)
 }
 
+// Gesture tuning — calibrated against a real trackpad. Trackpad pinch arrives
+// as wheel+ctrlKey in Chromium; a two-finger horizontal swipe is wheel deltaX.
+const PINCH_WHEEL_RATE = 0.002 // zoom multiplier per wheel deltaY unit
+const PINCH_WHEEL_CAP = 50 // ctrl+wheel notch guard (raw delta can be ~100)
+const SWIPE_THRESHOLD = 320 // px of horizontal travel to flip an item
+const SWIPE_COOLDOWN_MS = 500 // min gap between flips
+const SWIPE_GAP_MS = 160 // pause this long = new swipe, reset the accumulator
+const SWIPE_AXIS_RATIO = 2.2 // deltaX must dominate deltaY by this much
+const PULL_DEAD_ZONE = 10 // px before the image starts following the pointer
+const PULL_COMMIT_PX = 140 // release past this to dismiss
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 4
+
 interface LightboxViewProps {
   item: ImageLightboxItem
   canGoPrevious: boolean
@@ -71,6 +89,7 @@ interface LightboxViewProps {
   onNext: () => void
   onClose: () => void
   reduceMotion: boolean
+  headerActions?: ReactNode
 }
 
 function LightboxView({
@@ -81,14 +100,69 @@ function LightboxView({
   onNext,
   onClose,
   reduceMotion,
+  headerActions,
 }: LightboxViewProps) {
   const t = useTranslations("chat.renderers.image")
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [pullY, setPullY] = useState(0)
+  const stageRef = useRef<HTMLDivElement | null>(null)
   const pointersRef = useRef(new Map<number, { x: number; y: number }>())
   const pinchRef = useRef<{ startDistance: number; startZoom: number } | null>(null)
+  const panStartRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const zoomRef = useRef(1)
+  const navRef = useRef({ onPrevious, onNext })
+  const swipeAcc = useRef(0)
+  const swipeLast = useRef(0)
+  const swipeCooldown = useRef(0)
+
+  useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
+
+  useEffect(() => {
+    navRef.current = { onPrevious, onNext }
+  })
+
+  // Wheel gestures need a non-passive listener: ctrl+wheel must preventDefault
+  // to keep the browser's own page zoom out of the gesture.
+  useEffect(() => {
+    const el = stageRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault()
+        const d = Math.max(-PINCH_WHEEL_CAP, Math.min(PINCH_WHEEL_CAP, e.deltaY))
+        setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * Math.exp(-d * PINCH_WHEEL_RATE))))
+        return
+      }
+      const now = performance.now()
+      if (now - swipeLast.current > SWIPE_GAP_MS) swipeAcc.current = 0
+      swipeLast.current = now
+      if (zoomRef.current > 1) {
+        // Zoomed: two fingers pan the image.
+        e.preventDefault()
+        setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }))
+        return
+      }
+      if (Math.abs(e.deltaX) > 10 && Math.abs(e.deltaX) > Math.abs(e.deltaY) * SWIPE_AXIS_RATIO) {
+        swipeAcc.current += e.deltaX
+        if (Math.abs(swipeAcc.current) > SWIPE_THRESHOLD && now >= swipeCooldown.current) {
+          if (swipeAcc.current > 0) navRef.current.onNext()
+          else navRef.current.onPrevious()
+          swipeAcc.current = 0
+          swipeCooldown.current = now + SWIPE_COOLDOWN_MS
+        }
+      } else {
+        swipeAcc.current = 0
+      }
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [])
 
   const pinchDistance = useCallback(() => {
     const pointers = [...pointersRef.current.values()]
@@ -98,12 +172,27 @@ function LightboxView({
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent) => {
+      // Right-click drags are not gestures; and presses that began on a button
+      // belong to the button — capturing the pointer would retarget its click
+      // to the capture element and swallow the onClick entirely.
+      if (event.button !== 0) return
+      const target = event.target as Element
+      if (target.closest("button")) return
+      // Capture on the TARGET (not the stage): the gesture survives the pointer
+      // crossing the header/filmstrip, while the target keeps receiving its own
+      // click/dblclick (jsdom lacks setPointerCapture, hence the guard).
+      if (typeof target.setPointerCapture === "function") {
+        target.setPointerCapture(event.pointerId)
+      }
       pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
       if (pointersRef.current.size === 2) {
         pinchRef.current = { startDistance: pinchDistance(), startZoom: zoom }
+        panStartRef.current = null
+      } else {
+        panStartRef.current = { x: event.clientX, y: event.clientY, px: pan.x, py: pan.y }
       }
     },
-    [pinchDistance, zoom]
+    [pinchDistance, zoom, pan.x, pan.y]
   )
 
   const handlePointerMove = useCallback(
@@ -111,18 +200,38 @@ function LightboxView({
       if (!pointersRef.current.has(event.pointerId)) return
       pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
       const pinch = pinchRef.current
-      if (pinch && pointersRef.current.size === 2 && pinch.startDistance > 0) {
+      if (pinch && pointersRef.current.size >= 2 && pinch.startDistance > 0) {
         const ratio = pinchDistance() / pinch.startDistance
-        setZoom(Math.min(3, Math.max(0.5, pinch.startZoom * ratio)))
+        setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.startZoom * ratio)))
+        return
+      }
+      const start = panStartRef.current
+      if (!start || pointersRef.current.size !== 1) return
+      const dx = event.clientX - start.x
+      const dy = event.clientY - start.y
+      if (zoomRef.current > 1) {
+        setPan({ x: start.px + dx, y: start.py + dy })
+      } else if (dy > PULL_DEAD_ZONE && dy > Math.abs(dx)) {
+        // Pull-down to dismiss: the image follows the pointer below a small
+        // dead zone; releasing past the commit distance closes the viewer.
+        setPullY(dy - PULL_DEAD_ZONE)
       }
     },
     [pinchDistance]
   )
 
-  const handlePointerEnd = useCallback((event: React.PointerEvent) => {
-    pointersRef.current.delete(event.pointerId)
-    if (pointersRef.current.size < 2) pinchRef.current = null
-  }, [])
+  const handlePointerEnd = useCallback(
+    (event: React.PointerEvent) => {
+      pointersRef.current.delete(event.pointerId)
+      if (pointersRef.current.size < 2) pinchRef.current = null
+      if (pointersRef.current.size === 0) {
+        panStartRef.current = null
+        if (pullY > PULL_COMMIT_PX) onClose()
+        else setPullY(0)
+      }
+    },
+    [onClose, pullY]
+  )
 
   const handleOpenExternal = useCallback(async () => {
     try {
@@ -151,22 +260,28 @@ function LightboxView({
   const resetView = useCallback(() => {
     setZoom(1)
     setRotation(0)
+    setPan({ x: 0, y: 0 })
+    setPullY(0)
   }, [])
 
   return (
     <>
-      <DialogHeader className="flex-row items-center justify-between gap-2 border-b border-white/10 bg-black/60 px-3 py-2 text-left">
-        <DialogTitle className="min-w-0 flex-1 truncate text-sm font-medium text-white">
+      {/* Floating chrome, not a solid bar: the header sits over the stage on
+          a gradient scrim, same convention as the prototype and native photo
+          viewers — controls appear where you look, the image keeps the full
+          frame underneath. */}
+      <DialogHeader className="pointer-events-none absolute inset-x-0 top-0 z-10 flex-row items-center justify-between gap-2 bg-gradient-to-b from-black/70 via-black/35 to-transparent px-3 pt-2 pb-7 text-left">
+        <DialogTitle className="pointer-events-auto min-w-0 flex-1 truncate text-sm font-medium text-white">
           {itemName(item, t("defaultTitle"))}
         </DialogTitle>
         <DialogDescription className="sr-only">{t("previewDescription")}</DialogDescription>
-        <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 overflow-x-auto">
           <TooltipIconButton
             variant="ghost"
             size="icon"
             className="size-8 text-white hover:bg-white/15 hover:text-white"
-            onClick={() => setZoom((value) => Math.max(value - 0.25, 0.5))}
-            disabled={zoom <= 0.5}
+            onClick={() => setZoom((value) => Math.max(value - 0.25, MIN_ZOOM))}
+            disabled={zoom <= MIN_ZOOM}
             aria-label={t("zoomOut")}
             tooltip={t("zoomOut")}
           >
@@ -179,8 +294,8 @@ function LightboxView({
             variant="ghost"
             size="icon"
             className="size-8 text-white hover:bg-white/15 hover:text-white"
-            onClick={() => setZoom((value) => Math.min(value + 0.25, 3))}
-            disabled={zoom >= 3}
+            onClick={() => setZoom((value) => Math.min(value + 0.25, MAX_ZOOM))}
+            disabled={zoom >= MAX_ZOOM}
             aria-label={t("zoomIn")}
             tooltip={t("zoomIn")}
           >
@@ -218,6 +333,7 @@ function LightboxView({
               <ExternalLinkIcon className="size-4" />
             </TooltipIconButton>
           ) : null}
+          {headerActions}
           <TooltipIconButton
             variant="ghost"
             size="icon"
@@ -232,9 +348,10 @@ function LightboxView({
       </DialogHeader>
 
       <div
-        className="relative flex min-h-0 items-center justify-center overflow-auto bg-black/95 p-4 sm:p-8"
+        ref={stageRef}
+        className="relative flex min-h-0 items-center justify-center overflow-hidden bg-black/95 p-4 sm:p-8"
         data-testid="image-lightbox-stage"
-        style={{ touchAction: "pan-x pan-y" }}
+        style={{ touchAction: "none" }}
         onClick={(event) => {
           if (event.target === event.currentTarget) resetView()
         }}
@@ -260,7 +377,9 @@ function LightboxView({
             exit={reduceMotion ? undefined : { opacity: 0, scale: 0.97 }}
             transition={reduceMotion ? { duration: 0 } : mobileTransition("normal")}
             className="max-h-full max-w-full select-none object-contain"
-            style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y + pullY}px) scale(${zoom}) rotate(${rotation}deg)`,
+            }}
             onLoad={() => setIsLoading(false)}
             onError={() => {
               setIsLoading(false)
@@ -306,6 +425,7 @@ export function ImageLightbox({
   returnFocusRef,
   onActiveIndexChange,
   onOpenChange,
+  headerActions,
 }: ImageLightboxProps) {
   const t = useTranslations("chat.renderers.image")
   const reduceMotion = useReducedMotion() ?? false
@@ -327,7 +447,7 @@ export function ImageLightbox({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[min(92dvh,900px)] w-[min(96vw,1400px)] max-w-none grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-0 bg-black p-0 shadow-2xl"
+        className="h-[min(92dvh,900px)] w-[min(96vw,1400px)] max-w-none grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden border-0 bg-black p-0 shadow-2xl"
         showCloseButton={false}
         onCloseAutoFocus={(event) => {
           if (!returnFocusRef?.current) return
@@ -360,14 +480,15 @@ export function ImageLightbox({
             onNext={() => select(safeIndex + 1)}
             onClose={() => onOpenChange(false)}
             reduceMotion={reduceMotion}
+            headerActions={headerActions}
           />
         </AnimatePresence>
 
         <div
-          className="border-t border-white/10 bg-black/75 px-3 py-2"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 via-black/35 to-transparent px-3 pt-7 pb-2"
           data-testid="image-lightbox-thumbnails"
         >
-          <div className="flex items-center justify-center gap-2 overflow-x-auto overscroll-x-contain">
+          <div className="pointer-events-auto flex items-center justify-center gap-2 overflow-x-auto overscroll-x-contain">
             {items.map((item, index) => {
               const active = index === safeIndex
               const name = itemName(item, t("defaultTitle"))

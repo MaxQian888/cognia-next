@@ -272,3 +272,114 @@ describe("extractPdf — error paths", () => {
     ).rejects.toThrow(/network down/)
   })
 })
+
+describe("complete mixed PDF processing", () => {
+  it("visits all pages sequentially, reports errors, and releases page/document resources", async () => {
+    const { deps, ocrPage } = makeDeps()
+    const doc = makeFakeDoc(
+      Array.from({ length: 23 }, (_, i) => ({
+        pageNumber: i + 1,
+        emptyTextLayer: i % 2 === 1,
+        text: "Substantive digital page text",
+      }))
+    )
+    const originalGetPage = doc.getPage.bind(doc)
+    const cleanup = jest.fn()
+    doc.getPage = jest.fn(async (pageNumber) => {
+      if (pageNumber === 2) throw new Error("broken page")
+      return { ...(await originalGetPage(pageNumber)), cleanup }
+    })
+    doc.destroy = jest.fn()
+    const onDocument = jest.fn()
+    const onPageError = jest.fn()
+    const outcome = await extractPdf(
+      { bytes: new Uint8Array() },
+      {
+        loadPdf: async () => doc,
+        extractDeps: deps,
+        ocrPage,
+        continueOnPageError: true,
+        onDocument,
+        onPageError,
+      }
+    )
+    expect(doc.getPage).toHaveBeenCalledTimes(23)
+    expect(outcome.pages).toHaveLength(22)
+    expect(outcome.pages.at(-1)?.pageNumber).toBe(23)
+    expect(onPageError).toHaveBeenCalledWith(expect.any(Error), 2, 2, 23)
+    expect(onDocument).toHaveBeenCalledWith(23)
+    expect(cleanup).toHaveBeenCalledTimes(22)
+    expect(doc.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it("propagates signal to OCR and does not publish a late page after cancellation", async () => {
+    const { deps } = makeDeps()
+    const controller = new AbortController()
+    const doc = makeFakeDoc([
+      { pageNumber: 1, emptyTextLayer: true },
+      { pageNumber: 2, emptyTextLayer: true },
+    ])
+    doc.destroy = jest.fn()
+    const onPage = jest.fn()
+    const ocrPage = jest.fn(async (input) => {
+      expect(input.signal).toBe(controller.signal)
+      controller.abort()
+      return {
+        providerId: "test",
+        pages: [{ pageNumber: 1, text: "late", markdown: "late" }],
+        combinedText: "late",
+        combinedMarkdown: "late",
+        languages: ["en"],
+        durationMs: 1,
+        cached: false,
+      } as OcrResult
+    })
+    await expect(
+      extractPdf(
+        { bytes: new Uint8Array() },
+        {
+          loadPdf: async () => doc,
+          extractDeps: deps,
+          ocrPage,
+          onPage,
+          signal: controller.signal,
+          continueOnPageError: true,
+        }
+      )
+    ).rejects.toMatchObject({ code: "aborted" })
+    expect(onPage).not.toHaveBeenCalled()
+    expect(ocrPage).toHaveBeenCalledTimes(1)
+    expect(doc.destroy).toHaveBeenCalledTimes(1)
+  })
+})
+
+it("destroys a PDF on cancellation to release an outstanding text-layer read", async () => {
+  const { deps } = makeDeps()
+  const controller = new AbortController()
+  let releaseRead!: (error: Error) => void
+  const reading = new Promise<never>((_, reject) => {
+    releaseRead = reject
+  })
+  const started = Promise.withResolvers<void>()
+  const destroy = jest.fn(() => releaseRead(new Error("document destroyed")))
+  const doc: PdfDocument = {
+    numPages: 1,
+    destroy,
+    getPage: async () => ({
+      pageNumber: 1,
+      getTextContent: () => {
+        started.resolve()
+        return reading
+      },
+      renderToDataUrl: jest.fn(),
+    }),
+  }
+  const pending = extractPdf(
+    { bytes: new Uint8Array() },
+    { loadPdf: async () => doc, extractDeps: deps, signal: controller.signal }
+  )
+  await started.promise
+  controller.abort()
+  await expect(pending).rejects.toMatchObject({ code: "aborted" })
+  expect(destroy).toHaveBeenCalledTimes(1)
+})

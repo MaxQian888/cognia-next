@@ -1,6 +1,7 @@
 "use client"
 
 import type { UIMessage } from "ai"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { create } from "zustand"
 import type {
   MessageReplyTo,
@@ -36,6 +37,8 @@ export type SteerEntry = {
   id: string
   text: string
   blocks?: SendContentBlock[]
+  /** Provenance aligned with leading attachment blocks, with source Blobs already persisted. */
+  attachmentManifest?: readonly AttachmentManifestEntry[]
   /** Pre-search sources attached to this follow-up; replayed with the drained turn. */
   webSearchContext?: SendOptions["webSearchContext"]
   /** The message this follow-up answers, replayed with the drained turn. */
@@ -677,6 +680,16 @@ interface ChatState {
   messagesReloadNonce: number
 
   setActiveSession: (id: string | null) => void
+  /**
+   * Drop the active-session pointer WITHOUT stamping `activeSessionEpoch`.
+   * `setActiveSession(null)` records "the user navigated to no conversation",
+   * which the guild reconcile then reads as the newest navigation intent —
+   * wrong when the clear was itself produced by the reconcile (welcome
+   * intent / a guild with nothing to show): the bump would make the clear
+   * outrank the intent that caused it. Shell-driven clears go through this;
+   * user-driven clears (delete, archive, agent switch) keep `setActiveSession`.
+   */
+  clearActiveSession: () => void
   /** Add a session to the open-tab strip (no focus change). Idempotent. */
   openSession: (id: string) => void
   retainPane: (sessionId: string, paneId: string) => void
@@ -902,6 +915,7 @@ export const useChatStore = create<ChatState>((set) => ({
         ...projectSlice(slice),
       }
     }),
+  clearActiveSession: () => set({ activeSessionId: null, ...EMPTY_PROJECTION }),
   openSession: (id) =>
     set((s) => {
       if (s.openSessionIds.includes(id)) return s

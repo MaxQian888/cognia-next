@@ -180,6 +180,7 @@ export function ImportedOriginChip({
     runtime.setSessionComposition(session.id, {
       ...compositionForSession(session.id),
       verifiedNativeResume: true,
+      verifiedNativeResumeAgentId: result.agentId,
     })
     runtime.setSessionRuntimeRef(session.id, { kind: "external", agentId: result.agentId })
     toast.success(t("resumeReady"))

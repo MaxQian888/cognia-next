@@ -24,6 +24,7 @@ import { useTranslations } from "next-intl"
 import { BrainIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
 import {
@@ -64,58 +65,69 @@ export function EffortChip({ session, disabled, className, glyph }: EffortChipPr
   const ultra = isUltracodeLevel(current)
 
   return (
-    <ResponsivePicker
-      open={open}
-      onOpenChange={setOpen}
-      // A form, not an option list: the card is sliders and rows, and cmdk
-      // would take its keystrokes.
-      variant="panel"
-      title={t("title")}
-      align="start"
-      side="top"
-      // Width matches the model popover's, so opening one after the other
-      // doesn't resize the surface under the pointer.
-      contentClassName="w-[19rem]"
-      testId="effort-panel"
-      trigger={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={disabled}
-          aria-label={t("triggerAria", { level: t(`level.${current}` as "level.off") })}
-          data-testid="effort-chip"
-          data-level={current}
-          data-glyph={glyph || undefined}
-          className={cn(
-            "gap-1",
-            ultra && "text-effort-ultra hover:text-effort-ultra",
-            glyph && "w-7 justify-center px-0",
-            className
-          )}
-        >
-          {/* Both halves are keyed by tier so React remounts them and their
+    // `TooltipTrigger` sits INSIDE the picker's trigger slot, so the picker's
+    // own popover/drawer trigger keeps working while hover reports the
+    // tooltip. `TooltipContent` is a sibling of the picker because Radix
+    // requires it under the same `Tooltip` root as its trigger.
+    <Tooltip>
+      <ResponsivePicker
+        open={open}
+        onOpenChange={setOpen}
+        // A form, not an option list: the card is sliders and rows, and cmdk
+        // would take its keystrokes.
+        variant="panel"
+        title={t("title")}
+        align="start"
+        side="top"
+        // Width matches the model popover's, so opening one after the other
+        // doesn't resize the surface under the pointer.
+        contentClassName="w-[19rem]"
+        testId="effort-panel"
+        trigger={
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              aria-label={t("triggerAria", { level: t(`level.${current}` as "level.off") })}
+              data-testid="effort-chip"
+              data-level={current}
+              data-glyph={glyph || undefined}
+              className={cn(
+                "gap-1",
+                ultra && "text-effort-ultra hover:text-effort-ultra",
+                glyph && "w-7 justify-center px-0",
+                className
+              )}
+            >
+              {/* Both halves are keyed by tier so React remounts them and their
               entrance re-fires: this chip is often the only part of the control
               on screen when the level changes (a keyboard commit inside the
               popover, or a preset), and a silent relabel is easy to
               miss on a row this quiet. */}
-          <BrainIcon
-            key={`glyph-${current}`}
-            className={cn(
-              "effort-glyph-pulse size-3.5 shrink-0",
-              ultra && "text-effort-ultra drop-shadow-[0_0_6px_var(--effort-ultra)]"
-            )}
-            aria-hidden
-          />
-          {glyph ? null : (
-            <span key={`label-${current}`} className="effort-value-rise truncate">
-              {t(`level.${current}` as "level.off")}
-            </span>
-          )}
-        </Button>
-      }
-    >
-      <EffortSelector session={session} disabled={disabled} />
-    </ResponsivePicker>
+              <BrainIcon
+                key={`glyph-${current}`}
+                className={cn(
+                  "effort-glyph-pulse size-3.5 shrink-0",
+                  ultra && "text-effort-ultra drop-shadow-[0_0_6px_var(--effort-ultra)]"
+                )}
+                aria-hidden
+              />
+              {glyph ? null : (
+                <span key={`label-${current}`} className="effort-value-rise truncate">
+                  {t(`level.${current}` as "level.off")}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+        }
+      >
+        <EffortSelector session={session} disabled={disabled} />
+      </ResponsivePicker>
+      <TooltipContent side="top">
+        {t("triggerAria", { level: t(`level.${current}` as "level.off") })}
+      </TooltipContent>
+    </Tooltip>
   )
 }

@@ -63,6 +63,12 @@ export interface UseConversationListModelParams {
   activeWorkspaceId?: string | null
   /** Explicit per-group collapse choices, keyed `workspace:<id>` / `agent:<id>`. */
   groupCollapseOverrides?: Readonly<Record<string, boolean>>
+  /**
+   * Emit every supplied group even when empty — for surfaces where group
+   * headers are navigation entities (the merged rail's scope tree), not just
+   * buckets of whatever matched. See `BuildSectionsOptions.emitEmptyGroups`.
+   */
+  emitEmptyGroups?: boolean
   /** Session ids whose message content matched the query (title OR content). */
   contentMatchIds?: ReadonlySet<string>
   /** Let a query reach past the archive split (search only, never browsing). */
@@ -102,6 +108,7 @@ export function useConversationListModel({
   teams = EMPTY_GROUPS,
   activeWorkspaceId = null,
   groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
+  emitEmptyGroups = false,
   contentMatchIds,
   searchIncludesArchived = false,
   sortBy = "recent",
@@ -124,6 +131,7 @@ export function useConversationListModel({
         teams,
         activeWorkspaceId,
         groupCollapseOverrides,
+        emitEmptyGroups,
         contentMatchIds,
         searchIncludesArchived,
         sortBy,
@@ -144,6 +152,7 @@ export function useConversationListModel({
       teams,
       activeWorkspaceId,
       groupCollapseOverrides,
+      emitEmptyGroups,
       contentMatchIds,
       searchIncludesArchived,
       sortBy,

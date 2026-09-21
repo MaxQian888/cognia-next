@@ -27,6 +27,8 @@ import {
 } from "@/lib/chat/attachments/video/preprocess"
 import { VideoPreprocessError } from "@/lib/chat/attachments/video/frame-source"
 import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
+import { sha256Blob } from "@/lib/ocr/hash"
+import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
 import {
   StagedAttachmentsProvider,
   useStagedAttachments,
@@ -140,6 +142,30 @@ function txt(name: string, body = "body text") {
 }
 
 describe("StagedAttachmentsProvider — extraction lifecycle", () => {
+  it("retains uploaded original bytes even when intake resized the model image", async () => {
+    const original = new File(["original-image-bytes"], "picture.png", { type: "image/png" })
+    const prepared = await prepareComposerAttachments([original], {
+      maxFileSize: 5,
+      optimizeImage: async () => new File(["tiny"], "picture.png", { type: "image/png" }),
+    })
+    extractMock.mockResolvedValue({
+      ...imageResult(),
+      extractedContent: {
+        attachmentId: "staged",
+        contentHash: "a".repeat(64),
+        status: "partial",
+        segments: [],
+        processor: { id: "image", version: "1" },
+      },
+    })
+    mount()
+    await act(async () => captured.addFiles(prepared.files))
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    const state = captured.store.byId.get(captured.store.order[0]!)!
+    expect(state.extracted?.original).toBe(original)
+    expect(state.extracted?.extractedContent?.contentHash).toBe(await sha256Blob(original))
+    expect(new TextDecoder().decode(state.bytes)).toBe("original-image-bytes")
+  })
   it("marks a newly staged file as extracting, then ready with its token cost", async () => {
     mount()
     await act(async () => {
@@ -409,16 +435,32 @@ describe("StagedAttachmentsProvider — seeding a restored draft", () => {
   // filename instead, and must be queued BEFORE the file is staged.
   it("adopts a queued extraction instead of re-parsing the restored file", async () => {
     mount()
+    const source = txt("a.txt")
     const seeded = {
       status: "ready" as const,
       sizeBytes: 42,
-      extracted: docResult("from draft", 99),
+      extracted: {
+        ...docResult("from draft", 99),
+        extractedContent: {
+          attachmentId: "old-id",
+          contentHash: await sha256Blob(source),
+          status: "ready" as const,
+          segments: [
+            {
+              id: "body",
+              text: "from draft",
+              locator: { type: "text" as const, start: 0, end: 10 },
+            },
+          ],
+          processor: { id: "text", version: "1" },
+        },
+      },
     }
     await act(async () => {
       captured.store.seedIncoming([{ filename: "a.txt", sizeBytes: 42, state: seeded }])
-      captured.addFiles([txt("a.txt")])
+      captured.addFiles([source])
     })
-    await waitFor(() => expect(captured.store.order).toHaveLength(1))
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
     const id = captured.store.order[0]!
     expect(extractMock).not.toHaveBeenCalled()
     expect(captured.store.byId.get(id)?.sizeBytes).toBe(42)
@@ -443,10 +485,20 @@ describe("StagedAttachmentsProvider — seeding a restored draft", () => {
 
   it("consumes each queued entry only once", async () => {
     mount()
+    const source = txt("dup.txt")
     const seeded = {
       status: "ready" as const,
       sizeBytes: 7,
-      extracted: docResult("from draft", 3),
+      extracted: {
+        ...docResult("from draft", 3),
+        extractedContent: {
+          attachmentId: "old-id",
+          contentHash: await sha256Blob(source),
+          status: "ready" as const,
+          segments: [],
+          processor: { id: "text", version: "1" },
+        },
+      },
     }
     await act(async () => {
       captured.store.seedIncoming([{ filename: "dup.txt", sizeBytes: 7, state: seeded }])
@@ -456,6 +508,42 @@ describe("StagedAttachmentsProvider — seeding a restored draft", () => {
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready,ready"))
     // First file adopted the entry; the second had to be parsed for real.
     expect(extractMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("reparses legacy or mismatched draft caches instead of trusting filenames", async () => {
+    mount()
+    await act(async () => {
+      captured.store.seedIncoming([
+        {
+          filename: "legacy.txt",
+          sizeBytes: 9,
+          state: { status: "ready", sizeBytes: 9, extracted: docResult("stale") },
+        },
+        {
+          filename: "mismatch.txt",
+          sizeBytes: 9,
+          state: {
+            status: "ready",
+            sizeBytes: 9,
+            extracted: {
+              ...docResult("stale"),
+              extractedContent: {
+                attachmentId: "old",
+                contentHash: "a".repeat(64),
+                status: "ready",
+                segments: [],
+                processor: { id: "text", version: "1" },
+              },
+            },
+          },
+        },
+      ])
+      captured.addFiles([txt("legacy.txt"), txt("mismatch.txt")])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready,ready"))
+    expect(extractMock).toHaveBeenCalledTimes(2)
+    for (const state of captured.store.byId.values())
+      expect(state.extracted?.text).not.toBe("stale")
   })
 })
 
@@ -682,6 +770,55 @@ describe("StagedAttachmentsProvider — videos", () => {
     })
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
     expect(preprocessMock.mock.calls[0]![0].settings).toEqual(saved)
+  })
+
+  it("preserves verified transcripts when video sampling is changed and retried", async () => {
+    const source = clip()
+    const segment = {
+      id: "transcript",
+      text: "Release on Friday",
+      locator: { type: "time" as const, startSec: 1, endSec: 4 },
+      derivation: "transcription" as const,
+    }
+    const restoredContent = {
+      attachmentId: "old",
+      contentHash: await sha256Blob(source),
+      status: "partial" as const,
+      segments: [segment],
+      processor: { id: "transcriber", version: "1" },
+    }
+    preprocessMock.mockResolvedValue({ kind: "motion", result: videoResult() })
+    mount()
+    await act(async () => {
+      captured.store.seedIncoming([
+        {
+          filename: "clip.mp4",
+          sizeBytes: source.size,
+          state: { status: "ready", sizeBytes: source.size, restoredContent },
+        },
+      ])
+      captured.addFiles([source])
+    })
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    const id = captured.store.order[0]!
+    await act(async () =>
+      captured.store.applyVideoSettings(id, { ...DEFAULT_VIDEO_SETTINGS, frameCount: 3 })
+    )
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(captured.store.byId.get(id)?.extracted?.extractedContent?.segments).toEqual([segment])
+    expect(captured.store.byId.get(id)?.extracted?.video?.sampled.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          text: expect.stringContaining("Release on Friday"),
+        }),
+      ])
+    )
+    await act(async () => captured.store.retry(id))
+    await waitFor(() => expect(preprocessMock).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ready"))
+    expect(captured.store.byId.get(id)?.extracted?.extractedContent?.segments).toEqual([segment])
   })
 
   it("ignores applied settings for an unknown id", async () => {

@@ -590,7 +590,10 @@ describe("Composer — mobile (Claude-style) layout", () => {
 
     fireEvent.click(screen.getByTestId("composer-plus-toggle"))
 
-    expect(screen.getByRole("button", { name: "Toggle web search" })).toBeInTheDocument()
+    // The sheet's rows are menu items. With no search provider configured in
+    // this fixture the web row opens a setup card rather than toggling, so it
+    // carries the plain `menuitem` role rather than `menuitemcheckbox`.
+    expect(screen.getByRole("menuitem", { name: "Toggle web search" })).toBeInTheDocument()
     expect(screen.getByTestId("composer-skill-trigger")).toBeInTheDocument()
   })
 

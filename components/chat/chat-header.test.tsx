@@ -106,6 +106,16 @@ jest.mock("@/stores/ui", () => ({
     selector({ sidebarCollapsed, toggleSidebar }),
 }))
 
+// The slot renders null without registered extensions; a marker carrying the
+// real component's own attribute keeps the tests about *where the slot
+// mounts* honest without standing up the plugin manager — and without a
+// `data-testid`, which `countControls` would count as a chrome stub.
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({ point }: { point: string }) => (
+    <span data-plugin-extension-slot={point} />
+  ),
+}))
+
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { useChatStore } from "@/stores/chat"
@@ -612,9 +622,10 @@ describe("ChatHeader — title-bar projection", () => {
     const outlet = screen.getByTestId("center-outlet")
     expect(outlet).toContainElement(screen.getByTestId("chat-header"))
     expect(outlet).toHaveTextContent("Projected")
-    const summaryButton = screen.getByRole("button", { name: "Task summary" })
-    expect(outlet).not.toContainElement(summaryButton)
-    expect(screen.getByTestId("actions-outlet")).toContainElement(summaryButton)
+    // The summary opener moved off the title bar onto the pane surface
+    // (`chat-surface-stage` in `chat-view.tsx`), so the projected header emits
+    // no copy of it at all — only the pane actions still use the actions outlet.
+    expect(screen.queryByRole("button", { name: "Task summary" })).toBeNull()
     const splitButton = screen.getByRole("button", { name: /^split view$/i })
     expect(screen.getByTestId("actions-outlet")).toContainElement(splitButton)
     expect(outlet).not.toContainElement(splitButton)
@@ -626,7 +637,7 @@ describe("ChatHeader — title-bar projection", () => {
     expect(screen.queryByTestId("chat-artifact-dock-toggle")).toBeNull()
   })
 
-  it("shows only the focused conversation summary in the global right toolbar", () => {
+  it("projects only the focused pane's actions into the global right toolbar", () => {
     const Wrapper = withAdapter(makeAdapter())
     useChatStore.setState({ activeSessionId: "first" })
     const { unmount } = render(
@@ -646,18 +657,17 @@ describe("ChatHeader — title-bar projection", () => {
         </TitleBarOutletsProvider>
       </Wrapper>
     )
-    expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
+    // The summary opener is a pane-surface control now (`chat-view.tsx`), so
+    // neither projected header emits it — the actions outlet carries only the
+    // focused pane's split affordance.
+    expect(screen.queryByRole("button", { name: "Task summary" })).toBeNull()
     expect(screen.getByRole("button", { name: /^split view$/i })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /exit split view/i })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Task summary" }))
-    expect(screen.getByRole("dialog", { name: "Task summary" })).toBeVisible()
     act(() => useChatStore.setState({ activeSessionId: "second" }))
     expect(screen.getByTestId("actions-outlet")).toContainElement(
       screen.getByRole("button", { name: /exit split view/i })
     )
     expect(screen.queryByRole("button", { name: /^split view$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("dialog", { name: "Task summary" })).not.toBeInTheDocument()
-    expect(screen.getAllByRole("button", { name: "Task summary" })).toHaveLength(1)
     unmount()
     useChatStore.setState({ activeSessionId: null })
   })
@@ -674,5 +684,61 @@ describe("ChatHeader — title-bar projection", () => {
     )
     expect(container.querySelector("header")).not.toBeNull()
     expect(screen.getByTestId("center-outlet")).toBeEmptyDOMElement()
+  })
+
+  /** The marker the PluginExtensionSlot mock stamps, by extension point. */
+  const slot = (point: string) => document.querySelector(`[data-plugin-extension-slot="${point}"]`)
+
+  it("hosts the toolbar.* plugin slots inline inside the scope when no bar exists", () => {
+    // The web shell's default (`webTitleBarEnabled` off): the provider is up
+    // but no bar registered its outlets, so the header draws its own row —
+    // and becomes the host for the slots the bar carried.
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <TitleBarProjectionScope enabled>
+            <ChatHeader session={mkSession()} />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    const header = screen.getByTestId("chat-header")
+    for (const point of ["toolbar.left", "toolbar.center", "toolbar.right"]) {
+      expect(header.querySelector(`[data-plugin-extension-slot="${point}"]`)).not.toBeNull()
+    }
+  })
+
+  it("leaves the toolbar.* slots to the bar while projected", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <TitleBarOutletsProvider>
+          <CenterOutlet />
+          <TitleBarProjectionScope enabled>
+            <ChatHeader session={mkSession()} />
+          </TitleBarProjectionScope>
+        </TitleBarOutletsProvider>
+      </Wrapper>
+    )
+    expect(slot("toolbar.left")).toBeNull()
+    expect(slot("toolbar.center")).toBeNull()
+    expect(slot("toolbar.right")).toBeNull()
+  })
+
+  it("does not host the toolbar.* slots outside the projection scope", () => {
+    // Inbox detail / Canvas sidechat / the mobile Sheet: the header there is
+    // plain content chrome, not the shell's — the slots stay the bar's.
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(slot("toolbar.left")).toBeNull()
+    expect(slot("toolbar.center")).toBeNull()
+    expect(slot("toolbar.right")).toBeNull()
+    // The chat-local slot is unaffected either way.
+    expect(slot("chat.header")).not.toBeNull()
   })
 })

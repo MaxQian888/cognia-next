@@ -1,5 +1,10 @@
 import { InlineCompletionEngine, type InlineScheduler } from "./engine"
-import type { InlineCompletionContext, InlineCompletionProvider, InlineSuggestion } from "./types"
+import type {
+  InlineCompletionContext,
+  InlineCompletionProvider,
+  InlineEmitFn,
+  InlineSuggestion,
+} from "./types"
 
 /** Drain the microtask queue so provider promises settle. */
 const drain = () => new Promise<void>((resolve) => setImmediate(resolve))
@@ -70,6 +75,36 @@ function manualProvider(
   produce: (ctx: InlineCompletionContext) => Promise<InlineSuggestion[]>
 ): InlineCompletionProvider {
   return { id, label: id, priority: 20, manual: true, getCompletions: (ctx) => produce(ctx) }
+}
+
+/** An async provider whose `produce` also receives the engine's partial channel. */
+function emittingProvider(
+  id: string,
+  produce: (ctx: InlineCompletionContext, emit: InlineEmitFn) => Promise<InlineSuggestion[]>
+): InlineCompletionProvider {
+  return {
+    id,
+    label: id,
+    priority: 30,
+    sync: false,
+    getCompletions: (ctx, _signal, emit) => produce(ctx, emit ?? (() => {})),
+  }
+}
+
+/** An ai-source candidate with a stable id, as a streaming provider emits it. */
+function streamHit(providerId: string, text: string): InlineSuggestion {
+  return { id: `${providerId}:0`, text, source: "ai", providerId, score: 0.9 }
+}
+
+/** A promise plus the resolve handle, for a provider call the test completes by hand. */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 function agentHit(text: string): InlineSuggestion {
@@ -809,5 +844,301 @@ describe("InlineCompletionEngine — manual tier", () => {
     engine.requestManual()
     await drain()
     expect(calls).toBe(1)
+  })
+})
+
+describe("InlineCompletionEngine — streaming partials", () => {
+  it("paints emitted partials before the call settles", async () => {
+    const call = deferred<InlineSuggestion[]>()
+    const { engine, scheduler } = build([
+      emittingProvider("async", async (_ctx, emit) => {
+        emit([streamHit("async", "fix the")])
+        emit([streamHit("async", "fix the build")])
+        return call.promise
+      }),
+    ])
+    engine.feed("fix ")
+    // `querying` is true only once the debounce has fired — the armed timer
+    // alone must not flash a "thinking" state on every keystroke.
+    expect(engine.getView().querying).toBe(false)
+    await scheduler.advance(DEBOUNCE)
+    expect(engine.getView().querying).toBe(true)
+    expect(engine.getView().ghost).toBe("the build")
+    expect(engine.getView().streaming).toBe(true)
+
+    call.resolve([streamHit("async", "fix the build please")])
+    await drain()
+    expect(engine.getView().ghost).toBe("the build please")
+    expect(engine.getView().streaming).toBe(false)
+    expect(engine.getView().querying).toBe(false)
+  })
+
+  it("keeps a cycled-to streaming candidate pinned as its text grows", async () => {
+    const calls = deferred<InlineSuggestion[]>()
+    let emitA: InlineEmitFn = () => {}
+    let emitB: InlineEmitFn = () => {}
+    const { engine, scheduler } = build([
+      emittingProvider("a", async (_ctx, emit) => {
+        emitA = emit
+        emit([streamHit("a", "fix alpha")])
+        return calls.promise
+      }),
+      emittingProvider("b", async (_ctx, emit) => {
+        emitB = emit
+        emit([streamHit("b", "fix beta")])
+        return calls.promise
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+
+    // Both streamers are ranked ai-source; `b` sits second (arrival order).
+    // Cycle onto it — the pin must ride on its stable `id`, because its `text`
+    // is about to mutate.
+    engine.cycleTo(1)
+    expect(engine.getView().suggestion?.providerId).toBe("b")
+    emitB([streamHit("b", "fix beta and more")])
+    await drain()
+    // With text-keyed pinning this emit would have lost the pin ("fix beta" ≠
+    // "fix beta and more") and snapped the view back to index 0.
+    expect(engine.getView().suggestion?.text).toBe("fix beta and more")
+    expect(engine.getView().suggestion?.providerId).toBe("b")
+    // And the pin also survives a grow that temporarily drops the candidate
+    // out of the ranked list (draft moved past it is covered separately; here
+    // a sibling simply emits again).
+    emitA([streamHit("a", "fix alpha extended")])
+    await drain()
+    expect(engine.getView().suggestion?.providerId).toBe("b")
+
+    calls.resolve([])
+    await drain()
+  })
+
+  it("routes each emission to the provider that made it", async () => {
+    const callA = deferred<InlineSuggestion[]>()
+    const callB = deferred<InlineSuggestion[]>()
+    const { engine, scheduler } = build([
+      emittingProvider("a", async (_ctx, emit) => {
+        emit([streamHit("a", "fix alpha")])
+        return callA.promise
+      }),
+      emittingProvider("b", async (_ctx, emit) => {
+        emit([streamHit("b", "fix beta")])
+        return callB.promise
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    const texts = engine.getView().candidates.map((c) => c.text)
+    expect(texts).toEqual(expect.arrayContaining(["fix alpha", "fix beta"]))
+    callA.resolve([streamHit("a", "fix alpha")])
+    callB.resolve([streamHit("b", "fix beta")])
+    await drain()
+    expect(engine.getView().candidates.map((c) => c.text)).toEqual(
+      expect.arrayContaining(["fix alpha", "fix beta"])
+    )
+  })
+
+  it("ignores partials emitted by a run that was superseded", async () => {
+    let staleEmit: InlineEmitFn = () => {}
+    const calls: string[] = []
+    const { engine, scheduler } = build([
+      emittingProvider("async", async (ctx, emit) => {
+        calls.push(ctx.draft)
+        if (calls.length === 1) staleEmit = emit
+        return [aiHit(`${ctx.draft}!`)]
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    // Diverge — the first run is aborted; its late emit must not resurrect a
+    // candidate for the old draft.
+    engine.feed("fix z")
+    await scheduler.advance(DEBOUNCE)
+    staleEmit([streamHit("async", "fix the stale ghost")])
+    await drain()
+    expect(engine.getView().ghost).toBe("!")
+    expect(engine.getView().candidates.map((c) => c.text)).toEqual(["fix z!"])
+  })
+
+  it("keeps an in-flight candidate when the draft moves past its partial", async () => {
+    const call = deferred<InlineSuggestion[]>()
+    let emitNow: InlineEmitFn = () => {}
+    const calls: string[] = []
+    const { engine, scheduler } = build([
+      emittingProvider("async", async (ctx, emit) => {
+        calls.push(ctx.draft)
+        emitNow = emit
+        emit([streamHit("async", "fix the")])
+        return call.promise
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    expect(engine.getView().ghost).toBe("the")
+
+    // The user types AHEAD of the streamed prefix. Strict `extendsDraft` would
+    // kill the candidate and re-bill; the relaxed narrow keeps the run alive —
+    // but the prefix is not a usable completion yet, so nothing is painted and
+    // nothing can be accepted.
+    engine.feed("fix the b")
+    await drain()
+    expect(calls).toEqual(["fix "])
+    expect(engine.getView().ghost).toBe("")
+    expect(engine.accept()).toBeNull()
+
+    // The stream catches up and the candidate reappears without a re-query.
+    emitNow([streamHit("async", "fix the build")])
+    await drain()
+    expect(engine.getView().ghost).toBe("uild")
+    call.resolve([streamHit("async", "fix the build")])
+    await drain()
+    expect(engine.getView().ghost).toBe("uild")
+    expect(calls).toEqual(["fix "])
+  })
+
+  it("re-arms the timeout watchdog on every emitted partial", async () => {
+    const { engine, scheduler } = build(
+      [
+        emittingProvider(
+          "async",
+          (_ctx, emit) =>
+            new Promise<InlineSuggestion[]>((resolve) => {
+              // Chunks 900ms apart under a 1s watchdog: each re-arms it, so the
+              // stream is alive the whole time — the watchdog bounds SILENCE,
+              // not total duration.
+              scheduler.set(() => emit([streamHit("async", "fix a")]), 900)
+              scheduler.set(() => emit([streamHit("async", "fix ab")]), 1800)
+              scheduler.set(() => resolve([streamHit("async", "fix abc")]), 2500)
+            })
+        ),
+      ],
+      { providerTimeoutMs: 1_000 }
+    )
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await scheduler.advance(2_500)
+    expect(engine.getView().ghost).toBe("abc")
+    expect(engine.getView().completionError).toBe(false)
+  })
+})
+
+describe("InlineCompletionEngine — failure and retry", () => {
+  it("flags a provider throw as a completion error, not silence", async () => {
+    const { engine, scheduler } = build([
+      asyncProvider("async", async () => {
+        throw new Error("upstream down")
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await drain()
+    expect(engine.getView().ghost).toBe("")
+    expect(engine.getView().completionError).toBe(true)
+    expect(engine.getView().querying).toBe(false)
+  })
+
+  it("flags a timeout as a completion error", async () => {
+    const { engine, scheduler } = build(
+      [asyncProvider("hang", () => new Promise<InlineSuggestion[]>(() => {}))],
+      { providerTimeoutMs: 1_000 }
+    )
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await scheduler.advance(1_000)
+    expect(engine.getView().completionError).toBe(true)
+  })
+
+  it("retry() re-runs the failed round immediately, bypassing the debounce", async () => {
+    let calls = 0
+    const { engine, scheduler } = build([
+      asyncProvider("async", async (ctx) => {
+        calls += 1
+        if (calls === 1) throw new Error("blip")
+        return [aiHit(`${ctx.draft}fixed`)]
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await drain()
+    expect(engine.getView().completionError).toBe(true)
+
+    engine.retry()
+    // No debounce wait — the user already asked.
+    await drain()
+    expect(calls).toBe(2)
+    expect(engine.getView().ghost).toBe("fixed")
+    expect(engine.getView().completionError).toBe(false)
+  })
+
+  it("does not cache a failed round — the same draft is queryable again", async () => {
+    let calls = 0
+    const { engine, scheduler } = build(
+      [
+        asyncProvider("async", async (ctx) => {
+          calls += 1
+          if (calls === 1) throw new Error("blip")
+          return [aiHit(`${ctx.draft}back`)]
+        }),
+      ],
+      { cacheTtlMs: 60_000 }
+    )
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await drain()
+    engine.feed("other")
+    await scheduler.advance(DEBOUNCE)
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    await drain()
+    // Three queries, not two — the failure was never written to the cache.
+    expect(calls).toBe(3)
+    expect(engine.getView().ghost).toBe("back")
+  })
+
+  it("retry() is a no-op when nothing failed or a run is in flight", async () => {
+    const call = deferred<InlineSuggestion[]>()
+    let calls = 0
+    const { engine, scheduler } = build([
+      asyncProvider("async", async (ctx) => {
+        calls += 1
+        void ctx
+        return call.promise
+      }),
+    ])
+    engine.feed("fix ")
+    await scheduler.advance(DEBOUNCE)
+    engine.retry()
+    await drain()
+    expect(calls).toBe(1)
+
+    call.resolve([])
+    await drain()
+    // A settled empty round is not a failure — retry stays inert.
+    engine.retry()
+    await drain()
+    expect(calls).toBe(1)
+  })
+
+  it("re-runs a failed manual round from retry()", async () => {
+    let calls = 0
+    const { engine } = build([
+      manualProvider("manual", async () => {
+        calls += 1
+        if (calls === 1) throw new Error("turn failed")
+        return [agentHit("deploy now")]
+      }),
+    ])
+    engine.feed("deploy ")
+    await drain()
+    engine.requestManual()
+    await drain()
+    expect(engine.getView().completionError).toBe(true)
+    expect(engine.getView().manualPending).toBe(false)
+
+    engine.retry()
+    await drain()
+    expect(calls).toBe(2)
+    expect(engine.getView().ghost).toBe("now")
   })
 })

@@ -48,6 +48,7 @@ export interface PDFMetadata {
 }
 
 export interface PDFParseOptions {
+  signal?: AbortSignal
   password?: string
   startPage?: number
   endPage?: number
@@ -81,6 +82,7 @@ export async function parsePDF(
   data: ArrayBuffer,
   options: PDFParseOptions = {}
 ): Promise<PDFParseResult> {
+  options.signal?.throwIfAborted()
   // The native path parses whole documents only; page ranges and
   // outline/annotation extraction are pdfjs-specific features.
   const nativeEligible =
@@ -96,6 +98,7 @@ export async function parsePDF(
       const native = await parsePdfNative(new Uint8Array(data), {
         ...(options.password !== undefined ? { password: options.password } : {}),
       })
+      options.signal?.throwIfAborted()
       if (native.text.trim().length < SPARSE_TEXT_THRESHOLD) {
         native.diagnostics = [
           ...(native.diagnostics ?? []),
@@ -109,6 +112,7 @@ export async function parsePDF(
       }
       return native
     } catch (err) {
+      options.signal?.throwIfAborted()
       const message = err instanceof Error ? err.message : String(err)
       // `unsupported` = the parse-liteparse feature isn't compiled in.
       // That's an expected capability gap, not a failure — stay silent.
@@ -131,84 +135,104 @@ export async function parsePDF(
     pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
   }
 
-  const docParams: Record<string, unknown> = { data }
+  const docParams: Record<string, unknown> = { data: data.slice(0) }
   if (options.password) {
     docParams.password = options.password
   }
 
   const loadingTask = pdfjsLib.getDocument(docParams)
-  const pdf = await loadingTask.promise
+  let destruction: Promise<void> | undefined
+  const destroy = () => (destruction ??= loadingTask.destroy())
+  const cancelLoading = () => {
+    void destroy().catch(() => undefined)
+  }
+  options.signal?.addEventListener("abort", cancelLoading, { once: true })
+  let pdf
+  try {
+    pdf = await loadingTask.promise
+    options.signal?.throwIfAborted()
 
-  const startPage = Math.max(1, options.startPage ?? 1)
-  const endPage = Math.min(pdf.numPages, options.endPage ?? pdf.numPages)
+    const startPage = Math.max(1, options.startPage ?? 1)
+    const endPage = Math.min(pdf.numPages, options.endPage ?? pdf.numPages)
 
-  const pages: PDFPage[] = []
-  const textParts: string[] = []
-  const allAnnotations: PDFAnnotation[] = []
+    const pages: PDFPage[] = []
+    const textParts: string[] = []
+    const allAnnotations: PDFAnnotation[] = []
 
-  // Extract text from each page with layout-aware paragraph detection
-  for (let i = startPage; i <= endPage; i++) {
-    const page = await pdf.getPage(i)
-    const textContent = await page.getTextContent()
-    const viewport = page.getViewport({ scale: 1.0 })
+    // Extract text from each page with layout-aware paragraph detection
+    for (let i = startPage; i <= endPage; i++) {
+      options.signal?.throwIfAborted()
+      const page = await pdf.getPage(i)
+      try {
+        const textContent = await page.getTextContent()
+        options.signal?.throwIfAborted()
+        const viewport = page.getViewport({ scale: 1.0 })
 
-    const pageText = extractTextWithLayout(textContent, viewport.height)
+        const pageText = extractTextWithLayout(textContent, viewport.height)
 
-    pages.push({
-      pageNumber: i,
-      text: pageText,
-      width: viewport.width,
-      height: viewport.height,
-    })
+        pages.push({
+          pageNumber: i,
+          text: pageText,
+          width: viewport.width,
+          height: viewport.height,
+        })
 
-    textParts.push(pageText)
+        textParts.push(pageText)
 
-    // Extract annotations if requested
-    if (options.extractAnnotations) {
-      const pageAnnotations = await extractPageAnnotations(page, i)
-      allAnnotations.push(...pageAnnotations)
+        // Extract annotations if requested
+        if (options.extractAnnotations) {
+          const pageAnnotations = await extractPageAnnotations(page, i)
+          allAnnotations.push(...pageAnnotations)
+        }
+      } finally {
+        page.cleanup?.()
+      }
     }
-  }
 
-  // Extract metadata
-  const metadataObj = await pdf.getMetadata()
-  const info = metadataObj.info as Record<string, unknown>
+    // Extract metadata
+    const metadataObj = await pdf.getMetadata()
+    const info = metadataObj.info as Record<string, unknown>
 
-  const metadata: PDFMetadata = {
-    title: info?.Title as string | undefined,
-    author: info?.Author as string | undefined,
-    subject: info?.Subject as string | undefined,
-    keywords: info?.Keywords as string | undefined,
-    creator: info?.Creator as string | undefined,
-    producer: info?.Producer as string | undefined,
-    creationDate: info?.CreationDate ? parseDate(info.CreationDate as string) : undefined,
-    modificationDate: info?.ModDate ? parseDate(info.ModDate as string) : undefined,
-  }
+    const metadata: PDFMetadata = {
+      title: info?.Title as string | undefined,
+      author: info?.Author as string | undefined,
+      subject: info?.Subject as string | undefined,
+      keywords: info?.Keywords as string | undefined,
+      creator: info?.Creator as string | undefined,
+      producer: info?.Producer as string | undefined,
+      creationDate: info?.CreationDate ? parseDate(info.CreationDate as string) : undefined,
+      modificationDate: info?.ModDate ? parseDate(info.ModDate as string) : undefined,
+    }
 
-  // Extract outline/bookmarks if requested
-  let outline: PDFOutlineItem[] | undefined
-  if (options.extractOutline) {
-    outline = await extractOutline(pdf)
-  }
+    // Extract outline/bookmarks if requested
+    let outline: PDFOutlineItem[] | undefined
+    if (options.extractOutline) {
+      outline = await extractOutline(pdf)
+    }
 
-  const result: PDFParseResult = {
-    text: textParts.join("\n\n"),
-    pageCount: pdf.numPages,
-    pages,
-    metadata,
-  }
+    const result: PDFParseResult = {
+      text: textParts.join("\n\n"),
+      pageCount: pdf.numPages,
+      pages,
+      metadata,
+    }
 
-  if (outline && outline.length > 0) {
-    result.outline = outline
-  }
-  if (allAnnotations.length > 0) {
-    result.annotations = allAnnotations
-  }
-  if (fallbackDiagnostic) {
-    result.diagnostics = [fallbackDiagnostic]
-  }
+    if (outline && outline.length > 0) {
+      result.outline = outline
+    }
+    if (allAnnotations.length > 0) {
+      result.annotations = allAnnotations
+    }
+    if (fallbackDiagnostic) {
+      result.diagnostics = [fallbackDiagnostic]
+    }
 
-  return result
+    options.signal?.throwIfAborted()
+    return result
+  } finally {
+    options.signal?.removeEventListener("abort", cancelLoading)
+    await destroy()
+  }
 }
 
 /**

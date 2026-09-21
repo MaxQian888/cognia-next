@@ -29,7 +29,10 @@ jest.mock("../composer-chip-overlay", () => ({
   OVERLAY_FONT_SIZE: "var(--composer-text-size, 0.875rem)",
 }))
 jest.mock("./composer-ghost-text", () => ({ ComposerGhostText: () => null }))
-jest.mock("./mobile-ghost-accept", () => ({ MobileGhostAccept: () => null }))
+jest.mock("./composer-ghost-card", () => ({
+  ComposerGhostCard: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="composer-ghost-card" /> : null,
+}))
 jest.mock("./drag-overlay", () => ({
   DragOverlay: ({ visible }: { visible: boolean }) =>
     visible ? <div data-testid="drag-overlay" /> : null,
@@ -55,7 +58,20 @@ function props(overrides: Partial<ComposerBoxProps> = {}): ComposerBoxProps {
     onSelect: jest.fn(),
     onCompositionStart: jest.fn(),
     onCompositionEnd: jest.fn(),
-    ghost: { ghost: "", candidates: [], index: 0, dismiss: jest.fn() },
+    ghost: {
+      ghost: "",
+      suggestion: null,
+      candidates: [],
+      index: 0,
+      querying: false,
+      streaming: false,
+      completionError: false,
+      dismiss: jest.fn(),
+      cycleNext: jest.fn(),
+      cyclePrev: jest.fn(),
+      cycleTo: jest.fn(),
+      retry: jest.fn(),
+    },
     acceptGhost: jest.fn(),
     fileInputRef: createRef<HTMLInputElement>(),
     attachmentAccept: "image/*",
@@ -112,6 +128,25 @@ describe("ComposerBox — arrangement", () => {
   it("opts the surface into the wallpaper-aware tonality system", () => {
     render(<ComposerBox {...props()} />)
     expect(box()).toHaveAttribute("data-tonality", "translucent")
+  })
+
+  it("renders the context row inside the card, ahead of the textarea", () => {
+    render(
+      <ComposerBox
+        {...props({ contextRow: <div data-testid="context-row-content">staged tiles</div> })}
+      />
+    )
+    const row = screen.getByTestId("context-row-content")
+    expect(box()).toContainElement(row)
+    // First full-width flex row: it must precede the textarea's wrapper in
+    // the box (default order 0 vs the textarea wrapper's order-1).
+    const textarea = screen.getByRole("textbox")
+    expect(row.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("omits the context row's wrapper entirely when nothing is staged", () => {
+    render(<ComposerBox {...props({ contextRow: null })} />)
+    expect(screen.queryByTestId("context-row-content")).not.toBeInTheDocument()
   })
 })
 

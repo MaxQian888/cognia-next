@@ -10,6 +10,9 @@ jest.mock("sonner", () => ({
 }))
 
 jest.mock("@/components/ai-elements/speech-input", () => ({
+  detectSpeechInputMode: () =>
+    ((globalThis as Record<string, unknown>).__mockSpeechMode as string | undefined) ??
+    "speech-recognition",
   SpeechInput: (props: Record<string, unknown>) => {
     const onListeningChange = props.onListeningChange as ((listening: boolean) => void) | undefined
     const onError = props.onError as ((error: string) => void) | undefined
@@ -105,6 +108,7 @@ describe("VoiceControls", () => {
     jest.clearAllMocks()
     micPermission.state = "prompt"
     micDevices.length = 0
+    delete (globalThis as Record<string, unknown>).__mockSpeechMode
   })
 
   it("renders both the SpeechInput button and the settings popover trigger", () => {
@@ -130,6 +134,15 @@ describe("VoiceControls", () => {
     const status = screen.getByRole("status")
     expect(status).toHaveTextContent("listening")
     expect(screen.getByTestId("speech-input")).toHaveAttribute("aria-label", "stopListening")
+  })
+
+  it("labels the mic as unsupported when Speech Recognition is unavailable", () => {
+    ;(globalThis as Record<string, unknown>).__mockSpeechMode = "none"
+    renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+    const input = screen.getByTestId("speech-input")
+    expect(input).toHaveAttribute("aria-label", "errors.unsupported")
+    // The disabled button is wrapped so the tooltip explaining why can fire.
+    expect(input.parentElement?.tagName).toBe("SPAN")
   })
 
   it("maps speech errors to localized toasts", async () => {

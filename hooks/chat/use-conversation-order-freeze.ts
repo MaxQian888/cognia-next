@@ -45,6 +45,12 @@ export interface UseConversationOrderFreezeParams {
    * own ordering stories, and a freeze on top of either would be a third.
    */
   disabled?: boolean
+  /**
+   * Keep group headers whose rows all left — the scope tree's squad groups
+   * are navigation entities, not just buckets, so an empty one must not
+   * flicker out while the pointer is still over the list.
+   */
+  preserveEmptyGroups?: boolean
 }
 
 /** Sections to render: the held order while hovering, the live ones otherwise. */
@@ -52,6 +58,7 @@ export function useConversationOrderFreeze({
   sections,
   hovering,
   disabled = false,
+  preserveEmptyGroups = false,
 }: UseConversationOrderFreezeParams): readonly ConversationSection[] {
   const shouldFreeze = !disabled && hovering
   const [held, setHeld] = useState<FrozenConversationLayout | null>(null)
@@ -74,7 +81,7 @@ export function useConversationOrderFreeze({
   }
 
   return useMemo(
-    () => (layout ? projectFrozenSections(layout, sections) : sections),
-    [layout, sections]
+    () => (layout ? projectFrozenSections(layout, sections, { preserveEmptyGroups }) : sections),
+    [layout, sections, preserveEmptyGroups]
   )
 }

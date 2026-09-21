@@ -179,6 +179,22 @@ describe("ContextUsageIndicator", () => {
     // metadata lifts it to 500k.
     expect(node).toHaveAttribute("data-max-tokens", "500000")
   })
+
+  it("waits for a deliberate hover before opening the card", () => {
+    jest.useFakeTimers()
+    try {
+      render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+      const trigger = screen.getByTestId("context-trigger")
+      fireEvent.pointerEnter(trigger)
+      // A pointer sweeping across the toolbar must not flash the card.
+      act(() => jest.advanceTimersByTime(499))
+      expect(trigger).toHaveAttribute("data-state", "closed")
+      act(() => jest.advanceTimersByTime(1))
+      expect(trigger).toHaveAttribute("data-state", "open")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })
 
 describe("ContextWindowHeader", () => {
