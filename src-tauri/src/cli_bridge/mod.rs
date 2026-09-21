@@ -320,7 +320,7 @@ pub fn generate_dev_token() -> String {
 
 /// Compute the endpoint-file path under the user's config directory.
 pub fn endpoint_file_path() -> Option<PathBuf> {
-    directories::BaseDirs::new().map(|d| d.config_dir().join(ENDPOINT_FILE_REL))
+    dirs::config_dir().map(|d| d.join(ENDPOINT_FILE_REL))
 }
 
 /// Write `cli-endpoint.json` so the CLI can discover us. Best-effort —

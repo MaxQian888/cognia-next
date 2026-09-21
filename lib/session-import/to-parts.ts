@@ -6,6 +6,7 @@
 // directly.
 
 import type { UIMessage } from "ai"
+import { buildHandoffContext } from "@/lib/chat/handoff-context"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 type Part = UIMessage["parts"][number]
@@ -110,35 +111,9 @@ export function buildMessage(opts: {
   }
 }
 
-/**
- * Render a plain-text transcript of the imported turns for the branch seed, so
- * continuing an imported session carries its pre-import context into the first
- * send (consumed by `resolveSendOptions`). Tool calls collapse to a one-line
- * marker; images to a placeholder.
- */
+/** Project imported history through the shared, budgeted handoff serializer. */
 export function renderTranscriptSeed(messages: StoredMessage[], maxChars = 12_000): string {
-  const blocks: string[] = []
-  for (const m of messages) {
-    const label = m.role === "user" ? "USER" : m.role === "assistant" ? "ASSISTANT" : "SYSTEM"
-    const body = (m.parts as Array<Record<string, unknown>>)
-      .map((p) => partToText(p))
-      .filter(Boolean)
-      .join("\n")
-    if (body) blocks.push(`${label}:\n${body}`)
-  }
-  const joined = blocks.join("\n\n")
-  return joined.length > maxChars ? joined.slice(joined.length - maxChars) : joined
-}
-
-function partToText(p: Record<string, unknown>): string {
-  const type = typeof p.type === "string" ? p.type : ""
-  if (type === "text" || type === "reasoning") return typeof p.text === "string" ? p.text : ""
-  if (type === "file") return "[file]"
-  if (type.startsWith("tool-")) {
-    const name = type.slice("tool-".length)
-    return `[tool: ${name}]`
-  }
-  return ""
+  return buildHandoffContext(messages, { maxChars }).text
 }
 
 /**

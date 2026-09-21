@@ -129,6 +129,13 @@ export interface ImportedSessionGraph {
   nodes: ImportedSessionGraphNode[]
 }
 
+/** A selected session that could not be parsed; retained for an actionable result. */
+export interface SessionImportFailure {
+  ref: SessionRef
+  code: "source-unavailable" | "parse-failed"
+  message?: string
+}
+
 /** Per-session provenance shown after import and retained independently of the aggregate. */
 export interface SessionImportDetail {
   sourceId: string

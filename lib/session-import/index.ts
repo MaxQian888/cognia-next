@@ -1,6 +1,7 @@
 // Public surface for the external-agent session-history import subsystem.
 // See ADR-0062.
 
+import { buildHandoffContext } from "@/lib/chat/handoff-context"
 import { applyImported } from "@/lib/data/import-registry"
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import { resolveHome } from "@/lib/memory/external/home"
@@ -13,6 +14,7 @@ import type {
   ImportedSessionGraphNode,
   ImportOptions,
   SessionRef,
+  SessionImportFailure,
   SessionScanInput,
   SessionSummary,
 } from "./types"
@@ -82,6 +84,7 @@ export type {
   ImportedSessionGraph,
   ImportedSessionGraphNode,
   SessionImportDetail,
+  SessionImportFailure,
 } from "./types"
 
 /**
@@ -157,9 +160,16 @@ async function parseRefConversations(
   conversations: ImportedConversation[]
   canonicalNodes: ImportedSessionGraphNode[]
   parsed: boolean
+  failure?: SessionImportFailure
 }> {
   const source = getSessionSource(ref.sourceId)
-  if (!source) return { conversations: [], canonicalNodes: [], parsed: false }
+  if (!source)
+    return {
+      conversations: [],
+      canonicalNodes: [],
+      parsed: false,
+      failure: { ref, code: "source-unavailable" },
+    }
   try {
     const richGraph = source.parseGraph
       ? await source.parseGraph(ref, input, { singleFile })
@@ -235,6 +245,27 @@ async function parseRefConversations(
       const target = node.conversation.session
       if (header.runtimeBinding) target.importRuntimeBinding = header.runtimeBinding
       target.importCanonicalState = canonicalStateFromSession(node.session)
+      if (target.kind !== "subagent" && header.lineage?.kind !== "subagent") {
+        // Historical state is reference context only. Never restore permissions
+        // or start imported tasks/goals merely because their records exist.
+        const {
+          permissions: _permissions,
+          recordedEvents: _events,
+          ...state
+        } = target.importCanonicalState
+        const context = buildHandoffContext(node.conversation.messages, {
+          maxChars: 12_000,
+          state: Object.values(state).some((entries) => entries?.length) ? state : undefined,
+        })
+        if (context.text) target.branchSeed = { kind: "transcript", content: context.text }
+        for (const loss of context.losses) {
+          node.loss.losses.push({
+            path: `continuation.${loss.messageId}`,
+            kind: "summarized",
+            detail: loss.detail,
+          })
+        }
+      }
       target.importLossReport = node.loss
       if (header.lineage) {
         target.importRelation = header.lineage
@@ -295,9 +326,17 @@ async function parseRefConversations(
       canonicalNodes,
       parsed: true,
     }
-  } catch {
-    // Skip a session that fails to parse.
-    return { conversations: [], canonicalNodes: [], parsed: false }
+  } catch (error) {
+    return {
+      conversations: [],
+      canonicalNodes: [],
+      parsed: false,
+      failure: {
+        ref,
+        code: "parse-failed",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }
   }
 }
 
@@ -366,6 +405,7 @@ export async function importSessions(
   >
   /** Session-level provenance and fidelity; unlike lossBySource this preserves graph identity. */
   details: import("./types").SessionImportDetail[]
+  failures?: SessionImportFailure[]
 }> {
   const { signal, onProgress, onRefParsed, chunkSize = DEFAULT_IMPORT_CHUNK, singleFile } = opts
   const total = refs.length
@@ -381,6 +421,7 @@ export async function importSessions(
     import("@cognia/agent-config-types/canonical-session").SessionLossReport
   > = {}
   const details: import("./types").SessionImportDetail[] = []
+  const failures: SessionImportFailure[] = []
 
   const flush = async () => {
     if (buffer.length === 0) return
@@ -400,6 +441,7 @@ export async function importSessions(
     if (signal?.aborted) break
     await budget()
     const parsedRef = await parseRefConversations(ref, input, projectId, singleFile)
+    if (parsedRef.failure) failures.push(parsedRef.failure)
     const conversations = parsedRef.conversations
     buffer.push(...conversations)
     if (parsedRef.parsed) onRefParsed?.(ref)
@@ -448,5 +490,5 @@ export async function importSessions(
   }
   // Persist whatever is buffered — including partial work when aborted.
   await flush()
-  return { sessions, messages, lossBySource, details }
+  return { sessions, messages, lossBySource, details, ...(failures.length ? { failures } : {}) }
 }

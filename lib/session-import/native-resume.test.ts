@@ -81,6 +81,23 @@ describe("resumeImportedSessionNative", () => {
     expect(resumeSession).not.toHaveBeenCalled()
   })
 
+  it("refuses ambiguous connected instances instead of selecting another account", async () => {
+    const result = await resumeImportedSessionNative(imported(), {
+      manager: {
+        getAllAgents: () => [
+          agent(),
+          agent({ config: { id: "agent-2", metadata: { preset: "codex" } } }),
+        ],
+        resumeSession,
+      },
+      fs: { exists },
+      bind,
+    })
+    expect(result).toMatchObject({ ok: false, code: "runtime-ambiguous" })
+    expect(resumeSession).not.toHaveBeenCalled()
+    expect(bind).not.toHaveBeenCalled()
+  })
+
   it("refuses a missing working directory", async () => {
     exists.mockResolvedValue(false)
     const result = await resumeImportedSessionNative(imported(), {

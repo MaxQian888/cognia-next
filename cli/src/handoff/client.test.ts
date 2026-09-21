@@ -54,7 +54,11 @@ describe("detectDesktop", () => {
 
 describe("pushHandoff", () => {
   it("POSTs the payload with the dev token and resolves on 2xx", async () => {
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200 })
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, result: { sessionId: "actual-id", persisted: true } }),
+    })
     const res = await pushHandoff(
       ENDPOINT,
       {
@@ -65,12 +69,26 @@ describe("pushHandoff", () => {
       },
       { fetch: fetchMock as unknown as typeof fetch }
     )
-    expect(res).toEqual({ ok: true, sessionId: "s_1" })
+    expect(res).toEqual({ ok: true, sessionId: "actual-id" })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${ENDPOINT.baseUrl}${HANDOFF_PATH}`)
     expect(init.method).toBe("POST")
     expect(init.headers[DEV_TOKEN_HEADER]).toBe("tok123")
     expect(JSON.parse(init.body)).toMatchObject({ sessionId: "s_1", title: "T" })
+  })
+
+  it("rejects an old best-effort acknowledgement", async () => {
+    await expect(
+      pushHandoff(
+        ENDPOINT,
+        { sessionId: "s", messages: [] },
+        {
+          fetch: jest
+            .fn()
+            .mockResolvedValue({ ok: true, json: async () => ({ ok: true, sessionId: "s" }) }),
+        }
+      )
+    ).rejects.toThrow("did not confirm persisted import")
   })
 
   it("throws on a non-2xx response", async () => {

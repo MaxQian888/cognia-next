@@ -162,6 +162,28 @@ describe("session-import runner", () => {
     expect(parsedRefs).toEqual(["ok"])
   })
 
+  it("returns the failed ref and parse reason without losing successful imports", async () => {
+    registerSessionSource(source("ok", 0), { pluginId: "p" })
+    registerSessionSource(
+      {
+        ...source("bad", 0),
+        parseSession: async () => {
+          throw new Error("corrupt transcript")
+        },
+      },
+      { pluginId: "p" }
+    )
+    const badRef = { sourceId: "p:bad", originalSessionId: "bad", locator: "/bad.jsonl" }
+    const result = await importSessions(
+      [{ sourceId: "p:ok", originalSessionId: "ok", locator: "ok" }, badRef],
+      input
+    )
+    expect(result.sessions).toBe(1)
+    expect(result.failures).toEqual([
+      { ref: badRef, code: "parse-failed", message: "corrupt transcript" },
+    ])
+  })
+
   it("flattens nested subagent conversations and stamps their projectId", async () => {
     const nesting: AgentSessionSourceAdapter = {
       ...source("nest", 1),
@@ -313,6 +335,14 @@ describe("session-import runner", () => {
       { taskId: "task-bg", status: "completed", summary: "Background research complete" },
     ]
     childCanonical.session.plans = [{ planId: "plan-bg", steps: ["inspect", "report"] }]
+    childCanonical.session.permissions = [
+      { toolCallId: "danger", toolName: "Bash", decision: "allow_always" },
+    ]
+    childCanonical.session.goals = [{ goalId: "goal-bg", description: "Complete the audit" }]
+    childCanonical.session.checkpoints = [
+      { checkpointId: "cp-bg", afterTurnId: "turn-1", note: "Reviewed source" },
+    ]
+
     childCanonical.session.interAgentMessages = [
       { messageId: "iam-1", fromSessionId: "child-bg", text: "done" },
     ]
@@ -334,6 +364,11 @@ describe("session-import runner", () => {
     )
 
     expect(parsed).toHaveLength(2)
+    expect(parsed[1].session.branchSeed?.content).toContain("Background research complete")
+    expect(parsed[1].session.branchSeed?.content).toContain("Complete the audit")
+    expect(parsed[1].session.branchSeed?.content).toContain("Reviewed source")
+    expect(parsed[1].session.branchSeed?.content).toContain("not authorization")
+    expect(parsed[1].session.branchSeed?.content).not.toContain("allow_always")
     expect(parsed[1]).toMatchObject({
       session: {
         parentSessionId: "root-bg",

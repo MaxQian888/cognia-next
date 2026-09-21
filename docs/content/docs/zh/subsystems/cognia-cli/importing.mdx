@@ -82,27 +82,36 @@ cognia plugin import --from mcp --input ~/.cursor/mcp.json --pick playwright --i
 规范转换器：
 
 ```bash
-# Claude Code、Codex 或 Gemini CLI 插件 → Cognia
+# 受支持的 Agent 插件 → Cognia
 cognia plugin import --from plugin --input ./foreign-plugin --dir ./cognia-plugin
 
-# Cognia → 另一种受支持生态
+# 只检查原生导出，不写文件
+cognia plugin export --input ./cognia-plugin --to codex --dry-run --surface cli --json
+
+# 写入导出（只有审阅并接受警告后才添加 --accept-warnings）
 cognia plugin export --input ./cognia-plugin --to codex --dir ./codex-plugin
 ```
 
-转换器会检测 `.claude-plugin/plugin.json`、`.codex-plugin/plugin.json`、`gemini-extension.json`
-或 Cognia `plugin.json`；转换结构化 Skill、Agent、MCP 定义和受支持元数据；逐字节保留二进制资源；
-并返回显式保真度报告。支持 Claude Code、Codex 或 Gemini CLI → Cognia，以及 Cognia → 这三种生态
-中的任意一种；外部生态 → 外部生态会被拒绝。
+目标包括 `cognia`、`claude-code`、`codex`、`gemini-cli`、`agent-plugins`、`cursor`、`copilot`、
+`kimi`、`devin`、`opencode`、`pi`。转换器识别受支持的清单，保留 Skill 资源树与二进制文件，
+返回保真度及逐能力处理报告。外部生态之间也通过同一规范表示进行转换。各目标支持的能力不同：
+例如 Pi 插件包不能直接携带 MCP 服务器，OpenCode 插件包需要可移植的本地 MCP 命令。
 
-转换采用关闭式失败。Hook、命令式运行时行为、权限或缺少安全目标契约的贡献类型会成为 blocking
-问题，而不会产出一个残缺插件。
+调用控制、Hook、Agent、命令式运行时行为、权限或配置字段，如果没有实现对应的目标映射，
+会阻止输出。存在警告时，写入前必须明确接受。Gemini Skill 保留原生 Skill 形态，不降级为命令提示。
+已识别的凭证配置会被清理，需要补充的设置在报告中说明。
+
+`--surface cli|desktop|cloud` 指定预期运行端。生成插件包不代表已经验证安装、认证或真实运行。
+云端导出在交付路径确认前会被阻止。无法原生导出的运行时工具可能提供 Cognia 托管选项：
+在受支持的 Cognia 外部 Agent 会话中启用插件；其界面、存储、Hook 和生命周期仍由 Cognia 承载。
 
 ### Cognia 中由 Agent 驱动转换
 
 种子 `plugin-conversion` 提示技能会在桌面工作区聊天中向 Cognia Agent 暴露
-`inspect_plugin_conversion` 与 `apply_plugin_conversion`。检查阶段只读，并返回绑定源快照的
+`plugin_conversion_inspect` 与 `plugin_conversion_apply`。检查阶段只读，并返回绑定源快照的
 限时计划；应用阶段会重新校验快照、拒绝非空或重叠输出目录、要求桌面审批，并且只写确定性转换产物。
-这些工具不会暴露给 IM、Web 或移动端会话。
+这些工具不会暴露给 IM、Web 或移动端会话。桌面插件工具栏也提供转换对话框，共用检查报告、
+警告确认和绑定源快照的应用计划。
 
 ## 不执行任何东西
 

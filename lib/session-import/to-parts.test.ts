@@ -87,9 +87,49 @@ describe("to-parts builders", () => {
       }),
     ]
     const seed = renderTranscriptSeed(msgs)
-    expect(seed).toContain("USER:")
-    expect(seed).toContain("[tool: Bash]")
-    expect(renderTranscriptSeed(msgs, 4).length).toBeLessThanOrEqual(4)
+    expect(seed).toContain("USER [s:m0]:")
+    expect(seed).toContain("Bash")
+    expect(() => renderTranscriptSeed(msgs, 4)).toThrow("handoff_context_budget_too_small")
+  })
+
+  it("preserves tool results and file references in continuation context", () => {
+    const seed = renderTranscriptSeed([
+      buildMessage({
+        sessionId: "s",
+        index: 0,
+        role: "assistant",
+        createdAt: 1,
+        parts: [
+          toolPart({
+            name: "Read",
+            toolCallId: "t",
+            input: { path: "/repo/a.ts" },
+            output: "unresolved bug",
+          }),
+          filePart({ mediaType: "text/plain", url: "file:///repo/log.txt", filename: "log.txt" }),
+        ],
+      }),
+    ])
+    expect(seed).toContain("unresolved bug")
+    expect(seed).toContain("/repo/a.ts")
+    expect(seed).toContain("file:///repo/log.txt")
+  })
+
+  it("drops complete older turns with an explicit budget notice", () => {
+    const messages = ["old".repeat(400), "latest task"].map((text, index) =>
+      buildMessage({
+        sessionId: "s",
+        index,
+        role: "user",
+        createdAt: index,
+        parts: [textPart(text)],
+      })
+    )
+    const seed = renderTranscriptSeed(messages, 400)
+    expect(seed).toContain("USER [s:m1]:\nlatest task")
+    expect(seed).not.toContain("oldold")
+    expect(seed).toContain("omitted")
+    expect(seed.length).toBeLessThanOrEqual(400)
   })
 
   it("attaches a transcript branch seed to the built session", () => {

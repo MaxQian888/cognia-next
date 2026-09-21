@@ -23,12 +23,13 @@ config、credentials 与 history，但保留显式 MCP 选择。每项失败彼�
 
 ## GUI → CLI transcript
 
-桌面端按顺序把 message part 序列化到 `<CLI_HOME>/handoff/<sessionId>.jsonl`。Text 与
-markdown 保持可读，code 保留 fence；reasoning、tool 与 result、attachment、image、A2UI 和未知的
-未来 part 会变成有长度上限的 marker，而不会静默消失。CLI 读取 drop，并为新的 Agent process
-把早先对话作为文本 preamble 注入。
+桌面写入 `<CLI_HOME>/handoff/<encodeURIComponent(sessionId)>.jsonl`，每条记录同时保留消息 ID、
+结构化 parts、metadata 和可读文本。工具调用保留标识、状态、输入及完整多行结果。缓存媒体在导出前
+读取实际字节；附件缺失会使交接失败。历史推理不会作为指令发送，未知内容会明确标记。
 
-这是 snapshot continuation。它不会传递 desktop SDK session id、keyring handle 或实时 stream。
+CLI 保留结构化快照用于后续接回，并向新的 runtime 注入历史上下文。超长历史必须先成功生成摘要；
+摘要回合禁用工具和 MCP，失败时停止续聊，不写入不完整副本。后续 transcript 只追加新的用户输入，
+避免反复嵌套历史内容。无法强制禁用工具的 external CLI backend 会拒绝超长交接，并说明原因。交接不会转移桌面 SDK session ID、keyring handle、审批授权或实时 stream。
 
 ## CLI → GUI transcript
 
@@ -38,19 +39,21 @@ markdown 保持可读，code 保留 fence；reasoning、tool 与 result、attach
 sequenceDiagram
   participant CLI as cognia-agent
   participant HTTP as cli_bridge
-  participant Hook as Renderer event hook
+  participant Renderer as Renderer request handler
   participant DB as Desktop Dexie
 
-  CLI->>HTTP: POST /sessions/handoff，携带 text transcript
-  HTTP-->>Hook: emit cli-bridge:session-handoff
-  HTTP-->>CLI: accepted
-  Hook->>DB: 创建或替换 handoff 副本
-  Hook->>Hook: 激活已导入 session
+  CLI->>HTTP: POST /sessions/handoff，携带结构化 transcript
+  HTTP->>Renderer: 带 correlation ID 的 session_handoff 请求
+  Renderer->>DB: 原子导入快照及持久化 receipt
+  DB-->>Renderer: 已持久化的目标 session ID
+  Renderer-->>HTTP: persisted: true, sessionId
+  HTTP-->>CLI: 确认实际目标 session ID
 ```
 
-Importer 通过生成新 id 防止 incoming id 覆盖 native session；同一个 CLI 副本的重复 handoff
-保持幂等。由于 CLI sidecar 无法在桌面中恢复，它会种入 transcript continuation。HTTP acceptance
-早于 renderer persistence。
+响应确认 renderer 已持久化，而非仅发送事件。Renderer 不可用或事务失败时返回错误。原生会话不会
+被冲突的 ID 覆盖；重复发送相同快照会打开同一目标，不覆盖桌面端后续工作；发生变化的快照创建独立
+副本。持久化 receipt 关联源 ID、内容摘要值和实际目标 ID。由于 CLI sidecar 无法在桌面中恢复，导入
+对话通过历史上下文继续。
 
 ## Live renderer-backed 操作
 

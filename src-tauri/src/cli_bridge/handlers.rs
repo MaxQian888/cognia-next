@@ -107,6 +107,12 @@ const fn default_activate() -> bool {
 pub struct HandoffMessage {
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parts: Option<Vec<serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Wire shape for `POST /api/dev/sessions/handoff` — a CLI session
@@ -1053,8 +1059,8 @@ fn build_handoff_event(req: &SessionHandoffRequest) -> serde_json::Value {
 }
 
 /// `POST /api/dev/sessions/handoff` — receive a CLI session transcript and
-/// emit it for the renderer to import + open. Synchronous + best-effort: the
-/// renderer owns the Dexie write (`importHandoffSession`) and navigation.
+/// await the renderer transaction before acknowledging the actual imported id.
+/// Missing renderer, timeout, and failed persistence return a failure envelope.
 pub async fn handoff(
     State(state): State<SharedState>,
     Json(req): Json<SessionHandoffRequest>,
@@ -1070,8 +1076,7 @@ pub async fn handoff(
             .into_response();
     }
     let event = build_handoff_event(&req);
-    let _ = state.app_handle.emit("cli-bridge:session-handoff", &event);
-    Json(json!({ "ok": true, "sessionId": req.session_id })).into_response()
+    renderer_roundtrip(&state, "session_handoff", event).await
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2033,10 +2038,16 @@ mod tests {
                 HandoffMessage {
                     role: "user".into(),
                     content: "fix it".into(),
+                    id: None,
+                    parts: None,
+                    metadata: None,
                 },
                 HandoffMessage {
                     role: "assistant".into(),
                     content: "done".into(),
+                    id: None,
+                    parts: None,
+                    metadata: None,
                 },
             ],
             meta: Some(json!({ "provider": "anthropic", "model": "claude-x" })),
@@ -2047,6 +2058,21 @@ mod tests {
         assert_eq!(ev["messages"][0]["role"], "user");
         assert_eq!(ev["messages"][1]["content"], "done");
         assert_eq!(ev["meta"]["provider"], "anthropic");
+    }
+
+    #[test]
+    fn build_handoff_event_preserves_structured_parts() {
+        let req: SessionHandoffRequest = serde_json::from_value(json!({
+            "sessionId": "rich",
+            "messages": [{ "id": "source", "role": "assistant", "content": "result",
+                "parts": [{ "type": "dynamic-tool", "toolCallId": "call", "output": "passed" }],
+                "metadata": { "turnKey": "turn" } }]
+        }))
+        .unwrap();
+        let ev = build_handoff_event(&req);
+        assert_eq!(ev["messages"][0]["id"], "source");
+        assert_eq!(ev["messages"][0]["parts"][0]["output"], "passed");
+        assert_eq!(ev["messages"][0]["metadata"]["turnKey"], "turn");
     }
 
     #[test]

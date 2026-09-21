@@ -45,6 +45,7 @@ export type SessionImportState =
         import("@cognia/agent-config-types/canonical-session").SessionLossReport
       >
       details?: import("@/lib/session-import").SessionImportDetail[]
+      failures?: import("@/lib/session-import").SessionImportFailure[]
     }
   | { status: "error"; message: string }
 
@@ -208,6 +209,7 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
             ? { lossBySource: counts.lossBySource }
             : {}),
           ...(counts.details?.length ? { details: counts.details } : {}),
+          ...(counts.failures?.length ? { failures: counts.failures } : {}),
           ...(controller.signal.aborted ? { cancelled: true } : {}),
         })
       } catch (err) {

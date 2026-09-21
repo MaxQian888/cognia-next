@@ -93,8 +93,8 @@ describe("importHandoffSession", () => {
     expect(session.workingDir).toBe("/proj")
     // Context for the first in-app send is seeded as a transcript (no sdkSessionId).
     expect(session.branchSeed?.kind).toBe("transcript")
-    expect(session.branchSeed?.content).toMatch(/User: fix the bug/)
-    expect(session.branchSeed?.content).toMatch(/Assistant: fixed it in foo\.ts/)
+    expect(session.branchSeed?.content).toContain("fix the bug")
+    expect(session.branchSeed?.content).toContain("fixed it in foo.ts")
     // Tagged as a CLI handoff and stamped with a workspace (else invisible in
     // the scoped chat sidebar).
     expect(session.handoffSource).toBe("cli")
@@ -228,7 +228,7 @@ describe("importHandoffSession", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"])
   })
 
-  it("is idempotent — a repeat handoff overwrites the row but preserves createdAt", async () => {
+  it("forks changed snapshots instead of replacing desktop history", async () => {
     const first = await importHandoffSession({
       sessionId: "s_cli_3",
       messages: [{ role: "user", content: "first" }],
@@ -242,13 +242,58 @@ describe("importHandoffSession", () => {
       now: 2,
     })
     // Same id (idempotent re-handoff, not a native collision), content replaced.
-    expect(second.id).toBe("s_cli_3")
-    expect(second.createdAt).toBe(1) // preserved from the first handoff
+    expect(second.id).not.toBe("s_cli_3")
+    expect(second.createdAt).toBe(2) // preserved from the first handoff
     expect(second.updatedAt).toBe(2)
     const stored = await getSession("s_cli_3")
-    expect(stored?.title).toBe("Second")
+    expect(stored?.title).toBe("Handoff from CLI")
     const msgs = await listMessages("s_cli_3")
     expect(msgs).toHaveLength(1)
+  })
+
+  it("retries reopen the actual collision-diverted import without overwriting continuation", async () => {
+    await getDb().sessions.put({ id: "source", title: "Native", createdAt: 1, updatedAt: 1 })
+    const params = {
+      sessionId: "source",
+      messages: [{ role: "user" as const, content: "source prompt" }],
+    }
+    const first = await importHandoffSession(params)
+    await getDb().sessions.update(first.id, { title: "Continued locally" })
+    const second = await importHandoffSession(params)
+    expect(second.id).toBe(first.id)
+    expect(second.title).toBe("Continued locally")
+    expect(await getDb().sessions.count()).toBe(2)
+  })
+
+  it("serializes concurrent retries into one durable receipt", async () => {
+    const params = { sessionId: "concurrent", messages: [{ role: "user" as const, content: "x" }] }
+    const results = await Promise.all([importHandoffSession(params), importHandoffSession(params)])
+    expect(results[0].id).toBe(results[1].id)
+    expect(await getDb().sessions.count()).toBe(1)
+  })
+
+  it("rolls back the session and receipt if message persistence fails", async () => {
+    const spy = jest
+      .spyOn(getDb().messages, "bulkPut")
+      .mockRejectedValueOnce(new Error("quota exceeded"))
+    try {
+      await expect(
+        importHandoffSession({ sessionId: "rollback", messages: [{ role: "user", content: "x" }] })
+      ).rejects.toThrow("quota exceeded")
+      expect(await getDb().sessions.get("rollback")).toBeUndefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("rejects malformed parts before creating a session", async () => {
+    await expect(
+      importHandoffSession({
+        sessionId: "bad",
+        messages: [{ role: "assistant", content: "x", parts: [null] as never }],
+      })
+    ).rejects.toThrow("invalid messages")
+    expect(await getDb().sessions.count()).toBe(0)
   })
 
   it("omits branchSeed when the transcript renders empty", async () => {

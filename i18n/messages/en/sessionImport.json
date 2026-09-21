@@ -91,5 +91,11 @@
   "title": "Import agent sessions",
   "unrecognized": "These files weren't recognized as a supported agent session.",
   "webHint": "Auto-scan and live sync are desktop-only. On iOS and the web, choose exported session files manually.",
-  "writingProgress": "Saving {done}/{total}…"
+  "writingProgress": "Saving {done}/{total}…",
+  "partialTitle": "Import finished with failures",
+  "failedSessions": "{count, plural, one {# session could not be imported} other {# sessions could not be imported}}. Choose the files again to retry.",
+  "failureReasons": {
+    "source-unavailable": "The source adapter is no longer available",
+    "parse-failed": "The session could not be parsed"
+  }
 }

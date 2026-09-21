@@ -10,6 +10,7 @@ export type NativeResumeFailureCode =
   | "preset-missing"
   | "preset-not-configured"
   | "runtime-unavailable"
+  | "runtime-ambiguous"
   | "resume-unverified"
   | "cwd-missing"
   | "handshake-failed"
@@ -58,7 +59,18 @@ export async function resumeImportedSessionNative(
     .filter((instance) => externalAgentPresetIdOf(instance.config) === presetId)
   if (candidates.length === 0) return { ok: false, code: "preset-not-configured", detail: presetId }
 
-  const connected = candidates.find((instance) => instance.connectionStatus === "connected")
+  const connectedCandidates = candidates.filter(
+    (instance) => instance.connectionStatus === "connected"
+  )
+  // A preset identifies a runtime family, not an account or host. Without a
+  // durable instance binding choosing the first would resume on an arbitrary one.
+  if (connectedCandidates.length > 1) {
+    return {
+      ok: false,
+      code: "runtime-ambiguous",
+    }
+  }
+  const connected = connectedCandidates[0]
   if (!connected) {
     const detail = candidates.find((instance) => instance.validity?.blockingReason)?.validity
       ?.blockingReason

@@ -6,7 +6,6 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { toast } from "sonner"
 import { FolderSearchIcon, FilesIcon, Loader2Icon, CheckCircle2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -245,11 +244,36 @@ export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogPr
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <CheckCircle2Icon className="size-8 text-primary" />
               <p className="text-sm font-medium">
-                {t(state.cancelled ? "cancelledTitle" : "doneTitle")}
+                {t(
+                  state.cancelled
+                    ? "cancelledTitle"
+                    : state.failures?.length
+                      ? "partialTitle"
+                      : "doneTitle"
+                )}
               </p>
               <p className="text-xs text-muted-foreground">
                 {t("doneBody", { sessions: state.sessionsAdded, messages: state.messagesAdded })}
               </p>
+              {state.failures && state.failures.length > 0 && (
+                <div
+                  role="alert"
+                  className="w-full rounded-md border border-destructive/40 p-3 text-left text-xs"
+                >
+                  <p>{t("failedSessions", { count: state.failures.length })}</p>
+                  <ul className="mt-2 space-y-2">
+                    {state.failures.map((failure) => (
+                      <li key={summaryKey(failure.ref)} className="break-all">
+                        <p>{failure.ref.locator}</p>
+                        <p>
+                          {t(`failureReasons.${failure.code}`)}
+                          {failure.message ? `: ${failure.message}` : ""}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {state.details && state.details.length > 0 ? (
                 <div className="w-full space-y-3 pt-2 text-left">
                   {relationshipTree(state.details).map(({ detail, depth }) => (
@@ -320,14 +344,7 @@ export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogPr
               <Button variant="ghost" size="sm" onClick={() => setAll(selectedCount === 0)}>
                 {selectedCount === 0 ? t("selectAll") : t("deselectAll")}
               </Button>
-              <Button
-                size="sm"
-                disabled={selectedCount === 0}
-                // An earlier version toasted "Importing…" as a SUCCESS toast
-                // after the run had already finished. The completion copy is
-                // what belongs on a completion toast.
-                onClick={() => void onImport().then(() => toast.success(t("doneTitle")))}
-              >
+              <Button size="sm" disabled={selectedCount === 0} onClick={() => void onImport()}>
                 {t("importSelected", { count: selectedCount })}
               </Button>
             </>

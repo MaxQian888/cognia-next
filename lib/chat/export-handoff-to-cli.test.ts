@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { exportHandoffToCli, type ExportHandoffDeps } from "./export-handoff-to-cli"
+import {
+  serializeHandoffParts,
+  exportHandoffToCli,
+  type ExportHandoffDeps,
+} from "./export-handoff-to-cli"
 import type { UIMessage } from "ai"
 
 function msg(role: UIMessage["role"], text: string): UIMessage {
@@ -27,6 +31,16 @@ function deps(extra: Partial<ExportHandoffDeps> = {}): ExportHandoffDeps & {
 }
 
 describe("exportHandoffToCli", () => {
+  it("exports imported session ids using portable encoded filenames and shell-safe commands", async () => {
+    const d = deps()
+    const result = await exportHandoffToCli(
+      { sessionId: "import:codex:id", messages: [msg("user", "continue")] },
+      d
+    )
+    expect(result.path).toContain("import%3Acodex%3Aid.jsonl")
+    expect(result.command).toBe("cognia-agent resume 'import:codex:id'")
+  })
+
   it("writes the transcript drop and returns the resume command", async () => {
     const d = deps()
     const res = await exportHandoffToCli(
@@ -40,7 +54,7 @@ describe("exportHandoffToCli", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l))
-    expect(lines).toEqual([
+    expect(lines).toMatchObject([
       { ts: 1000, role: "user", content: "fix it" },
       { ts: 1001, role: "assistant", content: "done" },
     ])
@@ -95,7 +109,8 @@ describe("exportHandoffToCli", () => {
 
     const { content } = JSON.parse(d.writes[0].content.trim()) as { content: string }
     expect(content).toContain("I inspected the project.")
-    expect(content).toContain("[reasoning] Need to inspect the failing test.")
+    expect(content).toContain("[reasoning]")
+    expect(content).not.toContain("Need to inspect the failing test.")
     expect(content).toContain("[tool: Bash]")
     expect(content).toContain("1 test passed")
     expect(content).toContain("```ts\nconst ok = true\n```")
@@ -115,7 +130,7 @@ describe("exportHandoffToCli", () => {
     expect(ordered).toEqual([...ordered].sort((a, b) => a - b))
     expect(
       content.split("\n").find((line) => line.startsWith("[tool: Bash]"))?.length
-    ).toBeLessThanOrEqual(240)
+    ).toBeGreaterThan(240)
   })
 
   it("throws when there is nothing to hand off", async () => {
@@ -152,5 +167,36 @@ describe("exportHandoffToCli", () => {
       d
     )
     expect(JSON.parse(d.writes[0].content.trim()).role).toBe("user")
+  })
+})
+
+describe("lossless handoff projection", () => {
+  it("preserves multiline tool evidence, pairing, images, and complete UI mirrors", () => {
+    const mirror = "view\n".repeat(100)
+    const result = serializeHandoffParts(
+      [
+        {
+          type: "dynamic-tool",
+          toolName: "test",
+          toolCallId: "call-7",
+          state: "output-error",
+          errorText: "failed\nstack trace",
+        },
+        {
+          type: "tool_result",
+          tool_use_id: "call-8",
+          status: "interrupted",
+          content: "line one\nline two",
+        },
+        { type: "image", url: "file:///tmp/evidence.png" },
+        { type: "a2ui", plainTextMirror: mirror },
+      ],
+      { losslessDetails: true }
+    )
+    expect(result).toContain("call-7; output-error")
+    expect(result).toContain("failed\nstack trace")
+    expect(result).toContain("call-8; interrupted\nline one\nline two")
+    expect(result).toContain("file:///tmp/evidence.png")
+    expect(result).toContain(mirror.trim())
   })
 })

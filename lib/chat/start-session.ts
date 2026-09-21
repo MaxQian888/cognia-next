@@ -62,6 +62,22 @@ export interface NewSessionInput extends SessionSeed {
   /** Requested isolation base. Ignored for Local execution. */
   executionBase?: SessionWorkspaceBaseSpec
   /**
+   * ProjectEnvironment the conversation runs under. Absent follows the
+   * workspace's `defaultEnvironmentId`; `""` explicitly runs with none.
+   */
+  environmentId?: string
+  /**
+   * Workspace root the conversation runs against. Must name one of the owning
+   * workspace's `roots`; an unknown or absent id falls back to the primary
+   * root.
+   */
+  rootId?: string
+  /**
+   * Caller-chosen name for the managed worktree's branch. Blank or absent
+   * leaves naming to the host. Ignored for Local execution.
+   */
+  worktreeName?: string
+  /**
    * Move the UI to the new conversation. Default `true`, which is every entry
    * point below: a person clicked "new chat" or accepted a handoff, and a
    * conversation they do not land in is one they will not notice.
@@ -93,7 +109,8 @@ export interface NewSessionInput extends SessionSeed {
  * given, so a conversation is usable without picking a character first.
  */
 export async function startNewSession(partial?: NewSessionInput): Promise<ChatSession> {
-  const { executionLocation, executionBase, ...sessionSeed } = partial ?? {}
+  const { executionLocation, executionBase, environmentId, rootId, worktreeName, ...sessionSeed } =
+    partial ?? {}
 
   // Name the owning workspace explicitly instead of letting `createSession`
   // resolve it. `resolveScopeProjectId` reads the PERSISTED
@@ -134,7 +151,13 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     let project = ownerProjectId
       ? projects.find((candidate) => candidate.id === ownerProjectId)
       : undefined
-    let root = project ? primaryRootOf(project) : undefined
+    // A requested root must name one of the workspace's own roots — an id that
+    // does not is either stale (root since removed) or pointed at another
+    // workspace, and both fall back to primary rather than binding the session
+    // to a directory the workspace does not claim.
+    let root = project
+      ? (project.roots.find((candidate) => candidate.id === rootId) ?? primaryRootOf(project))
+      : undefined
     // Nothing on this device has a directory yet — the Default workspace ships
     // with `roots: []` and the setup line is skippable. Provision one rather
     // than handing the agent a workspace it cannot touch a file in. Off-desktop
@@ -191,7 +214,10 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
             projectId: project.id,
             projectRoot: root.path,
             rootId: root.id,
-            environmentId: project.defaultEnvironmentId,
+            // An explicit per-chat environment wins over the workspace's
+            // remembered default; "" is the explicit "run with none" choice,
+            // normalized away so the row never persists an empty id.
+            environmentId: (environmentId ?? project.defaultEnvironmentId) || undefined,
             requestedLocation:
               executionLocation ??
               project.defaultExecutionLocation ??
@@ -199,6 +225,7 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
               "managedWorktree",
             isGitRepository: false,
             base: executionBase ?? declared?.base,
+            worktreeName,
             now: Date.now(),
           })
         : createManagedWorkspaceContext(
@@ -266,6 +293,11 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
 
   if (ownerProjectId && executionLocation) {
     updateProject(ownerProjectId, { defaultExecutionLocation: executionLocation })
+  }
+  // Same remember-the-choice contract as the location: a per-chat environment
+  // pick becomes the workspace default for the next new chat. "" clears it.
+  if (ownerProjectId && environmentId !== undefined) {
+    updateProject(ownerProjectId, { defaultEnvironmentId: environmentId || undefined })
   }
 
   if (partial?.activate ?? true) {

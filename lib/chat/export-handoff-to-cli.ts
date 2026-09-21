@@ -50,7 +50,37 @@ function boundedDetail(value: unknown, max = 96): string {
   return detail.length <= max ? detail : `${detail.slice(0, max - 1)}…`
 }
 
-function toolMarker(part: Record<string, unknown>, type: string, includeDetails: boolean): string {
+function losslessDetail(value: unknown): string {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function toolIdentity(part: Record<string, unknown>): string {
+  return [part.toolCallId ?? part.tool_use_id ?? part.id, part.state ?? part.status]
+    .filter((value) => value !== undefined)
+    .map(losslessDetail)
+    .join("; ")
+}
+
+function attachmentReference(part: Record<string, unknown>): string {
+  const url = part.url ?? part.uri ?? part.image
+  return typeof url !== "string"
+    ? "[attachment bytes unavailable]"
+    : url.startsWith("data:")
+      ? "[inline attachment: available in structured history]"
+      : url
+}
+
+function toolMarker(
+  part: Record<string, unknown>,
+  type: string,
+  includeDetails: boolean,
+  lossless = false
+): string {
   const name =
     type === "dynamic-tool"
       ? stringValue(part.toolName) || "tool"
@@ -59,13 +89,16 @@ function toolMarker(part: Record<string, unknown>, type: string, includeDetails:
         : stringValue(part.name) || "tool"
   if (!includeDetails) return `[tool: ${name}]`
 
+  const detail = (value: unknown) => (lossless ? losslessDetail(value) : boundedDetail(value))
   const details: string[] = []
-  if (part.input !== undefined) details.push(`input: ${boundedDetail(part.input)}`)
-  if (part.output !== undefined) details.push(`result: ${boundedDetail(part.output)}`)
+  if (part.input !== undefined) details.push(`input: ${detail(part.input)}`)
+  if (part.output !== undefined) details.push(`result: ${detail(part.output)}`)
   if (typeof part.errorText === "string" && part.errorText) {
-    details.push(`error: ${boundedDetail(part.errorText)}`)
+    details.push(`error: ${detail(part.errorText)}`)
   }
-  return boundedMarker(`[tool: ${name}]`, details.join("; ") || part.state)
+  return lossless
+    ? `[tool: ${name}] ${[toolIdentity(part), ...details].filter(Boolean).join("; ")}`
+    : boundedMarker(`[tool: ${name}]`, details.join("; ") || part.state)
 }
 
 /**
@@ -77,6 +110,7 @@ function toolMarker(part: Record<string, unknown>, type: string, includeDetails:
 export interface HandoffSerializationOptions {
   includeReasoningDetails?: boolean
   includeToolDetails?: boolean
+  losslessDetails?: boolean
 }
 
 export function serializeHandoffParts(
@@ -109,13 +143,15 @@ export function serializeHandoffParts(
         )
       )
     } else if (type.startsWith("tool-") || type === "dynamic-tool" || type === "tool_use") {
-      rendered.push(toolMarker(raw, type, options.includeToolDetails !== false))
-    } else if (type === "tool_result") {
       rendered.push(
-        boundedMarker(
-          "[tool result]",
-          options.includeToolDetails === false ? undefined : (raw.content ?? raw.output)
-        )
+        toolMarker(raw, type, options.includeToolDetails !== false, options.losslessDetails)
+      )
+    } else if (type === "tool_result") {
+      const detail = options.includeToolDetails === false ? undefined : (raw.content ?? raw.output)
+      rendered.push(
+        options.losslessDetails
+          ? `[tool result] ${toolIdentity(raw)}${detail === undefined ? "" : `\n${losslessDetail(detail)}`}`
+          : boundedMarker("[tool result]", detail)
       )
     } else if (type === "file") {
       const filename =
@@ -124,12 +160,16 @@ export function serializeHandoffParts(
         stringValue(raw.mediaType) ||
         "file"
       rendered.push(boundedMarker(`[attachment: ${filename}]`))
+      if (options.losslessDetails) rendered.push(attachmentReference(raw))
     } else if (type === "image") {
       const alt = stringValue(raw.alt)
       rendered.push(boundedMarker(alt ? `[image: ${alt}]` : "[image]"))
+      if (options.losslessDetails) rendered.push(attachmentReference(raw))
     } else if (type === "a2ui") {
       const mirror = stringValue(raw.plainTextMirror) || stringValue(raw.text)
-      rendered.push(boundedMarker("[a2ui]", mirror || undefined))
+      rendered.push(
+        options.losslessDetails ? `[a2ui]\n${mirror}` : boundedMarker("[a2ui]", mirror || undefined)
+      )
     } else {
       rendered.push(boundedMarker(`[part: ${type}]`))
     }
@@ -167,10 +207,21 @@ export interface ExportHandoffResult {
 
 /** Render a UIMessage to a transcript JSONL line (matches the CLI's reader). */
 function toLine(message: UIMessage, ts: number): string | null {
-  const content = serializeHandoffParts(message.parts)
+  const content = serializeHandoffParts(message.parts, {
+    losslessDetails: true,
+    includeReasoningDetails: false,
+  })
   if (!content) return null
   const role = message.role === "assistant" || message.role === "system" ? message.role : "user"
-  return JSON.stringify({ ts, role, content })
+  return JSON.stringify({
+    schemaVersion: 1,
+    ts,
+    role,
+    content,
+    id: message.id,
+    parts: message.parts,
+    metadata: message.metadata,
+  })
 }
 
 async function defaultJoin(...parts: string[]): Promise<string> {
@@ -186,11 +237,15 @@ export async function exportHandoffToCli(
   params: ExportHandoffParams,
   deps: ExportHandoffDeps = {}
 ): Promise<ExportHandoffResult> {
+  if (!params.sessionId || /[\x00-\x1f]/.test(params.sessionId))
+    throw new Error("export handoff: invalid sessionId")
   const join = deps.join ?? defaultJoin
   const now = deps.now ?? Date.now
 
   const baseTs = now()
-  const lines = params.messages
+  const { materializeMessageMedia } = await import("@/lib/chat/media/normalize-message-media")
+  const portableMessages = await Promise.all(params.messages.map(materializeMessageMedia))
+  const lines = portableMessages
     .map((m, i) => toLine(m, baseTs + i))
     .filter((l): l is string => l !== null)
   if (lines.length === 0) {
@@ -207,7 +262,7 @@ export async function exportHandoffToCli(
     throw new Error("export handoff: could not resolve the cognia CLI home directory")
   }
   const dir = await join(cogniaHome, "handoff")
-  const path = await join(dir, `${params.sessionId}.jsonl`)
+  const path = await join(dir, `${encodeURIComponent(params.sessionId)}.jsonl`)
 
   // Confine the drop to the `.cognia` home so a crafted sessionId (e.g. one
   // containing `../`) can't write the transcript outside the handoff tree.
@@ -222,5 +277,8 @@ export async function exportHandoffToCli(
   await ensureDir(dir)
   await writeTextFile(path, lines.join("\n") + "\n")
 
-  return { path, command: `cognia-agent resume ${params.sessionId}` }
+  const argument = /^[A-Za-z0-9_-]+$/.test(params.sessionId)
+    ? params.sessionId
+    : `'${params.sessionId.replace(/'/g, "'\\''")}'`
+  return { path, command: `cognia-agent resume ${argument}` }
 }

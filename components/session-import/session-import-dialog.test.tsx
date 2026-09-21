@@ -54,6 +54,29 @@ describe("SessionImportDialog", () => {
     expect(screen.getByText("pickButton")).toBeInTheDocument()
   })
 
+  it("shows the failed file and parse reason instead of claiming complete success", () => {
+    setHook({
+      state: {
+        status: "done",
+        sessionsAdded: 1,
+        messagesAdded: 2,
+        failures: [
+          {
+            ref: { sourceId: "codex", originalSessionId: "bad", locator: "/bad.jsonl" },
+            code: "parse-failed",
+            message: "corrupt transcript",
+          },
+        ],
+      },
+    })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    expect(screen.getByText("partialTitle")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("/bad.jsonl")
+    expect(screen.getByRole("alert")).toHaveTextContent("corrupt transcript")
+    expect(screen.queryByText("doneTitle")).not.toBeInTheDocument()
+  })
+
   it("triggers a scan on click", () => {
     const scan = jest.fn()
     setHook({ scan })

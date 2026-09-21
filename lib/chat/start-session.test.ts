@@ -261,6 +261,155 @@ describe("startNewSession", () => {
     })
   })
 
+  it("binds a per-chat environment, root and worktree name into the context", async () => {
+    const updateProject = jest.fn()
+    const project = {
+      id: "p_ctx",
+      name: "Ctx",
+      roots: [
+        { id: "root-1", path: "/repo/app", isPrimary: true },
+        { id: "root-2", path: "/repo/api" },
+      ],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      defaultEnvironmentId: "env-default",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({
+      executionLocation: "managedWorktree",
+      environmentId: "env-picked",
+      rootId: "root-2",
+      worktreeName: "feat/login",
+    })
+
+    expect(session.executionContext).toMatchObject({
+      location: "managedWorktree",
+      environmentId: "env-picked",
+      rootId: "root-2",
+      projectRoot: "/repo/api",
+      requestedWorktreeName: "feat/login",
+      execution: expect.objectContaining({
+        roots: [expect.objectContaining({ logicalRootId: "root-2", aliasPath: "/repo/api" })],
+      }),
+    })
+    // The env pick is remembered as the workspace default, same as location.
+    expect(updateProject).toHaveBeenCalledWith(project.id, {
+      defaultEnvironmentId: "env-picked",
+    })
+  })
+
+  it('treats "" environmentId as an explicit none that clears the default', async () => {
+    const updateProject = jest.fn()
+    const project = {
+      id: "p_envclear",
+      name: "EnvClear",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      defaultEnvironmentId: "env-default",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({ environmentId: "" })
+
+    expect(session.executionContext?.environmentId).toBeUndefined()
+    expect(updateProject).toHaveBeenCalledWith(project.id, {
+      defaultEnvironmentId: undefined,
+    })
+  })
+
+  it("falls back to the primary root for an unknown rootId", async () => {
+    const project = {
+      id: "p_rootfb",
+      name: "RootFb",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject: jest.fn(),
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({
+      executionLocation: "local",
+      rootId: "root-does-not-exist",
+    })
+
+    expect(session.executionContext).toMatchObject({
+      rootId: "root-1",
+      projectRoot: "/repo",
+    })
+  })
+
+  it("drops the worktree name for local execution", async () => {
+    const project = {
+      id: "p_namelocal",
+      name: "NameLocal",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject: jest.fn(),
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({
+      executionLocation: "local",
+      worktreeName: "feat/x",
+    })
+
+    expect(session.executionContext?.requestedWorktreeName).toBeUndefined()
+  })
+
   describe("what the repository declares", () => {
     const project = {
       id: "p_declared",

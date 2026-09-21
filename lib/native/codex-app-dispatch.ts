@@ -3,10 +3,12 @@ import { invoke } from "@tauri-apps/api/core"
 export interface CodexAppDispatchMessage {
   role: "user" | "assistant"
   content: string
+  attachments?: Array<{ dataUrl: string; filename: string }>
   timestampMs?: number
 }
 
 export interface CodexAppDispatchRequest {
+  sourceSessionId: string
   title: string
   cwd: string
   messages: CodexAppDispatchMessage[]

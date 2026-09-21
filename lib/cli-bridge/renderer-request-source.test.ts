@@ -4,6 +4,15 @@
  * `cli_bridge_renderer_response` Tauri command.
  */
 
+const importHandoffMock = jest.fn()
+const setActiveSessionMock = jest.fn()
+jest.mock("@/lib/chat/import-handoff-session", () => ({
+  importHandoffSession: (...args: unknown[]) => importHandoffMock(...args),
+}))
+jest.mock("@/stores/chat/chat-store", () => ({
+  useChatStore: { getState: () => ({ setActiveSession: setActiveSessionMock }) },
+}))
+
 const twinContextGetMock = jest.fn()
 jest.mock("./handlers/twin-context", () => ({
   twinContextGet: (...args: unknown[]) => twinContextGetMock(...args),
@@ -83,6 +92,48 @@ beforeEach(() => {
 })
 
 describe("dispatchCommand", () => {
+  it("acknowledges handoff only after import and returns the actual persisted id", async () => {
+    let resolve!: (value: { id: string }) => void
+    importHandoffMock.mockReturnValue(
+      new Promise((r) => {
+        resolve = r
+      })
+    )
+    const pending = dispatchCommand("session_handoff", { sessionId: "source", messages: [] })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(setActiveSessionMock).not.toHaveBeenCalled()
+    expect(importHandoffMock).toHaveBeenCalledWith({
+      sessionId: "source",
+      messages: [],
+      title: undefined,
+      meta: undefined,
+    })
+    resolve({ id: "actual" })
+    await expect(pending).resolves.toEqual({ sessionId: "actual", persisted: true })
+    expect(setActiveSessionMock).toHaveBeenCalledWith("actual")
+  })
+
+  it("normalizes nullable optional fields from the Rust wire payload", async () => {
+    importHandoffMock.mockResolvedValue({ id: "source" })
+    await dispatchCommand("session_handoff", {
+      sessionId: "source",
+      messages: [],
+      title: null,
+      meta: null,
+    })
+    expect(importHandoffMock).toHaveBeenLastCalledWith({
+      sessionId: "source",
+      messages: [],
+      title: undefined,
+      meta: undefined,
+    })
+  })
+
+  it("propagates a failed persistent import", async () => {
+    importHandoffMock.mockRejectedValue(new Error("quota exceeded"))
+    await expect(dispatchCommand("session_handoff", {})).rejects.toThrow("quota exceeded")
+  })
+
   it("routes each command to its handler", async () => {
     twinContextGetMock.mockResolvedValue({ ok: true })
     agentTeamListMock.mockResolvedValue({ ok: true, teams: [] })

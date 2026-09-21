@@ -91,5 +91,11 @@
   "title": "导入 Agent 会话",
   "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
   "webHint": "自动扫描和实时同步仅支持桌面端。在 iOS 和网页端，请手动选择导出的会话文件。",
-  "writingProgress": "正在写入 {done}/{total}…"
+  "writingProgress": "正在写入 {done}/{total}…",
+  "partialTitle": "导入结束，部分会话失败",
+  "failedSessions": "{count} 个会话未能导入。请重新选择文件以重试。",
+  "failureReasons": {
+    "source-unavailable": "来源适配器已不可用",
+    "parse-failed": "无法解析会话"
+  }
 }

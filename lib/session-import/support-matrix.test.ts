@@ -9,6 +9,7 @@ describe("external session support matrix", () => {
     )
     expect(matrix.importSources.find((row) => row.sourceId === "codex")?.presetIds).toEqual([
       "codex",
+      "codex-acp",
       "codex-app-server",
     ])
     expect(matrix.importSources.find((row) => row.sourceId === "cursor")?.presetIds).toEqual([

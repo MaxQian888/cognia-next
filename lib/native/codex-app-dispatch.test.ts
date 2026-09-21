@@ -10,6 +10,7 @@ beforeEach(() => {
 
 test("dispatchConversationToCodexApp forwards the typed snapshot to Tauri", async () => {
   const request = {
+    sourceSessionId: "session-1",
     title: "Investigate auth",
     cwd: "/repo",
     messages: [

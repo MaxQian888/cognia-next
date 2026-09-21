@@ -56,9 +56,9 @@ export function useCliSessionHandoff(): void {
               // CLI-minted id when that collided with a native session.
               const created = await importHandoffSession({
                 sessionId: p.sessionId,
-                title: p.title,
+                title: p.title ?? undefined,
                 messages: p.messages ?? [],
-                meta: p.meta,
+                meta: p.meta ?? undefined,
               })
               useChatStore.getState().setActiveSession(created.id)
               loggers.shell.info(`[cli-bridge] session handoff received: ${created.id}`)

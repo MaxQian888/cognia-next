@@ -19,6 +19,9 @@ export const HANDOFF_PATH = "/api/dev/sessions/handoff"
 export interface HandoffMessage {
   role: "user" | "assistant" | "system"
   content: string
+  id?: string
+  parts?: import("ai").UIMessage["parts"]
+  metadata?: import("ai").UIMessage["metadata"]
 }
 
 export interface HandoffPayload {
@@ -97,5 +100,12 @@ export async function pushHandoff(
   if (!res.ok) {
     throw new Error(`handoff failed: HTTP ${res.status}`)
   }
-  return { ok: true, sessionId: payload.sessionId }
+  const body = (await res.json()) as {
+    ok?: boolean
+    result?: { sessionId?: string; persisted?: boolean }
+  }
+  if (body.ok !== true || body.result?.persisted !== true || !body.result.sessionId) {
+    throw new Error("handoff failed: desktop did not confirm persisted import")
+  }
+  return { ok: true, sessionId: body.result.sessionId }
 }

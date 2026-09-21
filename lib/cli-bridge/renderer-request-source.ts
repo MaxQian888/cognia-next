@@ -94,6 +94,18 @@ export async function dispatchCommand(
   bridge?: TauriBridge
 ): Promise<unknown> {
   switch (command) {
+    case "session_handoff": {
+      const { importHandoffSession } = await import("@/lib/chat/import-handoff-session")
+      const { useChatStore } = await import("@/stores/chat/chat-store")
+      const created = await importHandoffSession({
+        sessionId: payload.sessionId,
+        title: payload.title ?? undefined,
+        messages: payload.messages,
+        meta: payload.meta ?? undefined,
+      } as Parameters<typeof importHandoffSession>[0])
+      useChatStore.getState().setActiveSession(created.id)
+      return { sessionId: created.id, persisted: true }
+    }
     case "twin_context_get": {
       const { twinContextGet } = await import("./handlers/twin-context")
       return twinContextGet(payload)

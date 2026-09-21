@@ -87,28 +87,40 @@ Whole-plugin conversion uses `lib/plugin/convert/ecosystem.ts`, the same canonic
 in-app GitHub preview and the Agent conversion skill:
 
 ```bash
-# Claude Code, Codex, or Gemini CLI plugin → Cognia
+# A supported agent plugin → Cognia
 cognia plugin import --from plugin --input ./foreign-plugin --dir ./cognia-plugin
 
-# Cognia → another supported ecosystem
+# Inspect a native export without writing
+cognia plugin export --input ./cognia-plugin --to codex --dry-run --surface cli --json
+
+# Write the inspected export (add --accept-warnings only after reviewing warnings)
 cognia plugin export --input ./cognia-plugin --to codex --dir ./codex-plugin
 ```
 
-The converter detects `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `gemini-extension.json`, or
-Cognia `plugin.json`; translates structured skills, agents, MCP definitions, and supported metadata; preserves
-binary resources byte-for-byte; and returns an explicit fidelity report. Claude Code, Codex, or Gemini CLI →
-Cognia and Cognia → any of those three are supported. Foreign → foreign conversion is rejected.
+Targets are `cognia`, `claude-code`, `codex`, `gemini-cli`, `agent-plugins`, `cursor`, `copilot`, `kimi`,
+`devin`, `opencode`, and `pi`. The converter detects supported manifests, preserves Skill resource trees
+including binary assets, and returns a fidelity and per-capability delivery report. Foreign → foreign
+conversion uses the same canonical representation. These targets support different subsets: Pi bundles
+cannot directly carry MCP servers, and OpenCode bundles require a portable local MCP command.
 
-Conversion is fail-closed. Hooks, imperative runtime behavior, permissions, or contribution kinds without a
-safe target contract produce blocking issues instead of a partial plugin.
+Conversion is fail-closed. Invocation controls, hooks, agents, imperative runtime behavior, permissions, or
+configuration fields without an implemented target mapping block output. Warnings require explicit
+acknowledgement before writing. Gemini skills remain native Skills; they are not reduced to command prompts.
+Known credential-bearing configuration is sanitized; required setup appears in the report.
+
+`--surface cli|desktop|cloud` describes the intended host. Package generation does not verify installation,
+authentication, or host behavior. Cloud export is blocked pending a verified delivery route. When runtime
+tools cannot be exported, the report can identify a Cognia-hosted alternative: enable the plugin in a
+supported Cognia external-agent session. Its UI, storage, hooks, and lifecycle remain in Cognia.
 
 ### Agent-driven conversion in Cognia
 
-The seeded `plugin-conversion` prompt skill exposes `inspect_plugin_conversion` and
-`apply_plugin_conversion` to a Cognia Agent in desktop workspace chat. Inspection is read-only and returns an
+The seeded `plugin-conversion` prompt skill exposes `plugin_conversion_inspect` and
+`plugin_conversion_apply` to a Cognia Agent in desktop workspace chat. Inspection is read-only and returns an
 expiring plan bound to the source snapshot. Apply rechecks the snapshot, refuses non-empty or overlapping
 output directories, requires desktop approval, and writes only deterministic converter output. The tools are
-not exposed to IM, web, or mobile sessions.
+not exposed to IM, web, or mobile sessions. The desktop Plugins toolbar also offers a conversion dialog
+with the same inspection report, warning acknowledgement, and source-bound apply plan.
 
 ## Nothing is executed
 

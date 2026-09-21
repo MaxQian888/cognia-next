@@ -66,6 +66,25 @@ describe("useSessionImport", () => {
     })
   })
 
+  it("retains failed refs and reasons alongside successful counts", async () => {
+    const failures = [
+      { ref: summary("b").ref, code: "parse-failed" as const, message: "corrupt transcript" },
+    ]
+    const d = deps({
+      importSessions: jest.fn(async () => ({
+        sessions: 1,
+        messages: 3,
+        details: [],
+        lossBySource: {},
+        failures,
+      })),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => result.current.scan())
+    await act(async () => result.current.importSelected())
+    expect(result.current.state).toMatchObject({ status: "done", sessionsAdded: 1, failures })
+  })
+
   it("retains per-session graph details returned by the importer", async () => {
     const details = [
       {
