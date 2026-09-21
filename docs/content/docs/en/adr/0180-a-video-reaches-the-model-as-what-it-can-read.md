@@ -129,7 +129,7 @@ recording video from the mobile camera.
 describe, delivery-gate, route-facts, route-guard, frame-source, gif-source,
 browser-source, ffmpeg-source, preprocess, attachment-info), `prepare.ts`,
 `dispatch.ts`, `lib/claude/adapter.ts`, `hooks/chat/use-claude-chat-controller.ts`,
-`components/chat/composer/{staged-attachment-store,video-preprocess-panel,attachment-preview,attachment-preview-sheet}.tsx`,
+`components/chat/composer/{staged-attachment-store,video-preprocess-panel,attachment-preview,attachment-preview-dialog}.tsx`,
 `components/chat/composer/hooks/use-composer-video-route.ts`,
 `components/chat/renderers/message-video-attachment-card.tsx`,
 `components/chat/message-renderer.tsx`, `lib/chat/draft-attachments.ts`,

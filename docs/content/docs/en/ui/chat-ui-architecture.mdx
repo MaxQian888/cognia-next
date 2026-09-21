@@ -283,8 +283,7 @@ Use case: user clicks a row in the team member list, desktop shell calls `compos
 
 - **ModelPicker** — switch the default model for the current session; writes to session settings.
 - **AgentRuntimeSelector** — choose which agent implementation handles this message: the built-in Claude SDK runtime or one of the configured external agents, both in the same radio group (see [Provider System](../chat/provider-system)).
-- **AgentModeSelector** — the Agent Mode the Claude SDK runtime composes with; hidden while an external agent is selected, which brings its own.
-- **WebSearchToggle** — enable search tool calls.
+- **CompositionChip** — the Agent Mode composition preset the Claude SDK runtime composes with (it replaced `AgentModeSelector`); hidden while an external agent without a Squad binding is selected, which brings its own.
 - **PermissionModeIndicator** — current allow / deny / ask / plan.
 - **Context Usage** — real-time calculation and display of the current session's context window input/output/cache usage:
 
@@ -333,6 +332,8 @@ The attachment button supports:
 - **📷 Screenshot**: desktop calls Rust screenshot command; mobile calls `@capacitor/camera`.
 - **🎤 Voice**: record → transcribe via `lib/speech/` then fill into text.
 - **Drag / Paste**: listens to `onDragOver` / `onPaste`, files/images go directly into attachments.
+
+The same `+` trigger opens `ComposerAttachMenu`, a three-group popover: ATTACH (the entries above plus folder references, cloud docs, and record mentions), THIS TURN (plan mode, `/goal`, and the injected turn capabilities — **WebSearchToggle**, the skill picker, and the room-target picker — each rendered as a `CapabilityRow` menu row), and EXTEND (slash commands, external services). On mobile the same groups render as rows in `ComposerPlusMenu`'s bottom drawer.
 
 ## Empty / Error / Welcome
 

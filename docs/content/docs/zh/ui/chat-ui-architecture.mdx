@@ -270,8 +270,7 @@ interface ComposerHandle {
 
 - **ModelPicker** —— 切当前会话默认 model；写入会话设置。
 - **AgentRuntimeSelector** —— 选哪个 agent 实现处理这条消息：内置 Claude SDK 运行时与各个已配置的外部 Agent 同处一个单选组（详见 [Provider 系统](../chat/provider-system)）。
-- **AgentModeSelector** —— Claude SDK 运行时组合的 Agent Mode；选中外部 Agent 时隐藏，因为外部 Agent 自带模式。
-- **WebSearchToggle** —— 启用搜索工具调用。
+- **CompositionChip** —— Claude SDK 运行时组合的 Agent Mode 预设（取代了 `AgentModeSelector`）；选中未绑定 Squad 的外部 Agent 时隐藏，因为外部 Agent 自带模式。
 - **PermissionModeIndicator** —— 当前 allow / deny / ask / plan。
 - **Context Usage** —— 实时计算并显示当前会话上下文窗口的输入/输出/缓存使用率：
 
@@ -320,6 +319,8 @@ composer 外层声明了 `@container/composer`。低于 `@sm` 时文本域独占
 - **📷 截图**：桌面调 Rust 截图命令；移动调 `@capacitor/camera`。
 - **🎤 语音**：录音 → `lib/speech/` 转写后填入文本。
 - **拖拽 / 粘贴**：监听 `onDragOver` / `onPaste`，文件/图片直入附件。
+
+同一个 `+` 触发器打开 `ComposerAttachMenu` 三组弹层：ATTACH（上述各项，另有文件夹引用、云文档、记录提及）、THIS TURN（plan mode、`/goal`，以及注入的本轮能力——**WebSearchToggle**、技能选择器、回复目标选择器——均以 `CapabilityRow` 菜单行渲染）与 EXTEND（slash commands、外部服务）。移动端同一组内容以行形式呈现在 `ComposerPlusMenu` 底部抽屉里。
 
 ## Empty / Error / Welcome
 
