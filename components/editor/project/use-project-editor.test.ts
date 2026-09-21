@@ -2,7 +2,12 @@
  * @jest-environment jsdom
  */
 import { renderHook, act, waitFor } from "@testing-library/react"
-import { useProjectEditor, joinRootRel, type ProjectEditorDeps } from "./use-project-editor"
+import {
+  useProjectEditor,
+  joinRootRel,
+  MAX_EDITOR_BYTES,
+  type ProjectEditorDeps,
+} from "./use-project-editor"
 import {
   getModelRetainCount,
   getRetainedModelUris,
@@ -183,6 +188,117 @@ describe("useProjectEditor", () => {
     expect(result.current.activePath).toBeNull()
   })
 
+  describe("closed-tab history", () => {
+    it("reopens the most recently closed tab", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      act(() => result.current.closeFile("src/b.ts"))
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.openFiles.map((f) => f.relPath)).toContain("src/b.ts")
+      expect(result.current.activePath).toBe("src/b.ts")
+    })
+
+    it("pops a batch close in tab order, most recent first", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+        await result.current.openFile("src/c.ts")
+      })
+      act(() => result.current.closeAllFiles())
+      expect(result.current.openFiles).toHaveLength(0)
+      // History pushes in tab order and pops from the tail — the rightmost
+      // closed tab comes back first, like VS Code's reopen-closed.
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.activePath).toBe("src/c.ts")
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.activePath).toBe("src/b.ts")
+    })
+
+    it("is a no-op on an empty history", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.openFiles).toHaveLength(0)
+      expect(deps.readFile).not.toHaveBeenCalled()
+    })
+
+    it("does not stack the same path twice", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.closeFile("src/a.ts"))
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.closeFile("src/a.ts"))
+      // One reopen consumes the single history entry — a second is a no-op
+      // and must not resurrect a stale stack frame.
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.activePath).toBe("src/a.ts")
+      await act(async () => result.current.openFile("src/b.ts"))
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.activePath).toBe("src/b.ts")
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts", "src/b.ts"])
+    })
+
+    it("follows an in-app rename", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.closeFile("src/a.ts"))
+      await act(async () => result.current.renameOpenFile("src/a.ts", "src/renamed.ts"))
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.activePath).toBe("src/renamed.ts")
+    })
+
+    it("forgets the history when the root switches", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.closeFile("src/a.ts"))
+      await waitFor(() => expect(result.current.roots.length).toBe(2))
+      act(() => result.current.selectRoot("/repo-wt"))
+      // A relPath only resolves inside its own root — reopening the old
+      // root's history under /repo-wt would open (or fail on) the wrong file.
+      await act(async () => result.current.reopenClosedFile())
+      expect(result.current.openFiles).toHaveLength(0)
+    })
+
+    it("caps the history so the oldest entries fall off", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        for (let i = 1; i <= 21; i++) await result.current.openFile(`src/f${i}.ts`)
+      })
+      act(() => result.current.closeAllFiles())
+      for (let i = 0; i < 21; i++) {
+        await act(async () => result.current.reopenClosedFile())
+      }
+      const reopened = result.current.openFiles.map((f) => f.relPath)
+      expect(reopened).toHaveLength(20)
+      expect(reopened).not.toContain("src/f1.ts")
+      expect(reopened).toContain("src/f2.ts")
+    })
+  })
+
   it("saveAll writes every dirty file", async () => {
     const deps = makeDeps()
     const { result } = renderHook(() =>
@@ -314,11 +430,12 @@ describe("useProjectEditor", () => {
     expect(deps.writeFile).not.toHaveBeenCalled()
   })
 
-  it("reloadFile swallows a read error", async () => {
+  it("reloadFile propagates a read error and keeps the tab, draft and model", async () => {
     const readFile = jest
       .fn()
       .mockResolvedValueOnce("export const a = 1\n")
       .mockRejectedValueOnce(new Error("gone"))
+      .mockResolvedValue("export const a = 2\n")
     const deps = makeDeps({ readFile })
     const { result } = renderHook(() =>
       useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
@@ -326,6 +443,19 @@ describe("useProjectEditor", () => {
     await act(async () => {
       await result.current.openFile("src/a.ts")
     })
+    act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+    // The caller (workbench revert) toasts on rejection — swallowing it here
+    // would hide a real failure from the user.
+    await act(async () => {
+      await expect(result.current.reloadFile("src/a.ts")).rejects.toThrow("gone")
+    })
+    // The live tab survives a failed reload: draft, model hold and selection
+    // all stay put instead of the strip losing the file.
+    expect(result.current.openFiles).toHaveLength(1)
+    expect(result.current.openFiles[0].draftContent).toBe("unsaved\n")
+    expect(result.current.activePath).toBe("src/a.ts")
+    expect(getModelRetainCount("file:///repo/src/a.ts")).toBe(1)
+    // A later retry still works.
     await act(async () => {
       await result.current.reloadFile("src/a.ts")
     })
@@ -484,9 +614,9 @@ describe("useProjectEditor", () => {
     })
 
     it("does not resurrect a preview evicted while its read was still in flight", async () => {
-      // Fast A→B clicking: A's `readFile` is still pending when B claims the
-      // single preview slot and evicts A. The resolved read must not append A
-      // back — that would leave two files in a one-slot dock.
+      // Fast A→B clicking: A's stat is still settling when B claims the
+      // single preview slot and evicts A — the evicted tab never even reaches
+      // its `readFile`, and nothing appends A back into the one-slot dock.
       const gate: Record<string, (content: string) => void> = {}
       const deps = makeDeps({
         readFile: jest.fn(
@@ -499,20 +629,28 @@ describe("useProjectEditor", () => {
       const { result } = renderHook(() =>
         useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
       )
+      const flush = () => new Promise((r) => setTimeout(r, 0))
 
       await act(async () => {
         // `openFile` resolves the tab transition off refs before it awaits, so
-        // both calls interleave exactly as two fast clicks would.
-        const openA = result.current.openFile("src/a.ts", { mode: "preview" })
-        const openB = result.current.openFile("src/b.ts", { mode: "preview" })
+        // both calls interleave exactly as two fast clicks would. `readFile`
+        // now only fires once `statFile` has settled, so the queue has to
+        // drain before B's read exists.
+        result.current.openFile("src/a.ts", { mode: "preview" })
+        result.current.openFile("src/b.ts", { mode: "preview" })
+        await flush()
         gate["src/b.ts"]?.("export const b = 2\n")
-        gate["src/a.ts"]?.("export const a = 1\n")
-        await Promise.all([openA, openB])
+        await flush()
       })
 
       expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts"])
       expect(result.current.previewPath).toBe("src/b.ts")
       expect(result.current.activePath).toBe("src/b.ts")
+      // The evicted preview's read was skipped entirely and its model hold is
+      // gone — not just withheld from the tab list.
+      expect(
+        (deps.readFile as jest.Mock).mock.calls.filter((c) => c[1] === "src/a.ts")
+      ).toHaveLength(0)
       expect(getModelRetainCount("file:///repo/src/a.ts")).toBe(0)
     })
 
@@ -534,20 +672,28 @@ describe("useProjectEditor", () => {
       const { result } = renderHook(() =>
         useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
       )
+      const flush = () => new Promise((r) => setTimeout(r, 0))
 
       await act(async () => {
         const staleA = result.current.openFile("src/a.ts", { mode: "preview" })
+        // statFile resolves before readFile is invoked — drain the queue so
+        // the stale read actually exists before capturing its rejecter.
+        await flush()
         const failStaleA = gate["src/a.ts"]!.fail
         const openB = result.current.openFile("src/b.ts", { mode: "preview" })
+        await flush()
         pending.find((p) => p.rel === "src/b.ts")?.resolve("export const b = 2\n")
         await openB
+        await flush()
 
         // A comes back, starting a second read that will succeed.
         const freshA = result.current.openFile("src/a.ts", { mode: "preview" })
+        await flush()
         failStaleA(new Error("disk went away"))
         await staleA
         pending.at(-1)?.resolve("export const a = 1\n")
         await freshA
+        await flush()
       })
 
       expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
@@ -881,5 +1027,371 @@ describe("useProjectEditor", () => {
     expect(getRetainedModelUris()).toEqual([])
     act(() => result.current.closeFile("src/a.ts"))
     expect(getRetainedModelUris()).toEqual([])
+  })
+
+  describe("blocked files", () => {
+    it("opens a binary extension as a placeholder without a text read", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("assets/logo.png"))
+      const file = result.current.openFiles.find((f) => f.relPath === "assets/logo.png")
+      expect(file).toMatchObject({ blocked: "binary", savedContent: "", draftContent: "" })
+      expect(
+        (deps.readFile as jest.Mock).mock.calls.filter((c) => c[1] === "assets/logo.png")
+      ).toHaveLength(0)
+    })
+
+    it("marks a file binary when the text read fails UTF-8 decoding", async () => {
+      const deps = makeDeps({
+        readFile: jest.fn(async (_root: string, rel: string) => {
+          if (rel === "blob.bin.dat") return ""
+          throw new Error("stream did not contain valid UTF-8")
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/odd.ts"))
+      expect(result.current.openFiles.find((f) => f.relPath === "src/odd.ts")).toMatchObject({
+        blocked: "binary",
+        savedContent: "",
+      })
+    })
+
+    it("blocks files over the editor byte ceiling as too-large", async () => {
+      const deps = makeDeps({
+        statFile: jest.fn(async () => ({
+          exists: true,
+          isDir: false,
+          size: MAX_EDITOR_BYTES + 1,
+          mtimeMs: 1234,
+        })),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      expect(result.current.activeFile).toMatchObject({
+        blocked: "too-large",
+        savedContent: "",
+        sizeBytes: MAX_EDITOR_BYTES + 1,
+      })
+      // Stat answers before any read: an oversized file never sends its first
+      // chunk through IPC just to be thrown away.
+      expect(deps.readFile).not.toHaveBeenCalled()
+    })
+
+    it("stats before it reads, so the size verdict precedes the transfer", async () => {
+      const order: string[] = []
+      const deps = makeDeps({
+        statFile: jest.fn(async () => {
+          order.push("stat")
+          return { exists: true, isDir: false, size: 10, mtimeMs: 1234 }
+        }),
+        readFile: jest.fn(async () => {
+          order.push("read")
+          return "export const a = 1\n"
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      expect(order).toEqual(["stat", "read"])
+    })
+
+    it("falls back to the capped read when stat cannot answer", async () => {
+      const deps = makeDeps({
+        statFile: jest.fn(async () => {
+          throw new Error("stat unsupported")
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      expect(deps.readFile).toHaveBeenCalledWith("/repo", "src/a.ts", MAX_EDITOR_BYTES + 1)
+      expect(result.current.activeFile?.blocked).toBeUndefined()
+    })
+
+    it("opens a Jest .snap snapshot as text, not a binary placeholder", async () => {
+      const deps = makeDeps({
+        readFile: jest.fn(async (_root: string, rel: string) =>
+          rel.endsWith(".snap") ? "exports[`renders 1`] = `<div/>`\n" : ""
+        ),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("__snapshots__/a.test.tsx.snap"))
+      expect(result.current.activeFile).toMatchObject({
+        blocked: undefined,
+        savedContent: "exports[`renders 1`] = `<div/>`\n",
+      })
+    })
+
+    it("saveFile never writes a blocked tab's empty buffer over the file", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("assets/logo.png"))
+      expect(result.current.activeFile?.blocked).toBe("binary")
+      await act(async () => result.current.saveFile("assets/logo.png"))
+      await act(async () => result.current.saveAll())
+      expect(deps.writeFile).not.toHaveBeenCalled()
+    })
+
+    it("open anyway re-reads a too-large file without the cap and unblocks it", async () => {
+      const deps = makeDeps({
+        statFile: jest.fn(async () => ({
+          exists: true,
+          isDir: false,
+          size: MAX_EDITOR_BYTES + 1,
+          mtimeMs: 1234,
+        })),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      expect(result.current.activeFile?.blocked).toBe("too-large")
+
+      // The forced read bypasses the ceiling: no maxBytes argument.
+      await act(async () => result.current.openFile("src/a.ts", { allowLarge: true }))
+      const forced = (deps.readFile as jest.Mock).mock.calls.at(-1)
+      expect(forced?.[1]).toBe("src/a.ts")
+      expect(forced?.[2]).toBeUndefined()
+      expect(result.current.activeFile).toMatchObject({
+        blocked: undefined,
+        savedContent: "export const a = 1\n",
+      })
+    })
+
+    it("does not force-read an already-open file that is not too-large", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      const before = (deps.readFile as jest.Mock).mock.calls.length
+      await act(async () => result.current.openFile("src/a.ts", { allowLarge: true }))
+      expect((deps.readFile as jest.Mock).mock.calls.length).toBe(before)
+    })
+
+    it("clears a binary block when a rename lands on a text extension", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("img.png"))
+      expect(result.current.activeFile?.blocked).toBe("binary")
+      await act(() => result.current.renameOpenFile("img.png", "img.txt"))
+      expect(result.current.activeFile?.blocked).toBeUndefined()
+    })
+
+    it("keeps a binary block when the rename stays binary", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("img.png"))
+      await act(() => result.current.renameOpenFile("img.png", "img.webp"))
+      expect(result.current.activeFile?.blocked).toBe("binary")
+    })
+
+    it("re-classifies on reload: a file that turned binary stays out of drafts", async () => {
+      let utf8 = false
+      const deps = makeDeps({
+        readFile: jest.fn(async (_root: string, rel: string) => {
+          if (utf8) throw new Error("stream did not contain valid UTF-8")
+          return `// ${rel}\n`
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      expect(result.current.activeFile?.blocked).toBeUndefined()
+
+      utf8 = true
+      await act(async () => result.current.reloadFile("src/a.ts"))
+      expect(result.current.activeFile).toMatchObject({ blocked: "binary", savedContent: "" })
+    })
+  })
+
+  describe("tab batch operations", () => {
+    const open3 = async (
+      result: { current: ReturnType<typeof useProjectEditor> },
+      deps: Partial<ProjectEditorDeps>
+    ) => {
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+        await result.current.openFile("src/c.ts")
+      })
+      expect(deps.readFile).toHaveBeenCalledTimes(3)
+    }
+
+    it("moveOpenFile reorders tabs", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      act(() => result.current.moveOpenFile("src/c.ts", "src/a.ts"))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual([
+        "src/c.ts",
+        "src/a.ts",
+        "src/b.ts",
+      ])
+    })
+
+    it("moveOpenFile ignores unknown or identical paths", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      const before = result.current.openFiles.map((f) => f.relPath)
+      act(() => {
+        result.current.moveOpenFile("src/missing.ts", "src/a.ts")
+        result.current.moveOpenFile("src/a.ts", "src/a.ts")
+      })
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(before)
+    })
+
+    it("closeOtherFiles keeps only the named tab", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      act(() => result.current.closeOtherFiles("src/b.ts"))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts"])
+      expect(result.current.activePath).toBe("src/b.ts")
+    })
+
+    it("closeOtherFiles falls back to the kept tab's position when it was active", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      // Active is c.ts; closing everything except a.ts must move the active
+      // marker to the only survivor rather than leaving it dangling.
+      act(() => result.current.closeOtherFiles("src/a.ts"))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      expect(result.current.activePath).toBe("src/a.ts")
+    })
+
+    it("closeFilesToRight drops only the tabs after the named one", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      act(() => result.current.closeFilesToRight("src/a.ts"))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+    })
+
+    it("closeAllFiles empties the editor and clears the selection", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await open3(result, deps)
+      act(() => result.current.closeAllFiles())
+      expect(result.current.openFiles).toEqual([])
+      expect(result.current.activePath).toBeNull()
+      expect(getRetainedModelUris()).toEqual([])
+    })
+  })
+
+  describe("dirty close confirmation", () => {
+    let confirmSpy: jest.SpyInstance
+    beforeEach(() => {
+      confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false)
+    })
+    afterEach(() => {
+      confirmSpy.mockRestore()
+    })
+
+    it("keeps a dirty tab when the user cancels the close", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      act(() => result.current.closeFile("src/a.ts"))
+      expect(confirmSpy).toHaveBeenCalled()
+      // A cancelled close must be a full no-op: tab, draft and model hold stay.
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      expect(result.current.openFiles[0].draftContent).toBe("unsaved\n")
+      expect(getModelRetainCount("file:///repo/src/a.ts")).toBe(1)
+    })
+
+    it("closes a dirty tab once the user confirms", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      confirmSpy.mockReturnValue(true)
+      act(() => result.current.closeFile("src/a.ts"))
+      expect(result.current.openFiles).toEqual([])
+      expect(result.current.activePath).toBeNull()
+    })
+
+    it("never asks when nothing in scope is dirty", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      act(() => result.current.closeAllFiles())
+      expect(confirmSpy).not.toHaveBeenCalled()
+      expect(result.current.openFiles).toEqual([])
+    })
+
+    it("a cancelled batch close drops no tabs at all", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      act(() => result.current.setDraft("src/b.ts", "unsaved\n"))
+
+      // Only b.ts is dirty, but the batch is all-or-nothing: a cancel keeps
+      // even the clean tab in scope.
+      act(() => result.current.closeAllFiles())
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts", "src/b.ts"])
+    })
+  })
+
+  it("records monaco language and size metadata on open", async () => {
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => result.current.openFile("src/a.ts"))
+    expect(result.current.activeFile).toMatchObject({
+      language: "typescript",
+      monacoLanguage: "typescript",
+      sizeBytes: 10,
+      blocked: undefined,
+    })
   })
 })

@@ -32,15 +32,23 @@ const editor = {
     draftContent: "old",
     draftVersion: 1,
   } as Record<string, unknown> | null,
+  previewPath: null as string | null,
   dirtyCount: 0,
   treeRefreshToken: 0,
   selectRoot: jest.fn(),
   openFile: jest.fn().mockResolvedValue(undefined),
+  pinFile: jest.fn(),
   closeFile: jest.fn(),
+  moveOpenFile: jest.fn(),
+  closeOtherFiles: jest.fn(),
+  closeFilesToRight: jest.fn(),
+  closeAllFiles: jest.fn(),
+  reopenClosedFile: jest.fn(),
   setActivePath: jest.fn(),
   setDraft: jest.fn(),
   saveFile: jest.fn().mockResolvedValue(undefined),
   saveAll: jest.fn().mockResolvedValue(undefined),
+  reloadFile: jest.fn().mockResolvedValue(undefined),
   renameOpenFile: jest.fn().mockResolvedValue(undefined),
 }
 
@@ -62,6 +70,31 @@ jest.mock("./project-file-tree", () => ({
 jest.mock("./project-search-panel", () => ({
   ProjectSearchPanel: ({ onOpenMatch }: { onOpenMatch: (path: string) => void }) => (
     <button data-testid="search" onClick={() => onOpenMatch("src/search.ts")} />
+  ),
+}))
+// The decoration hook otherwise hits the real transport and resolves outside
+// act(); a never-settling status keeps the suite quiet and badge-free.
+jest.mock("./use-project-git-status", () => ({
+  useProjectGitStatus: () => ({ branch: null, byPath: new Map() }),
+}))
+const quickOpenProps = jest.fn()
+jest.mock("./project-quick-open", () => ({
+  ProjectQuickOpen: (props: { open: boolean }) => {
+    quickOpenProps(props)
+    return props.open ? <div data-testid="quick-open" /> : null
+  },
+}))
+jest.mock("./project-editor-breadcrumbs", () => ({
+  ProjectEditorBreadcrumbs: () => null,
+}))
+jest.mock("./project-editor-status-bar", () => ({
+  ProjectEditorStatusBar: () => null,
+}))
+jest.mock("./project-file-fallback", () => ({
+  ProjectFileFallback: ({ onOpenAnyway }: { onOpenAnyway?: () => void }) => (
+    <div data-testid="file-fallback">
+      <button data-testid="open-anyway" onClick={() => onOpenAnyway?.()} />
+    </div>
   ),
 }))
 // `mount-monaco` stands in for ProjectMonaco's real `onMount`, which is the
@@ -206,6 +239,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   registerOpener.mockReturnValue(disposeOpener)
   projectContextWorkbenchProps.mockClear()
+  editor.openFiles = []
   editor.activePath = "src/a.ts"
   editor.activeFile = {
     relPath: "src/a.ts",
@@ -371,6 +405,24 @@ it("renders the shared empty editor state", () => {
   expect(screen.getByTestId("editor-empty")).toHaveTextContent("emptyEditor")
   fireEvent.keyDown(screen.getByTestId("tabs"), { key: "s", metaKey: true })
   expect(editor.saveFile).not.toHaveBeenCalled()
+})
+
+it("empty-state shortcut rows drive quick open, search, and reopen", () => {
+  editor.activeFile = null
+  editor.activePath = null
+  render(<Harness />)
+
+  fireEvent.click(screen.getByTestId("editor-empty-quick-open"))
+  expect(screen.getByTestId("quick-open")).toBeInTheDocument()
+
+  fireEvent.click(screen.getByTestId("editor-empty-search"))
+  expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
+  expect(
+    screen.getByTestId("project-editor-sidebar-content").querySelector('[data-testid="search"]')
+  ).not.toBeNull()
+
+  fireEvent.click(screen.getByTestId("editor-empty-reopen"))
+  expect(editor.reopenClosedFile).toHaveBeenCalled()
 })
 
 it("keeps the editor mounted under a veil while a cold open reads the file", () => {
@@ -562,4 +614,120 @@ it("ignores a plain `s` keypress and a non-save modifier chord", () => {
   fireEvent.keyDown(surface, { key: "p", metaKey: true })
   expect(editor.saveFile).not.toHaveBeenCalled()
   expect(editor.saveAll).not.toHaveBeenCalled()
+})
+
+describe("tab keyboard chords", () => {
+  const surface = () => screen.getByTestId("tabs").parentElement!
+
+  it("closes the active tab on mod+W and leaves the chord alone with no tab", () => {
+    const view = render(<Harness />)
+    // fireEvent returns false when the dispatched event was preventDefaulted.
+    expect(fireEvent.keyDown(surface(), { key: "w", metaKey: true })).toBe(false)
+    expect(editor.closeFile).toHaveBeenCalledWith("src/a.ts")
+
+    editor.closeFile.mockClear()
+    editor.activePath = null
+    view.rerender(<Harness />)
+    expect(fireEvent.keyDown(surface(), { key: "w", metaKey: true })).toBe(true)
+    expect(editor.closeFile).not.toHaveBeenCalled()
+  })
+
+  it("reopens the last closed tab on mod+shift+T", () => {
+    render(<Harness />)
+    fireEvent.keyDown(surface(), { key: "T", metaKey: true, shiftKey: true })
+    expect(editor.reopenClosedFile).toHaveBeenCalled()
+  })
+
+  it("cycles tabs on ctrl+tab / ctrl+shift+tab with wraparound", () => {
+    editor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }, { relPath: "src/c.ts" }]
+    editor.activePath = "src/a.ts"
+    render(<Harness />)
+
+    fireEvent.keyDown(surface(), { key: "Tab", ctrlKey: true })
+    expect(editor.setActivePath).toHaveBeenLastCalledWith("src/b.ts")
+
+    fireEvent.keyDown(surface(), { key: "Tab", ctrlKey: true, shiftKey: true })
+    expect(editor.setActivePath).toHaveBeenLastCalledWith("src/c.ts")
+  })
+
+  it("cycles tabs on mod+shift+bracket using event.code, not the shifted glyph", () => {
+    editor.openFiles = [{ relPath: "src/a.ts" }, { relPath: "src/b.ts" }]
+    editor.activePath = "src/b.ts"
+    render(<Harness />)
+
+    fireEvent.keyDown(surface(), { key: "}", code: "BracketRight", metaKey: true, shiftKey: true })
+    expect(editor.setActivePath).toHaveBeenLastCalledWith("src/a.ts")
+
+    fireEvent.keyDown(surface(), { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true })
+    expect(editor.setActivePath).toHaveBeenLastCalledWith("src/a.ts")
+  })
+
+  it("does not cycle on a single tab or swallow the OS ⌘Tab switcher", () => {
+    editor.openFiles = [{ relPath: "src/a.ts" }]
+    render(<Harness />)
+
+    fireEvent.keyDown(surface(), { key: "Tab", ctrlKey: true })
+    fireEvent.keyDown(surface(), { key: "Tab", metaKey: true })
+    expect(editor.setActivePath).not.toHaveBeenCalled()
+  })
+
+  it("opens project search on mod+shift+F", () => {
+    render(<Harness />)
+    fireEvent.keyDown(surface(), { key: "F", metaKey: true, shiftKey: true })
+    expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
+    expect(
+      screen.getByTestId("project-editor-sidebar-content").querySelector('[data-testid="search"]')
+    ).not.toBeNull()
+  })
+})
+
+describe("activity rail", () => {
+  it("switches the sidebar between the file tree and search panel", () => {
+    render(<Harness />)
+    const sidebar = screen.getByTestId("project-editor-sidebar-content")
+    expect(sidebar.querySelector('[data-testid="tree"]')).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("left-tab-search"))
+    expect(sidebar.querySelector('[data-testid="search"]')).not.toBeNull()
+    expect(sidebar.querySelector('[data-testid="tree"]')).toBeNull()
+    expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(screen.getByTestId("left-tab-files"))
+    expect(sidebar.querySelector('[data-testid="tree"]')).not.toBeNull()
+  })
+
+  it("opens quick-open from the rail button", () => {
+    render(<Harness />)
+    expect(screen.queryByTestId("quick-open")).toBeNull()
+    fireEvent.click(screen.getByTestId("rail-quick-open"))
+    expect(screen.getByTestId("quick-open")).toBeInTheDocument()
+    expect(quickOpenProps).toHaveBeenLastCalledWith(expect.objectContaining({ open: true }))
+  })
+
+  it("opens quick-open on the mod+P chord", () => {
+    render(<Harness />)
+    const surface = screen.getByTestId("tabs").parentElement!
+    fireEvent.keyDown(surface, { key: "p", metaKey: true })
+    expect(screen.getByTestId("quick-open")).toBeInTheDocument()
+  })
+})
+
+describe("blocked files", () => {
+  it("renders the fallback pane and forwards open-anyway to the editor", () => {
+    editor.activeFile = {
+      relPath: "big.log",
+      absolutePath: "/repo/big.log",
+      savedContent: "",
+      draftContent: "",
+      draftVersion: 1,
+      blocked: "too-large",
+    }
+    editor.activePath = "big.log"
+    render(<Harness />)
+    expect(screen.getByTestId("file-fallback")).toBeInTheDocument()
+    expect(screen.queryByTestId("monaco")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("open-anyway"))
+    expect(editor.openFile).toHaveBeenCalledWith("big.log", { allowLarge: true })
+  })
 })

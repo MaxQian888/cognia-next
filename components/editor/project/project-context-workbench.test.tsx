@@ -23,8 +23,15 @@ jest.mock("@/hooks/chat/use-resource-workbench-session", () => ({
 }))
 
 import { ProjectContextWorkbench } from "./project-context-workbench"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 
 describe("ProjectContextWorkbench", () => {
+  beforeEach(() => {
+    // The store persists the user's rail/tabs preference; these assertions are
+    // written against the rail's button-per-activity navigation.
+    useContextWorkbenchStore.setState({ layouts: {}, navigationStyle: "rail" })
+  })
+
   it("binds the active draft and exposes all core activities", () => {
     render(
       <ProjectContextWorkbench
@@ -36,6 +43,7 @@ describe("ProjectContextWorkbench", () => {
           relPath: "src/index.ts",
           absolutePath: "/repo/src/index.ts",
           language: "typescript",
+          monacoLanguage: "typescript",
           savedContent: "const value = 1",
           draftContent: "const value = 2",
           draftVersion: 2,
@@ -59,6 +67,7 @@ describe("ProjectContextWorkbench", () => {
           relPath: "src/index.ts",
           absolutePath: "/repo/src/index.ts",
           language: "typescript",
+          monacoLanguage: "typescript",
           savedContent: "const value = 1",
           draftContent: "const value = 1",
           draftVersion: 1,
@@ -87,6 +96,7 @@ describe("ProjectContextWorkbench", () => {
           relPath: "src/main.ts",
           absolutePath: "/repo/src/main.ts",
           language: "typescript",
+          monacoLanguage: "typescript",
           savedContent: "x",
           draftContent: "x",
           draftVersion: 1,
@@ -108,6 +118,7 @@ describe("ProjectContextWorkbench", () => {
             relPath: "src/index.ts",
             absolutePath: "/repo/src/index.ts",
             language: "typescript",
+            monacoLanguage: "typescript",
             savedContent: "const value = 1",
             draftContent: undefined as unknown as string,
             draftVersion: 1,

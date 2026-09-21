@@ -88,6 +88,8 @@ interface Props {
   /** User keybindings from the canvas keybinding store. */
   bindings: Record<string, string>
   onSelectionChange?: (selection: TextSelectionCoordinates | undefined) => void
+  /** Caret line/column for the status bar; null when the editor loses focus context. */
+  onCursorChange?: (position: { lineNumber: number; column: number } | null) => void
   onDiagnosticsReady?: (
     relPath: string,
     diagnostics: { monaco: MonacoLike; editor: EditorLike } | null
@@ -102,6 +104,7 @@ export function ProjectMonaco({
   actionLabels,
   bindings,
   onSelectionChange,
+  onCursorChange,
   onDiagnosticsReady,
 }: Props) {
   const { resolvedTheme } = useTheme()
@@ -117,12 +120,14 @@ export function ProjectMonaco({
   // not re-run when the value changes. Synced in an effect declared *first*, so
   // the effects below always read this render's values.
   const onSelectionChangeRef = useRef(onSelectionChange)
+  const onCursorChangeRef = useRef(onCursorChange)
   const onDiagnosticsReadyRef = useRef(onDiagnosticsReady)
   const actionsRef = useRef(actions)
   const actionLabelsRef = useRef(actionLabels)
   const bindingsRef = useRef(bindings)
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange
+    onCursorChangeRef.current = onCursorChange
     onDiagnosticsReadyRef.current = onDiagnosticsReady
     actionsRef.current = actions
     actionLabelsRef.current = actionLabels
@@ -135,11 +140,14 @@ export function ProjectMonaco({
 
   // The `file://` URI is both the model key handed to `<Editor path>` and the
   // identity the LSP bridge addresses — one derivation so they cannot drift.
+  // `monacoLanguage` is the full-fidelity id (`rust`, `go`, `html`, …) so the
+  // model gets real highlighting and didOpen a truthful `languageId`; the
+  // closed `file.language` union stays for the CodeMirror side.
   const modelUri = buildWorkbenchUri({
     surface: "file",
     documentId: file.relPath,
     absolutePath: file.absolutePath,
-    language: file.language,
+    language: file.monacoLanguage,
     initialContent: file.draftContent,
   })
 
@@ -161,7 +169,7 @@ export function ProjectMonaco({
     nesDocumentRef.current = document
     manager.publishDidOpenDocument({
       uri: modelUri,
-      languageId: file.language,
+      languageId: file.monacoLanguage,
       version: file.draftVersion,
       text: file.draftContent,
     })
@@ -189,7 +197,7 @@ export function ProjectMonaco({
     // Content/version changes are emitted by the incremental effect below;
     // including them here would turn every keystroke into close+open churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diag, file.language, modelUri])
+  }, [diag, file.monacoLanguage, modelUri])
 
   useEffect(() => {
     const previous = nesDocumentRef.current
@@ -251,18 +259,22 @@ export function ProjectMonaco({
       documentId: relPath,
       absolutePath: file.absolutePath,
       projectRoot,
-      language: file.language,
+      language: file.monacoLanguage,
       initialContent: file.draftContent,
     })
     handleRef.current = handle
     onDiagnosticsReadyRef.current?.(relPath, diagnostics)
+    // Model swaps keep the caret wherever Monaco left it — re-emit so the
+    // status bar does not show the previous file's position on the new one.
+    const revealable = editor as unknown as RevealableEditor
+    onCursorChangeRef.current?.(revealable.getPosition?.() ?? null)
     return () => {
       handle.dispose()
       handleRef.current = null
       onDiagnosticsReadyRef.current?.(relPath, null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diag, file.relPath, file.absolutePath, file.language, projectRoot])
+  }, [diag, file.relPath, file.absolutePath, file.monacoLanguage, projectRoot])
 
   // Editor actions carry per-file closures (save target, copy-path). Re-attach
   // them at the same cadence the old per-file remount did — once per open
@@ -305,6 +317,7 @@ export function ProjectMonaco({
       const start = model.getOffsetAt(event.selection.getStartPosition())
       const end = model.getOffsetAt(event.selection.getEndPosition())
       onSelectionChangeRef.current?.(start === end ? undefined : { kind: "text", start, end })
+      onCursorChangeRef.current?.(event.selection.getEndPosition())
       const visible = revealableEditor.getVisibleRanges?.()[0]
       const document = nesDocumentRef.current
       if (visible && document) {
@@ -363,7 +376,7 @@ export function ProjectMonaco({
           path={modelUri}
           keepCurrentModel
           value={file.draftContent}
-          language={file.language}
+          language={file.monacoLanguage}
           theme={COGNIA_ACTIVE_THEME_ID}
           options={{
             minimap: { enabled: true },

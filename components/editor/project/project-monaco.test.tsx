@@ -63,6 +63,7 @@ const setPosition = jest.fn()
 const focus = jest.fn()
 const setTheme = jest.fn()
 const getOffsetAt = jest.fn(({ column }: { column: number }) => column - 1)
+const getPosition = jest.fn(() => ({ lineNumber: 2, column: 5 }))
 let editorModelPresent = true
 let cursorSelectionListener: ((event: unknown) => void) | null = null
 let capturedOnChange: ((v: string) => void) | null = null
@@ -100,6 +101,7 @@ jest.mock("@monaco-editor/react", () => {
         focus,
         getId: () => "ed1",
         getModel: () => (editorModelPresent ? { getOffsetAt } : null),
+        getPosition,
         onDidChangeCursorSelection: (listener: (event: unknown) => void) => {
           cursorSelectionListener = listener
           return { dispose: jest.fn() }
@@ -132,6 +134,7 @@ const file: OpenFile = {
   relPath: "src/a.ts",
   absolutePath: "/repo/src/a.ts",
   language: "typescript",
+  monacoLanguage: "typescript",
   savedContent: "x",
   draftContent: "x",
   draftVersion: 1,
@@ -141,6 +144,7 @@ const otherFile: OpenFile = {
   relPath: "src/b.ts",
   absolutePath: "/repo/src/b.ts",
   language: "typescript",
+  monacoLanguage: "typescript",
   savedContent: "y",
   draftContent: "y",
   draftVersion: 1,
@@ -264,6 +268,44 @@ describe("ProjectMonaco", () => {
       },
     })
     expect(onSelectionChange).toHaveBeenCalledWith({ kind: "text", start: 1, end: 3 })
+  })
+
+  it("re-emits the caret position when the workbench binds, so the status bar isn't stale", () => {
+    const onCursorChange = jest.fn()
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        onCursorChange={onCursorChange}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    expect(onCursorChange).toHaveBeenCalledWith({ lineNumber: 2, column: 5 })
+  })
+
+  it("forwards the selection's end position as the cursor", () => {
+    const onCursorChange = jest.fn()
+    render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        onCursorChange={onCursorChange}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    cursorSelectionListener?.({
+      selection: {
+        getStartPosition: () => ({ lineNumber: 1, column: 2 }),
+        getEndPosition: () => ({ lineNumber: 4, column: 9 }),
+      },
+    })
+    expect(onCursorChange).toHaveBeenLastCalledWith({ lineNumber: 4, column: 9 })
   })
 
   it("lifts the mounted Monaco diagnostics context into the workbench", () => {

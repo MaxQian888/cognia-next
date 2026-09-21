@@ -56,6 +56,10 @@ jest.mock("@/components/ui/context-menu", () => {
       </button>
     ),
     ContextMenuSeparator: () => null,
+    // Submenus flatten inline so template entries stay clickable in tests.
+    ContextMenuSub: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    ContextMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    ContextMenuSubContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   }
 })
 
@@ -225,15 +229,28 @@ describe("ProjectFileTree", () => {
     await waitFor(() => expect(deps.deleteEntry).toHaveBeenCalledWith("/repo", "readme.md", false))
   })
 
-  it("shows the empty state and tolerates a list error", async () => {
+  it("shows the empty state only after the root listing succeeds", async () => {
     const deps = makeDeps()
-    ;(deps.listDir as jest.Mock).mockImplementation(async (_r: string, rel?: string) =>
-      rel ? [] : Promise.reject(new Error("boom"))
-    )
+    ;(deps.listDir as jest.Mock).mockResolvedValue([])
     render(
       <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
     )
+    // Until the listing resolves the tree is loading, not empty — the "No
+    // files" claim must wait for a real answer.
+    expect(screen.getByTestId("tree-loading")).toBeInTheDocument()
+    expect(screen.queryByText("treeEmpty")).toBeNull()
     await waitFor(() => expect(screen.getByText("treeEmpty")).toBeInTheDocument())
+    expect(screen.queryByTestId("tree-loading")).toBeNull()
+  })
+
+  it("offers a new-file action inside the empty state", async () => {
+    const deps = makeDeps()
+    ;(deps.listDir as jest.Mock).mockResolvedValue([])
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    fireEvent.click(await screen.findByTestId("tree-empty-new-file"))
+    expect(await screen.findByPlaceholderText("newFile")).toBeInTheDocument()
   })
 
   it("cancels a create on Escape and ignores an empty name", async () => {
@@ -535,6 +552,256 @@ describe("failures reach the user", () => {
         expect.objectContaining({ kind: "conflict" }),
         "rename",
         "readme.md"
+      )
+    )
+  })
+})
+
+describe("git decorations", () => {
+  it("badges a file row with its status letter", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        gitDecorations={new Map([["readme.md", "modified"]])}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-git-readme.md")).toHaveTextContent("M"))
+  })
+
+  it("aggregates the worst descendant status onto a collapsed directory", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        gitDecorations={
+          new Map([
+            ["src/a.ts", "untracked"],
+            ["src/deep/b.ts", "conflicted"],
+          ])
+        }
+      />
+    )
+    // src never has to be expanded: the badge rolls up from the flat map.
+    await waitFor(() => expect(screen.getByTestId("tree-git-src")).toHaveTextContent("C"))
+  })
+
+  it("renders no badge for a clean workspace", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        gitDecorations={new Map()}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    expect(screen.queryByTestId("tree-git-src")).toBeNull()
+    expect(screen.queryByTestId("tree-git-readme.md")).toBeNull()
+  })
+})
+
+describe("collapse-all and reveal", () => {
+  it("collapses every expanded directory but keeps the root", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId("tree-collapse-all"))
+    expect(screen.queryByTestId("tree-row-src/a.ts")).toBeNull()
+    // Root rows stay put — only the expansion set resets.
+    expect(screen.getByTestId("tree-row-src")).toBeInTheDocument()
+  })
+
+  it("reveal-active expands the ancestors of the active file", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath="src/a.ts" onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    expect(screen.queryByTestId("tree-row-src/a.ts")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("tree-reveal-active"))
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+  })
+
+  it("answers an external revealRequest the same way", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        revealRequest={{ path: "src/a.ts", nonce: 1 }}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+  })
+})
+
+describe("drag-move", () => {
+  const TREE_MIME = "application/x-cognia-tree-row"
+  const treeDt = () => {
+    const data: Record<string, string> = {}
+    return {
+      types: [TREE_MIME],
+      effectAllowed: "",
+      dropEffect: "",
+      setData: (k: string, v: string) => {
+        data[k] = v
+      },
+      getData: (k: string) => data[k] ?? "",
+    }
+  }
+
+  it("moves a file into a directory through the rename path", async () => {
+    const deps = makeDeps()
+    const onRenamed = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        onRenamed={onRenamed}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-readme.md"), { dataTransfer: dt })
+    fireEvent.drop(screen.getByTestId("tree-row-src"), { dataTransfer: dt })
+    await waitFor(() =>
+      expect(deps.renameEntry).toHaveBeenCalledWith("/repo", "readme.md", "src/readme.md")
+    )
+    expect(onRenamed).toHaveBeenCalledWith("readme.md", "src/readme.md")
+  })
+
+  it("refuses to drop a directory into itself", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-src"), { dataTransfer: dt })
+    fireEvent.drop(screen.getByTestId("tree-row-src"), { dataTransfer: dt })
+    await act(async () => {})
+    expect(deps.renameEntry).not.toHaveBeenCalled()
+  })
+
+  it("refuses to drop a directory into its own descendant", async () => {
+    const deps = makeDeps()
+    deps.fs.src.push(entry("src/deep", true))
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/deep")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-src"), { dataTransfer: dt })
+    fireEvent.drop(screen.getByTestId("tree-row-src/deep"), { dataTransfer: dt })
+    await act(async () => {})
+    expect(deps.renameEntry).not.toHaveBeenCalled()
+  })
+
+  it("drops onto empty space land at the workspace root", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    // Stage a file inside src by expanding it first.
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-src/a.ts"), { dataTransfer: dt })
+    fireEvent.drop(screen.getByTestId("project-file-tree-scroll"), { dataTransfer: dt })
+    await waitFor(() => expect(deps.renameEntry).toHaveBeenCalledWith("/repo", "src/a.ts", "a.ts"))
+  })
+
+  it("highlights the directory row under the drag, not the root container", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-readme.md"), { dataTransfer: dt })
+    fireEvent.dragOver(screen.getByTestId("tree-row-src"), { dataTransfer: dt })
+    // Without stopPropagation the dragover bubbles to the scroll container,
+    // which claims the highlight for the root.
+    expect(screen.getByTestId("tree-row-src")).toHaveClass("bg-primary/15")
+    expect(screen.getByTestId("project-file-tree-scroll")).not.toHaveClass("bg-accent/30")
+  })
+
+  it("drops onto a file row land in that file's directory, never the root", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+    const dt = treeDt()
+    fireEvent.dragStart(screen.getByTestId("tree-row-readme.md"), { dataTransfer: dt })
+    // A file row is a drop target for its parent dir — the drop must not
+    // bubble to the scroll container's root handler.
+    fireEvent.drop(screen.getByTestId("tree-row-src/a.ts"), { dataTransfer: dt })
+    await waitFor(() =>
+      expect(deps.renameEntry).toHaveBeenCalledWith("/repo", "readme.md", "src/readme.md")
+    )
+  })
+})
+
+describe("new file from template", () => {
+  it("prefills the suggested name and writes the scaffold content", async () => {
+    const deps = makeDeps()
+    const onOpenFile = jest.fn()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={onOpenFile} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    // The root context menu flattens inline — its template items render last.
+    fireEvent.click(screen.getAllByText("templates.markdown").at(-1)!)
+    const input = await screen.findByPlaceholderText("templates.markdown")
+    expect(input).toHaveValue("README.md")
+    fireEvent.change(input, { target: { value: "notes.md" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(deps.writeFile).toHaveBeenCalledWith("/repo", "notes.md", "# notes\n")
+    )
+    expect(onOpenFile).toHaveBeenCalledWith("notes.md")
+  })
+
+  it("derives the component export from the final filename", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getAllByText("templates.reactComponent").at(-1)!)
+    const input = await screen.findByPlaceholderText("templates.reactComponent")
+    fireEvent.change(input, { target: { value: "my-widget.tsx" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(deps.writeFile).toHaveBeenCalledWith(
+        "/repo",
+        "my-widget.tsx",
+        expect.stringContaining("export function MyWidget()")
       )
     )
   })

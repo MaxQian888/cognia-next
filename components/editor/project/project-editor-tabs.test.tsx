@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -15,6 +16,7 @@ function file(relPath: string, dirty = false, externallyChanged = false): OpenFi
     relPath,
     absolutePath: `/repo/${relPath}`,
     language: "typescript",
+    monacoLanguage: "typescript",
     savedContent: "a",
     draftContent: dirty ? "b" : "a",
     draftVersion: dirty ? 2 : 1,
@@ -296,6 +298,269 @@ describe("ProjectEditorTabs", () => {
       expect(screen.getByTestId("editor-tab-src/a.ts")).not.toHaveClass("italic")
       // Double-clicking must be inert rather than throwing when `onPin` is absent.
       fireEvent.doubleClick(screen.getByTestId("editor-tab-src/a.ts"))
+    })
+  })
+
+  describe("drag reorder", () => {
+    const DRAG_MIME = "application/x-cognia-editor-tab"
+    const dataTransfer = () => {
+      const data: Record<string, string> = {}
+      return {
+        types: [DRAG_MIME],
+        effectAllowed: "",
+        dropEffect: "",
+        setData: (k: string, v: string) => {
+          data[k] = v
+        },
+        getData: (k: string) => data[k] ?? "",
+      }
+    }
+    /** The draggable ContextMenuTrigger div wrapping a tab's button. */
+    const wrap = (relPath: string) => screen.getByTestId(`editor-tab-${relPath}`).parentElement!
+
+    const render3 = (onMove?: jest.Mock) =>
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts"), file("src/c.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onMove={onMove}
+        />
+      )
+
+    it("makes tabs draggable only when the host wires onMove", () => {
+      const { unmount } = render3(jest.fn())
+      expect(wrap("src/a.ts")).toHaveAttribute("draggable", "true")
+      unmount()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      expect(wrap("src/a.ts")).toHaveAttribute("draggable", "false")
+    })
+
+    it("dropping a tab on another calls onMove(from, to)", () => {
+      const onMove = jest.fn()
+      render3(onMove)
+      const dt = dataTransfer()
+      fireEvent.dragStart(wrap("src/a.ts"), { dataTransfer: dt })
+      expect(fireEvent.dragOver(wrap("src/c.ts"), { dataTransfer: dt })).toBe(false)
+      fireEvent.drop(wrap("src/c.ts"), { dataTransfer: dt })
+      expect(onMove).toHaveBeenCalledWith("src/a.ts", "src/c.ts")
+    })
+
+    it("ignores a drop on the dragged tab itself", () => {
+      const onMove = jest.fn()
+      render3(onMove)
+      const dt = dataTransfer()
+      fireEvent.dragStart(wrap("src/a.ts"), { dataTransfer: dt })
+      fireEvent.drop(wrap("src/a.ts"), { dataTransfer: dt })
+      expect(onMove).not.toHaveBeenCalled()
+    })
+
+    it("does not claim a foreign drag payload", () => {
+      render3(jest.fn())
+      const foreign = { types: ["text/plain"], dropEffect: "", getData: () => "" }
+      // Without the editor-tab MIME the dragover must not be prevented — the
+      // browser keeps it a non-drop zone instead of advertising a reorder.
+      expect(fireEvent.dragOver(wrap("src/b.ts"), { dataTransfer: foreign })).toBe(true)
+    })
+  })
+
+  describe("tab context menu", () => {
+    const openMenu = async (relPath: string) => {
+      fireEvent.contextMenu(screen.getByTestId(`editor-tab-${relPath}`).parentElement!)
+      return screen.findByTestId(`editor-tab-menu-${relPath}`)
+    }
+
+    it("fires close-others and close-all from the menu", async () => {
+      const onCloseOthers = jest.fn()
+      const onCloseAll = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onCloseOthers={onCloseOthers}
+          onCloseAll={onCloseAll}
+        />
+      )
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("tabs.closeOthers"))
+      expect(onCloseOthers).toHaveBeenCalledWith("src/a.ts")
+      // Selecting an item dismisses the menu — reopen it for the next action.
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("tabs.closeAll"))
+      expect(onCloseAll).toHaveBeenCalled()
+    })
+
+    it("fires reopen-closed only when the host wires it", async () => {
+      const onReopenClosed = jest.fn()
+      const { unmount } = render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onReopenClosed={onReopenClosed}
+        />
+      )
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("tabs.reopenClosed"))
+      expect(onReopenClosed).toHaveBeenCalled()
+      unmount()
+
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      await openMenu("src/a.ts")
+      expect(screen.queryByText("tabs.reopenClosed")).toBeNull()
+    })
+
+    it("disables close-others on a single tab and close-to-right on the last tab", async () => {
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onCloseOthers={jest.fn()}
+          onCloseToRight={jest.fn()}
+        />
+      )
+      await openMenu("src/a.ts")
+      expect(await screen.findByText("tabs.closeOthers")).toHaveAttribute("aria-disabled", "true")
+      expect(await screen.findByText("tabs.closeToRight")).toHaveAttribute("aria-disabled", "true")
+    })
+
+    it("fires close-to-right with the tab's path", async () => {
+      const onCloseToRight = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts"), file("src/c.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onCloseToRight={onCloseToRight}
+        />
+      )
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("tabs.closeToRight"))
+      expect(onCloseToRight).toHaveBeenCalledWith("src/a.ts")
+    })
+
+    it("offers revert only on a dirty tab", async () => {
+      const onRevert = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts", true)]}
+          activePath="src/a.ts"
+          dirtyCount={1}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onRevert={onRevert}
+        />
+      )
+      await openMenu("src/a.ts")
+      expect(screen.queryByText("tabs.revert")).toBeNull()
+      await openMenu("src/b.ts")
+      fireEvent.click(await screen.findByText("tabs.revert"))
+      expect(onRevert).toHaveBeenCalledWith("src/b.ts")
+    })
+
+    it("copies relative and absolute paths", async () => {
+      const onCopyPath = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+          onCopyPath={onCopyPath}
+        />
+      )
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("action.copyRelativePath"))
+      expect(onCopyPath).toHaveBeenLastCalledWith("src/a.ts", false)
+      await openMenu("src/a.ts")
+      fireEvent.click(await screen.findByText("action.copyPath"))
+      expect(onCopyPath).toHaveBeenLastCalledWith("src/a.ts", true)
+    })
+  })
+
+  describe("overflow tab list", () => {
+    it("renders the list trigger only with more than one tab", () => {
+      const { unmount } = render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      expect(screen.queryByTestId("editor-tabs-list")).toBeNull()
+      unmount()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      expect(screen.getByTestId("editor-tabs-list")).toBeInTheDocument()
+    })
+
+    it("selecting from the list activates the file and closes the menu", async () => {
+      const onSelect = jest.fn()
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts"), file("src/b.ts"), file("src/c.ts")]}
+          activePath="src/a.ts"
+          dirtyCount={0}
+          onSelect={onSelect}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      // Radix dropdown triggers open on pointerdown, so the click must come
+      // through userEvent's real pointer sequence rather than a bare fireEvent.
+      await userEvent.click(screen.getByTestId("editor-tabs-list"))
+      await userEvent.click(await screen.findByTestId("editor-tabs-list-src/c.ts"))
+      expect(onSelect).toHaveBeenCalledWith("src/c.ts")
+      expect(screen.queryByTestId("editor-tabs-list-src/c.ts")).toBeNull()
     })
   })
 })

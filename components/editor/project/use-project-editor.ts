@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   listWorkspaceDir,
   readWorkspaceFile,
+  readWorkspaceFileBase64,
   statWorkspaceFile,
   writeWorkspaceFile,
   createWorkspaceDir,
@@ -37,8 +38,13 @@ import {
   type EditorTabMode,
   type EditorTabState,
 } from "@/lib/editor-workbench/editor-tab-model"
-import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
+import {
+  languageFromPath,
+  monacoLanguageFromPath,
+  type EditorLanguage,
+} from "@/components/editor/editor-language"
 import { reconcileSelectedRoot } from "@/lib/workspace/panel-follow"
+import { useTranslations } from "next-intl"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { loggers } from "@cognia/logging"
 import { getDb } from "@/lib/db/schema"
@@ -62,14 +68,138 @@ export interface OpenFile {
   relPath: string
   absolutePath: string
   language: EditorLanguage
+  /** Full-fidelity Monaco id (`rust`, `go`, `html`, …); `language` stays on the closed CM union. */
+  monacoLanguage: string
   savedContent: string
   draftContent: string
   /** Monotonic in-memory model version used by proposal compare-and-swap. */
   draftVersion: number
   /** Last observed filesystem mtime used by proposal compare-and-swap. */
   mtime?: number
+  /** Byte size as reported by stat at open; feeds the status bar + fallback pane. */
+  sizeBytes?: number
+  /**
+   * Set when the tab deliberately did NOT load text into an editor: `binary`
+   * for non-UTF-8 content (images, archives, executables — detected by
+   * extension or a failed UTF-8 read), `too-large` for files over
+   * {@link MAX_EDITOR_BYTES} the user can still force open. The workbench
+   * renders a fallback pane instead of an editor for these.
+   */
+  blocked?: "binary" | "too-large"
   /** Set when the file changed on disk under us while open. */
   externallyChanged?: boolean
+}
+
+/**
+ * Above this byte size a file opens as a `too-large` placeholder rather than
+ * being pulled into a Monaco model — the read alone would stall the tab, and
+ * the editor's own feature set (minimap, folding, tokens) degrades far earlier
+ * than this ceiling.
+ */
+export const MAX_EDITOR_BYTES = 10 * 1024 * 1024
+
+/**
+ * Extensions whose content can never be UTF-8 source text. Skipping the read
+ * outright is both faster (no doomed round trip) and more accurate than
+ * waiting for the decoder to fail: an `.png` that happens to decode is still
+ * not something a text editor can show meaningfully.
+ */
+const BINARY_EXTENSIONS = new Set([
+  // images
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "ico",
+  "icns",
+  "bmp",
+  "tif",
+  "tiff",
+  "psd",
+  "ai",
+  "heic",
+  "heif",
+  // media
+  "mp3",
+  "wav",
+  "flac",
+  "ogg",
+  "m4a",
+  "aac",
+  "mp4",
+  "mov",
+  "mkv",
+  "avi",
+  "webm",
+  "m4v",
+  "wmv",
+  // fonts
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  // archives / bundles
+  "zip",
+  "tar",
+  "gz",
+  "tgz",
+  "bz2",
+  "xz",
+  "7z",
+  "rar",
+  "jar",
+  "war",
+  "dmg",
+  "iso",
+  // executables / object code
+  "exe",
+  "dll",
+  "so",
+  "dylib",
+  "bin",
+  "dat",
+  "o",
+  "a",
+  "class",
+  "wasm",
+  "pyc",
+  "pyo",
+  // documents + data stores
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "sqlite",
+  "sqlite3",
+  "db",
+  "parquet",
+  "arrow",
+  // misc binary (`.cer`/`.crt` stay out — those are usually PEM text)
+  "sketch",
+  "fig",
+  "p12",
+  "pfx",
+  "der",
+])
+
+function isProbablyBinaryPath(relPath: string): boolean {
+  const name = relPath.split("/").pop() ?? ""
+  const dot = name.lastIndexOf(".")
+  // `> 0`: a leading dot is part of the name (`.gitignore`), not an extension.
+  if (dot <= 0) return false
+  return BINARY_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
+}
+
+/** The Rust text read reports undecodable content through its io error text. */
+function isUtf8ReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /utf-?8/i.test(message)
 }
 
 export interface UseProjectEditorArgs {
@@ -91,6 +221,7 @@ export interface UseProjectEditorArgs {
 export interface ProjectEditorDeps {
   listDir: typeof listWorkspaceDir
   readFile: typeof readWorkspaceFile
+  readFileBase64: typeof readWorkspaceFileBase64
   statFile: typeof statWorkspaceFile
   writeFile: typeof writeWorkspaceFile
   createDir: typeof createWorkspaceDir
@@ -105,6 +236,7 @@ export interface ProjectEditorDeps {
 const defaultDeps: ProjectEditorDeps = {
   listDir: listWorkspaceDir,
   readFile: readWorkspaceFile,
+  readFileBase64: readWorkspaceFileBase64,
   statFile: statWorkspaceFile,
   writeFile: writeWorkspaceFile,
   createDir: createWorkspaceDir,
@@ -167,6 +299,7 @@ export function useProjectEditor({
   deps,
 }: UseProjectEditorArgs) {
   const d = useMemo(() => ({ ...defaultDeps, ...deps }), [deps])
+  const t = useTranslations("projectEditor")
 
   const persisted = useProjectEditorSessionStore((s) => s.sessions[scopeKey])
   const setEditorSession = useProjectEditorSessionStore((s) => s.setSession)
@@ -192,6 +325,14 @@ export function useProjectEditor({
   // calls (before React flushes state) don't re-read a file that is already
   // opening. Kept in lockstep with `openFiles` by the mutators below.
   const openPathsRef = useRef<Set<string>>(new Set())
+  // Same reason as `openPathsRef` for the file entries themselves: `openFile`
+  // must know whether the existing tab is `blocked` (to honour an explicit
+  // "open anyway") without adding `openFiles` — which changes on every
+  // keystroke — to its dependency list.
+  const openFilesRef = useRef<OpenFile[]>([])
+  useEffect(() => {
+    openFilesRef.current = openFiles
+  }, [openFiles])
   // Per-path open counter. `openFile` reads a file asynchronously, so by the
   // time a read settles the tab may have been evicted, closed, *or* re-opened —
   // and the last case is invisible to `openPathsRef` alone, since the path is
@@ -230,6 +371,18 @@ export function useProjectEditor({
   // implies (evicting a tab, releasing its model).
   const [tabState, setTabStateValue] = useState<EditorTabState>(EMPTY_EDITOR_TAB_STATE)
   const tabStateRef = useRef(tabState)
+  // LIFO of relPaths the user closed, most recent last — the "reopen closed
+  // tab" stack. Ref rather than state: nothing renders from it.
+  const closedHistoryRef = useRef<string[]>([])
+  const rememberClosed = useCallback((paths: string[]) => {
+    const history = closedHistoryRef.current
+    for (const path of paths) {
+      const existing = history.indexOf(path)
+      if (existing !== -1) history.splice(existing, 1)
+      history.push(path)
+    }
+    if (history.length > 20) history.splice(0, history.length - 20)
+  }, [])
   const setTabState = useCallback((next: EditorTabState) => {
     if (next === tabStateRef.current) return
     tabStateRef.current = next
@@ -367,55 +520,94 @@ export function useProjectEditor({
     [rootPath, releaseFileModel]
   )
 
-  const openFile = useCallback(
-    async (relPath: string, options?: { mode?: EditorTabMode }) => {
-      // Pinned by default: every existing caller (session restore, search jump,
-      // the agent bridge, "new file") means "keep this open".
-      const mode = options?.mode ?? "pinned"
-      const isOpen = openPathsRef.current.has(relPath)
-      // Captured before the selection moves: a failed read reverts to it.
-      const previousActivePath = activePathRef.current
-      const transition = resolveTabIntent(tabStateRef.current, { relPath, mode, isOpen })
-      setTabState(transition.state)
-      setActivePath(relPath)
-      // Sync the mirror now — a second openFile in the same commit must see
-      // this path as "previous", not the one the last effect committed.
-      activePathRef.current = relPath
-      if (transition.evicted) evictTab(transition.evicted)
-      if (isOpen) return
-      openPathsRef.current.add(relPath)
-      const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
-      openSeqRef.current.set(relPath, seq)
-      /** Whether this attempt still owns the tab it opened. */
+  /**
+   * Read + classify a file into its open tab. Runs for fresh opens and for
+   * the "open anyway" re-load on a `too-large` placeholder; `seq` identifies
+   * which attempt owns the tab so a stale read can't resurrect an evicted or
+   * re-opened file. `preserveOnError` marks a re-load of a tab that already
+   * exists (revert, forced open): its failure must keep the tab's state
+   * intact and propagate to the caller instead of tearing the tab down.
+   */
+  const readIntoTab = useCallback(
+    async (
+      relPath: string,
+      seq: number,
+      allowLarge: boolean,
+      previousActivePath: string | null,
+      preserveOnError: boolean
+    ) => {
       const stillOurs = () =>
         openPathsRef.current.has(relPath) && openSeqRef.current.get(relPath) === seq
-      retainFileModel(joinRootRel(rootPath, relPath))
+      const binaryByName = isProbablyBinaryPath(relPath)
       try {
-        const [content, stat] = await Promise.all([
-          d.readFile(rootPath, relPath),
-          d.statFile(rootPath, relPath).catch(() => null),
-        ])
+        // Stat first: a file over the ceiling opens as a `too-large`
+        // placeholder without any read — the old parallel read still pulled
+        // ~MAX_EDITOR_BYTES through IPC just to throw the content away. A
+        // failed stat stays non-fatal: the capped read below is the backstop.
+        const stat = await d.statFile(rootPath, relPath).catch(() => null)
+        const tooLarge = !allowLarge && stat !== null && stat.size > MAX_EDITOR_BYTES
+        // Evicted/re-opened while the stat was in flight — skip the read
+        // entirely; whoever owns the tab now is running their own.
+        if (!stillOurs()) return
+        const read =
+          binaryByName || tooLarge
+            ? { ok: false as const, error: null }
+            : await d
+                // Forced opens pass no cap: the Rust reader would otherwise
+                // append a truncation marker into what looks like the file.
+                .readFile(rootPath, relPath, allowLarge ? undefined : MAX_EDITOR_BYTES + 1)
+                .then((content) => ({ ok: true as const, content }))
+                .catch((error: unknown) => ({ ok: false as const, error }))
         // Opening a second preview while this read was in flight evicts this
         // tab — `evictTab` has already dropped the ref entry and released the
         // model. Appending anyway would resurrect the evicted file and leave
         // two tabs in the single reusable preview slot.
         if (!stillOurs()) return
+        const blocked =
+          binaryByName || (!read.ok && isUtf8ReadError(read.error))
+            ? ("binary" as const)
+            : tooLarge
+              ? ("too-large" as const)
+              : undefined
+        if (!blocked && !read.ok) throw read.error
+        const content = blocked ? "" : read.ok ? read.content : ""
         setOpenFiles((prev) => {
-          if (prev.some((f) => f.relPath === relPath)) return prev
-          return [
-            ...prev,
-            {
-              relPath,
-              absolutePath: joinRootRel(rootPath, relPath),
-              language: languageFromPath(relPath),
-              savedContent: content,
-              draftContent: content,
-              draftVersion: 1,
-              mtime: stat?.mtimeMs ?? undefined,
-            },
-          ]
+          const entry: OpenFile = {
+            relPath,
+            absolutePath: joinRootRel(rootPath, relPath),
+            language: languageFromPath(relPath),
+            monacoLanguage: monacoLanguageFromPath(relPath),
+            savedContent: content,
+            draftContent: content,
+            draftVersion: 1,
+            mtime: stat?.mtimeMs ?? undefined,
+            sizeBytes: stat?.size,
+            blocked,
+            externallyChanged: false,
+          }
+          const idx = prev.findIndex((f) => f.relPath === relPath)
+          if (idx === -1) return [...prev, entry]
+          // A re-load keeps the tab's version lineage so Monaco keeps the
+          // model swap monotonic instead of re-creating it from scratch. A
+          // rejected stat keeps the metadata the earlier read recorded rather
+          // than regressing it to "unknown".
+          const next = [...prev]
+          next[idx] = {
+            ...entry,
+            draftVersion: prev[idx].draftVersion + 1,
+            mtime: stat?.mtimeMs ?? prev[idx].mtime,
+            sizeBytes: stat?.size ?? prev[idx].sizeBytes,
+          }
+          return next
         })
       } catch (err) {
+        // A reload/re-read of a tab that already exists keeps the tab intact —
+        // its draft, model and selection all stay — and the error propagates
+        // so the caller can surface it. Only a fresh open's failure tears down.
+        if (preserveOnError) {
+          editorLogger.warn("file reload failed", { relPath, err: String(err) })
+          throw err
+        }
         // A failed read only gets to tear the tab down if the tab is still the
         // one it opened. Otherwise the path has been evicted (already released)
         // or re-opened by a newer read, and closing it here would blank a tab
@@ -436,7 +628,45 @@ export function useProjectEditor({
         editorLogger.warn("open file failed", { relPath, err: String(err) })
       }
     },
-    [d, rootPath, retainFileModel, releaseFileModel, evictTab, setTabState]
+    [d, rootPath, releaseFileModel, setTabState]
+  )
+
+  const openFile = useCallback(
+    async (relPath: string, options?: { mode?: EditorTabMode; allowLarge?: boolean }) => {
+      // Pinned by default: every existing caller (session restore, search jump,
+      // the agent bridge, "new file") means "keep this open".
+      const mode = options?.mode ?? "pinned"
+      const isOpen = openPathsRef.current.has(relPath)
+      // Captured before the selection moves: a failed read reverts to it.
+      const previousActivePath = activePathRef.current
+      const transition = resolveTabIntent(tabStateRef.current, { relPath, mode, isOpen })
+      setTabState(transition.state)
+      setActivePath(relPath)
+      // Sync the mirror now — a second openFile in the same commit must see
+      // this path as "previous", not the one the last effect committed.
+      activePathRef.current = relPath
+      if (transition.evicted) evictTab(transition.evicted)
+      if (isOpen) {
+        // "Open anyway" on a `too-large` placeholder re-runs the load with the
+        // size ceiling lifted; anything else on an already-open path is a no-op
+        // beyond the focus above.
+        const existing = openFilesRef.current.find((f) => f.relPath === relPath)
+        if (options?.allowLarge && existing?.blocked === "too-large") {
+          const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
+          openSeqRef.current.set(relPath, seq)
+          // The placeholder tab already exists — a failed forced read keeps it
+          // (already logged inside); nothing further to surface here.
+          void readIntoTab(relPath, seq, true, previousActivePath, true).catch(() => {})
+        }
+        return
+      }
+      openPathsRef.current.add(relPath)
+      const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
+      openSeqRef.current.set(relPath, seq)
+      retainFileModel(joinRootRel(rootPath, relPath))
+      void readIntoTab(relPath, seq, options?.allowLarge === true, previousActivePath, false)
+    },
+    [retainFileModel, evictTab, setTabState, readIntoTab, rootPath]
   )
 
   /** Promote a preview tab to permanent (double-click, explicit pin). */
@@ -445,10 +675,34 @@ export function useProjectEditor({
     [setTabState]
   )
 
+  /**
+   * Closing a dirty tab destroys the only copy of the user's work — reopening
+   * re-reads the file from disk, not the draft. Any close path (⌘W, Close
+   * Others/Right/All) confirms once when dirty tabs are in scope; a cancel
+   * leaves the whole close a no-op.
+   */
+  const confirmDirtyClose = useCallback(
+    (relPaths: readonly string[]): boolean => {
+      const dirty = relPaths.filter((p) => {
+        const f = openFilesRef.current.find((o) => o.relPath === p)
+        return f !== undefined && f.draftContent !== f.savedContent
+      })
+      if (dirty.length === 0) return true
+      const message =
+        dirty.length === 1
+          ? t("closeDirtyConfirm", { name: dirty[0].split("/").pop() ?? dirty[0] })
+          : t("closeDirtyConfirmCount", { count: dirty.length })
+      return typeof window.confirm === "function" ? window.confirm(message) : false
+    },
+    [t]
+  )
+
   const closeFile = useCallback(
     (relPath: string) => {
+      if (!confirmDirtyClose([relPath])) return
       const idx = openFiles.findIndex((f) => f.relPath === relPath)
       const remaining = openFiles.filter((f) => f.relPath !== relPath)
+      rememberClosed([relPath])
       openPathsRef.current.delete(relPath)
       releaseFileModel(joinRootRel(rootPath, relPath))
       setTabState(forgetTab(tabStateRef.current, relPath))
@@ -457,8 +711,83 @@ export function useProjectEditor({
       setActivePath((cur) => (cur !== relPath ? cur : fallback))
       if (activePathRef.current === relPath) activePathRef.current = fallback
     },
-    [openFiles, rootPath, releaseFileModel, setTabState]
+    [openFiles, rootPath, releaseFileModel, setTabState, rememberClosed, confirmDirtyClose]
   )
+
+  /** Reorder tabs by drag-and-drop: move `fromRelPath` onto `toRelPath`'s slot. */
+  const moveOpenFile = useCallback((fromRelPath: string, toRelPath: string) => {
+    setOpenFiles((prev) => {
+      const from = prev.findIndex((f) => f.relPath === fromRelPath)
+      const to = prev.findIndex((f) => f.relPath === toRelPath)
+      if (from === -1 || to === -1 || from === to) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }, [])
+
+  /**
+   * Close every tab whose relPath is in `closing`. Active-tab fallback mirrors
+   * `closeFile`: the neighbour that slid into the closed tab's slot, or the
+   * new last tab.
+   */
+  const closeFiles = useCallback(
+    (closing: ReadonlySet<string>) => {
+      if (closing.size === 0) return
+      if (!confirmDirtyClose([...closing])) return
+      const remaining = openFiles.filter((f) => !closing.has(f.relPath))
+      const activeIdx = openFiles.findIndex((f) => f.relPath === activePathRef.current)
+      rememberClosed(openFiles.filter((f) => closing.has(f.relPath)).map((f) => f.relPath))
+      for (const f of openFiles) {
+        if (!closing.has(f.relPath)) continue
+        openPathsRef.current.delete(f.relPath)
+        releaseFileModel(joinRootRel(rootPath, f.relPath))
+      }
+      let nextTabState = tabStateRef.current
+      for (const relPath of closing) nextTabState = forgetTab(nextTabState, relPath)
+      setTabState(nextTabState)
+      setOpenFiles(remaining)
+      const fallback =
+        remaining[Math.min(Math.max(activeIdx, 0), remaining.length - 1)]?.relPath ?? null
+      setActivePath((cur) => (cur !== null && closing.has(cur) ? fallback : cur))
+      if (activePathRef.current !== null && closing.has(activePathRef.current)) {
+        activePathRef.current = fallback
+      }
+    },
+    [openFiles, rootPath, releaseFileModel, setTabState, rememberClosed, confirmDirtyClose]
+  )
+
+  const closeOtherFiles = useCallback(
+    (relPath: string) => {
+      closeFiles(new Set(openFiles.map((f) => f.relPath).filter((p) => p !== relPath)))
+    },
+    [closeFiles, openFiles]
+  )
+
+  const closeFilesToRight = useCallback(
+    (relPath: string) => {
+      const idx = openFiles.findIndex((f) => f.relPath === relPath)
+      if (idx === -1) return
+      closeFiles(new Set(openFiles.slice(idx + 1).map((f) => f.relPath)))
+    },
+    [closeFiles, openFiles]
+  )
+
+  const closeAllFiles = useCallback(() => {
+    closeFiles(new Set(openFiles.map((f) => f.relPath)))
+  }, [closeFiles, openFiles])
+
+  /**
+   * Reopen the most recently closed tab (⌘⇧T / Ctrl+Shift+T). A no-op when the
+   * history is empty; a path that no longer exists surfaces through the normal
+   * failed-open path inside `openFile`.
+   */
+  const reopenClosedFile = useCallback(() => {
+    const relPath = closedHistoryRef.current.pop()
+    if (relPath === undefined) return
+    void openFile(relPath)
+  }, [openFile])
 
   const setDraft = useCallback(
     (relPath: string, content: string) => {
@@ -479,7 +808,9 @@ export function useProjectEditor({
   const saveFile = useCallback(
     async (relPath: string) => {
       const file = openFiles.find((f) => f.relPath === relPath)
-      if (!file) return
+      // A `binary`/`too-large` placeholder tab holds an empty buffer, not the
+      // file's content — writing it would erase the real file on disk.
+      if (!file || file.blocked) return
       await d.writeFile(rootPath, relPath, file.draftContent)
       const stat = await d.statFile(rootPath, relPath).catch(() => null)
       setOpenFiles((prev) =>
@@ -499,7 +830,7 @@ export function useProjectEditor({
   )
 
   const saveAll = useCallback(async () => {
-    const dirty = openFiles.filter((f) => f.draftContent !== f.savedContent)
+    const dirty = openFiles.filter((f) => f.draftContent !== f.savedContent && !f.blocked)
     const mtimes = new Map<string, number>()
     for (const f of dirty) {
       await d.writeFile(rootPath, f.relPath, f.draftContent)
@@ -520,30 +851,16 @@ export function useProjectEditor({
 
   const reloadFile = useCallback(
     async (relPath: string) => {
-      try {
-        const [content, stat] = await Promise.all([
-          d.readFile(rootPath, relPath),
-          d.statFile(rootPath, relPath).catch(() => null),
-        ])
-        setOpenFiles((prev) =>
-          prev.map((f) =>
-            f.relPath === relPath
-              ? {
-                  ...f,
-                  savedContent: content,
-                  draftContent: content,
-                  draftVersion: f.draftVersion + 1,
-                  externallyChanged: false,
-                  mtime: stat?.mtimeMs ?? f.mtime,
-                }
-              : f
-          )
-        )
-      } catch (err) {
-        editorLogger.debug("reload failed", { relPath, err: String(err) })
-      }
+      // Route through the open-time classifier: a binary or oversized file
+      // must never be pulled into a draft, and a forced-open file re-checks
+      // the ceiling on every reload. `preserveOnError`: the tab is live — a
+      // failed reload keeps it (and any unsaved draft) and the caller sees
+      // the error.
+      const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
+      openSeqRef.current.set(relPath, seq)
+      await readIntoTab(relPath, seq, false, null, true)
     },
-    [d, rootPath]
+    [readIntoTab]
   )
 
   const selectRoot = useCallback(
@@ -551,8 +868,10 @@ export function useProjectEditor({
       setRootKey(key)
       openPathsRef.current.clear()
       // The new root's files live at different absolute paths, so every model
-      // held for the old root is now unreachable.
+      // held for the old root is now unreachable. The closed-tab history is
+      // likewise meaningless — relPaths only resolve inside their own root.
       releaseAllFileModels()
+      closedHistoryRef.current = []
       setTabState(EMPTY_EDITOR_TAB_STATE)
       setOpenFiles([])
       setActivePath(null)
@@ -635,6 +954,7 @@ export function useProjectEditor({
         releaseFileModel(joinRootRel(rootPath, previousRelPath))
         retainFileModel(joinRootRel(rootPath, relPath))
       }
+      closedHistoryRef.current = closedHistoryRef.current.map(migratePath)
       setTabState(renameTab(tabStateRef.current, from, to))
       setOpenFiles((previous) =>
         previous.map((file) => {
@@ -646,6 +966,14 @@ export function useProjectEditor({
                 relPath,
                 absolutePath: joinRootRel(rootPath, relPath),
                 language: languageFromPath(relPath),
+                monacoLanguage: monacoLanguageFromPath(relPath),
+                // A rename can move a file across the binary-extension line
+                // (`foo.png` → `foo.txt`), so the placeholder flag is only as
+                // good as the new name — the next reload re-classifies fully.
+                blocked:
+                  file.blocked === "binary" && !isProbablyBinaryPath(relPath)
+                    ? undefined
+                    : file.blocked,
               }
         })
       )
@@ -686,6 +1014,11 @@ export function useProjectEditor({
     openFile,
     pinFile,
     closeFile,
+    moveOpenFile,
+    closeOtherFiles,
+    closeFilesToRight,
+    closeAllFiles,
+    reopenClosedFile,
     setActivePath,
     setDraft,
     saveFile,
