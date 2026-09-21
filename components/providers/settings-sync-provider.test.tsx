@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
 import { SettingsSyncProvider } from "./settings-sync-provider"
 import { applyZoom } from "@/lib/tauri/webview-zoom"
@@ -84,5 +84,40 @@ describe("SettingsSyncProvider", () => {
     setLoadedSettings()
     render(<SettingsSyncProvider>child</SettingsSyncProvider>)
     await waitFor(() => expect(applyZoomMock).toHaveBeenCalledWith(1.5))
+  })
+
+  it("does not re-fire setZoom when an unrelated settings field changes", async () => {
+    setLoadedSettings()
+    render(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    await waitFor(() => expect(applyZoomMock).toHaveBeenCalledTimes(1))
+
+    // A save that leaves the four synced fields untouched used to re-run the
+    // whole effect via the whole-object `settings` dep — every re-run ended
+    // in a webview setZoom repaint, the visible flicker after any save.
+    act(() => setLoadedSettings({ sidebarDensity: "compact" }))
+    expect(mockSetTheme).toHaveBeenCalledTimes(1)
+    expect(applyZoomMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not re-fire setZoom when only the theme changes", async () => {
+    setLoadedSettings()
+    render(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    await waitFor(() => expect(applyZoomMock).toHaveBeenCalledTimes(1))
+
+    // Theme save lands after the live setTheme() already painted — the zoom
+    // IPC re-asserting the same factor a frame later was the repaint flicker.
+    act(() => setLoadedSettings({ theme: "light" }))
+    await waitFor(() => expect(mockSetTheme).toHaveBeenCalledWith("light"))
+    expect(applyZoomMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-applies zoom when webviewZoom itself changes", async () => {
+    setLoadedSettings()
+    render(<SettingsSyncProvider>child</SettingsSyncProvider>)
+    await waitFor(() => expect(applyZoomMock).toHaveBeenCalledWith(1.5))
+
+    act(() => setLoadedSettings({ webviewZoom: 1.25 }))
+    await waitFor(() => expect(applyZoomMock).toHaveBeenCalledWith(1.25))
+    expect(applyZoomMock).toHaveBeenCalledTimes(2)
   })
 })

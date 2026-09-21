@@ -26,11 +26,13 @@
  * rebuilt, so peeking costs no re-render of the conversation model.
  */
 
+import { useRef } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronLeftIcon, ChevronRightIcon, PinIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Surface } from "@/components/surface/surface"
+import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { cn } from "@/lib/utils"
 import type { SidebarSide } from "@/types/shell/sidebar"
@@ -121,6 +123,10 @@ export function SidebarPeekFrame({
 }: SidebarPeekFrameProps) {
   const t = useTranslations("desktop.channelList")
   const onRight = side === "right"
+  const frameRef = useRef<HTMLDivElement>(null)
+  // Arming changes the panel from in-flow to parked. Animate only a real
+  // open/close gesture, or the just-collapsed list flashes back into view.
+  const animatingPeek = useEdgePanelTransition(open, { element: frameRef, enabled: armed })
 
   return (
     // ONE tree, two presentations. Never an early return with a different
@@ -141,6 +147,7 @@ export function SidebarPeekFrame({
     // every pointer straight through. Unarmed, it is the fixed-width box that
     // keeps the list from reflowing as the aside's width animates to 0.
     <div
+      ref={frameRef}
       aria-hidden={armed ? !open || undefined : undefined}
       style={{ width: armed ? width + PEEK_SHADOW_ROOM_PX : width }}
       className={
@@ -196,7 +203,7 @@ export function SidebarPeekFrame({
           armed
             ? cn(
                 "pointer-events-auto absolute inset-y-3 flex min-h-0 flex-col overflow-hidden border border-border/70",
-                `transition-transform ${SHELL_DOCK_TIMING_CLASS}`,
+                animatingPeek && `transition-transform ${SHELL_DOCK_TIMING_CLASS}`,
                 onRight ? "right-0" : "left-0"
               )
             : // No tint of its own in flow: the rail's ground is the aside's,

@@ -7,6 +7,7 @@ import {
   createDefaultSearchUsageStats,
 } from "@cognia/web-search/types"
 import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
+import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 
 // ---- Mocks ----
 
@@ -2865,5 +2866,103 @@ describe("onboarding actions", () => {
     })
     const saved = dbSettings.saveSettings.mock.calls[0]?.[0] as Partial<AppSettings>
     expect(saved).not.toHaveProperty("onboardingDismissedAt")
+  })
+})
+
+// The flat plugin-facing fields are re-derived on every `set({ settings })`,
+// and the derive allocates fresh objects (`{...DEFAULTS, ...slice}`) while
+// `saveSettings` resolves a wholly fresh row. Subscribers therefore used to
+// receive a new `background`/`wallpapers` reference on EVERY unrelated write
+// — `BackgroundApplier` re-ran its pipeline and re-minted the wallpaper's
+// blob URL, the visible flash when generating a theme. The reconciler keeps
+// references stable when the contents did not actually change.
+describe("flat field reference stability", () => {
+  const stableBackground = () => ({
+    ...DEFAULT_BACKGROUND_SETTINGS,
+    enabled: true,
+    activeId: "wp-1",
+    opacity: 0.8,
+  })
+
+  const gradientRow = (id: string) => ({
+    id,
+    name: id,
+    kind: "gradient" as const,
+    builtin: false,
+    createdAt: 1,
+    source: { kind: "gradient" as const, css: "linear-gradient(0deg, #fff, #000)" },
+  })
+
+  it("keeps untouched slices referentially stable across the create+activate theme pair", async () => {
+    const bg = stableBackground()
+    const list = [gradientRow("a")]
+    dbSettings.saveSettings.mockImplementation(async (patch) => ({
+      ...baseSettings({ background: { ...bg }, wallpapers: [...list] }),
+      ...patch,
+    }))
+    // Seed the flat fields via a wrapped write (setState bypasses it).
+    useSettingsStore.setState({
+      settings: baseSettings({ background: bg, wallpapers: list }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#123456")
+    })
+    const backgroundBefore = useSettingsStore.getState().background
+    const wallpapersBefore = useSettingsStore.getState().wallpapers
+    expect(backgroundBefore.opacity).toBe(0.8)
+
+    act(() => {
+      const id = useSettingsStore.getState().createCustomTheme({
+        name: "Generated",
+        baseVariant: "dark",
+      })
+      useSettingsStore.getState().setActiveCustomTheme(id)
+    })
+
+    const state = useSettingsStore.getState()
+    expect(state.activeCustomThemeId).not.toBeNull()
+    expect(state.background).toBe(backgroundBefore)
+    expect(state.wallpapers).toBe(wallpapersBefore)
+  })
+
+  it("keeps references stable when a save returns a fresh-but-identical row", async () => {
+    const bg = stableBackground()
+    // Every resolution returns NEW nested objects with identical content —
+    // exactly what a fresh Dexie read hands back.
+    dbSettings.saveSettings.mockImplementation(async (patch) => ({
+      ...baseSettings({ background: { ...bg } }),
+      ...patch,
+    }))
+    useSettingsStore.setState({ settings: baseSettings({ background: { ...bg } }) })
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#123456")
+    })
+    const before = useSettingsStore.getState().background
+
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#654321")
+    })
+    expect(useSettingsStore.getState().background).toBe(before)
+  })
+
+  it("still delivers a new object when the slice actually changed", async () => {
+    const bg = stableBackground()
+    dbSettings.saveSettings.mockImplementation(async (patch) => ({
+      ...baseSettings({ background: { ...bg } }),
+      ...patch,
+    }))
+    useSettingsStore.setState({ settings: baseSettings({ background: { ...bg } }) })
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#123456")
+    })
+    const before = useSettingsStore.getState().background
+
+    await act(async () => {
+      await useSettingsStore.getState().setBackground({ blurPx: 9 })
+    })
+    const after = useSettingsStore.getState().background
+    expect(after).not.toBe(before)
+    expect(after.blurPx).toBe(9)
+    expect(after.opacity).toBe(0.8)
   })
 })

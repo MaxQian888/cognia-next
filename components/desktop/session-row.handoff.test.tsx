@@ -46,8 +46,10 @@ jest.mock("@/lib/chat/export-handoff-to-cli", () => ({
 }))
 
 const mockDispatchSessionToCodexApp = jest.fn()
+const mockReturnSessionFromCodexApp = jest.fn()
 jest.mock("@/lib/chat/dispatch-to-codex-app", () => ({
   dispatchSessionToCodexApp: (session: unknown) => mockDispatchSessionToCodexApp(session),
+  returnSessionFromCodexApp: (session: unknown) => mockReturnSessionFromCodexApp(session),
 }))
 
 import { SessionRow } from "./session-row"
@@ -225,4 +227,43 @@ test("hands the session's own working directory to the terminal launch", async (
       expect.objectContaining({ cwd: "/repos/cognia" })
     )
   )
+})
+
+test("the linked Codex task can be imported back and opened", async () => {
+  const onSelect = jest.fn()
+  const linked = {
+    ...baseSession,
+    codexHandoff: { threadId: "target", deepLink: "codex://threads/target", exportedAt: 1 },
+  }
+  mockReturnSessionFromCodexApp.mockResolvedValueOnce("import:codex:target")
+  const user = userEvent.setup()
+  render(
+    <ul>
+      <SessionRow
+        session={linked}
+        active={false}
+        onSelect={onSelect}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    </ul>
+  )
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("returnFromCodexApp"))
+  await waitFor(() =>
+    expect(onSelect).toHaveBeenCalledWith("import:codex:target", expect.anything())
+  )
+  expect(mockReturnSessionFromCodexApp).toHaveBeenCalledWith(linked)
+  expect(mockToastSuccess).toHaveBeenCalledWith("returnedFromCodexApp")
+})
+
+test("untransferable content produces an actionable localized error", async () => {
+  mockDispatchSessionToCodexApp.mockRejectedValueOnce(
+    Object.assign(new Error("content"), { code: "UNTRANSFERABLE_CONTENT" })
+  )
+  const user = userEvent.setup()
+  setup()
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("openInCodexApp"))
+  await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("codexHandoffUnsupported"))
 })

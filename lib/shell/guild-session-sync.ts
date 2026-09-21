@@ -46,6 +46,22 @@ export type GuildReconcileAction =
   | { type: "sync-guild"; guild: SelectedGuild }
 
 /**
+ * Whether the "New chat" (welcome) intent is the newest chat navigation.
+ * True only while `chatHomeEpoch` is at least as fresh as the guild stamp and
+ * strictly fresher than the session stamp — so a later guild click or session
+ * select ends it, while the reconcile's own non-epoch clear leaves it intact.
+ */
+export function isChatHomeActive(
+  chatHomeEpoch: number,
+  selectedGuildEpoch: number,
+  activeSessionEpoch: number
+): boolean {
+  return (
+    chatHomeEpoch > 0 && chatHomeEpoch >= selectedGuildEpoch && chatHomeEpoch > activeSessionEpoch
+  )
+}
+
+/**
  * Decide how to reconcile the active chat session with the selected guild.
  *
  * `guildWins` is true when the guild was chosen more recently than the active
@@ -75,15 +91,24 @@ export function planGuildReconcile(args: {
    * to the previous conversation.
    */
   activeSessionPending?: boolean
+  /**
+   * True while the "New chat" intent is the newest navigation (see
+   * `isChatHomeActive`). The welcome surface is the destination then, so no
+   * session is resumed — an active session is cleared and nothing replaces it.
+   */
+  homeRequested?: boolean
   sessions: readonly ChatSession[]
 }): GuildReconcileAction {
-  const { guild, guildWins, activeSession, activeSessionPending, sessions } = args
+  const { guild, guildWins, activeSession, activeSessionPending, homeRequested, sessions } = args
 
   // Canvas / plugin-view guilds render their own panes — never touch sessions.
   if (guild.kind !== "dm" && guild.kind !== "team") return { type: "none" }
 
   // Unknown active session: wait for the lookup rather than guess.
   if (activeSessionPending) return { type: "none" }
+
+  // Home wins over both epochs below: land on welcome instead of resuming.
+  if (homeRequested) return activeSession ? { type: "clear" } : { type: "none" }
 
   const belongs = activeSession ? sessionMatchesGuild(activeSession, guild) : false
   if (belongs) return { type: "none" }

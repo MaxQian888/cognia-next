@@ -22,6 +22,7 @@ import {
   makeWallpaper,
   mimeToExtension,
   resolveSourceToCss,
+  sameWallpaperSource,
   saveImage,
 } from "./wallpaper-storage"
 
@@ -236,6 +237,82 @@ describe("disposeUrl", () => {
     disposeUrl("linear-gradient(red, blue)")
     disposeUrl("url('data:image/png;base64,...')")
     expect(revokedUrls).toEqual([])
+  })
+})
+
+// The applier keys its "did the image move?" reuse check on this comparator,
+// so it must track exactly the fields `resolveSourceToCss` reads — and ignore
+// metadata like mime/dimensions that never reach the paint.
+describe("sameWallpaperSource", () => {
+  const dataUrl = (dataUrl: string) => ({
+    kind: "image" as const,
+    storage: "data-url" as const,
+    dataUrl,
+    mime: "image/png",
+    width: 1,
+    height: 1,
+  })
+  const idb = (blobKey: string) => ({
+    kind: "image" as const,
+    storage: "indexeddb" as const,
+    blobKey,
+    mime: "image/png",
+    width: 1,
+    height: 1,
+  })
+  const disk = (relPath: string) => ({
+    kind: "image" as const,
+    storage: "disk" as const,
+    relPath,
+    mime: "image/png",
+    width: 1,
+    height: 1,
+  })
+
+  it("is reflexive", () => {
+    const s = dataUrl("data:image/png;base64,AA")
+    expect(sameWallpaperSource(s, s)).toBe(true)
+  })
+
+  it("compares colors and gradients by their CSS payload", () => {
+    expect(
+      sameWallpaperSource({ kind: "color", value: "#fff" }, { kind: "color", value: "#fff" })
+    ).toBe(true)
+    expect(
+      sameWallpaperSource({ kind: "color", value: "#fff" }, { kind: "color", value: "#000" })
+    ).toBe(false)
+    expect(
+      sameWallpaperSource(
+        { kind: "gradient", css: "linear-gradient(0deg, red, blue)" },
+        { kind: "gradient", css: "linear-gradient(0deg, red, blue)" }
+      )
+    ).toBe(true)
+    expect(
+      sameWallpaperSource(
+        { kind: "gradient", css: "linear-gradient(0deg, red, blue)" },
+        { kind: "gradient", css: "linear-gradient(0deg, blue, red)" }
+      )
+    ).toBe(false)
+  })
+
+  it("compares images by their storage locator, not by metadata", () => {
+    expect(sameWallpaperSource(idb("k1"), idb("k1"))).toBe(true)
+    expect(sameWallpaperSource(idb("k1"), idb("k2"))).toBe(false)
+    expect(sameWallpaperSource(disk("a.png"), disk("a.png"))).toBe(true)
+    expect(sameWallpaperSource(disk("a.png"), disk("b.png"))).toBe(false)
+    expect(sameWallpaperSource(dataUrl("data:AA"), dataUrl("data:AA"))).toBe(true)
+    expect(sameWallpaperSource(dataUrl("data:AA"), dataUrl("data:BB"))).toBe(false)
+    // Same locator, different mime/dimensions — the resolved CSS is identical,
+    // so reusing the painted value stays correct.
+    expect(sameWallpaperSource(idb("k1"), { ...idb("k1"), mime: "image/webp", width: 9 })).toBe(
+      true
+    )
+  })
+
+  it("never equates across kinds or storages", () => {
+    expect(sameWallpaperSource({ kind: "color", value: "#fff" }, dataUrl("data:AA"))).toBe(false)
+    expect(sameWallpaperSource(idb("k"), disk("k"))).toBe(false)
+    expect(sameWallpaperSource(dataUrl("data:AA"), idb("data:AA"))).toBe(false)
   })
 })
 

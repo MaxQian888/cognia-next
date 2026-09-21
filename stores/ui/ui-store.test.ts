@@ -26,6 +26,7 @@ const RESET = {
   pendingCreateRequest: null,
   guildRailCollapsed: false,
   statusBarCollapsed: false,
+  webTitleBarEnabled: false,
   sidebarCollapsed: false,
   sidebarTeamsCollapsed: false,
   sidebarWidth: 256,
@@ -248,6 +249,7 @@ describe("useUIStore", () => {
         result.current.setScratchpadCollapsed("ts1", true)
         result.current.toggleGuildRail()
         result.current.setStatusBarCollapsed(true)
+        result.current.setWebTitleBarEnabled(true)
         // Transient fields — must NOT appear in localStorage
         result.current.setMemberStatus("ts1", "a", "thinking")
         result.current.requestStopMember("ts1", "a")
@@ -272,6 +274,7 @@ describe("useUIStore", () => {
         activeConversationViewId: null,
         guildRailCollapsed: true,
         statusBarCollapsed: true,
+        webTitleBarEnabled: true,
         barItems: { ...DEFAULT_BAR_ITEMS },
       })
       // Transient fields explicitly excluded
@@ -347,6 +350,17 @@ describe("useUIStore", () => {
       expect(result.current.guildRailCollapsed).toBe(true)
       expect(result.current.statusBarCollapsed).toBe(true)
       expect(result.current.barItems.usage).toBe(false)
+    })
+  })
+
+  describe("webTitleBarEnabled", () => {
+    it("defaults to false — the web shell starts bar-less — and sets", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.webTitleBarEnabled).toBe(false)
+      act(() => result.current.setWebTitleBarEnabled(true))
+      expect(result.current.webTitleBarEnabled).toBe(true)
+      act(() => result.current.setWebTitleBarEnabled(false))
+      expect(result.current.webTitleBarEnabled).toBe(false)
     })
   })
 

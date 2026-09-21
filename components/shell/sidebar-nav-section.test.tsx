@@ -217,6 +217,22 @@ describe("SidebarNavSection", () => {
     expect(routerPush).toHaveBeenCalledWith("/logs")
   })
 
+  it("More groups the overflow into labeled sections and filters them", async () => {
+    const user = userEvent.setup()
+    render(<SidebarNavSection />)
+    await user.click(screen.getByTestId("sidebar-nav-more"))
+
+    // Category headers come back verbatim from the i18n mock.
+    expect(screen.getByText("categories.explore")).toBeInTheDocument()
+    expect(screen.getByText("categories.agents")).toBeInTheDocument()
+
+    await user.type(screen.getByTestId("sidebar-nav-more-filter"), "logs")
+    expect(screen.getByTestId("sidebar-nav-more-item-logs")).toBeInTheDocument()
+    expect(screen.queryByTestId("sidebar-nav-more-item-skills")).not.toBeInTheDocument()
+    expect(screen.queryByText("categories.explore")).not.toBeInTheDocument()
+    expect(screen.getByText("categories.insights")).toBeInTheDocument()
+  })
+
   it("More lights up while an overflow route is current, and opens the customizer", async () => {
     pathname = "/skills"
     const user = userEvent.setup()

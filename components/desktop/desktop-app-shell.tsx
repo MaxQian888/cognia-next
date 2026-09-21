@@ -6,10 +6,10 @@
  * inherits a unified frame. Mounted from `app/layout.tsx` between
  * `MobileShellWrapper` and the routed children.
  *
- *   ┌────────── TitleBar ──────────┐  ← always mounted (close button lives here)
- *   │  {children}           │ Guild │  ← page-specific content
- *   │                       │ Rail  │
- *   ├──────────── StatusBar ────────┤
+ *   ┌────────── TitleBar ──────────┐  ← Tauri always (window controls live here);
+ *   │  {children}           │ Guild │    web only when `webTitleBarEnabled` —
+ *   │                       │ Rail  │    a browser tab already has chrome, so the
+ *   ├──────────── StatusBar ────────┤    columns draw their own headers instead.
  *
  * - The rail's edge is `settings.sidebarSide` (default `"right"`, as drawn).
  *   It is the outermost column on whichever side it takes, so the transient
@@ -30,6 +30,7 @@
  */
 
 import { usePathname, useRouter } from "next/navigation"
+import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
@@ -69,6 +70,14 @@ import { isOnboardingRoute } from "@/lib/onboarding/route"
 
 const log = loggers.shell
 
+// PROTOTYPE (throwaway): dev-only lab for the bar-less web shell — `?bar=<id>`
+// or the floating switcher picks how the status segments redistribute. Dynamic
+// + ssr:false so production and test bundles never fetch the chunk.
+const StatusBarLab = dynamic(
+  () => import("@/components/desktop/status-bar-lab").then((m) => m.StatusBarLab),
+  { ssr: false }
+)
+
 // Re-exported so the shell stays the discoverable home of "which routes have
 // no chrome"; the list itself lives in `lib/shell/bypass-routes` because
 // `FinishSetupBar` — chrome this shell mounts — has to read it too.
@@ -100,6 +109,12 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // icon column is its collapsed twin and stays off screen.
   const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+  // The top bar is a setting on the web shell (default off): a browser tab
+  // already has chrome, so the bar duplicates it and the column headers draw
+  // their own rows instead. On Tauri it is the window frame — the close /
+  // min / max controls live there — and stays unconditional.
+  const webTitleBarEnabled = useUIStore((s) => s.webTitleBarEnabled)
+  const titleBarMounted = platform === "tauri" || (platform === "web" && webTitleBarEnabled)
 
   // Which edge the rail occupies. Selected as a scalar rather than through
   // `useSidebarLayout()` on purpose: that hook subscribes to the whole
@@ -216,7 +231,12 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         <ZoomShortcuts />
         <TerminalToggleShortcut />
         <PanelQuickSwitch />
-        <TitleBar />
+        {/* Unmounted rather than hidden: nothing is projected, persisted, or
+            kept warm inside it, and mounting the bar on the web default would
+            still register the outlets that pull the column headers off their
+            rows. When it is absent the headers draw inline — see
+            `title-bar-outlets.tsx`. */}
+        {titleBarMounted ? <TitleBar /> : null}
         {/* Residual notice for a first run the user left early (ADR-0122).
           Mounted here rather than at the body level: this shell is `h-screen`
           and the body it sits in is `overflow:hidden`, so an in-flow bar after
@@ -264,7 +284,11 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         <ShellLayoutNotice />
         {/* Collapses to zero height on the same clock rather than unmounting —
           hiding it used to drop 24px out of the window in one frame. */}
-        <StatusBar collapsed={statusBarCollapsed} />
+        {platform === "web" && process.env.NODE_ENV === "development" ? (
+          <StatusBarLab collapsed={statusBarCollapsed} />
+        ) : (
+          <StatusBar collapsed={statusBarCollapsed} />
+        )}
       </div>
     </TitleBarOutletsProvider>
   )

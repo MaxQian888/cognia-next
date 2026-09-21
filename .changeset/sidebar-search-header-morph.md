@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Move the merged sidebar's search out of the title bar and into the rail it narrows: a real search field now heads the conversation list — below the shell navigation, above Chats — sharing its row with the scope, filter and ⋯ controls. When the field wakes (a click, `/`, or text already in it) its right edge slides over the controls as they fold to zero width on the shared shell-dock motion clock, and they slide back out when it rests — one gesture in two directions, instead of injecting a row between "New chat" and the list that shoved every row down in a single frame. The folded controls stay mounted but inert, and the secondary chrome (archived chip, filter chips, bulk actions, search hints) opens in an animated collapsible strip under the row. Team session rows also stop repeating their squad's name on the detail line — the section header and the row's avatar already carry it. The always-open preference pins the controls out permanently, and the mobile Sheet keeps its existing layout.

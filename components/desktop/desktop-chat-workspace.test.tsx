@@ -368,15 +368,15 @@ test("auto-selects a matching session on first render and logs", async () => {
   expect(select).toHaveBeenCalledWith("s-1")
 })
 
-test("passes the active project root to the reusable execution-base picker", () => {
+test("passes the active project root to the welcome context bar", () => {
   const project = useProjectStore.getState().createProject({ name: "Workspace", rootDir: "/repo" })
   useProjectStore.getState().setActiveProject(project.id)
 
   render(<DesktopChatWorkspace />)
 
-  const controls = paneGroupPropsLog.at(-1)?.newChatExecutionControls as
+  const slot = paneGroupPropsLog.at(-1)?.welcomeContextBarSlot as
     { props?: { rootDir?: string } } | undefined
-  expect(controls?.props?.rootDir).toBe("/repo")
+  expect(slot?.props?.rootDir).toBe("/repo")
 })
 
 test("switching to a team session adjusts the guild filter via guildFromSession", async () => {

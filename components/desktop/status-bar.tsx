@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 import { STATUS_BAR_HEIGHT_PX } from "@/types/shell/bars"
 
 /**
- * VSCode-style status bar mounted at the bottom of the desktop shell.
+ * Quiet-line status bar mounted at the bottom of the desktop shell.
  *
  * Ambient status only: connectivity, sync, git branch, notifications, running
  * jobs, hidden agent threads, plan usage, account, and the turn's run state.
@@ -29,6 +29,21 @@ import { STATUS_BAR_HEIGHT_PX } from "@/types/shell/bars"
  * permission picker, the account button's twin in the title bar — moved to
  * their single owner, and the low-frequency preferences (theme / zoom /
  * locale) live in the title bar's Views menu and the native View menu.
+ *
+ * ## Quiet line
+ *
+ * The bar used to paint a `bg-muted/40` band under its segments: a full-width
+ * fill that kept charging the window for chrome even on sessions where most
+ * segments self-hide, and that gave every segment its own `hover:bg-accent`
+ * tile — a row of little boxes, not a line of status. The bar now sits
+ * transparent on the window background with a hairline top edge (inset
+ * shadow, so it costs no layout), segments are flattened to a colour-only
+ * hover, and type drops to 10px. The descendant selectors below win on
+ * specificity over the segments' own utilities (`.row button` (0,1,1) >
+ * `.px-2` (0,1,0); `.row button:hover` (0,2,1) > `.hover\:bg-accent:hover`
+ * (0,2,0)), so no `!` is needed — and they only restyle *chrome*: icons,
+ * badges, open-state backgrounds, and popovers inside the segments are
+ * untouched.
  *
  * Which segments appear, and in what order, is user customization persisted on
  * `AppSettings.statusBarLayout` and resolved by `useBarLayout("status")` — the
@@ -68,10 +83,13 @@ export function StatusBar({ collapsed = false }: { collapsed?: boolean }) {
             ref={barRef}
             data-app-chrome
             data-collapsed={collapsed || undefined}
-            // Tint, no border — see `guild-rail.tsx`. Same rule as the title bar it
-            // mirrors at the other edge of the window.
+            // Hairline edge, no fill — the quiet-line inverse of the tint-only
+            // rule the rail and title bar follow (`guild-rail.tsx`): where they
+            // separate from content by `bg-muted/40` tone alone, the bottom bar
+            // separates by a single inset line and stays transparent.
             className={cn(
-              "hidden shrink-0 bg-muted/40 text-[11px] select-none md:block",
+              "hidden shrink-0 bg-transparent text-[10px] tracking-[0.01em] select-none md:block",
+              "[box-shadow:inset_0_1px_0_0_var(--border)]",
               // Clipped only while it is shut or moving, so a segment's popover
               // arrow and focus ring are not shaved off the resting bar.
               (collapsed || animating) && "overflow-hidden",
@@ -84,7 +102,16 @@ export function StatusBar({ collapsed = false }: { collapsed?: boolean }) {
           >
             {/* Fixed-height row, anchored to the bar's top edge so the segments
                 travel down with it rather than crushing together. */}
-            <div className="flex h-6 items-center gap-0">
+            <div
+              className={cn(
+                "flex h-6 items-center gap-0.5 px-1.5",
+                // Flatten each segment's hover tile into a colour-only change
+                // and tighten its padding — the bar reads as one continuous
+                // line instead of a row of boxes. See the module doc for why
+                // these descendant selectors need no `!`.
+                "[&_button]:px-1.5 [&_button]:text-[10px] [&_button]:hover:bg-transparent"
+              )}
+            >
               {/* No "Tauri" / "Web" badge: it never changes for a given install, so it
           spent a permanent slot restating something the user already knows.
           No session name either — the chat header shows it three rows up, in

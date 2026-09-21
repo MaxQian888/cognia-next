@@ -40,6 +40,7 @@ import {
   Settings2Icon,
   Share2Icon,
   UserPlusIcon,
+  UserRoundIcon,
   UsersIcon,
   XIcon,
 } from "lucide-react"
@@ -95,6 +96,7 @@ import { openSessionForReading } from "@/lib/chat/unread-marker"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
 import { guildFromSession } from "@/lib/claude/guild"
+import { isChatHomeActive } from "@/lib/shell/guild-session-sync"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
   needsCrossWorkspaceSessions,
@@ -131,6 +133,7 @@ const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
+  const tChat = useTranslations("chat")
   const router = useRouter()
   // Same reach contract as the desktop sidebar: grouping by workspace, or a
   // search told to reach every workspace, loads the cross-workspace list.
@@ -146,10 +149,15 @@ export function AppShellMobile() {
 
   const errorMessage = useChatStore((s) => s.errorMessage)
   const chatStatus = useChatStore((s) => s.status)
+  const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
+  const clearActiveSession = useChatStore((s) => s.clearActiveSession)
 
   const loadSettings = useSettingsStore((s) => s.load)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
+  const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
+  const chatHomeEpoch = useUIStore((s) => s.chatHomeEpoch)
+  const requestChatHome = useUIStore((s) => s.requestChatHome)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
   const { isSectionHidden } = useMobileHomeLayout()
@@ -219,7 +227,9 @@ export function AppShellMobile() {
     })
   }, [shellReadSessionId])
 
-  // Auto-select most recent session matching the current guild.
+  // Auto-select most recent session matching the current guild — except while
+  // a New-chat intent is newest: the welcome screen is the destination then,
+  // and resuming the latest conversation would bounce the user right back.
   useEffect(() => {
     if (!mounted) return
     if (activeSessionId) {
@@ -231,6 +241,7 @@ export function AppShellMobile() {
       }
       return
     }
+    if (isChatHomeActive(chatHomeEpoch, selectedGuildEpoch, activeSessionEpoch)) return
     const matching = sessions.find((s) => {
       if (selectedGuild.kind === "team") {
         return s.kind === "team" && s.teamId === selectedGuild.teamId
@@ -240,7 +251,17 @@ export function AppShellMobile() {
     if (matching) {
       select(matching.id)
     }
-  }, [mounted, sessions, activeSessionId, selectedGuild, select, setSelectedGuild])
+  }, [
+    mounted,
+    sessions,
+    activeSessionId,
+    selectedGuild,
+    chatHomeEpoch,
+    selectedGuildEpoch,
+    activeSessionEpoch,
+    select,
+    setSelectedGuild,
+  ])
 
   // Surface non-fatal errors as toasts.
   useEffect(() => {
@@ -406,7 +427,16 @@ export function AppShellMobile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSettingsRequest])
 
-  const handleNewDirect = () => setCharacterPickerOpen(true)
+  // Every "New chat" door on mobile (⋮ menu, drawer's list, quick-action tile,
+  // command palette, composer /clear) lands on the welcome surface — the same
+  // rule the desktop shell follows. The character picker is reachable from the
+  // welcome's own entry button and the session sheet instead.
+  const handleNewDirect = useCallback(() => {
+    requestChatHome()
+    // The desktop gets its clear from the reconcile; this shell's auto-select
+    // effect above only skips resuming — the pointer itself is cleared here.
+    clearActiveSession()
+  }, [requestChatHome, clearActiveSession])
 
   const handleCreateTeam = () => openSettings("teams")
 

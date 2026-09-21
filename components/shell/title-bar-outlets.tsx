@@ -133,6 +133,18 @@ export function useTitleBarProjectionState(): Record<TitleBarZone, boolean> {
 }
 
 /**
+ * Whether the nearest `TitleBarProjectionScope` enables projection — i.e.
+ * this subtree is the chat workspace, regardless of whether a bar exists to
+ * project into. `chat-header.tsx` reads it to host the `toolbar.*` plugin
+ * slots inline on the bar-less web shell; hosts that deliberately stand
+ * outside the scope (inbox detail, Canvas sidechat, the mobile Sheet) answer
+ * `false` and keep the header plain.
+ */
+export function useTitleBarProjectionScope(): boolean {
+  return useContext(TitleBarProjectionScopeContext)
+}
+
+/**
  * For a column header: the outlet to portal into, or `null` to draw inline.
  * Pass `active: false` to stand down without unmounting — the conversation
  * rail does this while collapsed, so an invisible column does not leave its

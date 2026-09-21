@@ -265,9 +265,7 @@ interface SettingsState {
 
   // Provider circuit breaker — persisted config, applied to the shared
   // in-memory breaker immediately (no reload needed).
-  setSearchProviderHealthSettings: (
-    patch: Partial<SearchProviderHealthSettings>
-  ) => Promise<void>
+  setSearchProviderHealthSettings: (patch: Partial<SearchProviderHealthSettings>) => Promise<void>
   /** Clear in-memory breaker state for one provider (or all). No persistence. */
   resetSearchProviderHealth: (providerId?: SearchProviderType) => void
 
@@ -692,6 +690,59 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
 }
 
 /**
+ * The object/array flat fields. Every `set({ settings })` re-derives them —
+ * the `{...DEFAULTS, ...slice}` merges allocate fresh objects, and a
+ * `saveSettings` resolution hands back a wholly fresh row — so without
+ * reconciliation an unrelated write (say, activating a custom theme)
+ * delivers a new `background`/`wallpapers` reference to every subscriber.
+ * `BackgroundApplier` was the visible casualty: each write re-ran its
+ * effect and re-minted the wallpaper's blob URL, flashing the background
+ * layer for a frame. Scalar fields don't need this — `Object.is` already
+ * dedupes them.
+ */
+const STRUCTURAL_FLAT_KEYS = [
+  "customThemes",
+  "providerSettings",
+  "customProviders",
+  "providerUsageStats",
+  "providerUIPreferences",
+  "background",
+  "lockScreen",
+  "wallpapers",
+  "monacoLink",
+  "autoMode",
+  "importedVscodeThemes",
+] as const satisfies readonly (keyof FlatPluginFields)[]
+
+/**
+ * Structural equality over plain-JSON values. `AppSettings` slices are
+ * Dexie-persisted data — no functions, class instances, or cycles — so a
+ * recursive key/value walk is exact.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => deepEqual(item, b[i]))
+    )
+  }
+  const aRecord = a as Record<string, unknown>
+  const bRecord = b as Record<string, unknown>
+  const aKeys = Object.keys(aRecord)
+  if (aKeys.length !== Object.keys(bRecord).length) return false
+  return aKeys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(bRecord, key) && deepEqual(aRecord[key], bRecord[key])
+  )
+}
+
+/**
  * Resolve the skill bundle mirror toggles with defaults applied. The
  * canonical `<appData>/cognia/skills/<id>/` write is always on; only the
  * `~/.claude/skills/` and `~/.agents/skills/` mirrors are user-toggleable.
@@ -725,6 +776,30 @@ function enqueueProviderMutation<T>(task: () => Promise<T>): Promise<T> {
 }
 
 export const useSettingsStore = create<SettingsState>((rawSet, get) => {
+  // The initial flat projection — also the baseline the reconciler compares
+  // the first `set` against.
+  const initialFlat = deriveFlatPluginFields(null)
+  let prevFlat: FlatPluginFields = initialFlat
+  /**
+   * Hand subscribers the previous object/array reference whenever a
+   * re-derived field's contents did not actually change (see
+   * STRUCTURAL_FLAT_KEYS for why churn is harmful). Scalars are already
+   * deduped by zustand's Object.is comparison.
+   */
+  const reconcileFlat = (next: FlatPluginFields): FlatPluginFields => {
+    let out: FlatPluginFields | null = null
+    for (const key of STRUCTURAL_FLAT_KEYS) {
+      if (prevFlat[key] !== next[key] && deepEqual(prevFlat[key], next[key])) {
+        out ??= { ...next }
+        // Keyed writes through the union can't carry the per-key field type —
+        // the loop invariant keeps `key` aligned with its own field.
+        ;(out as Record<keyof FlatPluginFields, unknown>)[key] = prevFlat[key]
+      }
+    }
+    const reconciled = out ?? next
+    prevFlat = reconciled
+    return reconciled
+  }
   // Intercept every state update: if the update modifies `settings`, also
   // re-derive the plugin-facing flat fields. This keeps the two views
   // (nested AppSettings + plugin-flat fields) in lockstep without
@@ -740,7 +815,9 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       if (partial && Object.prototype.hasOwnProperty.call(partial, "settings")) {
         return {
           ...partial,
-          ...deriveFlatPluginFields((partial.settings ?? state.settings) as AppSettings | null),
+          ...reconcileFlat(
+            deriveFlatPluginFields((partial.settings ?? state.settings) as AppSettings | null)
+          ),
         } as Partial<SettingsState>
       }
       return partial
@@ -753,7 +830,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     loadError: null,
     providerKeys: {},
     providerKeysLoaded: false,
-    ...deriveFlatPluginFields(null),
+    ...initialFlat,
 
     load: async () => {
       if (get().loaded) return

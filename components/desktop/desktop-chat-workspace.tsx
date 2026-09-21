@@ -22,12 +22,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { UserRoundIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { CharacterPicker } from "@/components/chat/character-picker"
-import { NewChatExecutionPicker } from "@/components/chat/new-chat-execution-picker"
+import { ContextBar } from "@/components/chat/composer/context-bar"
 import { useNewChatExecution } from "@/hooks/chat/use-new-chat-execution"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
@@ -42,6 +44,7 @@ import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
+import { useImNotifyStore } from "@/stores/chat/im-notify-store"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
@@ -55,8 +58,7 @@ import {
   resolveConversationSearchOptions,
 } from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
-import { primaryRootOf } from "@/lib/workspace/roots"
-import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
+import { isChatHomeActive, planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { usePlatform } from "@/hooks/use-platform"
@@ -73,6 +75,7 @@ export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const runtimeT = useTranslations("desktop.chatRuntime")
   const tMembers = useTranslations("desktop.memberList")
+  const tChat = useTranslations("chat")
   // Held in a ref for the same reason as `bulkT` below: `useTranslations`
   // returns a fresh function each render, and `handleSwitchToSession` must not
   // change identity on every render because of it.
@@ -127,6 +130,7 @@ export function DesktopChatWorkspace() {
 
   const errorMessage = useChatStore((s) => s.errorMessage)
   const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
+  const clearActiveSession = useChatStore((s) => s.clearActiveSession)
 
   const loadSettings = useSettingsStore((s) => s.load)
   // Which edge the conversation sidebar takes. The nav rail already follows
@@ -137,11 +141,12 @@ export function DesktopChatWorkspace() {
   const selectedGuild = useUIStore((s) => s.selectedGuild)
   const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
+  const chatHomeEpoch = useUIStore((s) => s.chatHomeEpoch)
+  const requestChatHome = useUIStore((s) => s.requestChatHome)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const activeProject = useProjectStore((s) =>
     s.projects.find((project) => project.id === s.activeProjectId)
   )
-  const activeProjectRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
 
@@ -162,7 +167,6 @@ export function DesktopChatWorkspace() {
   // Shared with the mobile shell so both offer the same choice with the same
   // per-workspace defaulting rules.
   const { value: newChatExecution, setValue: setNewChatExecution } = useNewChatExecution()
-
   const composerRef = useRef<ComposerHandle | null>(null)
 
   const [mounted, setMounted] = useState(false)
@@ -195,7 +199,10 @@ export function DesktopChatWorkspace() {
   // that team's most recent conversation; a team with no conversations lands
   // on the welcome empty state (the CTA / "+" create one explicitly — the
   // reconcile never silently inserts a session row). A session resumed from
-  // elsewhere still pulls the guild over to match it.
+  // elsewhere still pulls the guild over to match it. A New-chat request
+  // (`chatHomeEpoch` newest) lands on the welcome surface instead — without
+  // the explicit intent the first rule above would resume the latest
+  // conversation right back.
   useEffect(() => {
     if (!mounted) return
     const action = planGuildReconcile({
@@ -206,6 +213,7 @@ export function DesktopChatWorkspace() {
       // (eventually-consistent) list, so a conversation that was just created
       // reconciles as itself instead of looking deleted for a render.
       activeSessionPending: activeSessionState === "pending",
+      homeRequested: isChatHomeActive(chatHomeEpoch, selectedGuildEpoch, activeSessionEpoch),
       sessions: guildSessions,
     })
     switch (action.type) {
@@ -216,7 +224,9 @@ export function DesktopChatWorkspace() {
         select(action.sessionId)
         break
       case "clear":
-        select(null)
+        // A reconcile-driven clear must not stamp a nav epoch — doing so
+        // would outrank the intent that produced it and bounce straight back.
+        clearActiveSession()
         break
       case "sync-guild":
         log.info("auto guild-switch from active session", { target: action.guild })
@@ -227,11 +237,13 @@ export function DesktopChatWorkspace() {
     mounted,
     selectedGuild,
     selectedGuildEpoch,
+    chatHomeEpoch,
     activeSessionEpoch,
     guildSessions,
     activeSession,
     activeSessionState,
     select,
+    clearActiveSession,
     setSelectedGuild,
   ])
 
@@ -274,10 +286,14 @@ export function DesktopChatWorkspace() {
     clearPendingSettings()
   }, [pendingSettingsRequest, openSettings, clearPendingSettings])
 
+  // Every "New chat" affordance in the DM scope lands on the welcome surface:
+  // the pane's first send materialises the conversation, and the welcome's
+  // character entry still opens the picker for "chat as…". Nothing creates a
+  // session up front — an empty session row would just sit in the list.
   const handleNewDirect = useCallback(() => {
-    log.info("new-direct (open character picker)")
-    setCharacterPickerOpen(true)
-  }, [setCharacterPickerOpen])
+    log.info("new-direct → welcome")
+    requestChatHome()
+  }, [requestChatHome])
 
   const handleNewTeamConversation = useCallback(
     async (teamId: string) => {
@@ -288,7 +304,11 @@ export function DesktopChatWorkspace() {
         teamId,
         executionLocation: newChatExecution.location,
         executionBase: newChatExecution.base,
+        environmentId: newChatExecution.environmentId,
+        rootId: newChatExecution.rootId,
+        worktreeName: newChatExecution.worktreeName,
       })
+      useImNotifyStore.getState().armSession(s.id)
       select(s.id)
       return s
     },
@@ -564,7 +584,11 @@ export function DesktopChatWorkspace() {
         const s = await create({
           executionLocation: newChatExecution.location,
           executionBase: newChatExecution.base,
+          environmentId: newChatExecution.environmentId,
+          rootId: newChatExecution.rootId,
+          worktreeName: newChatExecution.worktreeName,
         })
+        useImNotifyStore.getState().armSession(s.id)
         await directChat.send(content, undefined, {
           sessionId: s.id,
           attachmentManifest: manifest,
@@ -590,13 +614,14 @@ export function DesktopChatWorkspace() {
     [handleFirstTurn]
   )
 
-  // The welcome CTA / tab-strip "+" respect the selected guild: a team guild
-  // starts a new conversation with that team, everything else opens the
-  // character picker for a direct chat.
+  // The pane's "new conversation" action (composer /clear, welcome CTA) goes
+  // home in the current scope: a DM guild lands on the direct-chat welcome,
+  // a team guild on its own welcome whose first send creates that team's
+  // conversation (`handleFirstTurn`). In-scope creation stays with the team
+  // section's own "+" affordances (`handleNewTeamConversation`).
   const handleCreate = useCallback(() => {
-    if (selectedGuild.kind === "team") void handleNewTeamConversation(selectedGuild.teamId)
-    else handleNewDirect()
-  }, [selectedGuild, handleNewTeamConversation, handleNewDirect])
+    requestChatHome()
+  }, [requestChatHome])
 
   // The team-members panel lives in the workbench, outside this tree, so it
   // asks for a mention over the shared seam rather than through a callback
@@ -612,7 +637,11 @@ export function DesktopChatWorkspace() {
         characterId: c.id,
         executionLocation: newChatExecution.location,
         executionBase: newChatExecution.base,
+        environmentId: newChatExecution.environmentId,
+        rootId: newChatExecution.rootId,
+        worktreeName: newChatExecution.worktreeName,
       })
+      useImNotifyStore.getState().armSession(s.id)
       select(s.id)
       setSelectedGuild({ kind: "dm" })
     },
@@ -696,22 +725,35 @@ export function DesktopChatWorkspace() {
                     setModel={directChat.setModel}
                     resetRuntime={directChat.resetRuntime}
                     onCreate={handleCreate}
+                    onPickCharacter={() => setCharacterPickerOpen(true)}
                     onUseSample={handleUseSample}
                     onHeroSend={handleFirstTurn}
                     onOpenSettings={openSettings}
-                    newChatExecutionControls={
-                      // Only offered when the workspace HAS a directory. A
-                      // rootless workspace (Default, before anything is opened
-                      // or created) has nothing for "Local" to mean — the
-                      // session falls back to a managed workspace regardless,
-                      // so presenting the choice would be presenting a lie.
-                      activeProjectRoot ? (
-                        <NewChatExecutionPicker
-                          rootDir={activeProjectRoot}
-                          value={newChatExecution}
-                          onChange={setNewChatExecution}
-                        />
-                      ) : undefined
+                    welcomeContextBarSlot={
+                      <ContextBar
+                        execution={newChatExecution}
+                        onExecutionChange={setNewChatExecution}
+                        project={activeProject}
+                      />
+                    }
+                    welcomeComposerToolbar={
+                      /* The "chat as a character" door New chat used to be.
+                         It lives in the welcome composer's toolbar — picking
+                         still creates that character's conversation directly. */
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={tChat("empty.characterEntry")}
+                            onClick={() => setCharacterPickerOpen(true)}
+                            data-testid="welcome-character-entry"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                          >
+                            <UserRoundIcon aria-hidden className="size-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">{tChat("empty.characterEntry")}</TooltipContent>
+                      </Tooltip>
                     }
                     recentSessions={recentSessions}
                     onResumeSession={handleSwitchToSession}

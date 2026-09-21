@@ -26,7 +26,6 @@ import { listSessions } from "@/lib/db/sessions"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
-import { startNewSession } from "@/lib/chat/start-session"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -187,22 +186,20 @@ export const GO_ROUTES: Record<string, string> = {
 // --------------------------------------------------------------------------
 
 /**
- * Cmd+N / File → New Chat / tray. Starts a real conversation rather than
- * clearing to the welcome page: `clear()` dropped every open pane and left the
- * user with no session, so "New Chat" meant something different here than it
- * did for the in-app "+" and the command palette.
+ * Cmd+N / File → New Chat / tray. Navigates to the welcome surface on the DM
+ * scope — the same place every in-app "New chat" lands. The conversation is
+ * only created when the user sends from there, so this is idempotent.
  *
  * Main-window only. Rust broadcasts `menu://*` / `tray://*` to EVERY window
  * (`app.emit`), and the pet overlay / popup / island load this same root
- * layout, so their subscribers run this too. Creating a session is not
- * idempotent — without this guard one Cmd+N with the pet overlay open would
- * create two conversations.
+ * layout, so their subscribers run this too. Navigation is harmless in the
+ * overlay windows' own store instances, but the guard keeps the intent
+ * scoped to the window the user actually typed in.
  */
 export function newChatAction(): void {
   if (!isMainAppWindow()) return
-  log.info("menu action new-chat")
-  useUIStore.getState().setSelectedGuild({ kind: "dm" })
-  void startNewSession()
+  log.info("menu action new-chat → welcome")
+  useUIStore.getState().requestChatHome({ kind: "dm" })
 }
 
 export function newWorkflowAction(router: AppRouterInstance): void {

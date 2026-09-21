@@ -123,6 +123,18 @@ jest.mock("@cognia/logging", () => {
 
 const liveQueryUndefined = Symbol("live-query-undefined")
 const callQueue: Array<unknown> = []
+
+// The scope-tree headers' unread pills — an aggregate of its own, not a row
+// the shared live-query queue serves. Mocked per-test so a value can be set.
+let mockGuildUnread: { dm: number; teams: ReadonlyMap<string, number>; total: number } = {
+  dm: 0,
+  teams: new Map<string, number>(),
+  total: 0,
+}
+jest.mock("@/hooks/shell/use-guild-unread", () => ({
+  useGuildUnread: () => mockGuildUnread,
+  markGuildRead: jest.fn(async () => 0),
+}))
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: <T,>(_q: () => Promise<T> | T, _d: unknown[], _i: T): T | undefined => {
     const value = callQueue.shift()
@@ -204,6 +216,10 @@ jest.mock("@/stores/ui", () => ({
       setSidebarCollapsed,
       sidebarPeekEnabled,
       sidebarSearchCollapsible,
+      // The web-shell top-bar switch. jsdom reports `web` and the bar is never
+      // mounted in this suite, so the flag stays false — its off-state is what
+      // the "web shell without the bar" describe exercises.
+      webTitleBarEnabled: false,
     })
   },
   SIDEBAR_WIDTH_DEFAULT: 256,
@@ -259,17 +275,33 @@ jest.mock("@/hooks/ui", () => {
 // The expanded rail hosts the shell navigation, the guild accordion headers,
 // the footer and the workspace switcher; each has its own suite under
 // `components/shell/`, so here they are stubs that record what they were given.
-jest.mock("@/components/shell/sidebar-nav-section", () => ({
-  SidebarNavSection: () => <nav data-testid="sidebar-nav" />,
-}))
+jest.mock("@/components/shell/sidebar-nav-section", () => {
+  const actual = jest.requireActual("@/components/shell/sidebar-nav-section") as Record<
+    string,
+    unknown
+  >
+  return {
+    ...actual,
+    SidebarNavSection: () => <nav data-testid="sidebar-nav" />,
+  }
+})
 jest.mock("@/components/shell/sidebar-guild-sections", () => {
   const actual = jest.requireActual("@/components/shell/sidebar-guild-sections") as {
     guildSectionRows: unknown
     activeGuildKey: unknown
+    GuildScopeMenuItems: unknown
+    GuildUnreadPill: unknown
+    TEAM_SETTINGS_ROUTE: unknown
   }
   return {
     guildSectionRows: actual.guildSectionRows,
     activeGuildKey: actual.activeGuildKey,
+    TEAM_SETTINGS_ROUTE: actual.TEAM_SETTINGS_ROUTE,
+    // The scope-tree headers serve the real shared menu and unread pill —
+    // they are what the headers are *for*, so stubbing them would test a
+    // different component than the one that ships.
+    GuildScopeMenuItems: actual.GuildScopeMenuItems,
+    GuildUnreadPill: actual.GuildUnreadPill,
     SidebarGuildSectionRows: ({
       rows,
       activeKey,
@@ -298,7 +330,7 @@ jest.mock("@/components/shell/workspace-switcher", () => ({
   ),
 }))
 
-import { ChannelList, TEAM_DND_CONTEXT_ID } from "./channel-list"
+import { ChannelList } from "./channel-list"
 // The team order is read and written through the real settings store — the
 // barrel mocked above only covers this component's own display settings.
 import { useSettingsStore as teamOrderSettingsStore } from "@/stores/settings/settings-store"
@@ -374,6 +406,7 @@ beforeEach(() => {
   mockDroppableNodes.clear()
   callQueue.length = 0
   mockDragEndById.clear()
+  mockGuildUnread = { dm: 0, teams: new Map<string, number>(), total: 0 }
   selectedGuild = { kind: "dm" }
   collapsedFolderIds = []
   channelListView = "active"
@@ -1234,9 +1267,13 @@ test("Team guild renders only that team's sessions", () => {
       onRename={jest.fn()}
     />
   )
-  expect(screen.getAllByText("Squad")).toHaveLength(2)
-  expect(screen.getByText("Squad meeting")).toBeInTheDocument()
-  expect(screen.queryByText("Hi Alice")).toBeNull()
+  // The team-axis section now carries the squad's own name (previously the
+  // axis had no teams to name, so the bucket rendered as "Chats"). "Squad"
+  // appears as the header title, the section label, and the row's agent
+  // metadata — assert the scope is what the list shows, not a text count.
+  const squadSection = screen.getByRole("region", { name: "Squad" })
+  expect(within(squadSection).getByText("Squad meeting")).toBeInTheDocument()
+  expect(within(squadSection).queryByText("Hi Alice")).toBeNull()
 })
 
 describe("workspace grouping (the default axis)", () => {
@@ -3139,12 +3176,13 @@ describe("unread badges and identity rendering", () => {
   })
 })
 
-describe("title-bar projection", () => {
-  function StartOutlet() {
-    const ref = useTitleBarOutletRef("start")
-    return <div ref={ref} data-testid="start-outlet" />
-  }
+/** The title bar's start zone — the merged rail projects its header into it. */
+function StartOutlet() {
+  const ref = useTitleBarOutletRef("start")
+  return <div ref={ref} data-testid="start-outlet" />
+}
 
+describe("title-bar projection", () => {
   function renderProjected() {
     callQueue.push(characters, [], [])
     return render(
@@ -3242,11 +3280,11 @@ describe("title-bar projection", () => {
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
   })
 
-  it("keeps the guild group in one fixed block under the list, whichever scope is selected", () => {
-    // The rail used to cut this run in two and hoist the selected row — and
-    // Chats above it — over the search field, so picking a team pushed the
-    // search row and the whole list down the rail. One block, always in the
-    // same place: only the highlight moves.
+  it("draws every scope inside one scrolling region — only New chat and the footer stay put", () => {
+    // The old rail cut the scope run in two and pinned the band under the
+    // list. The scope tree replaces it: Chats first, then every squad as a
+    // collapsible group, all inside the scroll — so folding a squad can never
+    // move the search field, the nav rows, or the footer.
     const teams = [
       { id: "t-1", name: "Alpha" },
       { id: "t-2", name: "Beta" },
@@ -3276,39 +3314,68 @@ describe("title-bar projection", () => {
     }
 
     selectedGuild = { kind: "team", teamId: "t-2" }
-    const { unmount } = renderRail()
-    const group = screen.getByTestId("sidebar-guild-rows")
-    expect(group).toHaveAttribute("data-active", "t-2")
-    for (const key of ["dm", "t-1", "t-2", "t-3"]) {
-      expect(group).toContainElement(screen.getByTestId(`guild-row-${key}`))
-    }
-    // Search and list first, the group under them — never the other way round.
+    const { unmount, container } = renderRail()
+    // No scope-switcher band on the merged rail — the scopes are the list.
+    expect(screen.queryByTestId("sidebar-guild-rows")).toBeNull()
+    // Order: pinned New chat → nav rows → the search row heading the list it
+    // narrows → Chats → squads → footer. The default test preference keeps
+    // the field open; the resting trigger state is covered under "search in
+    // its resting form".
+    const newChat = screen.getByTestId("sidebar-new-conversation")
+    const nav = screen.getByTestId("sidebar-nav")
     const search = screen.getByTestId("channel-list-search")
-    expect(search.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.queryByTestId("sidebar-guild-rows-before")).toBeNull()
-    const searchTop = search.compareDocumentPosition(screen.getByTestId("sidebar-nav-band"))
-    expect(searchTop & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
-    unmount()
-
-    // Selecting Chats instead moves the highlight and nothing else — the run
-    // still holds every row, in the same order, still under the search field.
-    selectedGuild = { kind: "dm" }
-    renderRail()
-    const chatsGroup = screen.getByTestId("sidebar-guild-rows")
-    expect(chatsGroup).toHaveAttribute("data-active", "dm")
-    for (const key of ["dm", "t-1", "t-2", "t-3"]) {
-      expect(chatsGroup).toContainElement(screen.getByTestId(`guild-row-${key}`))
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    const beta = screen.getByTestId("sidebar-scope-t-2")
+    const gamma = screen.getByTestId("sidebar-scope-t-3")
+    const footer = screen.getByTestId("sidebar-footer")
+    for (const [before, after] of [
+      [newChat, nav],
+      [nav, search],
+      [search, chats],
+      [chats, alpha],
+      [alpha, beta],
+      [beta, gamma],
+      [gamma, footer],
+    ] as const) {
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
+    // The selected guild no longer filters the list — every scope renders,
+    // the direct session under Chats, the empty squads as bare headers.
+    expect(within(chats).getByText("Hi Alice")).toBeInTheDocument()
+    for (const scope of [alpha, beta, gamma]) {
+      expect(within(scope).getByTestId(/^sidebar-scope-empty-/)).toBeInTheDocument()
+    }
+    // The Squads micro-label separates Chats from the named groups.
     expect(
-      screen.getByTestId("channel-list-search").compareDocumentPosition(chatsGroup) &
+      chats.compareDocumentPosition(screen.getByTestId("sidebar-squads-label")) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+    // "Scrolls together" is literal: everything from the nav rows to the
+    // last squad lives inside the one viewport — the search row included,
+    // it heads the list it narrows. The bookends — New chat and the
+    // footer — stay outside.
+    const viewport = container.querySelector("[data-slot=scroll-area-viewport]")!
+    for (const inside of [nav, search, chats, gamma]) {
+      expect(viewport).toContainElement(inside)
+    }
+    expect(viewport).not.toContainElement(newChat)
+    expect(viewport).not.toContainElement(footer)
+    unmount()
+
+    // Picking Chats instead changes nothing structural — there is no
+    // selection to move in a tree that shows everything.
+    selectedGuild = { kind: "dm" }
+    renderRail()
+    expect(screen.queryByTestId("sidebar-guild-rows")).toBeNull()
+    expect(screen.getByTestId("sidebar-scope-chats")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-scope-t-3")).toBeInTheDocument()
   })
 
-  it("carries every team in one drag context, so a row can cross the open section", () => {
-    // Beta is open, which splits the accordion: Alpha above the list, Gamma
-    // below it. Both have to be in the same sortable run or Gamma could never
-    // be dragged above Alpha.
+  it("carries every team in one drag context, so a header can cross a section", () => {
+    // Alpha, Beta, Gamma all live in the scope tree's one sortable run — a
+    // Gamma header dragged over Alpha's section must land in the same
+    // context, or it could never move above it.
     selectedGuild = { kind: "team", teamId: "t-2" }
     const teams = [
       { id: "t-1", name: "Alpha" },
@@ -3339,10 +3406,15 @@ describe("title-bar projection", () => {
     )
     expect(mockSortableItems).toContainEqual(["t-1", "t-2", "t-3"])
 
-    const dropTeam = mockDragEndById.get(TEAM_DND_CONTEXT_ID)
-    expect(dropTeam).toBeDefined()
+    // The squad headers share the session list's own DndContext, tagged
+    // `type: "team"` — the group reorder and the row reorder stay in one
+    // context, sorted out by the drag's data.
+    expect(mockDragEnd).toBeDefined()
     act(() => {
-      dropTeam?.({ active: { id: "t-3" }, over: { id: "t-1" } })
+      mockDragEnd?.({
+        active: { id: "t-3", data: { current: { type: "team", teamId: "t-3" } } },
+        over: { id: "t-1", data: { current: { type: "team", teamId: "t-1" } } },
+      })
     })
     expect(save).toHaveBeenCalledWith({
       conversationSidebar: { teamOrder: ["t-3", "t-1", "t-2"] },
@@ -3377,8 +3449,12 @@ describe("title-bar projection", () => {
         </TitleBarProjectionScope>
       </TitleBarOutletsProvider>
     )
+    expect(mockDragEnd).toBeDefined()
     act(() => {
-      mockDragEndById.get(TEAM_DND_CONTEXT_ID)?.({ active: { id: "t-1" }, over: null })
+      mockDragEnd?.({
+        active: { id: "t-1", data: { current: { type: "team", teamId: "t-1" } } },
+        over: null,
+      })
     })
     expect(save).not.toHaveBeenCalled()
   })
@@ -3476,43 +3552,107 @@ describe("title-bar projection", () => {
   })
 
   describe("search in its resting form", () => {
-    it("rests as one button and opens into the row when used", () => {
+    it("rests as a field beside its controls at the head of the list and slides over them on focus", () => {
       sidebarSearchCollapsible = true
       renderProjected()
-      const search = screen.getByTestId("channel-list-search")
-      expect(search).toHaveAttribute("data-button-form", "true")
-      // Sized to the control, so it sits beside the three buttons after it
-      // instead of holding the row's remaining width open around a glyph.
-      expect(search).toHaveClass("grow-0")
-      expect(search).toHaveStyle({ flexBasis: "32px" })
-      // Still one control with one name and one tab stop. The overlay is a
-      // pointer target that hands focus over, not a second search button.
+      // At rest the field shares the row with the scope, filter and ⋯
+      // controls — no trigger, no hidden half; the affordance is the input
+      // itself.
       const input = screen.getByLabelText("searchAria")
-      const overlay = screen.getByTestId("channel-list-search-button")
-      expect(overlay).toHaveAttribute("aria-hidden", "true")
-      expect(overlay).toHaveAttribute("tabindex", "-1")
+      const field = screen.getByTestId("channel-list-search")
+      const controls = screen.getByTestId("channel-list-search-controls")
+      expect(field).not.toHaveAttribute("data-expanded")
+      expect(controls).not.toHaveAttribute("inert")
+      // The row heads the conversation list — between the nav rows and the
+      // Chats group, inside the rail, not up in the window chrome.
+      const rail = document.getElementById("conversation-sidebar")!
+      expect(rail).toContainElement(field)
+      expect(screen.getByTestId("channel-list-header")).not.toContainElement(field)
 
-      fireEvent.click(overlay)
+      // Waking the field slides its right edge over the controls box — it
+      // folds to zero width while staying mounted, so resting again is the
+      // same gesture backwards.
       act(() => input.focus())
-      expect(search).not.toHaveAttribute("data-button-form")
-      expect(screen.queryByTestId("channel-list-search-button")).toBeNull()
+      expect(field).toHaveAttribute("data-expanded", "true")
+      expect(controls).toHaveAttribute("inert")
+      expect(controls).toHaveAttribute("aria-hidden", "true")
+
+      // Escape on the empty field lets it go: blur rests it and the
+      // controls slide back out.
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(input).not.toHaveFocus()
+      expect(controls).not.toHaveAttribute("inert")
     })
 
-    it("holds the row open while it still has a query", () => {
+    it("keeps the search row's neighbours put while the field unfolds", () => {
+      // The fold plays inside the row's own slot — a regression that
+      // reintroduces mounting a row somewhere else has a test to answer to.
+      sidebarSearchCollapsible = true
+      renderProjected()
+      const nav = screen.getByTestId("sidebar-nav")
+      const chats = screen.getByTestId("sidebar-scope-chats")
+      const navSnapshot = nav.innerHTML
+      act(() => screen.getByLabelText("searchAria").focus())
+      // Nav is untouched by the gesture, and the field sits inside the one
+      // scrolling viewport — nav above it, Chats below it, all in place.
+      expect(nav.innerHTML).toBe(navSnapshot)
+      expect(nav.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      const viewport = nav.closest("[data-slot=scroll-area-viewport]")!
+      const searchRow = screen.getByTestId("channel-list-search-row")
+      expect(viewport).toContainElement(searchRow)
+      expect(nav.compareDocumentPosition(searchRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(
+        searchRow.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    it("opens on / without the pointer reaching for the row", async () => {
+      sidebarSearchCollapsible = true
+      renderProjected()
+      const rail = document.getElementById("conversation-sidebar")!
+      const container = rail.querySelector("[data-surface=sidebar]")!
+      fireEvent.keyDown(container, { key: "/" })
+      const input = screen.getByLabelText("searchAria")
+      expect(input).toHaveFocus()
+      // Focus is the wake — the controls fold without a pointer anywhere.
+      await waitFor(() =>
+        expect(screen.getByTestId("channel-list-search-controls")).toHaveAttribute("inert")
+      )
+    })
+
+    it("keeps the controls folded while a query still sits in the field", async () => {
       sidebarSearchCollapsible = true
       renderProjected()
       const input = screen.getByLabelText("searchAria")
       act(() => input.focus())
       fireEvent.change(input, { target: { value: "budget" } })
-      act(() => input.blur())
-      expect(screen.getByTestId("channel-list-search")).not.toHaveAttribute("data-button-form")
+      // The query lands on the 150ms debounce — the list narrowing is the
+      // observable sign it reached the model.
+      await waitFor(() => expect(screen.queryByText("Hi Alice")).toBeNull())
+      const controls = screen.getByTestId("channel-list-search-controls")
+      // Leaving the field with text still in it does not rest it — the fold
+      // outlasts focus so the row never bounces mid-search.
+      fireEvent.blur(input)
+      expect(controls).toHaveAttribute("inert")
+      // Escaping twice — clear, then let go — is the way out.
+      act(() => input.focus())
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(input).toHaveValue("")
+      fireEvent.keyDown(input, { key: "Escape" })
+      expect(input).not.toHaveFocus()
+      expect(controls).not.toHaveAttribute("inert")
     })
 
-    it("keeps the field open when the preference says so", () => {
+    it("pins the controls out when the preference says so", () => {
       sidebarSearchCollapsible = false
       renderProjected()
-      expect(screen.getByTestId("channel-list-search")).not.toHaveAttribute("data-button-form")
-      expect(screen.queryByTestId("channel-list-search-button")).toBeNull()
+      const input = screen.getByLabelText("searchAria")
+      act(() => input.focus())
+      expect(screen.getByTestId("channel-list-search")).toHaveAttribute("data-expanded", "true")
+      // The always-open preference: the controls keep their slot beside the
+      // field even while it has the focus — nothing folds, nothing moves.
+      expect(screen.getByTestId("channel-list-search-controls")).not.toHaveAttribute("inert")
+      expect(screen.getByTestId("channel-list-search-controls")).toHaveClass("opacity-100")
     })
   })
 
@@ -3579,8 +3719,19 @@ describe("title-bar projection", () => {
     )
     unmount()
 
-    // The merged rail has a whole chat pane to open into, so it keeps `right`.
+    // The merged rail's row has a whole chat pane to open into, so it keeps
+    // `right` — in the collapsible form too, where the field slides over the
+    // controls while it is awake.
     isNarrow = false
+    const projected = renderProjected()
+    await user.click(screen.getByTestId("channel-list-search-scope"))
+    expect(await screen.findByTestId("channel-list-search-scope-menu")).toHaveAttribute(
+      "data-side",
+      "right"
+    )
+    projected.unmount()
+
+    sidebarSearchCollapsible = true
     renderProjected()
     await user.click(screen.getByTestId("channel-list-search-scope"))
     expect(await screen.findByTestId("channel-list-search-scope-menu")).toHaveAttribute(
@@ -3597,61 +3748,62 @@ describe("title-bar projection", () => {
   })
 
   it("sizes the search row like the navigation rows above it", () => {
-    // The rail reads as one list: the field and the three controls beside it
-    // take the same 32px `rounded-md` box as a `SidebarRow`, not the taller
-    // pill a form input defaults to. Kept as an assertion because the drift
-    // back to `h-9 rounded-lg` is invisible in every behavioural test.
+    // The rail reads as one list: the field and the controls beside it take
+    // the same 32px `rounded-md` box as a `SidebarRow`, not the taller pill a
+    // form input defaults to. Kept as an assertion because the drift back to
+    // `h-9 rounded-lg` is invisible in every behavioural test.
     renderProjected()
     const field = screen.getByTestId("channel-list-search").querySelector("[data-slot=input-group]")
     expect(field).toHaveClass("h-8", "rounded-md")
-    for (const testId of [
-      "channel-list-search-scope",
-      "channel-list-filter-trigger",
-      "channel-list-actions-menu",
-    ]) {
+    for (const testId of ["channel-list-search-scope", "channel-list-filter-trigger"]) {
       expect(screen.getByTestId(testId)).toHaveClass("size-8", "rounded-md")
     }
   })
 
-  it("heads the rail with new-conversation and puts the rest behind ⋯ on the search row", async () => {
+  it("heads the rail with new-conversation and keeps the list actions beside the search row", async () => {
     renderProjected()
     const rail = document.getElementById("conversation-sidebar")!
-    // Nothing but the workspace switcher in the bar.
+    const outlet = screen.getByTestId("start-outlet")
+    // New conversation is the rail's first control, above the navigation.
     const newButton = screen.getByTestId("sidebar-new-conversation")
-    expect(screen.getByTestId("start-outlet")).not.toContainElement(newButton)
-    // New conversation is the rail's first control, above the navigation, and
-    // it names what it creates in the section that is open.
+    expect(outlet).not.toContainElement(newButton)
     expect(rail).toContainElement(newButton)
     expect(newButton).toHaveTextContent("newChat")
     const search = screen.getByTestId("channel-list-search")
-    expect(
-      newButton.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      newButton.compareDocumentPosition(screen.getByTestId("sidebar-nav")) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    // The search row carries the field, the filter and ⋯ — and nothing else.
+    const nav = screen.getByTestId("sidebar-nav")
+    expect(newButton.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(nav.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The search row heads the conversation list and carries everything that
+    // narrows or manages it — the field, the scope picker, the filter and
+    // the ⋯ menu — while the projected header keeps to the workspace bar.
     const menu = screen.getByTestId("channel-list-actions-menu")
+    const header = screen.getByTestId("channel-list-header")
+    const searchRow = screen.getByTestId("channel-list-search-row")
     expect(rail).toContainElement(screen.getByLabelText("searchAria"))
-    expect(search.parentElement).toContainElement(menu)
-    expect(search.parentElement).toContainElement(screen.getByTestId("channel-list-filter-trigger"))
-    expect(search.parentElement).not.toContainElement(newButton)
+    expect(searchRow).toContainElement(screen.getByTestId("channel-list-filter-trigger"))
+    expect(searchRow).toContainElement(screen.getByLabelText("searchAria"))
+    expect(searchRow).toContainElement(menu)
+    expect(outlet).toContainElement(header)
+    expect(header).not.toContainElement(menu)
+    expect(header).not.toContainElement(screen.getByLabelText("searchAria"))
     expect(menu).toHaveAccessibleName("listActions")
     expect(screen.queryByLabelText("viewArchived")).toBeNull()
 
     const user = userEvent.setup()
     await user.click(menu)
-    // Archived toggle first, then the display options that were already a menu.
-    expect(await screen.findByTestId("channel-list-toggle-view")).toHaveTextContent("viewArchived")
+    // Archived toggle first, then the display options that were already a
+    // menu — dropping downward off the row like every menu in the rail.
+    const viewItem = await screen.findByTestId("channel-list-toggle-view")
+    expect(viewItem).toHaveTextContent("viewArchived")
     expect(screen.getByText("displayOptions")).toBeInTheDocument()
   })
 
-  it("creates in the open team when a team section is the one showing", () => {
+  it("pins a direct-only New chat — squad creation moved to the squad header", () => {
     selectedGuild = { kind: "team", teamId: "t-1" }
     const teams = [{ id: "t-1", name: "Alpha" }]
     callQueue.length = 0
     for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+    const onNewDirect = jest.fn()
     const onNewTeamConversation = jest.fn()
     render(
       <TitleBarOutletsProvider>
@@ -3659,6 +3811,37 @@ describe("title-bar projection", () => {
         <TitleBarProjectionScope enabled>
           <ChannelList
             sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={onNewDirect}
+            onNewTeamConversation={onNewTeamConversation}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+    // Merged: the scope tree shows every squad at once, so the pinned row
+    // cannot inherit a scope — it is always a direct chat.
+    const newButton = screen.getByTestId("sidebar-new-conversation")
+    expect(newButton).toHaveTextContent("newChat")
+    fireEvent.click(newButton)
+    expect(onNewDirect).toHaveBeenCalled()
+    expect(onNewTeamConversation).not.toHaveBeenCalled()
+  })
+
+  it("creates inside a squad from its scope-tree header +", async () => {
+    const teams = [{ id: "t-1", name: "Alpha" }]
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], teams)
+    const onNewTeamConversation = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession, teamSession]}
             activeSessionId={null}
             onSelect={jest.fn()}
             onNewDirect={jest.fn()}
@@ -3669,13 +3852,15 @@ describe("title-bar projection", () => {
         </TitleBarProjectionScope>
       </TitleBarOutletsProvider>
     )
-    const newButton = screen.getByTestId("sidebar-new-conversation")
-    expect(newButton).toHaveTextContent("newConversation")
-    fireEvent.click(newButton)
+    const alphaSection = screen.getByRole("region", { name: "Alpha" })
+    const plus = within(alphaSection).getByTestId("sidebar-scope-new-t-1")
+    expect(plus).toHaveAccessibleName('newConversationIn:{"name":"Alpha"}')
+    await user.click(plus)
     expect(onNewTeamConversation).toHaveBeenCalledWith("t-1")
   })
 
-  it("takes the whole row while in use, and offers to take the words global", () => {
+  it("expands on focus by folding its neighbours under it, and offers to take the words global", () => {
+    sidebarSearchCollapsible = true
     const requests: unknown[] = []
     const onRequest = (event: Event) => requests.push((event as CustomEvent).detail)
     window.addEventListener("cognia:command-palette:request", onRequest)
@@ -3686,16 +3871,16 @@ describe("title-bar projection", () => {
       expect(search).not.toHaveAttribute("data-expanded")
       expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
-      // Focus (what `/` gives it) expands the field; the filter and ⋯ beside
-      // it yield. They stay mounted and collapse on the field's own clock, so
-      // the row does not reflow under the pointer mid-gesture, but they are
-      // out of reach for the keyboard and for assistive tech while it is open.
+      // Focus (what `/` gives it) expands the field — its right edge slides
+      // over the scope and filter controls, which fold to zero width on the
+      // same clock instead of popping. The ⋯ menu never moves.
       act(() => input.focus())
       expect(search).toHaveAttribute("data-expanded", "true")
-      const actions = screen.getByTestId("channel-list-search-actions")
-      expect(actions).toHaveAttribute("data-hidden", "true")
-      expect(actions).toHaveAttribute("aria-hidden", "true")
-      expect(actions).toHaveClass("max-w-0")
+      const controls = screen.getByTestId("channel-list-search-controls")
+      expect(controls).toHaveAttribute("inert")
+      expect(controls).toHaveAttribute("aria-hidden", "true")
+      expect(controls).toHaveClass("max-w-0")
+      expect(screen.getByTestId("channel-list-actions-menu").closest("[inert]")).toBeNull()
       expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
       // The global-search hatch sits inside the field, and carries the query.
@@ -3707,16 +3892,17 @@ describe("title-bar projection", () => {
       fireEvent.keyDown(input, { key: "Enter", metaKey: true })
       expect(requests).toHaveLength(2)
 
-      // Text keeps it expanded even unfocused; Escape clears, a second Escape
-      // on the empty field hands the row back.
+      // Text keeps it expanded even unfocused; Escape clears, and a second
+      // Escape lets the empty field go — the controls slide back out.
       act(() => input.blur())
       expect(search).toHaveAttribute("data-expanded", "true")
       act(() => input.focus())
       fireEvent.keyDown(input, { key: "Escape" })
       expect(input).toHaveValue("")
       fireEvent.keyDown(input, { key: "Escape" })
-      act(() => input.blur())
+      expect(input).not.toHaveFocus()
       expect(search).not.toHaveAttribute("data-expanded")
+      expect(screen.getByTestId("channel-list-search-controls")).not.toHaveAttribute("inert")
       expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
     } finally {
       window.removeEventListener("cognia:command-palette:request", onRequest)
@@ -3750,6 +3936,256 @@ describe("title-bar projection", () => {
     } finally {
       rect.mockRestore()
     }
+  })
+})
+
+describe("web shell without the title bar", () => {
+  // The web shell's default (`webTitleBarEnabled` off): the outlets provider
+  // is mounted but the bar never is, so no start outlet registers. The rail
+  // is still the workspace sidebar — same merged layout, same header, drawn
+  // in its own row instead of portalled into the bar.
+  function renderBarlessWeb() {
+    callQueue.push(characters, [], [])
+    return render(
+      <TitleBarOutletsProvider>
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={[dmSession]}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={jest.fn()}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+  }
+
+  it("keeps the merged workspace rail — nav rows and footer", () => {
+    renderBarlessWeb()
+    expect(screen.getByTestId("sidebar-nav")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-footer")).toBeInTheDocument()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(true)
+  })
+
+  it("draws the workspace header inline — the switcher, nothing else", () => {
+    renderBarlessWeb()
+    const header = screen.getByTestId("channel-list-header")
+    // In the rail's own row — no outlet was ever mounted to portal into.
+    expect(header.closest("aside")).not.toBeNull()
+    expect(within(header).getByTestId("workspace-switcher")).toBeInTheDocument()
+    // Search and the list's ⋯ actions head the conversation list itself,
+    // inside the rail — the header keeps to the workspace bar.
+    expect(within(header).queryByTestId("channel-list-search")).toBeNull()
+    expect(within(header).queryByTestId("channel-list-actions-menu")).toBeNull()
+    expect(header).not.toHaveTextContent("directMessages")
+    expect(screen.getByTestId("channel-list-search-row")).toBeInTheDocument()
+  })
+
+  it("keeps the compact reading outside the projection scope", () => {
+    // A rail mounted outside the chat workspace is not the workspace sidebar
+    // on any platform — guild title, no nav claim, icon column stays in charge.
+    callQueue.push(characters, [], [])
+    render(
+      <ChannelList
+        sessions={[dmSession]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("sidebar-nav")).toBeNull()
+    expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
+    expect(screen.getByTestId("channel-list-header")).toHaveTextContent("directMessages")
+  })
+})
+
+describe("scope tree (merged rail)", () => {
+  const squads = [
+    { id: "t-1", name: "Alpha" },
+    { id: "t-2", name: "Beta" },
+  ]
+  function renderMerged(
+    sessions: ChatSession[],
+    overrides: Partial<Parameters<typeof ChannelList>[0]> = {}
+  ) {
+    callQueue.length = 0
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], squads)
+    return render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList
+            sessions={sessions}
+            activeSessionId={null}
+            onSelect={jest.fn()}
+            onNewDirect={jest.fn()}
+            onNewTeamConversation={jest.fn()}
+            onDelete={jest.fn()}
+            onRename={jest.fn()}
+            {...overrides}
+          />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+  }
+
+  it("nests each squad's sessions under its own collapsible header", async () => {
+    const user = userEvent.setup()
+    renderMerged([dmSession, baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" })])
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    expect(within(alpha).getByText("A work")).toBeInTheDocument()
+    // The header folds the group through the same persisted collapse map the
+    // other axes use (`setGroupCollapsed` is the mock — the fold itself is
+    // covered by the store's own tests).
+    await user.click(within(alpha).getByTestId("sidebar-scope-toggle-t-1"))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("team:t-1", true)
+  })
+
+  it("does not repeat the squad's name on the row — the section header and avatar already carry it", () => {
+    conversationSidebar = { metadata: ["agent", "model"] }
+    renderMerged([dmSession, baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" })])
+    const teamRow = screen.getByText("A work").closest("li")!
+    // Three copies of "Alpha" on one row — the section header, the avatar and
+    // the detail line — is two too many.
+    expect(teamRow.querySelector('[data-metadata-kind="agent"]')).toBeNull()
+    expect(teamRow.querySelector('[data-metadata-kind="model"]')).not.toBeNull()
+    // A direct row keeps its `agent` detail — the character's name lands
+    // nowhere else.
+    const dmRow = screen.getByText("Hi Alice").closest("li")!
+    expect(dmRow.querySelector('[data-metadata-kind="agent"]')).not.toBeNull()
+  })
+
+  it("keeps an empty squad as a header with a quiet empty hint", () => {
+    renderMerged([dmSession])
+    const beta = screen.getByTestId("sidebar-scope-t-2")
+    expect(within(beta).getByTestId("sidebar-scope-empty-t-2")).toHaveTextContent("groupEmpty")
+    // …and its "+" still offers a new conversation in that scope.
+    expect(within(beta).getByTestId("sidebar-scope-new-t-2")).toBeInTheDocument()
+  })
+
+  it("heads Chats with a plain label — count, no fold, no +", () => {
+    renderMerged([dmSession])
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    // A label, not a group header: nothing to fold, nothing to start from —
+    // the pinned New chat row is the direct-chat door.
+    expect(within(chats).queryByTestId("sidebar-scope-toggle-chats")).toBeNull()
+    expect(within(chats).queryByTestId("sidebar-scope-chevron-chats")).toBeNull()
+    expect(within(chats).queryByTestId("sidebar-scope-new-chats")).toBeNull()
+    expect(chats).toHaveTextContent("1")
+  })
+
+  it("lets an empty Chats group offer a start-one row", async () => {
+    const onNewDirect = jest.fn()
+    const user = userEvent.setup()
+    renderMerged([baseSession("s-t", { kind: "team", teamId: "t-1", title: "Team" })], {
+      onNewDirect,
+    })
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    const cta = within(chats).getByTestId("sidebar-scope-empty-chats")
+    expect(cta).toHaveTextContent("chatsEmpty")
+    await user.click(cta)
+    expect(onNewDirect).toHaveBeenCalled()
+  })
+
+  it("caps a long squad at two rows and expands on Show more", async () => {
+    const rows = Array.from({ length: 9 }, (_, i) =>
+      baseSession(`s-a${i}`, {
+        kind: "team",
+        teamId: "t-1",
+        title: `Alpha ${i}`,
+        updatedAt: i, // oldest first, so the cap cuts the tail predictably
+      })
+    )
+    const user = userEvent.setup()
+    renderMerged(rows)
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    // 9 rows → the two newest shown, seven behind the expander.
+    expect(within(alpha).getByTestId("sidebar-scope-more-t-1")).toHaveTextContent(
+      'groupShowMore:{"count":7}'
+    )
+    expect(within(alpha).queryByText("Alpha 0")).toBeNull()
+    await user.click(within(alpha).getByTestId("sidebar-scope-more-t-1"))
+    expect(within(alpha).getByText("Alpha 0")).toBeInTheDocument()
+    expect(within(alpha).getByTestId("sidebar-scope-more-t-1")).toHaveTextContent("groupShowLess")
+    await user.click(within(alpha).getByTestId("sidebar-scope-more-t-1"))
+    expect(within(alpha).queryByText("Alpha 0")).toBeNull()
+  })
+
+  it("caps Chats at four rows and labels the expander Show all", async () => {
+    const rows = Array.from({ length: 9 }, (_, i) =>
+      baseSession(`s-dm${i}`, { title: `DM ${i}`, updatedAt: i })
+    )
+    const user = userEvent.setup()
+    renderMerged(rows)
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    // 9 rows → the four newest shown, and the expander names the total.
+    expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent(
+      'groupShowAll:{"count":9}'
+    )
+    expect(within(chats).queryByText("DM 0")).toBeNull()
+    await user.click(within(chats).getByTestId("sidebar-scope-more-chats"))
+    expect(within(chats).getByText("DM 0")).toBeInTheDocument()
+    expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent("groupShowLess")
+  })
+
+  it("shows the tail instead of an expander when only a row or two would hide", () => {
+    // Squad cap is two + a two-row tolerance → four rows just render.
+    const rows = Array.from({ length: 4 }, (_, i) =>
+      baseSession(`s-a${i}`, { kind: "team", teamId: "t-1", title: `Alpha ${i}`, updatedAt: i })
+    )
+    renderMerged(rows)
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    expect(within(alpha).queryByTestId("sidebar-scope-more-t-1")).toBeNull()
+    expect(within(alpha).getByText("Alpha 0")).toBeInTheDocument()
+  })
+
+  it("reorders squads by dragging a group header inside the list's drag context", () => {
+    const save = jest.fn(async () => {})
+    act(() => {
+      teamOrderSettingsStore.setState({ settings: {} as never, save: save as never })
+    })
+    renderMerged([dmSession])
+    // Squad headers are a second draggable `type` inside the conversation
+    // list's own context — the same one the rows drag in.
+    act(() => {
+      mockDragEnd?.({
+        active: { id: "t-2", data: { current: { type: "team", teamId: "t-2" } } },
+        over: { id: "t-1", data: { current: { type: "team", teamId: "t-1" } } },
+      })
+    })
+    expect(save).toHaveBeenCalledWith({
+      conversationSidebar: { teamOrder: ["t-2", "t-1"] },
+    })
+  })
+
+  it("keeps Chats first even when a squad outranks it in activity", () => {
+    renderMerged([
+      baseSession("s-new", { kind: "team", teamId: "t-1", title: "New", updatedAt: 100 }),
+      dmSession,
+    ])
+    const chats = screen.getByTestId("sidebar-scope-chats")
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    expect(chats.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("omits the Squads label and Create team row while browsing the archive", () => {
+    channelListView = "archived"
+    // Archived rows still group by scope — only the active-view furniture
+    // (the micro-label, the create affordance) stands down.
+    renderMerged([
+      baseSession("s-old", { title: "Old chat", archivedAt: 1 }),
+      baseSession("s-old-team", { kind: "team", teamId: "t-1", title: "Old team", archivedAt: 1 }),
+    ])
+    expect(screen.queryByTestId("sidebar-squads-label")).toBeNull()
+    expect(screen.queryByTestId("sidebar-guild-create-team")).toBeNull()
+    expect(screen.getByTestId("sidebar-scope-chats")).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-scope-t-1")).toBeInTheDocument()
   })
 })
 

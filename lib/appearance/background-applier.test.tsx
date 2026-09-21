@@ -6,8 +6,11 @@ import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotation"
 
-// Mock the storage module so we control resolveSourceToCss output.
+// Mock the storage module so we control resolveSourceToCss output. The real
+// sameWallpaperSource comes along for the ride — it's a pure comparator the
+// reuse path relies on.
 jest.mock("@/lib/appearance/wallpaper-storage", () => ({
+  ...jest.requireActual("@/lib/appearance/wallpaper-storage"),
   resolveSourceToCss: jest.fn(),
   disposeUrl: jest.fn(),
 }))
@@ -104,11 +107,14 @@ beforeEach(() => {
   })
 })
 
+// The id is folded into the dataUrl so two ids never alias the same bytes —
+// the applier reuses the painted value when sources are identical, and the
+// swap tests depend on wp-1 and wp-2 being genuinely different images.
 const imageWp = (id: string): Wallpaper =>
   wallpaper(id, {
     kind: "image",
     storage: "data-url",
-    dataUrl: "data:image/png;base64,xx",
+    dataUrl: `data:image/png;base64,${id}`,
     mime: "image/png",
     width: 10,
     height: 10,
@@ -603,5 +609,78 @@ describe("BackgroundApplier rotation transitions", () => {
 
     expect(document.body.getAttribute("data-bg-transition")).toBe("kenBurns")
     expect(document.body.style.getPropertyValue("--app-bg-transition-duration")).toBe("1500ms")
+  })
+
+  // The flicker regression: a settings write that never touched the wallpaper
+  // re-ran this effect and re-resolved the source, minting a FRESH Object URL
+  // for identical bytes. The new string is an undecoded image, so stamping it
+  // onto the layer blanked the wallpaper for a frame.
+  it("reuses the painted image — no re-resolve, no revoke — when the source is unchanged", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1")]
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    // An unrelated-feeling write: same wallpaper id, same source, a slider
+    // moved. The painted CSS value is reused verbatim.
+    await swapTo(view, { ...rotating(), activeId: "wp-1", opacity: 0.6 }, wps)
+
+    expect(wallpaperStorage.resolveSourceToCss).toHaveBeenCalledTimes(1)
+    expect(wallpaperStorage.disposeUrl).not.toHaveBeenCalled()
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(one.png)")
+    expect(document.body.style.getPropertyValue("--app-bg-opacity")).toBe("0.6")
+  })
+
+  it("re-resolves when the same wallpaper id now points at different bytes", async () => {
+    // A plugin can swap the blob behind a wallpaper id; the locator changed,
+    // so the painted value is not reusable.
+    const wpA = wallpaper("wp-1", {
+      kind: "image",
+      storage: "indexeddb",
+      blobKey: "blob-a",
+      mime: "image/png",
+      width: 1,
+      height: 1,
+    })
+    const wpB = { ...wpA, source: { ...wpA.source, blobKey: "blob-b" } as typeof wpA.source }
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(a.png)")
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, [wpA])
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(b.png)")
+    await swapTo(view, { ...rotating(), activeId: "wp-1" }, [wpB])
+
+    expect(wallpaperStorage.resolveSourceToCss).toHaveBeenCalledTimes(2)
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(b.png)")
+    // The outgoing URL is only revoked once a different value replaced it.
+    expect(wallpaperStorage.disposeUrl).toHaveBeenCalledWith("url(a.png)")
+  })
+
+  it("revokes a URL that finished resolving after the wallpaper already moved on", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2"), imageWp("wp-3")]
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    let release: ((value: string) => void) | undefined
+    wallpaperStorage.resolveSourceToCss.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve
+        })
+    )
+    // wp-2 starts resolving; before it lands the user picks wp-3, which
+    // cancels wp-2's run.
+    await swapTo(view, { ...rotating(), activeId: "wp-2" }, wps)
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(three.png)")
+    await swapTo(view, { ...rotating(), activeId: "wp-3" }, wps)
+
+    await act(async () => {
+      release!("url(two.png)")
+      await Promise.resolve()
+    })
+
+    // The stale resolution is revoked, never painted, and wp-3 wins — as a
+    // swap under rotation it lands on layer B mid-crossfade.
+    expect(wallpaperStorage.disposeUrl).toHaveBeenCalledWith("url(two.png)")
+    expect(document.body.style.getPropertyValue("--app-bg-image-b")).toBe("url(three.png)")
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(one.png)")
   })
 })

@@ -2,15 +2,21 @@
 
 // Derives a Cognia color theme — and a readable opacity/blur — from whatever
 // wallpaper is active. Works for every wallpaper kind: images go through a
-// canvas sample, gradients and solid colors through their declared color stops,
-// so the built-in gradient presets (the bulk of the gallery) are no longer
-// excluded from the feature.
+// canvas sample, gradients and solid colors through their declared color
+// stops, so the built-in gradient presets (the bulk of the gallery) are no
+// longer excluded from the feature.
 //
 // The analysis runs on mount rather than on click. It is the input to the
 // readability chip in `wallpaper-tab.tsx`, which without it can only assume a
 // worst-case image — so "select a wallpaper, see an honest contrast number"
-// needs the sample to already exist. Generating and activating a theme stays an
-// explicit action.
+// needs the sample to already exist.
+//
+// The single action button does the WHOLE job — users reasonably assume
+// "generate" finishes adapting the wallpaper, so it creates (or refreshes)
+// and activates the theme AND applies the suggested opacity/blur in the same
+// click. The separate "apply suggested values" row below only resurfaces
+// when the live sliders have drifted away from the suggestion, as a way to
+// snap them back — not as a second required step.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -40,20 +46,37 @@ export interface WallpaperThemeGeneratorProps {
   onAnalyzed?: (analysis: WallpaperThemeAnalysis | null) => void
   /** Applies the sample-derived opacity/blur to the live background. */
   onApplyTuning?: (tuning: WallpaperTuning) => void
+  /**
+   * The opacity/blur the background currently runs at. Lets the suggestion
+   * row hide itself once the values match — and reappear when the user drags
+   * the sliders away again.
+   */
+  currentTuning?: WallpaperTuning
 }
 
 export function WallpaperThemeGenerator({
   wallpaper,
   onAnalyzed,
   onApplyTuning,
+  currentTuning,
 }: WallpaperThemeGeneratorProps) {
   const t = useTranslations("settings.appearance.wallpaper.generator")
   const createCustomTheme = useSettingsStore((state) => state.createCustomTheme)
+  const updateCustomTheme = useSettingsStore((state) => state.updateCustomTheme)
   const setActiveCustomTheme = useSettingsStore((state) => state.setActiveCustomTheme)
+  const customThemes = useSettingsStore((state) => state.customThemes)
+  const activeCustomThemeId = useSettingsStore((state) => state.activeCustomThemeId)
   const [busy, setBusy] = useState(false)
   const [analysis, setAnalysis] = useState<WallpaperThemeAnalysis | null>(null)
-  const [applied, setApplied] = useState(false)
+  // null = nothing generated yet; otherwise whether the suggested
+  // opacity/blur went on with the theme — the status line reports both.
+  const [outcome, setOutcome] = useState<{ tuningApplied: boolean } | null>(null)
   const [failed, setFailed] = useState(false)
+  // Snapshot of `currentTuning` taken the moment a suggestion was applied.
+  // The store write lands asynchronously; until the props catch up the row
+  // would briefly re-show as "values differ". While they still equal the
+  // pre-apply snapshot, keep it hidden.
+  const [tuningShadow, setTuningShadow] = useState<WallpaperTuning | null>(null)
 
   // Keep the reporting callback out of the sampling effect's dependency list —
   // an inline arrow from the parent would otherwise re-sample every render.
@@ -89,6 +112,14 @@ export function WallpaperThemeGenerator({
     }
   }, [source])
 
+  const applySuggestedTuning = useCallback(
+    (next: WallpaperTuning) => {
+      setTuningShadow(currentTuning ?? null)
+      onApplyTuning?.(next)
+    },
+    [currentTuning, onApplyTuning]
+  )
+
   const generate = useCallback(async () => {
     if (!wallpaper) return
     setBusy(true)
@@ -98,21 +129,76 @@ export function WallpaperThemeGenerator({
       // swap the bytes behind a wallpaper id while this panel is open.
       const nextAnalysis = await analyzeWallpaperSource(wallpaper.source)
       const theme = buildWallpaperTheme(t("themeName", { name: wallpaper.name }), nextAnalysis)
-      const id = createCustomTheme(theme)
-      setActiveCustomTheme(id)
+      // Generating again on the same wallpaper refreshes the row it made last
+      // time instead of stacking a duplicate into the theme list.
+      const existing = customThemes.find((candidate) => candidate.name === theme.name)
+      let themeId: string
+      if (existing) {
+        // updateCustomTheme merges — clear the fields a generated row never
+        // sets so provenance/extra-CSS from an unrelated same-named row can't
+        // linger. `ownerPluginId` stays: it is lifecycle ownership, not paint.
+        updateCustomTheme(existing.id, {
+          ...theme,
+          derivedVariant: undefined,
+          cssVars: undefined,
+          sourcePluginId: undefined,
+          sourceBuiltinName: undefined,
+        })
+        themeId = existing.id
+      } else {
+        themeId = createCustomTheme(theme)
+      }
+      // Re-activating the same theme would only rewrite the row unchanged.
+      if (activeCustomThemeId !== themeId) {
+        setActiveCustomTheme(themeId)
+      }
       setAnalysis(nextAnalysis)
-      setApplied(true)
       onAnalyzedRef.current?.(nextAnalysis)
+      // One click completes the adaptation: the suggested readability values
+      // go on alongside the theme. Skipped when the sliders already sit at
+      // the suggestion — an identical write would just dirty the row.
+      const suggested = recommendBackgroundTuning(nextAnalysis, wallpaper.kind)
+      const tuningDiffers =
+        !currentTuning ||
+        currentTuning.opacity !== suggested.opacity ||
+        currentTuning.blurPx !== suggested.blurPx
+      const tuningApplied = Boolean(onApplyTuning && tuningDiffers)
+      if (onApplyTuning && tuningDiffers) {
+        applySuggestedTuning(suggested)
+      }
+      setOutcome({ tuningApplied })
     } catch {
       setFailed(true)
     } finally {
       setBusy(false)
     }
-  }, [wallpaper, t, createCustomTheme, setActiveCustomTheme])
+  }, [
+    wallpaper,
+    t,
+    customThemes,
+    activeCustomThemeId,
+    createCustomTheme,
+    updateCustomTheme,
+    setActiveCustomTheme,
+    onApplyTuning,
+    currentTuning,
+    applySuggestedTuning,
+  ])
 
   if (!wallpaper) return null
 
   const tuning = analysis ? recommendBackgroundTuning(analysis, wallpaper.kind) : null
+  const tuningDiffers =
+    !currentTuning ||
+    (tuning !== null &&
+      (currentTuning.opacity !== tuning.opacity || currentTuning.blurPx !== tuning.blurPx))
+  const tuningShadowed =
+    tuningShadow !== null &&
+    currentTuning !== undefined &&
+    currentTuning.opacity === tuningShadow.opacity &&
+    currentTuning.blurPx === tuningShadow.blurPx
+  const showTuning =
+    tuning !== null && onApplyTuning !== undefined && tuningDiffers && !tuningShadowed
 
   return (
     <div
@@ -145,7 +231,11 @@ export function WallpaperThemeGenerator({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {applied ? t("created") : t("description")}
+            {outcome
+              ? outcome.tuningApplied
+                ? t("createdWithTuning")
+                : t("created")
+              : t("description")}
           </p>
           {failed && <p className="text-xs text-destructive">{t("error")}</p>}
         </div>
@@ -162,10 +252,10 @@ export function WallpaperThemeGenerator({
         </Button>
       </div>
 
-      {/* The other half of "adapt to this wallpaper": a busy image needs less
-          opacity and more blur than a flat gradient, and the sample already
-          knows which one this is. */}
-      {tuning && onApplyTuning && (
+      {/* Not a second required step — the generate button already applied the
+          suggestion. This row only resurfaces when the live sliders drift
+          away from it, offering a way to snap back. */}
+      {showTuning && tuning && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">
             {t("tuningHint", {
@@ -179,7 +269,7 @@ export function WallpaperThemeGenerator({
             variant="ghost"
             className="shrink-0 gap-1.5"
             data-testid="wallpaper-apply-tuning"
-            onClick={() => onApplyTuning(tuning)}
+            onClick={() => applySuggestedTuning(tuning)}
           >
             <WandSparklesIcon className="size-3.5" aria-hidden />
             {t("applyTuning")}

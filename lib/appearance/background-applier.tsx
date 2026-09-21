@@ -3,7 +3,11 @@
 import { useEffect, useRef } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
-import { disposeUrl, resolveSourceToCss } from "@/lib/appearance/wallpaper-storage"
+import {
+  disposeUrl,
+  resolveSourceToCss,
+  sameWallpaperSource,
+} from "@/lib/appearance/wallpaper-storage"
 import { BG_VARS, resolveBackgroundFit } from "@/lib/appearance/background-fit"
 import {
   crossfadeToLayer,
@@ -72,6 +76,12 @@ export function BackgroundApplier(): null {
   // runs of the effect is what distinguishes "the user swapped wallpaper" from
   // "the user dragged the blur slider", and only the former animates.
   const paintedIdRef = useRef<string | null>(null)
+  // The source that produced the painted image. Re-resolving an unchanged
+  // source mints a brand-new Object URL for identical bytes — the fresh URL
+  // is an undecoded image, so writing it onto the layer blanks the wallpaper
+  // for a frame. Settings writes that never touched the wallpaper used to
+  // trigger exactly that.
+  const paintedSourceRef = useRef<Wallpaper["source"] | null>(null)
   // Cancels the timers a fade or dissolve leaves behind. Advancing again while
   // one is pending must not let the old timer restore state belonging to a
   // wallpaper two swaps ago.
@@ -86,16 +96,23 @@ export function BackgroundApplier(): null {
       background,
       wallpapers,
       previousId: paintedIdRef.current,
+      paintedSource: paintedSourceRef.current,
+      paintedCssValue: lastUrlRef.current,
       cancelPending: () => {
         for (const cancel of pendingRef.current) cancel()
         pendingRef.current = []
       },
       registerPending: (cancel) => pendingRef.current.push(cancel),
-      onApplied: (cssValue, paintedId) => {
-        // Revoke any prior Object URL we minted; only one is alive at a time.
-        if (lastUrlRef.current) disposeUrl(lastUrlRef.current)
+      onApplied: (cssValue, paintedId, source) => {
+        // Revoke any prior Object URL we minted — but only when the painted
+        // value actually changed. A re-apply that reuses the same CSS must
+        // not revoke the image it is still showing.
+        if (lastUrlRef.current && lastUrlRef.current !== cssValue) {
+          disposeUrl(lastUrlRef.current)
+        }
         lastUrlRef.current = cssValue
         paintedIdRef.current = paintedId
+        paintedSourceRef.current = source
       },
       isCancelled: () => cancelled,
     }).catch((err) => {
@@ -141,11 +158,19 @@ interface ApplyArgs {
   wallpapers: Wallpaper[]
   /** The wallpaper id currently painted, or null on first run. */
   previousId: string | null
+  /** The source that produced the painted image, or null when nothing is up. */
+  paintedSource: Wallpaper["source"] | null
+  /** The CSS value currently painted, reused when `paintedSource` matches. */
+  paintedCssValue: string | null
   /** Drop any timers a previous fade or dissolve left pending. */
   cancelPending: () => void
   /** Hand a canceller back to the component so unmount can drop it. */
   registerPending: (cancel: () => void) => void
-  onApplied: (cssValue: string | null, paintedId: string | null) => void
+  onApplied: (
+    cssValue: string | null,
+    paintedId: string | null,
+    source: Wallpaper["source"] | null
+  ) => void
   isCancelled: () => boolean
 }
 
@@ -154,6 +179,8 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
     background,
     wallpapers,
     previousId,
+    paintedSource,
+    paintedCssValue,
     cancelPending,
     registerPending,
     onApplied,
@@ -170,13 +197,13 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   const role = getPetWindowRole()
   if (isSecondaryOverlayRole(role)) {
     disableBackground(body)
-    onApplied(null, null)
+    onApplied(null, null, null)
     return
   }
 
   if (!background.enabled || !background.activeId) {
     disableBackground(body)
-    onApplied(null, null)
+    onApplied(null, null, null)
     return
   }
 
@@ -187,14 +214,28 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
     // off is the honest outcome, and it is also what stops a rotation from
     // advancing onto a dead id and leaving a blank screen with no explanation.
     disableBackground(body)
-    onApplied(null, null)
+    onApplied(null, null, null)
     return
   }
 
-  const cssValue = await resolveSourceToCss(wallpaper.source)
-  if (isCancelled()) {
-    // The user changed wallpapers while we were resolving — drop our work.
-    return
+  // Reuse the painted value when the source did not move. Re-resolving mints
+  // a fresh Object URL for the same bytes — the new URL is an undecoded
+  // image, so stamping it onto the layer blanks the wallpaper for a frame.
+  // That was the visible flicker when an unrelated settings write re-ran
+  // this effect (and on every committed slider drag).
+  let cssValue = paintedCssValue
+  if (
+    paintedSource === null ||
+    cssValue === null ||
+    !sameWallpaperSource(paintedSource, wallpaper.source)
+  ) {
+    cssValue = await resolveSourceToCss(wallpaper.source)
+    if (isCancelled()) {
+      // The user changed wallpapers while we were resolving — drop our work
+      // and revoke the URL we minted, since nothing will ever paint it.
+      disposeUrl(cssValue)
+      return
+    }
   }
   cancelPending()
 
@@ -256,7 +297,7 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   // don't merit the extra layer.
   applyScrim(body, { needsScrim, scope: background.scope })
 
-  onApplied(cssValue, background.activeId)
+  onApplied(cssValue, background.activeId, wallpaper.source)
 }
 
 /**

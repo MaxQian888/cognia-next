@@ -22,7 +22,6 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { CheckIcon, InfoIcon } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
@@ -34,6 +33,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { Toggle } from "@/components/ui/toggle"
 import { cn, responsiveSelectClass } from "@/lib/utils"
 import { isRotatable, resolveRotationPool } from "@/lib/appearance/wallpaper-rotation"
 import { planTransition } from "@/lib/appearance/wallpaper-transition"
@@ -323,22 +323,22 @@ export function WallpaperRotationCard({
             {rotatable.map((wallpaper) => {
               const selected = usingEverything || merged.playlist.includes(wallpaper.id)
               return (
-                <Badge
+                <Toggle
                   key={wallpaper.id}
-                  asChild
-                  variant={selected ? "default" : "outline"}
-                  className="cursor-pointer select-none"
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  pressed={selected}
+                  onPressedChange={() => togglePlaylistMember(wallpaper.id)}
+                  data-testid={`rotation-playlist-${wallpaper.id}`}
+                  className={cn(
+                    "h-auto min-w-0 cursor-pointer gap-1 rounded-pill border-border px-2 py-0.5 text-xs font-medium shadow-none select-none",
+                    "data-[state=on]:border-transparent data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => togglePlaylistMember(wallpaper.id)}
-                    aria-pressed={selected}
-                    data-testid={`rotation-playlist-${wallpaper.id}`}
-                  >
-                    {selected && <CheckIcon className="size-3" />}
-                    <span className="max-w-32 truncate">{wallpaper.name}</span>
-                  </button>
-                </Badge>
+                  {selected && <CheckIcon className="size-3" />}
+                  <span className="max-w-32 truncate">{wallpaper.name}</span>
+                </Toggle>
               )
             })}
           </div>

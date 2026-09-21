@@ -1,29 +1,27 @@
 "use client"
 
 /**
- * The expanded sidebar's guild group: Chats, then one row per team, pinned
- * below the conversation list as a fixed block.
+ * The sidebar's guild rows: Chats, then one row per team.
  *
  * These rows pick the list's *scope*, they do not disclose a panel of their
  * own: the conversation list above shows whatever the selected row names
  * (`channel-list.tsx` filters by it), so one row is highlighted the way a
- * navigation entry is rather than turned open like an accordion header. That
- * is a deliberate change from the earlier Codex-style accordion, which cut the
- * row list in two and hoisted the open section — and Chats above it — over the
- * search field. Selecting a team then moved the search row and the whole list
- * down the rail, which read as the layout coming apart, and the rows danced
- * around a list that (outside `groupBy: "team"`) never actually followed them.
+ * navigation entry is rather than turned open like an accordion header.
+ *
+ * This band survives only on the *compact* surfaces — the mobile Sheet and
+ * the collapsed-rail peek panel — where there is no room for the scope tree.
+ * The merged desktop rail replaced it with `groupBy: "team"` sections inside
+ * the scrollable list itself (the Codex-style scope tree), so the rows' old
+ * job — naming the scope of a filtered list — no longer exists there.
  *
  * The group's own order is the user's: team rows are drag-sortable, and the
  * order is shared with the 56px icon column (`lib/shell/team-order.ts`).
  *
  * The list's actions are not here — "new conversation" heads the whole sidebar
  * and the ⋯ menu sits on the search row, both in one fixed place
- * (`channel-list.tsx`). Every row does carry a context menu with the scope's
- * own actions — start a conversation there without selecting it first, mark it
- * read, reorder it, manage teams — the way a Discord category or a Slack
- * section does, plus the unread count of what it holds while it is not the
- * selected scope (`useGuildUnread`, the same aggregate the icon column draws).
+ * (`channel-list.tsx`). `GuildScopeMenuItems` is the shared per-scope context
+ * menu — the band's rows and the scope tree's group headers serve the same
+ * actions from it.
  */
 import { Fragment, useCallback, type CSSProperties, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -100,6 +98,95 @@ export function GuildUnreadPill({ count, testId }: { count: number; testId?: str
     >
       {count > 99 ? "99+" : count}
     </span>
+  )
+}
+
+/**
+ * The per-scope context menu, as items — the caller supplies the
+ * `ContextMenuContent` so the same actions serve both surfaces that draw a
+ * scope: the band's rows here, and the merged rail's collapsible group
+ * headers in `channel-list.tsx`. One menu, so "new conversation in this
+ * scope", "mark all read", and reorder/manage never drift between the two.
+ *
+ * `teamId` of `null` names the Chats scope — the direct-conversation group —
+ * which is never reorderable and has no team settings to manage.
+ */
+export function GuildScopeMenuItems({
+  teamId,
+  unreadCount,
+  onNewConversation,
+  onMoveTeam,
+}: {
+  teamId: string | null
+  unreadCount: number
+  onNewConversation?: (teamId: string | null) => void
+  onMoveTeam?: (teamId: string, delta: number) => void
+}) {
+  const t = useTranslations("desktop.channelList")
+  const railT = useTranslations("desktop.guildRail")
+  const router = useRouter()
+  const key = teamId ?? "dm"
+  const markRead = useCallback(() => {
+    const target: GuildUnreadTarget = teamId ? { kind: "team", teamId } : { kind: "dm" }
+    log.info("guild mark read", target)
+    void markGuildRead(target).catch((error: unknown) => {
+      log.warn("guild mark read failed", { error: String(error) })
+    })
+  }, [teamId])
+  const manageTeams = useCallback(() => {
+    log.info("guild manage teams")
+    router.push(TEAM_SETTINGS_ROUTE)
+  }, [router])
+  return (
+    <>
+      {onNewConversation ? (
+        <ContextMenuItem
+          onSelect={() => {
+            log.info("guild new conversation via context menu", { key })
+            onNewConversation(teamId)
+          }}
+          data-testid={`sidebar-guild-menu-new-${key}`}
+        >
+          <PlusIcon className="size-4" />
+          {teamId ? t("newConversation") : t("newChat")}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem
+        disabled={unreadCount === 0}
+        onSelect={markRead}
+        data-testid={`sidebar-guild-menu-mark-read-${key}`}
+      >
+        <CheckCheckIcon className="size-4" />
+        {railT("markAllRead")}
+      </ContextMenuItem>
+      {teamId ? (
+        <>
+          <ContextMenuSeparator />
+          {onMoveTeam ? (
+            <>
+              <ContextMenuItem
+                onSelect={() => onMoveTeam(teamId, -1)}
+                data-testid={`sidebar-guild-menu-move-up-${key}`}
+              >
+                <ArrowUpIcon className="size-4" />
+                {railT("moveTeamUp")}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => onMoveTeam(teamId, 1)}
+                data-testid={`sidebar-guild-menu-move-down-${key}`}
+              >
+                <ArrowDownIcon className="size-4" />
+                {railT("moveTeamDown")}
+              </ContextMenuItem>
+            </>
+          ) : null}
+          <ContextMenuItem onSelect={manageTeams} data-testid={`sidebar-guild-menu-manage-${key}`}>
+            <SettingsIcon className="size-4" />
+            {railT("manageTeams")}
+          </ContextMenuItem>
+        </>
+      ) : null}
+    </>
   )
 }
 
@@ -212,23 +299,8 @@ export function SidebarGuildSectionRows({
   onToggleCollapsed,
 }: RowsProps) {
   const t = useTranslations("desktop.channelList")
-  const railT = useTranslations("desktop.guildRail")
-  const router = useRouter()
   const { switchToDm, switchToTeam } = useShellNav()
   const unread = useGuildUnread()
-
-  const markRead = useCallback((row: GuildSectionRow) => {
-    const target: GuildUnreadTarget =
-      row.key === "dm" ? { kind: "dm" } : { kind: "team", teamId: row.key }
-    log.info("guild mark read", target)
-    void markGuildRead(target).catch((error: unknown) => {
-      log.warn("guild mark read failed", { error: String(error) })
-    })
-  }, [])
-  const manageTeams = useCallback(() => {
-    log.info("guild manage teams")
-    router.push(TEAM_SETTINGS_ROUTE)
-  }, [router])
 
   if (rows.length === 0) return null
   // Which row survives a fold — the active scope, or the first row when the
@@ -261,7 +333,6 @@ export function SidebarGuildSectionRows({
         const isDm = !team
         const label = team ? team.name : t("directMessages")
         const count = isDm ? unread.dm : (unread.teams.get(row.key) ?? 0)
-        const newLabel = isDm ? t("newChat") : t("newConversation")
         const draggable = sortable && !isDm
         const renderRow = (drag: GuildRowDragBinding = {}) => (
           <ContextMenu>
@@ -338,56 +409,12 @@ export function SidebarGuildSectionRows({
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent data-testid={`sidebar-guild-menu-${row.key}`}>
-              {onNewConversation ? (
-                <ContextMenuItem
-                  onSelect={() => {
-                    log.info("guild new conversation via context menu", { key: row.key })
-                    onNewConversation(isDm ? null : row.key)
-                  }}
-                  data-testid={`sidebar-guild-menu-new-${row.key}`}
-                >
-                  <PlusIcon className="size-4" />
-                  {newLabel}
-                </ContextMenuItem>
-              ) : null}
-              <ContextMenuItem
-                disabled={count === 0}
-                onSelect={() => markRead(row)}
-                data-testid={`sidebar-guild-menu-mark-read-${row.key}`}
-              >
-                <CheckCheckIcon className="size-4" />
-                {railT("markAllRead")}
-              </ContextMenuItem>
-              {isDm ? null : (
-                <>
-                  <ContextMenuSeparator />
-                  {onMoveTeam ? (
-                    <>
-                      <ContextMenuItem
-                        onSelect={() => onMoveTeam(row.key, -1)}
-                        data-testid={`sidebar-guild-menu-move-up-${row.key}`}
-                      >
-                        <ArrowUpIcon className="size-4" />
-                        {railT("moveTeamUp")}
-                      </ContextMenuItem>
-                      <ContextMenuItem
-                        onSelect={() => onMoveTeam(row.key, 1)}
-                        data-testid={`sidebar-guild-menu-move-down-${row.key}`}
-                      >
-                        <ArrowDownIcon className="size-4" />
-                        {railT("moveTeamDown")}
-                      </ContextMenuItem>
-                    </>
-                  ) : null}
-                  <ContextMenuItem
-                    onSelect={manageTeams}
-                    data-testid={`sidebar-guild-menu-manage-${row.key}`}
-                  >
-                    <SettingsIcon className="size-4" />
-                    {railT("manageTeams")}
-                  </ContextMenuItem>
-                </>
-              )}
+              <GuildScopeMenuItems
+                teamId={isDm ? null : row.key}
+                unreadCount={count}
+                onNewConversation={onNewConversation}
+                onMoveTeam={onMoveTeam}
+              />
             </ContextMenuContent>
           </ContextMenu>
         )

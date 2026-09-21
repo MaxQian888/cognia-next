@@ -2,20 +2,24 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ShellLayoutCustomizer, SHELL_SURFACES } from "./shell-layout-customizer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "tauri" }))
+let platformValue: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platformValue }))
 
 beforeEach(() => {
+  platformValue = "tauri"
+  useUIStore.setState({ webTitleBarEnabled: false })
   useSettingsStore.setState({ settings: {} as never, save: (async () => {}) as never })
 })
 
@@ -63,5 +67,30 @@ describe("ShellLayoutCustomizer", () => {
       </TooltipProvider>
     )
     expect(screen.getByTestId("bar-customizer-title")).toBeInTheDocument()
+  })
+})
+
+describe("web top-bar switch", () => {
+  it("is not offered on Tauri — there the bar is window chrome and cannot leave", () => {
+    platformValue = "tauri"
+    renderCustomizer({ defaultSurface: "title" })
+    expect(screen.queryByTestId("web-title-bar-toggle")).toBeNull()
+    // The item list itself stays — it is the layout the bar uses.
+    expect(screen.getByTestId("bar-customizer-title")).toBeInTheDocument()
+  })
+
+  it("shows on the web shell and drives the ui-store flag", async () => {
+    platformValue = "web"
+    const user = userEvent.setup()
+    renderCustomizer({ defaultSurface: "title" })
+    const row = screen.getByTestId("web-title-bar-toggle")
+    const toggle = screen.getByRole("switch", { name: "webTitleBar.label" })
+    // Default off — the bar-less web shell.
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    expect(within(row).getByText("webTitleBar.description")).toBeInTheDocument()
+    await user.click(toggle)
+    expect(useUIStore.getState().webTitleBarEnabled).toBe(true)
+    await user.click(toggle)
+    expect(useUIStore.getState().webTitleBarEnabled).toBe(false)
   })
 })

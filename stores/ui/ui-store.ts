@@ -108,6 +108,23 @@ interface UIState {
    * should win when they disagree). Transient — never persisted.
    */
   selectedGuildEpoch: number
+  /**
+   * Navigation epoch stamped by `requestChatHome` — the "New chat" intent.
+   * While it is the newest navigation stamp, the chat surface shows the
+   * welcome screen instead of auto-resuming the most recent conversation.
+   * Any later guild pick or session select stamps a newer epoch and ends it.
+   * Transient — never persisted; a reload simply resumes the latest session.
+   */
+  chatHomeEpoch: number
+  /**
+   * Navigate to the welcome surface (New chat). The active conversation is
+   * cleared by the shell's reconcile — the intent is what matters: without it
+   * the reconcile would immediately resume the most recent conversation and
+   * the welcome screen would be unreachable once any conversation exists.
+   * Pass `guild` to also switch scope first (e.g. File → New chat always lands
+   * on the DM scope); omitted, the current guild stays selected.
+   */
+  requestChatHome: (guild?: SelectedGuild) => void
 
   /**
    * Member-status map keyed by `${teamSessionId}::${characterId}`. Transient
@@ -274,6 +291,17 @@ interface UIState {
   setStatusBarCollapsed: (collapsed: boolean) => void
 
   /**
+   * Whether the browser shell mounts the desktop-style top bar. On Tauri the
+   * bar is the window chrome — the traffic-light / min-max-close controls
+   * live there — so it is unconditional and this flag is ignored. In a
+   * browser the tab already has chrome, so the bar defaults off and each
+   * column draws its own header instead (`channel-list.tsx`, `chat-header.tsx`).
+   * Persisted; toggled from Settings → Shell layout → Top bar.
+   */
+  webTitleBarEnabled: boolean
+  setWebTitleBarEnabled: (enabled: boolean) => void
+
+  /**
    * **Legacy, read-only.** Pre-customization per-segment visibility for the
    * title/status bars — see {@link DEFAULT_BAR_ITEMS}. Its sole consumer is
    * `components/shell/use-bar-layout.ts`, which folds it into the
@@ -372,6 +400,19 @@ export const useUIStore = create<UIState>()(
       selectedGuild: { kind: "dm" },
       selectedGuildEpoch: 0,
       setSelectedGuild: (g) => set({ selectedGuild: g, selectedGuildEpoch: nextNavEpoch() }),
+      chatHomeEpoch: 0,
+      requestChatHome: (guild) =>
+        set((s) => {
+          const epoch = nextNavEpoch()
+          return {
+            selectedGuild: guild ?? s.selectedGuild,
+            // A scope switch counts as guild navigation too; without the bump
+            // a stale `selectedGuildEpoch` would make the reconcile read the
+            // home request as older than a guild pick that happened earlier.
+            selectedGuildEpoch: guild ? epoch : s.selectedGuildEpoch,
+            chatHomeEpoch: epoch,
+          }
+        }),
 
       memberStatus: {},
       setMemberStatus: (teamSessionId, characterId, status) =>
@@ -487,6 +528,9 @@ export const useUIStore = create<UIState>()(
       statusBarCollapsed: false,
       toggleStatusBar: () => set((s) => ({ statusBarCollapsed: !s.statusBarCollapsed })),
       setStatusBarCollapsed: (collapsed) => set({ statusBarCollapsed: collapsed }),
+
+      webTitleBarEnabled: false,
+      setWebTitleBarEnabled: (enabled) => set({ webTitleBarEnabled: enabled }),
 
       chromeLayoutMigrated: false,
       acknowledgeChromeLayout: () => set({ chromeLayoutMigrated: false }),
@@ -631,6 +675,7 @@ export const useUIStore = create<UIState>()(
         activeConversationViewId: s.activeConversationViewId,
         guildRailCollapsed: s.guildRailCollapsed,
         statusBarCollapsed: s.statusBarCollapsed,
+        webTitleBarEnabled: s.webTitleBarEnabled,
         barItems: s.barItems,
       }),
     }

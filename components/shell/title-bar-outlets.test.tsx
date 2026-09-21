@@ -7,6 +7,7 @@ import {
   TitleBarProjectionScope,
   useTitleBarOutletRef,
   useTitleBarProjection,
+  useTitleBarProjectionScope,
   useTitleBarProjectionState,
 } from "./title-bar-outlets"
 
@@ -177,6 +178,19 @@ describe("title-bar outlets", () => {
       </Shell>
     )
     expect(projectedState().center).toBe(false)
+  })
+
+  it("reports the scope flag to subtree readers even with no bar mounted", () => {
+    // `useTitleBarProjectionScope` answers "is this the chat workspace" — the
+    // bar-less web shell uses it to re-home the toolbar.* plugin slots. It is
+    // independent of outlets: no provider is mounted here at all.
+    expect(renderHook(() => useTitleBarProjectionScope()).result.current).toBe(false)
+    const { result } = renderHook(() => useTitleBarProjectionScope(), {
+      wrapper: ({ children }) => (
+        <TitleBarProjectionScope enabled>{children}</TitleBarProjectionScope>
+      ),
+    })
+    expect(result.current).toBe(true)
   })
 
   it("outlet ref and projection state are inert without a provider", () => {

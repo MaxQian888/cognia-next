@@ -35,7 +35,19 @@ jest.mock("@/components/shell/title-bar-outlets", () => ({
 import { TitleBarWorkspace } from "./title-bar-workspace"
 
 function project(id: string, name: string): Project {
-  return { id, name, roots: [] } as Project
+  const now = new Date(0)
+  return {
+    id,
+    name,
+    roots: [],
+    knowledgeBase: [],
+    sessionIds: [],
+    sessionCount: 0,
+    messageCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    lastAccessedAt: now,
+  }
 }
 
 beforeEach(() => {

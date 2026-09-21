@@ -32,7 +32,6 @@ import {
   EyeOffIcon,
   MessagesSquareIcon,
   PencilRulerIcon,
-  PinIcon,
   PinOffIcon,
   PlusIcon,
   SettingsIcon,
@@ -46,6 +45,7 @@ import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
 import { useRouter } from "next/navigation"
 import { useShellNav } from "./use-shell-nav"
+import { MoreMenuContent } from "./more-menu"
 import { ShellLayoutDialog } from "./shell-layout-dialog"
 import { TEAM_SETTINGS_ROUTE } from "./sidebar-guild-sections"
 import { startGuildConversation } from "@/lib/shell/start-guild-conversation"
@@ -388,51 +388,20 @@ export function GuildRail({
                       <EllipsisIcon className="relative size-[18px]" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent side={overlaySide} align="start" className="w-56 p-1">
-                    <div className="flex flex-col">
-                      {resolved.overflow.map((item) => (
-                        <div
-                          key={item.id}
-                          className={cn(
-                            "flex items-center rounded hover:bg-accent",
-                            isFeatureActive(item.route) && "bg-primary/10 text-foreground"
-                          )}
-                        >
-                          <Button
-                            variant="ghost"
-                            onClick={() => openOverflowItem(item.route)}
-                            data-testid={`guild-more-item-${item.id}`}
-                            className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
-                          >
-                            <item.Icon className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1 truncate text-left">
-                              {t(item.i18nKey)}
-                            </span>
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
-                            data-testid={`guild-more-pin-${item.id}`}
-                            onClick={() => void pin(item.id)}
-                            className="mr-1 size-7 shrink-0"
-                          >
-                            <PinIcon className="size-3.5" />
-                          </Button>
-                        </div>
-                      ))}
-                      <Separator className="my-1" />
-                      <Button
-                        variant="ghost"
-                        onClick={openCustomize}
-                        data-testid="guild-more-customize"
-                        className="h-auto w-full justify-start rounded px-2 py-1.5 font-normal"
-                      >
-                        <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
-                        <span className="flex-1 text-left">{t("customize.title")}</span>
-                      </Button>
-                    </div>
+                  <PopoverContent
+                    side={overlaySide}
+                    align="start"
+                    className="w-62 p-0"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                  >
+                    <MoreMenuContent
+                      items={resolved.overflow}
+                      isActive={isFeatureActive}
+                      onOpen={openOverflowItem}
+                      onPin={(id) => void pin(id)}
+                      onCustomize={openCustomize}
+                      testIdPrefix="guild-more"
+                    />
                   </PopoverContent>
                 </Popover>
               )}

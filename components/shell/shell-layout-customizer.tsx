@@ -19,7 +19,10 @@
 import * as React from "react"
 import { useTranslations } from "next-intl"
 
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { usePlatform } from "@/hooks/use-platform"
+import { useUIStore } from "@/stores/ui/ui-store"
 import { BarCustomizer } from "./bar-customizer"
 import { SidebarCustomizer } from "./sidebar-customizer"
 import { WorkbenchCustomizer } from "./workbench-customizer"
@@ -81,6 +84,7 @@ export function ShellLayoutCustomizer({
       </TabsContent>
       <TabsContent value="title" className="mt-4 space-y-3">
         <p className="text-xs text-muted-foreground">{t("description.title")}</p>
+        <WebTitleBarToggle />
         <BarCustomizer bar="title" />
       </TabsContent>
       <TabsContent value="status" className="mt-4 space-y-3">
@@ -88,5 +92,35 @@ export function ShellLayoutCustomizer({
         <BarCustomizer bar="status" />
       </TabsContent>
     </Tabs>
+  )
+}
+
+/**
+ * The web shell's answer to "the top bar is a second window frame inside a
+ * browser tab": it is a setting, off by default, and while off every column
+ * draws its own header (`desktop-app-shell.tsx`). Only offered on the web —
+ * on Tauri the bar carries the window controls and cannot leave.
+ *
+ * The item list below stays editable either way: it is the layout the bar
+ * comes back with when the switch turns on, and the same layout the desktop
+ * app reads.
+ */
+function WebTitleBarToggle() {
+  const t = useTranslations("desktop.shellLayout")
+  const platform = usePlatform()
+  const enabled = useUIStore((s) => s.webTitleBarEnabled)
+  const setEnabled = useUIStore((s) => s.setWebTitleBarEnabled)
+  if (platform !== "web") return null
+  return (
+    <div
+      className="flex items-center justify-between gap-4 rounded-md border p-3"
+      data-testid="web-title-bar-toggle"
+    >
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-sm font-medium">{t("webTitleBar.label")}</p>
+        <p className="text-xs text-muted-foreground">{t("webTitleBar.description")}</p>
+      </div>
+      <Switch checked={enabled} onCheckedChange={setEnabled} aria-label={t("webTitleBar.label")} />
+    </div>
   )
 }

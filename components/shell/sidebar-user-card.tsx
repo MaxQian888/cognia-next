@@ -26,7 +26,6 @@ import { useCallback, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
-  ChevronsUpDownIcon,
   CloudIcon,
   GaugeIcon,
   LaptopIcon,
@@ -170,7 +169,6 @@ export function SidebarUserCard({ className }: { className?: string }) {
                     : t("standingLocal")}
               </span>
             </span>
-            <ChevronsUpDownIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
           </button>
         </PopoverTrigger>
         <PopoverContent

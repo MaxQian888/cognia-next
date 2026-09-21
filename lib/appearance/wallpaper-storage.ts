@@ -124,6 +124,35 @@ export function disposeUrl(css: string): void {
   if (m && m[1]) URL.revokeObjectURL(m[1])
 }
 
+/**
+ * Do two sources resolve to the same paintable thing? Compares the locator
+ * fields `resolveSourceToCss` reads — blobKey / relPath / dataUrl / css /
+ * value — and deliberately ignores `mime`, `width` and `height`, which are
+ * metadata that never reaches the image request. This is the check that lets
+ * the applier reuse an already-painted (already-decoded) image instead of
+ * re-resolving the same bytes into a fresh Object URL.
+ */
+export function sameWallpaperSource(a: WallpaperSource, b: WallpaperSource): boolean {
+  if (a === b) return true
+  if (a.kind !== b.kind) return false
+  switch (a.kind) {
+    case "color":
+      return b.kind === "color" && a.value === b.value
+    case "gradient":
+      return b.kind === "gradient" && a.css === b.css
+    case "image":
+      if (b.kind !== "image" || a.storage !== b.storage) return false
+      switch (a.storage) {
+        case "disk":
+          return b.storage === "disk" && a.relPath === b.relPath
+        case "indexeddb":
+          return b.storage === "indexeddb" && a.blobKey === b.blobKey
+        case "data-url":
+          return b.storage === "data-url" && a.dataUrl === b.dataUrl
+      }
+  }
+}
+
 /** Remove a wallpaper from the underlying store. Idempotent. */
 export async function deleteImage(source: WallpaperSource): Promise<void> {
   if (source.kind !== "image") return

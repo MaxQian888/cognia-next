@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useRef } from "react"
 import { useTheme } from "next-themes"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { useSettingsStore } from "@/stores/settings"
 import type { ResolvedThemeColors } from "@/types/plugin/plugin"
 import { CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
@@ -35,7 +36,13 @@ export function CustomThemeApplier(): null {
   // when the active theme changes or a plugin theme takes over.
   const cssVarsApplied = useRef<string[]>([])
 
-  useEffect(() => {
+  // Layout effect, deliberately: the `<html>` class flip lands inside
+  // next-themes' own passive effect, and these inline vars out-specify the
+  // stylesheet. Written from a passive effect they could paint one frame of
+  // the outgoing variant before catching up — the flicker users report on
+  // theme switch. A layout effect re-stamps the palette inside the same
+  // commit, before the browser paints, so no stale-variant frame exists.
+  useIsomorphicLayoutEffect(() => {
     if (typeof document === "undefined") return
     if (!resolvedTheme) return // next-themes still hydrating; effect will re-run when settled
     const root = document.documentElement

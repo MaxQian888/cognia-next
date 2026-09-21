@@ -30,11 +30,25 @@ jest.mock("@/lib/appearance/wallpaper-theme-generator", () => ({
 }))
 
 const createCustomTheme = jest.fn().mockReturnValue("theme-generated")
+const updateCustomTheme = jest.fn()
 const setActiveCustomTheme = jest.fn()
+const storeState: {
+  customThemes: Array<{ id: string; name: string }>
+  activeCustomThemeId: string | null
+} = {
+  customThemes: [],
+  activeCustomThemeId: null,
+}
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: jest.fn((selector: (state: unknown) => unknown) =>
-    selector({ createCustomTheme, setActiveCustomTheme })
+    selector({
+      createCustomTheme,
+      updateCustomTheme,
+      setActiveCustomTheme,
+      customThemes: storeState.customThemes,
+      activeCustomThemeId: storeState.activeCustomThemeId,
+    })
   ),
 }))
 
@@ -81,6 +95,8 @@ async function renderGenerator(props: Parameters<typeof WallpaperThemeGenerator>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  storeState.customThemes = []
+  storeState.activeCustomThemeId = null
   generator.analyzeWallpaperSource.mockResolvedValue(analysis)
   generator.buildWallpaperTheme.mockReturnValue(generatedTheme)
   generator.recommendBackgroundTuning.mockReturnValue({ opacity: 0.43, blurPx: 8 })
@@ -160,8 +176,13 @@ describe("WallpaperThemeGenerator", () => {
     })
   })
 
-  it("analyzes the image, creates a dual theme, and activates it", async () => {
-    await renderGenerator({ wallpaper: imageWallpaper })
+  it("creates and activates a dual theme, and applies the suggested tuning in the same click", async () => {
+    const onApplyTuning = jest.fn()
+    await renderGenerator({
+      wallpaper: imageWallpaper,
+      onApplyTuning,
+      currentTuning: { opacity: 1, blurPx: 0 },
+    })
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "action" }))
@@ -170,7 +191,64 @@ describe("WallpaperThemeGenerator", () => {
     expect(generator.buildWallpaperTheme).toHaveBeenCalledWith("themeName:Sunset", analysis)
     expect(createCustomTheme).toHaveBeenCalledWith(generatedTheme)
     expect(setActiveCustomTheme).toHaveBeenCalledWith("theme-generated")
+    // "Generate" is the whole job: the readability suggestion goes on too.
+    expect(generator.recommendBackgroundTuning).toHaveBeenCalledWith(analysis, "image")
+    expect(onApplyTuning).toHaveBeenCalledWith({ opacity: 0.43, blurPx: 8 })
+    expect(screen.getByText("createdWithTuning")).toBeInTheDocument()
+  })
+
+  it("reports theme-only when the caller cannot apply tuning", async () => {
+    await renderGenerator({ wallpaper: imageWallpaper })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "action" }))
+    })
+
+    expect(createCustomTheme).toHaveBeenCalledWith(generatedTheme)
     expect(screen.getByText("created")).toBeInTheDocument()
+  })
+
+  it("skips the tuning write when the sliders already sit at the suggestion", async () => {
+    const onApplyTuning = jest.fn()
+    await renderGenerator({
+      wallpaper: imageWallpaper,
+      onApplyTuning,
+      currentTuning: { opacity: 0.43, blurPx: 8 },
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "action" }))
+    })
+
+    expect(onApplyTuning).not.toHaveBeenCalled()
+    expect(screen.getByText("created")).toBeInTheDocument()
+  })
+
+  it("refreshes the previously generated theme instead of stacking a duplicate", async () => {
+    storeState.customThemes = [{ id: "theme-existing", name: "themeName:Sunset" }]
+    storeState.activeCustomThemeId = "other-theme"
+    await renderGenerator({ wallpaper: imageWallpaper })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "action" }))
+    })
+
+    expect(updateCustomTheme).toHaveBeenCalledWith("theme-existing", generatedTheme)
+    expect(createCustomTheme).not.toHaveBeenCalled()
+    expect(setActiveCustomTheme).toHaveBeenCalledWith("theme-existing")
+  })
+
+  it("does not re-activate a generated theme that is already active", async () => {
+    storeState.customThemes = [{ id: "theme-existing", name: "themeName:Sunset" }]
+    storeState.activeCustomThemeId = "theme-existing"
+    await renderGenerator({ wallpaper: imageWallpaper })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "action" }))
+    })
+
+    expect(updateCustomTheme).toHaveBeenCalledWith("theme-existing", generatedTheme)
+    expect(setActiveCustomTheme).not.toHaveBeenCalled()
   })
 
   it("surfaces a localized error when local image analysis fails", async () => {
@@ -188,7 +266,11 @@ describe("WallpaperThemeGenerator", () => {
   describe("suggested tuning", () => {
     it("hands the sampled opacity and blur back to the caller", async () => {
       const onApplyTuning = jest.fn()
-      await renderGenerator({ wallpaper: imageWallpaper, onApplyTuning })
+      await renderGenerator({
+        wallpaper: imageWallpaper,
+        onApplyTuning,
+        currentTuning: { opacity: 1, blurPx: 0 },
+      })
 
       await waitFor(() => expect(screen.getByTestId("wallpaper-apply-tuning")).toBeInTheDocument())
       expect(generator.recommendBackgroundTuning).toHaveBeenCalledWith(analysis, "image")
@@ -197,6 +279,92 @@ describe("WallpaperThemeGenerator", () => {
 
       fireEvent.click(screen.getByTestId("wallpaper-apply-tuning"))
       expect(onApplyTuning).toHaveBeenCalledWith({ opacity: 0.43, blurPx: 8 })
+    })
+
+    it("shows the suggestion row whenever the live values differ from it", async () => {
+      await renderGenerator({
+        wallpaper: imageWallpaper,
+        onApplyTuning: jest.fn(),
+        currentTuning: { opacity: 0.9, blurPx: 0 },
+      })
+
+      await waitFor(() => expect(screen.getByTestId("wallpaper-apply-tuning")).toBeInTheDocument())
+    })
+
+    it("hides the row once the live values already match the suggestion", async () => {
+      await renderGenerator({
+        wallpaper: imageWallpaper,
+        onApplyTuning: jest.fn(),
+        currentTuning: { opacity: 0.43, blurPx: 8 },
+      })
+
+      await waitFor(() => expect(screen.getByLabelText("accent")).toBeInTheDocument())
+      expect(screen.queryByTestId("wallpaper-apply-tuning")).not.toBeInTheDocument()
+    })
+
+    it("stays hidden while the apply write is in flight, then resurfaces when values drift", async () => {
+      const onApplyTuning = jest.fn()
+      const view = await renderGenerator({
+        wallpaper: imageWallpaper,
+        onApplyTuning,
+        currentTuning: { opacity: 1, blurPx: 0 },
+      })
+
+      await waitFor(() => expect(screen.getByTestId("wallpaper-apply-tuning")).toBeInTheDocument())
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("wallpaper-apply-tuning"))
+      })
+
+      // The store write has not landed yet — currentTuning still reads the
+      // pre-apply values — but the row must not bounce back.
+      expect(screen.queryByTestId("wallpaper-apply-tuning")).not.toBeInTheDocument()
+
+      const nextProps = {
+        wallpaper: imageWallpaper,
+        onApplyTuning,
+        currentTuning: { opacity: 0.43, blurPx: 8 },
+      }
+      await act(async () => {
+        view.rerender(<WallpaperThemeGenerator {...nextProps} />)
+      })
+      expect(screen.queryByTestId("wallpaper-apply-tuning")).not.toBeInTheDocument()
+
+      // Dragging the sliders away from the suggestion brings the row back
+      // as a way to snap them back.
+      await act(async () => {
+        view.rerender(
+          <WallpaperThemeGenerator {...nextProps} currentTuning={{ opacity: 0.9, blurPx: 2 }} />
+        )
+      })
+      expect(screen.getByTestId("wallpaper-apply-tuning")).toBeInTheDocument()
+    })
+
+    it("hides the row after generate applied the suggestion", async () => {
+      const onApplyTuning = jest.fn()
+      const view = await renderGenerator({
+        wallpaper: imageWallpaper,
+        onApplyTuning,
+        currentTuning: { opacity: 1, blurPx: 0 },
+      })
+
+      await waitFor(() => expect(screen.getByTestId("wallpaper-apply-tuning")).toBeInTheDocument())
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "action" }))
+      })
+      expect(onApplyTuning).toHaveBeenCalledWith({ opacity: 0.43, blurPx: 8 })
+      expect(screen.queryByTestId("wallpaper-apply-tuning")).not.toBeInTheDocument()
+
+      // The write lands; the row stays hidden.
+      await act(async () => {
+        view.rerender(
+          <WallpaperThemeGenerator
+            wallpaper={imageWallpaper}
+            onApplyTuning={onApplyTuning}
+            currentTuning={{ opacity: 0.43, blurPx: 8 }}
+          />
+        )
+      })
+      expect(screen.queryByTestId("wallpaper-apply-tuning")).not.toBeInTheDocument()
     })
 
     it("stays hidden when the caller cannot apply it", async () => {

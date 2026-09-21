@@ -8,6 +8,24 @@
  * resolver live in `lib/shell/sidebar-nav.ts`.
  */
 
+/**
+ * Display grouping for the "More" overflow menu — the sections a 20-item
+ * flat list becomes. `explore` is where new capabilities come from,
+ * `agents` is the workforce, `spaces` are work surfaces, `insights` look
+ * back at what happened, `system` is infrastructure, `you` is personal.
+ */
+export type SidebarNavCategory = "explore" | "agents" | "spaces" | "insights" | "system" | "you"
+
+/** Canonical display order of the More-menu sections. */
+export const SIDEBAR_NAV_CATEGORIES: readonly SidebarNavCategory[] = [
+  "explore",
+  "agents",
+  "spaces",
+  "insights",
+  "system",
+  "you",
+]
+
 /** A customizable top-level nav destination on the rail. */
 export interface SidebarNavMeta {
   /** Stable key — persisted in `SidebarLayout`, also the i18n key. */
@@ -21,6 +39,12 @@ export interface SidebarNavMeta {
   i18nKey: string
   /** Primary feature vs. auxiliary/utility — drives the default pinned set. */
   group: "feature" | "auxiliary"
+  /**
+   * Which "More"-menu section the item renders under (label key
+   * `desktop.guildRail.categories.{category}`). Presentation metadata —
+   * unlike `group` it affects nothing but how the overflow list reads.
+   */
+  category: SidebarNavCategory
   /**
    * i18n key under `desktop.guildRail.aliases.*` holding a comma-separated list
    * of extra ⌘K search terms. Set it when a surface absorbs another one whose
@@ -38,68 +62,147 @@ export interface SidebarNavMeta {
  */
 export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // === Features (pinned by default) ===
-  { id: "workflows", route: "/workflows", i18nKey: "workflows", group: "feature" },
-  { id: "inbox", route: "/inbox", i18nKey: "inbox", group: "feature" },
-  { id: "twin", route: "/twin", i18nKey: "twin", group: "feature" },
-  { id: "discover", route: "/discover", i18nKey: "discover", group: "feature" },
-  { id: "templates", route: "/templates", i18nKey: "templates", group: "feature" },
-  { id: "issues", route: "/issues", i18nKey: "issues", group: "feature" },
-  { id: "skills", route: "/skills", i18nKey: "skills", group: "feature" },
-  { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature" },
-  { id: "squads", route: "/squads", i18nKey: "squads", group: "feature" },
-  { id: "scheduler", route: "/scheduler", i18nKey: "scheduler", group: "feature" },
-  { id: "goals", route: "/goals", i18nKey: "goals", group: "feature" },
-  { id: "pet", route: "/pet", i18nKey: "pet", group: "feature" },
-  { id: "browser", route: "/browser", i18nKey: "browser", group: "feature", desktopOnly: true },
+  {
+    id: "workflows",
+    route: "/workflows",
+    i18nKey: "workflows",
+    group: "feature",
+    category: "agents",
+  },
+  { id: "inbox", route: "/inbox", i18nKey: "inbox", group: "feature", category: "you" },
+  { id: "twin", route: "/twin", i18nKey: "twin", group: "feature", category: "agents" },
+  {
+    id: "discover",
+    route: "/discover",
+    i18nKey: "discover",
+    group: "feature",
+    category: "explore",
+  },
+  {
+    id: "templates",
+    route: "/templates",
+    i18nKey: "templates",
+    group: "feature",
+    category: "explore",
+  },
+  { id: "issues", route: "/issues", i18nKey: "issues", group: "feature", category: "agents" },
+  { id: "skills", route: "/skills", i18nKey: "skills", group: "feature", category: "explore" },
+  { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature", category: "explore" },
+  { id: "squads", route: "/squads", i18nKey: "squads", group: "feature", category: "agents" },
+  {
+    id: "scheduler",
+    route: "/scheduler",
+    i18nKey: "scheduler",
+    group: "feature",
+    category: "agents",
+  },
+  { id: "goals", route: "/goals", i18nKey: "goals", group: "feature", category: "agents" },
+  { id: "pet", route: "/pet", i18nKey: "pet", group: "feature", category: "agents" },
+  {
+    id: "browser",
+    route: "/browser",
+    i18nKey: "browser",
+    group: "feature",
+    category: "spaces",
+    desktopOnly: true,
+  },
   // === Auxiliary (overflow → "More" by default) ===
   {
     id: "source-control",
     route: "/source-control",
     i18nKey: "sourceControl",
     group: "auxiliary",
+    category: "spaces",
   },
-  { id: "agent-runs", route: "/agent-runs", i18nKey: "agentRuns", group: "auxiliary" },
+  {
+    id: "agent-runs",
+    route: "/agent-runs",
+    i18nKey: "agentRuns",
+    group: "auxiliary",
+    category: "agents",
+  },
   // The tracker's low-frequency management surfaces. `issues` is the daily
   // entry point and is pinned by default; these two live in "More" until the
   // user pins them, rather than tripling the rail for everyone.
-  { id: "workspace", route: "/workspace", i18nKey: "workspace", group: "auxiliary" },
+  {
+    id: "workspace",
+    route: "/workspace",
+    i18nKey: "workspace",
+    group: "auxiliary",
+    category: "spaces",
+  },
   // Reachable from the Go menu (`src-tauri/src/menu.rs`) long before they were
   // reachable from the navigation — the menubar could go somewhere the rail
   // could not. In "More" by default, like every other auxiliary surface.
-  { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary" },
-  { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary" },
-  { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary" },
+  { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary", category: "spaces" },
+  { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary", category: "spaces" },
+  { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary", category: "insights" },
   // No "observability" entry: the tracing dashboard is a sub-view of `/logs`
   // → Traces now, not a route of its own, and two rail items pointing at the
   // same page would both light up as the active destination.
-  { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary" },
+  { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary", category: "system" },
   // Marketplace integrations (GitHub app installs, webhook subscriptions, the
   // action approval queue). The route and its surface contract already
   // existed, but nothing listed it here, so the only way in was one <Link> at
   // the bottom of Settings > Plugins. Absent from the catalog it was also
   // absent from the rail, the customizer and the navigation search.
-  { id: "integrations", route: "/integrations", i18nKey: "integrations", group: "auxiliary" },
+  {
+    id: "integrations",
+    route: "/integrations",
+    i18nKey: "integrations",
+    group: "auxiliary",
+    category: "explore",
+  },
   // Absorbed the paired-devices table from Settings → Companion and the host
   // list from Settings → Remote hosts, so both retired names have to resolve
   // here in ⌘K — someone who learned "paired devices" will keep typing it.
-  { id: "devices", route: "/devices", i18nKey: "devices", group: "auxiliary", aliasKey: "devices" },
+  {
+    id: "devices",
+    route: "/devices",
+    i18nKey: "devices",
+    group: "auxiliary",
+    category: "system",
+    aliasKey: "devices",
+  },
   // The Bot control plane's console. Auxiliary rather than a feature: a Bot is
   // installed once and then runs unattended, so this is the page you open when
   // something needs deciding, not one you live in.
-  { id: "bots", route: "/bots", i18nKey: "bots", group: "auxiliary" },
-  { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
+  { id: "bots", route: "/bots", i18nKey: "bots", group: "auxiliary", category: "agents" },
+  { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary", category: "insights" },
   {
     id: "performance",
     route: "/performance",
     i18nKey: "performance",
     group: "auxiliary",
+    category: "insights",
     desktopOnly: true,
   },
   // The tracing dashboard folded into this route's Traces channel, taking its
   // own rail entry with it — so "observability" has to resolve here in ⌘K.
-  { id: "logs", route: "/logs", i18nKey: "logs", group: "auxiliary", aliasKey: "logs" },
-  { id: "me", route: "/me", i18nKey: "me", group: "auxiliary" },
+  {
+    id: "logs",
+    route: "/logs",
+    i18nKey: "logs",
+    group: "auxiliary",
+    category: "insights",
+    aliasKey: "logs",
+  },
+  { id: "me", route: "/me", i18nKey: "me", group: "auxiliary", category: "you" },
 ] as const
+
+/**
+ * Section `items` for the "More" menu: `SIDEBAR_NAV_CATEGORIES` order,
+ * empty sections dropped. Callers render `category` via
+ * `desktop.guildRail.categories.{category}`.
+ */
+export function groupSidebarNavByCategory<T extends { category: SidebarNavCategory }>(
+  items: readonly T[]
+): { category: SidebarNavCategory; items: T[] }[] {
+  return SIDEBAR_NAV_CATEGORIES.map((category) => ({
+    category,
+    items: items.filter((i) => i.category === category),
+  })).filter((g) => g.items.length > 0)
+}
 
 /**
  * User customization of the rail. `overflow` is NOT stored — it is derived as

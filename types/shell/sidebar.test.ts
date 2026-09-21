@@ -1,4 +1,10 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "./sidebar"
+import {
+  SIDEBAR_NAV_META,
+  SIDEBAR_NAV_CATEGORIES,
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_SIDE,
+  groupSidebarNavByCategory,
+} from "./sidebar"
 import enMessages from "@/i18n/messages/en.json"
 import zhCnMessages from "@/i18n/messages/zh-CN.json"
 
@@ -25,6 +31,20 @@ describe("sidebar nav meta", () => {
     }
   })
 
+  it("assigns every item a More-menu category", () => {
+    for (const m of SIDEBAR_NAV_META) {
+      expect(SIDEBAR_NAV_CATEGORIES).toContain(m.category)
+    }
+  })
+
+  it("groups in canonical order and drops empty sections", () => {
+    const at = (id: string) => SIDEBAR_NAV_META.find((m) => m.id === id)!
+    const grouped = groupSidebarNavByCategory([at("me"), at("plugins"), at("servers")])
+    expect(grouped.map((g) => g.category)).toEqual(["explore", "system", "you"])
+    expect(grouped[0].items.map((i) => i.id)).toEqual(["plugins"])
+    expect(groupSidebarNavByCategory([])).toEqual([])
+  })
+
   it.each([
     ["en", enMessages],
     ["zh-CN", zhCnMessages],
@@ -32,6 +52,10 @@ describe("sidebar nav meta", () => {
     const labels = messages.desktop.guildRail as Record<string, unknown>
     for (const item of SIDEBAR_NAV_META) {
       expect(labels[item.i18nKey]).toEqual(expect.any(String))
+    }
+    const categories = labels.categories as Record<string, unknown>
+    for (const c of SIDEBAR_NAV_CATEGORIES) {
+      expect(categories[c]).toEqual(expect.any(String))
     }
   })
 

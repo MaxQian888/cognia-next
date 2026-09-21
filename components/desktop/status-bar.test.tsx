@@ -133,6 +133,10 @@ jest.mock("@/stores/chat/chat-store", () => ({
     selector({
       activeSessionId: chatRef.activeSessionId,
       status: chatRef.status,
+      // The run readout aggregates the session map — top-level `status` is the
+      // focused-slice projection — so the mock projects `chatRef.status` into
+      // one slice to keep the two consistent.
+      sessions: chatRef.status === "idle" ? {} : { s1: { status: chatRef.status } },
       errorMessage: chatRef.errorMessage,
       permissionMode: chatRef.permissionMode,
       setPermissionMode,
@@ -340,6 +344,21 @@ test.each([
   chatRef.status = status
   render(<StatusBar />)
   expect(screen.getByText(label)).toBeInTheDocument()
+})
+
+// Quiet line: the bar dropped its `bg-muted/40` fill band for a hairline top
+// edge (inset shadow, so the 24px height budget is untouched) and flattens
+// each segment's hover tile into a colour-only change via descendant
+// selectors — the readout is one continuous line, not a row of boxes.
+test("draws a hairline edge instead of a fill band and flattens segment hovers", () => {
+  render(<StatusBar />)
+  const footer = screen.getByTestId("status-bar")
+  expect(footer.className).toContain("bg-transparent")
+  expect(footer.className).toContain("[box-shadow:inset_0_1px_0_0_var(--border)]")
+  expect(footer.className).not.toContain("bg-muted")
+  const row = footer.firstElementChild
+  expect(row?.className).toContain("[&_button]:hover:bg-transparent")
+  expect(row?.className).toContain("[&_button]:text-[10px]")
 })
 
 test("footer is hidden below the mobile breakpoint and shown from md up", () => {

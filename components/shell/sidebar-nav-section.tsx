@@ -23,7 +23,6 @@ import {
   EllipsisIcon,
   EyeOffIcon,
   PencilRulerIcon,
-  PinIcon,
   PinOffIcon,
   SlidersHorizontalIcon,
 } from "lucide-react"
@@ -39,6 +38,7 @@ import {
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { MotionSelectionIndicator } from "@/components/chat/motion/motion-reveal"
+import { MoreMenuContent } from "./more-menu"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
 import { ResolvedRailIcon } from "@/components/shell/plugin-view-container-panel"
@@ -247,49 +247,20 @@ export function SidebarNavSection({ className }: { className?: string }) {
               testId="sidebar-nav-more"
             />
           </PopoverTrigger>
-          <PopoverContent side="right" align="start" className="w-56 p-1">
-            <div className="flex flex-col">
-              {resolved.overflow.map((item) => (
-                <div
-                  key={item.id}
-                  className={cn(
-                    "flex items-center rounded hover:bg-accent",
-                    isFeatureActive(item.route) && "bg-primary/10 text-foreground"
-                  )}
-                >
-                  <Button
-                    variant="ghost"
-                    onClick={() => openOverflowItem(item.route)}
-                    data-testid={`sidebar-nav-more-item-${item.id}`}
-                    className="h-auto min-w-0 flex-1 justify-start rounded px-2 py-1.5 font-normal"
-                  >
-                    <item.Icon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-left">{t(item.i18nKey)}</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
-                    data-testid={`sidebar-nav-more-pin-${item.id}`}
-                    onClick={() => void pin(item.id)}
-                    className="mr-1 size-7 shrink-0"
-                  >
-                    <PinIcon className="size-3.5" />
-                  </Button>
-                </div>
-              ))}
-              <Separator className="my-1" />
-              <Button
-                variant="ghost"
-                onClick={openCustomize}
-                data-testid="sidebar-nav-more-customize"
-                className="h-auto w-full justify-start rounded px-2 py-1.5 font-normal"
-              >
-                <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
-                <span className="flex-1 text-left">{t("customize.title")}</span>
-              </Button>
-            </div>
+          <PopoverContent
+            side="right"
+            align="start"
+            className="w-62 p-0"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+          >
+            <MoreMenuContent
+              items={resolved.overflow}
+              isActive={isFeatureActive}
+              onOpen={openOverflowItem}
+              onPin={(id) => void pin(id)}
+              onCustomize={openCustomize}
+              testIdPrefix="sidebar-nav-more"
+            />
           </PopoverContent>
         </Popover>
       ) : null}

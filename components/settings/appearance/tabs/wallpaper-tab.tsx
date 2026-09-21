@@ -631,9 +631,11 @@ export function WallpaperTab() {
                 {FOCAL_PRESETS.map((preset) => {
                   const selected = activeFocalPreset === preset.id
                   return (
-                    <button
+                    <Button
                       key={preset.id}
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       role="radio"
                       aria-checked={selected}
                       aria-label={t(`focal.${preset.id}`)}
@@ -757,6 +759,7 @@ export function WallpaperTab() {
             if (activeWallpaper) setAnalysis({ id: activeWallpaper.id, value })
           }}
           onApplyTuning={applyTuning}
+          currentTuning={{ opacity, blurPx }}
         />
       </fieldset>
     </div>

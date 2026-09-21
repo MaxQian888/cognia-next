@@ -15,7 +15,7 @@ import { ChannelList } from "./channel-list"
 
 // The merged (expanded) sidebar: the title projects into the window bar, so the
 // rail itself carries the shell navigation rows, the search row and the guild
-// accordion. `merged` is `headerOutlet !== null`, which means the story has to
+// scope tree. `merged` is `headerOutlet !== null`, which means the story has to
 // mount a real title-bar outlet and enable the projection scope — the same
 // wiring `channel-list.test.tsx` uses.
 function StartOutlet() {
@@ -102,8 +102,9 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * The alignment this story exists for: the search field and the three controls
- * beside it take the navigation rows' 32px `rounded-md` box, and the field's
- * icon and placeholder sit on the rows' icon and label columns.
+ * The alignment this story exists for: the search row heads the conversation
+ * list — a quiet nav-row trigger at rest ("Search chats"), morphing in place
+ * into the field plus the scope/filter/⋯ controls, all on the navigation
+ * rows' `rounded-md` box and icon/label columns.
  */
 export const Default: Story = {}

@@ -95,6 +95,29 @@ const frameProps = {
 }
 
 describe("SidebarPeekFrame", () => {
+  it.each(["left", "right"] as const)(
+    "parks immediately after collapse on the %s, but animates hover changes",
+    (side) => {
+      const { rerender } = render(
+        <SidebarPeekFrame {...frameProps} side={side} armed={false} open={false}>
+          <div />
+        </SidebarPeekFrame>
+      )
+      const show = (open: boolean) =>
+        rerender(
+          <SidebarPeekFrame {...frameProps} side={side} armed open={open}>
+            <div />
+          </SidebarPeekFrame>
+        )
+      show(false)
+      expect(screen.getByTestId("sidebar-peek-panel")).not.toHaveClass("transition-transform")
+      show(true)
+      expect(screen.getByTestId("sidebar-peek-panel")).toHaveClass("transition-transform")
+      show(false)
+      expect(screen.getByTestId("sidebar-peek-panel")).toHaveClass("transition-transform")
+    }
+  )
+
   it("unarmed, is the rail's fixed-width inner layer and nothing else", () => {
     render(
       <SidebarPeekFrame {...frameProps} armed={false} open={false}>

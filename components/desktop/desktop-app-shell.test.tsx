@@ -114,6 +114,7 @@ jest.mock("@/components/ui/loading-states", () => ({
 const uiStateRef = {
   guildRailCollapsed: false,
   statusBarCollapsed: false,
+  webTitleBarEnabled: false,
 }
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: typeof uiStateRef) => unknown) => selector(uiStateRef),
@@ -145,6 +146,7 @@ beforeEach(() => {
   platformValue = "web"
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  uiStateRef.webTitleBarEnabled = false
   act(() => useShellColumnsStore.setState({ sidebarHostsNav: false }))
   settingsStateRef.settings = undefined
   toggleSidebarAction.mockReset()
@@ -187,18 +189,41 @@ test("does not register the sidebar toggle on mobile or on bypass routes", () =>
   expect(getAppRegistration("shell.sidebar.toggle")).toBeUndefined()
 })
 
-test("renders TitleBar, StatusBar, GuildRail, CommandPalette, and resize edges", () => {
+test("renders StatusBar, GuildRail, CommandPalette, and resize edges — but no TitleBar on the web default", () => {
   render(
     <DesktopAppShell>
       <div data-testid="route-content" />
     </DesktopAppShell>
   )
-  expect(screen.getByTestId("title-bar")).toBeInTheDocument()
+  // The bar is off by default on the web shell (`webTitleBarEnabled`): a
+  // browser tab already has chrome, so the columns draw their own headers.
+  expect(screen.queryByTestId("title-bar")).toBeNull()
   expect(screen.getByTestId("status-bar")).toBeInTheDocument()
   expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
   expect(screen.getByTestId("command-palette")).toBeInTheDocument()
   expect(screen.getByTestId("resize-edges")).toBeInTheDocument()
   expect(screen.getByTestId("route-content")).toBeInTheDocument()
+})
+
+test("mounts the TitleBar on web when the setting is on, and always on Tauri", () => {
+  uiStateRef.webTitleBarEnabled = true
+  const { unmount } = render(
+    <DesktopAppShell>
+      <div />
+    </DesktopAppShell>
+  )
+  expect(screen.getByTestId("title-bar")).toBeInTheDocument()
+  unmount()
+
+  // Tauri ignores the flag either way — the bar is the window chrome there.
+  platformValue = "tauri"
+  uiStateRef.webTitleBarEnabled = false
+  render(
+    <DesktopAppShell>
+      <div />
+    </DesktopAppShell>
+  )
+  expect(screen.getByTestId("title-bar")).toBeInTheDocument()
 })
 
 test("clicking the rail's Create-team button routes to Settings → Teams", async () => {
@@ -320,6 +345,9 @@ test("mounts the finish-setup notice as a row of the shell, not after it", () =>
   // The shell is `h-screen` inside an `overflow:hidden` body: mounted at the
   // body level the bar was laid out past the bottom edge and clipped, so it
   // was visible on no desktop route at all.
+  // The title bar anchors the ordering assertion, so the bar's web-shell
+  // setting is switched on for this one.
+  uiStateRef.webTitleBarEnabled = true
   render(
     <DesktopAppShell>
       <div data-testid="route-content" />

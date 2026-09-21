@@ -442,7 +442,41 @@ function SessionRowImpl({
       })
       .catch((error) => {
         log.warn("session open-in-codex-app failed", { error: String(error) })
-        toast.error(t("openInCodexAppFailed"))
+        const code = (error as { code?: string } | null)?.code
+        const detail = String(error)
+        toast.error(
+          t(
+            code === "PII_BLOCKED"
+              ? "codexHandoffPiiBlocked"
+              : code === "UNTRANSFERABLE_CONTENT"
+                ? "codexHandoffUnsupported"
+                : detail.includes("uncertain outcome") ||
+                    detail.includes("timed out") ||
+                    detail.includes("not yet discoverable") ||
+                    detail.includes("recovery scan limit")
+                  ? "codexHandoffPending"
+                  : "openInCodexAppFailed"
+          ),
+          { description: detail }
+        )
+      })
+      .finally(() => setCodexDispatching(false))
+  }
+
+  const handleReturnFromCodexApp = (event: ReactMouseEvent) => {
+    setCodexDispatching(true)
+    void import("@/lib/chat/dispatch-to-codex-app")
+      .then(({ returnSessionFromCodexApp }) => returnSessionFromCodexApp(session))
+      .then((sessionId) => {
+        onSelect(sessionId, event)
+        toast.success(t("returnedFromCodexApp"))
+      })
+      .catch((error) => {
+        const code = (error as { code?: string } | null)?.code
+        toast.error(
+          t(code === "TARGET_NOT_FOUND" ? "codexHandoffTargetMissing" : "returnFromCodexAppFailed"),
+          { description: String(error) }
+        )
       })
       .finally(() => setCodexDispatching(false))
   }
@@ -751,6 +785,15 @@ function SessionRowImpl({
                     )}
                     {t("openInCodexApp")}
                   </DropdownMenuItem>
+                  {session.codexHandoff ? (
+                    <DropdownMenuItem
+                      onClick={handleReturnFromCodexApp}
+                      disabled={codexDispatching}
+                    >
+                      <ArrowRightLeftIcon className="mr-2 size-4" />
+                      {t("returnFromCodexApp")}
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     onSelect={handleOpenInTerminal}
                     disabled={cogniaAgentStatus !== "available"}

@@ -37,6 +37,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { SessionListLoading } from "@/components/ui/loading-states"
 import {
   Empty,
@@ -78,21 +79,30 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE, type SidebarSide } from "@/types/shell/sidebar"
 import { createPortal } from "react-dom"
-import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
+import {
+  useTitleBarProjection,
+  useTitleBarProjectionScope,
+} from "@/components/shell/title-bar-outlets"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
+import { usePlatform } from "@/hooks/use-platform"
 import { useSidebarPeek } from "@/hooks/shell/use-sidebar-peek"
 import { SidebarPeekEdge, SidebarPeekFrame } from "@/components/shell/sidebar-peek-panel"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useSidebarNavHost } from "@/hooks/shell/use-sidebar-nav-host"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
-import { SidebarNavSection } from "@/components/shell/sidebar-nav-section"
+import { SidebarNavSection, SidebarRow } from "@/components/shell/sidebar-nav-section"
 import { SidebarRowsScope } from "@/components/shell/sidebar-row-roving"
 import {
+  GuildScopeMenuItems,
+  GuildUnreadPill,
   SidebarCreateTeamRow,
   SidebarGuildSectionRows,
+  TEAM_SETTINGS_ROUTE,
   activeGuildKey,
   guildSectionRows,
 } from "@/components/shell/sidebar-guild-sections"
+import { useGuildUnread } from "@/hooks/shell/use-guild-unread"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { SidebarFooter } from "@/components/shell/sidebar-footer"
 import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
@@ -149,6 +159,11 @@ import type {
 import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { ConversationGroupAxis, DateBucket } from "@/lib/chat/conversation-list-model"
 import {
+  applyTeamGroupPreviewCaps,
+  isChatsScopeGroup,
+  teamGroupPreviewExpanded,
+} from "@/lib/chat/conversation-group-preview"
+import {
   CONVERSATION_GROUP_AXIS_ICON,
   CONVERSATION_UNGROUPED_LABEL_KEY,
 } from "@/lib/chat/conversation-group-axis"
@@ -168,6 +183,7 @@ import {
 } from "@/lib/chat/conversation-grouping"
 import {
   CONVERSATION_SORT_BY_OPTIONS,
+  DEFAULT_CONVERSATION_SORT_BY,
   resolveConversationSortBy,
   sortSupportsManualOrder,
 } from "@/lib/chat/conversation-filters"
@@ -203,7 +219,9 @@ import {
   XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -229,6 +247,9 @@ const log = loggers.ui
  * note below). Hoisting the fallback keeps the reference constant.
  */
 const EMPTY_FOLDERS: SessionFolder[] = []
+
+/** Shared identity for the scope tree's "Show more" expansions before any exist. */
+const EMPTY_GROUP_PREVIEWS: ReadonlySet<string> = new Set<string>()
 
 /**
  * How the dragged clone lands: a short ease onto the source row's final rect.
@@ -496,18 +517,41 @@ export function ChannelList(props: Props) {
   // same reason — including the part where the flag has to be raised during
   // render so the class and the new width reach the DOM in one commit.
   const animatingCollapse = useEdgePanelTransition(sidebarCollapsed, { element: asideRef })
+  // "Expanded desktop workspace rail": the left-edge rail while open (or
+  // riding its collapse animation). This is what `merged` used to read off the
+  // projection outlet — but the web shell can run with no title bar at all
+  // (`webTitleBarEnabled`, default off), and the rail's merged layout is a
+  // property of the *column*, not of whether a bar sits above it.
+  const railExpanded =
+    (!sidebarCollapsed || animatingCollapse) && !isNarrow && sidebarSide === "left"
   // The rail's header renders into the title bar's *start* outlet — the
   // leading column's zone; on the right edge there is no such zone to take
   // (the end zone belongs to the artifact dock's header), so the sidebar keeps
   // its own 40px header there and the icon column stays beside it, unfolded.
-  // The bar sizes that outlet from the width reported below.
+  // The bar sizes that outlet from the width reported below. With no bar the
+  // outlet stays `null` and the header draws inline — the same content, in the
+  // rail's own top row.
   const headerOutlet = useTitleBarProjection("start", {
     // Keep the header projected for the length of the collapse animation, not
     // just while the rail is open: the bar's start outlet clips it
     // progressively as the column beneath shrinks, which is what lets the
     // workspace bar ride the gesture instead of vanishing on its first frame.
-    active: (!sidebarCollapsed || animatingCollapse) && !isNarrow && sidebarSide === "left",
+    active: railExpanded,
   })
+  const platform = usePlatform()
+  const webTitleBarEnabled = useUIStore((s) => s.webTitleBarEnabled)
+  // Mirrors the app shell's mount decision (`desktop-app-shell.tsx`): the bar
+  // exists on Tauri unconditionally and on the web only when enabled.
+  const shellHasTitleBar = platform === "tauri" || (platform === "web" && webTitleBarEnabled)
+  // The expanded desktop rail is the workspace sidebar: it also hosts the
+  // shell navigation as rows and the guild accordion, so the 56px icon column
+  // can step aside (`sidebarHostsNav`). Its title projects into the bar when
+  // there is one; on the bar-less web shell it draws the same header inline.
+  // The scope check keeps the invariant the outlet used to imply: a rail
+  // mounted outside the chat workspace (or with the scope turned off, like
+  // the mobile Sheet) keeps the compact reading on every platform.
+  const inScope = useTitleBarProjectionScope()
+  const merged = railExpanded && inScope && (headerOutlet !== null || !shellHasTitleBar)
   useReportShellColumn(
     "sidebar",
     asideRef,
@@ -655,6 +699,7 @@ export function ChannelList(props: Props) {
           {...props}
           onSelect={handleSelect}
           headerOutlet={headerOutlet}
+          merged={merged}
           collapsed={sidebarCollapsed}
         />
       </SidebarPeekFrame>
@@ -742,6 +787,7 @@ function SidebarResizeHandle({
 
 function ChannelListBody({
   headerOutlet = null,
+  merged = false,
   collapsed = false,
   surface = "rail",
   sessions,
@@ -772,6 +818,14 @@ function ChannelListBody({
    * desktop rail passes one; the mobile Sheet keeps its header where it is.
    */
   headerOutlet?: HTMLElement | null
+  /**
+   * "This rail is the expanded desktop workspace sidebar" — it hosts the
+   * shell navigation as rows and the guild accordion, and its header is the
+   * workspace row (projected into the bar when one exists, inline on the
+   * bar-less web shell). Computed by the outer `ChannelList`, which owns the
+   * collapse animation and the platform read; the Sheet never passes it.
+   */
+  merged?: boolean
   /**
    * The desktop aside's collapse flag. The body needs it separately from
    * `headerOutlet` because the header now stays projected through the collapse
@@ -898,13 +952,11 @@ function ChannelListBody({
   const { teams, teamIds, reorderTeams, moveTeam } = useOrderedTeams()
   const teamById = useMemo(() => new Map((teams ?? []).map((item) => [item.id, item])), [teams])
   const team = chatGuild.kind === "team" ? teamById.get(chatGuild.teamId) : undefined
+  // Per-scope unread aggregates — what the merged rail's scope-tree group
+  // headers count. The same aggregate the compact band and the icon column
+  // draw, so all three always agree.
+  const guildUnread = useGuildUnread()
 
-  // The expanded desktop rail (its title projected into the bar) is the
-  // workspace sidebar: it also hosts the shell navigation as rows and the
-  // guild accordion, so the 56px icon column can step aside
-  // (`sidebarHostsNav`). The mobile Sheet, a collapsed rail (no outlet) and a
-  // plugin view that replaces the list all leave the icon column in charge.
-  const merged = headerOutlet !== null
   // `merged` deliberately survives the collapse animation — the projected
   // header stays in the bar while the outlet clips it — so the nav claim has
   // to release on `sidebarCollapsed` itself, not on `merged` going false.
@@ -915,30 +967,26 @@ function ChannelListBody({
     !collapsed && merged && selectedGuild.kind !== "canvas" && selectedGuild.kind !== "plugin-view"
   )
 
-  // Filter the session list by the selected guild, on every grouping axis.
+  // Filter the session list by the selected guild — but only on the compact
+  // surfaces. The merged rail draws the *scope tree*: every scope at once,
+  // Chats as the first group and one collapsible group per squad, so there is
+  // no selected scope left for the list to obey. The Sheet and the peeked
+  // rail keep the scoped reading — their guild rows are the only way to pick
+  // which conversations show, so a list that ignored them would look broken.
   //
-  // This used to apply only under `groupBy: "team"`, on the reading that
-  // grouping is the general form of "organize the list" and that picking
-  // another axis hands it the whole set. In the rail that reading did not
-  // survive contact: the guild rows sit right under the list and one of them
-  // is visibly selected, so a list that ignores them looks broken — you pick a
-  // team and nothing happens. Scope and grouping are different questions now:
-  // the guild says *which* conversations, the axis says how they are stacked,
-  // and a team's conversations still fall into their workspace / date / agent
-  // sections inside that scope. Sessions with `kind === "workflow-editor"` are scoped to
-  // the workflow editor's chat tab and never surface in the main channel list —
-  // they appear ONLY inside the editor itself. `kind === "subagent"` sessions
-  // (ADR-0062) are hidden imported-subagent inner transcripts, reachable only by
-  // drilling in from a parent turn's SubagentPart — never in the list, search,
-  // or a bucket.
+  // `kind === "workflow-editor"` sessions are scoped to the workflow editor's
+  // chat tab and never surface in the main channel list; `kind === "subagent"`
+  // sessions (ADR-0062) are hidden inner transcripts reachable only by
+  // drilling in from a parent turn's SubagentPart.
   const filtered = useMemo(() => {
     const visible = filterExposedSessions(sessions, "main-list")
+    if (merged) return visible
     if (chatGuild.kind === "team") {
       return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }
     // Chats: anything that isn't a team session.
     return visible.filter((s) => s.kind !== "team")
-  }, [sessions, chatGuild])
+  }, [sessions, chatGuild, merged])
 
   // Search owns only the debounced model query here. The immediate field value
   // lives inside `ChannelListSearch`, so each keystroke repaints the input
@@ -993,10 +1041,17 @@ function ChannelListBody({
   // display names come from here.
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  // The merged rail's grouping *is* the scope tree — Chats, then one
+  // collapsible group per squad — so it always groups on the team axis
+  // (`applyTeamGroupPreviewCaps` caps each one). The `groupBy` preference stays
+  // meaningful on the compact surfaces, whose scoped list keeps its own
+  // grouping; the ⋯ menu's Group-by submenu hides itself in the compact layout
+  // for the same reason.
+  const effectiveGroupBy = merged ? "team" : groupBy
   // Which workspaces the *content* index is asked about — the same reach the
   // session list is loaded with, so title hits and message hits never disagree
   // about which conversations exist.
-  const scopeProjectId = needsCrossWorkspaceSessions(groupBy, searchOptions)
+  const scopeProjectId = needsCrossWorkspaceSessions(effectiveGroupBy, searchOptions)
     ? undefined
     : (activeProjectId ?? undefined)
   const contentSearch = useChatHistorySearch(query, {
@@ -1036,6 +1091,12 @@ function ChannelListBody({
     () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),
     [characters]
   )
+  // The scope tree's squad order is the user's own drag order, the same one
+  // the icon column and the compact band read (`use-ordered-teams.ts`).
+  const teamGroups = useMemo(
+    () => (teams ?? []).map((item) => ({ id: item.id, name: item.name })),
+    [teams]
+  )
   const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
   const setGroupCollapsedInStore = useUIStore((s) => s.setGroupCollapsed)
   const setGroupCollapsed = useCallback(
@@ -1064,45 +1125,79 @@ function ChannelListBody({
     teams: teams ?? undefined,
     sidebarSettings,
     saveSidebarSettings,
-    // The guild rows below the list own the direct-vs-team axis here: they scope
-    // it on every grouping axis (see `filtered`), so the `kind` facet could only
-    // ever repeat a choice already on screen — or, left over from the mobile
-    // list, hide every row with no control anywhere to undo it. The controller
-    // therefore neither offers nor applies it, and leaves the stored value for
-    // the surface that still has a use for it.
-    scopeOwnsKind: true,
+    // On the compact surfaces the guild rows own the direct-vs-team axis: they
+    // scope it (see `filtered`), so the `kind` facet could only ever repeat a
+    // choice already on screen — or, left over from another surface, hide every
+    // row with no control anywhere to undo it. The merged rail has no selected
+    // scope, so there the facet is a real narrowing the menu both offers and
+    // applies.
+    scopeOwnsKind: !merged,
   })
   const { filters, activeFilters, filterContext } = filterController
   const resetConversationFilters = filterController.actions.reset
 
   // Grouping/filtering/sorting/search now live in the shared headless model
   // (pinned → folders → the chosen axis, or a flat result list while searching).
-  const {
-    sections,
-    total,
-    filteredCount,
-    visibleCount,
-    orderedIds,
-    contentOnlyIds,
-    activeFilterCount,
-  } = useConversationListModel({
-    sessions: filtered,
-    folders: modelFolders,
-    query,
-    view,
-    collapsedFolderIds,
-    groupBy,
-    sortBy,
-    filters,
-    unreadIds,
-    filterContext,
-    workspaces: workspaceGroups,
-    agents: agentGroups,
-    activeWorkspaceId: activeProjectId,
-    groupCollapseOverrides,
-    contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
-    searchIncludesArchived: searchOptions.includeArchived,
-  })
+  const { sections, total, filteredCount, contentOnlyIds, activeFilterCount } =
+    useConversationListModel({
+      sessions: filtered,
+      folders: modelFolders,
+      query,
+      view,
+      collapsedFolderIds,
+      groupBy: effectiveGroupBy,
+      sortBy,
+      filters,
+      unreadIds,
+      filterContext,
+      workspaces: workspaceGroups,
+      agents: agentGroups,
+      teams: teamGroups,
+      activeWorkspaceId: activeProjectId,
+      groupCollapseOverrides,
+      // Scope-tree groups are navigation entities: every squad keeps a header
+      // even with nothing under it (its context menu and "+" still work), and
+      // the Chats group is always drawn. Archived browsing only lists what the
+      // archive holds, so there empty headers would be noise.
+      emitEmptyGroups: merged && view === "active",
+      contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
+      searchIncludesArchived: searchOptions.includeArchived,
+    })
+
+  // "Show more" previews on the scope tree: every group opens capped
+  // (`TEAM_GROUP_PREVIEW_LIMIT`) so a dozen squads never push the rail's own
+  // footer off screen. Lifting a cap is a transient disclosure — the answer to
+  // "show me the rest right now", not a standing layout answer — so it lives
+  // in local state rather than the persisted collapse map.
+  const [expandedGroupPreviews, setExpandedGroupPreviews] =
+    useState<ReadonlySet<string>>(EMPTY_GROUP_PREVIEWS)
+  const toggleGroupPreview = useCallback((key: string) => {
+    setExpandedGroupPreviews((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+  // Capping happens *before* the freeze / pending-reorder chain below so every
+  // downstream consumer — drop targets, the selection order, the reveal ladder
+  // — reasons about the rows actually on screen, not the ones behind "Show
+  // more". On the compact surfaces the capped set is just the model's.
+  const cappedSections = useMemo(
+    () => (merged ? applyTeamGroupPreviewCaps(sections, expandedGroupPreviews) : sections),
+    [merged, sections, expandedGroupPreviews]
+  )
+  // The model's `orderedIds` describes the *uncapped* list. What keyboard
+  // navigation, range selection and the reveal ladder must agree with is the
+  // rendered list — same derivation, run over the capped sections.
+  const renderedOrderedIds = useMemo(() => {
+    const ids: string[] = []
+    for (const section of cappedSections) {
+      if ((section.kind === "folder" || section.kind === "group") && section.collapsed) continue
+      for (const s of section.sessions) ids.push(s.id)
+    }
+    return ids
+  }, [cappedSections])
 
   // Remount token for the search field: it owns the immediate input value, so
   // clearing `query` from out here (the reveal ladder below) has to reach it.
@@ -1117,15 +1212,32 @@ function ChannelListBody({
     (id: string) => filtered.some((session) => session.id === id),
     [filtered]
   )
-  const revealVisible = useCallback((id: string) => orderedIds.includes(id), [orderedIds])
+  const revealVisible = useCallback(
+    (id: string) => renderedOrderedIds.includes(id),
+    [renderedOrderedIds]
+  )
   const revealSteps = useCallback(
     (id: string): ConversationRevealStep[] => {
-      // Last rung: the row is in a section the user folded away.
+      // Second-to-last rung: the row is in a section the user folded away.
       const holder = sections.find(
         (section) =>
           (section.kind === "folder" || section.kind === "group") &&
           section.collapsed &&
           section.sessions.some((session) => session.id === id)
+      )
+      // Last rung: the row sits past its group header's "Show more" cut — it
+      // belongs to a visible section but beyond the preview slice, so the fix
+      // is lifting that cap, not unfolding anything.
+      const cappedHolder = cappedSections.find(
+        (section) =>
+          section.kind === "group" &&
+          (section.previewHidden ?? 0) > 0 &&
+          !section.sessions.some((session) => session.id === id) &&
+          sections.some(
+            (full) =>
+              conversationSectionKey(full) === conversationSectionKey(section) &&
+              full.sessions.some((session) => session.id === id)
+          )
       )
       return [
         { active: view !== "active", undo: () => setView("active") },
@@ -1145,10 +1257,19 @@ function ChannelListBody({
               setGroupCollapsed(conversationSectionKey(holder), false)
           },
         },
+        {
+          active: cappedHolder != null,
+          undo: () => {
+            if (!cappedHolder) return
+            const key = conversationSectionKey(cappedHolder)
+            setExpandedGroupPreviews((current) => new Set(current).add(key))
+          },
+        },
       ]
     },
     [
       sections,
+      cappedSections,
       view,
       setView,
       query,
@@ -1247,6 +1368,10 @@ function ChannelListBody({
         workspace: session.projectId ? workspaceById.get(session.projectId) : undefined,
       }
       const metadata = metadataFields.flatMap((kind) => {
+        // In the merged rail a team session already sits under its squad's
+        // section header and wears the squad's avatar — printing the squad's
+        // name a third time on the row's detail line is noise.
+        if (merged && kind === "agent" && session.kind === "team") return []
         const value = values[kind]
         return value ? [{ kind, value }] : []
       })
@@ -1258,6 +1383,7 @@ function ChannelListBody({
     defaultModel,
     defaultProvider,
     filtered,
+    merged,
     metadataFields,
     teamById,
     workspaceById,
@@ -1267,7 +1393,7 @@ function ChannelListBody({
     [metadataBySessionId]
   )
 
-  const selection = useRangeSelection(orderedIds)
+  const selection = useRangeSelection(renderedOrderedIds)
   const { selected, handleClick, selectAll, clear, isSelected, lastInteractionWasModified } =
     selection
 
@@ -1342,6 +1468,31 @@ function ChannelListBody({
   )
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const railCollapsed = useUIStore((s) => surface === "rail" && s.sidebarCollapsed)
+  const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed)
+  // Whether the controls beside the rail's search field may fold away while
+  // the field is in use. A preference rather than a constant: a user who
+  // searches constantly can pin them out permanently instead of paying the
+  // fold per query.
+  const searchCollapsible = useUIStore((s) => s.sidebarSearchCollapsible)
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0)
+  useEffect(() => {
+    if (searchFocusRequest === 0 || railCollapsed) return
+    searchInputRef.current?.focus()
+    searchInputRef.current?.select()
+  }, [searchFocusRequest, railCollapsed])
+  const openSearch = useCallback(() => {
+    log.info("channel-list focus-search shortcut", { expand: railCollapsed })
+    if (railCollapsed) setSidebarCollapsed(false)
+    setSearchFocusRequest((n) => n + 1)
+  }, [railCollapsed, setSidebarCollapsed])
+  // The rail's field is always drawn, so "close" is just letting go of it:
+  // blur returns `expanded` to false and the controls slide back out — there
+  // is no trigger to hand focus to, and the app-wide `/` still works from
+  // <body>.
+  const closeSearch = useCallback(() => {
+    searchInputRef.current?.blur()
+  }, [])
   const handleContainerKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement
@@ -1362,7 +1513,7 @@ function ChannelListBody({
         return
       }
       const isCtrlA = (e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")
-      if (isCtrlA && orderedIds.length > 0) {
+      if (isCtrlA && renderedOrderedIds.length > 0) {
         e.preventDefault()
         selectAll()
         return
@@ -1373,27 +1524,29 @@ function ChannelListBody({
 
       if (e.key === "/") {
         e.preventDefault()
-        searchInputRef.current?.focus()
+        openSearch()
         return
       }
-      if (orderedIds.length === 0) return
-      const current = focusedId ? orderedIds.indexOf(focusedId) : -1
+      if (renderedOrderedIds.length === 0) return
+      const current = focusedId ? renderedOrderedIds.indexOf(focusedId) : -1
       const focusAt = (index: number) => {
         e.preventDefault()
-        setFocusedId(orderedIds[Math.min(orderedIds.length - 1, Math.max(0, index))])
+        setFocusedId(
+          renderedOrderedIds[Math.min(renderedOrderedIds.length - 1, Math.max(0, index))]
+        )
       }
       if (e.key === "ArrowDown" || e.key === "j") focusAt(current < 0 ? 0 : current + 1)
       else if (e.key === "ArrowUp" || e.key === "k")
-        focusAt(current < 0 ? orderedIds.length - 1 : current - 1)
+        focusAt(current < 0 ? renderedOrderedIds.length - 1 : current - 1)
       else if (e.key === "Home") focusAt(0)
-      else if (e.key === "End") focusAt(orderedIds.length - 1)
+      else if (e.key === "End") focusAt(renderedOrderedIds.length - 1)
       else if (e.key === "Enter" && focusedId) {
         e.preventDefault()
         void trackConversationOpened(focusedId, "keyboard")
         onSelect(focusedId)
       }
     },
-    [clear, orderedIds, selectAll, selected.size, focusedId, onSelect]
+    [clear, renderedOrderedIds, selectAll, selected.size, focusedId, onSelect, openSearch]
   )
 
   // App-wide shortcuts for the list, live while it is mounted (`useAppShortcut`
@@ -1407,40 +1560,27 @@ function ChannelListBody({
   // - ⌘⌥[ / ⌘⌥] step the *active* conversation through the list's visible
   //   order (`orderedIds`, after grouping / filters / search), so the composer
   //   never has to lose focus to move between chats.
-  const railCollapsed = useUIStore((s) => surface === "rail" && s.sidebarCollapsed)
-  const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed)
-  const [searchFocusRequest, setSearchFocusRequest] = useState(0)
-  useEffect(() => {
-    if (searchFocusRequest === 0 || railCollapsed) return
-    searchInputRef.current?.focus()
-    searchInputRef.current?.select()
-  }, [searchFocusRequest, railCollapsed])
-  const focusSearch = useCallback(() => {
-    log.info("channel-list focus-search shortcut", { expand: railCollapsed })
-    if (railCollapsed) setSidebarCollapsed(false)
-    setSearchFocusRequest((n) => n + 1)
-  }, [railCollapsed, setSidebarCollapsed])
-  useAppShortcut("app.search.focus", focusSearch, { preventDefault: true })
+  useAppShortcut("app.search.focus", openSearch, { preventDefault: true })
   const stepActiveConversation = useCallback(
     (delta: 1 | -1) => {
-      if (orderedIds.length === 0) return
-      const current = activeSessionId ? orderedIds.indexOf(activeSessionId) : -1
+      if (renderedOrderedIds.length === 0) return
+      const current = activeSessionId ? renderedOrderedIds.indexOf(activeSessionId) : -1
       // No active conversation (or one the current view hides): start from
       // the end the step comes from, the way the arrow keys do.
       const target =
         current === -1
           ? delta === 1
             ? 0
-            : orderedIds.length - 1
-          : Math.min(orderedIds.length - 1, Math.max(0, current + delta))
-      const next = orderedIds[target]
+            : renderedOrderedIds.length - 1
+          : Math.min(renderedOrderedIds.length - 1, Math.max(0, current + delta))
+      const next = renderedOrderedIds[target]
       if (!next || next === activeSessionId) return
       log.info("channel-list step conversation", { delta })
       void trackConversationOpened(next, "keyboard")
       setFocusedId(next)
       onSelect(next)
     },
-    [orderedIds, activeSessionId, onSelect]
+    [renderedOrderedIds, activeSessionId, onSelect]
   )
   const stepNext = useCallback(() => stepActiveConversation(1), [stepActiveConversation])
   const stepPrevious = useCallback(() => stepActiveConversation(-1), [stepActiveConversation])
@@ -1493,13 +1633,16 @@ function ChannelListBody({
   // pointer while the source row stays put as a placeholder.
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const projectedReorder = useMemo(
-    () => projectPendingReorder(sections, pendingReorder),
-    [sections, pendingReorder]
+    () => projectPendingReorder(cappedSections, pendingReorder),
+    [cappedSections, pendingReorder]
   )
   // Hold the order still while the pointer is in the list — the one moment a
   // moving row costs something. Read from the DOM rather than derived: whether
   // the pointer is over the list is a fact about the surface, not the model.
   const [pointerInList, setPointerInList] = useState(false)
+  // Whether the unified scroll region is off the top — drives the hairline
+  // under the pinned New chat row in the merged rail.
+  const [listScrolled, setListScrolled] = useState(false)
   const displaySections = useConversationOrderFreeze({
     sections: projectedReorder.sections,
     hovering: pointerInList,
@@ -1507,6 +1650,9 @@ function ChannelListBody({
     // it is previewing; a freeze on top of either would be a third story about
     // where a row is.
     disabled: query.trim().length > 0 || activeDragId !== null,
+    // In the scope tree an emptied squad group is still its header — fold
+    // handle, context menu, "+" — so the freeze must not drop it.
+    preserveEmptyGroups: merged,
   })
   // Drop the projection the moment it stops being needed: `settled` means the
   // store now carries the dropped order; `stale` means the store moved
@@ -1552,6 +1698,12 @@ function ChannelListBody({
   }, [])
   const handleDragOver = useCallback(
     (e: DragOverEvent) => {
+      // A scope-tree header drag never produces a conversation drop preview —
+      // it reorders groups, handled wholesale in `handleDragEnd`.
+      if (e.active.data?.current?.type === "team") {
+        setDropPreview(null)
+        return
+      }
       const activeId = String(e.active.id)
       const overId = e.over ? String(e.over.id) : null
       const overSection = overId ? sectionIdsBySession.get(overId) : undefined
@@ -1567,6 +1719,25 @@ function ChannelListBody({
     (e: DragEndEvent) => {
       setActiveDragId(null)
       setDropPreview(null)
+      // A scope-tree header drag is a *group* reorder, not a conversation
+      // drop: the squads re-sort among themselves, through the same
+      // persistence the compact band's rows use.
+      if (e.active.data?.current?.type === "team") {
+        // Landing on another squad's header targets that squad; landing on a
+        // conversation row targets the squad its group belongs to (its
+        // section key is `team:<id>`), so the whole block is a drop zone.
+        const overId = e.over ? String(e.over.id) : null
+        const overKey = overId ? sectionIdsBySession.get(overId)?.key : undefined
+        const targetId =
+          e.over?.data?.current?.type === "team"
+            ? overId
+            : overKey?.startsWith("team:")
+              ? overKey.slice("team:".length)
+              : null
+        const next = applyDragReorder(teamIds, String(e.active.id), targetId)
+        if (next) reorderTeams(next)
+        return
+      }
       // Reorder is scoped to the section the drop target lives in.
       const overId = e.over ? String(e.over.id) : null
       const overSection = overId ? sectionIdsBySession.get(overId) : undefined
@@ -1591,7 +1762,7 @@ function ChannelListBody({
       // the projection overrides exactly that snapshot and steps aside the
       // moment the live query moves. Persist first so a synchronous throw
       // never leaves a projection with nothing behind it.
-      const stored = sections.find((s) => conversationSectionKey(s) === overSection.key)
+      const stored = cappedSections.find((s) => conversationSectionKey(s) === overSection.key)
       const baseIds = stored ? stored.sessions.map((s) => s.id) : overSection.ids
       const pending: PendingReorder = { sectionKey: overSection.key, baseIds, ids: action.ids }
       const persisted = onReorderSessions(action.ids, overSection.key)
@@ -1604,7 +1775,15 @@ function ChannelListBody({
         setPendingReorder((current) => (current === pending ? null : current))
       })
     },
-    [sectionIdsBySession, sections, rowActions, onReorderSessions, flashSettled]
+    [
+      sectionIdsBySession,
+      cappedSections,
+      rowActions,
+      onReorderSessions,
+      flashSettled,
+      teamIds,
+      reorderTeams,
+    ]
   )
 
   // Toolbar visibility: show when ≥2 are selected OR when a single row was
@@ -1613,14 +1792,27 @@ function ChannelListBody({
   // single click — the normal "open this conversation" gesture — never
   // pops the toolbar so it stays out of the way.
   const toolbarVisible = selected.size >= 2 || (selected.size === 1 && lastInteractionWasModified)
-  // While the rail's search field is expanded (focused or holding text) it
-  // owns its row; the filter and the list actions beside it hide until it
-  // lets go (see `ChannelListSearch`).
+  // While the search field is expanded (focused or holding text — see
+  // `ChannelListSearch`) it owns its row: the scope and filter controls
+  // beside it fold under its right edge until it lets go. Sheet and merged
+  // rail play the same gesture on the same signal; the always-open
+  // preference (`sidebarSearchCollapsible` off) pins the merged row's
+  // controls out permanently.
   const [searchExpanded, setSearchExpanded] = useState(false)
-  // Whether the field rests as a button. A preference rather than a constant:
-  // the rail is the only place the space is tight, and a user who searches
-  // constantly would rather keep the field open than pay a click per query.
-  const searchCollapsible = useUIStore((s) => s.sidebarSearchCollapsible)
+  const searchControlsFolded = merged && searchCollapsible && searchExpanded
+  // Filter chips self-hide when nothing is set; this is the same predicate so
+  // the chrome block (and its divider) only renders when a chip could.
+  const chipsVisible =
+    activeFilters > 0 ||
+    filterController.activeView != null ||
+    sortBy !== DEFAULT_CONVERSATION_SORT_BY
+  // The status lines under the field (content-search hints) are chrome too.
+  const searchStatusVisible = contentBelowMinQuery || (contentTruncated && query.trim().length > 0)
+  // Everything under the field slot that is not the field: the archived chip,
+  // the filter chips, the bulk bar, the status lines. In the merged rail this
+  // is what opens the strip below New chat — the field itself no longer does.
+  const secondaryChromeVisible =
+    view === "archived" || chipsVisible || toolbarVisible || searchStatusVisible
 
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
@@ -1668,6 +1860,170 @@ function ChannelListBody({
     else handleNewDirect()
   }
 
+  // The one field instance, wherever it is drawn: the rail row morph keeps it
+  // mounted (hidden) so closing is the opening played backwards — unmounting
+  // at either end is what made the toggle read as a glitch.
+  const searchField = (
+    <ChannelListSearch
+      key={searchResetToken}
+      inputRef={searchInputRef}
+      onQueryChange={setQuery}
+      onExpandedChange={setSearchExpanded}
+      compact={merged}
+      onRequestClose={merged ? closeSearch : undefined}
+    />
+  )
+  // The merged rail's search row heads the conversation list — the thing the
+  // field narrows — instead of living in the window chrome. The field is
+  // always drawn, sharing the row with the scope and filter controls at
+  // rest; the moment it wakes (a click, `/`, text already in it) its right
+  // edge slides over them as they fold to zero width on the shared shell
+  // clock, and they slide back out when it rests. One gesture in two
+  // directions — nothing pops, nothing reflows — and the ⋯ menu keeps the
+  // end slot throughout.
+  const railSearchRow = merged ? (
+    <div className="flex items-center gap-0.5 px-1 pb-1" data-testid="channel-list-search-row">
+      {searchField}
+      <div
+        data-testid="channel-list-search-controls"
+        className={cn(
+          "flex items-center gap-1.5 overflow-hidden",
+          `transition-[max-width,opacity] ${SHELL_DOCK_TIMING_CLASS}`,
+          searchControlsFolded ? "max-w-0 opacity-0" : "max-w-[4.5rem] opacity-100"
+        )}
+        inert={searchControlsFolded || undefined}
+        aria-hidden={searchControlsFolded || undefined}
+      >
+        {/* Beside the field it governs: how far a query looks is not a
+            display preference and does not belong in a settings page.
+            `right` because there is a whole chat pane to open into. */}
+        <ConversationSearchScopeControl
+          model={filterController}
+          side="right"
+          triggerClassName="size-8 rounded-md"
+          testId="channel-list-search-scope"
+        />
+        <ConversationFilterMenu
+          model={filterController}
+          side="right"
+          triggerClassName="size-8 rounded-md"
+          testId="channel-list-filter-trigger"
+        />
+      </div>
+      {/* The list's own actions sit at the row's end whatever state the field
+          is in — reachable while it is awake and while it rests. */}
+      <HeaderActions
+        layout="compact"
+        className="text-muted-foreground hover:text-foreground"
+        {...headerActionProps}
+      />
+    </div>
+  ) : null
+  // The field as a row of its own — the Sheet only; the merged rail draws it
+  // inside `railSearchRow` at the head of the list instead.
+  const searchFieldRow = (
+    <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-2.5">
+      {searchField}
+      {/* Collapsed rather than unmounted, on the same clock the field
+          grows on: the two are one gesture, and swapping these out in a
+          single frame made the field's opening read as a glitch. They
+          keep their box while it plays, which is what stops the row from
+          reflowing under the pointer. */}
+      <div
+        data-testid="channel-list-search-actions"
+        data-hidden={searchExpanded || undefined}
+        aria-hidden={searchExpanded || undefined}
+        inert={searchExpanded || undefined}
+        className={cn(
+          "flex items-center gap-1.5 overflow-hidden",
+          `transition-[max-width,opacity] ${SHELL_DOCK_TIMING_CLASS}`,
+          searchExpanded ? "max-w-0 opacity-0" : "max-w-40 opacity-100"
+        )}
+      >
+        <ConversationSearchScopeControl
+          model={filterController}
+          side="bottom"
+          triggerClassName="size-8 rounded-md"
+          testId="channel-list-search-scope"
+        />
+        <ConversationFilterMenu
+          model={filterController}
+          side="bottom"
+          triggerClassName="size-8 rounded-md"
+          testId="channel-list-filter-trigger"
+        />
+      </div>
+    </div>
+  )
+  // The chrome that is not the field: the archived-view chip, the filter
+  // chips, the bulk bar and the search status lines. The compact surfaces pin
+  // it above their scoped list; the merged rail slides it open under "New
+  // chat" only while it has something to say.
+  const secondaryChrome = (
+    <>
+      {merged && view === "archived" ? (
+        // Where you are, now that neither a heading row nor the archived
+        // toggle is on screen: a chip that says it and takes you back.
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            onClick={() => setView("active")}
+            aria-label={t("viewActive")}
+            title={t("viewActive")}
+            data-testid="channel-list-archived-chip"
+            className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 pr-1.5 pl-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ArchiveIcon className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{t("archivedTitleSuffix")}</span>
+            <XIcon className="size-3 shrink-0" aria-hidden />
+          </button>
+        </div>
+      ) : null}
+      <ConversationFilterChips
+        model={filterController}
+        // What is on screen, so folding a group moves the number. The empty
+        // state below still branches on `filteredCount` — collapsing
+        // everything is not "your filters matched nothing".
+        shown={renderedOrderedIds.length}
+        total={total}
+        className="px-3 pb-2"
+        testId="channel-list-filter-chips"
+      />
+      <ChannelListBulkActions
+        visible={toolbarVisible}
+        selected={selected}
+        orderedIds={renderedOrderedIds}
+        sessions={filtered}
+        archived={view === "archived"}
+        onDelete={rowActions.onBulkDelete}
+        onSetPinned={rowActions.onBulkSetPinned}
+        onArchive={rowActions.onBulkArchive}
+        onUnarchive={rowActions.onBulkUnarchive}
+        folders={modelFolders}
+        onMoveToFolder={rowActions.onBulkAssignToFolder}
+        onClear={clear}
+      />
+      {contentBelowMinQuery ? (
+        <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
+          {t("searchContentMinQuery", { count: CONTENT_SEARCH_MIN_QUERY })}
+        </p>
+      ) : contentTruncated && query.trim() ? (
+        <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
+          {t("searchTruncated")}
+        </p>
+      ) : null}
+    </>
+  )
+  const searchChrome = (
+    <>
+      {/* The Sheet's field is a permanent row — there is no rail morph on
+          this path, only the field's own expanded fold above. */}
+      {searchFieldRow}
+      {secondaryChrome}
+      <Separator className="opacity-60" />
+    </>
+  )
+
   const rows = (
     // Permanent, like the chat surfaces' own boundaries (`chat:list`,
     // `chat:message`): the sidebar re-renders on every session write, every
@@ -1690,169 +2046,63 @@ function ChannelListBody({
         onKeyDown={handleContainerKeyDown}
         {...densitySurfaceProps("sidebar", appearanceDensity)}
       >
-        <Header outlet={headerOutlet} {...headerActionProps} />
+        <Header
+          outlet={headerOutlet}
+          // No bar above (the web shell's default) but this rail is still the
+          // expanded workspace sidebar — draw the projected header's content
+          // in the rail's own top row instead of the guild title.
+          workspaceChrome={merged}
+          {...headerActionProps}
+        />
         {merged ? (
-          // Outside the scrolling band below: the sidebar's primary action
-          // does not scroll away behind eight pinned features and six teams.
-          <SidebarNewConversationButton
-            guild={chatGuild}
-            onNewDirect={handleNewDirect}
-            onNewTeamConversation={handleNewTeamConversation}
-          />
-        ) : null}
-        {merged ? (
-          // Everything above the search field shares one bounded, scrolling
-          // band. The nav rows and the plugin view containers grow with what
-          // the user has — pin eight features and an unbounded block pushed
-          // the conversation list toward zero height.
-          //
-          // `shrink` + `min-h-16`, not `shrink-0`: the list below holds a
-          // third of the rail as a floor, and if the two bands would push it
-          // under that they give way and scroll inside their own band. The
-          // floor is set so this one is never the band that gives — a normal
-          // pin set draws every nav row, and only a pathological one (a dozen
-          // pinned features *and* a dozen teams) ever scrolls here, which is
-          // still better than clipping the footer off the bottom of the rail.
+          // The rail's pinned strip — the only thing above the scroll that
+          // never moves besides the footer. New chat heads it; the search row
+          // lives below the nav rows, at the head of the list it narrows.
+          // Once the list is off the top, a hairline marks the divide.
           <div
-            className="flex max-h-[45%] min-h-16 shrink flex-col overflow-x-hidden overflow-y-auto"
-            data-testid="sidebar-nav-band"
-          >
-            <SidebarNavSection className="pt-1" />
-          </div>
-        ) : null}
-        <div
-          className={cn(
-            "flex items-center gap-1.5",
-            // The row above is the last navigation entry, so the field takes
-            // the full gap — that space is what separates "where to go" from
-            // "which conversation". The Sheet keeps its own roomier row.
-            merged ? "px-2 pt-1.5 pb-1.5" : "px-3 pt-2.5 pb-2.5"
-          )}
-        >
-          <ChannelListSearch
-            key={searchResetToken}
-            inputRef={searchInputRef}
-            onQueryChange={setQuery}
-            onExpandedChange={setSearchExpanded}
-            compact={merged}
-            collapsible={merged && searchCollapsible}
-          />
-          {/* Collapsed rather than unmounted, on the same clock the field
-              grows on: the two are one gesture, and swapping these three out
-              in a single frame made the field's opening read as a glitch. They
-              keep their box while it plays, which is what stops the row from
-              reflowing under the pointer. */}
-          <div
-            data-testid="channel-list-search-actions"
-            data-hidden={searchExpanded || undefined}
-            aria-hidden={searchExpanded || undefined}
-            inert={searchExpanded || undefined}
             className={cn(
-              "flex items-center gap-1.5 overflow-hidden",
-              `transition-[max-width,opacity] ${SHELL_DOCK_TIMING_CLASS}`,
-              searchExpanded ? "max-w-0 opacity-0" : "max-w-40 opacity-100"
+              "shrink-0 transition-shadow duration-150",
+              listScrolled && "shadow-[0_1px_0_0_var(--border)]"
             )}
           >
-            <>
-              {/* Beside the field it governs: how far a query looks is not a
-                  display preference and does not belong in a settings page.
-
-                  `right` only in the merged rail, where there is a whole chat
-                  pane to open into. In the Sheet the rail *is* the screen: a
-                  256px menu opening sideways off a 288px sheet has nowhere to
-                  land and Radix's flip pushed it past the left edge. Downward
-                  from the trigger, the way the ⋯ menu below already does it,
-                  only has to be clamped horizontally — which it handles. */}
-              <ConversationSearchScopeControl
-                model={filterController}
-                side={merged ? "right" : "bottom"}
-                triggerClassName="size-8 rounded-md"
-                testId="channel-list-search-scope"
-              />
-              <ConversationFilterMenu
-                model={filterController}
-                side={merged ? "right" : "bottom"}
-                triggerClassName="size-8 rounded-md"
-                testId="channel-list-filter-trigger"
-              />
-              {/* The list's own actions, beside the field they act on and in
-                  the same place whichever section is open — they used to ride
-                  the open accordion row, which moved them every time the user
-                  picked a team and left them nowhere at all once the Chats
-                  heading went away. The mobile Sheet keeps its inline header
-                  row instead (`Header`). */}
-              {merged ? <HeaderActions layout="compact" {...headerActionProps} /> : null}
-            </>
+            <SidebarNewConversationButton onNewDirect={handleNewDirect} />
           </div>
-        </div>
-        {merged && view === "archived" ? (
-          // Where you are, now that neither a heading row nor the archived
-          // toggle is on screen: a chip that says it and takes you back.
-          <div className="px-2 pb-2">
-            <button
-              type="button"
-              onClick={() => setView("active")}
-              aria-label={t("viewActive")}
-              title={t("viewActive")}
-              data-testid="channel-list-archived-chip"
-              className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 pr-1.5 pl-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <ArchiveIcon className="size-3 shrink-0" aria-hidden />
-              <span className="truncate">{t("archivedTitleSuffix")}</span>
-              <XIcon className="size-3 shrink-0" aria-hidden />
-            </button>
-          </div>
-        ) : null}
-        <ConversationFilterChips
-          model={filterController}
-          // What is on screen, so folding a group moves the number. The empty
-          // state below still branches on `filteredCount` — collapsing
-          // everything is not "your filters matched nothing".
-          shown={visibleCount}
-          total={total}
-          className="px-3 pb-2"
-          testId="channel-list-filter-chips"
-        />
-        <ChannelListBulkActions
-          visible={toolbarVisible}
-          selected={selected}
-          orderedIds={orderedIds}
-          sessions={filtered}
-          archived={view === "archived"}
-          onDelete={rowActions.onBulkDelete}
-          onSetPinned={rowActions.onBulkSetPinned}
-          onArchive={rowActions.onBulkArchive}
-          onUnarchive={rowActions.onBulkUnarchive}
-          folders={modelFolders}
-          onMoveToFolder={rowActions.onBulkAssignToFolder}
-          onClear={clear}
-        />
-        {contentBelowMinQuery ? (
-          <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
-            {t("searchContentMinQuery", { count: CONTENT_SEARCH_MIN_QUERY })}
-          </p>
-        ) : contentTruncated && query.trim() ? (
-          <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
-            {t("searchTruncated")}
-          </p>
-        ) : null}
-        <Separator className="opacity-60" />
+        ) : (
+          searchChrome
+        )}
         <ScrollArea
-          // A third of the rail, floor — not whatever the two bands leave
-          // over. The list is the reason the rail exists and it was landing at
-          // ~34% of it once a few features were pinned and a few teams
-          // existed. The floor is deliberately below what a normal rail gives
-          // the list (it lands around 45%, and folding the guild band takes it
-          // past 55%): it is the guard against a long team list, not the
-          // layout, and a floor high enough to fight the nav band would push
-          // the footer off a 600px window — the shell's minimum height.
+          // One scrolling region holds everything that is not pinned: the
+          // navigation rows, the Chats group, the squads, and "Create team".
+          // Expanding a squad's header or lifting a "Show more" cap therefore
+          // never moves the chrome — the motion stays inside this viewport,
+          // which is the whole reason the scope tree works where the old
+          // accordion did not.
           className="min-h-[30%] flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
+          // React delegates `scroll`, so the viewport's scrolling reaches the
+          // root here without a ref on Radix's internals.
+          onScroll={(event) => setListScrolled((event.target as HTMLElement).scrollTop > 0)}
           onMouseEnter={() => setPointerInList(true)}
           onMouseLeave={() => setPointerInList(false)}
         >
+          {merged ? (
+            // Nav rows → search row → scope tree, all in the same scroll.
+            // The search row heads the conversation list it narrows; the
+            // secondary chrome it can surface (archived chip, filter chips,
+            // the bulk bar, status hints) slides open right under it instead
+            // of shoving rows down in a single frame.
+            <>
+              <SidebarNavSection className="pt-1" />
+              {railSearchRow}
+              <Collapsible open={secondaryChromeVisible}>
+                <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
+                  {secondaryChrome}
+                </CollapsibleContent>
+              </Collapsible>
+            </>
+          ) : null}
           {loading && total === 0 ? (
             <SessionListLoading />
-          ) : total === 0 ? (
+          ) : total === 0 && (!merged || view === "archived") ? (
             <ConversationListEmptyState
               archived={view === "archived"}
               team={chatGuild.kind === "team"}
@@ -1876,11 +2126,14 @@ function ChannelListBody({
             >
               {t("searchingMessages")}
             </p>
-          ) : filteredCount === 0 ? (
+          ) : filteredCount === 0 && (!merged || query.trim().length > 0 || activeFilters > 0) ? (
             // Three different reasons a non-empty view can show nothing, and
             // they need different exits: refine the query, drop the filters, or
             // both. A single "no results" line leaves the user hunting for the
-            // filter they forgot they set.
+            // filter they forgot they set. In the merged rail, though, an
+            // unnarrowed zero means the account simply has no conversations —
+            // the scope tree below draws that itself (a quiet hint row under
+            // each header), which is also how the squads stay reachable.
             <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
               <p className="text-xs text-muted-foreground">
                 {query.trim()
@@ -1909,6 +2162,22 @@ function ChannelListBody({
             >
               <ConversationSections
                 sections={displaySections}
+                scopeTree={
+                  merged
+                    ? {
+                        archived: view === "archived",
+                        teamById,
+                        unreadDm: guildUnread.dm,
+                        unreadTeams: guildUnread.teams,
+                        teamOrderIds: teamIds,
+                        squadCount: teamById.size,
+                        previewExpanded: expandedGroupPreviews,
+                        onTogglePreview: toggleGroupPreview,
+                        onNewConversation: handleGuildNewConversation,
+                        onMoveTeam: moveTeam,
+                      }
+                    : undefined
+                }
                 dropPreview={dropPreview}
                 activeDragId={activeDragId}
                 settled={
@@ -1949,52 +2218,51 @@ function ChannelListBody({
             </DndContext>
           )}
         </ScrollArea>
-        {/* The whole guild group, in one fixed place under the list; a long
-            team list scrolls inside its own band rather than eating the list.
-
-            Drawn in the Sheet too, not only in the merged rail: the list is
-            scoped to the selected guild on every axis now, and the Sheet has
-            no other way to change it — without these rows a narrow window that
-            last had a team selected is stuck inside it, looking at a list that
-            nothing on screen can widen.
+        {/* The scope-switching band exists only on the compact surfaces — the
+            mobile Sheet and the peeked rail — where the list above is still
+            scoped to one guild and these rows are the way to change which.
+            The merged rail draws every scope at once inside the list, so the
+            band has no job there.
 
             The drag context wraps exactly this band — every row a team can be
             dropped on is inside it, and it stays clear of the session list's
             own `DndContext` above. */}
-        <DndContext
-          id={TEAM_DND_CONTEXT_ID}
-          sensors={teamDndSensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleTeamDragEnd}
-        >
-          <SortableContext items={teamIds} strategy={verticalListSortingStrategy}>
-            <div
-              className={cn(
-                "flex flex-col overflow-y-auto border-t py-0.5",
-                // Folded it is one row and must not stretch; unfolded it is a
-                // bounded band that scrolls its own overflow.
-                teamsCollapsed ? "shrink-0" : "max-h-[30%] min-h-16 shrink"
-              )}
-              data-testid="sidebar-guild-band"
-            >
-              <SidebarGuildSectionRows
-                rows={guildRows}
-                activeKey={activeGuild}
-                onNewConversation={handleGuildNewConversation}
-                testId="sidebar-guild-rows"
-                sortable
-                onMoveTeam={moveTeam}
-                collapsed={teamsCollapsed}
-                onToggleCollapsed={toggleTeams}
-              />
-              {/* Folded, the band is exactly "where the list is scoped" — one
-                  row. Creating a team is a settings trip, not something the
-                  fold owes you a permanent row for; the context menu on the
-                  row still reaches team management. */}
-              {teamsCollapsed ? null : <SidebarCreateTeamRow />}
-            </div>
-          </SortableContext>
-        </DndContext>
+        {!merged ? (
+          <DndContext
+            id={TEAM_DND_CONTEXT_ID}
+            sensors={teamDndSensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleTeamDragEnd}
+          >
+            <SortableContext items={teamIds} strategy={verticalListSortingStrategy}>
+              <div
+                className={cn(
+                  "flex flex-col overflow-y-auto border-t py-0.5",
+                  // Folded it is one row and must not stretch; unfolded it is a
+                  // bounded band that scrolls its own overflow.
+                  teamsCollapsed ? "shrink-0" : "max-h-[30%] min-h-16 shrink"
+                )}
+                data-testid="sidebar-guild-band"
+              >
+                <SidebarGuildSectionRows
+                  rows={guildRows}
+                  activeKey={activeGuild}
+                  onNewConversation={handleGuildNewConversation}
+                  testId="sidebar-guild-rows"
+                  sortable
+                  onMoveTeam={moveTeam}
+                  collapsed={teamsCollapsed}
+                  onToggleCollapsed={toggleTeams}
+                />
+                {/* Folded, the band is exactly "where the list is scoped" — one
+                    row. Creating a team is a settings trip, not something the
+                    fold owes you a permanent row for; the context menu on the
+                    row still reaches team management. */}
+                {teamsCollapsed ? null : <SidebarCreateTeamRow />}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ) : null}
         {merged ? <SidebarFooter /> : null}
       </div>
     </PerfBoundary>
@@ -2008,22 +2276,12 @@ function ChannelListBody({
   return merged ? <SidebarRowsScope containerRef={containerRef}>{rows}</SidebarRowsScope> : rows
 }
 
-/**
- * Resting width of the rail's search control, in px. The nav rows' icon column
- * is 32px, so the button lands on it exactly.
- *
- * Also the control's flex basis, which is what makes the resting form sit
- * beside the three buttons after it rather than holding the row's whole
- * remaining width open around a 32px glyph.
- */
-const SEARCH_BUTTON_PX = 32
-
 function ChannelListSearch({
   inputRef,
   onQueryChange,
   onExpandedChange,
+  onRequestClose,
   compact = false,
-  collapsible = false,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>
   onQueryChange: (query: string) => void
@@ -2035,6 +2293,13 @@ function ChannelListSearch({
    */
   onExpandedChange?: (expanded: boolean) => void
   /**
+   * Escape on an empty field asks the parent to end the gesture — the merged
+   * rail's answer is a blur, which is what lets the folded controls slide
+   * back out. Undefined where nothing about the row folds (the Sheet): Esc
+   * there just blurs the input.
+   */
+  onRequestClose?: () => void
+  /**
    * The merged sidebar's row: the field sits directly under the navigation
    * rows, so it takes their 32px `rounded-md` box and their 13px type instead
    * of a form control's own proportions. The mobile Sheet (`compact: false`)
@@ -2042,15 +2307,6 @@ function ChannelListSearch({
    * shrinking its text would walk into the iOS auto-zoom rule below.
    */
   compact?: boolean
-  /**
-   * Rest as a single 32px button and open into the row when used. This is the
-   * rail's default: the field spent the whole session holding a placeholder
-   * next to three other controls, and a rail that narrow cannot afford a
-   * permanently open text input. `false` keeps the field always open, which is
-   * what the mobile Sheet wants (it has the width) and what a user who lives
-   * in search can switch back to.
-   */
-  collapsible?: boolean
 }) {
   const t = useTranslations("desktop.channelList")
   const [value, setValue] = useState("")
@@ -2059,9 +2315,6 @@ function ChannelListSearch({
   // caret / the clear button.
   const [focused, setFocused] = useState(false)
   const expanded = focused || value.length > 0
-  // The field is a button until it is used. `expanded` already means "the
-  // field owns the row" for the controls beside it, so the two stay one idea.
-  const buttonForm = collapsible && !expanded
   useEffect(() => {
     onExpandedChange?.(expanded)
   }, [expanded, onExpandedChange])
@@ -2093,25 +2346,9 @@ function ChannelListSearch({
 
   return (
     <div
-      // The WRAPPER carries the width, not the field inside it. A `flex-1`
-      // wrapper holding a 32px control would keep the row's whole remaining
-      // width while drawing a lone magnifier at the leading edge, leaving a
-      // third of the rail empty between it and the three buttons pinned to the
-      // other end. Resting it is one more 32px button beside those three.
-      //
-      // `flex-grow` rather than a width, because it is the one length here that
-      // interpolates: the end state is "whatever the row has left" once the
-      // actions beside it have collapsed, which no fixed value can name.
-      className={cn(
-        "relative min-w-0",
-        collapsible
-          ? cn(`transition-[flex-grow] ${SHELL_DOCK_TIMING_CLASS}`, buttonForm ? "grow-0" : "grow")
-          : "flex-1"
-      )}
-      style={collapsible ? { flexBasis: SEARCH_BUTTON_PX } : undefined}
+      className="relative min-w-0 flex-1"
       data-testid="channel-list-search"
       data-expanded={expanded || undefined}
-      data-button-form={buttonForm || undefined}
     >
       <InputGroup
         // Compact: sized and cornered like the navigation rows right above it
@@ -2124,7 +2361,6 @@ function ChannelListSearch({
           compact ? "h-8 rounded-md" : "h-9 rounded-lg",
           "border-border/40 bg-muted/40 shadow-none transition-colors",
           "hover:bg-muted/60",
-          collapsible && `overflow-hidden transition-[background-color] ${SHELL_DOCK_TIMING_CLASS}`,
           // Softer focus treatment than the form default — this sits in a rail,
           // not a form, so a 3px halo reads as an alarm rather than a caret.
           "has-[[data-slot=input-group-control]:focus-visible]:border-ring/50 has-[[data-slot=input-group-control]:focus-visible]:bg-background/60 has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-ring/25"
@@ -2158,10 +2394,12 @@ function ChannelListSearch({
           onBlur={() => setFocused(false)}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
-              // Text → clear it; empty → hand the row back to the actions.
+              // Text → clear it; empty → leave the search mode (or just blur
+              // where the row is permanent).
               event.preventDefault()
               event.stopPropagation()
               if (value) clear()
+              else if (onRequestClose) onRequestClose()
               else event.currentTarget.blur()
             } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               // ⌘/Ctrl+Enter from the field: take this query global.
@@ -2228,25 +2466,6 @@ function ChannelListSearch({
           )}
         </InputGroupAddon>
       </InputGroup>
-      {buttonForm ? (
-        // The 32px box is almost entirely the magnifier addon, and clicking an
-        // addon does not focus the control beside it. Rather than rebuild the
-        // resting form as a real button (which would fork the accessible name,
-        // the focus ring, the clear button and the shortcut hint into two
-        // controls that are really one), the overlay is a pointer target only:
-        // hidden from assistive tech, out of the tab order, and doing nothing
-        // but handing focus to the field. Focus is the single thing that opens
-        // the field, so a click, a tab and `/` all arrive the same way.
-        <button
-          type="button"
-          aria-hidden
-          tabIndex={-1}
-          data-testid="channel-list-search-button"
-          onClick={() => inputRef.current?.focus()}
-          style={{ width: SEARCH_BUTTON_PX }}
-          className="absolute inset-y-0 left-0 rounded-md"
-        />
-      ) : null}
     </div>
   )
 }
@@ -2294,36 +2513,27 @@ function ConversationListEmptyState({
  * rather than a "+" that travels with the open accordion row — and the label
  * names the target, which is what the row it replaced used to say.
  *
- * Sized to `SidebarRow` (28px, the same gutter and type) so it lines up with
- * the nav rows beneath it, but bordered: this one acts rather than navigates.
+ * Drawn with `SidebarRow` itself — a hand-rolled copy once drifted 4px
+ * right, because `Button`'s `has-[>svg]:px-3` fires on a bare icon child
+ * that `SidebarRow`'s icon span shields it from. The trailing "+" keeps it
+ * reading as an action rather than a destination.
+ *
+ * Always a direct chat: the scope tree shows every squad at once, so there is
+ * no selected scope for the button to inherit — squad conversations start
+ * from the "+" on their group header instead.
  */
-function SidebarNewConversationButton({
-  guild,
-  onNewDirect,
-  onNewTeamConversation,
-}: {
-  guild: { kind: "dm" } | { kind: "team"; teamId: string }
-  onNewDirect: () => void
-  onNewTeamConversation: (teamId: string) => void
-}) {
+function SidebarNewConversationButton({ onNewDirect }: { onNewDirect: () => void }) {
   const t = useTranslations("desktop.channelList")
-  const label = guild.kind === "team" ? t("newConversation") : t("newChat")
   return (
-    <div className="shrink-0 px-2 pt-1.5 pb-1">
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => {
-          if (guild.kind === "team") onNewTeamConversation(guild.teamId)
-          else onNewDirect()
-        }}
-        title={label}
-        data-testid="sidebar-new-conversation"
-        className="h-7 w-full min-w-0 justify-start gap-2.5 rounded-md border-border/60 bg-background/50 px-2 text-[13px] font-normal shadow-none hover:bg-accent hover:text-accent-foreground"
-      >
-        <PlusIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate">{label}</span>
-      </Button>
+    <div className="shrink-0 px-2 pt-1.5 pb-0.5">
+      <SidebarRow
+        onClick={onNewDirect}
+        title={t("newChat")}
+        icon={<MessagesSquareIcon />}
+        label={t("newChat")}
+        trailing={<PlusIcon className="size-3.5 text-muted-foreground/70" aria-hidden />}
+        testId="sidebar-new-conversation"
+      />
     </div>
   )
 }
@@ -2337,10 +2547,19 @@ function SidebarNewConversationButton({
  */
 function Header({
   outlet,
+  workspaceChrome,
   selectedGuild,
   team,
   ...actions
-}: { outlet: HTMLElement | null } & HeaderActionsProps) {
+}: {
+  outlet: HTMLElement | null
+  /**
+   * Draw the workspace header's content inline. Set when the expanded rail is
+   * the workspace sidebar but there is no title bar to project into — the web
+   * shell's default (`webTitleBarEnabled` off).
+   */
+  workspaceChrome: boolean
+} & HeaderActionsProps) {
   const t = useTranslations("desktop.channelList")
   const isTeam = selectedGuild.kind === "team"
   const title = (
@@ -2370,30 +2589,45 @@ function Header({
       ) : null}
     </div>
   )
-  // Projected: the title bar's start outlet is already sized to this rail, so
-  // the row only lays its content out. Inline: `h-10` + `border-b`, the same
-  // 40px and bottom rule the chat and workbench headers draw when they are
-  // not projected either, so the three columns still read as one bar.
-  // Projected: the bar's start outlet is sized to this rail. What goes there
-  // is the *sidebar's* identity — the workspace switcher (initial · name ·
-  // chevron), the way a Slack/Claude sidebar is headed by its workspace — not
-  // the guild title: with the guild accordion inside the sidebar the open
-  // section's own row already says "Direct Messages" / the team's name.
-  // Inline (the mobile Sheet): `h-10` + `border-b` guild title with the
-  // list actions beside it, the same 40px the other column headers draw.
+  // What the bar's start outlet carries when it exists — the *sidebar's*
+  // identity, not the guild title: the workspace switcher (initial · name ·
+  // chevron), the way a Slack/Claude sidebar is headed by its workspace, plus
+  // the branch chip the workspace is on. The guild accordion inside the rail
+  // already names the open section. On the bar-less web shell the same row
+  // draws inline, so the rail keeps the same head either way. Search and the
+  // list's ⋯ actions are not here — they head the conversation list itself,
+  // next to the rows they act on.
+  const workspaceRow = (
+    <div
+      data-testid="channel-list-workspace-chrome"
+      className="flex min-w-0 flex-1 items-center self-stretch p-0.5"
+    >
+      <WorkspaceContextBar />
+    </div>
+  )
+  // Projected: the bar's start outlet is already sized to this rail, so the
+  // row only lays its content out. Inline: `h-[var(--chrome-h)]` + `border-b`,
+  // the same 40px and bottom rule the chat and workbench headers draw, so the
+  // columns still read as one header line. The compact rail (mobile Sheet, a
+  // right-edge or collapsed rail — never the workspace sidebar) keeps the
+  // plain guild title with its actions beside it.
   return outlet ? (
     createPortal(
       <div
         data-testid="channel-list-header"
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-2"
       >
-        {/* The bar, not the bare switcher: the branch belongs beside the
-            workspace it is inside, and from a conversation there was no door
-            to it at all. Same switcher inside, so this is not a second one. */}
-        <WorkspaceContextBar />
+        {workspaceRow}
       </div>,
       outlet
     )
+  ) : workspaceChrome ? (
+    <div
+      data-testid="channel-list-header"
+      className="flex h-[var(--chrome-h)] shrink-0 items-center gap-2 border-b px-2"
+    >
+      {workspaceRow}
+    </div>
   ) : (
     <div
       data-testid="channel-list-header"
@@ -2416,6 +2650,12 @@ interface HeaderActionsProps {
    * full-width search field and one button beside it.
    */
   layout?: "row" | "compact"
+  /**
+   * Where the menu opens. Compact inside the rail used to fly `right`, over
+   * the chat pane; in the title bar (where it now lives) it drops `bottom`,
+   * like every other menu up there.
+   */
+  menuSide?: "right" | "bottom"
   selectedGuild: { kind: "dm" } | { kind: "team"; teamId: string }
   team: Team | null
   view: "active" | "archived"
@@ -2440,6 +2680,7 @@ interface HeaderActionsProps {
 function HeaderActions({
   className,
   layout = "row",
+  menuSide,
   selectedGuild,
   view,
   density,
@@ -2524,10 +2765,9 @@ function HeaderActions({
         <Button
           size="icon"
           variant="ghost"
-          // Compact sits in the search row next to the filter trigger, so it
-          // takes that row's 32px square — the navigation rows' box; inline it
-          // is one of three 28px buttons on a 40px title row.
-          className={compact ? "size-8 rounded-md" : "size-7"}
+          // Compact sits beside the rail's other 32px icon controls; inline
+          // it is one of three 28px buttons on a 40px title row.
+          className={cn(compact ? "size-8 rounded-md" : "size-7", className)}
           aria-label={compact ? t("listActions") : t("displayOptions")}
           title={compact ? t("listActions") : t("displayOptions")}
           data-testid="channel-list-actions-menu"
@@ -2540,10 +2780,11 @@ function HeaderActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        // Compact: a flyout to the right, off the rail and over the chat, so a
-        // long menu is not clipped by the rail's edge or laid over the list it
-        // configures. Inline (the title row): a plain drop-down, as before.
-        side={compact ? "right" : "bottom"}
+        // Compact inside the rail flew `right`, off the rail and over the
+        // chat, so a long menu was not clipped by the rail's edge; in the
+        // title bar it drops downward like the bar's own menus. Inline (the
+        // Sheet's title row): a plain drop-down, as before.
+        side={menuSide ?? (compact ? "right" : "bottom")}
         align={compact ? "start" : "end"}
         className="w-60"
       >
@@ -2617,31 +2858,38 @@ function HeaderActions({
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
-            <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
-            <span className="flex-1 truncate">{t("groupBy.label")}</span>
-            <span className="max-w-24 truncate text-xs text-muted-foreground">
-              {t(`groupBy.options.${groupBy}`)}
-            </span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-56">
-            <DropdownMenuRadioGroup
-              value={groupBy}
-              onValueChange={(value) => onUpdateDisplay({ groupBy: value as ConversationGroupBy })}
-            >
-              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
-                <DropdownMenuRadioItem
-                  key={option}
-                  value={option}
-                  data-testid={`channel-list-group-${option}`}
-                >
-                  {t(`groupBy.options.${option}`)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        {/* Not offered in the compact (merged rail) menu: there the grouping
+            is not a preference — it is the scope tree itself, always the team
+            axis. The choice stays live in the Sheet's row layout. */}
+        {!compact ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
+              <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
+              <span className="flex-1 truncate">{t("groupBy.label")}</span>
+              <span className="max-w-24 truncate text-xs text-muted-foreground">
+                {t(`groupBy.options.${groupBy}`)}
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-56">
+              <DropdownMenuRadioGroup
+                value={groupBy}
+                onValueChange={(value) =>
+                  onUpdateDisplay({ groupBy: value as ConversationGroupBy })
+                }
+              >
+                {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem
+                    key={option}
+                    value={option}
+                    data-testid={`channel-list-group-${option}`}
+                  >
+                    {t(`groupBy.options.${option}`)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
         {/* Sort sits beside grouping, the setting it pairs with — the filter
             menu carries the same radio group, because that is where a narrowed
             list is being shaped. Both write `conversationSidebar.sortBy`. */}
@@ -2729,8 +2977,38 @@ function HeaderActions({
   )
 }
 
+/**
+ * Everything the merged rail's scope tree needs beyond plain sections. Absent
+ * on the compact surfaces, where the guild band still owns scope switching.
+ */
+interface ScopeTreeConfig {
+  /**
+   * Browsing the archive borrows the grouping but not the furniture: the
+   * SQUADS label and "Create team" row only head the active list.
+   */
+  archived: boolean
+  /** Squad id → entity, for the header's avatar and context menu. */
+  teamById: ReadonlyMap<string, Team>
+  /** Unread conversations under the Chats scope. */
+  unreadDm: number
+  /** Unread conversations per squad id. */
+  unreadTeams: ReadonlyMap<string, number>
+  /** Squad ids in the user's drag order — the headers' sortable items. */
+  teamOrderIds: readonly string[]
+  /** How many squads the label counts. */
+  squadCount: number
+  /** Section keys whose "Show more" cap is lifted this session. */
+  previewExpanded: ReadonlySet<string>
+  onTogglePreview: (sectionKey: string) => void
+  /** Start a conversation inside a scope; `null` = the Chats group. */
+  onNewConversation: (teamId: string | null) => void
+  /** Keyboard reorder for squad headers — the headers spend Enter on folding. */
+  onMoveTeam: (teamId: string, delta: number) => void
+}
+
 function ConversationSections({
   sections,
+  scopeTree,
   dropPreview,
   activeDragId,
   settled,
@@ -2767,6 +3045,12 @@ function ConversationSections({
   onJumpToParent,
 }: {
   sections: readonly import("@/lib/chat/conversation-list-model").ConversationSection[]
+  /**
+   * Set in the merged rail only: the list is a scope tree, so team-axis
+   * groups render as collapsible squad headers (avatar, unread pill, hover
+   * "+", context menu, drag reorder) instead of plain section labels.
+   */
+  scopeTree?: ScopeTreeConfig
   dropPreview: ConversationDropPreview | null
   /** Row currently being dragged — rendered again as the pointer-following overlay. */
   activeDragId: string | null
@@ -2874,10 +3158,18 @@ function ConversationSections({
   const folderIds = sections.flatMap((section) =>
     section.kind === "folder" ? [section.folder.id] : []
   )
+  // The scope tree's squad run starts at the first named team group (the
+  // ungrouped "Chats" bucket leads). The SQUADS label is drawn before it — or
+  // after the sections entirely when there are no squads, where it still
+  // heads the "Create team" row.
+  const squadsStartIndex = sections.findIndex(
+    (section) => section.kind === "group" && section.axis === "team" && !isChatsScopeGroup(section)
+  )
+  const searching = searchQuery.length > 0
 
-  return (
-    <div className="flex flex-col gap-2 p-2">
-      {sections.map((section) => {
+  const body = (
+    <>
+      {sections.map((section, index) => {
         if (section.kind === "folder") {
           const { folder, collapsed } = section
           return (
@@ -2901,7 +3193,55 @@ function ConversationSections({
 
         if (section.kind === "group") {
           const key = conversationSectionKey(section)
-          return (
+          // The SQUADS label precedes the first named team group — the seam
+          // between the Chats bucket and the squad run.
+          const squadsLabel =
+            scopeTree && !scopeTree.archived && !searching && index === squadsStartIndex ? (
+              <SquadsGroupLabel key="squads-label" count={scopeTree.squadCount} />
+            ) : null
+          if (scopeTree && section.axis === "team") {
+            const chatsGroup = isChatsScopeGroup(section)
+            const group = (
+              <ScopeTreeGroupSection
+                key={key}
+                sectionKey={key}
+                // The scope identity (who the context menu and "+" act on) is
+                // the group id; the entity only supplies the avatar. A squad
+                // whose entity is gone keeps its name and its menu — only the
+                // avatar degrades to the generic icon.
+                scopeTeamId={chatsGroup ? null : section.group.id}
+                team={chatsGroup ? undefined : scopeTree.teamById.get(section.group.id)}
+                name={
+                  section.group.id === UNGROUPED_ID
+                    ? t(CONVERSATION_UNGROUPED_LABEL_KEY[section.axis])
+                    : section.group.name
+                }
+                collapsed={section.collapsed}
+                sessions={section.sessions}
+                previewHidden={section.previewHidden ?? 0}
+                previewExpanded={teamGroupPreviewExpanded(section, scopeTree.previewExpanded)}
+                unreadCount={
+                  chatsGroup
+                    ? scopeTree.unreadDm
+                    : (scopeTree.unreadTeams.get(section.group.id) ?? 0)
+                }
+                onToggle={() => onToggleGroup(key, !section.collapsed)}
+                onTogglePreview={() => scopeTree.onTogglePreview(key)}
+                onNewConversation={scopeTree.onNewConversation}
+                onMoveTeam={scopeTree.onMoveTeam}
+                renderRow={renderSortableRow}
+              />
+            )
+            return squadsLabel ? (
+              <Fragment key={key}>
+                {squadsLabel}
+                {group}
+              </Fragment>
+            ) : (
+              group
+            )
+          }
+          const groupSection = (
             <GroupSection
               key={key}
               sectionKey={key}
@@ -2916,6 +3256,14 @@ function ConversationSections({
               onToggle={() => onToggleGroup(key, !section.collapsed)}
               renderRow={renderSortableRow}
             />
+          )
+          return squadsLabel ? (
+            <Fragment key={key}>
+              {squadsLabel}
+              {groupSection}
+            </Fragment>
+          ) : (
+            groupSection
           )
         }
 
@@ -2972,10 +3320,36 @@ function ConversationSections({
           </section>
         )
       })}
+      {scopeTree && !scopeTree.archived && !searching ? (
+        <>
+          {/* No named team groups → the label still heads "Create team". */}
+          {squadsStartIndex === -1 ? <SquadsGroupLabel count={scopeTree.squadCount} /> : null}
+          <SidebarCreateTeamRow />
+        </>
+      ) : null}
       <ConversationDragOverlay
         session={activeDragSession}
         rowProps={activeDragSession ? rowProps(activeDragSession) : null}
       />
+    </>
+  )
+
+  return (
+    <div className="flex flex-col gap-2 p-2">
+      {/* The squad headers share one sortable list inside the session DnD
+          context — a different draggable `type`, so a header drag reorders
+          groups while a row drag still reorders within its section. */}
+      {scopeTree ? (
+        <SortableContext
+          id="scope-tree-teams"
+          items={[...scopeTree.teamOrderIds]}
+          strategy={verticalListSortingStrategy}
+        >
+          {body}
+        </SortableContext>
+      ) : (
+        body
+      )}
     </div>
   )
 }
@@ -3138,6 +3512,285 @@ function GroupSection({
           >
             <ul className="flex flex-col gap-0.5">{sessions.map(renderRow)}</ul>
           </SortableContext>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  )
+}
+
+/**
+ * The micro-label that heads the squad run of the scope tree — the seam
+ * between the Chats group and the teams. A label only, deliberately not
+ * sticky: the group headers themselves already stick, and a second pinned
+ * strip would just sit underneath them.
+ */
+function SquadsGroupLabel({ count }: { count: number }) {
+  const railT = useTranslations("desktop.guildRail")
+  const router = useRouter()
+  return (
+    <div
+      className="group/squads-label flex h-6 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground"
+      data-testid="sidebar-squads-label"
+    >
+      <span className={SECTION_LABEL_CLASS}>{railT("squads")}</span>
+      {count > 0 ? <span className={SECTION_COUNT_CLASS}>{count}</span> : null}
+      {/* Same destination the trailing "Create team" row has — the hover "+"
+          on the label is the shortcut, the row is the discoverable one. */}
+      <button
+        type="button"
+        onClick={() => router.push(TEAM_SETTINGS_ROUTE)}
+        aria-label={railT("createTeam")}
+        title={railT("createTeam")}
+        data-testid="sidebar-squads-create-team"
+        className="ml-auto grid size-5 place-items-center rounded-sm opacity-0 transition-opacity group-hover/squads-label:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100"
+      >
+        <PlusIcon className="size-3.5" />
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A scope-tree group — the merged rail's replacement for the scope-switcher
+ * band. Chats first (the ungrouped team bucket), then one collapsible group
+ * per squad. The header is a navigation entity, not just a label: it folds
+ * the group, serves the scope's context menu, offers a hover "+" for a new
+ * conversation there, and counts the scope's unread conversations.
+ *
+ * Squad headers are also the groups' reorder handles — a second `type` of
+ * draggable inside the session list's DndContext. Pointer listeners only: the
+ * header's Enter/Space fold the group, so the shared keyboard sensor must
+ * never arm on them (the menu's Move up/down covers that path — the same
+ * split the compact band used). Chats is the fixed first group, never
+ * sortable.
+ *
+ * Rows inside a squad group indent under the header's name — the tree's one
+ * level of nesting. The header itself is a plain button, not a `SidebarRow`:
+ * it *discloses* rather than navigates, like the folder headers it sits
+ * among.
+ */
+function ScopeTreeGroupSection({
+  sectionKey,
+  scopeTeamId,
+  team,
+  name,
+  collapsed,
+  sessions,
+  previewHidden,
+  previewExpanded,
+  unreadCount,
+  onToggle,
+  onTogglePreview,
+  onNewConversation,
+  onMoveTeam,
+  renderRow,
+}: {
+  sectionKey: string
+  /** The group this header acts on; `null` = the Chats bucket. */
+  scopeTeamId: string | null
+  /** The squad entity — avatar only; absent for Chats or a deleted team. */
+  team: Team | undefined
+  name: string
+  collapsed: boolean
+  /** The preview slice — `previewHidden` more rows sit behind "Show more". */
+  sessions: ChatSession[]
+  previewHidden: number
+  /** The cap was lifted AND the group is long enough that it matters. */
+  previewExpanded: boolean
+  unreadCount: number
+  onToggle: () => void
+  onTogglePreview: () => void
+  onNewConversation: (teamId: string | null) => void
+  onMoveTeam: (teamId: string, delta: number) => void
+  renderRow: (s: ChatSession) => ReactNode
+}) {
+  const t = useTranslations("desktop.channelList")
+  const scopeKey = scopeTeamId ?? "chats"
+  const {
+    setNodeRef: setScopeNodeRef,
+    transform: scopeTransform,
+    transition: scopeTransition,
+    isDragging: scopeDragging,
+    listeners: scopeListeners,
+  } = useSortable({
+    id: scopeTeamId ?? "scope:chats",
+    disabled: scopeTeamId === null,
+    data: { type: "team", teamId: scopeTeamId },
+  })
+  // Drop the keyboard sensor's listener — the header's Enter/Space belong to
+  // the fold. Pointer listeners are what make it a drag handle.
+  const { onKeyDown: _headerKeyDown, ...headerDragListeners } = (scopeListeners ?? {}) as Record<
+    string,
+    unknown
+  >
+  const nested = scopeTeamId !== null
+  const total = sessions.length + previewHidden
+  const newLabel = scopeTeamId ? t("newConversationIn", { name }) : t("newChat")
+
+  const rowsList =
+    sessions.length === 0 ? (
+      // An empty squad keeps a quiet hint; an empty Chats gets a door instead
+      // — the label alone cannot start anything, so the row does it.
+      scopeTeamId ? (
+        <p
+          className="py-1 pl-7 text-[11px] text-muted-foreground/70"
+          data-testid={`sidebar-scope-empty-${scopeKey}`}
+        >
+          {t("groupEmpty")}
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onNewConversation(null)}
+          data-testid={`sidebar-scope-empty-${scopeKey}`}
+          className="mx-1 block h-6 rounded-md pl-6 pr-2 text-left text-[11px] text-muted-foreground/70 transition-colors hover:bg-accent/60 hover:text-foreground"
+        >
+          {t("chatsEmpty")}
+        </button>
+      )
+    ) : (
+      <SortableContext
+        id={sectionKey}
+        items={sessions.map((session) => session.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <ul className={cn("flex flex-col gap-0.5", nested && "pl-4")}>{sessions.map(renderRow)}</ul>
+      </SortableContext>
+    )
+  const moreRow =
+    previewHidden > 0 || previewExpanded ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={onTogglePreview}
+        data-testid={`sidebar-scope-more-${scopeKey}`}
+        className={cn(
+          "mt-0.5 h-6 w-full justify-start rounded-md text-[11px] font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+          nested ? "pl-4" : "px-2.5"
+        )}
+      >
+        {previewExpanded
+          ? t("groupShowLess")
+          : scopeTeamId
+            ? t("groupShowMore", { count: previewHidden })
+            : t("groupShowAll", { count: total })}
+      </Button>
+    ) : null
+
+  // The Chats bucket is the tree's fixed first section: a plain label, not a
+  // group header — there is nothing to fold into (the rail's own chrome is
+  // the fold) and no scope menu a label could serve.
+  if (!nested) {
+    return (
+      <section aria-label={name} data-testid={`sidebar-scope-${scopeKey}`}>
+        <div className="flex h-6 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground">
+          <span className={SECTION_LABEL_CLASS}>{name}</span>
+          {total > 0 ? <span className={SECTION_COUNT_CLASS}>{total}</span> : null}
+        </div>
+        {rowsList}
+        {moreRow}
+      </section>
+    )
+  }
+
+  return (
+    <Collapsible asChild open={!collapsed} onOpenChange={onToggle}>
+      <section
+        ref={setScopeNodeRef}
+        style={{
+          transform: CSS.Transform.toString(scopeTransform),
+          transition: scopeTransition,
+        }}
+        aria-label={name}
+        data-testid={`sidebar-scope-${scopeKey}`}
+        className={cn(
+          "rounded-md transition-colors duration-200 data-[state=open]:bg-muted/10",
+          scopeDragging && "z-10 opacity-50"
+        )}
+      >
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className={cn(
+                "group/scope-head flex h-7 items-center gap-0.5 px-1 pb-0.5",
+                STICKY_SECTION_HEADER,
+                "cursor-grab active:cursor-grabbing"
+              )}
+              {...headerDragListeners}
+            >
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="min-w-0 flex-1 justify-start gap-1.5 px-1"
+                  aria-label={name}
+                  data-testid={`sidebar-scope-toggle-${scopeKey}`}
+                >
+                  {team ? (
+                    <AvatarBadge subject={team} size={14} textClassName="text-[8px]" />
+                  ) : (
+                    <UsersIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-left text-[13px] font-normal text-muted-foreground transition-colors group-hover/scope-head:text-foreground">
+                    {name}
+                  </span>
+                </Button>
+              </CollapsibleTrigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                // The header is the drag handle — without this, pressing "+"
+                // would arm a group drag.
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onNewConversation(scopeTeamId)
+                }}
+                aria-label={newLabel}
+                title={newLabel}
+                data-testid={`sidebar-scope-new-${scopeKey}`}
+                className="size-5 shrink-0 rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/scope-head:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground"
+              >
+                <PlusIcon className="size-3.5" />
+              </Button>
+              <GuildUnreadPill count={unreadCount} testId={`sidebar-scope-unread-${scopeKey}`} />
+              {/* The fold affordance sits at the row's end (Codex-style), a
+                  second trigger on the same disclosure — pointer-only: the
+                  main header button already owns Enter/Space, so this one
+                  stays out of the tab order and the a11y tree. */}
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  tabIndex={-1}
+                  aria-hidden
+                  // Same drag-handle guard as the "+": a press here must not
+                  // arm a group drag.
+                  onPointerDown={(event) => event.stopPropagation()}
+                  data-testid={`sidebar-scope-chevron-${scopeKey}`}
+                  className="size-5 shrink-0 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <SectionChevron collapsed={collapsed} />
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent data-testid={`sidebar-scope-menu-${scopeKey}`}>
+            <GuildScopeMenuItems
+              teamId={scopeTeamId}
+              unreadCount={unreadCount}
+              onNewConversation={onNewConversation}
+              onMoveTeam={onMoveTeam}
+            />
+          </ContextMenuContent>
+        </ContextMenu>
+        <CollapsibleContent className="overflow-hidden pt-0.5 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
+          {rowsList}
+          {moreRow}
         </CollapsibleContent>
       </section>
     </Collapsible>
