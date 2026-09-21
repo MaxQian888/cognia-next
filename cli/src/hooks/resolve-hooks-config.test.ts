@@ -68,6 +68,151 @@ describe("resolveCliHooksConfig", () => {
     expect(hasAnyHookGroup(config)).toBe(false)
   })
 
+  it("merges enabled plugins' commandHooks under user groups and above built-ins", () => {
+    const pluginManifest = JSON.stringify({
+      id: "guard",
+      name: "Guard",
+      type: "frontend",
+      capabilities: ["command-hooks"],
+      commandHooks: {
+        PreToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [{ type: "command", command: "${COGNIA_PLUGIN_ROOT}/guard.mjs" }],
+          },
+        ],
+      },
+    })
+    const config = resolveCliHooksConfig({
+      home: HOME,
+      osHome: "/home",
+      cwd: "/work",
+      isTrustedFolder: () => true,
+      builtinHooksDir: "/bundle/hooks/builtin",
+      readDir: (dir) => (dir === "/home/.cognia/.cognia/plugins" ? ["guard"] : []),
+      readFile: (absPath) => {
+        if (absPath.endsWith("config.json")) {
+          return JSON.stringify({
+            hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "user.sh" }] }] },
+          })
+        }
+        if (absPath.endsWith("plugin.json")) return pluginManifest
+        return null
+      },
+    })
+
+    const commands = (config.PreToolUse ?? []).map(
+      (g) => (g.hooks[0] as { command?: string }).command ?? ""
+    )
+    // user group first, then the plugin's (root token bound) — any
+    // default-on built-ins land after both.
+    expect(commands.slice(0, 2)).toEqual([
+      "user.sh",
+      '"/home/.cognia/.cognia/plugins/guard"/guard.mjs',
+    ])
+  })
+
+  it("scans the COGNIA_DATA_DIR root where cognia-server installs plugins", () => {
+    const dataDir = "/data-dir"
+    process.env.COGNIA_DATA_DIR = dataDir
+    try {
+      const config = resolveCliHooksConfig({
+        home: HOME,
+        osHome: "/home",
+        builtinHooksDir: "/bundle/hooks/builtin",
+        readDir: (dir) => (dir === `${dataDir}/.cognia/plugins` ? ["guard"] : []),
+        readFile: (absPath) =>
+          absPath.endsWith("manifest.json")
+            ? JSON.stringify({
+                id: "guard",
+                name: "Guard",
+                type: "frontend",
+                capabilities: ["command-hooks"],
+                commandHooks: {
+                  SessionStart: [{ hooks: [{ type: "command", command: "echo data-scope" }] }],
+                },
+              })
+            : null,
+      })
+
+      const commands = (config.SessionStart ?? []).flatMap((g) =>
+        g.hooks.map((h) => (h as { command?: string }).command ?? "")
+      )
+      expect(commands).toContain("echo data-scope")
+    } finally {
+      delete process.env.COGNIA_DATA_DIR
+    }
+  })
+
+  it("does not run repository-controlled project hooks until the folder is trusted", () => {
+    const projectPlugins = "/work/.cognia/plugins"
+    const readFile = (absPath: string) =>
+      absPath.endsWith("manifest.json")
+        ? JSON.stringify({
+            id: "guard",
+            name: "Guard",
+            type: "frontend",
+            capabilities: ["command-hooks"],
+            commandHooks: {
+              UserPromptSubmit: [{ hooks: [{ type: "command", command: "echo repo-owned" }] }],
+            },
+          })
+        : null
+    const readDir = (dir: string) => (dir === projectPlugins ? ["guard"] : [])
+
+    // Untrusted project → the manifest never even feeds the merge.
+    const untrusted = resolveCliHooksConfig({
+      home: HOME,
+      osHome: "/home",
+      cwd: "/work",
+      isTrustedFolder: () => false,
+      builtinHooksDir: "/bundle/hooks/builtin",
+      readDir,
+      readFile,
+    })
+    expect(
+      (untrusted.UserPromptSubmit ?? []).flatMap((g) =>
+        g.hooks.map((h) => (h as { command?: string }).command ?? "")
+      )
+    ).not.toContain("echo repo-owned")
+
+    // Once the folder is trusted the same manifest contributes its hooks.
+    const trusted = resolveCliHooksConfig({
+      home: HOME,
+      osHome: "/home",
+      cwd: "/work",
+      isTrustedFolder: (home, cwd) => home === HOME && cwd === "/work",
+      builtinHooksDir: "/bundle/hooks/builtin",
+      readDir,
+      readFile,
+    })
+    expect(
+      (trusted.UserPromptSubmit ?? []).flatMap((g) =>
+        g.hooks.map((h) => (h as { command?: string }).command ?? "")
+      )
+    ).toContain("echo repo-owned")
+  })
+
+  it("omits the plugin layer entirely when no plugin contributes", () => {
+    const config = resolveCliHooksConfig({
+      home: HOME,
+      osHome: "/home",
+      builtinHooksDir: "/bundle/hooks/builtin",
+      builtinHookOverrides: {
+        "auto-context-loader": false,
+        "auto-context-loader-prompt": false,
+        "cost-quota-guard": false,
+        "pii-safety-guard": false,
+        "pii-safety-guard-tool": false,
+        "tool-provenance-guard": false,
+        "command-auth-gate": false,
+      },
+      readDir: () => [],
+      readFile: () => null,
+    })
+    expect(hasAnyHookGroup(config)).toBe(false)
+  })
+
   it("strips fleet groups so the monitor's own hooks are not re-run", () => {
     const config = resolveCliHooksConfig({
       home: HOME,

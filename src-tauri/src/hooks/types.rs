@@ -75,6 +75,11 @@ pub enum HookHandler {
         command: String,
         #[serde(default)]
         timeout: Option<u64>, // seconds
+        /// Fire-and-forget (`"async": true` in settings.json): spawn detached
+        /// and never wait on the child — its output can neither block nor
+        /// inject context. `is_async` because `async` is a Rust keyword.
+        #[serde(rename = "async", default)]
+        is_async: bool,
     },
     /// HTTP POST with the event payload as JSON body. Phase 2.
     Webhook {
@@ -206,6 +211,11 @@ pub struct HookEventPayload {
     pub hook_event_name: String,
     pub session_id: String,
     pub cwd: Option<String>,
+    /// `cwd` already survived the host's trust gate (`resolve_trusted_cwd`) —
+    /// hook scripts that read repository-controlled files may act on it
+    /// without re-checking. `false` means the caller never trust-filtered the
+    /// path (or had none), so repo content under it stays inert.
+    pub cwd_trusted: bool,
     /// Which agent produced the event. Omitted from the JSON when unknown so a
     /// hook script can distinguish "no identity" from "identity is empty".
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +260,7 @@ mod tests {
             hook_event_name: "PreToolUse".into(),
             session_id: "s1".into(),
             cwd: None,
+            cwd_trusted: false,
             agent_kind: None,
             agent_ref: None,
             fields: serde_json::json!({

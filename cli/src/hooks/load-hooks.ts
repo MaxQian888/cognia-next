@@ -85,6 +85,13 @@ export function loadHooks(opts: {
   claudeHome: string
   readFile: FileReader
   /**
+   * Enabled plugins' merged `commandHooks` block (see `plugin-hooks.ts`).
+   * Merged UNDER the user's own groups and above built-ins — for each event
+   * the final order is cognia → claude → plugin → builtin, matching the
+   * desktop rail (`src-tauri/src/hooks/mod.rs:load_effective_settings`).
+   */
+  plugin?: HooksConfig
+  /**
    * Product-bundled built-in hook groups (see `lib/claude/hooks/builtin-hooks`).
    * Merged UNDER the user's own hooks — for each event the cognia then claude
    * groups run first, then the built-in groups, so a user hook can block before
@@ -96,7 +103,9 @@ export function loadHooks(opts: {
   const claude = withoutFleetHookGroups(
     readHooksBlock(path.join(opts.claudeHome, "settings.json"), opts.readFile)
   )
-  return mergeHookConfigs(mergeHookConfigs(cognia, claude), opts.builtin)
+  const user = mergeHookConfigs(cognia, claude)
+  const plugin = mergeHookConfigs(user, opts.plugin)
+  return mergeHookConfigs(plugin, opts.builtin)
 }
 
 export type { HookEvent, HookGroup, HooksConfig }

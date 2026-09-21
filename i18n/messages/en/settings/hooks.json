@@ -26,6 +26,10 @@
       "tool-provenance-guard": {
         "desc": "Deny a tool call by which surface declared it — selectors come from COGNIA_DENY_TOOL_PROVENANCE.",
         "label": "Tool provenance guard"
+      },
+      "command-auth-gate": {
+        "desc": "Deny a shell command when its rule's `ensure` credential check fails — rules come from .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES.",
+        "label": "Command auth gate"
       }
     },
     "off": "Off",
@@ -76,6 +80,8 @@
     "removeAria": "Remove this group"
   },
   "handler": {
+    "asyncHint": "Runs detached — its output can't block or add context.",
+    "asyncLabel": "Run in background",
     "commandHint": "e.g. {example}",
     "commandLabel": "Shell command",
     "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",

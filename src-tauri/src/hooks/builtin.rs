@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::settings::ClaudeSettings;
 
@@ -70,6 +70,13 @@ pub const BUILTIN_HOOKS: &[BuiltinHookDef] = &[
         script: "tool-provenance-guard.mjs",
         default_enabled: false,
     },
+    BuiltinHookDef {
+        id: "command-auth-gate",
+        event: "PreToolUse",
+        matcher: Some("Bash|shell_execute_advanced|start_process"),
+        script: "command-auth-gate.mjs",
+        default_enabled: false,
+    },
 ];
 
 fn is_enabled(def: &BuiltinHookDef, overrides: &Map<String, Value>) -> bool {
@@ -80,12 +87,12 @@ fn is_enabled(def: &BuiltinHookDef, overrides: &Map<String, Value>) -> bool {
 }
 
 #[cfg(not(windows))]
-fn quote(value: &str) -> String {
+pub(super) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 #[cfg(windows)]
-fn quote(value: &str) -> String {
+pub(super) fn quote(value: &str) -> String {
     // Hook commands run through cmd.exe on Windows. Quotes protect whitespace
     // and metacharacters; doubling percent signs prevents environment-variable
     // expansion in paths supplied by the installation layout.

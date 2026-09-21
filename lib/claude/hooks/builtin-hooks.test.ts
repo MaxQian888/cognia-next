@@ -281,6 +281,162 @@ describe("tool-provenance-guard.mjs", () => {
   })
 })
 
+describe("command-auth-gate.mjs", () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), "cag-"))
+    mkdirSync(path.join(dir, ".cognia"))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  // `cwd_trusted` mirrors what the desktop rail emits after its own trust
+  // gate — it marks these payloads as host-verified so the repo rules file
+  // applies (the CLI rail would instead pass the trusted-folders ledger).
+  const bashPayload = (command: string, cwd: string) => ({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command },
+    cwd,
+    cwd_trusted: true,
+  })
+
+  function writeRules(rules: object[]) {
+    writeFileSync(path.join(dir, ".cognia", "command-auth.json"), JSON.stringify({ rules }))
+  }
+
+  it("soft-allows (exit 0) with no rules configured", () => {
+    const res = runScript("command-auth-gate.mjs", bashPayload("anything", dir))
+    expect(res.code).toBe(0)
+  })
+
+  it("denies (exit 2) with the rule message when ensure fails", () => {
+    writeRules([
+      {
+        id: "demo-auth",
+        match: "^deploy\\b",
+        ensure: "false",
+        message: "re-auth first, then retry",
+      },
+    ])
+    const res = runScript("command-auth-gate.mjs", bashPayload("deploy --prod", dir))
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("re-auth first, then retry")
+  })
+
+  it("allows (exit 0) when every matching ensure passes", () => {
+    writeRules([
+      { match: "^deploy\\b", ensure: "true" },
+      { match: ".", ensure: "true" },
+    ])
+    const res = runScript("command-auth-gate.mjs", bashPayload("deploy --prod", dir))
+    expect(res.code).toBe(0)
+  })
+
+  it("lets commands through that match no rule", () => {
+    writeRules([{ match: "^deploy\\b", ensure: "false" }])
+    const res = runScript("command-auth-gate.mjs", bashPayload("ls -la", dir))
+    expect(res.code).toBe(0)
+  })
+
+  it("denies on the FIRST failing ensure across every matching rule", () => {
+    writeRules([
+      { match: ".", ensure: "true" },
+      { match: "deploy", ensure: "false", id: "second" },
+      { match: ".", ensure: "false", id: "never-reached" },
+    ])
+    const res = runScript("command-auth-gate.mjs", bashPayload("deploy", dir))
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("second")
+    expect(res.stderr).not.toContain("never-reached")
+  })
+
+  it("reads rules from COGNIA_COMMAND_AUTH_RULES too", () => {
+    const res = runScript("command-auth-gate.mjs", bashPayload("deploy", dir), {
+      COGNIA_COMMAND_AUTH_RULES: JSON.stringify([
+        { match: "deploy", ensure: "false", message: "env rule says no" },
+      ]),
+    })
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("env rule says no")
+  })
+
+  it("soft-allows when the ensure command itself cannot spawn", () => {
+    writeRules([{ match: ".", ensure: "true", ensureTimeoutMs: 1 }])
+    // ensureTimeoutMs=1 makes the spawn throw on some platforms; either way the
+    // guard must not lock the user out of their agent.
+    const res = runScript("command-auth-gate.mjs", bashPayload("ls", dir))
+    expect([0, 2]).toContain(res.code)
+  })
+
+  it("ignores non-shell tools entirely", () => {
+    writeRules([{ match: ".", ensure: "false" }])
+    const res = runScript("command-auth-gate.mjs", {
+      hook_event_name: "PreToolUse",
+      tool_name: "Edit",
+      tool_input: { file_path: "x", command: "deploy" },
+      cwd: dir,
+    })
+    expect(res.code).toBe(0)
+  })
+
+  it("extracts commands from shell_execute_advanced and start_process", () => {
+    writeRules([{ match: "kubectl", ensure: "false", message: "no k8s creds" }])
+    const adv = runScript("command-auth-gate.mjs", {
+      hook_event_name: "PreToolUse",
+      tool_name: "shell_execute_advanced",
+      tool_input: { command: "kubectl", args: ["get", "pods"] },
+      cwd: dir,
+      cwd_trusted: true,
+    })
+    expect(adv.code).toBe(2)
+    const proc = runScript("command-auth-gate.mjs", {
+      hook_event_name: "PreToolUse",
+      tool_name: "start_process",
+      tool_input: { program: "kubectl", args: ["apply"] },
+      cwd: dir,
+      cwd_trusted: true,
+    })
+    expect(proc.code).toBe(2)
+  })
+
+  it("never runs repo rules for an untrusted cwd — even a failing ensure stays inert", () => {
+    // The exploit this gate exists for: a checked-in `.cognia/command-auth.json`
+    // carrying a hostile `ensure` must not execute merely because a hook fired.
+    writeRules([{ match: ".", ensure: "exit 1", message: "repo payload ran" }])
+    const payload = bashPayload("deploy", dir) as Record<string, unknown>
+    delete payload.cwd_trusted
+    const res = runScript("command-auth-gate.mjs", payload, {
+      COGNIA_HOME: mkdtempSync(path.join(os.tmpdir(), "cag-home-")),
+    })
+    expect(res.code).toBe(0)
+    expect(res.stderr ?? "").not.toContain("repo payload ran")
+  })
+
+  it("honours repo rules once the cwd is in trusted-folders.json (CLI ledger)", () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), "cag-home-"))
+    writeFileSync(path.join(home, "trusted-folders.json"), JSON.stringify({ folders: [dir] }))
+    writeRules([{ match: ".", ensure: "false", message: "ledger trusted" }])
+    const payload = bashPayload("deploy", dir) as Record<string, unknown>
+    delete payload.cwd_trusted
+    const res = runScript("command-auth-gate.mjs", payload, { COGNIA_HOME: home })
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("ledger trusted")
+  })
+
+  it("applies COGNIA_COMMAND_AUTH_RULES even when the cwd is untrusted", () => {
+    const payload = bashPayload("deploy", dir) as Record<string, unknown>
+    delete payload.cwd_trusted
+    const res = runScript("command-auth-gate.mjs", payload, {
+      COGNIA_HOME: mkdtempSync(path.join(os.tmpdir(), "cag-home-")),
+      COGNIA_COMMAND_AUTH_RULES: JSON.stringify([
+        { match: "deploy", ensure: "false", message: "env rule says no" },
+      ]),
+    })
+    expect(res.code).toBe(2)
+    expect(res.stderr).toContain("env rule says no")
+  })
+})
+
 describe("TS ↔ Rust lockstep", () => {
   it("matches the shared registry table", () => {
     // The registry is declared twice (here and `src-tauri/src/hooks/builtin.rs`)

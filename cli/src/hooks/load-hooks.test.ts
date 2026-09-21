@@ -108,4 +108,29 @@ describe("loadHooks", () => {
     }
     expect(loadHooks({ home, claudeHome, readFile })).toEqual({})
   })
+
+  it("orders user → plugin → builtin groups per event", () => {
+    const files = {
+      [coniaPath]: JSON.stringify({
+        hooks: {
+          PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "user" }] }],
+        },
+      }),
+    }
+    const merged = loadHooks({
+      home,
+      claudeHome,
+      readFile: reader(files),
+      plugin: {
+        PreToolUse: [{ hooks: [{ type: "command", command: "plugin" }] }],
+      },
+      builtin: {
+        PreToolUse: [{ hooks: [{ type: "command", command: "builtin" }] }],
+      },
+    })
+    const commands = merged.PreToolUse?.map(
+      (group) => (group.hooks[0] as { command: string }).command
+    )
+    expect(commands).toEqual(["user", "plugin", "builtin"])
+  })
 })

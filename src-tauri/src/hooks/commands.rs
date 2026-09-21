@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use super::trust;
 use super::{
-    hook_event_name, load_effective_settings, run_session_scoped, run_tool_scoped,
-    HookAgentIdentity, HookDecision, HookEvent,
+    HookAgentIdentity, HookDecision, HookEvent, hook_event_name, load_effective_settings,
+    run_session_scoped, run_tool_scoped,
 };
 
 /// Wire shape returned to TS. `block` set ⇒ the caller should treat the action
@@ -76,6 +76,9 @@ pub async fn run_agent_hook(
         agent_ref,
     };
 
+    // `resolved_cwd` is `Some` only when the folder passed the trust gate, so
+    // hook scripts may treat its presence as host-verified trust.
+    let cwd_trusted = resolved_cwd.is_some();
     let decision = match &tool_name {
         Some(tool) => {
             run_tool_scoped(
@@ -83,6 +86,7 @@ pub async fn run_agent_hook(
                 hook_event,
                 &session_id,
                 resolved_cwd.as_deref(),
+                cwd_trusted,
                 tool,
                 identity,
                 fields,
@@ -95,6 +99,7 @@ pub async fn run_agent_hook(
                 hook_event,
                 &session_id,
                 resolved_cwd.as_deref(),
+                cwd_trusted,
                 identity,
                 fields,
             )

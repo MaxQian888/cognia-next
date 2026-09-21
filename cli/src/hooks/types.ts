@@ -93,7 +93,16 @@ export const HOOK_EVENTS: readonly HookEvent[] = [
  *   (MCP-tool / prompt / agent handlers etc. that the CLI doesn't execute).
  */
 export type HookHandler =
-  | { type: "command"; command: string; timeout?: number }
+  | {
+      type: "command"
+      command: string
+      timeout?: number
+      /**
+       * Fire-and-forget: spawn detached, pipe the payload on stdin, and never
+       * wait for exit — output can neither deny nor inject context.
+       */
+      async?: boolean
+    }
   | { type: "webhook"; url: string; headers?: Record<string, string>; timeout?: number }
   | { type: "http"; url: string; headers?: Record<string, string>; timeout?: number }
   /**
@@ -135,6 +144,7 @@ const commandHandlerSchema = z
     type: z.literal("command"),
     command: z.string(),
     timeout: z.number().optional(),
+    async: z.boolean().optional(),
   })
   .passthrough()
 

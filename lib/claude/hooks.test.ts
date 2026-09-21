@@ -147,5 +147,7 @@ describe("dormant handler fields", () => {
     expect(DORMANT_HOOK_HANDLER_FIELDS).not.toContain("policyClass")
     expect(DORMANT_HOOK_HANDLER_FIELDS).not.toContain("command")
     expect(DORMANT_HOOK_HANDLER_FIELDS).not.toContain("url")
+    // `async` graduated out of dormancy when every rail started honouring it.
+    expect(DORMANT_HOOK_HANDLER_FIELDS).not.toContain("async")
   })
 })

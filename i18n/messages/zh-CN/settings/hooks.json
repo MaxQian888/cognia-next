@@ -26,6 +26,10 @@
       "tool-provenance-guard": {
         "desc": "按声明该工具的来源面拒绝调用 — 选择器由 COGNIA_DENY_TOOL_PROVENANCE 配置。",
         "label": "工具来源守卫"
+      },
+      "command-auth-gate": {
+        "desc": "当 shell 命令命中的规则其 `ensure` 凭证检查未通过时拒绝执行 — 规则来自 .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES。",
+        "label": "命令鉴权守卫"
       }
     },
     "off": "关",
@@ -76,6 +80,8 @@
     "removeAria": "移除该分组"
   },
   "handler": {
+    "asyncHint": "以分离进程运行 —— 其输出无法拦截操作或注入上下文。",
+    "asyncLabel": "后台运行",
     "commandHint": "例如 {example}",
     "commandLabel": "Shell 命令",
     "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME 已运行\"",

@@ -82,6 +82,15 @@ export const BUILTIN_HOOKS: readonly BuiltinHookDef[] = [
       "Deny a tool call by which surface declared it — selectors in COGNIA_DENY_TOOL_PROVENANCE.",
     defaultEnabled: false,
   },
+  {
+    id: "command-auth-gate",
+    event: "PreToolUse",
+    matcher: "Bash|shell_execute_advanced|start_process",
+    script: "command-auth-gate.mjs",
+    description:
+      "Deny a shell command when its rule's `ensure` credential check fails — rules in .cognia/command-auth.json / COGNIA_COMMAND_AUTH_RULES.",
+    defaultEnabled: false,
+  },
 ] as const
 
 /** Per-id enable/disable overrides (id → enabled). */

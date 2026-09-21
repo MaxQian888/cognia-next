@@ -59,6 +59,13 @@
       "matcher": null,
       "script": "tool-provenance-guard.mjs",
       "defaultEnabled": false
+    },
+    {
+      "id": "command-auth-gate",
+      "event": "PreToolUse",
+      "matcher": "Bash|shell_execute_advanced|start_process",
+      "script": "command-auth-gate.mjs",
+      "defaultEnabled": false
     }
   ]
 }

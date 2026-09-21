@@ -86,6 +86,41 @@ describe("HookHandlerForm", () => {
     expect(onChange).toHaveBeenCalledWith({ type: "command", command: "ls -la" })
   })
 
+  it("toggles the async flag on command handlers on and off", () => {
+    const onChange = jest.fn()
+    const { rerender } = render(
+      <HookHandlerForm
+        value={{ type: "command", command: "x" }}
+        onChange={onChange}
+        onRemove={() => undefined}
+      />
+    )
+    fireEvent.click(screen.getByTestId("handler-async"))
+    expect(onChange).toHaveBeenCalledWith({ type: "command", command: "x", async: true })
+
+    onChange.mockClear()
+    rerender(
+      <HookHandlerForm
+        value={{ type: "command", command: "x", async: true }}
+        onChange={onChange}
+        onRemove={() => undefined}
+      />
+    )
+    fireEvent.click(screen.getByTestId("handler-async"))
+    expect(onChange).toHaveBeenCalledWith({ type: "command", command: "x", async: undefined })
+  })
+
+  it("an honoured async flag is not flagged inert", () => {
+    render(
+      <HookHandlerForm
+        value={{ type: "command", command: "x", async: true }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.queryByTestId("handler-inert-fields")).toBeNull()
+  })
+
   it("renders webhook variant with URL field and headers editor", () => {
     const onChange = jest.fn()
     const value: HookHandler = {

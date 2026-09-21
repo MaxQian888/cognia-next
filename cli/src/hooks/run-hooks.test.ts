@@ -10,18 +10,24 @@ import type { HookGroup } from "./types"
 /** A fake child process that records the piped stdin + a scripted close code. */
 function fakeChild(code: number) {
   const ee = new EventEmitter() as EventEmitter & {
-    stdin: { end: (t: string) => void }
+    stdin: { end: (t: string) => void; on: () => void }
+    unref: () => void
     written?: string
   }
-  ee.stdin = { end: (t: string) => (ee.written = t) }
+  ee.stdin = { end: (t: string) => (ee.written = t), on: () => {} }
+  ee.unref = () => {}
   queueMicrotask(() => ee.emit("close", code))
   return ee
 }
 
 /** A child that never closes (for the timeout path). */
 function hangingChild() {
-  const ee = new EventEmitter() as EventEmitter & { stdin: { end: () => void } }
-  ee.stdin = { end: () => {} }
+  const ee = new EventEmitter() as EventEmitter & {
+    stdin: { end: () => void; on: () => void }
+    unref: () => void
+  }
+  ee.stdin = { end: () => {}, on: () => {} }
+  ee.unref = () => {}
   return ee
 }
 
@@ -238,6 +244,96 @@ describe("runHooks", () => {
       spawn,
     })
     expect(res.deny).toBe(false)
+  })
+
+  describe("async: true handlers", () => {
+    it("never deny a blocking event, even on a non-zero exit", async () => {
+      const spawn = (() => fakeChild(2)) as unknown as Spawn
+      const res = await runHooks({
+        event: "PreToolUse",
+        toolName: "Bash",
+        payload: {},
+        groups: [{ hooks: [{ type: "command", command: "guard", async: true }] }],
+        spawn,
+      })
+      expect(res.deny).toBe(false)
+    })
+
+    it("resolve without waiting for the child to exit", async () => {
+      // A child that never closes: a sync handler would hit the (tiny)
+      // timeout; an async one resolves immediately because nothing awaits it.
+      const spawn = (() => hangingChild()) as unknown as Spawn
+      const res = await runHooks({
+        event: "PreToolUse",
+        toolName: "Bash",
+        payload: {},
+        groups: [{ hooks: [{ type: "command", command: "slow", async: true }] }],
+        spawn,
+        timeoutMsDefault: 5,
+      })
+      expect(res.deny).toBe(false)
+    })
+
+    it("spawn detached (ignored stdio, unref'd) and still pipe the payload", async () => {
+      let opts: Record<string, unknown> | undefined
+      let unrefed = false
+      const children: { written?: string }[] = []
+      const spawn = ((_cmd: string, o: Record<string, unknown>) => {
+        opts = o
+        const child = fakeChild(0)
+        const orig = child.unref
+        child.unref = () => {
+          unrefed = true
+          orig()
+        }
+        children.push(child)
+        return child
+      }) as unknown as Spawn
+      await runHooks({
+        event: "PostToolUse",
+        toolName: "Bash",
+        payload: { tool_response: "ok" },
+        groups: [{ hooks: [{ type: "command", command: "report", async: true }] }],
+        spawn,
+      })
+      expect(opts?.shell).toBe(true)
+      expect(opts?.stdio).toEqual(["pipe", "ignore", "ignore"])
+      expect(unrefed).toBe(true)
+      expect(JSON.parse(children[0]!.written!).hook_event_name).toBe("PostToolUse")
+    })
+
+    it("a synchronous spawn throw still soft-allows", async () => {
+      const spawn = (() => {
+        throw new Error("boom")
+      }) as unknown as Spawn
+      const res = await runHooks({
+        event: "PreToolUse",
+        toolName: "Bash",
+        payload: {},
+        groups: [{ hooks: [{ type: "command", command: "x", async: true }] }],
+        spawn,
+      })
+      expect(res.deny).toBe(false)
+    })
+
+    it("an async handler does not shield a later sync handler's deny", async () => {
+      const spawn = ((cmd: string) => fakeChild(cmd === "deny" ? 2 : 0)) as unknown as Spawn
+      const res = await runHooks({
+        event: "PreToolUse",
+        toolName: "Bash",
+        payload: {},
+        groups: [
+          {
+            hooks: [
+              { type: "command", command: "report", async: true },
+              { type: "command", command: "deny" },
+            ],
+          },
+        ],
+        spawn,
+      })
+      expect(res.deny).toBe(true)
+    })
   })
 })
 

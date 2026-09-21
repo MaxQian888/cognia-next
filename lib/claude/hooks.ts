@@ -101,7 +101,6 @@ export const DORMANT_HOOK_HANDLER_FIELDS: readonly string[] = [
   "if",
   "statusMessage",
   "once",
-  "async",
   "asyncRewake",
   "shell",
   "allowedEnvVars",
@@ -132,7 +131,13 @@ export type HookHandler =
       command: string
       /** DORMANT — see {@link DORMANT_HOOK_HANDLER_FIELDS}. */
       args?: string[]
-      /** DORMANT — see {@link DORMANT_HOOK_HANDLER_FIELDS}. */
+      /**
+       * Fire-and-forget: the runner spawns the command detached, pipes the
+       * payload on stdin, and never waits for exit. The process may outlive
+       * the turn; its output can neither block nor inject context, so an
+       * `async` handler never denies a tool call. Honoured on every rail
+       * (sidecar, Rust, CLI).
+       */
       async?: boolean
       /** DORMANT — see {@link DORMANT_HOOK_HANDLER_FIELDS}. */
       asyncRewake?: boolean

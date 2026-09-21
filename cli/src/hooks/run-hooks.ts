@@ -106,7 +106,7 @@ export function matchGroups(
 /** Is this handler an executable `command` handler? */
 function isCommandHandler(
   h: HookHandler
-): h is { type: "command"; command: string; timeout?: number } {
+): h is { type: "command"; command: string; timeout?: number; async?: boolean } {
   return h.type === "command" && typeof (h as { command?: unknown }).command === "string"
 }
 
@@ -165,10 +165,42 @@ function runCommand(
 }
 
 /**
+ * Spawn an `async: true` command handler detached and never wait on it — the
+ * payload is still piped on stdin, but the child's output can neither deny
+ * nor inject context. `stdio` drops stdout/stderr so a chatty child cannot
+ * stall on a full pipe, `detached` (POSIX) keeps it out of the parent's
+ * signal group, and `unref` keeps it from holding the CLI's event loop open.
+ * A spawn failure is swallowed: a fire-and-forget hook has no blocking
+ * channel and this rail has no diagnostic surface to report one on.
+ */
+function spawnAsyncCommand(command: string, payloadJson: string, spawn: Spawn): void {
+  let child: ReturnType<Spawn>
+  try {
+    child = spawn(command, {
+      shell: true,
+      detached: process.platform !== "win32",
+      windowsHide: true,
+      stdio: ["pipe", "ignore", "ignore"],
+    })
+  } catch {
+    return
+  }
+  child.on("error", () => {})
+  child.stdin?.on("error", () => {})
+  try {
+    child.stdin?.end(payloadJson)
+  } catch {
+    // child may have exited before the write landed; nothing to report.
+  }
+  child.unref()
+}
+
+/**
  * Run every `command` handler in the matched groups for an event, piping the
  * JSON `payload` on stdin. On a `PreToolUse` / `UserPromptSubmit` event, the
  * first handler that exits non-zero denies the action (and short-circuits the
- * rest). `webhook` and unknown handlers are inert.
+ * rest). `async: true` handlers spawn detached and are never awaited.
+ * `webhook` and unknown handlers are inert.
  */
 export async function runHooks(opts: {
   event: HookEvent
@@ -206,6 +238,10 @@ export async function runHooks(opts: {
   for (const group of matched) {
     for (const handler of group.hooks) {
       if (!isCommandHandler(handler)) continue // webhook / unknown ⇒ inert
+      if (handler.async === true) {
+        spawnAsyncCommand(handler.command, payloadJson, opts.spawn)
+        continue
+      }
       const outcome = await runCommand(handler, payloadJson, opts.spawn, defaultTimeoutMs)
       if (blocking && outcome.blocked) {
         return { deny: true, reason: outcome.reason }

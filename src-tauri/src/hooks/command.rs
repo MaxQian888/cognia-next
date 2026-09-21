@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::{timeout, Instant};
+use tokio::time::{Instant, timeout};
 
 use super::types::HookOutcome;
 
@@ -25,9 +25,16 @@ const HARD_TIMEOUT_CAP_SECS: u64 = 30;
 
 /// Run one `command` handler. `payload_json` is the serialized event payload;
 /// it is written verbatim to the child's stdin.
+///
+/// `is_async` (`"async": true` in settings.json) makes the handler
+/// fire-and-forget: the child is spawned detached, never awaited, and its
+/// output is discarded, so it can neither block nor inject context. The
+/// outcome is `Allow` as soon as the spawn succeeds (or `InternalError` if the
+/// spawn itself fails — still soft-allow, surfaced as a warning).
 pub async fn run_command_handler(
     command: &str,
     configured_timeout: Option<u64>,
+    is_async: bool,
     payload_json: &str,
 ) -> HookOutcome {
     let timeout_secs = configured_timeout
@@ -51,9 +58,19 @@ pub async fn run_command_handler(
     };
 
     cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    cmd.kill_on_drop(true);
+    if is_async {
+        // Detached: stdout/stderr dropped so a chatty child cannot stall on a
+        // full pipe, and dropping the handle must NOT kill the process — it is
+        // meant to outlive the turn. A reaper task below still wait()s on it so
+        // the child never zombifies.
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+        cmd.kill_on_drop(false);
+    } else {
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
+    }
 
     // Suppress Windows console flash for hook execution. tokio::process::Command
     // exposes `creation_flags` directly on Windows, no trait import required.
@@ -81,6 +98,16 @@ pub async fn run_command_handler(
             let _ = stdin.write_all(payload.as_bytes()).await;
             let _ = stdin.shutdown().await;
         });
+    }
+
+    if is_async {
+        // Fire-and-forget: hand the child to a background reaper so it never
+        // zombifies (kill_on_drop is off — the reaper owns the handle now) and
+        // resolve immediately. The exit code is intentionally unobserved.
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
+        return HookOutcome::Allow;
     }
 
     // Wait with timeout.
@@ -274,5 +301,56 @@ mod tests {
             }
             _ => panic!("expected context"),
         }
+    }
+
+    #[tokio::test]
+    async fn sync_handler_still_blocks_on_exit_2() {
+        // The new `is_async` parameter must not disturb the blocking contract:
+        // exit 2 on a synchronous handler still denies.
+        let outcome = run_command_handler("exit 2", None, false, "{}").await;
+        match outcome {
+            HookOutcome::Block { reason } => assert_eq!(reason, "hook denied (no message)"),
+            _ => panic!("expected Block"),
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn async_handler_returns_allow_without_waiting() {
+        // `sleep 3; exit 2` would both stall a synchronous runner AND report a
+        // block; the detached path resolves immediately as Allow and never
+        // observes the exit code.
+        let started = std::time::Instant::now();
+        let outcome = run_command_handler("sleep 3; exit 2", None, true, "{}").await;
+        assert!(matches!(outcome, HookOutcome::Allow));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "async handler must not be awaited"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn async_handler_still_pipes_stdin() {
+        // Fire-and-forget does not mean fire-without-payload: the child still
+        // receives the serialized event on stdin.
+        let out = std::env::temp_dir().join(format!("cognia-async-hook-{}", std::process::id()));
+        let cmd = format!("cat > {}", out.display());
+        let outcome = run_command_handler(&cmd, None, true, "{\"probe\":1}").await;
+        assert!(matches!(outcome, HookOutcome::Allow));
+        // The detached child may still be writing — and `cat >` creates the
+        // file before stdin lands, so poll for CONTENT, not existence.
+        let mut content = String::new();
+        for _ in 0..100 {
+            if let Ok(read) = std::fs::read_to_string(&out) {
+                content = read;
+                if content.contains("\"probe\":1") {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(content.contains("\"probe\":1"));
+        let _ = std::fs::remove_file(&out);
     }
 }

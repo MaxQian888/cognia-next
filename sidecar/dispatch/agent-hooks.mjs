@@ -454,6 +454,66 @@ export function runCommandHandler(command, configuredTimeout, payloadJson, signa
 }
 
 /**
+ * Run one `command` handler with `async: true` — fire-and-forget. The payload
+ * is still piped on stdin, but the child is spawned detached, never awaited,
+ * and its stdout/stderr are discarded, so it can neither block nor inject
+ * context. `detached` (POSIX) keeps it out of the parent's signal group and
+ * `unref` keeps it from holding the sidecar's event loop open, so an async
+ * hook may outlive the turn it fired on.
+ *
+ * Resolves immediately: `{}` on a successful spawn, `{ warning }` when the
+ * spawn itself throws. Post-spawn failures (the async `error` event, a
+ * non-zero exit) are reported through the audit channel when one is wired —
+ * diagnostics only, never a decision.
+ *
+ * @returns {{}|{warning: string}} an outcome that never carries a decision.
+ */
+function runCommandDetached(handler, payloadJson, cwd, deps) {
+  let child
+  try {
+    child = spawn(handler.command, {
+      shell: true,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["pipe", "ignore", "ignore"],
+      ...(typeof cwd === "string" && cwd ? { cwd } : {}),
+    })
+  } catch (e) {
+    return { warning: `async hook failed to spawn: ${e?.message ?? e}` }
+  }
+
+  const report = (error) => {
+    if (typeof deps?.onAudit !== "function") return
+    deps.onAudit({
+      hookId: `${deps.sessionId ?? "session"}:${deps.eventName ?? "event"}:${Date.now()}:async`,
+      hookEvent: deps.eventName ?? "unknown",
+      provider: deps.provider ?? "unknown",
+      handlerType: "command",
+      policyClass: handlerPolicyClass(handler),
+      outcome: "warning",
+      latencyMs: 0,
+      redacted: false,
+      error,
+    })
+  }
+  child.on("error", (e) => report(`async hook crashed: ${e?.message ?? e}`))
+  child.on("close", (code) => {
+    if (code !== 0 && code !== null) report(`async hook exited with code ${code}`)
+  })
+  // stdin stays piped (the payload contract still holds) but a child that
+  // exits before the write lands must not crash the sidecar with an EPIPE.
+  child.stdin?.on("error", () => {})
+  try {
+    child.stdin?.write(payloadJson)
+    child.stdin?.end()
+  } catch {
+    // child may have exited early; the close/error handlers report if needed.
+  }
+  child.unref()
+  return {}
+}
+
+/**
  * Run one `webhook` handler: HTTP POST the payload as the JSON body, parse the
  * 2xx response body through the same decision contract. Non-2xx / network
  * errors become soft-allow warnings.
@@ -510,6 +570,11 @@ function runHandler(handler, payloadJson, signal, cwd, deps = {}) {
     return Promise.resolve({ warning: "invalid hook handler configuration" })
   }
   if (handler.type === "command" && typeof handler.command === "string") {
+    if (handler.async === true) {
+      // Fire-and-forget: spawn detached and resolve immediately — the child
+      // may still be running when the turn ends, by design.
+      return Promise.resolve(runCommandDetached(handler, payloadJson, cwd, deps))
+    }
     return runCommandHandler(handler.command, handler.timeout, payloadJson, signal, cwd)
   }
   if ((handler.type === "http" || handler.type === "webhook") && typeof handler.url === "string") {
@@ -627,10 +692,18 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, deps =
       pending.push(
         runHandler(effectiveHandler, payloadJson, signal, cwd, deps).then((rawOutcome) => {
           const normalized = rawOutcome?.pluginResult ?? rawOutcome
-          const outcome = applyFailurePolicy(handler, {
+          const merged = {
             ...rawOutcome,
             ...extractDecision(normalized),
-          })
+          }
+          // `async` handlers are fire-and-forget: the detached path only ever
+          // reports `{}` or `{ warning }`, and a managed policyClass must not
+          // promote that spawn warning into a block — an async hook can never
+          // participate in the decision.
+          const outcome =
+            handler?.type === "command" && handler?.async === true
+              ? merged
+              : applyFailurePolicy(handler, merged)
           if (deps.eventName === "PreModelSwitch" && /timed out/.test(outcome.warning ?? ""))
             outcome.block = "Model switch hook timed out"
           deps.onAudit?.({

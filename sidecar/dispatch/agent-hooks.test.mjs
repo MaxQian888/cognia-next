@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import http from "node:http"
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -491,6 +491,108 @@ test("runCommandHandler: pre-aborted signal warns", async () => {
   ac.abort()
   const out = await runCommandHandler(nodeCmd("setTimeout(()=>{},10000)"), 5, "{}", ac.signal)
   assert.match(out.warning, /aborted/)
+})
+
+// --- async: true command handlers (fire-and-forget) -------------------------
+
+test("async command handlers never block and are never awaited", async () => {
+  const groups = [
+    {
+      hooks: [
+        // Sleeps far longer than runGroups takes: a runner that awaited this
+        // would stall the test, and the exit-2 tail would block if its output
+        // were ever observed.
+        {
+          type: "command",
+          command: nodeCmd("setTimeout(()=>process.exit(2),2000)"),
+          async: true,
+        },
+        { type: "command", command: nodeCmd("process.exit(0)") },
+      ],
+    },
+  ]
+  const started = Date.now()
+  const dec = await runGroups(groups, "Bash", "{}", undefined, process.cwd(), {
+    eventName: "PreToolUse",
+  })
+  assert.equal(dec.block, undefined)
+  assert.ok(Date.now() - started < 2000, "async hook must not be awaited")
+})
+
+test("a managed async hook can never fail closed into a block", async () => {
+  // policyClass "managed" promotes warnings to blocks — but an async handler
+  // reports no decision, so even a managed async hook stays non-blocking.
+  const dec = await runGroups(
+    [
+      {
+        hooks: [
+          {
+            type: "command",
+            command: nodeCmd("process.exit(2)"),
+            async: true,
+            policyClass: "managed",
+          },
+        ],
+      },
+    ],
+    "Bash",
+    "{}",
+    undefined,
+    process.cwd(),
+    { eventName: "PreToolUse" }
+  )
+  assert.equal(dec.block, undefined)
+})
+
+test("async exit failures surface through the audit channel, not the decision", async () => {
+  const audits = []
+  const dec = await runGroups(
+    [{ hooks: [{ type: "command", command: nodeCmd("process.exit(7)"), async: true }] }],
+    "Bash",
+    "{}",
+    undefined,
+    process.cwd(),
+    { eventName: "PreToolUse", sessionId: "s", onAudit: (a) => audits.push(a) }
+  )
+  assert.equal(dec.block, undefined)
+  assert.equal(dec.warnings.length, 0)
+  // The dispatch audit lands immediately; the detached child's non-zero exit
+  // lands a second, diagnostic-only entry once it closes.
+  for (let i = 0; i < 50 && !audits.some((a) => a.outcome === "warning"); i++) {
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  const failure = audits.find((a) => a.outcome === "warning")
+  assert.ok(failure, "expected an audit entry for the async exit")
+  assert.match(failure.error, /exited with code 7/)
+  assert.equal(failure.handlerType, "command")
+})
+
+test("async handlers still receive the event payload on stdin", async () => {
+  const outFile = join(tmpdir(), `cognia-async-hook-${process.pid}.txt`)
+  const helper = join(tmpdir(), `cognia-async-hook-capture-${process.pid}.mjs`)
+  writeFileSync(
+    helper,
+    `import{writeFileSync as w}from"node:fs";let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>w(${JSON.stringify(outFile)},d));`
+  )
+  try {
+    const dec = await runGroups(
+      [{ hooks: [{ type: "command", command: `node ${JSON.stringify(helper)}`, async: true }] }],
+      "Bash",
+      JSON.stringify({ hook_event_name: "PostToolUse", probe: "stdin-pipe" }),
+      undefined,
+      process.cwd(),
+      { eventName: "PostToolUse" }
+    )
+    assert.equal(dec.block, undefined)
+    // The detached child may still be running — poll briefly for its output.
+    for (let i = 0; i < 100 && !existsSync(outFile); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.match(readFileSync(outFile, "utf8"), /stdin-pipe/)
+  } finally {
+    rmSync(outFile, { force: true })
+    rmSync(helper, { force: true })
+  }
 })
 
 // --- runWebhookHandler (real local server) ----------------------------------

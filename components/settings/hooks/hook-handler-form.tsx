@@ -13,6 +13,7 @@
 import { useTranslations } from "next-intl"
 import { InfoIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -154,6 +155,22 @@ export function HookHandlerForm({
               {t("commandHint", { example: t("commandPlaceholder") })}
             </p>
           ) : null}
+          <div className="flex items-start gap-2 pt-0.5">
+            <Checkbox
+              id="handler-async"
+              checked={value.async === true}
+              onCheckedChange={(checked) =>
+                onChange({ ...value, async: checked === true ? true : undefined })
+              }
+              data-testid="handler-async"
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="handler-async" className="text-xs font-normal">
+                {t("asyncLabel")}
+              </Label>
+              <p className="text-[0.6875rem] text-muted-foreground">{t("asyncHint")}</p>
+            </div>
+          </div>
         </div>
       ) : value.type === "http" || value.type === "webhook" ? (
         <>

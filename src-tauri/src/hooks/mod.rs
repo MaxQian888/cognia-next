@@ -6,6 +6,7 @@
 pub mod builtin;
 pub mod command;
 pub mod commands;
+pub mod plugin;
 pub mod trust;
 pub mod types;
 pub mod webhook;
@@ -163,9 +164,11 @@ async fn run_event(
 
 async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
     match handler {
-        HookHandler::Command { command, timeout } => {
-            command::run_command_handler(&command, timeout, payload_json).await
-        }
+        HookHandler::Command {
+            command,
+            timeout,
+            is_async,
+        } => command::run_command_handler(&command, timeout, is_async, payload_json).await,
         HookHandler::Webhook {
             url,
             headers,
@@ -218,6 +221,7 @@ pub async fn run_session_scoped(
     event: HookEvent,
     session_id: &str,
     cwd: Option<&str>,
+    cwd_trusted: bool,
     identity: HookAgentIdentity,
     fields: Value,
 ) -> HookDecision {
@@ -225,6 +229,7 @@ pub async fn run_session_scoped(
         hook_event_name: hook_event_name(event),
         session_id: session_id.to_string(),
         cwd: cwd.map(String::from),
+        cwd_trusted,
         agent_kind: identity.kind.clone(),
         agent_ref: identity.agent_ref.clone(),
         fields,
@@ -239,6 +244,7 @@ pub async fn run_tool_scoped(
     event: HookEvent,
     session_id: &str,
     cwd: Option<&str>,
+    cwd_trusted: bool,
     tool_name: &str,
     identity: HookAgentIdentity,
     fields: Value,
@@ -247,6 +253,7 @@ pub async fn run_tool_scoped(
         hook_event_name: hook_event_name(event),
         session_id: session_id.to_string(),
         cwd: cwd.map(String::from),
+        cwd_trusted,
         agent_kind: identity.kind.clone(),
         agent_ref: identity.agent_ref.clone(),
         fields,
@@ -256,9 +263,16 @@ pub async fn run_tool_scoped(
 
 /// Load merged settings for the given cwd. Returns an empty `EffectiveSettings`
 /// when reading fails so a missing/broken config never blocks the user.
+///
+/// Final hook-group order per event: user (local → project → user scope) →
+/// enabled plugins' `commandHooks` → built-in hooks. Plugin collection is
+/// gated on the plugin being `enabled` in the runtime ledger AND declaring the
+/// `command-hooks` capability; a missing runtime (tests, pre-setup boot
+/// phases, bare CLI runs) contributes nothing.
 pub fn load_effective_settings(cwd: Option<&str>) -> EffectiveSettings {
     match crate::settings::read_claude_effective_settings(cwd.map(String::from)) {
         Ok(mut eff) => {
+            apply_plugin_layer(&mut eff.merged);
             // Merge the product-bundled built-in hooks UNDER the user's own
             // hooks (user groups run first). Honors `builtinHookOverrides`.
             builtin::apply_builtin_hooks(&mut eff.merged);
@@ -270,6 +284,28 @@ pub fn load_effective_settings(cwd: Option<&str>) -> EffectiveSettings {
         }
     }
 }
+
+/// Resolve the plugin runtime for this process and merge enabled plugins'
+/// `commandHooks` under the user's groups. Desktop resolves through the
+/// published `AppHandle`'s managed state; a headless `cognia-server` through
+/// the process-global `HeadlessServices`. At most one is installed.
+#[cfg(not(test))]
+fn apply_plugin_layer(settings: &mut ClaudeSettings) {
+    if let Some(app) = crate::crash::app_handle() {
+        use tauri::Manager;
+        let runtime = app.state::<crate::plugin_api::PluginRuntimeState>();
+        plugin::apply_plugin_command_hooks(settings, runtime.inner());
+        return;
+    }
+    if let Some(services) = crate::headless::headless_services() {
+        plugin::apply_plugin_command_hooks(settings, services.plugin_runtime.as_ref());
+    }
+}
+
+/// Tests resolve plugin layers explicitly through `apply_plugin_command_hooks`
+/// — there is no AppHandle or installed services in a unit-test process.
+#[cfg(test)]
+fn apply_plugin_layer(_settings: &mut ClaudeSettings) {}
 
 #[cfg(test)]
 mod tests {
@@ -346,6 +382,7 @@ mod tests {
             hook_event_name: "PostToolUse".to_string(),
             session_id: "s1".to_string(),
             cwd: None,
+            cwd_trusted: false,
             agent_kind: Some("teammate".to_string()),
             agent_ref: Some("reviewer".to_string()),
             fields: json!({ "tool_name": "Bash" }),
@@ -361,6 +398,7 @@ mod tests {
             hook_event_name: "PostToolUse".to_string(),
             session_id: "s1".to_string(),
             cwd: None,
+            cwd_trusted: false,
             agent_kind: None,
             agent_ref: None,
             fields: json!({}),

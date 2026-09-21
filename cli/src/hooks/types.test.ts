@@ -51,6 +51,22 @@ describe("HooksConfigSchema", () => {
     })
   })
 
+  it("round-trips the async flag on command handlers", () => {
+    const fragment = {
+      PostToolUse: [
+        {
+          matcher: "Bash",
+          hooks: [{ type: "command", command: "report.mjs", async: true }],
+        },
+      ],
+    }
+    const result = HooksConfigSchema.safeParse(fragment)
+    expect(result.success).toBe(true)
+    expect((result as { success: true; data: HooksConfig }).data.PostToolUse?.[0].hooks[0]).toEqual(
+      { type: "command", command: "report.mjs", async: true }
+    )
+  })
+
   it("preserves an unknown handler type as inert (passthrough)", () => {
     const fragment = {
       Stop: [
