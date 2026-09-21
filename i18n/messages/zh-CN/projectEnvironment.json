@@ -148,7 +148,7 @@
     "bundleFollow": "跟随当前版本（{tag}）",
     "bundleNone": "该部署未配置 Agent 运行时包，暂时无法使用沙箱。",
     "bundlePinned": "固定在 {tag}",
-    "credentials": "沙箱使用的是该主机自身经过过滤的凭据，暂不支持按沙箱签发的网关票据。",
+    "credentials": "沙箱不接收宿主 provider 凭据；受管任务携带按任务签发的网关租约。",
     "declaration": {
       "approve": "批准此镜像",
       "approveHint": "批准时会把镜像固定到该标签当前指向的摘要；之后即使该标签被重新推送，实际运行的内容也不会变。",
@@ -166,7 +166,21 @@
       "revoked": "已撤销",
       "searched": "已查找：{paths}",
       "title": "仓库声明",
-      "user": "以 {user} 身份运行"
+      "user": "以 {user} 身份运行",
+      "buildImage": "从此仓库构建",
+      "buildHint": "在此 Host 上构建已提交的 Dockerfile 和 Features，然后批准生成的镜像用于运行。Host 需要配置环境构建服务。",
+      "build": "构建环境",
+      "cancelBuild": "取消构建",
+      "buildStatus": {
+        "queued": "构建已排队",
+        "building": "正在构建环境…",
+        "succeeded": "构建完成，等待批准",
+        "failed": "构建失败",
+        "cancelled": "构建已取消"
+      },
+      "effectiveRuntime": "查看最终运行配置",
+      "approveBuildHint": "批准会将此构建镜像及其最终运行配置绑定到仓库的确切提交。",
+      "ignoredFields": "沙箱运行时不使用以下字段：{fields}"
     },
     "description": "选择该项目的 Agent 运行时所使用的容器镜像。",
     "driver": "沙箱驱动：{driver}",
@@ -242,6 +256,12 @@
         "user_tier_default": "用户：隔离级别默认"
       },
       "title": "选择依据"
+    },
+    "ports": {
+      "title": "转发端口",
+      "desktopRequired": "请在桌面应用中打开此项目，以访问需要认证的容器端口。",
+      "open": "打开",
+      "close": "关闭连接"
     }
   },
   "save": "保存环境",

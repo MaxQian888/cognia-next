@@ -24,6 +24,7 @@ use cognia_external_agent::exec_backend::ExecBackend;
 use cognia_external_agent::sandbox_routing_backend::{SandboxExecBackend, SandboxRoutingBackend};
 
 use crate::admission::EnvironmentSandboxAdmission;
+use crate::runtime::SandboxRuntimeControl;
 use crate::status::SandboxDriverStatus;
 
 /// The tenant environment store, beside the other Rust-owned databases.
@@ -52,6 +53,7 @@ pub struct PoolServices {
     pub admission: Arc<EnvironmentSandboxAdmission>,
     /// The driver, narrowed to what a status read may ask.
     pub status: Arc<dyn SandboxDriverStatus>,
+    pub runtime: Option<Arc<dyn SandboxRuntimeControl>>,
 }
 
 /// Install the pool: wrap `existing` in the sandbox router when this
@@ -121,31 +123,38 @@ pub fn install_with(
 
     let store = EnvironmentStore::open(&data_dir.join(STORE_FILE))
         .map_err(|error| format!("environment store: {error}"))?;
-    let credentials = EnvironmentSandboxAdmission::credentials_from_env()?;
     // A shared Host approves repository declarations server-side; the
     // desktop's per-device approvals are the brain's own trust row, and that
     // path arrives with ADR-0147's device approval reference in ①.11.
-    let admission = Arc::new(EnvironmentSandboxAdmission::new(
+    let admission = Arc::new(EnvironmentSandboxAdmission::new_with_registry_lookup(
         loaded.baseline,
         store,
-        credentials,
+        |name| std::env::var(name).ok(),
         false,
-    ));
+    )?);
     let multi_tenant = admission.baseline().multi_tenant;
-    let (sandbox, status) = docker_driver(Arc::clone(&admission), default_deployment_id)?;
+    let (sandbox, status, runtime) = docker_driver(Arc::clone(&admission), default_deployment_id)?;
     log::info!(
         "runtime environment sandboxes: on (docker driver, baseline {}, multi-tenant {multi_tenant})",
         loaded.origin.as_str()
     );
     Ok(InstalledPool {
         backend: SandboxRoutingBackend::new(existing, sandbox),
-        services: Some(PoolServices { admission, status }),
+        services: Some(PoolServices {
+            admission,
+            status,
+            runtime: Some(runtime),
+        }),
     })
 }
 
 /// The driver, as both halves the Host needs: the one that starts agents and
 /// the one that answers what it can attest.
-type Driver = (Arc<dyn SandboxExecBackend>, Arc<dyn SandboxDriverStatus>);
+type Driver = (
+    Arc<dyn SandboxExecBackend>,
+    Arc<dyn SandboxDriverStatus>,
+    Arc<dyn SandboxRuntimeControl>,
+);
 
 #[cfg(feature = "docker")]
 fn docker_driver(
@@ -157,7 +166,11 @@ fn docker_driver(
     let api = BollardContainerApi::connect()?;
     let config = crate::docker::DockerSandboxConfig::from_env(default_deployment_id)?;
     let backend = crate::docker::DockerSandboxBackend::new(api, admission, config);
-    Ok((Arc::clone(&backend) as Arc<dyn SandboxExecBackend>, backend))
+    Ok((
+        Arc::clone(&backend) as Arc<dyn SandboxExecBackend>,
+        Arc::clone(&backend) as Arc<dyn SandboxDriverStatus>,
+        backend,
+    ))
 }
 
 #[cfg(not(feature = "docker"))]

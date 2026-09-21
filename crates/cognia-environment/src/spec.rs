@@ -95,7 +95,7 @@ pub enum EnvironmentSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
-pub struct SpecImage {
+pub struct RegistrySpecImage {
     pub registry: String,
     pub repository: String,
     pub digest: String,
@@ -107,13 +107,81 @@ pub struct SpecImage {
     pub build_key: Option<String>,
 }
 
-impl SpecImage {
+impl RegistrySpecImage {
     pub fn pinned(&self) -> PinnedImage {
         PinnedImage {
             registry: self.registry.clone(),
             repository: self.repository.clone(),
             digest: self.digest.clone(),
         }
+    }
+}
+
+/// A local image ID is a Docker config digest, not a registry manifest digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SpecImage {
+    Registry(RegistrySpecImage),
+    Built(BuiltSpecImage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
+pub struct BuiltSpecImage {
+    pub kind: BuiltImageKind,
+    pub build_key: String,
+    pub image_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum BuiltImageKind {
+    #[serde(rename = "build")]
+    Build,
+}
+
+impl SpecImage {
+    pub fn registry_image(&self) -> Option<PinnedImage> {
+        match self {
+            Self::Registry(image) => Some(image.pinned()),
+            Self::Built(_) => None,
+        }
+    }
+    pub fn registry_mut(&mut self) -> Option<&mut RegistrySpecImage> {
+        match self {
+            Self::Registry(image) => Some(image),
+            Self::Built(_) => None,
+        }
+    }
+    pub fn catalog_entry_id(&self) -> Option<&str> {
+        match self {
+            Self::Registry(image) => image.catalog_entry_id.as_deref(),
+            Self::Built(_) => None,
+        }
+    }
+    pub fn build_key(&self) -> Option<&str> {
+        match self {
+            Self::Registry(image) => image.build_key.as_deref(),
+            Self::Built(image) => Some(&image.build_key),
+        }
+    }
+    pub fn image_id(&self) -> Option<&str> {
+        match self {
+            Self::Registry(_) => None,
+            Self::Built(image) => Some(&image.image_id),
+        }
+    }
+    pub fn identity(&self) -> String {
+        match self {
+            Self::Registry(image) => image.pinned().canonical(),
+            Self::Built(image) => image.image_id.clone(),
+        }
+    }
+}
+
+impl From<RegistrySpecImage> for SpecImage {
+    fn from(image: RegistrySpecImage) -> Self {
+        Self::Registry(image)
     }
 }
 
@@ -165,7 +233,7 @@ pub struct SpecUser {
     pub declared: Option<DeclaredUser>,
 }
 
-/// One command. `Parallel` may not nest.
+/// A bounded command tree with explicit sequential and concurrent groups.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CommandSpec {
@@ -177,6 +245,8 @@ pub enum CommandSpec {
     Parallel {
         commands: BTreeMap<String, CommandSpec>,
     },
+    /// Ordered commands; a failure prevents subsequent commands from starting.
+    Sequence { commands: Vec<CommandSpec> },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -250,6 +320,12 @@ pub struct EnvironmentSpec {
     pub lifecycle: SandboxLifecycleKind,
     pub user: SpecUser,
     pub container_env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub remote_env: BTreeMap<String, Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_timeout_ms: Option<u64>,
     pub lifecycle_commands: LifecycleCommands,
     pub forward_ports: Vec<ForwardPort>,
     pub egress: EgressSpec,
@@ -316,15 +392,31 @@ impl EnvironmentSpec {
         validate_id(&self.project_id, "projectId")?;
         validate_source(&self.source)?;
 
-        self.image
-            .pinned()
-            .validate()
-            .map_err(|error| SpecError::new("spec_image_invalid", "image", error.to_string()))?;
-        if let Some(entry) = &self.image.catalog_entry_id {
-            validate_catalog_id(entry, "image.catalogEntryId")?;
-        }
-        if let Some(key) = &self.image.build_key {
-            validate_hex64(key, "image.buildKey")?;
+        match &self.image {
+            SpecImage::Registry(image) => {
+                image.pinned().validate().map_err(|error| {
+                    SpecError::new("spec_image_invalid", "image", error.to_string())
+                })?;
+                if let Some(entry) = &image.catalog_entry_id {
+                    validate_catalog_id(entry, "image.catalogEntryId")?;
+                }
+                if let Some(key) = &image.build_key {
+                    validate_hex64(key, "image.buildKey")?;
+                }
+            }
+            SpecImage::Built(image) => {
+                validate_hex64(&image.build_key, "image.buildKey")?;
+                validate_digest(&image.image_id).map_err(|error| {
+                    SpecError::new("spec_image_invalid", "image.imageId", error.to_string())
+                })?;
+                if image.image_id != image.image_id.to_ascii_lowercase() {
+                    return Err(SpecError::new(
+                        "spec_image_invalid",
+                        "image.imageId",
+                        "image ID must be lowercase",
+                    ));
+                }
+            }
         }
 
         validate_digest(&self.bundle.digest).map_err(|error| {
@@ -369,10 +461,43 @@ impl EnvironmentSpec {
         }
 
         validate_env(&self.container_env)?;
+        // Null means removal, not an absent entry: validate its name too.
+        let remote_values = self
+            .remote_env
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone().unwrap_or_default()))
+            .collect();
+        validate_env(&remote_values).map_err(|mut error| {
+            error.field = error.field.replacen("containerEnv", "remoteEnv", 1);
+            error
+        })?;
+        if let Some(folder) = &self.workspace_folder {
+            if !(folder == "/workspace" || folder.starts_with("/workspace/"))
+                || folder.len() > 4096
+                || folder.contains('\0')
+                || folder.split('/').any(|part| matches!(part, "." | ".."))
+            {
+                return Err(SpecError::new(
+                    "spec_workspace_invalid",
+                    "workspaceFolder",
+                    "workspace folder must be /workspace or a confined child path",
+                ));
+            }
+        }
+        if self
+            .lifecycle_timeout_ms
+            .is_some_and(|timeout| !(1_000..=3_600_000).contains(&timeout))
+        {
+            return Err(SpecError::new(
+                "spec_lifecycle_timeout_invalid",
+                "lifecycleTimeoutMs",
+                "lifecycle timeout must be between 1000 and 3600000 milliseconds",
+            ));
+        }
 
         for (name, command) in self.lifecycle_commands.entries() {
             if let Some(command) = command {
-                validate_command(command, &format!("lifecycleCommands.{name}"), true)?;
+                validate_command(command, &format!("lifecycleCommands.{name}"), 0, &mut 0)?;
             }
         }
 
@@ -481,8 +606,17 @@ fn validate_source(source: &EnvironmentSource) -> Result<(), SpecError> {
 fn validate_command(
     command: &CommandSpec,
     field: &str,
-    allow_parallel: bool,
+    depth: usize,
+    count: &mut usize,
 ) -> Result<(), SpecError> {
+    *count += 1;
+    if depth > 8 || *count > 256 {
+        return Err(SpecError::new(
+            "spec_command_invalid",
+            field,
+            "command tree exceeds depth 8 or 256 nodes",
+        ));
+    }
     match command {
         CommandSpec::Shell { command } => {
             if command.trim().is_empty()
@@ -512,13 +646,6 @@ fn validate_command(
             }
         }
         CommandSpec::Parallel { commands } => {
-            if !allow_parallel {
-                return Err(SpecError::new(
-                    "spec_command_invalid",
-                    field,
-                    "parallel commands cannot nest",
-                ));
-            }
             if commands.is_empty() || commands.len() > limits::MAX_PARALLEL_COMMANDS {
                 return Err(SpecError::new(
                     "spec_command_invalid",
@@ -534,7 +661,19 @@ fn validate_command(
                         "command names are 1-64 of [A-Za-z0-9._-]",
                     ));
                 }
-                validate_command(inner, &format!("{field}.{name}"), false)?;
+                validate_command(inner, &format!("{field}.{name}"), depth + 1, count)?;
+            }
+        }
+        CommandSpec::Sequence { commands } => {
+            if commands.is_empty() || commands.len() > 256 {
+                return Err(SpecError::new(
+                    "spec_command_invalid",
+                    field,
+                    "sequence commands need 1-256 entries",
+                ));
+            }
+            for (index, inner) in commands.iter().enumerate() {
+                validate_command(inner, &format!("{field}.{index}"), depth + 1, count)?;
             }
         }
     }
@@ -780,6 +919,18 @@ pub(crate) mod tests {
     pub(crate) const RETAINED_BUNDLE_DIGEST: &str =
         "sha256:4444444444444444444444444444444444444444444444444444444444444444";
 
+    #[test]
+    fn built_images_round_trip_without_a_fabricated_registry_reference() {
+        let value = serde_json::json!({"kind":"build","buildKey":"a".repeat(64),"imageId":format!("sha256:{}","b".repeat(64))});
+        let image: SpecImage = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&image).unwrap(), value);
+        assert!(image.registry_image().is_none());
+        let mut spec = sample_spec();
+        spec.image = image;
+        assert!(spec.validate().is_ok());
+        assert!(serde_json::from_value::<SpecImage>(serde_json::json!({"kind":"build","buildKey":"a".repeat(64),"imageId":"bad","registry":"ghcr.io"})).is_err());
+    }
+
     pub(crate) fn sample_spec() -> EnvironmentSpec {
         let mut spec = EnvironmentSpec {
             version: 1,
@@ -788,13 +939,13 @@ pub(crate) mod tests {
             source: EnvironmentSource::ProjectSetting {
                 catalog_entry_id: "python-312".into(),
             },
-            image: SpecImage {
+            image: SpecImage::Registry(RegistrySpecImage {
                 registry: "ghcr.io".into(),
                 repository: "acme/python".into(),
                 digest: IMAGE_DIGEST.into(),
                 catalog_entry_id: Some("python-312".into()),
                 build_key: None,
-            },
+            }),
             bundle: SpecBundle {
                 digest: BUNDLE_DIGEST.into(),
                 release_tag: "v1.0.0".into(),
@@ -810,6 +961,9 @@ pub(crate) mod tests {
                 "PIP_INDEX_URL".into(),
                 "https://pypi.org/simple".into(),
             )]),
+            remote_env: BTreeMap::new(),
+            workspace_folder: None,
+            lifecycle_timeout_ms: None,
             lifecycle_commands: LifecycleCommands {
                 post_create: Some(CommandSpec::Shell {
                     command: "pip install -r requirements.txt".into(),
@@ -836,6 +990,45 @@ pub(crate) mod tests {
     #[test]
     fn a_sample_spec_validates_with_its_digest() {
         sample_spec().validate_with_digest().unwrap();
+    }
+
+    #[test]
+    fn optional_runtime_fields_preserve_old_wire_and_validate_new_values() {
+        let mut spec = sample_spec();
+        let old_digest = spec.spec_digest.clone();
+        let wire = serde_json::to_value(&spec).unwrap();
+        for key in ["remoteEnv", "workspaceFolder", "lifecycleTimeoutMs"] {
+            assert!(wire.get(key).is_none());
+        }
+        let decoded: EnvironmentSpec = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded.compute_digest().unwrap(), old_digest);
+        spec.remote_env.insert("REMOVE_ME".into(), None);
+        spec.remote_env
+            .insert("PATH".into(), Some("${containerEnv:PATH}:/tools".into()));
+        spec.workspace_folder = Some("/workspace/app".into());
+        spec.lifecycle_timeout_ms = Some(60_000);
+        spec.validate().unwrap();
+        assert_ne!(spec.compute_digest().unwrap(), old_digest);
+        spec.remote_env.insert("COGNIA_SECRET".into(), None);
+        assert_eq!(spec.validate().unwrap_err().code, "spec_env_reserved");
+        spec.remote_env.remove("COGNIA_SECRET");
+        for folder in [
+            "/workspace/../outside",
+            "/workspace/./app",
+            "/other",
+            "/workspace/x\0",
+        ] {
+            spec.workspace_folder = Some(folder.into());
+            assert_eq!(spec.validate().unwrap_err().code, "spec_workspace_invalid");
+        }
+        spec.workspace_folder = None;
+        for timeout in [0, 999, 3_600_001] {
+            spec.lifecycle_timeout_ms = Some(timeout);
+            assert_eq!(
+                spec.validate().unwrap_err().code,
+                "spec_lifecycle_timeout_invalid"
+            );
+        }
     }
 
     #[test]
@@ -931,7 +1124,7 @@ pub(crate) mod tests {
     fn structural_refusals_carry_stable_codes() {
         assert_eq!(refusal(|s| s.version = 2), "spec_version_unsupported");
         assert_eq!(
-            refusal(|s| s.image.digest = "sha256:abc".into()),
+            refusal(|s| s.image.registry_mut().unwrap().digest = "sha256:abc".into()),
             "spec_image_invalid"
         );
         assert_eq!(
@@ -988,7 +1181,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parallel_commands_cannot_nest() {
+    fn lifecycle_composition_is_bounded_and_round_trips_sequences() {
         let inner = CommandSpec::Parallel {
             commands: BTreeMap::from([(
                 "a".into(),
@@ -1000,10 +1193,34 @@ pub(crate) mod tests {
         let outer = CommandSpec::Parallel {
             commands: BTreeMap::from([("nested".into(), inner)]),
         };
+        let command = CommandSpec::Sequence {
+            commands: vec![outer],
+        };
+        validate_command(&command, "command", 0, &mut 0).unwrap();
+        let json = serde_json::to_value(&command).unwrap();
+        assert_eq!(json["kind"], "sequence");
         assert_eq!(
-            refusal(|s| s.lifecycle_commands.on_create = Some(outer)),
-            "spec_command_invalid"
+            serde_json::from_value::<CommandSpec>(json).unwrap(),
+            command
         );
+        let mut nested = command;
+        for _ in 0..8 {
+            nested = CommandSpec::Sequence {
+                commands: vec![nested],
+            };
+        }
+        assert!(validate_command(&nested, "command", 0, &mut 0).is_err());
+        for count in [0, 256] {
+            let oversized = CommandSpec::Sequence {
+                commands: vec![
+                    CommandSpec::Shell {
+                        command: "true".into()
+                    };
+                    count
+                ],
+            };
+            assert!(validate_command(&oversized, "command", 0, &mut 0).is_err());
+        }
     }
 
     #[test]

@@ -114,6 +114,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 5,
             max_memory_mb: 128,
+            max_processes: 0,
         }
     }
 

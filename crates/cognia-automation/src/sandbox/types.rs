@@ -100,6 +100,16 @@ pub enum SandboxPolicy {
         /// 0 = no cap.
         #[serde(default)]
         max_memory_mb: u32,
+        /// Process-count ceiling for the whole sandboxed tree. Linux applies
+        /// it as `RLIMIT_NPROC` inside the unshared user namespace (so the
+        /// count is scoped to the sandbox, not the login uid); Windows maps
+        /// it onto the runner Job Object's `ActiveProcessLimit`. macOS has
+        /// no per-tree primitive — Seatbelt cannot count processes and
+        /// `RLIMIT_NPROC` there is uid-wide — so the macOS backend
+        /// deliberately does not apply it (see `macos.rs::rlimits_for`).
+        /// 0 = no cap.
+        #[serde(default)]
+        max_processes: u32,
     },
     /// `Edit` tool — modifies an existing file. `target_files` is the exact
     /// allowed write set; nothing else on the FS is writable. Reads
@@ -280,6 +290,7 @@ mod tests {
             },
             max_cpu_seconds: 30,
             max_memory_mb: 512,
+            max_processes: 256,
         };
         let json = serde_json::to_string(&policy).unwrap();
         let back: SandboxPolicy = serde_json::from_str(&json).unwrap();

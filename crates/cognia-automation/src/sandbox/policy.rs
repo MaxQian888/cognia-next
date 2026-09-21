@@ -32,6 +32,12 @@ pub struct PolicyRequest {
     pub max_cpu_seconds: u32,
     /// For Bash: per-call memory cap (MB). 0 inherits the default.
     pub max_memory_mb: u32,
+    /// For Bash: per-call process-count cap for the whole sandboxed tree.
+    /// 0 inherits `BASH_DEFAULT_MAX_PROCESSES`. Honoured on Linux
+    /// (`RLIMIT_NPROC` inside the unshared user namespace) and Windows (Job
+    /// Object `ActiveProcessLimit`); macOS has no per-tree primitive, so
+    /// the backend documents the gap rather than applying a uid-wide limit.
+    pub max_processes: u32,
     /// For Bash: network shape. `"off"` (default), `"on"`, or `"allowlist"`
     /// (consumes `network_hosts`).
     pub network: Option<String>,
@@ -45,6 +51,13 @@ pub struct PolicyRequest {
 pub fn bash_defaults() -> (u32, u32) {
     (300, 2048) // 5 minutes, 2 GB
 }
+
+/// Default process ceiling for a Bash sandbox — the same bound the container
+/// tiers apply (the runner's pids-limit default). On Linux it lands as
+/// `RLIMIT_NPROC` inside the unshared user namespace, so it counts only the
+/// sandbox's own tree; on Windows it is the Job Object's `ActiveProcessLimit`.
+/// 512 is comfortably above a `make -j` fan-out and far below a fork bomb.
+pub const BASH_DEFAULT_MAX_PROCESSES: u32 = 512;
 
 /// Translate a tool name + request into a `SandboxPolicy`. The `tool` arg
 /// is the renderer-side MCP tool name with the `sandbox_` prefix stripped
@@ -65,6 +78,11 @@ pub fn policy_for(tool: &str, req: PolicyRequest) -> Result<SandboxPolicy, Sandb
             } else {
                 req.max_memory_mb
             };
+            let processes = if req.max_processes == 0 {
+                BASH_DEFAULT_MAX_PROCESSES
+            } else {
+                req.max_processes
+            };
             if req.writable.is_empty() {
                 return Err(SandboxError::InvalidPolicy {
                     reason: "bash policy needs at least one writable dir (cwd)".into(),
@@ -76,6 +94,7 @@ pub fn policy_for(tool: &str, req: PolicyRequest) -> Result<SandboxPolicy, Sandb
                 network,
                 max_cpu_seconds: cpu,
                 max_memory_mb: mem,
+                max_processes: processes,
             })
         }
         "edit" | "write" | "text_editor" => {
@@ -160,11 +179,13 @@ mod tests {
         let req = PolicyRequest {
             max_cpu_seconds: 10,
             max_memory_mb: 256,
+            max_processes: 64,
             ..bash_req()
         };
         let SandboxPolicy::Bash {
             max_cpu_seconds,
             max_memory_mb,
+            max_processes,
             ..
         } = policy_for("bash", req).unwrap()
         else {
@@ -172,6 +193,16 @@ mod tests {
         };
         assert_eq!(max_cpu_seconds, 10);
         assert_eq!(max_memory_mb, 256);
+        assert_eq!(max_processes, 64);
+    }
+
+    #[test]
+    fn bash_policy_defaults_the_process_cap() {
+        let SandboxPolicy::Bash { max_processes, .. } = policy_for("bash", bash_req()).unwrap()
+        else {
+            panic!("expected Bash variant")
+        };
+        assert_eq!(max_processes, BASH_DEFAULT_MAX_PROCESSES);
     }
 
     #[test]

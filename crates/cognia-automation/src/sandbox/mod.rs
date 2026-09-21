@@ -113,12 +113,14 @@ fn canonicalize_policy(
             network,
             max_cpu_seconds,
             max_memory_mb,
+            max_processes,
         } => SandboxPolicy::Bash {
             writable: safe_canonicalize_all(&writable).map_err(map_err)?,
             readable: safe_canonicalize_all(&readable).map_err(map_err)?,
             network,
             max_cpu_seconds,
             max_memory_mb,
+            max_processes,
         },
         SandboxPolicy::Edit {
             target_files,
@@ -162,6 +164,7 @@ fn downgrade_unenforceable_network(
             readable,
             max_cpu_seconds,
             max_memory_mb,
+            max_processes,
         } = policy
         {
             eprintln!(
@@ -175,6 +178,7 @@ fn downgrade_unenforceable_network(
                 readable,
                 max_cpu_seconds,
                 max_memory_mb,
+                max_processes,
             };
         }
         policy
@@ -228,9 +232,10 @@ fn with_resolved_twins(roots: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf
 /// Reject — before any spawn — a cwd / writable / write-target path that aims
 /// at a forbidden system or app-internal location. A model that asks for
 /// `writable: ["/etc"]` or the keyring directory is refused with
-/// `InvalidPolicy` rather than confined to a dangerous root. Readable paths are
-/// NOT checked here: the backends already need read access to `/usr` · `/etc`
-/// (CA bundles, loaders) for real toolchains to run.
+/// `InvalidPolicy` rather than confined to a dangerous root. Readable roots
+/// get their own floor in [`reject_forbidden_readable`]: the writable check
+/// guards what a sandboxed command can change, the readable one what it can
+/// see.
 fn reject_forbidden_paths(
     cwd: &std::path::Path,
     policy: &crate::sandbox::types::SandboxPolicy,
@@ -276,6 +281,51 @@ fn reject_forbidden_paths(
                     });
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// The directories a sandbox READABLE root may never be, sit under, or
+/// swallow: host runtime and control-plane state (`/proc`, `/sys`, `/dev`,
+/// `/run`, `/var`, `/etc`, `/boot`, `/root`, `/tmp`). The audit's case was
+/// `readable: ["/var/run"]` reaching `/var/run/docker.sock`; the ancestor
+/// direction (`/var`, `/`) is refused for the same reason. Resolved twins are
+/// added so macOS's `/var → /private/var` and `/tmp → /private/tmp` spellings
+/// are refused too. System dirs the backends themselves bind (`/usr`,
+/// `/bin`, `/lib`, …) are deliberately absent — a caller declaring them only
+/// duplicates the backend's own read-only mounts.
+fn readable_deny_roots() -> Vec<std::path::PathBuf> {
+    with_resolved_twins(crate::sandbox::protected::forbidden_readable_roots())
+}
+
+/// Reject — before any spawn — a readable root that would expose host
+/// runtime state inside the sandbox. Applies to every policy variant's
+/// `readable` list (Bash plus the file tools), before the backend renders
+/// its bind set / SBPL profile.
+fn reject_forbidden_readable(
+    policy: &crate::sandbox::types::SandboxPolicy,
+) -> Result<(), crate::sandbox::types::SandboxError> {
+    use crate::sandbox::types::{SandboxError, SandboxPolicy};
+
+    let deny_roots = readable_deny_roots();
+    if deny_roots.is_empty() {
+        return Ok(());
+    }
+    let readable: &[std::path::PathBuf] = match policy {
+        SandboxPolicy::Bash { readable, .. }
+        | SandboxPolicy::Edit { readable, .. }
+        | SandboxPolicy::Write { readable, .. }
+        | SandboxPolicy::TextEditor { readable, .. } => readable,
+    };
+    for p in readable {
+        if crate::sandbox::protected::is_forbidden_readable(p, &deny_roots) {
+            return Err(SandboxError::InvalidPolicy {
+                reason: format!(
+                    "'{}' reaches host runtime / control state and cannot be a sandbox readable root",
+                    p.display()
+                ),
+            });
         }
     }
     Ok(())
@@ -370,6 +420,11 @@ pub async fn run_confined(
     // data / keyring dir) regardless of what the caller asked for. Runs after
     // canonicalization so symlink / `..` evasions are already resolved.
     reject_forbidden_paths(&command.cwd, &policy, &forbidden_deny_roots())?;
+
+    // 2c. Floor: refuse readable roots that would mount host runtime /
+    // control-plane state into the sandbox (`/var/run/docker.sock` being the
+    // audit's case).
+    reject_forbidden_readable(&policy)?;
 
     // 3. Drop code-injection environment variables (LD_PRELOAD, NODE_OPTIONS…).
     crate::sandbox::env::filter_env(&mut command.env);
@@ -675,6 +730,7 @@ mod tests {
             network,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         }
     }
 
@@ -803,6 +859,71 @@ mod tests {
         };
         let err = reject_forbidden_paths(&std::env::temp_dir(), &policy, &deny).unwrap_err();
         assert!(matches!(err, SandboxError::InvalidPolicy { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_forbidden_readable_blocks_docker_socket_root() {
+        // The audit's case: a caller binds /var/run and reaches the host's
+        // Docker socket — a straight container escape.
+        for readable in [
+            "/var/run/docker.sock",
+            "/var/run",
+            "/var",
+            "/run",
+            "/proc",
+            "/dev",
+        ] {
+            let policy = SandboxPolicy::Bash {
+                writable: vec![std::env::temp_dir()],
+                readable: vec![PathBuf::from(readable)],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+                max_processes: 0,
+            };
+            assert!(
+                matches!(
+                    reject_forbidden_readable(&policy),
+                    Err(SandboxError::InvalidPolicy { .. })
+                ),
+                "{readable} must be refused"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_forbidden_readable_blocks_root_and_ancestors() {
+        for readable in ["/", "/tmp"] {
+            let policy = SandboxPolicy::Edit {
+                target_files: vec![std::env::temp_dir().join("f.txt")],
+                readable: vec![PathBuf::from(readable)],
+            };
+            assert!(reject_forbidden_readable(&policy).is_err(), "{readable}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_forbidden_readable_allows_workspace_and_system_tool_dirs() {
+        // /usr / /bin are the backend's own ro mounts — declaring them is
+        // redundant, not dangerous, and stays allowed. (temp_dir is NOT used
+        // as a readable root here: on macOS it is literally under /var.)
+        let policy = SandboxPolicy::Bash {
+            writable: vec![std::env::temp_dir()],
+            readable: vec![
+                PathBuf::from("/nonexistent-workspace"),
+                PathBuf::from("/usr"),
+                PathBuf::from("/opt"),
+                PathBuf::from("/bin"),
+            ],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        assert!(reject_forbidden_readable(&policy).is_ok());
     }
 
     #[test]

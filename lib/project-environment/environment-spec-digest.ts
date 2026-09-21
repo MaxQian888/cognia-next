@@ -29,6 +29,7 @@ export async function computeEnvironmentSpecDigest(
 export function canonicalEnvironmentSpec(spec: EnvironmentSpecBody | EnvironmentSpec): string {
   const { explain: _explain, ...rest } = spec as EnvironmentSpec
   const { specDigest: _digest, ...body } = rest
+  if (!body.remoteEnv || Object.keys(body.remoteEnv).length === 0) delete body.remoteEnv
   return canonicalizeJson(body)
 }
 
@@ -48,11 +49,27 @@ export async function sealEnvironmentSpec(body: EnvironmentSpecBody): Promise<En
  * project's egress grant instead.
  */
 export async function environmentRuntimeFieldsDigest(
-  spec: Pick<EnvironmentSpec, "containerEnv" | "lifecycleCommands" | "forwardPorts" | "user">
+  spec: Pick<
+    EnvironmentSpec,
+    | "containerEnv"
+    | "remoteEnv"
+    | "workspaceFolder"
+    | "lifecycleTimeoutMs"
+    | "lifecycleCommands"
+    | "forwardPorts"
+    | "user"
+  >
 ): Promise<string> {
   return sha256String(
     canonicalizeJson({
       containerEnv: spec.containerEnv,
+      ...(spec.remoteEnv && Object.keys(spec.remoteEnv).length
+        ? { remoteEnv: spec.remoteEnv }
+        : {}),
+      ...(spec.workspaceFolder !== undefined ? { workspaceFolder: spec.workspaceFolder } : {}),
+      ...(spec.lifecycleTimeoutMs !== undefined
+        ? { lifecycleTimeoutMs: spec.lifecycleTimeoutMs }
+        : {}),
       lifecycleCommands: spec.lifecycleCommands,
       forwardPorts: spec.forwardPorts,
       user: spec.user,
@@ -75,11 +92,26 @@ export async function environmentRuntimeFieldsDigest(
 export async function declarationRuntimeFieldsDigest(
   declaration: Pick<
     EnvironmentDeclaration,
-    "containerEnv" | "lifecycleCommands" | "forwardPorts" | "user"
+    | "containerEnv"
+    | "remoteEnv"
+    | "workspaceFolder"
+    | "lifecycleTimeoutMs"
+    | "lifecycleCommands"
+    | "forwardPorts"
+    | "user"
   >
 ): Promise<string> {
   return environmentRuntimeFieldsDigest({
     containerEnv: { ...declaration.containerEnv },
+    ...(declaration.remoteEnv && Object.keys(declaration.remoteEnv).length
+      ? { remoteEnv: { ...declaration.remoteEnv } }
+      : {}),
+    ...(declaration.workspaceFolder !== undefined
+      ? { workspaceFolder: declaration.workspaceFolder }
+      : {}),
+    ...(declaration.lifecycleTimeoutMs !== undefined
+      ? { lifecycleTimeoutMs: declaration.lifecycleTimeoutMs }
+      : {}),
     lifecycleCommands: declaration.lifecycleCommands,
     forwardPorts: declaration.forwardPorts,
     user: declaration.user ? { declared: { ...declaration.user } } : {},

@@ -132,14 +132,15 @@ The resolver and injection path are shared by the Docker driver (compose T2 and 
 
 In a local container on the desktop, the agent receives the user's own keys exactly as `env-builder.ts` does today. The desktop gateway is loopback-only. The "sandboxes never hold raw model keys" rule of ADR-0185 (planned) applies to compose T2 and Kubernetes. The desktop exception is labelled in the Runtime environment panel.
 
-### Step ① enforces neither egress nor credential routing, and says so
+### Step ① does not enforce egress, and says so
 
-Two guarantees in this ADR need infrastructure that Step ② builds. Until then the Step ① driver is deliberately weaker, and the gap is labelled on the type, in the placement the UI renders, and in a test:
+One guarantee in this ADR needs infrastructure that Step ② builds. Until then the Step ① driver is deliberately weaker on egress, and the gap is labelled on the type, in the placement the UI renders, and in a test:
 
 - **Egress.** `off` is honoured by giving the container no network at all. `allowlist` and `on` get the network the legacy runner had, with nothing filtering it, because the per-tenant L7 egress proxy is ADR-0185. The placement carries `egress.enforced: false`, so nothing downstream can present an unfiltered sandbox as an enforced allowlist.
-- **Credentials.** A sandbox receives the same `SpawnPolicy`-filtered environment the legacy runner received, provider keys included; the gateway's ticket-only sandbox ingress is ADR-0185 §②.7. The placement carries `credentials.mode: "spawn-env"`. The in-sandbox supervisor still strips ambient credentials that came from the image rather than from Cognia, using the list of names the driver declares ([ADR-0183](./0183-the-agent-is-brought-to-the-image)).
 
-Neither is a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
+Credentials are no longer a gap. The driver strips the ambient provider-credential names — the same list the local launcher clears — out of the spawn environment before the container sees them, so a sandbox never holds the host's real keys; a managed gateway task's per-task lease (`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`) is the ingress instead, and the placement says `credentials.mode: "gateway-lease"` for it and `"none"` otherwise. Because the stripped names are never listed as driver-provided, the in-sandbox supervisor also drops an image-baked copy ([ADR-0183](./0183-the-agent-is-brought-to-the-image)). Per-sandbox tickets for ordinary spawns remain ADR-0185 §②.7.
+
+Egress is not a silent downgrade: a project cannot ask for an enforced allowlist in Step ① and be told it got one.
 
 ### The companion plane
 

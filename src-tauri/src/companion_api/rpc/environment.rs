@@ -34,6 +34,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "environment_catalog_update",
     "environment_catalog_delete",
     "environment_declaration_read",
+    "environment_build_start",
+    "environment_build_get",
+    "environment_build_cancel",
+    "environment_ports_list",
     "environment_spec_resolve_preview",
     "environment_approval_list",
     "environment_approval_get",
@@ -139,10 +143,19 @@ fn stamped_actor(name: &str, account_id: Option<&str>, device_id: &str) -> Strin
 /// every way it can fail is a refusal — never an assumption of access. The
 /// codes come from [`crate::companion_api::workspace_access`] so a UI can tell
 /// "you are not a maintainer" from "the plane is down".
-async fn require_approval_authority(
+pub(crate) async fn require_approval_authority(
     name: &str,
     workspace_id: &str,
     account_id: Option<&str>,
+) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
+    require_environment_authority(name, workspace_id, account_id, true).await
+}
+
+async fn require_environment_authority(
+    name: &str,
+    workspace_id: &str,
+    account_id: Option<&str>,
+    manage: bool,
 ) -> Result<ApprovalAuthority, (StatusCode, Json<RpcError>)> {
     if host_owner() {
         return Ok(ApprovalAuthority::HostOwner);
@@ -174,7 +187,12 @@ async fn require_approval_authority(
                 Json(RpcError::new(error.code(), format!("{name}: {error}"))),
             )
         })?;
-    if !may_approve_environment(access.as_ref(), false) {
+    if !(may_approve_environment(access.as_ref(), false)
+        || (!manage
+            && access.as_ref().is_some_and(|access| {
+                access.allows(cognia_tenant_auth::WorkspaceCapability::Read)
+            })))
+    {
         return Err((
             StatusCode::FORBIDDEN,
             Json(RpcError::new(
@@ -289,6 +307,58 @@ pub(super) async fn dispatch(
             let requested: String = required(&args, "workspaceRoot")?;
             let root = authorize_workspace_root(host, requested)?;
             to_json(pool::read_declaration(&root).map_err(|e| served(name, e))?)
+        }
+
+        "environment_build_start" => {
+            let mut request: pool::BuildRequest = required(&args, "request")?;
+            require_approval_authority(name, &request.project_id, account_id).await?;
+            request.cwd =
+                authorize_workspace_root(host, request.cwd.to_string_lossy().into_owned())?.into();
+            to_json(pool::start_build(&services, request).map_err(|error| served(name, error))?)
+        }
+        "environment_build_get" => {
+            let project_id: String = required(&args, "projectId")?;
+            require_environment_authority(name, &project_id, account_id, false).await?;
+            let job_id: Option<String> = optional(&args, "jobId")?;
+            let build_key: Option<String> = optional(&args, "buildKey")?;
+            to_json(
+                pool::get_build(
+                    &services,
+                    &project_id,
+                    job_id.as_deref(),
+                    build_key.as_deref(),
+                )
+                .map_err(|error| served(name, error))?,
+            )
+        }
+        "environment_build_cancel" => {
+            let project_id: String = required(&args, "projectId")?;
+            require_approval_authority(name, &project_id, account_id).await?;
+            let job_id: String = required(&args, "jobId")?;
+            to_json(pool::cancel_build(&project_id, &job_id).map_err(|error| served(name, error))?)
+        }
+        "environment_ports_list" => {
+            let project_id: String = required(&args, "projectId")?;
+            require_approval_authority(name, &project_id, account_id).await?;
+            let runtime = services.runtime.as_ref().ok_or_else(|| {
+                served(
+                    name,
+                    EnvironmentServiceError::Refused {
+                        code: "sandbox_runtime_unavailable".into(),
+                        message: "sandbox runtime control is unavailable".into(),
+                    },
+                )
+            })?;
+            let ports = runtime.list_ports(&project_id).await.map_err(|error| {
+                served(
+                    name,
+                    EnvironmentServiceError::Refused {
+                        code: error.code.into(),
+                        message: error.message,
+                    },
+                )
+            })?;
+            Ok(serde_json::json!({"ports":ports}))
         }
 
         // ── A dry run of admission ─────────────────────────────────────────

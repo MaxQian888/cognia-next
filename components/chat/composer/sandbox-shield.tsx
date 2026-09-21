@@ -20,6 +20,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getCharacter } from "@/lib/db/characters"
 import { updateSession } from "@/lib/db/sessions"
@@ -138,20 +139,24 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
 
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          data-testid="sandbox-shield"
-          data-state={state}
-          data-pinned={pinned ? "true" : "false"}
-          data-available={runtimeAvailable ? "true" : "false"}
-          aria-label={ariaLabel}
-          title={tooltip}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
-        >
-          {icon}
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              data-testid="sandbox-shield"
+              data-state={state}
+              data-pinned={pinned ? "true" : "false"}
+              data-available={runtimeAvailable ? "true" : "false"}
+              aria-label={ariaLabel}
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              {icon}
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{tooltip}</TooltipContent>
+      </Tooltip>
       <PopoverContent align="start" sideOffset={4} className="w-72 space-y-2 p-3">
         <p className="text-sm font-medium">{ariaLabel}</p>
         <p className="text-xs text-muted-foreground">{tooltip}</p>

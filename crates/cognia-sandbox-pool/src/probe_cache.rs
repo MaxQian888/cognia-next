@@ -74,16 +74,20 @@ impl ProbeCacheEntry {
         if version != PROBE_CACHE_VERSION {
             return None;
         }
-        let workspace_owner = match value.get("workspaceOwner") {
-            None | Some(Value::Null) => None,
-            Some(owner) => Some(serde_json::from_value::<Ownership>(owner.clone()).ok()?),
+        let workspace_owner = match value.get("workspaceOwner")? {
+            Value::Null => None,
+            owner => Some(serde_json::from_value::<Ownership>(owner.clone()).ok()?),
         };
+        let report: ProbeReport = serde_json::from_value(value.get("report")?.clone()).ok()?;
+        if report.version != PROBE_REPORT_VERSION {
+            return None;
+        }
         Some(Self {
             version,
             user: value.get("user")?.as_str()?.to_string(),
             match_workspace_owner: value.get("matchWorkspaceOwner")?.as_bool()?,
             workspace_owner,
-            report: serde_json::from_value(value.get("report")?.clone()).ok()?,
+            report,
         })
     }
 
@@ -94,7 +98,9 @@ impl ProbeCacheEntry {
         match_workspace_owner: bool,
         workspace_owner: Option<Ownership>,
     ) -> Option<&ProbeReport> {
-        (self.user == user.to_string()
+        (self.version == PROBE_CACHE_VERSION
+            && self.report.version == PROBE_REPORT_VERSION
+            && self.user == user.to_string()
             && self.match_workspace_owner == match_workspace_owner
             && self.workspace_owner == workspace_owner)
             .then_some(&self.report)
@@ -181,6 +187,26 @@ mod tests {
         assert_eq!(ProbeCacheEntry::from_value(&no_report), None);
 
         assert_eq!(ProbeCacheEntry::from_value(&json!({ "version": 1 })), None);
+    }
+
+    #[test]
+    fn an_incompatible_report_or_missing_owner_never_reuses_a_probe() {
+        let user = UserSpec::Uid(0);
+        let entry = ProbeCacheEntry::new(&user, false, None, report(Vec::new()));
+        let mut stored = entry.to_value();
+        stored["report"]["version"] = json!(PROBE_REPORT_VERSION + 1);
+        assert_eq!(ProbeCacheEntry::from_value(&stored), None);
+
+        let mut stored = entry.to_value();
+        stored.as_object_mut().unwrap().remove("workspaceOwner");
+        assert_eq!(ProbeCacheEntry::from_value(&stored), None);
+
+        let mut incompatible = entry.clone();
+        incompatible.report.version += 1;
+        assert!(incompatible.report_for(&user, false, None).is_none());
+        let mut incompatible = entry;
+        incompatible.version += 1;
+        assert!(incompatible.report_for(&user, false, None).is_none());
     }
 
     #[test]

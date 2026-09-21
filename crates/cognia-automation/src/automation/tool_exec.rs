@@ -188,6 +188,9 @@ pub async fn run_bash_confined(action: BashAction, confine: &SandboxConfine) -> 
         network: confine_network(confine)?,
         max_cpu_seconds: 0,
         max_memory_mb: 0,
+        // The default tree-wide process cap — a fork bomb inside a confined
+        // bash call must exhaust its own budget, not the host's.
+        max_processes: crate::sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
     };
     match crate::sandbox::run_confined(command, policy).await {
         Ok(r) => Ok(BashResult {

@@ -141,3 +141,14 @@ describe("ProjectEnvironmentRuntimeTrace", () => {
     )
   })
 })
+
+it("shows a built Docker image identity without fabricating a registry reference", () => {
+  render(
+    <ProjectEnvironmentRuntimeTrace
+      preview={placed({ image: { kind: "build", buildKey: "b".repeat(64), imageId: DIGEST } })}
+      catalog={catalog}
+    />
+  )
+  expect(screen.getByText(new RegExp(DIGEST))).toBeInTheDocument()
+  expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
+})

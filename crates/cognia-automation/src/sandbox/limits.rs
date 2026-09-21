@@ -28,20 +28,31 @@ pub struct ResolvedLimits {
     pub cpu_seconds: Option<u64>,
     /// `RLIMIT_AS` ceiling in bytes.
     pub address_space_bytes: Option<u64>,
+    /// `RLIMIT_NPROC` ceiling — the process-count backstop a fork bomb trips.
+    /// Only meaningful on Linux, where the bwrap user namespace makes the
+    /// count per-sandbox-tree. On macOS `RLIMIT_NPROC` counts every process
+    /// the login uid owns, so applying it would cap the whole session; the
+    /// macOS backend never sets this field.
+    pub processes: Option<u64>,
 }
 
 impl ResolvedLimits {
-    /// True when neither limit needs to be applied (so the backend can skip
+    /// True when no limit needs to be applied (so the backend can skip
     /// installing a `pre_exec` hook entirely).
     pub fn is_empty(&self) -> bool {
-        self.cpu_seconds.is_none() && self.address_space_bytes.is_none()
+        self.cpu_seconds.is_none() && self.address_space_bytes.is_none() && self.processes.is_none()
     }
 }
 
-/// Translate the policy's `max_cpu_seconds` / `max_memory_mb` (0 = no cap)
-/// into concrete rlimit values. Memory MB is converted to bytes with
-/// saturating arithmetic so an absurd value can't overflow.
-pub fn resolve_rlimits(max_cpu_seconds: u32, max_memory_mb: u32) -> ResolvedLimits {
+/// Translate the policy's `max_cpu_seconds` / `max_memory_mb` /
+/// `max_processes` (0 = no cap) into concrete rlimit values. Memory MB is
+/// converted to bytes with saturating arithmetic so an absurd value can't
+/// overflow.
+pub fn resolve_rlimits(
+    max_cpu_seconds: u32,
+    max_memory_mb: u32,
+    max_processes: u32,
+) -> ResolvedLimits {
     ResolvedLimits {
         cpu_seconds: if max_cpu_seconds == 0 {
             None
@@ -52,6 +63,11 @@ pub fn resolve_rlimits(max_cpu_seconds: u32, max_memory_mb: u32) -> ResolvedLimi
             None
         } else {
             Some(u64::from(max_memory_mb).saturating_mul(1024 * 1024))
+        },
+        processes: if max_processes == 0 {
+            None
+        } else {
+            Some(u64::from(max_processes))
         },
     }
 }
@@ -69,6 +85,7 @@ pub fn apply_rlimits(cmd: &mut tokio::process::Command, limits: ResolvedLimits) 
     }
     let cpu = limits.cpu_seconds;
     let addr = limits.address_space_bytes;
+    let procs = limits.processes;
     // SAFETY: the closure runs in the forked child before exec. It only calls
     // `setrlimit` (async-signal-safe) and constructs stack values — no heap
     // allocation, no locks, nothing that could deadlock a half-forked child.
@@ -82,11 +99,23 @@ pub fn apply_rlimits(cmd: &mut tokio::process::Command, limits: ResolvedLimits) 
             // Linux-only. macOS callers still get the wall-clock watchdog +
             // RLIMIT_CPU.
             #[cfg(target_os = "linux")]
-            if let Some(bytes) = addr {
-                set_one(libc::RLIMIT_AS, bytes)?;
+            {
+                if let Some(bytes) = addr {
+                    set_one(libc::RLIMIT_AS, bytes)?;
+                }
+                // RLIMIT_NPROC is applied under the bwrap user namespace:
+                // inside it the child's uid maps to a namespace-owned uid,
+                // so the counter only covers the sandboxed tree — a fork
+                // bomb exhausts the cap instead of the host's task space.
+                if let Some(n) = procs {
+                    set_one(libc::RLIMIT_NPROC, n)?;
+                }
             }
             #[cfg(not(target_os = "linux"))]
-            let _ = addr;
+            {
+                let _ = addr;
+                let _ = procs;
+            }
             Ok(())
         });
     }
@@ -118,15 +147,16 @@ mod tests {
 
     #[test]
     fn zero_caps_resolve_to_none() {
-        let r = resolve_rlimits(0, 0);
+        let r = resolve_rlimits(0, 0, 0);
         assert!(r.is_empty());
         assert_eq!(r.cpu_seconds, None);
         assert_eq!(r.address_space_bytes, None);
+        assert_eq!(r.processes, None);
     }
 
     #[test]
     fn cpu_seconds_pass_through() {
-        let r = resolve_rlimits(30, 0);
+        let r = resolve_rlimits(30, 0, 0);
         assert_eq!(r.cpu_seconds, Some(30));
         assert_eq!(r.address_space_bytes, None);
         assert!(!r.is_empty());
@@ -134,21 +164,30 @@ mod tests {
 
     #[test]
     fn memory_mb_converts_to_bytes() {
-        let r = resolve_rlimits(0, 512);
+        let r = resolve_rlimits(0, 512, 0);
         assert_eq!(r.address_space_bytes, Some(512 * 1024 * 1024));
         assert_eq!(r.cpu_seconds, None);
     }
 
     #[test]
-    fn both_caps_set() {
-        let r = resolve_rlimits(10, 256);
+    fn process_cap_passes_through_and_marks_non_empty() {
+        let r = resolve_rlimits(0, 0, 512);
+        assert_eq!(r.processes, Some(512));
+        assert_eq!(r.cpu_seconds, None);
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn all_caps_set() {
+        let r = resolve_rlimits(10, 256, 64);
         assert_eq!(r.cpu_seconds, Some(10));
         assert_eq!(r.address_space_bytes, Some(256 * 1024 * 1024));
+        assert_eq!(r.processes, Some(64));
     }
 
     #[test]
     fn absurd_memory_saturates_instead_of_overflowing() {
-        let r = resolve_rlimits(0, u32::MAX);
+        let r = resolve_rlimits(0, u32::MAX, 0);
         // u32::MAX MB in bytes exceeds u32 but fits u64 — no panic, no wrap.
         assert_eq!(
             r.address_space_bytes,

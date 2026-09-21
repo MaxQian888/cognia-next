@@ -42,6 +42,80 @@ enum StageArg {
 
 #[derive(Subcommand)]
 enum Mode {
+    #[cfg(unix)]
+    /// Keep one workspace container ready for concurrent agent sessions.
+    Serve {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+        #[arg(long, default_value = "/var/lib/cognia-sandboxd")]
+        state_dir: PathBuf,
+        #[arg(long)]
+        runtime_key: String,
+        #[arg(long, default_value = "300")]
+        idle_timeout_secs: u64,
+        #[arg(long)]
+        forward_port: Vec<u16>,
+        #[arg(long, default_value = "/")]
+        root: PathBuf,
+        #[arg(long, default_value = INJECTION_ROOT)]
+        bundle: PathBuf,
+        #[arg(long)]
+        user: Option<UserSpec>,
+        #[arg(long)]
+        match_owner_of: Option<String>,
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
+    },
+    #[cfg(unix)]
+    /// Attach stdio to one agent in a persistent sandbox.
+    ConnectAgent {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
+        /// Host-renewed lease; expiry terminates an abandoned Docker exec.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=300))]
+        lease_seconds: Option<u64>,
+        #[arg(last = true, required = true)]
+        argv: Vec<String>,
+    },
+    #[cfg(unix)]
+    /// Renew one existing agent's original lease duration.
+    RenewAgent {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+        #[arg(long)]
+        session: String,
+    },
+    #[cfg(unix)]
+    /// Send a lifecycle signal to one persistent agent session.
+    SignalAgent {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+        #[arg(long)]
+        session: String,
+        #[arg(long, value_parser = ["TERM", "INT", "KILL"], default_value = "TERM")]
+        signal: String,
+    },
+    #[cfg(unix)]
+    /// Report readiness after the required lifecycle phases complete.
+    Health {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+    },
+    #[cfg(unix)]
+    /// Tunnel binary stdio to a port explicitly authorized at supervisor boot.
+    ConnectPort {
+        #[arg(long, default_value = "/tmp/cognia-sandboxd/control.sock")]
+        socket: PathBuf,
+        #[arg(long)]
+        port: u16,
+        /// Direct loopback tunnel for a Host-authorized ephemeral container.
+        #[arg(long)]
+        direct: bool,
+    },
     /// Stage bundle trees into the injection volume.
     Install {
         #[arg(long, value_enum)]
@@ -90,6 +164,10 @@ enum Mode {
         bundle: PathBuf,
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Protected runtime configuration; otherwise read the driver's
+        /// chunked COGNIA_SANDBOXD_RUNTIME_CONFIG_* environment handoff.
+        #[arg(long)]
+        runtime_config: Option<PathBuf>,
         #[arg(last = true, required = true)]
         argv: Vec<OsString>,
     },
@@ -98,6 +176,126 @@ enum Mode {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
+        #[cfg(unix)]
+        Mode::Serve {
+            socket,
+            state_dir,
+            runtime_key,
+            idle_timeout_secs,
+            forward_port,
+            root,
+            bundle,
+            user,
+            match_owner_of,
+            runtime_config,
+        } => {
+            let image_env = std::env::vars().collect();
+            let runtime = match load_runtime(runtime_config.as_deref(), &image_env) {
+                Ok(Some(runtime)) => runtime,
+                _ => {
+                    return fail(
+                        "persistent supervisor requires valid runtime configuration",
+                        EXIT_INIT_FAILED,
+                    )
+                }
+            };
+            let executable = match std::env::current_exe() {
+                Ok(path) => path,
+                Err(error) => return fail(error, EXIT_INIT_FAILED),
+            };
+            match cognia_sandboxd::serve::serve(cognia_sandboxd::serve::ServeOptions {
+                socket,
+                state_dir,
+                runtime_key,
+                idle_timeout_secs,
+                forward_ports: forward_port,
+                root,
+                bundle,
+                user,
+                match_owner_of,
+                runtime,
+                image_env,
+                executable,
+            }) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
+        #[cfg(unix)]
+        Mode::ConnectAgent {
+            socket,
+            session,
+            runtime_config,
+            lease_seconds,
+            argv,
+        } => {
+            let runtime = match load_runtime(runtime_config.as_deref(), &std::env::vars().collect())
+            {
+                Ok(Some(runtime)) => runtime,
+                _ => {
+                    return fail(
+                        "agent connection requires valid runtime configuration",
+                        EXIT_INIT_FAILED,
+                    )
+                }
+            };
+            match cognia_sandboxd::serve::connect_agent_with_lease(
+                &socket,
+                session,
+                argv,
+                runtime,
+                lease_seconds,
+            ) {
+                Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
+        #[cfg(unix)]
+        Mode::RenewAgent { socket, session } => {
+            match cognia_sandboxd::serve::renew_agent(&socket, session) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
+        #[cfg(unix)]
+        Mode::SignalAgent {
+            socket,
+            session,
+            signal,
+        } => {
+            let signal = match signal.as_str() {
+                "INT" => libc::SIGINT,
+                "KILL" => libc::SIGKILL,
+                _ => libc::SIGTERM,
+            };
+            match cognia_sandboxd::serve::signal_agent(&socket, session, signal) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
+        #[cfg(unix)]
+        Mode::Health { socket } => match cognia_sandboxd::serve::health(&socket) {
+            Ok(value) => {
+                println!("{value}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => fail(error, EXIT_INIT_FAILED),
+        },
+        #[cfg(unix)]
+        Mode::ConnectPort {
+            socket,
+            port,
+            direct,
+        } => {
+            match if direct {
+                cognia_sandboxd::serve::connect_port_direct(port)
+            } else {
+                cognia_sandboxd::serve::connect_port(&socket, port)
+            } {
+                Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
+                Err(error) => fail(error, EXIT_INIT_FAILED),
+            }
+        }
         Mode::Install {
             stage,
             libc,
@@ -125,6 +323,7 @@ fn main() -> ExitCode {
             root,
             bundle,
             cwd,
+            runtime_config,
             argv,
         } => run_init(
             user.as_ref(),
@@ -132,6 +331,7 @@ fn main() -> ExitCode {
             &root,
             &bundle,
             cwd,
+            runtime_config.as_deref(),
             argv,
         ),
     }
@@ -213,14 +413,50 @@ fn run_probe(
     ExitCode::from(report.exit_code() as u8)
 }
 
+fn load_runtime(
+    path: Option<&Path>,
+    parent: &BTreeMap<String, String>,
+) -> Result<Option<cognia_sandboxd::env::RuntimeConfigV1>, cognia_sandboxd::env::RuntimeConfigError>
+{
+    match path {
+        Some(path) => cognia_sandboxd::env::read_runtime_config(path).map(Some),
+        None => cognia_sandboxd::env::decode_runtime_config_env(parent),
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Mirrors the init-agent CLI, including its optional wire handoff.
 fn run_init(
     user: Option<&UserSpec>,
     match_owner_of: Option<&str>,
     root: &Path,
     bundle: &Path,
     cwd: Option<PathBuf>,
+    runtime_config_path: Option<&Path>,
     argv: Vec<OsString>,
 ) -> ExitCode {
+    let parent: BTreeMap<String, String> = std::env::vars().collect();
+    let runtime = load_runtime(runtime_config_path, &parent);
+    let runtime = match runtime {
+        Ok(runtime) => runtime,
+        Err(error) => return fail(error, EXIT_INIT_FAILED),
+    };
+    let cwd = if let Some(runtime) = &runtime {
+        let workspace = root.join("workspace");
+        let path =
+            cwd.unwrap_or_else(|| root.join(runtime.workspace_folder.trim_start_matches('/')));
+        let confined = std::fs::canonicalize(&workspace).and_then(|workspace| {
+            std::fs::canonicalize(&path).map(|path| path.starts_with(workspace))
+        });
+        if !matches!(confined, Ok(true)) {
+            return fail(
+                "runtime working directory is unavailable or outside /workspace",
+                EXIT_INIT_FAILED,
+            );
+        }
+        Some(path)
+    } else {
+        cwd
+    };
     let layout = InjectedLayout::at(bundle);
     let mut resolved = match user {
         Some(spec) => match cognia_sandboxd::passwd::resolve_user(root, spec) {
@@ -253,16 +489,22 @@ fn run_init(
             probe::find_ca_bundle(root),
         ),
     };
-    let parent: BTreeMap<String, String> = std::env::vars().collect();
-    let env = cognia_sandboxd::env::build_child_env(&cognia_sandboxd::env::ChildEnvInput {
+    let input = cognia_sandboxd::env::ChildEnvInput {
         parent: &parent,
         layout: &layout,
         libc,
         user: resolved.as_ref(),
         image_ca_bundle: image_ca.as_deref(),
-    });
+    };
+    let env = match &runtime {
+        Some(runtime) => match cognia_sandboxd::env::build_runtime_child_env(&input, runtime) {
+            Ok(env) => env,
+            Err(error) => return fail(error, EXIT_INIT_FAILED),
+        },
+        None => cognia_sandboxd::env::build_child_env(&input),
+    };
 
-    run_agent(argv, env, resolved, cwd)
+    run_agent(argv, env, resolved, cwd, runtime.as_ref())
 }
 
 #[cfg(unix)]
@@ -271,14 +513,18 @@ fn run_agent(
     env: BTreeMap<String, String>,
     user: Option<cognia_sandboxd::passwd::ResolvedUser>,
     cwd: Option<PathBuf>,
+    runtime: Option<&cognia_sandboxd::env::RuntimeConfigV1>,
 ) -> ExitCode {
     use cognia_sandboxd::init::{self, InitOptions};
-    match init::run(InitOptions {
-        argv,
-        env,
-        user,
-        cwd,
-    }) {
+    match init::run_with_runtime(
+        InitOptions {
+            argv,
+            env,
+            user,
+            cwd,
+        },
+        runtime,
+    ) {
         Ok(code) => ExitCode::from(code.clamp(0, 255) as u8),
         Err(error) => fail(error, EXIT_INIT_FAILED),
     }
@@ -290,6 +536,7 @@ fn run_agent(
     _env: BTreeMap<String, String>,
     _user: Option<cognia_sandboxd::passwd::ResolvedUser>,
     _cwd: Option<PathBuf>,
+    _runtime: Option<&cognia_sandboxd::env::RuntimeConfigV1>,
 ) -> ExitCode {
     fail("init-agent only runs on Linux", EXIT_INIT_FAILED)
 }

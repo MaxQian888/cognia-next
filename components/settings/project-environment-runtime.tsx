@@ -446,12 +446,51 @@ export function ProjectEnvironmentRuntime({
 
       <ProjectEnvironmentRuntimeTrace preview={state.preview} catalog={catalog} />
 
+      {state.ports && state.ports.length > 0 ? (
+        <div className="space-y-2 rounded-md border p-3">
+          <p className="text-xs font-medium">{t("ports.title")}</p>
+          {!state.portsAvailable ? (
+            <p className="text-xs text-muted-foreground">{t("ports.desktopRequired")}</p>
+          ) : null}
+          {state.ports.map((port) => (
+            <div key={port.path} className="flex items-center justify-between gap-2">
+              <span className="text-xs">
+                {port.label ? `${port.label} · ${port.port}` : port.port}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={state.busy || !state.portsAvailable}
+                  onClick={() => void state.openPort(port)}
+                >
+                  {t("ports.open")}
+                </Button>
+                {state.openedPorts?.[port.path] ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={state.busy}
+                    onClick={() => void state.closePort(port.path)}
+                  >
+                    {t("ports.close")}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <ProjectEnvironmentRuntimeDeclaration
         files={state.files}
         declaration={state.declaration}
         approvals={state.approvals}
         canApprove={state.poolEnabled}
         busy={state.busy}
+        build={state.build}
+        onBuild={() => void state.buildEnvironment()}
+        onCancelBuild={() => void state.cancelBuild()}
         onApprove={() => void state.approve()}
         onRevoke={(id) => void state.revoke(id)}
       />

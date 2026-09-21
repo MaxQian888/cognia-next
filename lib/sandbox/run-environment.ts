@@ -32,10 +32,13 @@
 
 import type { Project } from "@/types"
 import type { ApprovedEnvironmentDeclaration } from "@/lib/db/trusted-workspaces"
+import { builtEnvironmentDeclaration } from "@/lib/project-environment/devcontainer"
 import {
   declarationReader,
   fetchEnvironmentCatalog,
   isPoolDisabled,
+  environmentBuildGet,
+  type EnvironmentBuildRecord,
   type ApprovalRecord,
   type DeclarationReadResult,
 } from "@/lib/project-environment/environment-client"
@@ -109,6 +112,7 @@ export interface RunEnvironmentSources {
   restricted: (request: RunEnvironmentRequest) => Promise<boolean>
   /** The Host's approval ledger for this project. */
   serverApprovals: (projectId: string) => Promise<ApprovalRecord[]>
+  buildRecord?: (projectId: string, buildKey: string) => Promise<EnvironmentBuildRecord | undefined>
   /** The device approval (ADR-0147) recorded against the workspace's primary root. */
   deviceApproval: (approvalKey: string) => Promise<ApprovedEnvironmentDeclaration | undefined>
 }
@@ -148,8 +152,33 @@ export async function applicableApproval(
       record.revokedAt === undefined &&
       record.declarationDigest === declaration.digest &&
       record.path === declared.path &&
-      record.resolvedImage !== undefined
+      (declared.build ? record.buildKey !== undefined : record.resolvedImage !== undefined)
   )
+  if (server?.buildKey && declared.build) {
+    const record = await sources
+      .buildRecord?.(request.projectId, server.buildKey)
+      .catch(() => undefined)
+    if (
+      !record ||
+      record.projectId !== request.projectId ||
+      record.buildKey !== server.buildKey ||
+      record.declarationDigest !== declaration.digest ||
+      record.declarationPath !== declared.path ||
+      record.commitSha !== request.repository?.commitSha.toLowerCase()
+    )
+      return undefined
+    const effective = builtEnvironmentDeclaration(record.runtimeConfiguration, declared)
+    if (!effective.ok) return undefined
+    return {
+      ref: server.id,
+      declarationDigest: server.declarationDigest,
+      file: declared.file,
+      path: server.path,
+      builtImage: { kind: "build", buildKey: record.buildKey, imageId: record.imageId },
+      buildCommitSha: record.commitSha,
+      runtimeDeclaration: effective.declaration,
+    }
+  }
   if (server?.resolvedImage) {
     return {
       ref: server.id,
@@ -180,6 +209,12 @@ export async function prepareRunEnvironment(
   const project = await sources.selection(request.projectId, request.environmentId)
   // Q39: nothing selected, nothing read, nothing sent.
   if (project.runtime === undefined) return { kind: "off" }
+
+  // Host eligibility is independent of catalog reachability. An explicit
+  // local-container request must not turn into an unsandboxed fallback when
+  // the catalog happens to be offline.
+  const eligibility = sandboxPlacementFrom({ kind: "off" }, project)
+  if (eligibility.kind === "refused") return eligibility
 
   let catalog: EnvironmentCatalogView
   try {
@@ -305,6 +340,8 @@ export async function placeAgentRun(
  */
 export function defaultRunEnvironmentSources(): RunEnvironmentSources {
   return {
+    buildRecord: async (projectId, buildKey) =>
+      (await environmentBuildGet({ projectId, buildKey })).record,
     selection: async (projectId, environmentId) => {
       const [{ listProjectEnvironments }, { useProjectStore }] = await Promise.all([
         import("@/lib/db/project-environments"),
@@ -350,10 +387,9 @@ export function defaultRunEnvironmentSources(): RunEnvironmentSources {
       }).catch(() => true)
     },
     serverApprovals: async (projectId) => {
-      const { environmentApprovalList } =
+      const { fetchEnvironmentApprovals } =
         await import("@/lib/project-environment/environment-client")
-      const page = await environmentApprovalList({ projectId, pageSize: 200 })
-      return page.items
+      return fetchEnvironmentApprovals(projectId)
     },
     deviceApproval: async (approvalKey) => {
       const { getTrustedWorkspace } = await import("@/lib/db/trusted-workspaces")

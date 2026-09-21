@@ -53,6 +53,14 @@ function createDeps(): jest.Mocked<SandboxSessionRuntimeDeps> {
   }
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 function runningConnection(
   capabilities = defaultSandboxCapabilities("docker", "computer-server")
 ): SandboxConnectionRow {
@@ -76,6 +84,236 @@ function runningConnection(
 }
 
 describe("SandboxSessionRuntime", () => {
+  it.each([
+    [false, 30],
+    [true, 30],
+    [false, 0],
+  ] as const)(
+    "executes in the bound Docker desktop with a seconds-based budget (failure=%s)",
+    async (fail, timeout) => {
+      const deps = createDeps()
+      const row = runningConnection()
+      row.config = {
+        ...row.config,
+        provider: "docker",
+        image: "cua",
+        host: "127.0.0.1",
+        port: 1,
+        networkMode: "none",
+        workspaceMount: { hostPath: "/workspace", containerPath: "/workspace" },
+      }
+      deps.getConnection.mockResolvedValue(row)
+      const runtime = new SandboxSessionRuntime(deps)
+      const ref = await runtime.bindSession({
+        sessionId: "docker-exec",
+        binding: { shellTier: "cua-desktop", computerTarget: "bound", connectionId: row.id },
+        policy: null,
+        confine: null,
+        sandboxEnabled: true,
+        computerUseEnabled: true,
+      })
+      const call = jest.mocked(transport.call)
+      if (fail) call.mockRejectedValueOnce(new Error("daemon offline"))
+      else
+        call.mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: "container",
+          stderr: "",
+          durationMs: 4,
+          timedOut: false,
+          stdoutTruncated: true,
+          stderrTruncated: true,
+        })
+      const result = runtime.executeSandbox(ref, {
+        ...payload,
+        command: { ...payload.command, timeout },
+      })
+      if (fail) await expect(result).rejects.toThrow("daemon offline")
+      else
+        await expect(result).resolves.toMatchObject({
+          stdout: "container",
+          stdout_truncated: true,
+          stderr_truncated: true,
+        })
+      expect(call).toHaveBeenCalledWith(
+        "cua_sandbox_exec",
+        expect.objectContaining({
+          connectionId: row.id,
+          timeoutMs: timeout === 0 ? undefined : 30_000,
+        })
+      )
+      expect(deps.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ processName: "cua-desktop:docker" })
+      )
+      expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+    }
+  )
+
+  it("retains failed preparation cleanup for retry without blocking other sessions", async () => {
+    const deps = createDeps()
+    let serial = 0
+    deps.makeRef.mockImplementation(() => `sandbox-runtime:${++serial}`)
+    const entered = deferred()
+    const finish = deferred()
+    const adapter = {
+      preflight: jest.fn(async (_ref: string, root?: string) => {
+        if (root === "/failed") {
+          entered.resolve()
+          await finish.promise
+          throw new Error("preparation failed")
+        }
+      }),
+      execute: jest.fn(),
+      release: jest
+        .fn<Promise<void>, [string]>()
+        .mockRejectedValueOnce(new Error("close failed"))
+        .mockResolvedValue(undefined),
+    }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const runtime = new SandboxSessionRuntime(deps)
+    const input = {
+      sessionId: "failed",
+      binding: { shellTier: "microvm", computerTarget: "local" } as const,
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/failed",
+    }
+    const failed = runtime.bindSession(input).catch((error: unknown) => error)
+    await entered.promise
+    const healthy = await runtime.bindSession({
+      ...input,
+      sessionId: "healthy",
+      workspaceRoot: "/healthy",
+    })
+    expect(runtime.activeRefForSession("healthy")).toBe(healthy)
+    finish.resolve()
+    expect(await failed).toMatchObject({ message: "preparation failed" })
+    await runtime.releaseSession("failed")
+    expect(adapter.release.mock.calls).toEqual([["sandbox-runtime:1"], ["sandbox-runtime:1"]])
+    expect(runtime.activeRefForSession("healthy")).toBe(healthy)
+    await runtime.releaseSession("healthy")
+  })
+
+  it.each([false, true])(
+    "keeps the newer binding when older preparation finishes late (failure=%s)",
+    async (fail) => {
+      const deps = createDeps()
+      let serial = 0
+      deps.makeRef.mockImplementation(() => `sandbox-runtime:${++serial}`)
+      const entered = deferred()
+      const finish = deferred()
+      const adapter = {
+        preflight: jest.fn(async (_ref: string, root?: string) => {
+          if (root === "/old") {
+            entered.resolve()
+            await finish.promise
+            if (fail) throw new Error("old provider failed")
+          }
+        }),
+        execute: jest.fn(),
+        release: jest.fn(async () => undefined),
+      }
+      deps.getMicrovmAdapter.mockReturnValue(adapter)
+      const runtime = new SandboxSessionRuntime(deps)
+      const input = {
+        sessionId: "changing",
+        binding: { shellTier: "microvm", computerTarget: "local" } as const,
+        policy: null,
+        confine: null,
+        sandboxEnabled: true,
+        computerUseEnabled: false,
+        workspaceRoot: "/old",
+      }
+      const old = runtime.bindSession(input).catch((error: unknown) => error)
+      await entered.promise
+      const current = await runtime.bindSession({ ...input, workspaceRoot: "/new" })
+      finish.resolve()
+      const error = await old
+      expect(error).toMatchObject({ code: "runtime-released" })
+      const fallback = runtime.bindUnplacedSession(input, error)
+      expect(runtime.activeRefForSession("changing")).toBe(current)
+      await expect(runtime.executeSandbox(fallback, payload)).rejects.toMatchObject({
+        code: "runtime-released",
+      })
+      expect(adapter.release).toHaveBeenCalledWith("sandbox-runtime:1")
+      await runtime.releaseSession("changing")
+      expect(adapter.release).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  it("waits for an in-flight bind to clean up without resurrecting a released session", async () => {
+    const deps = createDeps()
+    const entered = deferred()
+    const finish = deferred()
+    const adapter = {
+      preflight: jest.fn(async () => {
+        entered.resolve()
+        await finish.promise
+      }),
+      execute: jest.fn(),
+      release: jest.fn(async () => undefined),
+    }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const runtime = new SandboxSessionRuntime(deps)
+    const binding = runtime.bindSession({
+      sessionId: "closing",
+      binding: { shellTier: "microvm", computerTarget: "local" },
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspace",
+    })
+    const settled = binding.then(
+      () => "bound",
+      (error: unknown) => error
+    )
+    await entered.promise
+    let released = false
+    const closing = runtime.releaseSession("closing").then(() => {
+      released = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(released).toBe(false)
+    finish.resolve()
+    await closing
+    expect(await settled).toMatchObject({ code: "runtime-released" })
+    expect(runtime.activeRefForSession("closing")).toBeUndefined()
+    expect(adapter.release).toHaveBeenCalledWith("sandbox-runtime:test-ref")
+  })
+
+  it("shares one preparation for simultaneous identical microVM binds", async () => {
+    const deps = createDeps()
+    let serial = 0
+    deps.makeRef.mockImplementation(() => `sandbox-runtime:${++serial}`)
+    let finish!: () => void
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const adapter = { preflight: jest.fn(() => gate), execute: jest.fn(), release: jest.fn() }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const runtime = new SandboxSessionRuntime(deps)
+    const input = {
+      sessionId: "parallel",
+      binding: { shellTier: "microvm", computerTarget: "local" } as const,
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspace",
+    }
+    const first = runtime.bindSession(input)
+    const second = runtime.bindSession(input)
+    finish()
+    const refs = await Promise.all([first, second])
+    expect(refs[0]).toBe(refs[1])
+    expect(adapter.preflight).toHaveBeenCalledTimes(1)
+    expect(adapter.release).not.toHaveBeenCalled()
+  })
+
   afterEach(() => {
     __resetMicrovmBridgeForTesting()
     jest.mocked(transport.call).mockReset()
@@ -399,6 +637,7 @@ describe("SandboxSessionRuntime", () => {
         workspaceRoot: "/workspace",
       })
     ).resolves.toBeDefined()
+    expect(deps.getConnection).toHaveBeenCalledTimes(1)
     // Whatever happens, it must not have quietly run on this machine.
     expect(deps.executeOsSandbox).not.toHaveBeenCalled()
   })

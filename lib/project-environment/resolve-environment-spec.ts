@@ -68,7 +68,10 @@ export interface EnvironmentApprovalView {
   declarationDigest: string
   file: DeclarationFile
   path: string
-  resolvedImage: PinnedImage
+  resolvedImage?: PinnedImage
+  builtImage?: import("@/types/sandbox/environment-spec").BuiltSpecImage
+  buildCommitSha?: string
+  runtimeDeclaration?: import("./environment-declaration").EnvironmentDeclaration
 }
 
 export interface ResolveEnvironmentSpecInput {
@@ -223,6 +226,15 @@ export async function resolveEnvironmentSpec(
       lifecycle: runtime.lifecycle ?? "persistent",
       user: declared ? { declared } : {},
       containerEnv: { ...(declaration?.containerEnv ?? {}) },
+      ...(declaration?.remoteEnv && Object.keys(declaration.remoteEnv).length
+        ? { remoteEnv: { ...declaration.remoteEnv } }
+        : {}),
+      ...(declaration?.workspaceFolder !== undefined
+        ? { workspaceFolder: declaration.workspaceFolder }
+        : {}),
+      ...(declaration?.lifecycleTimeoutMs !== undefined
+        ? { lifecycleTimeoutMs: declaration.lifecycleTimeoutMs }
+        : {}),
       lifecycleCommands: structuredClone(declaration?.lifecycleCommands ?? {}),
       forwardPorts: structuredClone(declaration?.forwardPorts ?? []),
       egress,
@@ -338,16 +350,25 @@ function declarationSource(
   }
 
   const declared = declaration.declaration
+  const imageMatches = declared.build
+    ? approval?.builtImage?.kind === "build" &&
+      isValidImageDigest(approval.builtImage.imageId) &&
+      /^[0-9a-f]{64}$/.test(approval.builtImage.buildKey) &&
+      approval.buildCommitSha === repository?.commitSha.toLowerCase() &&
+      approval.runtimeDeclaration !== undefined
+    : declared.image !== undefined &&
+      approval?.resolvedImage !== undefined &&
+      approval.resolvedImage.registry === declared.image.registry &&
+      approval.resolvedImage.repository === declared.image.repository &&
+      isValidImageDigest(approval.resolvedImage.digest) &&
+      (declared.image.digest === undefined ||
+        declared.image.digest === approval.resolvedImage.digest)
   const approvalMatches =
     approval !== undefined &&
     approval.declarationDigest === declaration.digest &&
     approval.path === declared.path &&
     approval.file === declared.file &&
-    approval.resolvedImage.registry === declared.image.registry &&
-    approval.resolvedImage.repository === declared.image.repository &&
-    isValidImageDigest(approval.resolvedImage.digest) &&
-    // A declaration that names a digest was approved as exactly that digest.
-    (declared.image.digest === undefined || declared.image.digest === approval.resolvedImage.digest)
+    imageMatches
   if (!approvalMatches) {
     return fallThrough("environment_approval_pending", {
       path: declared.path,
@@ -383,12 +404,8 @@ function declarationSource(
       declarationDigest: declaration.digest,
       approvalRef: approval!.ref,
     },
-    image: {
-      registry: approval!.resolvedImage.registry,
-      repository: approval!.resolvedImage.repository,
-      digest: approval!.resolvedImage.digest,
-    },
-    declaration: declared,
+    image: declared.build ? { ...approval!.builtImage! } : { ...approval!.resolvedImage! },
+    declaration: declared.build ? approval!.runtimeDeclaration! : declared,
   }
 }
 

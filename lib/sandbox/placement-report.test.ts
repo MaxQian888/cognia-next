@@ -32,7 +32,7 @@ function sandboxEvent(over: Record<string, unknown> = {}) {
       command: "codex-acp",
       user: { name: "node", uid: 1000, gid: 1000, remappedFrom: { uid: 1001, gid: 1001 } },
       egress: { tier: "allowlist", enforced: false },
-      credentials: { mode: "spawn-env" },
+      credentials: { mode: "none" },
       ...over,
     },
   }
@@ -61,7 +61,7 @@ describe("readPlacementEvent", () => {
       userRemapped: true,
       egressTier: "allowlist",
       egressEnforced: false,
-      credentialsMode: "spawn-env",
+      credentialsMode: "none",
     })
   })
 

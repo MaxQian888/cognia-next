@@ -32,12 +32,37 @@ const DEFAULT_READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 /// change a running container's network mode or its cpu/memory ceiling, which
 /// is why the renderer records what was actually applied and refuses any later
 /// request that asks for something stricter.
+///
+/// Every field is optional: an absent field keeps the hardened default from
+/// `ContainerPolicy::default`, and an explicit value overrides it verbatim
+/// (an empty list clears the default's entries; `0` lifts a numeric bound).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxPolicyArgs {
     pub network_mode: Option<String>,
     pub cpus: Option<String>,
     pub memory_mb: Option<u64>,
+    /// `0` lifts the process cap entirely.
+    pub pids_limit: Option<u64>,
+    /// Replaces the default `["ALL"]` wholesale.
+    pub cap_drop: Option<Vec<String>>,
+    /// Replaces the default supervisor re-grants wholesale.
+    pub cap_add: Option<Vec<String>>,
+    pub no_new_privileges: Option<bool>,
+    pub read_only_rootfs: Option<bool>,
+    /// Replaces the default tmpfs set wholesale.
+    pub tmpfs_mounts: Option<Vec<String>>,
+    /// Replaces the default anonymous-volume set wholesale.
+    pub writable_dirs: Option<Vec<String>>,
+    /// The user `docker exec` commands run as. An empty string lifts the
+    /// bound, leaving the image's default user.
+    pub exec_user: Option<String>,
+    /// `--user` for the container entrypoint. The cua-xfce supervisord must
+    /// boot as root, so this stays unset unless a different image needs it.
+    pub entrypoint_user: Option<String>,
+    /// Host interface for the computer-server port. An empty string keeps
+    /// the loopback default; anything else is the caller's responsibility.
+    pub publish_addr: Option<String>,
     /// Both halves are required together for a bind mount to be applied.
     pub workspace_host_path: Option<String>,
     pub workspace_container_path: Option<String>,
@@ -61,12 +86,46 @@ impl From<Option<SandboxPolicyArgs>> for ContainerPolicy {
             // the missing half would bind a directory the caller never named.
             _ => None,
         };
-        ContainerPolicy {
+        let mut policy = ContainerPolicy {
             network_mode: args.network_mode,
             cpus: args.cpus,
             memory_mb: args.memory_mb,
             workspace_mount,
+            ..ContainerPolicy::default()
+        };
+        if let Some(limit) = args.pids_limit {
+            policy.pids_limit = (limit > 0).then_some(limit);
         }
+        if let Some(caps) = args.cap_drop {
+            policy.cap_drop = caps;
+        }
+        if let Some(caps) = args.cap_add {
+            policy.cap_add = caps;
+        }
+        if let Some(flag) = args.no_new_privileges {
+            policy.no_new_privileges = flag;
+        }
+        if let Some(flag) = args.read_only_rootfs {
+            policy.read_only_rootfs = flag;
+        }
+        if let Some(mounts) = args.tmpfs_mounts {
+            policy.tmpfs_mounts = mounts;
+        }
+        if let Some(dirs) = args.writable_dirs {
+            policy.writable_dirs = dirs;
+        }
+        if let Some(user) = args.exec_user {
+            policy.exec_user = (!user.is_empty()).then_some(user);
+        }
+        if let Some(user) = args.entrypoint_user {
+            policy.entrypoint_user = (!user.is_empty()).then_some(user);
+        }
+        if let Some(addr) = args.publish_addr {
+            if !addr.is_empty() {
+                policy.publish_addr = addr;
+            }
+        }
+        policy
     }
 }
 
@@ -95,6 +154,13 @@ pub struct SandboxStateDto {
     pub nano_cpus: i64,
     /// Bytes. Zero means memory is uncapped.
     pub memory_bytes: i64,
+    /// Zero or negative means processes are uncapped.
+    pub pids_limit: i64,
+    /// Whether the container's root filesystem is read-only.
+    pub read_only_rootfs: bool,
+    /// The exec-user bound recorded on the container at create time, or null
+    /// on containers that predate the label.
+    pub exec_user: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -128,6 +194,9 @@ impl From<lifecycle::ContainerState> for SandboxStateDto {
             network_mode: value.network_mode,
             nano_cpus: value.nano_cpus,
             memory_bytes: value.memory_bytes,
+            pids_limit: value.pids_limit,
+            read_only_rootfs: value.read_only_rootfs,
+            exec_user: value.exec_user,
         }
     }
 }
@@ -292,6 +361,57 @@ mod tests {
     }
 
     #[test]
+    fn absent_hardening_fields_keep_the_hardened_defaults() {
+        // The audit regression guard on the IPC surface: a caller that passes
+        // only the legacy fields still gets the hardened profile, because
+        // every new field defaults rather than opting out.
+        let policy: ContainerPolicy = Some(SandboxPolicyArgs {
+            network_mode: Some("none".into()),
+            ..SandboxPolicyArgs::default()
+        })
+        .into();
+        assert_eq!(policy.pids_limit, Some(lifecycle::DEFAULT_PIDS_LIMIT));
+        assert_eq!(policy.cap_drop, vec!["ALL".to_string()]);
+        assert!(policy.no_new_privileges);
+        assert!(policy.read_only_rootfs);
+        assert!(!policy.tmpfs_mounts.is_empty());
+        assert_eq!(policy.writable_dirs, vec!["/home/cua".to_string()]);
+        assert_eq!(
+            policy.exec_user.as_deref(),
+            Some(lifecycle::DEFAULT_EXEC_USER)
+        );
+        assert_eq!(policy.publish_addr, "127.0.0.1");
+    }
+
+    #[test]
+    fn explicit_overrides_replace_defaults_verbatim() {
+        let policy: ContainerPolicy = Some(SandboxPolicyArgs {
+            pids_limit: Some(0), // 0 lifts the cap entirely
+            cap_drop: Some(vec![]),
+            cap_add: Some(vec!["NET_BIND_SERVICE".into()]),
+            no_new_privileges: Some(false),
+            read_only_rootfs: Some(false),
+            tmpfs_mounts: Some(vec!["/scratch".into()]),
+            writable_dirs: Some(vec![]),
+            exec_user: Some(String::new()), // empty lifts the exec-user bound
+            entrypoint_user: Some("operator".into()),
+            publish_addr: Some("0.0.0.0".into()),
+            ..SandboxPolicyArgs::default()
+        })
+        .into();
+        assert_eq!(policy.pids_limit, None);
+        assert!(policy.cap_drop.is_empty());
+        assert_eq!(policy.cap_add, vec!["NET_BIND_SERVICE".to_string()]);
+        assert!(!policy.no_new_privileges);
+        assert!(!policy.read_only_rootfs);
+        assert_eq!(policy.tmpfs_mounts, vec!["/scratch".to_string()]);
+        assert!(policy.writable_dirs.is_empty());
+        assert_eq!(policy.exec_user, None);
+        assert_eq!(policy.entrypoint_user.as_deref(), Some("operator"));
+        assert_eq!(policy.publish_addr, "0.0.0.0");
+    }
+
+    #[test]
     fn policy_args_map_onto_container_policy() {
         let policy: ContainerPolicy = Some(SandboxPolicyArgs {
             network_mode: Some("none".into()),
@@ -299,6 +419,7 @@ mod tests {
             memory_mb: Some(4096),
             workspace_host_path: Some("/host/ws".into()),
             workspace_container_path: Some("/workspace".into()),
+            ..SandboxPolicyArgs::default()
         })
         .into();
         assert_eq!(policy.network_mode.as_deref(), Some("none"));

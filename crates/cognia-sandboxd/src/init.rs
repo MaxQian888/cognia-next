@@ -7,20 +7,22 @@
 //! signals a runtime sends, reaps everything, and exits with the child's
 //! status (`128 + n` for a child killed by signal `n`, as a shell reports it).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use signal_hook::consts::signal::{
     SIGALRM, SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH,
 };
 use signal_hook::iterator::Signals;
 
+use crate::env::{RuntimeCommand, RuntimeConfigV1};
 use crate::passwd::ResolvedUser;
 use crate::probe::Ownership;
 
@@ -126,6 +128,7 @@ pub const FORWARDED_SIGNALS: [i32; 9] = [
     SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH, SIGCONT, SIGALRM,
 ];
 
+#[derive(Clone)]
 pub struct InitOptions {
     /// The program and its arguments.
     pub argv: Vec<OsString>,
@@ -146,36 +149,156 @@ pub enum InitError {
     Signals(io::Error),
     #[error("cannot start {program}: {source}")]
     Spawn { program: String, source: io::Error },
+    #[error("invalid runtime configuration: {0}")]
+    Runtime(#[from] crate::env::RuntimeConfigError),
+    #[error("cannot set up child output: {0}")]
+    Output(io::Error),
+    #[error("cannot read the current process groups: {0}")]
+    Groups(io::Error),
+    #[error("changing the current user's groups needs root")]
+    GroupSwitchRequiresRoot,
 }
 
 /// Runs the agent to completion and returns the status to exit with.
 pub fn run(options: InitOptions) -> Result<i32, InitError> {
-    let Some((program, args)) = options.argv.split_first() else {
+    run_with_runtime(options, None)
+}
+
+/// The lifecycle and agent share one signal subscription: there is no gap
+/// between preparation phases during which PID 1 can lose a cancellation.
+pub fn run_with_runtime(
+    options: InitOptions,
+    runtime: Option<&RuntimeConfigV1>,
+) -> Result<i32, InitError> {
+    if options.argv.is_empty() {
         return Err(InitError::NoCommand);
-    };
-
+    }
+    if let Some(runtime) = runtime {
+        runtime.validate()?;
+    }
     become_subreaper();
-
-    // Registered before the child exists, so an early SIGCHLD is not lost.
     let mut watched: Vec<i32> = FORWARDED_SIGNALS.to_vec();
     watched.push(SIGCHLD);
     let mut signals = Signals::new(&watched).map_err(InitError::Signals)?;
+    if let Some(runtime) = runtime {
+        for phase in &runtime.lifecycle_phases {
+            if let Some(command) = runtime.lifecycle_commands.get(*phase) {
+                let commands = lifecycle_tasks(command);
+                let code = supervise(
+                    &options,
+                    &commands,
+                    true,
+                    Some(Duration::from_millis(runtime.lifecycle_timeout_ms)),
+                    &mut signals,
+                )?;
+                if code != 0 {
+                    eprintln!("cognia-sandboxd: lifecycle {phase:?} failed with status {code}");
+                    return Ok(code);
+                }
+            }
+        }
+    }
+    supervise(
+        &options,
+        &[CommandTask {
+            argv: options.argv.clone(),
+            dependencies: BTreeSet::new(),
+        }],
+        false,
+        None,
+        &mut signals,
+    )
+}
 
+struct CommandTask {
+    argv: Vec<OsString>,
+    dependencies: BTreeSet<usize>,
+}
+
+/// Compile the bounded tree into prerequisites. Sequence waits for every
+/// terminal task in its preceding group; parallel siblings share prerequisites.
+fn lifecycle_tasks(command: &RuntimeCommand) -> Vec<CommandTask> {
+    fn append(
+        command: &RuntimeCommand,
+        dependencies: &BTreeSet<usize>,
+        tasks: &mut Vec<CommandTask>,
+    ) -> BTreeSet<usize> {
+        let argv = match command {
+            RuntimeCommand::Shell { command } => {
+                vec!["/bin/sh".into(), "-c".into(), command.into()]
+            }
+            RuntimeCommand::Argv { argv } => argv.iter().map(OsString::from).collect(),
+            RuntimeCommand::Parallel { commands } => {
+                return commands
+                    .values()
+                    .flat_map(|command| append(command, dependencies, tasks))
+                    .collect()
+            }
+            RuntimeCommand::Sequence { commands } => {
+                return commands
+                    .iter()
+                    .fold(dependencies.clone(), |previous, command| {
+                        append(command, &previous, tasks)
+                    })
+            }
+        };
+        let index = tasks.len();
+        tasks.push(CommandTask {
+            argv,
+            dependencies: dependencies.clone(),
+        });
+        BTreeSet::from([index])
+    }
+    let mut tasks = Vec::new();
+    append(command, &BTreeSet::new(), &mut tasks);
+    tasks
+}
+
+fn child_command(
+    options: &InitOptions,
+    argv: &[OsString],
+    lifecycle: bool,
+) -> Result<Command, InitError> {
+    let Some((program, args)) = argv.split_first() else {
+        return Err(InitError::NoCommand);
+    };
     let mut command = Command::new(program);
     command.args(args).env_clear().envs(&options.env);
+    command.process_group(0);
+    if lifecycle {
+        // Setup output must never be mistaken for an ACP stdout frame.
+        use std::os::fd::FromRawFd;
+        // SAFETY: dup returns a fresh descriptor which Stdio exclusively owns.
+        let stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
+        if stderr < 0 {
+            return Err(InitError::Output(io::Error::last_os_error()));
+        }
+        command.stdout(unsafe { Stdio::from_raw_fd(stderr) });
+        command.stdin(Stdio::null());
+    }
     if let Some(cwd) = &options.cwd {
         command.current_dir(cwd);
     }
     if let Some(user) = &options.user {
         // SAFETY: geteuid has no preconditions and cannot fail.
         let current = unsafe { libc::geteuid() };
-        if current != user.uid {
-            if current != 0 {
+        if current != 0 {
+            if current != user.uid {
                 return Err(InitError::UserSwitchRequiresRoot {
                     uid: user.uid,
                     current,
                 });
             }
+            // An unprivileged caller can retain its identity, but must not
+            // silently run with a different primary or supplementary group.
+            let mut groups = current_groups()?;
+            groups.insert(unsafe { libc::getegid() });
+            let wanted: BTreeSet<_> = user.groups.iter().copied().chain([user.gid]).collect();
+            if unsafe { libc::getegid() } != user.gid || groups != wanted {
+                return Err(InitError::GroupSwitchRequiresRoot);
+            }
+        } else {
+            // Root applies the whole identity even when uid stays zero.
             let groups: Vec<libc::gid_t> = user.groups.clone();
             let (uid, gid) = (user.uid, user.gid);
             // SAFETY: the closure runs between fork and exec and only calls
@@ -198,41 +321,138 @@ pub fn run(options: InitOptions) -> Result<i32, InitError> {
         }
     }
 
-    let child = command.spawn().map_err(|source| InitError::Spawn {
-        program: program.to_string_lossy().into_owned(),
-        source,
-    })?;
-    let pid = child.id() as libc::pid_t;
-    // The child is waited on with waitpid(-1) below; std's handle must not
-    // reap it first.
-    drop(child);
+    Ok(command)
+}
 
-    let mut status_of_child = None;
-    for signal in signals.forever() {
-        if signal == SIGCHLD {
-            loop {
-                let mut status = 0;
-                // SAFETY: a valid out-pointer; WNOHANG makes this non-blocking.
-                let reaped = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
-                if reaped <= 0 {
-                    break;
-                }
-                if reaped == pid {
-                    status_of_child = Some(exit_status(status));
-                }
-            }
-            if let Some(code) = status_of_child {
-                return Ok(code);
-            }
-        } else {
-            // SAFETY: kill has no memory preconditions; a child that already
-            // exited makes it fail with ESRCH, which is harmless here.
-            unsafe {
-                libc::kill(pid, signal);
-            }
+fn current_groups() -> Result<BTreeSet<u32>, InitError> {
+    // SAFETY: first query the length, then supply the allocated output array.
+    let count = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+    if count < 0 {
+        return Err(InitError::Groups(io::Error::last_os_error()));
+    }
+    let mut groups = vec![0; count as usize];
+    let count = unsafe { libc::getgroups(count, groups.as_mut_ptr()) };
+    if count < 0 {
+        return Err(InitError::Groups(io::Error::last_os_error()));
+    }
+    groups.truncate(count as usize);
+    Ok(groups.into_iter().collect())
+}
+
+fn signal_groups(groups: &BTreeSet<libc::pid_t>, signal: i32) {
+    for pid in groups {
+        // SAFETY: a negative pid selects the child's independent process
+        // group. Missing/exited groups are harmless (ESRCH).
+        unsafe {
+            libc::kill(-*pid, signal);
         }
     }
-    unreachable!("Signals::forever only ends when the handle is closed")
+}
+
+/// Reap all descendants while watching only this phase's direct children.
+/// A failed parallel command cancels its peers and their descendants. A
+/// successful setup may intentionally leave a background server running.
+fn supervise(
+    options: &InitOptions,
+    commands: &[CommandTask],
+    lifecycle: bool,
+    timeout: Option<Duration>,
+    signals: &mut Signals,
+) -> Result<i32, InitError> {
+    for signal in signals.pending() {
+        if matches!(signal, SIGTERM | SIGINT | SIGQUIT | SIGHUP) {
+            return Ok(128 + signal);
+        }
+    }
+    let mut children = BTreeMap::new();
+    let mut groups = BTreeSet::new();
+    let mut launched = BTreeSet::new();
+    let mut completed = BTreeSet::new();
+    let mut spawn_error = None;
+    let started = Instant::now();
+    let mut outcome = None;
+    let mut stopping = None;
+    loop {
+        for signal in signals.pending() {
+            if signal == SIGCHLD {
+                continue;
+            }
+            signal_groups(&groups, signal);
+            if matches!(signal, SIGTERM | SIGINT | SIGQUIT | SIGHUP) && outcome.is_none() {
+                // Lifecycle cancellation prevents the following stage even
+                // if a hook traps TERM and exits zero. The final agent keeps
+                // its own exit status, including an application-specific
+                // status returned by a graceful signal handler.
+                if lifecycle || launched.is_empty() {
+                    outcome = Some(128 + signal);
+                }
+                stopping.get_or_insert_with(Instant::now);
+            }
+        }
+        loop {
+            let mut status = 0;
+            // SAFETY: valid output pointer; WNOHANG never blocks.
+            let reaped = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+            if reaped <= 0 {
+                break;
+            }
+            if let Some(index) = children.remove(&reaped) {
+                completed.insert(index);
+                let code = exit_status(status);
+                if (code != 0 || !lifecycle) && outcome.is_none() {
+                    outcome = Some(code);
+                    stopping = Some(Instant::now());
+                    signal_groups(&groups, SIGTERM);
+                }
+            }
+        }
+        if timeout.is_some_and(|limit| started.elapsed() >= limit) && outcome.is_none() {
+            outcome = Some(124);
+            stopping = Some(Instant::now());
+            signal_groups(&groups, SIGTERM);
+        }
+        if outcome.is_none() && stopping.is_none() {
+            for (index, task) in commands.iter().enumerate() {
+                if launched.contains(&index) || !task.dependencies.is_subset(&completed) {
+                    continue;
+                }
+                match child_command(options, &task.argv, lifecycle).and_then(|mut command| {
+                    command.spawn().map_err(|source| InitError::Spawn {
+                        program: task.argv[0].to_string_lossy().into_owned(),
+                        source,
+                    })
+                }) {
+                    Ok(child) => {
+                        let pid = child.id() as libc::pid_t;
+                        children.insert(pid, index);
+                        launched.insert(index);
+                        groups.insert(pid);
+                        drop(child);
+                    }
+                    Err(error) => {
+                        spawn_error = Some(error);
+                        outcome = Some(125);
+                        stopping = Some(Instant::now());
+                        signal_groups(&groups, SIGTERM);
+                        break;
+                    }
+                }
+            }
+        }
+        if children.is_empty() && (outcome.is_some() || completed.len() == commands.len()) {
+            if outcome.is_some() {
+                signal_groups(&groups, libc::SIGKILL);
+            }
+            return match spawn_error {
+                Some(error) => Err(error),
+                None => Ok(outcome.unwrap_or(0)),
+            };
+        }
+        if stopping.is_some_and(|at| at.elapsed() >= Duration::from_secs(2)) {
+            signal_groups(&groups, libc::SIGKILL);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// The shell convention for a wait status.
@@ -262,6 +482,7 @@ fn become_subreaper() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env::{LifecyclePhase, RuntimeLifecycleCommands};
 
     #[test]
     fn maps_wait_statuses_like_a_shell() {
@@ -373,5 +594,288 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(error, InitError::NoCommand));
+    }
+
+    // Each supervisor test runs in its own process: PID 1's waitpid(-1) and
+    // signal handlers must not reap another parallel Rust test's children.
+    #[test]
+    fn lifecycle_subprocess_fixture() {
+        let Ok(path) = std::env::var("COGNIA_TEST_RUNTIME_PATH") else {
+            return;
+        };
+        let config: RuntimeConfigV1 = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let directory = std::env::var("COGNIA_TEST_RUNTIME_CWD").unwrap();
+        let mut env = BTreeMap::from([("PATH".into(), "/bin:/usr/bin".into())]);
+        env.insert("ORDER".into(), format!("{directory}/order"));
+        let argv = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            std::env::var("COGNIA_TEST_AGENT_COMMAND").unwrap().into(),
+        ];
+        let result = run_with_runtime(
+            InitOptions {
+                argv,
+                env,
+                user: None,
+                cwd: Some(directory.into()),
+            },
+            Some(&config),
+        );
+        match result {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(125);
+            }
+        }
+    }
+
+    fn fixture_command(dir: &Path, config: &RuntimeConfigV1, agent: &str) -> Command {
+        let config_path = dir.join("runtime.json");
+        fs::write(&config_path, serde_json::to_vec(config).unwrap()).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "init::tests::lifecycle_subprocess_fixture",
+                "--nocapture",
+            ])
+            .env("COGNIA_TEST_RUNTIME_PATH", config_path)
+            .env("COGNIA_TEST_RUNTIME_CWD", dir)
+            .env("COGNIA_TEST_AGENT_COMMAND", agent);
+        command
+    }
+
+    fn shell(command: &str) -> RuntimeCommand {
+        RuntimeCommand::Shell {
+            command: command.into(),
+        }
+    }
+
+    #[test]
+    fn lifecycle_phases_run_in_order_and_setup_output_never_enters_agent_stdout() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfigV1 {
+            lifecycle_phases: vec![
+                LifecyclePhase::OnCreate,
+                LifecyclePhase::UpdateContent,
+                LifecyclePhase::PostCreate,
+                LifecyclePhase::PostStart,
+                LifecyclePhase::PostAttach,
+            ],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(shell(
+                    "printf 'create,' >> \"$ORDER\"; printf 'setup-output'",
+                )),
+                update_content: Some(RuntimeCommand::Argv {
+                    argv: vec![
+                        "/bin/sh".into(),
+                        "-c".into(),
+                        "printf 'update,' >> \"$ORDER\"".into(),
+                    ],
+                }),
+                post_create: Some(shell("printf 'postcreate,' >> \"$ORDER\"")),
+                post_start: Some(shell("printf 'start,' >> \"$ORDER\"")),
+                post_attach: Some(shell("printf 'attach,' >> \"$ORDER\"")),
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let output = fixture_command(
+            dir.path(),
+            &config,
+            "printf 'agent' >> \"$ORDER\"; printf 'agent-output'",
+        )
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("order")).unwrap(),
+            "create,update,postcreate,start,attach,agent"
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("setup-output"));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("setup-output"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("agent-output"));
+    }
+
+    #[test]
+    fn parallel_lifecycle_children_start_concurrently_and_all_finish_before_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfigV1 {
+            lifecycle_timeout_ms: 1_000,
+            lifecycle_phases: vec![LifecyclePhase::OnCreate],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(RuntimeCommand::Parallel { commands: BTreeMap::from([
+                    ("left".into(), shell("touch left; while [ ! -e right ]; do sleep 0.01; done; touch left-done")),
+                    ("right".into(), shell("touch right; while [ ! -e left ]; do sleep 0.01; done; touch right-done")),
+                ]) }),
+                ..RuntimeLifecycleCommands::default()
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let output = fixture_command(
+            dir.path(),
+            &config,
+            "test -e left-done && test -e right-done",
+        )
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn failing_preparation_blocks_remaining_phases_and_the_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfigV1 {
+            lifecycle_phases: vec![LifecyclePhase::OnCreate, LifecyclePhase::PostStart],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(RuntimeCommand::Sequence {
+                    commands: vec![
+                        shell("touch first-step"),
+                        shell("exit 17"),
+                        shell("touch sequence-must-not-run"),
+                    ],
+                }),
+                post_start: Some(shell("touch should-not-run")),
+                ..RuntimeLifecycleCommands::default()
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let output = fixture_command(dir.path(), &config, "touch agent-must-not-run")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(17));
+        assert!(dir.path().join("first-step").exists());
+        assert!(!dir.path().join("sequence-must-not-run").exists());
+        assert!(!dir.path().join("should-not-run").exists());
+        assert!(!dir.path().join("agent-must-not-run").exists());
+    }
+
+    #[test]
+    fn parallel_failure_and_timeout_kill_peers_instead_of_leaving_them_running() {
+        for timeout in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut commands = BTreeMap::from([(
+                "blocking".into(),
+                shell("trap '' TERM; sleep 30 & echo $! > descendant; wait"),
+            )]);
+            if !timeout {
+                commands.insert(
+                    "failure".into(),
+                    shell("while [ ! -e descendant ]; do sleep 0.01; done; exit 19"),
+                );
+            }
+            let config = RuntimeConfigV1 {
+                lifecycle_timeout_ms: 1_000,
+                lifecycle_phases: vec![LifecyclePhase::OnCreate],
+                lifecycle_commands: RuntimeLifecycleCommands {
+                    on_create: Some(RuntimeCommand::Sequence {
+                        commands: vec![
+                            RuntimeCommand::Parallel { commands },
+                            shell("touch sequence-must-not-run"),
+                        ],
+                    }),
+                    ..RuntimeLifecycleCommands::default()
+                },
+                ..RuntimeConfigV1::default()
+            };
+            let started = Instant::now();
+            let output = fixture_command(dir.path(), &config, "touch agent-must-not-run")
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(if timeout { 124 } else { 19 }));
+            assert!(started.elapsed() < Duration::from_secs(8));
+            assert!(!dir.path().join("agent-must-not-run").exists());
+            assert!(!dir.path().join("sequence-must-not-run").exists());
+            let pid: i32 = fs::read_to_string(dir.path().join("descendant"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            assert_eq!(
+                unsafe { libc::kill(pid, 0) },
+                -1,
+                "setup descendant must not survive"
+            );
+        }
+    }
+
+    #[test]
+    fn cancellation_during_preparation_reaches_children_and_blocks_the_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfigV1 {
+            lifecycle_phases: vec![LifecyclePhase::OnCreate],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(RuntimeCommand::Sequence {
+                    commands: vec![
+                        shell("touch ready; sleep 30"),
+                        shell("touch sequence-must-not-run"),
+                    ],
+                }),
+                ..RuntimeLifecycleCommands::default()
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let child = fixture_command(dir.path(), &config, "touch agent-must-not-run")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        while !dir.path().join("ready").exists() {
+            assert!(started.elapsed() < Duration::from_secs(5));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(unsafe { libc::kill(child.id() as i32, SIGTERM) }, 0);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(128 + SIGTERM));
+        assert!(!dir.path().join("agent-must-not-run").exists());
+        assert!(!dir.path().join("sequence-must-not-run").exists());
+    }
+
+    #[test]
+    fn sequence_preserves_parallel_barriers_and_each_nested_branch_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = RuntimeConfigV1 {
+            lifecycle_timeout_ms: 2_000,
+            lifecycle_phases: vec![LifecyclePhase::OnCreate],
+            lifecycle_commands: RuntimeLifecycleCommands {
+                on_create: Some(RuntimeCommand::Sequence { commands: vec![
+                    shell("printf before, >> \"$ORDER\"; touch before"),
+                    RuntimeCommand::Parallel { commands: BTreeMap::from([
+                        ("left".into(), RuntimeCommand::Sequence { commands: vec![
+                            shell("test -e before; touch left; while [ ! -e right ]; do sleep 0.01; done; touch left-first"),
+                            shell("test -e left-first; touch left-done"),
+                        ] }),
+                        ("right".into(), RuntimeCommand::Sequence { commands: vec![
+                            shell("test -e before; touch right; while [ ! -e left ]; do sleep 0.01; done; touch right-first"),
+                            shell("test -e right-first; touch right-done"),
+                        ] }),
+                    ]) },
+                    shell("test -e left-done && test -e right-done && printf after, >> \"$ORDER\""),
+                ] }),
+                ..RuntimeLifecycleCommands::default()
+            },
+            ..RuntimeConfigV1::default()
+        };
+        let output = fixture_command(dir.path(), &config, "printf agent >> \"$ORDER\"")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("order")).unwrap(),
+            "before,after,agent"
+        );
     }
 }

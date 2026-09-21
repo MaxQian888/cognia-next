@@ -148,7 +148,7 @@
     "bundleFollow": "Follow the release ({tag})",
     "bundleNone": "No agent bundle is configured on this deployment, so nothing can be sandboxed.",
     "bundlePinned": "Stay on {tag}",
-    "credentials": "Sandboxes receive this host's own filtered credentials. Per-sandbox gateway tickets are not available yet.",
+    "credentials": "Sandboxes receive no host provider credentials; a managed task carries a per-task gateway lease.",
     "declaration": {
       "approve": "Approve this image",
       "approveHint": "Approving pins the image to the digest its tag names right now; a later push to that tag does not change what runs.",
@@ -166,7 +166,21 @@
       "revoked": "Revoked",
       "searched": "Looked for: {paths}",
       "title": "Repository declaration",
-      "user": "Runs as {user}"
+      "user": "Runs as {user}",
+      "buildImage": "Build from this repository",
+      "buildHint": "Build the committed Dockerfile and Features on this Host, then approve the resulting image for runs. The Host must have the environment build service configured.",
+      "build": "Build environment",
+      "cancelBuild": "Cancel build",
+      "buildStatus": {
+        "queued": "Build queued",
+        "building": "Building environment…",
+        "succeeded": "Build ready for approval",
+        "failed": "Build failed",
+        "cancelled": "Build cancelled"
+      },
+      "effectiveRuntime": "Review effective runtime configuration",
+      "approveBuildHint": "Approval binds this built image and its effective runtime configuration to the exact repository commit.",
+      "ignoredFields": "Fields not used by the sandbox runtime: {fields}"
     },
     "description": "Choose the container image this project's agents run in.",
     "driver": "Sandbox driver: {driver}",
@@ -242,6 +256,12 @@
         "user_tier_default": "User: the tier's default"
       },
       "title": "How this was chosen"
+    },
+    "ports": {
+      "title": "Forwarded ports",
+      "desktopRequired": "Open this project in the desktop app to access authenticated container ports.",
+      "open": "Open",
+      "close": "Close connection"
     }
   },
   "save": "Save environment",

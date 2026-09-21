@@ -1,9 +1,12 @@
 //! ADR-0028 Phase 4 — non-elevated Windows sandbox runner.
 //!
-//! Reads a JSON `RunnerInput` from `argv[1]` and launches the requested argv
-//! under a **restricted, low-integrity token** assigned to a **Job Object**,
-//! then prints a JSON `RunnerOutput` (exit code + captured stdout/stderr +
-//! duration + timeout flag).
+//! Reads a JSON `RunnerInput` from `argv[1]`, turns it into a
+//! [`LaunchPlan`](cognia_sandbox_runner::LaunchPlan) — which decides the
+//! limits, the child's environment and what confinement is actually on offer
+//! — and launches the requested argv under a **restricted, low-integrity
+//! token** assigned to a **Job Object**, then prints a JSON `RunnerOutput`
+//! (exit code + captured stdout/stderr + duration + timeout flag + the
+//! confinement that was enforced).
 //!
 //! Sandbox model (Chromium / codex-windows-sandbox lineage):
 //!   * `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` strips every privilege
@@ -13,56 +16,34 @@
 //!     inject into normal processes (the Windows mandatory-integrity write-up
 //!     block). This is the path-agnostic Windows analogue of the bwrap /
 //!     sandbox-exec write confinement.
-//!   * A Job Object caps memory + active processes and kills the whole tree on
-//!     handle close (no orphaned grandchildren).
+//!   * A Job Object caps active processes, per-process and job-wide committed
+//!     memory, and per-process CPU time, and kills the whole tree on handle
+//!     close (no orphaned grandchildren).
+//!   * The child's environment is the caller's plus an OS allowlist; the
+//!     runner's own environment, provider keys and `DOCKER_HOST` included, is
+//!     not inherited.
 //!   * Output is captured to inheritable temp files (deadlock-free vs. pipes).
 //!
 //! Because the launch token is a *restricted subset of the caller's own*
 //! token, `CreateProcessAsUserW` succeeds WITHOUT `SeAssignPrimaryToken`
-//! privilege — i.e. no elevation / UAC and no synthetic users. Network is not
-//! confined here; the sandbox dispatcher already routes allowlisted egress
-//! through the host-side filtering proxy via injected `HTTP(S)_PROXY` env.
+//! privilege — i.e. no elevation / UAC and no synthetic users.
+//!
+//! **Egress is not confined on this tier.** A payload that asks for
+//! `network: "off"` is refused with exit code
+//! [`EXIT_CONFINEMENT_UNAVAILABLE`] rather than run with an open network; see
+//! `lib.rs` for why that is the fail-closed answer and not a regression.
 //!
 //! Build/check in isolation: `cargo check -p cognia-sandbox-runner`.
 
-use std::collections::BTreeMap;
+use cognia_sandbox_runner::{
+    plan, LaunchPlan, PlanError, RunnerInput, RunnerOutput, EXIT_CONFINEMENT_UNAVAILABLE,
+    MAX_OUTPUT_BYTES, TRUNCATION_MARKER,
+};
 
-#[derive(serde::Deserialize)]
-// Every field but `target_user` is consumed only by the Windows `mod win`
-// runner; the non-Windows stub ignores the payload, so the fields read as dead
-// there. They stay live on Windows, so scope the allow to non-Windows builds.
+/// Read one of the child's capture files, bounded, with a marker when the
+/// stream was longer than the cap. Only the Windows launch path has capture
+/// files to read, so the symbol is dead on other hosts by construction.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-struct RunnerInput {
-    /// Retained for backward compatibility with the desktop backend's payload
-    /// (the synthetic-user model); ignored by the restricted-token runner.
-    #[serde(default)]
-    #[allow(dead_code)]
-    target_user: String,
-    argv: Vec<String>,
-    cwd: String,
-    #[serde(default)]
-    env: BTreeMap<String, String>,
-    #[serde(default)]
-    timeout_seconds: u64,
-    /// 0 = no Job-Object memory cap.
-    #[serde(default)]
-    max_memory_mb: u32,
-}
-
-#[derive(serde::Serialize)]
-struct RunnerOutput {
-    exit_code: i32,
-    stdout: String,
-    stderr: String,
-    duration_ms: u64,
-    timed_out: bool,
-    stdout_truncated: bool,
-    stderr_truncated: bool,
-}
-
-const MAX_OUTPUT_BYTES: usize = 1_000_000;
-const TRUNCATION_MARKER: &str = "\n... (truncated)";
-
 fn read_capture(path: &std::path::Path) -> (String, bool) {
     use std::io::Read;
 
@@ -103,7 +84,20 @@ fn main() {
             std::process::exit(2)
         }
     };
-    match run(input) {
+    // Nothing is launched until the plan says the confinement the caller
+    // asked for can be enforced.
+    let launch = match plan(&input) {
+        Ok(launch) => launch,
+        Err(error @ PlanError::NetworkConfinementUnavailable(_)) => {
+            eprintln!("{error}");
+            std::process::exit(EXIT_CONFINEMENT_UNAVAILABLE)
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2)
+        }
+    };
+    match run(&launch) {
         Ok(result) => match serde_json::to_string(&result) {
             Ok(s) => println!("{s}"),
             Err(e) => {
@@ -119,37 +113,20 @@ fn main() {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn run(_input: RunnerInput) -> Result<RunnerOutput, String> {
+fn run(_launch: &LaunchPlan) -> Result<RunnerOutput, String> {
     Err("cognia-sandbox-runner runs on Windows only".into())
 }
 
-/// Convert a wait timeout to the `u32` milliseconds `WaitForSingleObject` wants,
-/// without the silent `as u32` wrap that turned any timeout above ~49.7 days
-/// (and, via `Duration::from_secs` overflow upstream, anything past ~71 minutes
-/// in millis-as-u32 truncation) into a tiny value — making long-running commands
-/// time out almost immediately. We saturate at `u32::MAX - 1` (≈49.7 days): a
-/// finite, very-long ceiling that is deliberately NOT the `INFINITE`
-/// (`u32::MAX`) sentinel, so a hung child can never wait forever.
-///
-/// Called by the Windows `mod win` runner and by the host-side unit tests
-/// below; on a non-Windows, non-test build neither caller exists, so allow the
-/// otherwise-dead symbol there rather than hard-gating it out of the tests.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn clamp_timeout_millis(timeout: std::time::Duration) -> u32 {
-    const MAX_FINITE_MS: u128 = (u32::MAX - 1) as u128;
-    timeout.as_millis().min(MAX_FINITE_MS) as u32
-}
-
 #[cfg(target_os = "windows")]
-fn run(input: RunnerInput) -> Result<RunnerOutput, String> {
-    win::run(input)
+fn run(launch: &LaunchPlan) -> Result<RunnerOutput, String> {
+    win::run(launch)
 }
 
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{RunnerInput, RunnerOutput};
+    use cognia_sandbox_runner::{cpu_time_100ns, JobLimits, LaunchPlan, RunnerOutput};
     use std::os::windows::ffi::OsStrExt;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use windows::core::{BOOL, PCWSTR, PWSTR};
     use windows::Win32::Foundation::{
@@ -174,8 +151,9 @@ mod win {
     use windows::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
         SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+        JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_JOB_MEMORY,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+        JOB_OBJECT_LIMIT_PROCESS_TIME,
     };
     use windows::Win32::System::Threading::{
         CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken,
@@ -214,31 +192,29 @@ mod win {
             match c {
                 '\\' => backslashes += 1,
                 '"' => {
-                    out.extend(std::iter::repeat('\\').take(backslashes * 2 + 1));
+                    out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
                     backslashes = 0;
                     out.push('"');
                 }
                 _ => {
-                    out.extend(std::iter::repeat('\\').take(backslashes));
+                    out.extend(std::iter::repeat_n('\\', backslashes));
                     backslashes = 0;
                     out.push(c);
                 }
             }
         }
-        out.extend(std::iter::repeat('\\').take(backslashes * 2));
+        out.extend(std::iter::repeat_n('\\', backslashes * 2));
         out.push('"');
         out
     }
 
-    /// Build the UTF-16 `KEY=VALUE\0...\0\0` block, merging `extra` over the
-    /// current process environment so the child keeps PATH / SystemRoot etc.
-    fn build_env_block(extra: &std::collections::BTreeMap<String, String>) -> Vec<u16> {
-        let mut merged: std::collections::BTreeMap<String, String> = std::env::vars().collect();
-        for (k, v) in extra {
-            merged.insert(k.clone(), v.clone());
-        }
+    /// Build the UTF-16 `KEY=VALUE\0...\0\0` block from the plan's
+    /// environment. The plan already decided what the host contributes, so
+    /// nothing is merged in here: the desktop app's own variables, provider
+    /// keys included, stay out of the sandbox.
+    fn build_env_block(environment: &std::collections::BTreeMap<String, String>) -> Vec<u16> {
         let mut block: Vec<u16> = Vec::new();
-        for (k, v) in &merged {
+        for (k, v) in environment {
             block.extend(wide(&format!("{k}={v}")));
         }
         block.push(0); // final terminating NUL after the last entry's NUL
@@ -274,16 +250,8 @@ mod win {
         Ok((OwnedHandle(handle), path))
     }
 
-    pub fn run(input: RunnerInput) -> Result<RunnerOutput, String> {
-        if input.argv.is_empty() {
-            return Err("argv is empty".into());
-        }
+    pub fn run(launch: &LaunchPlan) -> Result<RunnerOutput, String> {
         let started = Instant::now();
-        let timeout = if input.timeout_seconds == 0 {
-            Duration::from_secs(300)
-        } else {
-            Duration::from_secs(input.timeout_seconds)
-        };
 
         // 1. Restricted, de-privileged token derived from our own.
         let mut proc_token = HANDLE::default();
@@ -320,11 +288,11 @@ mod win {
         // 2. Drop the token to LOW integrity (S-1-16-4096).
         set_low_integrity(restricted.0)?;
 
-        // 3. Job object with resource limits, kill-on-close.
+        // 3. Job object with the plan's resource limits, kill-on-close.
         let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|e| format!("CreateJobObjectW failed: {e}"))?;
         let job = OwnedHandle(job);
-        configure_job(job.0, input.max_memory_mb)?;
+        configure_job(job.0, &launch.job)?;
 
         // 4. Inheritable stdout/stderr capture files.
         let (out_h, out_path) = temp_capture_file("out")?;
@@ -332,15 +300,15 @@ mod win {
 
         // 5. Spawn suspended under the restricted token, assign to the job.
         let mut cmdline: Vec<u16> = wide(
-            &input
+            &launch
                 .argv
                 .iter()
                 .map(|a| quote_arg(a))
                 .collect::<Vec<_>>()
                 .join(" "),
         );
-        let cwd = wide(&input.cwd);
-        let mut env_block = build_env_block(&input.env);
+        let cwd = wide(&launch.cwd);
+        let mut env_block = build_env_block(&launch.environment);
 
         let mut si = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
@@ -385,8 +353,12 @@ mod win {
         // 6. Wait with timeout.
         let timed_out;
         let exit_code;
-        let wait =
-            unsafe { WaitForSingleObject(pi.hProcess, super::clamp_timeout_millis(timeout)) };
+        let wait = unsafe {
+            WaitForSingleObject(
+                pi.hProcess,
+                cognia_sandbox_runner::clamp_timeout_millis(launch.timeout),
+            )
+        };
         if wait == WAIT_TIMEOUT {
             timed_out = true;
             unsafe {
@@ -419,6 +391,7 @@ mod win {
             timed_out,
             stdout_truncated,
             stderr_truncated,
+            confinement: launch.confinement,
         })
     }
 
@@ -448,17 +421,29 @@ mod win {
         res.map_err(|e| format!("SetTokenInformation(integrity) failed: {e}"))
     }
 
-    fn configure_job(job: HANDLE, max_memory_mb: u32) -> Result<(), String> {
+    /// Apply the plan's bounds. Every one of them is a cap the caller's
+    /// policy already declared and the Windows backend used to drop on the
+    /// floor: memory, CPU time and the process count now reach the kernel.
+    fn configure_job(job: HANDLE, limits: &JobLimits) -> Result<(), String> {
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-        // A generous active-process cap bounds fork bombs without breaking
-        // normal build tool fan-out.
-        info.BasicLimitInformation.ActiveProcessLimit = 512;
-        if max_memory_mb > 0 {
-            info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-            info.ProcessMemoryLimit = (max_memory_mb as usize) * 1024 * 1024;
+        let mut flags = JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        if limits.kill_on_close {
+            flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         }
+        info.BasicLimitInformation.ActiveProcessLimit = limits.active_processes;
+        if let Some(bytes) = limits.process_memory_bytes {
+            flags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            info.ProcessMemoryLimit = bytes as usize;
+        }
+        if let Some(bytes) = limits.job_memory_bytes {
+            flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+            info.JobMemoryLimit = bytes as usize;
+        }
+        if let Some(cpu) = limits.per_process_cpu {
+            flags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+            info.BasicLimitInformation.PerProcessUserTimeLimit = cpu_time_100ns(cpu);
+        }
+        info.BasicLimitInformation.LimitFlags = flags;
         unsafe {
             SetInformationJobObject(
                 job,
@@ -468,43 +453,5 @@ mod win {
             )
         }
         .map_err(|e| format!("SetInformationJobObject failed: {e}"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::clamp_timeout_millis;
-    use std::time::Duration;
-
-    const INFINITE: u32 = u32::MAX;
-
-    #[test]
-    fn short_timeout_passes_through_unchanged() {
-        assert_eq!(clamp_timeout_millis(Duration::from_secs(300)), 300_000);
-    }
-
-    #[test]
-    fn ninety_minute_timeout_is_not_truncated() {
-        // 90 min = 5_400_000 ms — above the old u32-wrap edge but well under the
-        // saturation ceiling, so it must round-trip exactly (the bug returned a
-        // tiny wrapped value here, causing an instant timeout).
-        let ms = 90u64 * 60 * 1000;
-        assert_eq!(
-            clamp_timeout_millis(Duration::from_secs(90 * 60)),
-            ms as u32
-        );
-    }
-
-    #[test]
-    fn huge_timeout_saturates_below_the_infinite_sentinel() {
-        let clamped = clamp_timeout_millis(Duration::from_secs(60 * 60 * 24 * 365));
-        assert_eq!(clamped, INFINITE - 1);
-        assert_ne!(clamped, INFINITE, "must never become the INFINITE sentinel");
-    }
-
-    #[test]
-    fn exactly_at_the_ceiling_clamps_to_max_finite() {
-        let clamped = clamp_timeout_millis(Duration::from_millis(u32::MAX as u64));
-        assert_eq!(clamped, INFINITE - 1);
     }
 }

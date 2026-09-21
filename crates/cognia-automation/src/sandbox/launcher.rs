@@ -129,12 +129,23 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
     push_protected_binds(&mut args, &writable, &scope.readable, empty_dir);
     for denied in &scope.denied_readable {
         if Path::new(denied).exists() {
-            let kind = if Path::new(denied).is_file() { ProtKind::File } else { ProtKind::Dir };
+            let kind = if Path::new(denied).is_file() {
+                ProtKind::File
+            } else {
+                ProtKind::Dir
+            };
             push_empty_bind(&mut args, kind, empty_dir, denied);
-            for allowed in scope.readable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+            for allowed in scope
+                .readable
+                .iter()
+                .filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied)
+            {
                 args.extend(["--ro-bind-try".into(), allowed.clone(), allowed.clone()]);
             }
-            for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+            for allowed in writable
+                .iter()
+                .filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied)
+            {
                 args.extend(["--bind".into(), allowed.clone(), allowed.clone()]);
             }
         }
@@ -226,12 +237,28 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     // closes).
     push_protected_denies(&mut out, &writable);
     for denied in &scope.denied_readable {
-        out.push_str(&format!("(deny file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(denied)));
-        for allowed in scope.readable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
-            out.push_str(&format!("(allow file-read* (subpath \"{}\"))\n", escape_sbpl(allowed)));
+        out.push_str(&format!(
+            "(deny file-read* file-write* (subpath \"{}\"))\n",
+            escape_sbpl(denied)
+        ));
+        for allowed in scope
+            .readable
+            .iter()
+            .filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied)
+        {
+            out.push_str(&format!(
+                "(allow file-read* (subpath \"{}\"))\n",
+                escape_sbpl(allowed)
+            ));
         }
-        for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
-            out.push_str(&format!("(allow file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(allowed)));
+        for allowed in writable
+            .iter()
+            .filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied)
+        {
+            out.push_str(&format!(
+                "(allow file-read* file-write* (subpath \"{}\"))\n",
+                escape_sbpl(allowed)
+            ));
         }
     }
     push_secret_read_denies(&mut out, &scope.readable);
@@ -339,15 +366,31 @@ mod tests {
         std::fs::create_dir_all(&own).unwrap();
         let mut managed = scope();
         managed.writable.push(own.to_string_lossy().into_owned());
-        managed.denied_readable = vec![tasks.to_string_lossy().into_owned(), "/home/u/.codex".into()];
+        managed.denied_readable = vec![
+            tasks.to_string_lossy().into_owned(),
+            "/home/u/.codex".into(),
+        ];
         let profile = render_sbpl(&managed);
-        let deny = format!("(deny file-read* file-write* (subpath \"{}\"))", tasks.display());
-        let own_allow = format!("(allow file-read* file-write* (subpath \"{}\"))", own.display());
+        let deny = format!(
+            "(deny file-read* file-write* (subpath \"{}\"))",
+            tasks.display()
+        );
+        let own_allow = format!(
+            "(allow file-read* file-write* (subpath \"{}\"))",
+            own.display()
+        );
         assert!(profile.contains("(deny file-read* file-write* (subpath \"/home/u/.codex\"))"));
         assert!(profile.find(&deny).unwrap() < profile.find(&own_allow).unwrap());
         let args = bwrap_prefix("/usr/bin/bwrap", &managed, root.path());
-        assert!(args.windows(3).any(|w| w == ["--ro-bind", root.path().to_str().unwrap(), tasks.to_str().unwrap()]));
-        assert!(args.windows(3).any(|w| w == ["--bind", own.to_str().unwrap(), own.to_str().unwrap()]));
+        assert!(args.windows(3).any(|w| w
+            == [
+                "--ro-bind",
+                root.path().to_str().unwrap(),
+                tasks.to_str().unwrap()
+            ]));
+        assert!(args
+            .windows(3)
+            .any(|w| w == ["--bind", own.to_str().unwrap(), own.to_str().unwrap()]));
     }
 
     use std::path::PathBuf;

@@ -16,8 +16,9 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::approval::{ApprovalRecord, EgressGrant};
 use crate::catalog::{CatalogEntry, CatalogScope, TenantPolicy};
@@ -31,10 +32,29 @@ pub struct AdmittedSpec {
     pub last_admitted_at: i64,
 }
 
-/// Bump when a migration is appended to [`MIGRATIONS`].
-const SCHEMA_VERSION: i32 = 2;
+/// Host-attested output of a Dev Containers build. No registry digest is
+/// inferred from Docker's local image ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnvironmentBuildRecord {
+    pub build_key: String,
+    pub image_id: String,
+    pub project_id: String,
+    pub commit_sha: String,
+    pub declaration_path: String,
+    pub declaration_digest: String,
+    pub declaration_bytes_sha256: String,
+    pub source_hash: String,
+    pub runtime_configuration: serde_json::Value,
+    pub cli_version: String,
+    pub platform: String,
+    pub created_at: i64,
+}
 
-const MIGRATIONS: [&str; 2] = [
+/// Bump when a migration is appended to [`MIGRATIONS`].
+const SCHEMA_VERSION: i32 = 3;
+
+const MIGRATIONS: [&str; 3] = [
     r#"
 CREATE TABLE tenant_catalog_entries (
     id TEXT PRIMARY KEY NOT NULL,
@@ -88,6 +108,15 @@ CREATE TABLE admitted_specs (
 );
 CREATE INDEX admitted_specs_by_project ON admitted_specs (project_id, last_admitted_at);
 "#,
+    r#"
+CREATE TABLE environment_builds (
+    build_key TEXT PRIMARY KEY NOT NULL,
+    project_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX environment_builds_by_project ON environment_builds (project_id, created_at);
+"#,
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -140,6 +169,53 @@ impl EnvironmentStore {
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
         Ok(Self { conn })
+    }
+
+    pub fn record_build(&self, record: &EnvironmentBuildRecord) -> Result<(), StoreError> {
+        let hex64 = |value: &str| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        };
+        if !hex64(&record.build_key)
+            || !hex64(&record.source_hash)
+            || !hex64(&record.declaration_digest)
+            || !hex64(&record.declaration_bytes_sha256)
+            || record.project_id.trim().is_empty()
+            || crate::image::validate_digest(&record.image_id).is_err()
+            || record.image_id != record.image_id.to_ascii_lowercase()
+        {
+            return Err(StoreError::Invalid(
+                "invalid environment build record".into(),
+            ));
+        }
+        if let Some(mut existing) = self.get_build(&record.build_key)? {
+            existing.created_at = record.created_at;
+            return if existing == *record {
+                Ok(())
+            } else {
+                Err(StoreError::Invalid(
+                    "build key already identifies another immutable output".into(),
+                ))
+            };
+        }
+        self.conn.execute("INSERT INTO environment_builds(build_key, project_id, body, created_at) VALUES (?1,?2,?3,?4)",
+            params![record.build_key,record.project_id,to_json(record)?,record.created_at])?;
+        Ok(())
+    }
+
+    pub fn get_build(&self, build_key: &str) -> Result<Option<EnvironmentBuildRecord>, StoreError> {
+        let body: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT body FROM environment_builds WHERE build_key=?1",
+                params![build_key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        body.map(|body| serde_json::from_str(&body).map_err(StoreError::Json))
+            .transpose()
     }
 
     // ── tenant catalog ────────────────────────────────────────────────────
@@ -569,6 +645,40 @@ mod tests {
     use crate::catalog::tests::entry;
     use crate::spec::tests::{BUNDLE_DIGEST, IMAGE_DIGEST};
     use crate::spec::{EgressTier, IsolationTier};
+
+    #[test]
+    fn build_records_preserve_immutable_output_and_first_timestamp() {
+        let store = EnvironmentStore::open_in_memory().unwrap();
+        let mut record = EnvironmentBuildRecord {
+            build_key: "a".repeat(64),
+            image_id: format!("sha256:{}", "b".repeat(64)),
+            project_id: "project".into(),
+            commit_sha: "c".repeat(40),
+            declaration_path: ".devcontainer/devcontainer.json".into(),
+            declaration_digest: "d".repeat(64),
+            declaration_bytes_sha256: "e".repeat(64),
+            source_hash: "f".repeat(64),
+            runtime_configuration: serde_json::json!({}),
+            cli_version: "0.89.0".into(),
+            platform: "linux/arm64".into(),
+            created_at: 1,
+        };
+        store.record_build(&record).unwrap();
+        record.created_at = 2;
+        store.record_build(&record).unwrap();
+        assert_eq!(
+            store
+                .get_build(&record.build_key)
+                .unwrap()
+                .unwrap()
+                .created_at,
+            1
+        );
+        record.image_id = format!("sha256:{}", "c".repeat(64));
+        assert!(store.record_build(&record).is_err());
+        record.build_key = "bad".into();
+        assert!(store.record_build(&record).is_err());
+    }
 
     fn approval(id: &str, at: i64) -> ApprovalRecord {
         ApprovalRecord {

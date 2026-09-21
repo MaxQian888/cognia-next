@@ -1,6 +1,7 @@
 // ADR-0028 §UI surfaces — SandboxShield unit tests.
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { NextIntlClientProvider } from "next-intl"
 
 import { resolveShieldState, SandboxShield } from "./sandbox-shield"
@@ -20,9 +21,9 @@ jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
   useSandboxRuntimeAvailability: () => mockAvailability,
 }))
 
-// The shield is a Popover trigger (the repo's `status-bar-usage` pattern: a
-// `title` for the hover hint, no nested Radix triggers). Render the content
-// inline so the pin controls are assertable without driving a portal.
+// The shield is a Popover trigger (the repo's `status-bar-usage` pattern). Render
+// the content inline so the pin controls are assertable without driving a
+// portal; the Tooltip wrapper only needs a provider, supplied by `renderUI`.
 jest.mock("@/components/ui/popover", () => ({
   Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -73,7 +74,7 @@ const MESSAGES = {
 }
 
 function withIntl(ui: React.ReactElement) {
-  return render(
+  return renderUI(
     <NextIntlClientProvider locale="en" messages={MESSAGES}>
       {ui}
     </NextIntlClientProvider>
@@ -93,6 +94,10 @@ beforeEach(() => {
   mockUseLiveQuery.mockReset()
   updateSessionMock.mockClear()
 })
+
+// Radix tooltips throw without a provider — app/layout mounts one in production.
+const renderUI = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>)
 
 describe("resolveShieldState", () => {
   it("returns 'off' when no level enables sandbox", () => {

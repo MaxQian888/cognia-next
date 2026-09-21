@@ -122,6 +122,7 @@ pub trait SandboxedExec: Send + Sync {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 5,
             max_memory_mb: 256,
+            max_processes: 0,
         };
 
         // Sub-probe 1: trivial command must run under confinement.

@@ -93,8 +93,8 @@ pub fn admit(
                     format!("catalog entry {catalog_entry_id} has not been resolved to a digest"),
                 ));
             };
-            if pinned != spec.image.pinned()
-                || spec.image.catalog_entry_id.as_deref() != Some(catalog_entry_id.as_str())
+            if Some(pinned) != spec.image.registry_image()
+                || spec.image.catalog_entry_id() != Some(catalog_entry_id.as_str())
             {
                 return Err(refuse(
                     "spec_image_mismatch",
@@ -147,8 +147,8 @@ pub fn admit(
                 let runtime_digest = runtime_fields_digest(spec)
                     .map_err(|error| refuse(error.code, error.message))?;
                 let image_matches = match (&approval.resolved_image, &approval.build_key) {
-                    (Some(image), _) => *image == spec.image.pinned(),
-                    (None, Some(key)) => spec.image.build_key.as_deref() == Some(key.as_str()),
+                    (Some(image), None) => Some(image.clone()) == spec.image.registry_image(),
+                    (_, Some(key)) => spec.image.build_key() == Some(key.as_str()),
                     (None, None) => false,
                 };
                 if approval.project_id != spec.project_id
@@ -163,17 +163,18 @@ pub fn admit(
                     ));
                 }
             }
-            let image = spec.image.pinned();
-            let permitted = ctx
-                .baseline
-                .registry_allowlist
-                .iter()
-                .any(|rule| rule.matches(&image.registry, &image.repository));
-            if !permitted {
-                return Err(refuse(
-                    "catalog_registry_not_allowlisted",
-                    format!("{} is not on the registry allowlist", image.name()),
-                ));
+            if let Some(image) = spec.image.registry_image() {
+                let permitted = ctx
+                    .baseline
+                    .registry_allowlist
+                    .iter()
+                    .any(|rule| rule.matches(&image.registry, &image.repository));
+                if !permitted {
+                    return Err(refuse(
+                        "catalog_registry_not_allowlisted",
+                        format!("{} is not on the registry allowlist", image.name()),
+                    ));
+                }
             }
             if spec.isolation.minimum < ctx.catalog.floor {
                 return Err(refuse(
@@ -443,7 +444,7 @@ mod tests {
             "catalog_entry_unavailable"
         );
         assert_eq!(
-            check(&|s| s.image.repository = "acme/other".into()),
+            check(&|s| s.image.registry_mut().unwrap().repository = "acme/other".into()),
             "spec_image_mismatch"
         );
         assert_eq!(
@@ -585,7 +586,7 @@ mod tests {
             declaration_digest: "d".repeat(64),
             approval_ref: "approval-1".into(),
         };
-        spec.image.catalog_entry_id = None;
+        spec.image.registry_mut().unwrap().catalog_entry_id = None;
         spec.egress.approved_domains.clear();
         reseal(&mut spec);
         spec
@@ -598,7 +599,7 @@ mod tests {
             normalized_remote: "https://github.com/acme/app".into(),
             path: ".devcontainer/devcontainer.json".into(),
             declaration_digest: "d".repeat(64),
-            resolved_image: Some(spec.image.pinned()),
+            resolved_image: spec.image.registry_image(),
             build_key: None,
             runtime_fields_digest: runtime_fields_digest(spec).unwrap(),
             approver_user_id: "maintainer-1".into(),
@@ -637,7 +638,7 @@ mod tests {
         );
 
         let mut other_image = spec.clone();
-        other_image.image.digest = format!("sha256:{}", "9".repeat(64));
+        other_image.image.registry_mut().unwrap().digest = format!("sha256:{}", "9".repeat(64));
         reseal(&mut other_image);
         assert_eq!(
             admit_with(
@@ -657,8 +658,8 @@ mod tests {
     fn a_repo_declaration_still_obeys_the_registry_allowlist_and_floor() {
         let (base, catalog) = ctx_parts();
         let mut spec = declared_spec();
-        spec.image.registry = "docker.io".into();
-        spec.image.repository = "library/ubuntu".into();
+        spec.image.registry_mut().unwrap().registry = "docker.io".into();
+        spec.image.registry_mut().unwrap().repository = "library/ubuntu".into();
         reseal(&mut spec);
         let approval = approval_for(&spec);
         assert_eq!(

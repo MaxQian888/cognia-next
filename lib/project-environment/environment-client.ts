@@ -28,7 +28,7 @@
  */
 
 import { parseInvokeError } from "@/lib/tauri/command-error"
-import type { Page, PageRequest } from "@/lib/tauri/companion-paging"
+import { collectPages, type Page, type PageRequest } from "@/lib/tauri/companion-paging"
 import { transport } from "@/lib/tauri/transport-instance"
 import type { EgressTier, IsolationTier, PinnedImage } from "@/types/sandbox/environment-spec"
 import type {
@@ -131,6 +131,76 @@ export interface SpecPreview {
   refusalMessage?: string
   /** True when the refusal was infrastructure rather than policy (ADR-0182 fault rule). */
   fault: boolean
+}
+
+export interface EnvironmentRuntimePort {
+  containerId: string
+  projectId: string
+  port: number
+  label?: string
+  path: string
+}
+
+export async function environmentPortsList(projectId: string): Promise<EnvironmentRuntimePort[]> {
+  const result = await transport.call<{ ports: EnvironmentRuntimePort[] }>(
+    "environment_ports_list",
+    { projectId }
+  )
+  return result.ports
+}
+
+export interface EnvironmentBuildRecord {
+  runtimeConfiguration: unknown
+  buildKey: string
+  imageId: string
+  projectId: string
+  commitSha: string
+  declarationPath: string
+  declarationDigest: string
+  declarationBytesSha256: string
+  sourceHash: string
+  cliVersion: string
+  platform: string
+  createdAt: number
+}
+
+export interface EnvironmentBuildStatus {
+  jobId: string
+  projectId: string
+  status: "queued" | "building" | "succeeded" | "failed" | "cancelled"
+  record?: EnvironmentBuildRecord
+  error?: string
+}
+
+export interface EnvironmentBuildRequest {
+  projectId: string
+  cwd: string
+  declarationPath: string
+  declarationDigest: string
+  declarationBytesSha256: string
+  commitSha: string
+  platform?: string
+}
+
+export function environmentBuildStart(
+  request: EnvironmentBuildRequest
+): Promise<EnvironmentBuildStatus> {
+  return transport.call("environment_build_start", { request })
+}
+
+export function environmentBuildGet(query: {
+  projectId: string
+  jobId?: string
+  buildKey?: string
+}): Promise<EnvironmentBuildStatus> {
+  return transport.call("environment_build_get", query)
+}
+
+export function environmentBuildCancel(
+  projectId: string,
+  jobId: string
+): Promise<EnvironmentBuildStatus> {
+  return transport.call("environment_build_cancel", { projectId, jobId })
 }
 
 export type ApprovalAuthority = "workspaceMaintainer" | "orgAdmin" | "hostOwner"
@@ -286,6 +356,19 @@ export function environmentApprovalList(
   return transport.call<Page<ApprovalRecord>>("environment_approval_list", { ...options })
 }
 
+/** Read the complete project ledger; partial authority data cannot resolve a run. */
+export function fetchEnvironmentApprovals(projectId: string): Promise<ApprovalRecord[]> {
+  return collectPages(
+    (pageToken) =>
+      environmentApprovalList({
+        projectId,
+        pageSize: 200,
+        ...(pageToken === undefined ? {} : { pageToken }),
+      }),
+    { requireComplete: true }
+  )
+}
+
 export function environmentApprovalGet(id: string): Promise<ApprovalRecord | null> {
   return transport.call<ApprovalRecord | null>("environment_approval_get", { id })
 }
@@ -406,16 +489,18 @@ export interface CatalogRows {
  * same token would otherwise spin forever in the run path.
  */
 export async function fetchEnvironmentCatalogRows(pageSize = 200): Promise<CatalogRows> {
-  const rows: CatalogEntryRow[] = []
   const rejected: CatalogRejectionRow[] = []
-  let page = await environmentCatalogList({ pageSize })
-  const { items: _items, nextPageToken: _token, rejected: _rejected, ...facts } = page
-  for (let guard = 0; guard < 50; guard += 1) {
-    rows.push(...page.items)
-    rejected.push(...page.rejected)
-    if (page.nextPageToken === undefined) break
-    page = await environmentCatalogList({ pageSize, pageToken: page.nextPageToken })
-  }
+  const first = await environmentCatalogList({ pageSize })
+  const { items: _items, nextPageToken: _token, rejected: _rejected, ...facts } = first
+  const rows = await collectPages(
+    async (pageToken) => {
+      const page =
+        pageToken === undefined ? first : await environmentCatalogList({ pageSize, pageToken })
+      rejected.push(...page.rejected)
+      return page
+    },
+    { maxPages: 50, requireComplete: true }
+  )
   return { facts, rows, rejected }
 }
 

@@ -227,6 +227,7 @@ async fn execute_on_host(
             network: sandbox_network(effective.network),
             max_cpu_seconds: timeout.min(u32::MAX as u64) as u32,
             max_memory_mb: 2048,
+            max_processes: crate::sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
         };
         match crate::sandbox::run_confined(command, sandbox_policy).await {
             Ok(result) => ShellResult {

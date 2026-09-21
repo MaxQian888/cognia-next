@@ -52,6 +52,25 @@ describe("environment spec digests", () => {
     expect(Object.keys(sealed).slice(0, 2)).toEqual(["version", "specDigest"])
   })
 
+  it("keeps historical digests for absent remote env and binds new runtime settings", async () => {
+    const base = cases[0]!.spec
+    const digest = await environmentRuntimeFieldsDigest(base)
+    await expect(computeEnvironmentSpecDigest({ ...base, remoteEnv: {} })).resolves.toBe(
+      base.specDigest
+    )
+    await expect(environmentRuntimeFieldsDigest({ ...base, remoteEnv: {} })).resolves.toBe(digest)
+    for (const added of [
+      { remoteEnv: { IMAGE_SETTING: null } },
+      { remoteEnv: { PATH: "${containerEnv:PATH}:/custom/bin" } },
+      { workspaceFolder: "/workspace/app" },
+      { lifecycleTimeoutMs: 1000 },
+    ]) {
+      const changed = { ...base, ...added }
+      await expect(computeEnvironmentSpecDigest(changed)).resolves.not.toBe(base.specDigest)
+      await expect(environmentRuntimeFieldsDigest(changed)).resolves.not.toBe(digest)
+    }
+  })
+
   it("is sensitive to every runtime field and to key order only through content", async () => {
     const base = cases[1]!.spec
     const baseline = await computeEnvironmentSpecDigest(base)

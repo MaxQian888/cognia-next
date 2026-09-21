@@ -141,8 +141,8 @@ function approvalFor(
     file: verdict.declaration.file,
     path: verdict.declaration.path,
     resolvedImage: {
-      registry: verdict.declaration.image.registry,
-      repository: verdict.declaration.image.repository,
+      registry: verdict.declaration.image!.registry,
+      repository: verdict.declaration.image!.repository,
       digest: digest("d"),
     },
     ...over,
@@ -716,4 +716,36 @@ describe("declarationRuntimeFieldsDigest", () => {
       await environmentRuntimeFieldsDigest(spec)
     )
   })
+})
+
+it("resolves an approved build identity only for the exact source commit", async () => {
+  const verdict = await devcontainerVerdict()
+  verdict.declaration = {
+    ...verdict.declaration,
+    image: undefined,
+    build: { build: { dockerfile: "Dockerfile" } },
+  }
+  const base = input({
+    declaration: verdict,
+    repository: { remote: "https://github.com/acme/app.git", commitSha: "c".repeat(40) },
+  })
+  const builtImage = { kind: "build" as const, buildKey: "b".repeat(64), imageId: digest("c") }
+  const approval = {
+    ref: "apr",
+    file: verdict.declaration.file,
+    path: verdict.declaration.path,
+    declarationDigest: verdict.digest,
+    builtImage,
+    buildCommitSha: base.repository!.commitSha,
+    runtimeDeclaration: verdict.declaration,
+  }
+  const outcome = await resolveEnvironmentSpec({ ...base, approval })
+  expect(outcome.kind).toBe("resolved")
+  if (outcome.kind === "resolved") expect(outcome.spec.image).toEqual(builtImage)
+  const stale = await resolveEnvironmentSpec({
+    ...base,
+    surface: "unattended",
+    approval: { ...approval, buildCommitSha: "f".repeat(40) },
+  })
+  expect(stale).toMatchObject({ kind: "refused", code: "environment_approval_pending" })
 })

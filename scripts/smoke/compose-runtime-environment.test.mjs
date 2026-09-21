@@ -116,7 +116,7 @@ function placement(overrides = {}) {
       command: "codex-acp",
       user: { name: null, uid: CONTAINER_TIER_UID, gid: CONTAINER_TIER_UID, remappedFrom: null },
       egress: { tier: "off", enforced: true },
-      credentials: { mode: "spawn-env" },
+      credentials: { mode: "none" },
       ...overrides,
     },
   }

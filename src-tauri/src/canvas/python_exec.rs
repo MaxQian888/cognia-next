@@ -120,6 +120,7 @@ fn build_python_sandbox(
         network: NetworkPolicy::Off,
         max_cpu_seconds: 0,
         max_memory_mb: 0,
+        max_processes: crate::sandbox::policy::BASH_DEFAULT_MAX_PROCESSES,
     };
     (command, policy)
 }

@@ -13,6 +13,8 @@
  * after approval reads as "changed", and needs approving again.
  */
 
+import { useMemo } from "react"
+import { builtEnvironmentDeclaration } from "@/lib/project-environment/devcontainer"
 import { useTranslations } from "next-intl"
 import { CheckIcon, FileWarningIcon, ShieldAlertIcon } from "lucide-react"
 
@@ -20,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type {
   ApprovalRecord,
+  EnvironmentBuildStatus,
   DeclarationReadResult,
 } from "@/lib/project-environment/environment-client"
 import { canonicalImageReference } from "@/lib/project-environment/image-reference"
@@ -32,6 +35,9 @@ interface Props {
   /** False when the deployment has no pool: nothing can be approved there. */
   canApprove: boolean
   busy: boolean
+  build?: EnvironmentBuildStatus
+  onBuild?(): void
+  onCancelBuild?(): void
   onApprove(): void
   onRevoke(approvalId: string): void
 }
@@ -43,6 +49,9 @@ export function ProjectEnvironmentRuntimeDeclaration({
   canApprove,
   busy,
   onApprove,
+  build,
+  onBuild,
+  onCancelBuild,
   onRevoke,
 }: Props) {
   const t = useTranslations("projectEnvironment.runtime.declaration")
@@ -52,7 +61,8 @@ export function ProjectEnvironmentRuntimeDeclaration({
       ? active.find(
           (record) =>
             record.declarationDigest === declaration.digest &&
-            record.path === declaration.declaration.path
+            record.path === declaration.declaration.path &&
+            (!declaration.declaration.build || record.buildKey === build?.record?.buildKey)
         )
       : undefined
   // An approval for the same path under a different digest is the file
@@ -61,6 +71,19 @@ export function ProjectEnvironmentRuntimeDeclaration({
   const stale =
     declaration.kind === "declared" && !current
       ? active.find((record) => record.path === declaration.declaration.path)
+      : undefined
+
+  const effective = useMemo(
+    () =>
+      declaration.kind === "declared" && declaration.declaration.build && build?.record
+        ? builtEnvironmentDeclaration(build.record.runtimeConfiguration, declaration.declaration)
+        : undefined,
+    [declaration, build]
+  )
+  const displayed = effective?.ok
+    ? effective.declaration
+    : declaration.kind === "declared"
+      ? declaration.declaration
       : undefined
 
   return (
@@ -129,19 +152,92 @@ export function ProjectEnvironmentRuntimeDeclaration({
           <p className="break-all text-[11px]">
             {t("declared", {
               path: declaration.declaration.path,
-              image: canonicalImageReference(declaration.declaration.image),
+              image: declaration.declaration.build
+                ? t("buildImage")
+                : declaration.declaration.image
+                  ? canonicalImageReference(declaration.declaration.image)
+                  : "",
             })}
           </p>
           <p className="text-[10px] text-muted-foreground">
             {t("details", {
-              env: Object.keys(declaration.declaration.containerEnv).length,
-              ports: declaration.declaration.forwardPorts.length,
-              commands: Object.keys(declaration.declaration.lifecycleCommands).length,
+              env: Object.keys(displayed?.containerEnv ?? {}).length,
+              ports: displayed?.forwardPorts.length ?? 0,
+              commands: Object.keys(displayed?.lifecycleCommands ?? {}).length,
             })}
           </p>
-          {declaration.declaration.user?.name ? (
+          {displayed?.user?.name ? (
             <p className="text-[10px] text-muted-foreground">
-              {t("user", { user: declaration.declaration.user.name })}
+              {t("user", { user: displayed.user.name })}
+            </p>
+          ) : null}
+          {declaration.declaration.build ? (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground">{t("buildHint")}</p>
+              {build ? (
+                <p role="status" className="text-[11px]">
+                  {t(`buildStatus.${build.status}`)}
+                </p>
+              ) : null}
+              {build?.error ? (
+                <p role="alert" className="break-words text-[11px] text-destructive">
+                  {build.error}
+                </p>
+              ) : null}
+              {build?.record ? (
+                <p className="break-all font-mono text-[10px]">{build.record.imageId}</p>
+              ) : null}
+              {effective && !effective.ok ? (
+                <ul role="alert" className="text-[11px] text-destructive">
+                  {effective.problems.map((problem, index) => (
+                    <li key={index}>
+                      {problem.field}: {problem.code}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {effective?.ok ? (
+                <details className="text-[11px]">
+                  <summary>{t("effectiveRuntime")}</summary>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                    {JSON.stringify(
+                      {
+                        containerEnv: effective.declaration.containerEnv,
+                        remoteEnv: effective.declaration.remoteEnv,
+                        user: effective.declaration.user,
+                        lifecycleCommands: effective.declaration.lifecycleCommands,
+                        forwardPorts: effective.declaration.forwardPorts,
+                        workspaceFolder: effective.declaration.workspaceFolder,
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                </details>
+              ) : null}
+              {canApprove && onBuild ? (
+                <Button size="sm" variant="outline" disabled={busy} onClick={onBuild}>
+                  {t("build")}
+                </Button>
+              ) : null}
+              {(build?.status === "queued" || build?.status === "building") && onCancelBuild ? (
+                <Button size="sm" variant="ghost" onClick={onCancelBuild}>
+                  {t("cancelBuild")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {declaration.notices.length || effective?.notices.length ? (
+            <p className="text-[10px] text-muted-foreground">
+              {t("ignoredFields", {
+                fields: [
+                  ...new Set(
+                    [...declaration.notices, ...(effective?.notices ?? [])].map(
+                      (notice) => notice.field
+                    )
+                  ),
+                ].join(", "),
+              })}
             </p>
           ) : null}
           {stale ? (
@@ -153,12 +249,20 @@ export function ProjectEnvironmentRuntimeDeclaration({
             </p>
           ) : canApprove ? (
             <>
-              <p className="text-[10px] text-muted-foreground">{t("approveHint")}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {t(declaration.declaration.build ? "approveBuildHint" : "approveHint")}
+              </p>
               <Button
                 size="sm"
                 variant="outline"
                 className="w-full"
-                disabled={busy}
+                disabled={
+                  busy ||
+                  (Boolean(declaration.declaration.build) &&
+                    (build?.status !== "succeeded" ||
+                      build.record?.declarationDigest !== declaration.digest ||
+                      !effective?.ok))
+                }
                 onClick={onApprove}
                 data-testid="runtime-declaration-approve"
               >

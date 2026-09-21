@@ -42,9 +42,17 @@ async-trait = "0.1"
 log = "0.4"
 parking_lot = "0.12"
 serde_json = "1.0"
-tokio = { version = "1", features = ["sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+tar = "0.4"
+url = "2"
+sha2 = "0.10"
+tokio = { version = "1", features = ["sync", "time", "io-util", "process", "fs", "macros", "rt"] }
 
 [dev-dependencies]
 cognia-external-agent = { path = "../cognia-external-agent", default-features = false, features = ["test-support"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

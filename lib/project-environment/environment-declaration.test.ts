@@ -277,3 +277,19 @@ describe("parseWorkspaceEnvironmentBlock", () => {
     expect(codes("node:22")).toEqual([{ code: "declaration_not_object", field: "environment" }])
   })
 })
+
+it("binds Dockerfile and Feature inputs into the declaration digest without a fake image", async () => {
+  const build = declaration(
+    '{"build":{"dockerfile":"Dockerfile","args":{"VERSION":"1"}},"features":{"ghcr.io/acme/feature:1":{}}}'
+  )
+  expect(build.image).toBeUndefined()
+  const digest = await environmentDeclarationDigest(build)
+  const reordered = declaration(
+    '{"features":{"ghcr.io/acme/feature:1":{}},"build":{"args":{"VERSION":"1"},"dockerfile":"Dockerfile"}}'
+  )
+  expect(await environmentDeclarationDigest(reordered)).toBe(digest)
+  const changed = declaration(
+    '{"build":{"dockerfile":"Dockerfile","args":{"VERSION":"2"}},"features":{"ghcr.io/acme/feature:1":{}}}'
+  )
+  expect(await environmentDeclarationDigest(changed)).not.toBe(digest)
+})

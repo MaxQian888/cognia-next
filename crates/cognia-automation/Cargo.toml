@@ -50,7 +50,7 @@ rand = "0.10"
 ed25519-dalek = "3"
 futures-util = { version = "0.3", default-features = false }
 async-trait = "0.1"
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 
 # Cross-platform screenshot for non-macOS backends. macOS app-session capture
 # is implemented with ScreenCaptureKit in `native/macos/screen_capture.m`.

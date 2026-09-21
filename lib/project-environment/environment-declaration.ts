@@ -49,13 +49,18 @@ export interface EnvironmentDeclaration {
   file: DeclarationFile
   /** Repository-relative path of the declaring file. */
   path: string
-  image: ImageReference
+  image?: ImageReference
+  /** Validated devcontainer build inputs, included in the approval digest. */
+  build?: Record<string, unknown>
   /**
    * Values may contain `${containerEnv:NAME}` or `${containerEnv:NAME:default}`,
    * expanded by `cognia-sandboxd` against the image's environment when a
    * process starts (ADR-0183). Every other variable form is refused at parse.
    */
   containerEnv: Record<string, string>
+  remoteEnv?: Record<string, string | null>
+  workspaceFolder?: string
+  lifecycleTimeoutMs?: number
   lifecycleCommands: LifecycleCommands
   forwardPorts: ForwardPort[]
   user?: DeclaredUser
@@ -70,6 +75,7 @@ export type DeclarationProblemCode =
   | "declaration_not_object"
   | "declaration_image_missing"
   | "declaration_image_invalid"
+  | "declaration_build_invalid"
   | "declaration_env_invalid"
   | "declaration_env_reserved"
   | "declaration_command_invalid"
@@ -128,8 +134,18 @@ export function isValidCommandName(name: string): boolean {
 export function normalizeEnv(
   entries: ReadonlyArray<readonly [name: string, value: unknown, field: string]>,
   problems: DeclarationProblem[]
-): Record<string, string> {
-  const env = new Map<string, string>()
+): Record<string, string>
+export function normalizeEnv(
+  entries: ReadonlyArray<readonly [name: string, value: unknown, field: string]>,
+  problems: DeclarationProblem[],
+  preserveNulls: true
+): Record<string, string | null>
+export function normalizeEnv(
+  entries: ReadonlyArray<readonly [name: string, value: unknown, field: string]>,
+  problems: DeclarationProblem[],
+  preserveNulls = false
+): Record<string, string | null> {
+  const env = new Map<string, string | null>()
   for (const [name, value, field] of entries) {
     if (!isValidEnvName(name)) {
       problems.push({ code: "declaration_env_invalid", field, detail: { reason: "name" } })
@@ -140,7 +156,8 @@ export function normalizeEnv(
       continue
     }
     if (value === null) {
-      env.delete(name)
+      if (preserveNulls) env.set(name, null)
+      else env.delete(name)
       continue
     }
     if (typeof value !== "string") {
@@ -161,6 +178,32 @@ export function normalizeEnv(
     })
   }
   return Object.fromEntries([...env.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+}
+
+/** A declared cwd stays inside the container's existing workspace mount. */
+export function normalizeWorkspaceFolder(
+  value: unknown,
+  field: string,
+  problems: DeclarationProblem[]
+): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== "string") {
+    problems.push({ code: "declaration_path_invalid", field })
+    return undefined
+  }
+  const folder = substituteDeclarationVariables(value, field, problems, false)
+  if (folder === undefined) return undefined
+  if (
+    !(folder === SANDBOX_WORKSPACE_FOLDER || folder.startsWith(`${SANDBOX_WORKSPACE_FOLDER}/`)) ||
+    folder.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(folder) ||
+    byteLength(folder) > 4096 ||
+    folder.split("/").some((part) => part === ".." || part === ".")
+  ) {
+    problems.push({ code: "declaration_path_invalid", field })
+    return undefined
+  }
+  return folder
 }
 
 /**
@@ -442,6 +485,9 @@ export type WorkspaceEnvironmentBlock =
 const INLINE_BLOCK_KEYS = new Set([
   "image",
   "containerEnv",
+  "remoteEnv",
+  "workspaceFolder",
+  "lifecycleTimeoutMs",
   "lifecycleCommands",
   "forwardPorts",
   "user",
@@ -525,6 +571,43 @@ export function parseWorkspaceEnvironmentBlock(
   }
   const containerEnv = normalizeEnv(envEntries, problems)
 
+  const remoteEntries: Array<readonly [string, unknown, string]> = []
+  if (row.remoteEnv !== undefined) {
+    if (!row.remoteEnv || typeof row.remoteEnv !== "object" || Array.isArray(row.remoteEnv)) {
+      problems.push({
+        code: "declaration_env_invalid",
+        field: "environment.remoteEnv",
+        detail: { reason: "type" },
+      })
+    } else {
+      for (const [name, raw] of Object.entries(row.remoteEnv as Record<string, unknown>)) {
+        const field = `environment.remoteEnv.${name}`
+        const value =
+          typeof raw === "string" ? substituteDeclarationVariables(raw, field, problems, true) : raw
+        if (value !== undefined) remoteEntries.push([name, value, field])
+      }
+    }
+  }
+  const remoteEnv = normalizeEnv(remoteEntries, problems, true)
+  const workspaceFolder = normalizeWorkspaceFolder(
+    row.workspaceFolder,
+    "environment.workspaceFolder",
+    problems
+  )
+  let lifecycleTimeoutMs: number | undefined
+  if (row.lifecycleTimeoutMs !== undefined) {
+    if (
+      !Number.isSafeInteger(row.lifecycleTimeoutMs) ||
+      (row.lifecycleTimeoutMs as number) < 1000 ||
+      (row.lifecycleTimeoutMs as number) > 3600000
+    ) {
+      problems.push({
+        code: "declaration_command_invalid",
+        field: "environment.lifecycleTimeoutMs",
+      })
+    } else lifecycleTimeoutMs = row.lifecycleTimeoutMs as number
+  }
+
   const lifecycleCommands: LifecycleCommands = {}
   if (row.lifecycleCommands !== undefined) {
     const commands = row.lifecycleCommands
@@ -559,6 +642,9 @@ export function parseWorkspaceEnvironmentBlock(
         path: WORKSPACE_CONFIG_DECLARATION_PATH,
         image,
         containerEnv,
+        ...(Object.keys(remoteEnv).length ? { remoteEnv } : {}),
+        ...(workspaceFolder !== undefined ? { workspaceFolder } : {}),
+        ...(lifecycleTimeoutMs !== undefined ? { lifecycleTimeoutMs } : {}),
         lifecycleCommands,
         forwardPorts,
         ...(user ? { user } : {}),
@@ -577,8 +663,18 @@ export async function environmentDeclarationDigest(
       version: 1,
       file: declaration.file,
       path: declaration.path,
-      image: canonicalImageReference(declaration.image),
+      ...(declaration.image ? { image: canonicalImageReference(declaration.image) } : {}),
+      ...(declaration.build ? { build: declaration.build } : {}),
       containerEnv: declaration.containerEnv,
+      ...(declaration.remoteEnv && Object.keys(declaration.remoteEnv).length
+        ? { remoteEnv: declaration.remoteEnv }
+        : {}),
+      ...(declaration.workspaceFolder !== undefined
+        ? { workspaceFolder: declaration.workspaceFolder }
+        : {}),
+      ...(declaration.lifecycleTimeoutMs !== undefined
+        ? { lifecycleTimeoutMs: declaration.lifecycleTimeoutMs }
+        : {}),
       lifecycleCommands: declaration.lifecycleCommands,
       forwardPorts: declaration.forwardPorts,
       ...(declaration.user ? { user: declaration.user } : {}),

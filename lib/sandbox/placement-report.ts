@@ -17,8 +17,8 @@
  *   image that declares none gets the tier default. Neither is visible in the
  *   spec.
  * - **egressEnforced / credentialsMode** — Step ① enforces egress only on the
- *   `off` tier and routes no credentials, and the Host says so rather than
- *   letting a UI infer enforcement from a policy that is only recorded.
+ *   `off` tier, and the Host says so rather than letting a UI infer
+ *   enforcement from a policy that is only recorded.
  *
  * So a UI that rendered the request would be lying about all three. Every
  * surface reads this report instead.
@@ -71,10 +71,10 @@ export interface SandboxPlacementReport {
    */
   egressEnforced?: boolean
   /**
-   * How the sandbox got its provider credentials. `spawn-env` through
-   * Step ①: the Host's own filtered environment, which is the desktop
-   * arrangement carried into the container. Gateway tickets arrive with
-   * ADR-0185.
+   * How the sandbox got its provider credentials. Ambient provider keys are
+   * stripped before the container sees them, so this is `gateway-lease` when
+   * a managed gateway task's per-task lease rode in and `none` otherwise.
+   * Per-sandbox gateway tickets for ordinary spawns are ADR-0185.
    */
   credentialsMode?: string
 }

@@ -280,13 +280,20 @@ impl SandboxedExec for MacOsSandboxBackend {
 }
 
 /// Resolve the rlimit caps a policy asks for (only `Bash` carries them).
+///
+/// `max_processes` is deliberately NOT resolved here: Seatbelt has no
+/// per-tree process primitive, and `RLIMIT_NPROC` on macOS counts every
+/// process the login uid owns — applying it would cap the user's whole
+/// session, not the sandbox. The Linux backend enforces it inside the
+/// unshared user namespace; the Windows runner maps it onto the Job
+/// Object's `ActiveProcessLimit`.
 fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits {
     match policy {
         SandboxPolicy::Bash {
             max_cpu_seconds,
             max_memory_mb,
             ..
-        } => crate::sandbox::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb),
+        } => crate::sandbox::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb, 0),
         _ => crate::sandbox::limits::ResolvedLimits::default(),
     }
 }
@@ -559,7 +566,7 @@ mod tests {
                 stdin: None,
                 timeout: Duration::from_secs(10),
             },
-            SandboxPolicy::Bash { writable: vec![workspace], readable: vec![], network: NetworkPolicy::Off, max_cpu_seconds: 0, max_memory_mb: 0 },
+            SandboxPolicy::Bash { writable: vec![workspace], readable: vec![], network: NetworkPolicy::Off, max_cpu_seconds: 0, max_memory_mb: 0, max_processes: 0 },
         ).await.unwrap();
         assert_eq!(result.exit_code, 0, "{}", result.stderr);
         assert!(!outside.exists());
@@ -573,6 +580,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let profile =
             render_profile_with_scratch(&policy, None, Path::new("/private/tmp/cognia-one"))
@@ -593,6 +601,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let p = render_profile(&policy, None).unwrap();
         assert!(p.starts_with("(version 1)\n(deny default)\n"));
@@ -609,6 +618,7 @@ mod tests {
             network: NetworkPolicy::On,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let p = render_profile(&policy, None).unwrap();
         assert!(p.contains("(allow network*)"));
@@ -667,6 +677,7 @@ mod tests {
                 network: NetworkPolicy::Off,
                 max_cpu_seconds: 0,
                 max_memory_mb: 0,
+                max_processes: 0,
             },
             None,
         )
@@ -688,6 +699,7 @@ mod tests {
                 network: NetworkPolicy::Off,
                 max_cpu_seconds: 0,
                 max_memory_mb: 0,
+                max_processes: 0,
             },
             None,
         )
@@ -718,6 +730,7 @@ mod tests {
                 network: NetworkPolicy::Off,
                 max_cpu_seconds: 0,
                 max_memory_mb: 0,
+                max_processes: 0,
             },
             None,
         )
@@ -748,6 +761,7 @@ mod tests {
                 network: NetworkPolicy::Off,
                 max_cpu_seconds: 0,
                 max_memory_mb: 0,
+                max_processes: 0,
             },
             None,
         )
@@ -774,6 +788,7 @@ mod tests {
                 network: NetworkPolicy::Off,
                 max_cpu_seconds: 0,
                 max_memory_mb: 0,
+                max_processes: 0,
             },
             None,
         )
@@ -817,6 +832,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 5,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         assert_eq!(rlimits_for(&bash).cpu_seconds, Some(5));
         let edit = SandboxPolicy::Edit {
@@ -836,6 +852,7 @@ mod tests {
             },
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let p = render_profile(&policy, Some(54321)).unwrap();
         assert!(p.contains("(allow network-outbound (remote tcp \"localhost:54321\"))"));
@@ -853,10 +870,107 @@ mod tests {
             },
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let p = render_profile(&policy, None).unwrap();
         assert!(p.contains("(deny network*)"));
         assert!(!p.contains("(allow network*)"));
         assert!(!p.contains("network-outbound"));
+    }
+
+    #[test]
+    fn rlimits_for_never_applies_a_process_cap_on_macos() {
+        // Seatbelt cannot count a process tree and macOS `RLIMIT_NPROC` is
+        // uid-wide, so the backend deliberately drops `max_processes` rather
+        // than cap the user's whole login session. Linux enforces it inside
+        // the unshared user namespace; Windows uses the Job Object.
+        let bash = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/w")],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 512,
+        };
+        assert_eq!(rlimits_for(&bash).processes, None);
+    }
+
+    #[test]
+    fn bash_profile_denies_keychains_and_docker_socket() {
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+                max_processes: 0,
+            },
+            None,
+        )
+        .unwrap();
+        // System + user keychains, read AND write denied.
+        assert!(p.contains("(deny file-read* file-write* (subpath \"/Library/Keychains\"))"));
+        assert!(p.contains("(deny file-read* file-write* (subpath \"/private/var/db/SystemKey\"))"));
+        if let Some(home) = dirs::home_dir() {
+            let kc = escape_sbpl(&home.join("Library/Keychains").to_string_lossy());
+            assert!(p.contains(&format!("(deny file-read* (subpath \"{kc}\"))")));
+        }
+        // The docker socket — both its spellings.
+        assert!(p.contains("(deny file-read* file-write* (literal \"/var/run/docker.sock\"))"));
+        assert!(
+            p.contains("(deny file-read* file-write* (literal \"/private/var/run/docker.sock\"))")
+        );
+    }
+
+    /// Runtime proof on macOS: a real `sandbox-exec` run cannot read the
+    /// keychain dirs or the docker socket. `/Library/Keychains` exists on
+    /// every macOS install, so the denial is observed rather than inferred
+    /// from a missing file. Runs un-ignored like the other seatbelt tests —
+    /// `sandbox-exec` is part of the base OS install.
+    #[tokio::test]
+    async fn keychain_and_docker_socket_reads_are_denied_at_runtime() {
+        let workspace = tempfile::tempdir().unwrap();
+        let home_keychain = dirs::home_dir()
+            .map(|h| h.join("Library/Keychains").to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/nonexistent".into());
+        let result = MacOsSandboxBackend::new()
+            .run(
+                SandboxCommand {
+                    argv: vec![
+                        "/bin/sh".into(),
+                        "-c".into(),
+                        "ls \"$1\" >/dev/null 2>&1 && echo USER-KEYCHAIN-OPEN; \
+                         ls /Library/Keychains >/dev/null 2>&1 && echo SYS-KEYCHAIN-OPEN; \
+                         ls /var/run/docker.sock >/dev/null 2>&1 && echo DOCKERSOCK-OPEN; \
+                         exit 0"
+                            .into(),
+                        "sandbox-test".into(),
+                        home_keychain,
+                    ],
+                    cwd: workspace.path().to_path_buf(),
+                    env: Default::default(),
+                    stdin: None,
+                    timeout: Duration::from_secs(10),
+                },
+                SandboxPolicy::Bash {
+                    writable: vec![workspace.path().to_path_buf()],
+                    readable: vec![],
+                    network: NetworkPolicy::Off,
+                    max_cpu_seconds: 0,
+                    max_memory_mb: 0,
+                    max_processes: 0,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.exit_code, 0, "{}", result.stderr);
+        for marker in ["USER-KEYCHAIN-OPEN", "SYS-KEYCHAIN-OPEN", "DOCKERSOCK-OPEN"] {
+            assert!(
+                !result.stdout.contains(marker),
+                "{marker} — a host secret / control socket was reachable:\n{}",
+                result.stdout
+            );
+        }
     }
 }

@@ -45,6 +45,82 @@ use sha2::{Digest, Sha256};
 
 pub use cognia_sandbox_pool::boot::PoolServices;
 
+use cognia_sandbox_pool::build::{BuildConfig, BuildService};
+pub use cognia_sandbox_pool::build::{BuildPhase, BuildRequest, BuildStatus};
+use std::sync::Arc;
+
+static BUILD_SERVICE: Lazy<parking_lot::Mutex<Option<Arc<BuildService>>>> =
+    Lazy::new(|| parking_lot::Mutex::new(None));
+
+fn build_service() -> Served<Arc<BuildService>> {
+    let mut service = BUILD_SERVICE.lock();
+    if let Some(service) = service.as_ref() {
+        return Ok(Arc::clone(service));
+    }
+    let created = BuildService::new(BuildConfig::from_env().map_err(|error| {
+        EnvironmentServiceError::refused("environment_build_unconfigured", error)
+    })?)
+    .map_err(|error| EnvironmentServiceError::refused("environment_build_unconfigured", error))?;
+    *service = Some(Arc::clone(&created));
+    Ok(created)
+}
+
+pub fn start_build(services: &PoolServices, request: BuildRequest) -> Served<BuildStatus> {
+    let admission = Arc::clone(&services.admission);
+    build_service()?
+        .start(
+            request,
+            Arc::new(move |record| {
+                admission
+                    .with_store(|store| store.record_build(record))
+                    .map_err(|error| error.to_string())
+            }),
+        )
+        .map_err(|error| EnvironmentServiceError::refused("environment_build_invalid", error))
+}
+
+pub fn get_build(
+    services: &PoolServices,
+    project_id: &str,
+    job_id: Option<&str>,
+    build_key: Option<&str>,
+) -> Served<BuildStatus> {
+    match (job_id, build_key) {
+        (Some(job), None) => build_service()?
+            .get(project_id, job)
+            .map_err(|error| EnvironmentServiceError::refused("environment_build_missing", error)),
+        (None, Some(key)) => {
+            let record = services
+                .admission
+                .with_store(|store| store.get_build(key))?
+                .filter(|record| record.project_id == project_id)
+                .ok_or_else(|| {
+                    EnvironmentServiceError::refused(
+                        "environment_build_missing",
+                        "build is not recorded for this project",
+                    )
+                })?;
+            Ok(BuildStatus {
+                job_id: String::new(),
+                project_id: project_id.into(),
+                status: BuildPhase::Succeeded,
+                record: Some(record),
+                error: None,
+            })
+        }
+        _ => Err(EnvironmentServiceError::refused(
+            "environment_build_invalid",
+            "provide exactly one of jobId or buildKey",
+        )),
+    }
+}
+
+pub fn cancel_build(project_id: &str, job_id: &str) -> Served<BuildStatus> {
+    build_service()?
+        .cancel(project_id, job_id)
+        .map_err(|error| EnvironmentServiceError::refused("environment_build_missing", error))
+}
+
 /// The list page size when a caller names none. Catalogs and approval ledgers
 /// are small; the cap exists so a console cannot be handed an unbounded
 /// answer, not because paging these is routine.
@@ -835,6 +911,7 @@ mod tests {
             .expect("a legacy baseline")
             .baseline;
         PoolServices {
+            runtime: None,
             admission: Arc::new(EnvironmentSandboxAdmission::new(
                 baseline,
                 EnvironmentStore::open_in_memory().expect("an in-memory store"),
@@ -843,6 +920,50 @@ mod tests {
             )),
             status: Arc::new(FakeDriver { tiers }),
         }
+    }
+
+    #[test]
+    fn recorded_build_reads_are_project_scoped_and_require_one_selector() {
+        let services = pool(Some(vec![IsolationTier::Container]));
+        let record = cognia_environment::store::EnvironmentBuildRecord {
+            build_key: "a".repeat(64),
+            image_id: format!("sha256:{}", "b".repeat(64)),
+            project_id: "project".into(),
+            commit_sha: "c".repeat(40),
+            declaration_path: ".devcontainer/devcontainer.json".into(),
+            declaration_digest: "d".repeat(64),
+            declaration_bytes_sha256: "e".repeat(64),
+            source_hash: "f".repeat(64),
+            runtime_configuration: serde_json::json!({}),
+            cli_version: "0.89.0".into(),
+            platform: "linux/arm64".into(),
+            created_at: 1,
+        };
+        services
+            .admission
+            .with_store(|store| store.record_build(&record))
+            .unwrap();
+        let status = get_build(&services, "project", None, Some(&record.build_key)).unwrap();
+        assert_eq!(status.status, BuildPhase::Succeeded);
+        assert_eq!(status.record.unwrap().image_id, record.image_id);
+        assert_eq!(
+            get_build(&services, "other", None, Some(&record.build_key))
+                .unwrap_err()
+                .code(),
+            "environment_build_missing"
+        );
+        assert_eq!(
+            get_build(&services, "project", None, None)
+                .unwrap_err()
+                .code(),
+            "environment_build_invalid"
+        );
+        assert_eq!(
+            get_build(&services, "project", Some("job"), Some(&record.build_key))
+                .unwrap_err()
+                .code(),
+            "environment_build_invalid"
+        );
     }
 
     /// A transport that records what it was asked and answers from a closure.

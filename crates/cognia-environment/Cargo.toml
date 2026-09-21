@@ -27,7 +27,7 @@ path = "src/lib.rs"
 [features]
 default = ["store", "registry"]
 store = ["dep:rusqlite"]
-registry = ["dep:reqwest", "dep:tokio"]
+registry = ["dep:reqwest", "dep:rustls", "dep:tokio"]
 
 [dependencies]
 cognia-canonical-json = { path = "../cognia-canonical-json" }
@@ -35,14 +35,15 @@ cognia-net = { path = "../cognia-net" }
 cognia-problem = { path = "../cognia-problem" }
 base64 = "0.23"
 hex = "0.4"
-reqwest = { version = "0.13", default-features = false, features = ["rustls"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
 rusqlite = { version = "0.37", features = ["bundled"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"
 thiserror = "2"
-tokio = { version = "1", features = ["net"], optional = true }
+tokio = { version = "1", features = ["net", "time"], optional = true }
 url = "2"
 
 [dev-dependencies]

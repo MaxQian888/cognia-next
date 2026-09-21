@@ -21,3 +21,6 @@ pub mod rootfs;
 
 #[cfg(unix)]
 pub mod init;
+
+#[cfg(unix)]
+pub mod serve;

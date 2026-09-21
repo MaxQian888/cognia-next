@@ -5,6 +5,9 @@
  */
 
 const translate = jest.fn(async (): Promise<(key: string) => string> => (key) => `t:${key}`)
+jest.mock("@/lib/db/project-environments", () => ({ listProjectEnvironments: jest.fn() }))
+jest.mock("@/stores/project/project-store", () => ({ useProjectStore: { getState: jest.fn() } }))
+jest.mock("@/lib/db/trusted-workspaces", () => ({ getTrustedWorkspace: jest.fn() }))
 jest.mock("@/lib/i18n/runtime-translator", () => ({
   getRuntimeTranslator: () => translate(),
 }))
@@ -12,6 +15,7 @@ jest.mock("@/lib/i18n/runtime-translator", () => ({
 import {
   __resetRunEnvironmentForTests,
   applicableApproval,
+  defaultRunEnvironmentSources,
   agentNeedsRespawn,
   assertRunEnvironmentPlaced,
   forgetRunEnvironmentOutcome,
@@ -37,6 +41,10 @@ import type { WorkspaceRepositoryConfigV1 } from "@/lib/project-environment/work
 import type { WorkspaceConfigVerdict } from "@/lib/project-environment/workspace-config-trust"
 import type { EnvironmentCatalogView } from "@/types/sandbox/environment-catalog"
 import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
+import { transport } from "@/lib/tauri/transport-instance"
+import { listProjectEnvironments } from "@/lib/db/project-environments"
+import { useProjectStore } from "@/stores/project/project-store"
+import { getTrustedWorkspace } from "@/lib/db/trusted-workspaces"
 
 const DIGEST = `sha256:${"a".repeat(64)}`
 const DECLARATION_DIGEST = "d".repeat(64)
@@ -107,7 +115,78 @@ beforeEach(() => {
   __resetSpawnPlacementsForTests()
 })
 
+it("reads the complete Host approval ledger on the production run path", async () => {
+  const call = jest
+    .spyOn(transport, "call")
+    .mockResolvedValueOnce({ items: [], nextPageToken: "more" } as never)
+    .mockResolvedValueOnce({ items: [{ id: "later-approval" }] } as never)
+  try {
+    await expect(defaultRunEnvironmentSources().serverApprovals("prj1")).resolves.toEqual([
+      { id: "later-approval" },
+    ])
+    expect(call).toHaveBeenCalledTimes(2)
+  } finally {
+    call.mockRestore()
+  }
+})
+
+it("keeps an empty project off and uses the production read and trust boundaries", async () => {
+  jest.mocked(listProjectEnvironments).mockResolvedValue([])
+  jest
+    .mocked(useProjectStore.getState)
+    .mockReturnValue({ projects: [] } as unknown as ReturnType<typeof useProjectStore.getState>)
+  jest.mocked(getTrustedWorkspace).mockResolvedValue(undefined)
+  const from = defaultRunEnvironmentSources()
+  await expect(from.selection("empty")).resolves.toEqual({ runtime: undefined, policy: undefined })
+  await expect(from.deviceApproval("/missing")).resolves.toBeUndefined()
+  expect(getTrustedWorkspace).toHaveBeenCalledWith("/missing")
+  await expect(
+    from.workspaceConfig(request({ executionRoot: null }), jest.fn())
+  ).resolves.toMatchObject({ kind: "absent" })
+  await expect(from.restricted(request({ project: null }))).resolves.toBe(false)
+  const files = { files: [], searched: [".devcontainer.json"] }
+  const call = jest.spyOn(transport, "call").mockResolvedValue(files as never)
+  try {
+    await expect(from.declarationFiles("/repo")).resolves.toEqual(files)
+    expect(call).toHaveBeenCalledWith("environment_declaration_read", { workspaceRoot: "/repo" })
+    call.mockResolvedValue({
+      items: [],
+      rejected: [],
+      poolEnabled: false,
+      multiTenant: false,
+      floor: "container",
+      sizeClasses: [],
+      egressPresets: [],
+    } as never)
+    await expect(from.catalog()).resolves.toMatchObject({ poolEnabled: false, entries: [] })
+  } finally {
+    call.mockRestore()
+  }
+})
+
 describe("the off path", () => {
+  it("refuses an unsupported local container before contacting a remote catalog", async () => {
+    const catalog = jest.fn(async () => {
+      throw new Error("offline")
+    })
+    const declarationFiles = jest.fn()
+    await expect(
+      prepareRunEnvironment(
+        request(),
+        sources({
+          selection: async () => ({
+            runtime: { source: { kind: "auto" }, localContainer: true, updatedAt: 0 },
+            policy: undefined,
+          }),
+          catalog,
+          declarationFiles,
+        })
+      )
+    ).resolves.toEqual({ kind: "refused", code: "local_container_unavailable", notices: [] })
+    expect(catalog).not.toHaveBeenCalled()
+    expect(declarationFiles).not.toHaveBeenCalled()
+  })
+
   // Q39, and the single most important property of this module: a project
   // that never selected a runtime environment must cost nothing. Not one Host
   // call, not one filesystem read, not one Dexie read.
@@ -242,7 +321,9 @@ describe("resolution", () => {
 
     expect(outcome.kind).toBe("placed")
     if (outcome.kind !== "placed") throw new Error("unreachable")
-    expect(outcome.placement.spec.image.digest).toBe(DIGEST)
+    expect(
+      "digest" in outcome.placement.spec.image ? outcome.placement.spec.image.digest : undefined
+    ).toBe(DIGEST)
     expect(outcome.placement.spec.source).toEqual({
       kind: "deployment-default",
       catalogEntryId: "default",
@@ -321,6 +402,61 @@ describe("applicableApproval", () => {
       ...over,
     }
   }
+
+  it("resolves build approvals from the authoritative record and preserves Feature runtime metadata", async () => {
+    const buildDeclaration: EnvironmentDeclarationVerdict = {
+      ...declared,
+      declaration: {
+        ...declared.declaration,
+        image: undefined,
+        build: { build: { dockerfile: "Dockerfile" } },
+      },
+    }
+    const buildKey = "b".repeat(64)
+    const built = {
+      buildKey,
+      imageId: DIGEST,
+      projectId: "prj1",
+      commitSha: "c".repeat(40),
+      declarationPath: ".devcontainer.json",
+      declarationDigest: DECLARATION_DIGEST,
+      declarationBytesSha256: "d".repeat(64),
+      sourceHash: "s",
+      cliVersion: "0.80.0",
+      platform: "linux/arm64",
+      createdAt: 1,
+      runtimeConfiguration: {
+        containerEnv: { FEATURE: "yes" },
+        postCreateCommands: ["feature", "project"],
+      },
+    }
+    const req = request({
+      repository: { remote: "https://github.com/acme/app.git", commitSha: built.commitSha },
+    })
+    const from = sources({
+      serverApprovals: async () => [record({ resolvedImage: undefined, buildKey })],
+      buildRecord: async () => built,
+    })
+    const approval = await applicableApproval(req, buildDeclaration, catalog(), from)
+    expect(approval?.builtImage).toEqual({ kind: "build", buildKey, imageId: DIGEST })
+    expect(approval?.runtimeDeclaration?.containerEnv).toEqual({ FEATURE: "yes" })
+    expect(approval?.runtimeDeclaration?.lifecycleCommands.postCreate).toMatchObject({
+      kind: "sequence",
+    })
+    for (const changed of [
+      { projectId: "other" },
+      { commitSha: "e".repeat(40) },
+      { declarationDigest: "f".repeat(64) },
+      { runtimeConfiguration: { privileged: true } },
+    ]) {
+      expect(
+        await applicableApproval(req, buildDeclaration, catalog(), {
+          ...from,
+          buildRecord: async () => ({ ...built, ...changed }),
+        })
+      ).toBeUndefined()
+    }
+  })
 
   it("prefers the Host ledger, which is the authority admission checks", async () => {
     const approval = await applicableApproval(

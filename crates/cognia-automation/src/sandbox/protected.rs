@@ -141,6 +141,30 @@ pub const PROTECTED: &[Protected] = &[
         kind: ProtKind::File,
         secret: true,
     },
+    // Docker Desktop's real unix socket lives under ~/.docker/run (the
+    // well-known /var/run/docker.sock is a symlink to it). The socket is a
+    // host control plane — reaching it is a sandbox escape, so the whole
+    // directory is a secret store.
+    Protected {
+        rel: ".docker/run",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    // Keychain material: the macOS user keychains under ~/Library/Keychains
+    // and the freedesktop/GNOME keyring store under ~/.local/share/keyrings.
+    // The *system* macOS keychains live outside home and are denied
+    // absolutely in `sbpl.rs` (but NOT /System/Library/Keychains — it holds
+    // the TLS root store Apple's frameworks read for every HTTPS call).
+    Protected {
+        rel: "Library/Keychains",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
+    Protected {
+        rel: ".local/share/keyrings",
+        kind: ProtKind::Dir,
+        secret: true,
+    },
     Protected {
         rel: ".config/gh",
         kind: ProtKind::Dir,
@@ -343,6 +367,48 @@ pub fn is_forbidden_writable(candidate: &Path, deny_roots: &[PathBuf]) -> bool {
         .any(|r| path_eq_or_starts_with(candidate, r.as_path()))
 }
 
+/// Host runtime / control-plane roots that a READABLE declaration may never
+/// name or swallow (unix). Unlike `system_forbidden_roots` — which guards
+/// writable roots — these are about *visibility*: binding host `/proc`,
+/// `/sys`, `/dev`, `/run` or `/var` into the sandbox leaks other tenants'
+/// process table, device nodes, the Docker socket (`/var/run/docker.sock`),
+/// logs and spool; `/etc`, `/boot`, `/root`, `/tmp` and `/` cover the
+/// remaining identity and session state. Paths the backend itself mounts
+/// read-only (`/usr`, `/bin`, `/lib`, …) are absent — declaring them is
+/// redundant, not dangerous. The filesystem root is refused through the
+/// ancestor rule in [`is_forbidden_readable`].
+#[cfg(unix)]
+pub const FORBIDDEN_READABLE_ROOTS: &[&str] = &[
+    "/proc", "/sys", "/dev", "/run", "/var", "/etc", "/boot", "/root", "/tmp",
+];
+
+/// Concrete deny list for readable roots on this platform. Empty on
+/// non-unix hosts: the Windows runner confines the filesystem through the
+/// restricted token + ACLs, not a caller-supplied bind set, so the check is
+/// a no-op there.
+pub fn forbidden_readable_roots() -> Vec<PathBuf> {
+    #[cfg(unix)]
+    {
+        FORBIDDEN_READABLE_ROOTS.iter().map(PathBuf::from).collect()
+    }
+    #[cfg(not(unix))]
+    {
+        Vec::new()
+    }
+}
+
+/// True when `candidate` may not be a sandbox readable root: it is, is under,
+/// or is an ANCESTOR of any denied root. The ancestor direction matters —
+/// declaring `/var` reaches `/var/run/docker.sock`, and declaring `/`
+/// swallows the whole set. Paths are compared after canonicalization by the
+/// dispatcher, so symlink spellings are already resolved.
+pub fn is_forbidden_readable(candidate: &Path, deny_roots: &[PathBuf]) -> bool {
+    deny_roots.iter().any(|r| {
+        path_eq_or_starts_with(candidate, r.as_path())
+            || path_eq_or_starts_with(r.as_path(), candidate)
+    })
+}
+
 #[cfg(not(windows))]
 fn path_eq_or_starts_with(candidate: &Path, root: &Path) -> bool {
     candidate == root || candidate.starts_with(root)
@@ -535,5 +601,69 @@ mod tests {
         #[cfg(any(unix, windows))]
         assert!(!roots.is_empty());
         let _ = roots;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forbidden_readable_rejects_runtime_and_control_roots() {
+        let deny = forbidden_readable_roots();
+        for literal in [
+            "/proc", "/sys", "/dev", "/run", "/var", "/etc", "/boot", "/root", "/tmp",
+        ] {
+            assert!(
+                is_forbidden_readable(Path::new(literal), &deny),
+                "{literal} must be refused"
+            );
+        }
+        // Nested under a denied root — the audit's exact case.
+        assert!(is_forbidden_readable(
+            Path::new("/var/run/docker.sock"),
+            &deny
+        ));
+        assert!(is_forbidden_readable(Path::new("/var/lib"), &deny));
+        assert!(is_forbidden_readable(Path::new("/tmp/host-socket"), &deny));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forbidden_readable_rejects_ancestors_of_denied_roots() {
+        let deny = forbidden_readable_roots();
+        // `/` swallows every denied root; `/va` is a sibling component and
+        // must NOT be confused with `/var`.
+        assert!(is_forbidden_readable(Path::new("/"), &deny));
+        assert!(!is_forbidden_readable(Path::new("/va"), &deny));
+        assert!(!is_forbidden_readable(Path::new("/varrun"), &deny));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forbidden_readable_allows_workspace_home_and_system_read_dirs() {
+        let deny = forbidden_readable_roots();
+        for ok in [
+            "/workspace",
+            "/home/u/project",
+            "/usr",
+            "/bin",
+            "/opt/toolkit",
+            "/private/tmp/scratch-dir-with-a-twin",
+        ] {
+            // /private/tmp is only denied once macOS resolution adds it; the
+            // literal list alone must not overreach.
+            assert!(
+                !is_forbidden_readable(Path::new(ok), &deny),
+                "{ok} must stay mountable"
+            );
+        }
+    }
+
+    #[test]
+    fn keychain_and_docker_socket_dirs_are_secret() {
+        for rel in ["Library/Keychains", ".local/share/keyrings", ".docker/run"] {
+            let entry = PROTECTED.iter().find(|p| p.rel == rel);
+            assert!(entry.is_some(), "{rel} must be in PROTECTED");
+            let entry = entry.unwrap();
+            assert!(entry.secret, "{rel} must be a secret entry");
+            assert_eq!(entry.kind, ProtKind::Dir, "{rel} must be a dir");
+        }
     }
 }

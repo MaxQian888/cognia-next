@@ -69,6 +69,21 @@ interface RuntimeRecord extends BindSandboxSessionInput {
   unplaced?: UnplacedSurfaces
 }
 
+interface PendingBinding {
+  fingerprint: string
+  cancelled: boolean
+  promise: Promise<SandboxRuntimeRef>
+}
+
+function assertBindingCurrent(attempt: PendingBinding): void {
+  if (attempt.cancelled) {
+    throw new SandboxRuntimeError(
+      "runtime-released",
+      "The sandbox binding was superseded or released."
+    )
+  }
+}
+
 function copyPolicy(policy: SandboxResourcePolicy | null): SandboxResourcePolicy | null {
   if (!policy) return null
   return Object.freeze({
@@ -145,23 +160,66 @@ export class SandboxSessionRuntime {
   private readonly cleanupByRef = new Map<SandboxRuntimeRef, RuntimeRecord>()
   private readonly cleanupInFlight = new Map<SandboxRuntimeRef, Promise<void>>()
   private readonly closedSessions = new Set<string>()
+  private readonly pendingBinds = new Map<string, PendingBinding>()
+  private readonly bindingAttempts = new Map<string, Set<PendingBinding>>()
+  private readonly releases = new Map<string, Promise<void>>()
 
   constructor(private readonly deps: SandboxSessionRuntimeDeps) {
     this.records.set(HOST_FALLBACK_RUNTIME_REF, HOST_FALLBACK_RECORD)
   }
 
   async bindSession(input: BindSandboxSessionInput): Promise<SandboxRuntimeRef> {
-    if (this.closedSessions.has(input.sessionId)) {
-      const cleanupPending = [...this.cleanupByRef.values()].some(
-        (record) => record.sessionId === input.sessionId
-      )
-      // Retry the cleanup that failed instead of refusing forever. A provider
-      // blip during release must not leave the session permanently unable to
-      // bind — and therefore unable to send at all. If the provider is still
-      // down the retry throws and the next send tries again.
-      if (cleanupPending) await this.releaseSession(input.sessionId)
-      this.closedSessions.delete(input.sessionId)
+    // Own the requested policy before yielding to a provider or a release.
+    input = {
+      ...input,
+      binding: { ...input.binding },
+      policy: copyPolicy(input.policy),
+      confine: copyConfine(input.confine),
     }
+    const releasing = this.releases.get(input.sessionId)
+    if (releasing) await releasing
+    if (this.closedSessions.has(input.sessionId)) await this.releaseSession(input.sessionId)
+    const key = fingerprint(input)
+    const pending = this.pendingBinds.get(input.sessionId)
+    if (pending?.fingerprint === key && !pending.cancelled) return pending.promise
+    this.cancelPendingBindings(input.sessionId)
+    const attempts = this.bindingAttempts.get(input.sessionId) ?? new Set<PendingBinding>()
+    const attempt: PendingBinding = {
+      fingerprint: key,
+      cancelled: false,
+      promise: Promise.resolve()
+        .then(() => this.bindSessionGeneration(input, attempt))
+        .catch((cause) => {
+          assertBindingCurrent(attempt)
+          throw cause
+        }),
+    }
+    const { promise } = attempt
+    attempts.add(attempt)
+    this.bindingAttempts.set(input.sessionId, attempts)
+    this.pendingBinds.set(input.sessionId, attempt)
+    try {
+      return await promise
+    } finally {
+      if (this.pendingBinds.get(input.sessionId)?.promise === promise) {
+        this.pendingBinds.delete(input.sessionId)
+      }
+      attempts.delete(attempt)
+      if (attempts.size === 0 && this.bindingAttempts.get(input.sessionId) === attempts) {
+        this.bindingAttempts.delete(input.sessionId)
+      }
+    }
+  }
+
+  private cancelPendingBindings(sessionId: string): void {
+    for (const attempt of this.bindingAttempts.get(sessionId) ?? []) attempt.cancelled = true
+  }
+
+  private async bindSessionGeneration(
+    input: BindSandboxSessionInput,
+    attempt: PendingBinding
+  ): Promise<SandboxRuntimeRef> {
+    assertBindingCurrent(attempt)
     const validation = validateSandboxSessionBinding(input.binding)
     if (!validation.ok) {
       throw new SandboxRuntimeError("invalid-binding", validation.message)
@@ -178,6 +236,7 @@ export class SandboxSessionRuntime {
     if (active?.fingerprint === nextFingerprint) return active.ref
 
     await this.preflightMutableTarget(input)
+    assertBindingCurrent(attempt)
 
     const ref = this.deps.makeRef()
     let microvmAdapter: MicrovmExecAdapter | undefined
@@ -189,7 +248,6 @@ export class SandboxSessionRuntime {
           "The microVM sandbox was explicitly selected, but no E2B execution adapter is registered."
         )
       }
-      await microvmAdapter.preflight?.(ref, input.workspaceRoot, input.sessionId)
     }
 
     const record: RuntimeRecord = Object.freeze({
@@ -201,9 +259,21 @@ export class SandboxSessionRuntime {
       fingerprint: nextFingerprint,
       ...(microvmAdapter ? { microvmAdapter } : {}),
     })
+    try {
+      await microvmAdapter?.preflight?.(ref, input.workspaceRoot, input.sessionId)
+      assertBindingCurrent(attempt)
+    } catch (cause) {
+      if (microvmAdapter?.release) {
+        this.cleanupByRef.set(ref, record)
+        // Keep failed cleanup in the ledger for releaseSession to retry.
+        await this.releaseCleanupRecord(record).catch(() => undefined)
+      }
+      throw cause
+    }
+    const previousRef = this.activeBySession.get(input.sessionId)
     this.records.set(ref, record)
     this.activeBySession.set(input.sessionId, ref)
-    this.retireRecord(activeRef)
+    this.retireRecord(previousRef)
     return ref
   }
 
@@ -246,6 +316,7 @@ export class SandboxSessionRuntime {
     try {
       return await this.bindSession(input)
     } catch (err) {
+      if (!this.records.has(ref) || this.activeBySession.get(record.sessionId) !== ref) return ref
       return this.bindUnplacedSession(input, err)
     }
   }
@@ -262,6 +333,13 @@ export class SandboxSessionRuntime {
    * error path and must still be able to send.
    */
   bindUnplacedSession(input: BindSandboxSessionInput, cause: unknown): SandboxRuntimeRef {
+    // A late caller's catch must not replace the newer generation. Return an
+    // unusable ref so that caller still refuses at the execution boundary.
+    if (cause instanceof SandboxRuntimeError && cause.code === "runtime-released") {
+      return this.deps.makeRef()
+    }
+    this.cancelPendingBindings(input.sessionId)
+    if (this.closedSessions.has(input.sessionId)) return this.deps.makeRef()
     const reason = cause instanceof Error ? cause.message : String(cause)
     const unplaced: UnplacedSurfaces = {}
     // `os` is this machine by request; any other tier asked to leave it, and a
@@ -457,7 +535,7 @@ export class SandboxSessionRuntime {
               cwd: payload.command.cwd,
               env: payload.command.env,
               stdin: payload.command.stdin ?? undefined,
-              timeoutMs: payload.command.timeout,
+              timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
               policy: payload.request,
             },
           })
@@ -476,13 +554,20 @@ export class SandboxSessionRuntime {
             ...(exec.exec.stdoutTruncated ? { stdout_truncated: true } : {}),
             ...(exec.exec.stderrTruncated ? { stderr_truncated: true } : {}),
           }
-          this.recordMicrovmAudit(payload, {
+          this.recordTierAudit(payload, {
+            tier: "cua-desktop",
+            provider: row.provider,
             result,
             durationMs: Math.max(result.duration, Date.now() - started),
           })
           return result
         } catch (error) {
-          this.recordMicrovmAudit(payload, { error, durationMs: Date.now() - started })
+          this.recordTierAudit(payload, {
+            tier: "cua-desktop",
+            provider: row.provider,
+            error,
+            durationMs: Date.now() - started,
+          })
           throw error
         }
       }
@@ -503,10 +588,26 @@ export class SandboxSessionRuntime {
     }
   }
 
-  async releaseSession(sessionId: string): Promise<void> {
-    if (sessionId === HOST_FALLBACK_SESSION_ID) return
+  releaseSession(sessionId: string): Promise<void> {
+    if (sessionId === HOST_FALLBACK_SESSION_ID) return Promise.resolve()
+    const existing = this.releases.get(sessionId)
+    if (existing) return existing
     this.closedSessions.add(sessionId)
     this.activeBySession.delete(sessionId)
+    this.cancelPendingBindings(sessionId)
+    const release = this.releaseSessionResources(sessionId)
+    this.releases.set(sessionId, release)
+    const settled = () => {
+      if (this.releases.get(sessionId) === release) this.releases.delete(sessionId)
+    }
+    void release.then(settled, settled)
+    return release
+  }
+
+  private async releaseSessionResources(sessionId: string): Promise<void> {
+    await Promise.allSettled(
+      [...(this.bindingAttempts.get(sessionId) ?? [])].map((attempt) => attempt.promise)
+    )
     const previouslyRetired = [...this.cleanupByRef.values()].filter(
       (record) => record.sessionId === sessionId
     )
@@ -660,6 +761,10 @@ export class SandboxSessionRuntime {
    * the next and the second test silently exercises the first one's record.
    */
   __resetForTesting(): void {
+    for (const sessionId of this.bindingAttempts.keys()) this.cancelPendingBindings(sessionId)
+    this.bindingAttempts.clear()
+    this.releases.clear()
+    this.pendingBinds.clear()
     this.activeBySession.clear()
     this.records.clear()
     this.cleanupByRef.clear()
@@ -697,16 +802,18 @@ export class SandboxSessionRuntime {
   }
 
   private async preflightMutableTarget(input: BindSandboxSessionInput): Promise<void> {
-    if (input.computerUseEnabled && input.binding.computerTarget === "bound") {
-      const row = await this.requireConnection(input.binding.connectionId)
+    const needsGui = input.computerUseEnabled && input.binding.computerTarget === "bound"
+    const needsExec = input.sandboxEnabled && input.binding.shellTier === "cua-desktop"
+    if (!needsGui && !needsExec) return
+    const row = await this.requireConnection(input.binding.connectionId)
+    if (needsGui) {
       assertSandboxOperationAllowed(operationContext(row), "gui")
     }
-    if (input.sandboxEnabled && input.binding.shellTier === "cua-desktop") {
+    if (needsExec) {
       // The tier is available only for a connection whose provider actually
       // carries workspace execution. `assertSandboxOperationAllowed` refuses
       // with `unsupported-operation` otherwise, which is still the whole
       // answer for cua-cloud and lume: they have no adapter at all.
-      const row = await this.requireConnection(input.binding.connectionId)
       assertSandboxOperationAllowed(operationContext(row), "workspaceExec")
     }
   }

@@ -233,13 +233,15 @@ export function placementProblems(placement, { spec, libc, availableTiers }) {
   if (placement.command !== "codex-acp") problems.push(`command ${placement.command}`)
   const uid = tier === "container" ? CONTAINER_TIER_UID : 0
   if (placement.user?.uid !== uid) problems.push(`runs as uid ${placement.user?.uid}, want ${uid}`)
-  // Step ①: `off` is enforced by cutting the network; credentials are the
-  // spawn's own. Both are labeled on the run, and both are asserted here so a
-  // change to either is a deliberate one.
+  // Step ①: `off` is enforced by cutting the network, and ambient provider
+  // credentials are stripped before the container starts — this spawn carries
+  // no gateway task lease, so the placement must say `none`. Both are labeled
+  // on the run, and both are asserted here so a change to either is a
+  // deliberate one.
   if (placement.egress?.tier !== "off" || placement.egress?.enforced !== true) {
     problems.push(`egress ${JSON.stringify(placement.egress)}`)
   }
-  if (placement.credentials?.mode !== "spawn-env") {
+  if (placement.credentials?.mode !== "none") {
     problems.push(`credentials ${JSON.stringify(placement.credentials)}`)
   }
   return problems

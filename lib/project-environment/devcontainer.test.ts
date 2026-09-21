@@ -1,5 +1,6 @@
 import {
-  DEVCONTAINER_DORMANT_FIELDS,
+  DEVCONTAINER_BUILD_FIELDS,
+  builtEnvironmentDeclaration,
   DEVCONTAINER_HONORED_FIELDS,
   DEVCONTAINER_IGNORED_FIELDS,
   DEVCONTAINER_REFUSED_FIELDS,
@@ -49,8 +50,12 @@ describe("parseDevcontainer", () => {
         tag: "1-22-bookworm",
       },
       containerEnv: {
-        PATH: "${containerEnv:PATH}:/home/node/.local/bin",
+        NODE_ENV: "development",
         PNPM_HOME: "/workspace/.pnpm",
+      },
+      remoteEnv: {
+        PATH: "${containerEnv:PATH}:/home/node/.local/bin",
+        NODE_ENV: null,
       },
       lifecycleCommands: {
         onCreate: { kind: "shell", command: "corepack enable" },
@@ -78,6 +83,38 @@ describe("parseDevcontainer", () => {
     })
   })
 
+  it("preserves remote unsets and workspace subdirectories for execution and approval", () => {
+    const result = parse(
+      JSON.stringify({
+        image: "node:22",
+        containerEnv: { TOOL_HOME: "/opt/tool" },
+        remoteEnv: { TOOL_HOME: "${containerEnv:TOOL_HOME}/remote", IMAGE_SECRET: null },
+        workspaceFolder: "${containerWorkspaceFolder}/packages/server",
+      })
+    )
+    expect(result).toMatchObject({
+      ok: true,
+      declaration: {
+        containerEnv: { TOOL_HOME: "/opt/tool" },
+        remoteEnv: { TOOL_HOME: "${containerEnv:TOOL_HOME}/remote", IMAGE_SECRET: null },
+        workspaceFolder: "/workspace/packages/server",
+      },
+      notices: [],
+    })
+  })
+
+  it.each([
+    "/etc",
+    "/workspace/../root",
+    "/workspace/a/../../root",
+    "relative",
+    "/workspace\\escape",
+  ])("refuses a workspaceFolder outside the mounted workspace: %s", (workspaceFolder) => {
+    expect(problems(parse(JSON.stringify({ image: "node:22", workspaceFolder })))).toEqual([
+      { code: "declaration_path_invalid", field: "workspaceFolder" },
+    ])
+  })
+
   it("puts every refused field in the problems list, all at once", () => {
     const result = parse(`{
       "image": "node:22",
@@ -95,19 +132,36 @@ describe("parseDevcontainer", () => {
     )
   })
 
-  it("keeps image builds dormant until the build service exists", () => {
-    for (const field of DEVCONTAINER_DORMANT_FIELDS) {
-      const result = parse(
-        JSON.stringify({ [field]: field === "build" ? { dockerfile: "Dockerfile" } : "x" })
-      )
-      expect(problems(result)).toEqual([
-        { code: "devcontainer_build_requires_build_service", field },
-      ])
+  it("validates Dockerfile and Features declarations for the build service", () => {
+    expect(
+      parse(
+        JSON.stringify({
+          build: { dockerfile: "Dockerfile", context: "..", args: { VERSION: "22" } },
+          features: { "ghcr.io/devcontainers/features/node:1": { version: "22" } },
+        })
+      ).ok
+    ).toBe(true)
+    expect(parse(JSON.stringify({ image: "node:22", features: { "ghcr.io/x/y:1": {} } })).ok).toBe(
+      true
+    )
+    expect(
+      parse(
+        JSON.stringify({
+          build: { dockerfile: "Dockerfile", args: { EMPTY: "" } },
+          features: { "ghcr.io/acme/feature:1": { optionalValue: "" } },
+        })
+      ).ok
+    ).toBe(true)
+    for (const build of [
+      { dockerfile: "../../../secret" },
+      { dockerfile: "Dockerfile", options: ["--secret=id=key,src=/secret"] },
+      { dockerfile: "Dockerfile", args: { TOKEN: "${localEnv:TOKEN}" } },
+    ]) {
+      const result = parse(JSON.stringify({ build }))
+      expect(result.ok).toBe(false)
+      if (!result.ok)
+        expect(result.problems.some((p) => p.code === "declaration_build_invalid")).toBe(true)
     }
-    const withImage = parse(JSON.stringify({ image: "node:22", features: { "ghcr.io/x/y:1": {} } }))
-    expect(problems(withImage)).toEqual([
-      { code: "devcontainer_build_requires_build_service", field: "features" },
-    ])
   })
 
   it("refuses unknown top-level fields instead of skipping them", () => {
@@ -121,7 +175,8 @@ describe("parseDevcontainer", () => {
       DEVCONTAINER_HONORED_FIELDS,
       DEVCONTAINER_IGNORED_FIELDS,
       DEVCONTAINER_REFUSED_FIELDS,
-      DEVCONTAINER_DORMANT_FIELDS,
+      DEVCONTAINER_BUILD_FIELDS,
+      builtEnvironmentDeclaration,
     ].flat() as string[]
     expect(new Set(buckets).size).toBe(buckets.length)
   })
@@ -205,4 +260,47 @@ describe("parseDevcontainer", () => {
     const result = parse(`{ "image": "node:22", "name": "${"x".repeat(300 * 1024)}" }`)
     expect(problems(result)).toEqual([{ code: "declaration_too_large", field: PATH }])
   })
+})
+
+it("preserves official merged Feature lifecycle ordering and runtime fields", () => {
+  const original = parse('{"build":{"dockerfile":"Dockerfile"},"workspaceFolder":"/workspace/app"}')
+  if (!original.ok) throw new Error("fixture")
+  const result = builtEnvironmentDeclaration(
+    {
+      image: "sha256:" + "a".repeat(64),
+      privileged: false,
+      mounts: [],
+      containerEnv: { FROM_FEATURE: "yes" },
+      remoteUser: "vscode",
+      postCreateCommands: ["echo feature", ["node", "setup.js"], { a: "echo a", b: ["echo", "b"] }],
+    },
+    original.declaration
+  )
+  expect(result.ok).toBe(true)
+  if (result.ok) {
+    expect(result.declaration.workspaceFolder).toBe("/workspace/app")
+    expect(result.declaration.containerEnv).toEqual({ FROM_FEATURE: "yes" })
+    expect(result.declaration.lifecycleCommands.postCreate).toEqual({
+      kind: "sequence",
+      commands: [
+        { kind: "shell", command: "echo feature" },
+        { kind: "argv", argv: ["node", "setup.js"] },
+        {
+          kind: "parallel",
+          commands: {
+            a: { kind: "shell", command: "echo a" },
+            b: { kind: "argv", argv: ["echo", "b"] },
+          },
+        },
+      ],
+    })
+  }
+  for (const config of [
+    { privileged: true },
+    { entrypoints: ["/start.sh"] },
+    { mounts: ["source=/,target=/host,type=bind"] },
+    { postCreateCommands: Array(256).fill("true") },
+  ]) {
+    expect(builtEnvironmentDeclaration(config, original.declaration).ok).toBe(false)
+  }
 })

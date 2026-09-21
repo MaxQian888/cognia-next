@@ -122,7 +122,7 @@ impl SandboxedExec for WindowsSandboxBackend {
         crate::sandbox::env::filter_env(&mut command.env);
         let runner = self.runner_path();
         let target_user = self.target_user_for(&policy);
-        let payload = build_runner_payload(target_user, &command);
+        let payload = build_runner_payload(target_user, &command, &policy);
         let serialised =
             serde_json::to_string(&payload).map_err(|err| SandboxError::BackendFailed {
                 reason: format!("serialise runner payload failed: {err}"),
@@ -169,11 +169,22 @@ impl SandboxedExec for WindowsSandboxBackend {
             }
         };
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // `EXIT_CONFINEMENT_UNAVAILABLE` (3): the runner refused to launch
+            // because it cannot enforce what the policy asked for — today that
+            // is `network: off`, which this tier has no way to confine. That is
+            // a strict-mode refusal, not a broken backend, so it surfaces as
+            // `Unavailable` and the confinement probe reports "not confined"
+            // rather than "runner crashed".
+            if output.status.code() == Some(3) {
+                return Err(SandboxError::Unavailable {
+                    reason: stderr.trim().to_string(),
+                });
+            }
             return Err(SandboxError::BackendFailed {
                 reason: format!(
-                    "runner exited {} — stderr: {}",
+                    "runner exited {} — stderr: {stderr}",
                     output.status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&output.stderr)
                 ),
             });
         }
@@ -253,6 +264,55 @@ struct RunnerPayload<'a> {
     cwd: String,
     env: Vec<(String, String)>,
     timeout_seconds: u64,
+    /// The policy's caps. They used to stop here: the runner accepted
+    /// `max_memory_mb` and this backend never sent it, so a Windows sandbox
+    /// ran with no memory, CPU or process bound at all while the policy said
+    /// otherwise. The runner now puts all three on its Job Object —
+    /// `max_processes` lands on `ActiveProcessLimit`.
+    max_memory_mb: u32,
+    max_cpu_seconds: u32,
+    max_processes: u32,
+    /// What the policy says about the network, verbatim. `"unspecified"` for
+    /// the file-editing policies, which state no network requirement at all.
+    ///
+    /// The runner REFUSES a launch that asks for `"off"`: this tier confines
+    /// privileges, integrity and the process tree, and nothing else confines
+    /// a socket. Failing closed there is the same rule
+    /// `downgrade_unenforceable_network` applies to a Linux allowlist.
+    network: &'static str,
+}
+
+/// What the policy states about egress, in the runner's vocabulary.
+fn network_request(policy: &SandboxPolicy) -> &'static str {
+    match policy {
+        SandboxPolicy::Bash { network, .. } => match network {
+            NetworkPolicy::Off => "off",
+            NetworkPolicy::On => "on",
+            NetworkPolicy::Allowlist { .. } => "allowlist",
+        },
+        // Edit / Write / TextEditor carry no network field. The tool cannot
+        // reach the network on its own, and claiming the policy demanded
+        // confinement it never asked for would refuse every file edit.
+        SandboxPolicy::Edit { .. }
+        | SandboxPolicy::Write { .. }
+        | SandboxPolicy::TextEditor { .. } => "unspecified",
+    }
+}
+
+/// The policy's resource caps as `(memory MB, CPU seconds, process count)`;
+/// `0` means no cap / inherit the runner default.
+fn resource_caps(policy: &SandboxPolicy) -> (u32, u32, u32) {
+    match policy {
+        SandboxPolicy::Bash {
+            max_memory_mb,
+            max_cpu_seconds,
+            max_processes,
+            ..
+        } => (*max_memory_mb, *max_cpu_seconds, *max_processes),
+        SandboxPolicy::Edit { .. }
+        | SandboxPolicy::Write { .. }
+        | SandboxPolicy::TextEditor { .. } => (0, 0, 0),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -275,7 +335,9 @@ struct RunnerOutput {
 fn build_runner_payload<'a>(
     target_user: &'a str,
     command: &'a SandboxCommand,
+    policy: &SandboxPolicy,
 ) -> RunnerPayload<'a> {
+    let (max_memory_mb, max_cpu_seconds, max_processes) = resource_caps(policy);
     RunnerPayload {
         target_user,
         argv: &command.argv,
@@ -286,6 +348,10 @@ fn build_runner_payload<'a>(
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
         timeout_seconds: command.timeout.as_secs(),
+        max_memory_mb,
+        max_cpu_seconds,
+        max_processes,
+        network: network_request(policy),
     }
 }
 
@@ -314,6 +380,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 5,
             max_memory_mb: 128,
+            max_processes: 96,
         }
     }
 
@@ -362,6 +429,7 @@ mod tests {
             network: NetworkPolicy::On,
             max_cpu_seconds: 1,
             max_memory_mb: 64,
+            max_processes: 0,
         };
         assert_eq!(backend.target_user_for(&policy), ONLINE_USER);
     }
@@ -377,6 +445,7 @@ mod tests {
             },
             max_cpu_seconds: 1,
             max_memory_mb: 64,
+            max_processes: 0,
         };
         assert_eq!(backend.target_user_for(&policy), ONLINE_USER);
     }
@@ -431,11 +500,58 @@ mod tests {
             stdin: None,
             timeout: Duration::from_secs(42),
         };
-        let payload = build_runner_payload(OFFLINE_USER, &cmd);
+        let payload = build_runner_payload(OFFLINE_USER, &cmd, &sample_policy());
         assert_eq!(payload.target_user, OFFLINE_USER);
         assert_eq!(payload.argv, &cmd.argv);
         assert_eq!(payload.cwd, "C:\\work");
         assert_eq!(payload.env, vec![("FOO".to_string(), "bar".to_string())]);
         assert_eq!(payload.timeout_seconds, 42);
+    }
+
+    /// [ACC:SAFE-02] The policy's caps reach the runner, which puts them on
+    /// its Job Object. They were dropped here for as long as this backend
+    /// existed, so a Windows sandbox was bounded by the wall clock alone.
+    #[test]
+    fn build_runner_payload_carries_the_policy_resource_caps() {
+        let command = sample_cmd();
+        let payload = build_runner_payload(OFFLINE_USER, &command, &sample_policy());
+        assert_eq!(payload.max_cpu_seconds, 5);
+        assert_eq!(payload.max_memory_mb, 128);
+        // The Job Object's ActiveProcessLimit — the runner defaults to 512
+        // when the policy leaves this at 0.
+        assert_eq!(payload.max_processes, 96);
+    }
+
+    /// [ACC:SAFE-02] The network the policy asked for travels with the
+    /// payload, so the runner can refuse `off` rather than run a command
+    /// with the open network this tier cannot close.
+    #[test]
+    fn build_runner_payload_states_the_policy_network() {
+        let command = sample_cmd();
+        assert_eq!(
+            build_runner_payload(OFFLINE_USER, &command, &sample_policy()).network,
+            "off"
+        );
+        let online = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("C:\\workspace")],
+            readable: vec![],
+            network: NetworkPolicy::On,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        assert_eq!(
+            build_runner_payload(ONLINE_USER, &command, &online).network,
+            "on"
+        );
+        let editing = SandboxPolicy::Edit {
+            target_files: vec![PathBuf::from("C:\\workspace\\a.txt")],
+            readable: vec![],
+        };
+        assert_eq!(
+            build_runner_payload(OFFLINE_USER, &command, &editing).network,
+            "unspecified",
+            "a file edit states no network requirement, so it is not refused"
+        );
     }
 }

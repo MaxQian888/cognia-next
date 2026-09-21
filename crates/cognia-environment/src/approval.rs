@@ -172,12 +172,21 @@ impl EgressGrantRequest {
 /// Mirrored by `environmentRuntimeFieldsDigest` in
 /// `lib/project-environment/environment-spec-digest.ts`.
 pub fn runtime_fields_digest(spec: &EnvironmentSpec) -> Result<String, SpecError> {
-    let value = json!({
+    let mut value = json!({
         "containerEnv": spec.container_env,
         "lifecycleCommands": spec.lifecycle_commands,
         "forwardPorts": spec.forward_ports,
         "user": spec.user,
     });
+    if !spec.remote_env.is_empty() {
+        value["remoteEnv"] = json!(spec.remote_env);
+    }
+    if let Some(folder) = &spec.workspace_folder {
+        value["workspaceFolder"] = json!(folder);
+    }
+    if let Some(timeout) = spec.lifecycle_timeout_ms {
+        value["lifecycleTimeoutMs"] = json!(timeout);
+    }
     let canonical = cognia_canonical_json::canonicalize(&value).map_err(|error| SpecError {
         code: "spec_digest_failed",
         field: "spec".into(),
@@ -198,7 +207,7 @@ mod tests {
         let base = runtime_fields_digest(&spec).unwrap();
 
         let mut other_image = spec.clone();
-        other_image.image.repository = "acme/other".into();
+        other_image.image.registry_mut().unwrap().repository = "acme/other".into();
         assert_eq!(base, runtime_fields_digest(&other_image).unwrap());
 
         let mut more_ports = spec.clone();
@@ -219,6 +228,24 @@ mod tests {
             .approved_domains
             .push("example.org".into());
         assert_eq!(base, runtime_fields_digest(&more_domains).unwrap());
+    }
+
+    #[test]
+    fn optional_runtime_fields_require_new_approval_without_changing_old_digests() {
+        let spec = sample_spec();
+        let base = runtime_fields_digest(&spec).unwrap();
+        let old_fields = json!({ "containerEnv": spec.container_env, "lifecycleCommands": spec.lifecycle_commands, "forwardPorts": spec.forward_ports, "user": spec.user });
+        let old_canonical = cognia_canonical_json::canonicalize(&old_fields).unwrap();
+        assert_eq!(base, hex::encode(Sha256::digest(old_canonical.as_bytes())));
+        let mut changed = spec.clone();
+        changed.remote_env.insert("REMOVE".into(), None);
+        assert_ne!(base, runtime_fields_digest(&changed).unwrap());
+        changed = spec.clone();
+        changed.workspace_folder = Some("/workspace/subdir".into());
+        assert_ne!(base, runtime_fields_digest(&changed).unwrap());
+        changed = spec;
+        changed.lifecycle_timeout_ms = Some(30_000);
+        assert_ne!(base, runtime_fields_digest(&changed).unwrap());
     }
 
     #[test]

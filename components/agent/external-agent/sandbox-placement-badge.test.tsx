@@ -64,7 +64,7 @@ describe("SandboxPlacementBadge", () => {
         libc: "musl",
         egressTier: "allowlist",
         egressEnforced: false,
-        credentialsMode: "spawn-env",
+        credentialsMode: "none",
       })
     )
     renderBadge()
@@ -74,9 +74,10 @@ describe("SandboxPlacementBadge", () => {
     expect(text).toContain(`Image: ghcr.io/acme/dev@sha256:${"a".repeat(64)}`)
     expect(text).toContain("Runs as node, remapped onto the workspace owner")
     expect(text).toContain("Agent bundle: v1.2.3 (musl)")
-    // Rule 7: the two Step ① gaps are stated on the run, not implied away.
+    // Rule 7: the Step ① egress gap is stated on the run, not implied away,
+    // and the credentials line reports that none rode in.
     expect(text).toContain("Network: allowlist, recorded but not enforced")
-    expect(text).toContain("Credentials: this host's own (spawn-env)")
+    expect(text).toContain("Credentials: none")
   })
 
   // A Host that did not say whether egress is enforced has not said it is

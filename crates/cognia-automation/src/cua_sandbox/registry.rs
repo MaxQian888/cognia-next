@@ -19,9 +19,9 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use super::lifecycle::{
-    docker_create, docker_exec, docker_health, docker_inspect, docker_pause, docker_read_file,
-    docker_remove, docker_run, docker_start, docker_stop, docker_unpause, resolve_port,
-    ContainerPolicy, ContainerState, ExecOutcome, SpawnSpec,
+    attest_adopted, docker_create, docker_exec, docker_health, docker_inspect, docker_pause,
+    docker_read_file, docker_remove, docker_run, docker_start, docker_stop, docker_unpause,
+    resolve_port, ContainerPolicy, ContainerState, ExecOutcome, SpawnSpec,
 };
 use super::remote_client::CuaRemoteClient;
 use crate::automation::types::{AutomationError, Result};
@@ -62,6 +62,9 @@ impl CuaSandboxRegistry {
     ) -> Result<SandboxPlacement> {
         let name = container_name_for_connection(connection_id);
         if let Some(state) = docker_inspect(&name).await? {
+            // The found container may predate the hardened profile. Adopting
+            // it anyway would silently drop every bound the caller asked for.
+            attest_adopted(&policy, &state)?;
             let port = if state.running {
                 resolve_port(&name).await.unwrap_or(0)
             } else {
@@ -98,6 +101,7 @@ impl CuaSandboxRegistry {
         let name = container_name_for_connection(connection_id);
         let container_id = match docker_inspect(&name).await? {
             Some(state) => {
+                attest_adopted(&policy, &state)?;
                 if state.paused {
                     docker_unpause(&name).await?;
                 } else if !state.running {
@@ -189,7 +193,10 @@ impl CuaSandboxRegistry {
         docker_health(&container_name_for_connection(connection_id)).await
     }
 
-    /// Run one command inside the machine.
+    /// Run one command inside the machine. Commands run under the exec user
+    /// recorded on the container at create time — the entrypoint's supervisord
+    /// must boot as root, so the user bound lives on this channel, and the
+    /// container's own label is what carries it across app restarts.
     pub async fn exec(
         &self,
         connection_id: &str,
@@ -199,19 +206,29 @@ impl CuaSandboxRegistry {
         stdin: Option<&str>,
         timeout: Duration,
     ) -> Result<ExecOutcome> {
-        let name = self.require_running(connection_id).await?;
-        docker_exec(&name, argv, cwd, env, stdin, timeout).await
+        let (name, state) = self.require_running(connection_id).await?;
+        docker_exec(
+            &name,
+            argv,
+            cwd,
+            env,
+            stdin,
+            timeout,
+            state.exec_user.as_deref(),
+        )
+        .await
     }
 
-    /// Read one file from inside the machine.
+    /// Read one file from inside the machine, under the same exec-user bound
+    /// as `exec`.
     pub async fn read_file(
         &self,
         connection_id: &str,
         path: &str,
         max_bytes: usize,
     ) -> Result<String> {
-        let name = self.require_running(connection_id).await?;
-        docker_read_file(&name, path, max_bytes).await
+        let (name, state) = self.require_running(connection_id).await?;
+        docker_read_file(&name, path, max_bytes, state.exec_user.as_deref()).await
     }
 
     /// Resolve the driver client, reconnecting when the cache is cold.
@@ -223,7 +240,7 @@ impl CuaSandboxRegistry {
         if let Some(client) = self.clients.lock().await.get(connection_id) {
             return Ok(client.clone());
         }
-        let name = self.require_running(connection_id).await?;
+        let (name, _state) = self.require_running(connection_id).await?;
         let port = resolve_port(&name).await?;
         let client = CuaRemoteClient::connect("127.0.0.1", port).await?;
         self.clients
@@ -253,14 +270,16 @@ impl CuaSandboxRegistry {
         Ok(name)
     }
 
-    /// The container name for a connection that must be running right now.
-    async fn require_running(&self, connection_id: &str) -> Result<String> {
+    /// The container name and its inspected state for a connection that must
+    /// be running right now. Callers need the state as well as the name: the
+    /// exec-user bound is recorded on the container, not in this process.
+    async fn require_running(&self, connection_id: &str) -> Result<(String, ContainerState)> {
         let name = container_name_for_connection(connection_id);
         match docker_inspect(&name).await? {
             Some(state) if state.paused => Err(backend_err(format!(
                 "sandbox '{connection_id}' is suspended. Resume it first."
             ))),
-            Some(state) if state.running => Ok(name),
+            Some(state) if state.running => Ok((name, state)),
             Some(state) => Err(backend_err(format!(
                 "sandbox '{connection_id}' is not running (docker reports '{}')",
                 state.status

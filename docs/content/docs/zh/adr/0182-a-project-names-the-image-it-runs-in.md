@@ -132,14 +132,15 @@ digest 覆盖除「给人看的解析过程」之外的全部内容。Rust 在�
 
 桌面端本机容器里的 agent 拿到的是用户自己的 key，和今天 `env-builder.ts` 的做法一样，因为桌面网关只监听回环。ADR-0185（规划中）的「沙箱永不持有原始模型 key」规则约束的是 compose T2 与 Kubernetes。这个例外在「运行环境」面板里标注。
 
-### 第 ① 步既不强制出网也不改写凭据，并且明说这一点
+### 第 ① 步不强制出网，并且明说这一点
 
-本文里有两条保证要靠第 ② 步的基础设施才成立。在那之前，第 ① 步的驱动是故意更弱的，这个缺口在类型、界面读到的 placement、以及测试三处标注：
+本文里有一条保证要靠第 ② 步的基础设施才成立。在那之前，第 ① 步的驱动在出网上是故意更弱的，这个缺口在类型、界面读到的 placement、以及测试三处标注：
 
 - **出网**：`off` 会被真正执行——容器完全没有网络。`allowlist` 与 `on` 拿到的是旧 runner 那张网，没有任何东西在过滤，因为按租户的 L7 出网代理属于 ADR-0185。placement 里带 `egress.enforced: false`，下游任何地方都不能把一个没过滤的沙箱说成「已强制的白名单」。
-- **凭据**：沙箱拿到的是和旧 runner 相同的、经 `SpawnPolicy` 过滤的环境变量，包含 provider key；网关那条只认票据的沙箱入口属于 ADR-0185 §②.7。placement 里带 `credentials.mode: "spawn-env"`。沙箱内的 supervisor 仍然会按驱动声明的变量名清单，剥掉那些来自镜像而非来自 Cognia 的环境凭据（[ADR-0183](./0183-the-agent-is-brought-to-the-image)）。
 
-两者都不是悄悄降级：项目不可能在第 ① 步要求「强制白名单」，然后被告知它拿到了。
+凭据已不再是缺口。驱动会在容器看到 spawn 环境之前，把环境内 provider 凭据名（与本地 launcher 清理的是同一份清单）从中剥离，沙箱因此不会持有宿主的真实 key；受管网关任务按任务签发的租约（`COGNIA_GATEWAY_TASK_CONFIG`/`COGNIA_GATEWAY_TOKEN`）才是入口，placement 对它会写 `credentials.mode: "gateway-lease"`，否则写 `"none"`。由于被剥离的名字从不列入驱动声明的变量清单，沙箱内的 supervisor 也会丢掉镜像里烘焙的同名凭据（[ADR-0183](./0183-the-agent-is-brought-to-the-image)）。普通 spawn 的按沙箱票据仍属 ADR-0185 §②.7。
+
+出网不是悄悄降级：项目不可能在第 ① 步要求「强制白名单」，然后被告知它拿到了。
 
 ### companion 命令面
 

@@ -104,8 +104,8 @@ pub(crate) fn baseline_secret_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// Emit the unconditional credential denies. Every caller emits this LAST, so
-/// the rules win over every allow above them.
+/// Emit the unconditional credential / control-plane denies. Every caller
+/// emits this LAST, so the rules win over every allow above them.
 pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
     push_secret_read_denies(out, &baseline_secret_roots());
     // The app's own store is already refused as a WRITE target by the
@@ -114,6 +114,45 @@ pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
     // that one is relative to a root rather than absolute.
     if let Some(data) = dirs::data_dir() {
         push_read_deny(out, &escape(&data.join("cognia").to_string_lossy()));
+    }
+
+    // System keychain material lives OUTSIDE the user's home, so the
+    // home-anchored PROTECTED deny above never reaches it. Denied for read
+    // AND write: exfiltrating keychain items is the obvious threat, but a
+    // sandboxed write that injects a keychain item is persistence. Both
+    // spellings of /var are listed because sandbox-exec resolves the path
+    // against the real filesystem (/var → /private/var on macOS).
+    // Deliberately absent: /System/Library/Keychains — it holds the TLS root
+    // store and Apple's frameworks read it on every HTTPS evaluation;
+    // denying it breaks confined network tools when the policy is On.
+    for p in [
+        "/Library/Keychains",
+        "/var/db/SystemKey",
+        "/private/var/db/SystemKey",
+    ] {
+        let p = escape(p);
+        out.push_str(&format!(
+            "(deny file-read* file-write* (subpath \"{p}\"))\n"
+        ));
+        out.push_str(&format!(
+            "(deny file-read* file-write* (literal \"{p}\"))\n"
+        ));
+    }
+
+    // The Docker socket is a host control plane: connecting to it is a
+    // sandbox escape (a containerd/dockerd API client can spawn a privileged
+    // container over the whole host). Seatbelt gates a unix-socket connect on
+    // write access to the socket node, so file-write* denial closes the
+    // connect path and file-read* denial closes even lstat() enumeration.
+    // `/var/run/docker.sock` is the well-known path (a symlink to Docker
+    // Desktop's `~/.docker/run/docker.sock`, which the PROTECTED list covers
+    // under the home root); both spellings are named for the same reason as
+    // the keychain paths above.
+    for p in ["/var/run/docker.sock", "/private/var/run/docker.sock"] {
+        let p = escape(p);
+        out.push_str(&format!(
+            "(deny file-read* file-write* (literal \"{p}\"))\n"
+        ));
     }
 }
 
@@ -194,6 +233,54 @@ mod tests {
             assert!(
                 out.contains(&format!("(deny file-read* (subpath \"{store}\"))")),
                 "{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn baseline_denies_keychains_and_the_docker_socket() {
+        let mut out = String::new();
+        push_baseline_secret_read_denies(&mut out);
+        // The user keychain dir is covered via the home root + PROTECTED.
+        if let Some(home) = dirs::home_dir() {
+            let kc = escape(&home.join("Library/Keychains").to_string_lossy());
+            assert!(
+                out.contains(&format!("(deny file-read* (subpath \"{kc}\"))")),
+                "{out}"
+            );
+        }
+        // System keychain material and the docker socket are denied
+        // absolutely, for read AND write, in both /var spellings.
+        for denied in [
+            "(deny file-read* file-write* (subpath \"/Library/Keychains\"))",
+            "(deny file-read* file-write* (literal \"/Library/Keychains\"))",
+            "(deny file-read* file-write* (subpath \"/private/var/db/SystemKey\"))",
+            "(deny file-read* file-write* (subpath \"/var/db/SystemKey\"))",
+            "(deny file-read* file-write* (literal \"/var/run/docker.sock\"))",
+            "(deny file-read* file-write* (literal \"/private/var/run/docker.sock\"))",
+        ] {
+            assert!(out.contains(denied), "missing {denied} in:\n{out}");
+        }
+        // The TLS root store must stay readable — denying it breaks HTTPS
+        // trust evaluation inside the sandbox.
+        assert!(!out.contains("/System/Library/Keychains"), "{out}");
+    }
+
+    #[test]
+    fn baseline_denies_win_over_every_allow() {
+        // Last-match-wins: the baseline denies have to be emitted after the
+        // global read allow or they would silently do nothing.
+        let mut out = String::new();
+        push_loadability_base(&mut out);
+        push_baseline_secret_read_denies(&mut out);
+        let last_allow = out.rfind("(allow file-read*").unwrap();
+        for denied in [
+            "(deny file-read* file-write* (literal \"/var/run/docker.sock\"))",
+            "(deny file-read* file-write* (subpath \"/Library/Keychains\"))",
+        ] {
+            assert!(
+                out.find(denied).unwrap() > last_allow,
+                "{denied} must come after the read allow"
             );
         }
     }

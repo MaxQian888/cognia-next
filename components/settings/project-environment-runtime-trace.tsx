@@ -135,7 +135,10 @@ function PlacedSummary({
 }) {
   const t = useTranslations("projectEnvironment.runtime")
   const { spec } = preview.placement
-  const image = `${spec.image.registry}/${spec.image.repository}@${spec.image.digest}`
+  const image =
+    spec.image.kind === "build"
+      ? spec.image.imageId
+      : `${spec.image.registry}/${spec.image.repository}@${spec.image.digest}`
   const size = catalog?.sizeClasses.find((entry) => entry.id === spec.sizeClassId)
   const declared = spec.user.declared
   // A user may be declared by name, by uid, or both; show whichever exists.

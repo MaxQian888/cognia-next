@@ -13,6 +13,13 @@ description = "Non-elevated Windows sandbox runner — restricted token + low in
 license = "AGPL-3.0-or-later"
 publish = false
 
+# The contract and the launch plan are a library so the security-relevant
+# decisions — limits, the child's environment, what confinement is on offer —
+# can be tested on any host, not only on Windows.
+[lib]
+name = "cognia_sandbox_runner"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cognia-sandbox-runner"
 path = "src/main.rs"

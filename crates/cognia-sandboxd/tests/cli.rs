@@ -385,6 +385,20 @@ fn a_named_user_is_matched_to_the_workspace_owner_by_probe_and_init() {
     .unwrap();
     fs::create_dir_all(image.path().join("home/node")).unwrap();
     let me = uid();
+    if me != 0 {
+        // A non-root fixture cannot discard the test runner's supplementary
+        // groups. Model its actual identity in the image's group database.
+        let count = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+        assert!(count >= 0);
+        let mut groups = vec![0; count as usize];
+        assert!(unsafe { libc::getgroups(count, groups.as_mut_ptr()) } >= 0);
+        let group_file = groups
+            .into_iter()
+            .enumerate()
+            .map(|(index, gid)| format!("fixture{index}:x:{gid}:node\n"))
+            .collect::<String>();
+        fs::write(image.path().join("etc/group"), group_file).unwrap();
+    }
 
     let probe = sandboxd()
         .arg("probe")

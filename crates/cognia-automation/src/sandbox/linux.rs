@@ -109,6 +109,10 @@ impl SandboxedExec for LinuxSandboxBackend {
         // Defense-in-depth: scrub code-injection env vars at the exec boundary
         // too, so a direct backend call (not just `run_confined`) is safe.
         crate::sandbox::env::filter_env(&mut command.env);
+        // Defense-in-depth on the filesystem side: refuse readable roots that
+        // would expose host runtime state (`/var/run`, `/proc`, …) even when
+        // the call did not come through `run_confined`.
+        reject_forbidden_readable_roots(&policy)?;
         let Some(bwrap) = self.bwrap.as_ref() else {
             return Err(SandboxError::Unavailable {
                 reason: "bwrap binary not found (no bundled + not on PATH)".into(),
@@ -323,17 +327,58 @@ impl SandboxedExec for LinuxSandboxBackend {
     }
 }
 
-/// Resolve the rlimit caps a policy asks for. Only `Bash` carries CPU / memory
-/// caps; file-edit policies leave the wall-clock watchdog as the sole control.
+/// Resolve the rlimit caps a policy asks for. Only `Bash` carries CPU /
+/// memory / process caps; file-edit policies leave the wall-clock watchdog
+/// as the sole control.
+///
+/// `max_processes` becomes `RLIMIT_NPROC`, which is correct HERE but not on
+/// macOS: the backend unshares a user namespace (`--unshare-user`), and on
+/// kernels with per-user-namespace process accounting (≥4.11) the counter is
+/// scoped to the sandbox's own namespace — a fork bomb exhausts the sandbox
+/// cap, not the login uid's.
 fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits {
     match policy {
         SandboxPolicy::Bash {
             max_cpu_seconds,
             max_memory_mb,
+            max_processes,
             ..
-        } => crate::sandbox::limits::resolve_rlimits(*max_cpu_seconds, *max_memory_mb),
+        } => crate::sandbox::limits::resolve_rlimits(
+            *max_cpu_seconds,
+            *max_memory_mb,
+            *max_processes,
+        ),
         _ => crate::sandbox::limits::ResolvedLimits::default(),
     }
+}
+
+/// Defense-in-depth: refuse a readable root that would mount host runtime /
+/// control-plane state into the sandbox before bwrap ever runs. The
+/// dispatcher's `run_confined` enforces the same floor; a direct backend
+/// call (no dispatcher) must not get a weaker bind set. Both the raw and the
+/// symlink-resolved spelling of each candidate are checked.
+fn reject_forbidden_readable_roots(policy: &SandboxPolicy) -> Result<(), SandboxError> {
+    let readable: &[PathBuf] = match policy {
+        SandboxPolicy::Bash { readable, .. }
+        | SandboxPolicy::Edit { readable, .. }
+        | SandboxPolicy::Write { readable, .. }
+        | SandboxPolicy::TextEditor { readable, .. } => readable,
+    };
+    let deny = crate::sandbox::protected::forbidden_readable_roots();
+    for p in readable {
+        let resolved = crate::sandbox::paths::safe_canonicalize(p).unwrap_or_else(|_| p.clone());
+        if crate::sandbox::protected::is_forbidden_readable(&resolved, &deny)
+            || crate::sandbox::protected::is_forbidden_readable(p, &deny)
+        {
+            return Err(SandboxError::InvalidPolicy {
+                reason: format!(
+                    "'{}' reaches host runtime / control state and cannot be a sandbox readable root",
+                    p.display()
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Create any `Edit` / `Write` / `TextEditor` target that does not exist yet.
@@ -719,6 +764,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         // `.ssh` (secret dir) is shadowed by an empty read-only tmpfs, so it is
@@ -746,6 +792,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         // `.git` is write-protected and absent → NOT bound, so `git init` still
@@ -766,6 +813,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         // `.ssh` reachable through the readable root is shadowed so it can't
@@ -783,6 +831,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         // A readable root is mounted read-only, and bwrap mkdirs a mount point
@@ -805,6 +854,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         // A writable root IS creatable, so an absent secret store must still be
@@ -822,6 +872,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         assert!(args.iter().any(|s| s == "--unshare-pid"));
@@ -846,6 +897,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         let bind_idx = args
@@ -877,6 +929,7 @@ mod tests {
             network: NetworkPolicy::On,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         let args = render_bwrap_args(&policy, &cmd(), None);
         assert!(args.iter().any(|s| s == "--share-net"));
@@ -907,6 +960,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         // With a parked program, bwrap is told which descriptor to read it
         // from. Applying the same filter to bwrap itself denies the `mount`,
@@ -973,6 +1027,7 @@ mod tests {
             network: NetworkPolicy::Off,
             max_cpu_seconds: 0,
             max_memory_mb: 0,
+            max_processes: 0,
         };
         ensure_write_targets_exist(&policy).expect("no targets to create");
         assert_eq!(
@@ -1022,5 +1077,155 @@ mod tests {
         } else {
             assert!(!h.last_error.is_empty());
         }
+    }
+
+    #[test]
+    fn rlimits_for_passes_the_process_cap_through() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 512,
+        };
+        // Inside the unshared user namespace this lands as RLIMIT_NPROC on
+        // the sandbox's own ucount — see `limits::apply_rlimits`.
+        assert_eq!(rlimits_for(&policy).processes, Some(512));
+    }
+
+    #[test]
+    fn bwrap_args_never_bind_the_docker_socket() {
+        // The socket is a host control plane. bwrap only exposes paths that
+        // are explicitly bound, so the assertion is that nothing under the
+        // runtime dirs is ever a bind source — the audit's `readable:
+        // ["/var/run"]` path is refused before render, and a policy that
+        // passed no readable roots must produce no socket-bearing args.
+        let policy = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        let args = render_bwrap_args(&policy, &cmd(), None);
+        assert!(
+            !args.iter().any(|a| a.contains("docker.sock")),
+            "docker socket must never appear in bwrap argv: {args:?}"
+        );
+        for w in args.windows(3) {
+            if w[0] == "--bind" || w[0] == "--ro-bind" {
+                assert!(
+                    !w[1].starts_with("/var") && !w[1].starts_with("/run"),
+                    "host runtime dir bound into the sandbox: {w:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn backend_rejects_a_readable_root_under_var_run() {
+        // Defense-in-depth: a caller that reaches the backend directly
+        // (bypassing `run_confined`) gets the same refusal.
+        for bad in ["/var/run", "/var", "/proc", "/run", "/"] {
+            let policy = SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![PathBuf::from(bad)],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+                max_processes: 0,
+            };
+            assert!(
+                matches!(
+                    reject_forbidden_readable_roots(&policy),
+                    Err(SandboxError::InvalidPolicy { .. })
+                ),
+                "{bad} must be refused"
+            );
+        }
+        let ok = SandboxPolicy::Bash {
+            writable: vec![PathBuf::from("/workspace")],
+            readable: vec![PathBuf::from("/usr/local/include")],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+            max_processes: 0,
+        };
+        assert!(reject_forbidden_readable_roots(&ok).is_ok());
+    }
+
+    /// Runtime proof on Linux: inside the bwrap sandbox the docker socket is
+    /// simply absent — nothing under `/var/run` is bound, and the PID/mount
+    /// namespaces start from a clean slate. Self-skips on hosts without a
+    /// usable bwrap + user namespaces (same convention as the timeout test
+    /// above).
+    #[tokio::test]
+    async fn docker_socket_is_unreachable_inside_the_sandbox() {
+        let backend = LinuxSandboxBackend::new(None);
+        if !backend.is_available() {
+            return;
+        }
+        let result = backend
+            .run(
+                SandboxCommand {
+                    argv: vec![
+                        "/bin/sh".into(),
+                        "-c".into(),
+                        "test -e /var/run/docker.sock && exit 11; \
+                         ls /var/run >/dev/null 2>&1 && exit 12; \
+                         exit 0"
+                            .into(),
+                    ],
+                    cwd: PathBuf::from("/tmp"),
+                    env: BTreeMap::new(),
+                    stdin: None,
+                    timeout: Duration::from_secs(10),
+                },
+                SandboxPolicy::Bash {
+                    writable: vec![PathBuf::from("/tmp")],
+                    readable: vec![],
+                    network: NetworkPolicy::Off,
+                    max_cpu_seconds: 0,
+                    max_memory_mb: 0,
+                    max_processes: 0,
+                },
+            )
+            .await
+            .expect("the run itself must succeed — a refusal means bwrap could not start");
+        assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    }
+
+    /// Runtime proof the process cap lands: `ulimit -u` inside the sandbox
+    /// reports the policy's `max_processes`, not the host's.
+    #[tokio::test]
+    async fn process_cap_is_visible_as_nproc_inside_the_sandbox() {
+        let backend = LinuxSandboxBackend::new(None);
+        if !backend.is_available() {
+            return;
+        }
+        let result = backend
+            .run(
+                SandboxCommand {
+                    argv: vec!["/bin/sh".into(), "-c".into(), "ulimit -u".into()],
+                    cwd: PathBuf::from("/tmp"),
+                    env: BTreeMap::new(),
+                    stdin: None,
+                    timeout: Duration::from_secs(10),
+                },
+                SandboxPolicy::Bash {
+                    writable: vec![PathBuf::from("/tmp")],
+                    readable: vec![],
+                    network: NetworkPolicy::Off,
+                    max_cpu_seconds: 0,
+                    max_memory_mb: 0,
+                    max_processes: 64,
+                },
+            )
+            .await
+            .expect("the run itself must succeed");
+        assert_eq!(result.exit_code, 0, "{}", result.stderr);
+        assert_eq!(result.stdout.trim(), "64", "RLIMIT_NPROC was not applied");
     }
 }

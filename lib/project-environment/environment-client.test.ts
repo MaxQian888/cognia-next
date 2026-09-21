@@ -2,8 +2,13 @@
 import { transport } from "@/lib/tauri/transport-instance"
 import {
   declarationReader,
+  environmentBuildStart,
+  environmentPortsList,
+  environmentBuildGet,
+  environmentBuildCancel,
   environmentApprovalApprove,
   environmentApprovalList,
+  fetchEnvironmentApprovals,
   environmentCatalogCreate,
   environmentCatalogDelete,
   environmentCatalogGet,
@@ -250,12 +255,18 @@ describe("fetchEnvironmentCatalog", () => {
     ])
   })
 
-  // A Host that kept re-issuing the same token would spin the run path
-  // forever. The loop is bounded instead.
-  it("stops rather than spinning on a Host that never stops paging", async () => {
+  it("refuses an incomplete catalog after two calls when the Host repeats a token", async () => {
     call.mockResolvedValue(pageOf([{ id: "e1" }], "same") as never)
-    const view = await fetchEnvironmentCatalog(1)
-    expect(view.entries.length).toBe(50)
+    await expect(fetchEnvironmentCatalog(1)).rejects.toThrow("repeated page token")
+    expect(call).toHaveBeenCalledTimes(2)
+  })
+
+  it("refuses a catalog that exceeds the page budget without fetching an unused page", async () => {
+    call.mockImplementation(
+      async () => pageOf([{ id: "e1" }], `p${call.mock.calls.length}`) as never
+    )
+    await expect(fetchEnvironmentCatalog(1)).rejects.toThrow("page limit")
+    expect(call).toHaveBeenCalledTimes(50)
   })
 
   it("projects the entry rows and the deployment facts the resolver reads", async () => {
@@ -309,6 +320,29 @@ describe("fetchEnvironmentCatalog", () => {
   })
 })
 
+describe("fetchEnvironmentApprovals", () => {
+  it("includes approvals beyond the first page and preserves project scope", async () => {
+    call
+      .mockResolvedValueOnce({ items: [{ id: "old" }], nextPageToken: "second" } as never)
+      .mockResolvedValueOnce({ items: [{ id: "approved" }] } as never)
+    await expect(fetchEnvironmentApprovals("project-2")).resolves.toEqual([
+      { id: "old" },
+      { id: "approved" },
+    ])
+    expect(call.mock.calls).toEqual([
+      ["environment_approval_list", { projectId: "project-2", pageSize: 200 }],
+      ["environment_approval_list", { projectId: "project-2", pageSize: 200, pageToken: "second" }],
+    ])
+  })
+
+  it("propagates a later-page failure instead of reporting incomplete approvals", async () => {
+    call
+      .mockResolvedValueOnce({ items: [], nextPageToken: "second" } as never)
+      .mockRejectedValueOnce(new Error("host offline"))
+    await expect(fetchEnvironmentApprovals("project-2")).rejects.toThrow("host offline")
+  })
+})
+
 describe("commonImageUser", () => {
   const platform = (user?: string) => ({
     platform: { os: "linux", architecture: "amd64" },
@@ -338,4 +372,32 @@ describe("commonImageUser", () => {
   it("is null when the platforms disagree, so an editor can show them", () => {
     expect(commonImageUser(metadata("node", undefined))).toBeNull()
   })
+})
+
+it("routes build creation, lookup and cancellation through the Host transport", async () => {
+  const request = {
+    projectId: "p",
+    cwd: "/repo",
+    declarationPath: ".devcontainer.json",
+    declarationDigest: "d".repeat(64),
+    declarationBytesSha256: "e".repeat(64),
+    commitSha: "c".repeat(40),
+  }
+  await environmentBuildStart(request)
+  await environmentBuildGet({ projectId: "p", buildKey: "key" })
+  await environmentBuildCancel("p", "job")
+  expect(call.mock.calls).toEqual([
+    ["environment_build_start", { request }],
+    ["environment_build_get", { projectId: "p", buildKey: "key" }],
+    ["environment_build_cancel", { projectId: "p", jobId: "job" }],
+  ])
+})
+
+it("lists the authenticated runtime ports for the requested project", async () => {
+  const ports = [
+    { projectId: "p", containerId: "c", port: 3000, path: "/api/environment/ports/p/c/3000/" },
+  ]
+  call.mockResolvedValueOnce({ ports })
+  await expect(environmentPortsList("p")).resolves.toEqual(ports)
+  expect(call).toHaveBeenCalledWith("environment_ports_list", { projectId: "p" })
 })

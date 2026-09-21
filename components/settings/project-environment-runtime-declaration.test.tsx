@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 import { ProjectEnvironmentRuntimeDeclaration } from "./project-environment-runtime-declaration"
 import type { ApprovalRecord } from "@/lib/project-environment/environment-client"
@@ -162,4 +162,60 @@ describe("ProjectEnvironmentRuntimeDeclaration", () => {
     renderCard({ declaration: declared(), busy: true })
     expect(screen.getByTestId("runtime-declaration-approve")).toBeDisabled()
   })
+})
+
+it("shows build status and disables approval until an image is ready", () => {
+  const parsed = parseDevcontainer('{"build":{"dockerfile":"Dockerfile"}}', ".devcontainer.json")
+  if (!parsed.ok) throw new Error("build fixture rejected")
+  const onBuild = jest.fn()
+  renderCard({
+    declaration: { kind: "declared", declaration: parsed.declaration, digest: DIGEST, notices: [] },
+    onBuild,
+  })
+  expect(screen.getByTestId("runtime-declaration-approve")).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: en.runtime.declaration.build }))
+  expect(onBuild).toHaveBeenCalledTimes(1)
+})
+
+it("shows merged Feature runtime fields for review and refuses unsupported metadata", () => {
+  const parsed = parseDevcontainer('{"build":{"dockerfile":"Dockerfile"}}', ".devcontainer.json")
+  if (!parsed.ok) throw new Error("fixture")
+  const declaration: EnvironmentDeclarationVerdict = {
+    kind: "declared",
+    declaration: parsed.declaration,
+    digest: DIGEST,
+    notices: [],
+  }
+  const record = {
+    buildKey: "b".repeat(64),
+    imageId: `sha256:${"a".repeat(64)}`,
+    projectId: "p",
+    commitSha: "c".repeat(40),
+    declarationPath: ".devcontainer.json",
+    declarationDigest: DIGEST,
+    declarationBytesSha256: "b".repeat(64),
+    sourceHash: "s",
+    cliVersion: "0.89.0",
+    platform: "linux/arm64",
+    createdAt: 1,
+    runtimeConfiguration: {
+      containerEnv: { FROM_FEATURE: "yes" },
+      postCreateCommands: ["feature-command"],
+    },
+  }
+  renderCard({ declaration, build: { jobId: "j", projectId: "p", status: "succeeded", record } })
+  expect(screen.getByTestId("runtime-declaration-approve")).toBeEnabled()
+  expect(screen.getByText(/FROM_FEATURE/)).toBeInTheDocument()
+  cleanup()
+  renderCard({
+    declaration,
+    build: {
+      jobId: "j",
+      projectId: "p",
+      status: "succeeded",
+      record: { ...record, runtimeConfiguration: { privileged: true } },
+    },
+  })
+  expect(screen.getByTestId("runtime-declaration-approve")).toBeDisabled()
+  expect(screen.getByRole("alert")).toHaveTextContent("devcontainer_field_refused")
 })

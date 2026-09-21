@@ -44,12 +44,48 @@ impl RegistryTransport for ReqwestTransport {
         request: RegistryRequest,
     ) -> impl Future<Output = Result<RegistryResponse, RegistryError>> + Send {
         let settings = *self;
-        async move { settings.exchange(request).await }
+        async move {
+            settings
+                .exchange(request, |domain, port| async move {
+                    tokio::net::lookup_host((domain, port))
+                        .await
+                        .map(|addresses| addresses.collect())
+                })
+                .await
+        }
     }
 }
 
 impl ReqwestTransport {
-    async fn exchange(self, request: RegistryRequest) -> Result<RegistryResponse, RegistryError> {
+    async fn exchange<F, R>(
+        self,
+        request: RegistryRequest,
+        resolve: F,
+    ) -> Result<RegistryResponse, RegistryError>
+    where
+        F: FnOnce(String, u16) -> R,
+        R: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+    {
+        let registry = authority(&request.url).unwrap_or_default();
+        // Reqwest's timeout starts after our DNS validation. Bound the entire
+        // exchange here so a stalled resolver cannot hold an inspect forever.
+        tokio::time::timeout(self.timeout, self.exchange_inner(request, resolve))
+            .await
+            .map_err(|_| RegistryError::Unreachable {
+                registry,
+                message: "registry exchange timed out".to_string(),
+            })?
+    }
+
+    async fn exchange_inner<F, R>(
+        self,
+        request: RegistryRequest,
+        resolve: F,
+    ) -> Result<RegistryResponse, RegistryError>
+    where
+        F: FnOnce(String, u16) -> R,
+        R: Future<Output = std::io::Result<Vec<SocketAddr>>>,
+    {
         let url = request.url.clone();
         let registry = authority(&url).unwrap_or_default();
         let unreachable = |message: String| RegistryError::Unreachable {
@@ -63,6 +99,7 @@ impl ReqwestTransport {
                 reason: "it names no port".into(),
             })?;
 
+        cognia_net::proxy_config::ensure_crypto_provider();
         let builder = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .redirect(reqwest::redirect::Policy::none())
@@ -79,10 +116,9 @@ impl ReqwestTransport {
                 })
             }
             (ProxyRouteSummary::Direct { .. }, Some(Host::Domain(domain))) => {
-                let addresses: Vec<SocketAddr> = tokio::net::lookup_host((domain, port))
+                let addresses = resolve(domain.to_string(), port)
                     .await
-                    .map_err(|error| unreachable(format!("DNS lookup failed: {error}")))?
-                    .collect();
+                    .map_err(|error| unreachable(format!("DNS lookup failed: {error}")))?;
                 if addresses.is_empty() {
                     return Err(unreachable(format!("{domain} resolved to no address")));
                 }
@@ -164,6 +200,62 @@ mod tests {
     fn init_policy() {
         cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_exchange_deadline_includes_dns_resolution() {
+        init_policy();
+        let transport = ReqwestTransport {
+            timeout: Duration::from_millis(10),
+            ..ReqwestTransport::default()
+        };
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            transport.exchange(request("http://localhost:12345/v2/", true, 1024), |_, _| {
+                std::future::pending()
+            }),
+        )
+        .await
+        .expect("the exchange must time out before its caller does");
+        assert!(
+            matches!(result, Err(RegistryError::Unreachable { registry, .. }) if registry == "localhost:12345")
+        );
+    }
+
+    #[tokio::test]
+    async fn dns_and_body_reading_share_one_deadline() {
+        init_policy();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 1];
+            socket.read_exact(&mut request).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n")
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            let _ = socket.write_all(b"{}").await;
+        });
+        let transport = ReqwestTransport {
+            timeout: Duration::from_millis(60),
+            ..ReqwestTransport::default()
+        };
+        let result = transport
+            .exchange(
+                request(&format!("http://localhost:{}/", address.port()), true, 1024),
+                |_, _| async move {
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                    Ok(vec![address])
+                },
+            )
+            .await;
+        server.abort();
+        let _ = server.await;
+        assert!(
+            matches!(result, Err(RegistryError::Unreachable { message, .. }) if message == "registry exchange timed out")
+        );
     }
 
     fn request(url: &str, allow_loopback: bool, max_body_bytes: usize) -> RegistryRequest {

@@ -60,11 +60,21 @@ export interface PinnedImage {
   digest: string
 }
 
-export interface SpecImage extends PinnedImage {
+export interface RegistrySpecImage extends PinnedImage {
+  kind?: never
   catalogEntryId?: string
   /** Content-hash key of the environment build that produced the image (ADR-0186). */
   buildKey?: string
 }
+
+export interface BuiltSpecImage {
+  kind: "build"
+  buildKey: string
+  /** Immutable local Docker configuration identity, not a registry manifest digest. */
+  imageId: string
+}
+
+export type SpecImage = RegistrySpecImage | BuiltSpecImage
 
 export interface SpecBundle {
   /** `sha256:` digest of the agent bundle image (ADR-0183). */
@@ -97,9 +107,11 @@ export type SingleCommandSpec =
   /** Exec directly, no shell. */
   | { kind: "argv"; argv: string[] }
 
-/** One lifecycle command. `parallel` runs named commands concurrently and cannot nest. */
+/** Parallel named commands and ordered command groups share one bounded runtime tree. */
 export type CommandSpec =
-  SingleCommandSpec | { kind: "parallel"; commands: Record<string, SingleCommandSpec> }
+  | SingleCommandSpec
+  | { kind: "parallel"; commands: Record<string, SingleCommandSpec> }
+  | { kind: "sequence"; commands: CommandSpec[] }
 
 export interface LifecycleCommands {
   /** First create. */
@@ -174,6 +186,12 @@ export interface EnvironmentSpec {
    * process starts. No other `${…}` form survives resolution.
    */
   containerEnv: Record<string, string>
+  /** Agent-only overrides; null removes a variable inherited from the image/container. */
+  remoteEnv?: Record<string, string | null>
+  /** Working directory confined to the mounted /workspace tree. */
+  workspaceFolder?: string
+  /** Total deadline for required lifecycle preparation, in milliseconds. */
+  lifecycleTimeoutMs?: number
   lifecycleCommands: LifecycleCommands
   forwardPorts: ForwardPort[]
   egress: EgressSpec
@@ -277,7 +295,10 @@ export type SandboxPlacementPayload =
        * with ADR-0185.
        */
       egress?: { tier?: EgressTier; enforced?: boolean }
-      /** `spawn-env` through Step ①; gateway tickets arrive with ADR-0185. */
+      /**
+       * `none`, or `gateway-lease` when a managed task's per-task lease rode
+       * the spawn env. Ambient provider keys never reach the container.
+       */
       credentials?: { mode?: string }
     }
   | { kind: "fallback"; code?: string; message?: string }
