@@ -4365,9 +4365,11 @@ export class ExternalAgentManager {
    * execution seams call `observeExternalAgentEvent` / `gateExternalAgentPermission`
    * on every external turn with no host gate — the plugin hook system (System
    * A) runs in-process everywhere, and the settings.json command runtime
-   * (System B) additionally on desktop. The CLI, which wraps nothing, reports
-   * `false`, and that difference is exactly why this is a host fact rather
-   * than a protocol row.
+   * (System B) additionally on desktop. The CLI's external session wraps turns
+   * the same way (`dispatchUserPromptSubmit` et al. in
+   * `cli/src/agent/external-agent-session.ts`), so it reports `true` as well;
+   * a host that wrapped nothing would report `false`, which is exactly why
+   * this is a host fact rather than a protocol row.
    *
    * Unscoped profiles remain conservative. A renderer tool host reports live
    * facts for its owning chat only, and clears them while paused or disposed.

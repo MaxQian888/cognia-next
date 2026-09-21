@@ -57,6 +57,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
 import { CompositionPicker } from "./composition-picker"
@@ -167,23 +168,29 @@ export function CompositionChip({
     return (
       <div className="flex min-w-0 items-center gap-0.5" data-testid="composition-controls">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              data-testid="composition-chip"
-              data-narrowed={narrowed || undefined}
-              aria-label={t("chip.ariaLabel", { preset: label })}
-              title={narrowed ? t("chip.narrowed") : t("chip.ariaLabel", { preset: label })}
-              className={cn(chipClass, "max-w-[11rem]")}
-            >
-              <span className="truncate">{label}</span>
-              {narrowed ? <NarrowedDot /> : null}
-              <ChevronDown aria-hidden className="size-3 shrink-0 opacity-60" />
-            </Button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled}
+                  data-testid="composition-chip"
+                  data-narrowed={narrowed || undefined}
+                  aria-label={t("chip.ariaLabel", { preset: label })}
+                  className={cn(chipClass, "max-w-[11rem]")}
+                >
+                  <span className="truncate">{label}</span>
+                  {narrowed ? <NarrowedDot /> : null}
+                  <ChevronDown aria-hidden className="size-3 shrink-0 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {narrowed ? t("chip.narrowed") : t("chip.ariaLabel", { preset: label })}
+            </TooltipContent>
+          </Tooltip>
           <DropdownMenuContent
             align="start"
             className="w-56"
@@ -223,103 +230,113 @@ export function CompositionChip({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <ResponsivePicker
-          open={open}
-          onOpenChange={setOpen}
-          variant="panel"
-          title={t("advanced")}
-          align="start"
-          side="bottom"
-          contentClassName="w-80"
-          commandClassName="p-3"
-          testId="composition-advanced-panel"
-          trigger={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled}
-              data-testid="composition-advanced-trigger"
-              data-overrides={overrideCount || undefined}
-              aria-label={t("advanced")}
-              title={t("advanced")}
-              className={cn(
-                chipClass,
-                "size-7 shrink-0 justify-center p-0",
-                overrideCount > 0 && "w-auto gap-1 px-1.5 text-foreground"
-              )}
-            >
-              <SlidersHorizontal aria-hidden className="size-3.5" />
-              {overrideCount > 0 ? (
-                <span
-                  className="rounded-sm bg-primary/15 px-1 text-[10px] leading-4 tabular-nums"
-                  data-testid="composition-advanced-count"
+        <Tooltip>
+          <ResponsivePicker
+            open={open}
+            onOpenChange={setOpen}
+            variant="panel"
+            title={t("advanced")}
+            align="start"
+            side="bottom"
+            contentClassName="w-80"
+            commandClassName="p-3"
+            testId="composition-advanced-panel"
+            trigger={
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled}
+                  data-testid="composition-advanced-trigger"
+                  data-overrides={overrideCount || undefined}
+                  aria-label={t("advanced")}
+                  className={cn(
+                    chipClass,
+                    "size-7 shrink-0 justify-center p-0",
+                    overrideCount > 0 && "w-auto gap-1 px-1.5 text-foreground"
+                  )}
                 >
-                  {overrideCount}
-                </span>
-              ) : null}
-            </Button>
-          }
-        >
-          <div className="mb-3 flex items-center gap-2">
-            <SlidersHorizontal aria-hidden className="size-3.5 text-muted-foreground" />
-            <p className="text-xs font-medium">{t("advanced")}</p>
-            <span className="ml-auto truncate text-[11px] text-muted-foreground">{label}</span>
-          </div>
-          <CompositionPicker
-            presets={presets}
-            selection={selection}
-            onChange={commit}
-            developerMode={developerMode}
-            presetControl={false}
-            supportedToolPresentations={supportedToolPresentations}
-            supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
-          />
-        </ResponsivePicker>
+                  <SlidersHorizontal aria-hidden className="size-3.5" />
+                  {overrideCount > 0 ? (
+                    <span
+                      className="rounded-sm bg-primary/15 px-1 text-[10px] leading-4 tabular-nums"
+                      data-testid="composition-advanced-count"
+                    >
+                      {overrideCount}
+                    </span>
+                  ) : null}
+                </Button>
+              </TooltipTrigger>
+            }
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <SlidersHorizontal aria-hidden className="size-3.5 text-muted-foreground" />
+              <p className="text-xs font-medium">{t("advanced")}</p>
+              <span className="ml-auto truncate text-[11px] text-muted-foreground">{label}</span>
+            </div>
+            <CompositionPicker
+              presets={presets}
+              selection={selection}
+              onChange={commit}
+              developerMode={developerMode}
+              presetControl={false}
+              supportedToolPresentations={supportedToolPresentations}
+              supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
+            />
+          </ResponsivePicker>
+          <TooltipContent side="top">{t("advanced")}</TooltipContent>
+        </Tooltip>
       </div>
     )
   }
 
   return (
-    <ResponsivePicker
-      open={open}
-      onOpenChange={setOpen}
-      variant="panel"
-      title={t("chip.ariaLabel", { preset: label })}
-      align="start"
-      side="top"
-      contentClassName="w-80"
-      commandClassName="p-3"
-      testId="composition-panel"
-      trigger={
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          data-testid="composition-chip"
-          data-narrowed={narrowed || undefined}
-          aria-label={t("chip.ariaLabel", { preset: label })}
-          title={narrowed ? t("chip.narrowed") : t("chip.ariaLabel", { preset: label })}
-          className={cn(chipClass, "max-w-[9rem]")}
-        >
-          <span className="truncate">{label}</span>
-          {narrowed ? <NarrowedDot /> : null}
-        </Button>
-      }
-    >
-      <ExecutorChoiceList executor={executor} disabled={disabled} />
-      <CompositionPicker
-        presets={presets}
-        selection={selection}
-        onChange={commit}
-        developerMode={developerMode}
-        advancedOpen={advancedOpen}
-        onAdvancedOpenChange={setAdvancedOpen}
-        supportedToolPresentations={supportedToolPresentations}
-        supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
-      />
-    </ResponsivePicker>
+    <Tooltip>
+      <ResponsivePicker
+        open={open}
+        onOpenChange={setOpen}
+        variant="panel"
+        title={t("chip.ariaLabel", { preset: label })}
+        align="start"
+        side="top"
+        contentClassName="w-80"
+        commandClassName="p-3"
+        testId="composition-panel"
+        trigger={
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              data-testid="composition-chip"
+              data-narrowed={narrowed || undefined}
+              aria-label={t("chip.ariaLabel", { preset: label })}
+              className={cn(chipClass, "max-w-[9rem]")}
+            >
+              <span className="truncate">{label}</span>
+              {narrowed ? <NarrowedDot /> : null}
+            </Button>
+          </TooltipTrigger>
+        }
+      >
+        <ExecutorChoiceList executor={executor} disabled={disabled} />
+        <CompositionPicker
+          presets={presets}
+          selection={selection}
+          onChange={commit}
+          developerMode={developerMode}
+          advancedOpen={advancedOpen}
+          onAdvancedOpenChange={setAdvancedOpen}
+          supportedToolPresentations={supportedToolPresentations}
+          supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
+        />
+      </ResponsivePicker>
+      <TooltipContent side="top">
+        {narrowed ? t("chip.narrowed") : t("chip.ariaLabel", { preset: label })}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

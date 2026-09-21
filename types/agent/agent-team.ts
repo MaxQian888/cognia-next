@@ -919,6 +919,17 @@ export interface TeammateConfig {
    * the Anthropic sidecar; the others dispatch to an external ACP agent.
    */
   runtime?: TeammateRuntime
+  /**
+   * How this member's turn is executed by Router + Fusion (ADR-0188 B5, D3/D21).
+   *
+   * `"auto"` — the default, and what every teammate without this field does —
+   * is the member's ordinary channel, unchanged. The other values run the turn
+   * as a session-less child fusion run of the team run, booked on the
+   * `agentsWorkflows` surface; `"delegate"` additionally needs the team to have
+   * a project to work in. With Router + Fusion off, every value behaves like
+   * `"auto"`. See `lib/ai/agent/team/member-fusion-turn.ts`.
+   */
+  fusionAction?: import("@/lib/router-fusion/gate/explicit-run").FusionActionChoice
   /** Custom metadata */
   metadata?: Record<string, unknown>
   /**

@@ -75,7 +75,8 @@ export interface ResolvedSkill {
  */
 export async function resolveSkillsForCharacter(
   skillIds: string[],
-  scope?: WorkspaceCapabilityScope
+  scope?: WorkspaceCapabilityScope,
+  explicitSkillIds: readonly string[] = []
 ): Promise<ResolvedSkill[]> {
   const resolved: ResolvedSkill[] = []
   const remainingChatIds: string[] = []
@@ -83,6 +84,7 @@ export async function resolveSkillsForCharacter(
   for (const id of skillIds) {
     const pluginDef = getSkill(id)
     if (pluginDef) {
+      if (pluginDef.invocationPolicy === "explicit" && !explicitSkillIds.includes(id)) continue
       const entry = getSkillEntry(id)
       let body: string | undefined
       let containerSkillId: string | undefined

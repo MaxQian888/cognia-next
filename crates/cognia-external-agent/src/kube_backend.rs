@@ -16,6 +16,11 @@
 //!   the k8s answers are a RuntimeClass (gvisor/kata — see
 //!   `deploy/k8s/cluster/`), kubelet PID limits, and NetworkPolicy
 //!   (`deploy/k8s/base/guardrails.yaml`).
+//! - `cap_drop` / `cap_add` / `read_only_rootfs` translate onto the
+//!   container's `securityContext`; `tmpfs` entries become in-memory
+//!   `emptyDir` volumes. `writable_dirs` has no honest k8s analogue (an
+//!   `emptyDir` is empty, never seeded with the image's content), so a spec
+//!   that names one is refused rather than half-applied.
 //! - Host binds do not exist: `RunnerMount::Bind` is a hard error;
 //!   `COGNIA_WORKSPACES_VOLUME` must name the workspaces PVC.
 //! - Attach happens after the pod reports `Running` (k8s cannot attach
@@ -130,6 +135,37 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
                 .to_string(),
         );
     }
+    if !spec.writable_dirs.is_empty() {
+        // `Config.Volumes` anonymous volumes are seeded with the image's
+        // content. k8s has no equivalent — an emptyDir under the path would
+        // silently hide what the image shipped there — so the spec is
+        // refused rather than translated into a different semantic.
+        return Err(
+            "kubernetes runner pods cannot honor writable_dirs (an emptyDir is empty, not \
+             seeded from the image)"
+                .to_string(),
+        );
+    }
+    let tmpfs: Vec<&str> = spec
+        .tmpfs
+        .iter()
+        .map(|entry| {
+            // k8s has no tmpfs option syntax — only the path translates.
+            entry
+                .split_once(':')
+                .map_or(entry.as_str(), |(path, _)| path)
+        })
+        .collect();
+    if spec.tmpfs.iter().any(|entry| {
+        entry
+            .split_once(':')
+            .is_some_and(|(_, opts)| !opts.is_empty())
+    }) {
+        return Err(
+            "kubernetes runner pods cannot honor tmpfs mount options (emptyDir has none)"
+                .to_string(),
+        );
+    }
     let (claim, sub_path) = match &spec.mount {
         Some(RunnerMount::Volume { volume, subpath }) => (volume.clone(), subpath.clone()),
         Some(RunnerMount::Bind { host_dir }) => {
@@ -160,6 +196,37 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
     if let Some(sub) = &sub_path {
         volume_mount["subPath"] = json!(sub);
     }
+    let mut volume_mounts = vec![volume_mount];
+    let mut volumes = vec![json!({
+        "name": "workspace",
+        "persistentVolumeClaim": { "claimName": claim },
+    })];
+    for (index, path) in tmpfs.iter().enumerate() {
+        let name = format!("tmpfs-{index}");
+        volumes.push(json!({
+            "name": name,
+            "emptyDir": { "medium": "Memory" },
+        }));
+        volume_mounts.push(json!({
+            "name": name,
+            "mountPath": path,
+        }));
+    }
+
+    let mut security_context = json!({ "allowPrivilegeEscalation": false });
+    if !spec.cap_drop.is_empty() || !spec.cap_add.is_empty() {
+        let mut capabilities = serde_json::Map::new();
+        if !spec.cap_drop.is_empty() {
+            capabilities.insert("drop".to_string(), json!(spec.cap_drop));
+        }
+        if !spec.cap_add.is_empty() {
+            capabilities.insert("add".to_string(), json!(spec.cap_add));
+        }
+        security_context["capabilities"] = Value::Object(capabilities);
+    }
+    if spec.read_only_rootfs {
+        security_context["readOnlyRootFilesystem"] = json!(true);
+    }
 
     let mut pod_spec = json!({
         "restartPolicy": "Never",
@@ -173,19 +240,16 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
             "stdin": true,
             "stdinOnce": false,
             "tty": false,
-            "volumeMounts": [volume_mount],
+            "volumeMounts": volume_mounts,
             "resources": {
                 "limits": {
                     "memory": format!("{memory_mi}Mi"),
                     "cpu": format!("{milli_cpu}m"),
                 }
             },
-            "securityContext": { "allowPrivilegeEscalation": false },
+            "securityContext": security_context,
         }],
-        "volumes": [{
-            "name": "workspace",
-            "persistentVolumeClaim": { "claimName": claim },
-        }],
+        "volumes": volumes,
     });
     if let Some(node) = &opts.node_name {
         pod_spec["nodeName"] = json!(node);
@@ -438,8 +502,8 @@ pub mod kube_api {
 
             Ok(RunningRunner {
                 container_id: name,
-                events: event_rx,
-                stdin: stdin_tx,
+                events: event_rx.into(),
+                stdin: stdin_tx.into(),
             })
         }
 
@@ -582,6 +646,11 @@ mod tests {
             user: None,
             extra_mounts: Vec::new(),
             runtime: None,
+            cap_drop: vec!["ALL".to_string()],
+            cap_add: Vec::new(),
+            read_only_rootfs: false,
+            tmpfs: Vec::new(),
+            writable_dirs: Vec::new(),
         }
     }
 
@@ -690,11 +759,12 @@ mod tests {
             |s| s.user = Some("0".into()),
             |s| s.runtime = Some("runsc".into()),
             |s| {
-                s.extra_mounts.push(super::super::container_backend::VolumeMount {
-                    volume: "bundle".into(),
-                    target: "/cognia".into(),
-                    read_only: true,
-                })
+                s.extra_mounts
+                    .push(super::super::container_backend::VolumeMount {
+                        volume: "bundle".into(),
+                        target: "/cognia".into(),
+                        read_only: true,
+                    })
             },
         ];
         for set in sandbox_fields {
@@ -709,6 +779,56 @@ mod tests {
         assert!(runner_pod_manifest(&no_workspace, &opts())
             .unwrap_err()
             .contains("workspace mount"));
+    }
+
+    #[test]
+    fn capability_and_readonly_bounds_land_on_the_security_context() {
+        let mut hardened = spec(RunnerMount::Volume {
+            volume: "v".into(),
+            subpath: None,
+        });
+        hardened.cap_drop = vec!["ALL".into()];
+        hardened.cap_add = vec!["CHOWN".into()];
+        hardened.read_only_rootfs = true;
+        hardened.tmpfs = vec!["/tmp".into(), "/run".into()];
+
+        let manifest = runner_pod_manifest(&hardened, &opts()).expect("manifest");
+        let container = &manifest["spec"]["containers"][0];
+        assert_eq!(
+            container["securityContext"]["capabilities"]["drop"][0],
+            "ALL"
+        );
+        assert_eq!(
+            container["securityContext"]["capabilities"]["add"][0],
+            "CHOWN"
+        );
+        assert_eq!(container["securityContext"]["readOnlyRootFilesystem"], true);
+        // Each tmpfs path is an in-memory emptyDir paired with a mount.
+        assert_eq!(
+            manifest["spec"]["volumes"][1]["emptyDir"]["medium"],
+            "Memory"
+        );
+        assert_eq!(container["volumeMounts"][1]["mountPath"], "/tmp");
+        assert_eq!(container["volumeMounts"][2]["mountPath"], "/run");
+    }
+
+    #[test]
+    fn writable_dirs_and_tmpfs_options_are_refused_not_half_applied() {
+        let mut seeded = spec(RunnerMount::Volume {
+            volume: "v".into(),
+            subpath: None,
+        });
+        seeded.writable_dirs = vec!["/home/agent".into()];
+        let err = runner_pod_manifest(&seeded, &opts()).unwrap_err();
+        assert!(err.contains("writable_dirs"), "{err}");
+
+        let mut with_opts = spec(RunnerMount::Volume {
+            volume: "v".into(),
+            subpath: None,
+        });
+        with_opts.tmpfs = vec!["/run:size=64m".into()];
+        let err = runner_pod_manifest(&with_opts, &opts()).unwrap_err();
+        assert!(err.contains("tmpfs"), "{err}");
     }
 
     #[tokio::test]

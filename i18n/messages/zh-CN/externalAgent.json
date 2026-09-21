@@ -290,7 +290,7 @@
     "sandboxedUntiered": "沙箱",
     "tooltip": {
       "bundle": "Agent 运行时包：{tag}（{libc}）",
-      "credentials": "凭据：该主机自身的凭据（{mode}）；暂不支持按沙箱签发的网关票据",
+      "credentials": "凭据：{mode} —— 宿主 provider 凭据在容器启动前即被剥离",
       "egressEnforced": "网络：{tier}，已强制执行",
       "egressNotEnforced": "网络：{tier}，仅记录、未强制执行",
       "image": "镜像：{image}",
@@ -652,7 +652,17 @@
     },
     "devinPresetDescription": "通过原生 ACP 服务运行 Devin，复用已有的 CLI 登录。连接后可选择 SWE-2 等模型。 如需修改文件，请选择“接受编辑（Code）”模式。 每个会话均可使用 Cognia 工具和 Devin 原生工具。",
     "opencodeV2EndpointPlaceholder": "留空以发现本地服务",
-    "opencodeV2EndpointHint": "本地发现使用临时认证。填写原生服务地址时，请使用服务密码；Basic Auth 用户名默认为 opencode。可选 API 密钥用于采用 Bearer 认证的代理服务。"
+    "opencodeV2EndpointHint": "本地发现使用临时认证。填写原生服务地址时，请使用服务密码；Basic Auth 用户名默认为 opencode。可选 API 密钥用于采用 Bearer 认证的代理服务。",
+    "allAgents": "全部 Agent",
+    "navConfigure": "配置",
+    "fleetBannerConnected": "{total} 个 Agent 中 {connected} 个已连接",
+    "fleetBannerCollapsed": "{connected}/{total} 已连接",
+    "fleetHideSummary": "收起概览",
+    "fleetShowSummary": "展开概览",
+    "inspectorTabOverview": "概览",
+    "inspectorTabConnection": "连接",
+    "inspectorTabAdvanced": "高级",
+    "inspectorUnsaved": "有未保存的更改"
   },
   "statusConnected": "已连接",
   "statusConnecting": "连接中",
@@ -726,5 +736,39 @@
     "modelsLoaded": "已更新账号模型信息。",
     "unknown": "未知",
     "outputUnknown": "最大输出：未知"
+  },
+  "readiness": {
+    "pipelineLabel": "Agent 就绪度",
+    "dotsLabel": "就绪度:{summary}",
+    "steps": {
+      "configured": "已配置",
+      "runnable": "可运行",
+      "connected": "已连接",
+      "routed": "已接入路由"
+    },
+    "stepStates": {
+      "done": "完成",
+      "current": "进行中",
+      "failed": "失败",
+      "todo": "待完成",
+      "off": "不适用"
+    },
+    "states": {
+      "disabled": "已禁用",
+      "blocked": "受阻",
+      "error": "错误",
+      "connecting": "连接中",
+      "connected": "已连接",
+      "off": "未连接",
+      "checking": "检查中…",
+      "ready": "就绪"
+    },
+    "actions": {
+      "enable": "启用",
+      "inspect": "查看详情",
+      "retry": "重试",
+      "connect": "连接",
+      "addRule": "添加路由规则"
+    }
   }
 }

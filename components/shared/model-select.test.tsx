@@ -3,6 +3,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 import { ModelSelect, groupByProvider, resolveOptionModelName } from "./model-select"
 import { useSettingsStore } from "@/stores/settings"
@@ -41,9 +42,11 @@ function seedSettings() {
 
 function renderSelect(props: Partial<React.ComponentProps<typeof ModelSelect>> = {}) {
   return render(
-    <NextIntlClientProvider locale="en" messages={enMessages}>
-      <ModelSelect model={ANTHROPIC_MODEL} provider="anthropic" onSelect={jest.fn()} {...props} />
-    </NextIntlClientProvider>
+    <TooltipProvider>
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelSelect model={ANTHROPIC_MODEL} provider="anthropic" onSelect={jest.fn()} {...props} />
+      </NextIntlClientProvider>
+    </TooltipProvider>
   )
 }
 

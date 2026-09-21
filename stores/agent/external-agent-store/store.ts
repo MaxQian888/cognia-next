@@ -37,6 +37,7 @@ type PersistedExternalAgentState = Partial<
     | "autoConnectOnStartup"
     | "showConnectionNotifications"
     | "chatFailurePolicy"
+    | "overviewBannerCollapsed"
   >
 >
 
@@ -153,6 +154,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
         autoConnectOnStartup: state.autoConnectOnStartup,
         showConnectionNotifications: state.showConnectionNotifications,
         chatFailurePolicy: state.chatFailurePolicy,
+        overviewBannerCollapsed: state.overviewBannerCollapsed,
       }),
     }
   )

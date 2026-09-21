@@ -1448,16 +1448,41 @@ export function makeUserMessage(
   }
 
   const parts: Parts = []
+  const attachedSources = new Set<string>()
   content.forEach((block, index) => {
     const entry = manifest?.[index]
-    // A video's blocks become ordinary parts tagged with its descriptor, and
-    // the renderer folds every tagged part into one card. The original file is
-    // never persisted: a native video leaves its poster in its place.
     const video = entry?.kind === "video" ? entry.video : undefined
+    const sourceId = entry?.extractedContent?.attachmentId
+    const storesPart =
+      block.type === "text" ||
+      block.type === "image" ||
+      (block.type === "document" && (!video || !!video.poster))
+    // A source may produce twenty frames plus a description. Keep its complete
+    // extraction and original on just the first stored part, while every frame
+    // retains its video group descriptor for rendering.
+    const firstSourcePart = storesPart && (!sourceId || !attachedSources.has(sourceId))
+    const attachment =
+      entry && firstSourcePart
+        ? {
+            ...(entry.extractedContent ? { extractedContent: entry.extractedContent } : {}),
+            ...(entry.original
+              ? { attachmentOriginal: entry.original, attachmentOriginalMediaType: entry.mediaType }
+              : {}),
+          }
+        : {}
+    if (sourceId && firstSourcePart) attachedSources.add(sourceId)
+    // The renderer folds tagged parts into one card. Originals are retained in
+    // the independent source store; a native video's visible part is its poster.
     if (video) {
-      const tag = { [VIDEO_ATTACHMENT_PART_KEY]: video.info }
+      const tag = { [VIDEO_ATTACHMENT_PART_KEY]: video.info, ...attachment }
       if (block.type === "text") {
-        parts.push({ type: "text", text: block.text, state: "done", ...tag } as unknown as Part)
+        parts.push({
+          type: "file",
+          text: block.text,
+          filename: entry!.filename,
+          mediaType: "text/plain",
+          ...tag,
+        } as unknown as Part)
       } else if (block.type === "image") {
         parts.push({
           type: "file",
@@ -1480,7 +1505,7 @@ export function makeUserMessage(
     if (block.type === "text") {
       // Only a block the manifest claims is an attachment becomes a file card;
       // the user's own prose (and merged link context) stays a text part.
-      if (entry?.kind === "document") {
+      if (entry) {
         parts.push({
           type: "file",
           mediaType: entry.mediaType || "text/plain",
@@ -1489,6 +1514,7 @@ export function makeUserMessage(
           // would balloon every message row). The extracted text is what the
           // model saw and what the card shows.
           text: block.text,
+          ...attachment,
         } as unknown as Part)
         return
       }
@@ -1504,6 +1530,19 @@ export function makeUserMessage(
         url: dataUrl,
         mediaType: block.source.media_type,
         ...(entry?.filename ? { filename: entry.filename } : {}),
+        ...attachment,
+      } as unknown as Part)
+    } else if (block.type === "document") {
+      // Native PDFs also need a provenance card. Original bytes belong in the
+      // independent source store, never duplicated as base64 in message rows.
+      parts.push({
+        type: "file",
+        mediaType: block.source.media_type,
+        filename: entry?.filename ?? "attachment",
+        ...(entry?.extractedContent
+          ? { text: entry.extractedContent.segments.map((segment) => segment.text).join("\n\n") }
+          : {}),
+        ...attachment,
       } as unknown as Part)
     }
   })

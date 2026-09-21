@@ -55,6 +55,7 @@ import type {
 } from "@/types/execution/run"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
 import { SquadReviewForm, isRenderableSquadReview } from "./squad-review-form"
+import { DelegateReviewPane, isFusionApprovalInterrupt } from "./delegate-review-pane"
 import { DiffViewer } from "@/components/source-control/diff-viewer"
 import type { BotWorkspaceSnapshot } from "@/lib/plugin/workspace/bot-run"
 
@@ -138,6 +139,16 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
       interrupt.status === "pending" &&
       interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id
   )
+  // A Router + Fusion delegate run parked on a person (ADR-0188 B4). Like the
+  // Squad review above, its decision is typed — what is approved is a digest
+  // over paths and a revision — so `DelegateReviewPane` owns approve / deny
+  // and the bare verbs are hidden.
+  const pendingFusionApproval = interrupts.find(
+    (interrupt) =>
+      isFusionApprovalInterrupt(interrupt) &&
+      interrupt.status === "pending" &&
+      interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id
+  )
   const botEvidence = botDetailRecord(botResult?.output) ?? pendingBotApproval?.approvalDetail
   const botSnapshot = botSnapshotFrom(botEvidence)
   const botTests = botTestsFrom(botEvidence)
@@ -169,7 +180,10 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         actions={actions}
         busy={busy}
         hideDecisionVerbs={
-          pendingReview !== undefined || row.kind === "bot" || pendingBotApproval !== undefined
+          pendingReview !== undefined ||
+          row.kind === "bot" ||
+          pendingBotApproval !== undefined ||
+          pendingFusionApproval !== undefined
         }
         onDispatch={(action) => void dispatch(action)}
       />
@@ -225,6 +239,19 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             </p>
           )}
         </section>
+      )}
+
+      {/* A Router + Fusion run (`kind: "fusion"`). The pane renders nothing
+          unless the run is a delegation and Router + Fusion is switched on —
+          it reads that behind the gate — so every other run keeps this pane
+          exactly as it was. */}
+      {row.kind === "fusion" && (
+        <DelegateReviewPane
+          runId={row.runId}
+          interrupt={pendingFusionApproval ?? null}
+          busy={busy}
+          onDecide={(action) => void dispatch(action)}
+        />
       )}
 
       {actions.can(controlRow, "steer") && (

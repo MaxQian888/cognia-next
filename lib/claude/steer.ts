@@ -117,17 +117,18 @@ export function frameSteerQueue(entries: readonly string[]): string {
 }
 
 /** Framing text of a send payload — the first text block (or the whole string). */
-export function steerTextOf(content: SendContent): string {
+export function steerTextOf(content: SendContent, attachmentCount = 0): string {
   if (typeof content === "string") return content.trim()
-  const block = content.find((b) => b.type === "text") as { text?: string } | undefined
+  const block = content.find((b, index) => index >= attachmentCount && b.type === "text") as
+    { text?: string } | undefined
   return (block?.text ?? "").trim()
 }
 
-/** Non-text content blocks of a send (images/documents) — preserved on a queued
- * steer so its attachments survive the replay. Empty for a plain-string send. */
-export function steerBlocksOf(content: SendContent): SendContentBlock[] {
+/** Attachment blocks, including manifest-tagged extracted text, survive queue replay.
+ * Other text belongs to the request; plain-string sends have no attachment blocks. */
+export function steerBlocksOf(content: SendContent, attachmentCount = 0): SendContentBlock[] {
   if (typeof content === "string") return []
-  return content.filter((b) => b.type !== "text")
+  return content.filter((b, index) => index < attachmentCount || b.type !== "text")
 }
 
 /**

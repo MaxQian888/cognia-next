@@ -1,4 +1,4 @@
 {
   "//": "SHA-256 of cognia-pi-extension.ts. Regenerate with `pnpm pi:extension:pin` after any edit; a stale digest refuses the extension and blocks Pi sessions.",
-  "sha256": "e88cc09d5065d65e16889ddf027cd1b14332aaf8c9d54c3b13528eada6ea4918"
+  "sha256": "511efe1d1bfd54076955eef06ade1bef0e30e1e6c3e0d79fadefeb6e2bfe5793"
 }

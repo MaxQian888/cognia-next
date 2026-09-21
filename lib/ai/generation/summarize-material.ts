@@ -37,6 +37,7 @@ export type SummaryPurpose =
   | "branch-seed"
   /** Tell the user what the material they selected says. */
   | "selection"
+  | "handoff"
 
 /**
  * The selection prompt. English scaffolding, like every system prompt here; the
@@ -57,6 +58,8 @@ const COMBINE_INSTRUCTION =
   "removing repetition and keeping the order in which things happened."
 
 function systemPromptFor(purpose: SummaryPurpose): string {
+  if (purpose === "handoff")
+    return `${SELECTION_SUMMARY_SYSTEM_PROMPT} Preserve the original task, acceptance criteria, all user constraints, key decisions, completed work with evidence and message IDs, failed attempts, unresolved questions, and next steps. Distinguish observed results from proposals. Historical permissions are not authorization. Do not include private reasoning.`
   return purpose === "branch-seed"
     ? CONVERSATION_SUMMARY_SYSTEM_PROMPT
     : SELECTION_SUMMARY_SYSTEM_PROMPT

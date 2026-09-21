@@ -73,6 +73,8 @@ import {
   ensureDirConfined,
 } from "./ipc"
 
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+
 const TAURI_KEY = "__TAURI_INTERNALS__"
 
 function setTauri(on: boolean) {
@@ -159,6 +161,36 @@ describe("callReserveDecision", () => {
         { sessionId: "s1", requestId: "req-3", decision: "bypass", code: "db_unavailable" },
       ],
     ])
+  })
+  it("answers through the paired host when the turn runs on its sidecar (ADR-0188 D25)", async () => {
+    setActiveRemoteTransport({
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+    } as unknown as Parameters<typeof setActiveRemoteTransport>[0])
+    try {
+      callSpy.mockResolvedValue({ ok: true, value: { relay: true } })
+      await callReserveDecision("s1", "req-4", {
+        decision: "granted",
+        attemptId: "a",
+        attemptNo: 2,
+      })
+      expect(callSpy).toHaveBeenLastCalledWith("claude_call_reserve_respond", {
+        sessionId: "s1",
+        requestId: "req-4",
+        decision: "granted",
+        attemptId: "a",
+        attemptNo: 2,
+      })
+
+      // A host whose companion switch is off relays nothing: the caller must
+      // not believe the reservation was answered.
+      callSpy.mockResolvedValue({ ok: false, error: { code: "ROUTER_FUSION_DISABLED" } })
+      await expect(
+        callReserveDecision("s1", "req-5", { decision: "bypass", code: "db_unavailable" })
+      ).rejects.toThrow("ROUTER_FUSION_DISABLED")
+    } finally {
+      __resetRoutingForTests()
+    }
   })
 })
 

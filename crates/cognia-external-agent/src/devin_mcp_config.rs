@@ -35,7 +35,10 @@ pub fn validate_target(
     Ok(())
 }
 
-fn parse_jsonc(raw: &str) -> Result<Map<String, Value>, String> {
+/// Parse a bounded JSONC object without changing quoted string contents.
+/// Shared with environment builds so decoded substitutions are validated
+/// before any external CLI can resolve them.
+pub fn parse_jsonc(raw: &str) -> Result<Map<String, Value>, String> {
     if raw.len() > MAX_JSON_BYTES {
         return Err(INVALID.into());
     }
@@ -334,12 +337,22 @@ pub fn prepare(
     let cwd = config.cwd.as_deref().ok_or(INVALID)?;
     let bot_isolation = config.env.get("COGNIA_BOT_ISOLATION").map(String::as_str) == Some("1");
     if bot_isolation {
-        let state = config.env.get("COGNIA_BOT_STATE_DIR").filter(|value| Path::new(value).is_absolute()).ok_or("Bot isolation requires an owned state directory")?;
+        let state = config
+            .env
+            .get("COGNIA_BOT_STATE_DIR")
+            .filter(|value| Path::new(value).is_absolute())
+            .ok_or("Bot isolation requires an owned state directory")?;
         let credential = home.join(".local/share/devin/credentials.toml");
         let destination = Path::new(state).join("data/devin/credentials.toml");
         if credential.exists() && !destination.exists() {
-            if !fs::symlink_metadata(&credential).map_err(|_| "Cannot inspect Devin credential")?.is_file() { return Err("Devin credential must be a regular file".into()); }
-            fs::create_dir_all(destination.parent().unwrap()).map_err(|_| "Cannot prepare Bot model credential")?;
+            if !fs::symlink_metadata(&credential)
+                .map_err(|_| "Cannot inspect Devin credential")?
+                .is_file()
+            {
+                return Err("Devin credential must be a regular file".into());
+            }
+            fs::create_dir_all(destination.parent().unwrap())
+                .map_err(|_| "Cannot prepare Bot model credential")?;
             copy_private(&credential, &destination, &mut (0, 0), &mut HashSet::new())?;
         }
     }
@@ -365,13 +378,24 @@ pub fn prepare(
             if entry.file_name() == "devin" && bot_isolation {
                 let current = read_config(&entry.path().join("config.json"))?;
                 let mut selected = Map::new();
-                if let Some(version) = current.get("version").filter(|value| value.is_number()) { selected.insert("version".into(), version.clone()); }
-                if let Some(org) = current.get("devin").and_then(|value| value.get("org_id")).filter(|value| value.is_string()) {
+                if let Some(version) = current.get("version").filter(|value| value.is_number()) {
+                    selected.insert("version".into(), version.clone());
+                }
+                if let Some(org) = current
+                    .get("devin")
+                    .and_then(|value| value.get("org_id"))
+                    .filter(|value| value.is_string())
+                {
                     selected.insert("devin".into(), serde_json::json!({"org_id": org}));
                 }
                 selected.insert("shell".into(), serde_json::json!({"setup_complete": true}));
-                fs::create_dir_all(&destination).map_err(|_| "Cannot create isolated Devin configuration")?;
-                fs::write(destination.join("config.json"), serde_json::to_vec(&selected).map_err(|_| INVALID)?).map_err(|_| "Cannot write isolated Devin configuration")?;
+                fs::create_dir_all(&destination)
+                    .map_err(|_| "Cannot create isolated Devin configuration")?;
+                fs::write(
+                    destination.join("config.json"),
+                    serde_json::to_vec(&selected).map_err(|_| INVALID)?,
+                )
+                .map_err(|_| "Cannot write isolated Devin configuration")?;
             } else if entry.file_name() == "devin" {
                 copy_private(
                     &entry.path(),
@@ -397,7 +421,11 @@ pub fn prepare(
     let mut primary = read_config(&config_filename)?;
     let mut merged = if bot_isolation {
         primary.remove("mcpServers");
-        fs::write(&config_filename, serde_json::to_vec(&primary).map_err(|_| INVALID)?).map_err(|_| "Cannot write isolated Devin configuration")?;
+        fs::write(
+            &config_filename,
+            serde_json::to_vec(&primary).map_err(|_| INVALID)?,
+        )
+        .map_err(|_| "Cannot write isolated Devin configuration")?;
         dedicated.remove("mcpServers");
         Map::new()
     } else {
@@ -500,18 +528,37 @@ mod tests {
     #[test]
     fn bot_configuration_copies_only_model_credentials_and_drops_inherited_mcp() {
         let home = tempfile::tempdir().unwrap();
-        write(home.path(), ".local/share/devin/credentials.toml", "token = 'model-only'");
-        write(home.path(), ".config/devin/config.json", r#"{"mcpServers":{"github":{"command":"gh","env":{"GH_TOKEN":"secret"}}}}"#);
+        write(
+            home.path(),
+            ".local/share/devin/credentials.toml",
+            "token = 'model-only'",
+        );
+        write(
+            home.path(),
+            ".config/devin/config.json",
+            r#"{"mcpServers":{"github":{"command":"gh","env":{"GH_TOKEN":"secret"}}}}"#,
+        );
         write(home.path(), ".config/gh/hosts.yml", "secret");
         let state = home.path().join("bot-state");
         let mut input = config(home.path(), payload("safe-host-tool"));
         input.env.insert("COGNIA_BOT_ISOLATION".into(), "1".into());
-        input.env.insert("COGNIA_BOT_STATE_DIR".into(), state.to_string_lossy().into_owned());
-        let guard = prepare(&mut input, home.path(), home.path(), None).unwrap().unwrap();
+        input.env.insert(
+            "COGNIA_BOT_STATE_DIR".into(),
+            state.to_string_lossy().into_owned(),
+        );
+        let guard = prepare(&mut input, home.path(), home.path(), None)
+            .unwrap()
+            .unwrap();
         assert!(read(guard.path())["mcpServers"].get("github").is_none());
         assert!(!guard.path().join("gh").exists());
-        assert_eq!(fs::read_to_string(state.join("data/devin/credentials.toml")).unwrap(), "token = 'model-only'");
-        assert!(!input.args.windows(2).any(|pair| pair == ["--readable", &home.path().join(".config").to_string_lossy()]));
+        assert_eq!(
+            fs::read_to_string(state.join("data/devin/credentials.toml")).unwrap(),
+            "token = 'model-only'"
+        );
+        assert!(!input
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--readable", &home.path().join(".config").to_string_lossy()]));
     }
 
     #[test]

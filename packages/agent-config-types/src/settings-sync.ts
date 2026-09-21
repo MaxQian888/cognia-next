@@ -188,6 +188,7 @@ export const SETTINGS_SYNC = {
   welcomeStyle: { category: "desktop-only" },
   welcomeHidden: { category: "desktop-only" },
   welcomeStats: { category: "desktop-only" },
+  welcomeHints: { category: "desktop-only" },
   mcpPanel: { category: "desktop-only" },
   settingsSidebarCollapsedGroups: { category: "desktop-only" },
   memory: { category: "desktop-only" },

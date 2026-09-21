@@ -2279,6 +2279,14 @@ export type SessionOrigin =
   { kind: "gateway-api"; keyId: string; keyName: string }
 
 export interface ChatSession {
+  /** Durable source/target link for an explicitly exported Codex snapshot. */
+  codexHandoff?: {
+    threadId: string
+    deepLink: string
+    exportedAt: number
+    returnedSessionId?: string
+  }
+
   id: string
   /** Who opened this conversation, when it was not the app's own UI. */
   origin?: SessionOrigin
@@ -2643,6 +2651,8 @@ export interface ChatSession {
    * schema bump.
    */
   handoffSource?: "cli" | "thread-handoff"
+  /** Durable CLI receipt; retries reopen the same imported snapshot without replacing edits. */
+  cliHandoffReceipt?: { sourceSessionId: string; payloadDigest: string }
   /**
    * Cross-host handoff lock (ADR-0103). **PRESENCE MEANS THIS ROW IS READ-ONLY.**
    *
@@ -3450,6 +3460,25 @@ export interface RouterFusionRunStamp {
   acceptanceProfile: string
 }
 
+/**
+ * What a delegate run's journal says it went through (ADR-0188 B4): its
+ * subtasks, the sessions they took, the repairs and takeovers the run spent,
+ * the sandbox tier, and how the change was delivered. Mirrors
+ * `DelegateTimeline` in `@cognia/router-fusion/workflows/run-timeline`.
+ */
+export interface RouterFusionDelegateTimeline {
+  subtasks: { planned: number | null; completed: number }
+  attempts: number
+  repairs: number
+  takeovers: number
+  workerTurns: number
+  toolOperations: number
+  sandboxTier: string | null
+  patchFiles: number | null
+  delivery: string | null
+  approvals: { requested: number; pending: { kind: string } | null }
+}
+
 /** What a fusion run's journal says it went through, for the run card. Never model output. */
 export interface RouterFusionRunTimeline {
   phases: Array<{ phase: string; step: string | null; at: number }>
@@ -3466,6 +3495,11 @@ export interface RouterFusionRunTimeline {
   degraded: { reason: string } | null
   verification: { status: string; level: string } | null
   compactions: number
+  /**
+   * Only a delegate run has one, and only from B4 on: a summary written
+   * before delegate shipped simply has no field here.
+   */
+  delegate?: RouterFusionDelegateTimeline | null
 }
 
 /** A finished (or running) chat fusion run, as the answer message carries it. */
@@ -4869,6 +4903,13 @@ export interface AppSettings {
   welcomeStyle?: "rich" | "minimal"
   welcomeHidden?: { tryPrompt?: boolean }
   welcomeStats?: import("@/lib/chat/welcome-stats-prefs").StoredWelcomeStatsPrefs
+  /**
+   * User-written example prompts for the hero composer's typewriter hints.
+   * When at least one non-blank entry exists the carousel rotates through
+   * THIS list instead of the generated starters/curated pool. Edited one
+   * per line in Settings → Appearance → Personalization.
+   */
+  welcomeHints?: string[]
   /**
    * Persisted view preferences for the MCP servers management panel
    * (`/settings?section=mcp`). Lives in settings JSON (same pattern as
@@ -6860,3 +6901,4 @@ export interface Team {
   createdAt: number
   updatedAt: number
 }
+export type { AttachmentExtractedContent, AttachmentSegment, AttachmentLocator } from "./attachment"

@@ -1,4 +1,26 @@
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
+
+// The Router + Fusion gate reads the settings through this seam. `null` is what
+// every user has by default — the switch off — so every test below the
+// Router + Fusion block runs the judge exactly as it always ran.
+const mockGateSettings = jest.fn<Promise<AppSettings | null>, []>(async () => null)
+jest.mock("@/lib/router-fusion/gate/current-settings", () => ({
+  currentRouterFusionGateSettings: () => mockGateSettings(),
+}))
+// The classifier is loaded only behind the gate; the counter proves it.
+const mockClassifierLoads = jest.fn()
+const mockJudgeWithClassifier = jest.fn()
+const mockClassifierImport = { fail: false }
+jest.mock("@/lib/router-fusion/routing/llm-classifier", () => {
+  mockClassifierLoads()
+  if (mockClassifierImport.fail) throw new Error("chunk load failed")
+  return {
+    judgeDifficultyWithClassifier: (...args: unknown[]) => mockJudgeWithClassifier(...args),
+  }
+})
+
+import { __resetBreakerForTesting, getBreakerSnapshot } from "@/lib/router-fusion/gate/breaker"
 
 import {
   __resetDifficultyJudgeCache,
@@ -175,5 +197,177 @@ describe("createDifficultyJudge", () => {
       tier: "powerful",
     })
     expect(seen).toContain("balanced")
+  })
+})
+
+// ── Router + Fusion: the LLM classifier absorbs the judge (ADR-0188 D18) ──────
+
+function fusionSettings(
+  overrides: { enabled?: unknown; utilityLedger?: unknown; classifier?: unknown } = {}
+): AppSettings {
+  return {
+    routerFusion: {
+      enabled: overrides.enabled ?? true,
+      surfaces: { utilityLedger: overrides.utilityLedger ?? true },
+      llmClassifier: {
+        enabled: overrides.classifier ?? true,
+        timeoutMs: 1500,
+        cacheTtlSeconds: 600,
+      },
+    },
+  } as unknown as AppSettings
+}
+
+describe("judgeDifficulty — Router + Fusion off (off-path parity)", () => {
+  beforeEach(() => {
+    __resetDifficultyJudgeCache()
+    __resetBreakerForTesting()
+    mockGateSettings.mockReset()
+    mockClassifierLoads.mockClear()
+    mockJudgeWithClassifier.mockReset()
+  })
+
+  it("[ACC:OFF-02] judges exactly as before, with nothing of Router + Fusion loaded, whatever else is set", async () => {
+    const offs: Array<AppSettings | null> = [
+      null,
+      fusionSettings({ enabled: false }),
+      fusionSettings({ utilityLedger: false }),
+      fusionSettings({ classifier: false }),
+      fusionSettings({ classifier: "true" }),
+      {} as AppSettings,
+    ]
+    for (const settings of offs) {
+      __resetDifficultyJudgeCache()
+      mockGateSettings.mockResolvedValue(settings)
+      const prompts: unknown[] = []
+      const verdict = await judgeDifficulty(
+        client(async (prompt, opts) => {
+          prompts.push([prompt, opts])
+          return '{"tier":"powerful","confidence":0.7}'
+        }),
+        { promptText: "  refactor the parser  ", deterministicTier: "balanced" }
+      )
+      // The same verdict, from the same request, as the judge has always made.
+      expect(verdict).toEqual({ tier: "powerful", confidence: 0.7 })
+      expect(prompts).toEqual([
+        [
+          "Request:\nrefactor the parser\nA heuristic guessed: balanced. Correct it only if clearly wrong.",
+          expect.objectContaining({ temperature: 0, maxTokens: 24 }),
+        ],
+      ])
+    }
+    expect(mockClassifierLoads).not.toHaveBeenCalled()
+    expect(mockJudgeWithClassifier).not.toHaveBeenCalled()
+  })
+
+  it("runs the judge as before when the settings cannot be read", async () => {
+    mockGateSettings.mockRejectedValue(new Error("store unavailable"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    expect(await judgeDifficulty(client(complete), { promptText: "unreadable" })).toEqual({
+      tier: "fast",
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(mockClassifierLoads).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+
+describe("judgeDifficulty — absorbed by the LLM classifier", () => {
+  beforeEach(() => {
+    __resetDifficultyJudgeCache()
+    __resetBreakerForTesting()
+    mockGateSettings.mockReset()
+    mockJudgeWithClassifier.mockReset()
+  })
+
+  it("answers with the classifier when utilityLedger is on and the classifier enabled", async () => {
+    const settings = fusionSettings()
+    mockGateSettings.mockResolvedValue(settings)
+    mockJudgeWithClassifier.mockResolvedValue({ tier: "powerful" })
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    expect(
+      await judgeDifficulty(client(complete), {
+        promptText: "design a lock-free queue",
+        deterministicTier: "balanced",
+      })
+    ).toEqual({ tier: "powerful" })
+    // The judge's own model is never asked: one classification replaces it.
+    expect(complete).not.toHaveBeenCalled()
+    expect(mockJudgeWithClassifier).toHaveBeenCalledWith(settings, {
+      promptText: "design a lock-free queue",
+    })
+    expect(getBreakerSnapshot("utilityLedger").consecutiveFaults).toBe(0)
+  })
+
+  it("keeps the deterministic tier when the classifier falls back, without a second opinion", async () => {
+    mockGateSettings.mockResolvedValue(fusionSettings())
+    mockJudgeWithClassifier.mockResolvedValue(null)
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    expect(await judgeDifficulty(client(complete), { promptText: "anything" })).toBeNull()
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it("delegates the same way through createDifficultyJudge", async () => {
+    mockGateSettings.mockResolvedValue(fusionSettings())
+    mockJudgeWithClassifier.mockResolvedValue({ tier: "fast" })
+    const judge = createDifficultyJudge(() => client(async () => '{"tier":"powerful"}'))
+    expect(await judge({ promptText: "short", deterministicTier: "balanced" })).toEqual({
+      tier: "fast",
+    })
+  })
+
+  it("[ACC:ISO-01] falls back to the original judge, unledgered, on an infrastructure fault, and counts it", async () => {
+    mockGateSettings.mockResolvedValue(fusionSettings())
+    mockJudgeWithClassifier.mockRejectedValue(new Error("classifier exploded"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const complete = jest.fn(async () => '{"tier":"balanced"}')
+    expect(await judgeDifficulty(client(complete), { promptText: "fault" })).toEqual({
+      tier: "balanced",
+    })
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(getBreakerSnapshot("utilityLedger").consecutiveFaults).toBe(1)
+    warn.mockRestore()
+  })
+
+  it("runs the original judge while the utilityLedger surface is tripped", async () => {
+    mockGateSettings.mockResolvedValue({
+      routerFusion: {
+        ...(fusionSettings().routerFusion as object),
+        trippedSurfaces: { utilityLedger: { trippedAt: 1, reason: "db_unavailable" } },
+      },
+    } as unknown as AppSettings)
+    const complete = jest.fn(async () => '{"tier":"fast"}')
+    expect(await judgeDifficulty(client(complete), { promptText: "tripped" })).toEqual({
+      tier: "fast",
+    })
+    expect(mockJudgeWithClassifier).not.toHaveBeenCalled()
+  })
+
+  it("reports a classifier that fails to load as an import fault and judges on the original path", async () => {
+    // Forget every loaded module so the classifier's (mocked) chunk is loaded
+    // anew — and fails. The judge and breaker imported above keep their
+    // instances, which is what production has: the judge is loaded, the chunk
+    // behind the gate is not.
+    jest.resetModules()
+    mockClassifierImport.fail = true
+    try {
+      mockGateSettings.mockResolvedValue(fusionSettings())
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      const complete = jest.fn(async () => '{"tier":"powerful"}')
+      expect(await judgeDifficulty(client(complete), { promptText: "load" })).toEqual({
+        tier: "powerful",
+      })
+      expect(complete).toHaveBeenCalledTimes(1)
+      expect(mockJudgeWithClassifier).not.toHaveBeenCalled()
+      expect(getBreakerSnapshot("utilityLedger")).toMatchObject({ consecutiveFaults: 1 })
+      expect(warn).toHaveBeenCalledWith(
+        "[router-fusion] the difficulty judge ran on the original path, unledgered",
+        expect.objectContaining({ code: "import_failed" })
+      )
+      warn.mockRestore()
+    } finally {
+      mockClassifierImport.fail = false
+    }
   })
 })

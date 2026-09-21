@@ -4473,9 +4473,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       default:
-        log.warn("Unknown session update type", {
-          type: (update as AcpSessionUpdate).sessionUpdate,
-        })
+        // Same `_`-prefixed extension convention as notification methods:
+        // vendor update kinds are optional metadata, not drift to warn on.
+        if ((update as AcpSessionUpdate).sessionUpdate?.startsWith("_")) {
+          log.debug("Ignoring extension session update", {
+            type: (update as AcpSessionUpdate).sessionUpdate,
+          })
+        } else {
+          log.warn("Unknown session update type", {
+            type: (update as AcpSessionUpdate).sessionUpdate,
+          })
+        }
         return null
     }
   }
@@ -4658,7 +4666,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
 
       default:
-        log.warn("Unknown notification type", { method: notification.method })
+        // JSON-RPC reserves the `_` prefix for implementation extensions —
+        // `_cognition.ai/*` (devin) and future vendor methods are optional
+        // parallel metadata, not drift. Warn only on unknown STANDARD names.
+        if (notification.method.startsWith("_")) {
+          log.debug("Ignoring extension notification", { method: notification.method })
+        } else {
+          log.warn("Unknown notification type", { method: notification.method })
+        }
         return null
     }
   }

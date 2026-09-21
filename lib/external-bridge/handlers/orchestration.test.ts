@@ -226,14 +226,17 @@ describe("teamRun", () => {
 
     // Already claimed → never overwritten.
     updateTeamMock.mockClear()
+    runTeamMock.mockClear()
     storeTeams = {
       t1: {
         id: "t1",
         externalPickup: { requestedAt: new Date(0), claimedBy: "other", claimedAt: new Date(1) },
       },
     }
-    await teamRun({ teamId: "t1" })
+    const refused = await teamRun({ teamId: "t1" })
     expect(updateTeamMock).not.toHaveBeenCalled()
+    expect(refused.ok).toBe(false)
+    expect(runTeamMock).not.toHaveBeenCalled()
   })
 
   it("stamps a structured claimant + claim lease (ADR 0061 P4)", async () => {

@@ -51,6 +51,7 @@ import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import type { PopoverContent } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import {
   ModelSelectorEmpty,
@@ -282,169 +283,178 @@ export function ModelSelect({
   }, [options, leadingGroups, model, provider, autoActive, t])
 
   return (
-    <ResponsivePicker
-      open={open}
-      onOpenChange={handleOpenChange}
-      title={t("title")}
-      align={align}
-      side={side}
-      testId="model-select-panel"
-      trigger={
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className={cn(
-            // Shrink-to-fit: long model ids must ellipsize inside narrow
-            // composer containers instead of overflowing the row.
-            composerChipTriggerClass,
-            className
-          )}
-          aria-label={t("switchModelAria")}
-        >
-          <CpuIcon className="size-3.5 shrink-0" />
-          {autoActive ? (
-            <span
-              className="shrink-0 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary"
-              title={t("autoBadgeHint")}
+    // `TooltipTrigger` sits INSIDE the picker's trigger slot, so the picker's
+    // own popover/drawer trigger keeps working while hover reports the
+    // tooltip. `TooltipContent` is a sibling of the picker because Radix
+    // requires it under the same `Tooltip` root as its trigger.
+    <Tooltip>
+      <ResponsivePicker
+        open={open}
+        onOpenChange={handleOpenChange}
+        title={t("title")}
+        align={align}
+        side={side}
+        testId="model-select-panel"
+        trigger={
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              className={cn(
+                // Shrink-to-fit: long model ids must ellipsize inside narrow
+                // composer containers instead of overflowing the row.
+                composerChipTriggerClass,
+                className
+              )}
+              aria-label={t("switchModelAria")}
             >
-              {t("autoBadge")}
-            </span>
-          ) : null}
-          <span className="min-w-0 truncate" title={model}>
-            {activeModelName}
-          </span>
-          <ChevronsUpDownIcon className="size-3 opacity-50" />
-        </Button>
-      }
-    >
-      <ModelSelectorInput placeholder={t("searchPlaceholder")} />
-      <ModelSelectorList>
-        {onSelectAuto ? (
-          <>
-            <ModelSelectorGroup heading={t("routingGroup")}>
-              <ModelSelectorItem
-                ref={autoActive ? positionActiveModelItem : undefined}
-                value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
-                onSelect={() => {
-                  setOpen(false)
-                  onSelectAuto()
-                }}
-                className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
-              >
-                <BrainIcon className="size-4 shrink-0 text-primary" />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className={cn("text-xs leading-none", autoActive && "font-medium")}>
-                    {t("autoModel")}
-                  </span>
-                  <span className="truncate text-[10px] leading-tight text-muted-foreground">
-                    {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
-                  </span>
+              <CpuIcon className="size-3.5 shrink-0" />
+              {autoActive ? (
+                <span
+                  className="shrink-0 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary"
+                  title={t("autoBadgeHint")}
+                >
+                  {t("autoBadge")}
                 </span>
-                <CheckIcon
-                  className={cn(
-                    "size-3.5 shrink-0 text-primary",
-                    autoActive ? "opacity-100" : "opacity-0"
-                  )}
-                />
-              </ModelSelectorItem>
-            </ModelSelectorGroup>
-            <ModelSelectorSeparator />
-          </>
-        ) : null}
-        {leadingNotice ? (
-          <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground">
-            {leadingNotice}
-          </p>
-        ) : null}
-        {groups.length === 0 ? (
-          <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
-        ) : (
-          groups.map((group, idx) => (
-            <div key={group.providerId}>
-              {idx > 0 ? <ModelSelectorSeparator /> : null}
-              {group.headingAction ? (
-                <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                  <span>{group.providerName}</span>
-                  {group.headingAction}
-                </div>
               ) : null}
-              <ModelSelectorGroup
-                heading={group.headingAction ? undefined : group.providerName}
-                aria-label={group.headingAction ? group.providerName : undefined}
-              >
-                {group.models.map((gm) => {
-                  const { id: modelId, name: modelName } = gm
-                  const isActive = modelId === model && group.providerId === provider
-                  const hasMeta =
-                    gm.contextLength !== undefined ||
-                    gm.supportsTools ||
-                    gm.supportsVision ||
-                    gm.supportsReasoning
-                  return (
-                    <ModelSelectorItem
-                      key={`${group.providerId}:${modelId}`}
-                      ref={isActive ? positionActiveModelItem : undefined}
-                      // Include both name and id so the command filter matches
-                      // either the friendly name or the raw id the user types.
-                      value={`${group.providerId} ${modelName} ${modelId}`}
-                      onSelect={() => {
-                        setOpen(false)
-                        onSelect({ providerId: group.providerId, modelId })
-                      }}
-                      className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span
-                          className={cn(
-                            "truncate text-xs leading-none",
-                            isActive && "font-medium text-foreground"
-                          )}
-                        >
-                          {modelName}
-                        </span>
-                        {modelName !== modelId ? (
-                          <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
-                            {modelId}
+              <span className="min-w-0 truncate" title={model}>
+                {activeModelName}
+              </span>
+              <ChevronsUpDownIcon className="size-3 opacity-50" />
+            </Button>
+          </TooltipTrigger>
+        }
+      >
+        <ModelSelectorInput placeholder={t("searchPlaceholder")} />
+        <ModelSelectorList>
+          {onSelectAuto ? (
+            <>
+              <ModelSelectorGroup heading={t("routingGroup")}>
+                <ModelSelectorItem
+                  ref={autoActive ? positionActiveModelItem : undefined}
+                  value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
+                  onSelect={() => {
+                    setOpen(false)
+                    onSelectAuto()
+                  }}
+                  className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+                >
+                  <BrainIcon className="size-4 shrink-0 text-primary" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className={cn("text-xs leading-none", autoActive && "font-medium")}>
+                      {t("autoModel")}
+                    </span>
+                    <span className="truncate text-[10px] leading-tight text-muted-foreground">
+                      {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
+                    </span>
+                  </span>
+                  <CheckIcon
+                    className={cn(
+                      "size-3.5 shrink-0 text-primary",
+                      autoActive ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                </ModelSelectorItem>
+              </ModelSelectorGroup>
+              <ModelSelectorSeparator />
+            </>
+          ) : null}
+          {leadingNotice ? (
+            <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+              {leadingNotice}
+            </p>
+          ) : null}
+          {groups.length === 0 ? (
+            <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+          ) : (
+            groups.map((group, idx) => (
+              <div key={group.providerId}>
+                {idx > 0 ? <ModelSelectorSeparator /> : null}
+                {group.headingAction ? (
+                  <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                    <span>{group.providerName}</span>
+                    {group.headingAction}
+                  </div>
+                ) : null}
+                <ModelSelectorGroup
+                  heading={group.headingAction ? undefined : group.providerName}
+                  aria-label={group.headingAction ? group.providerName : undefined}
+                >
+                  {group.models.map((gm) => {
+                    const { id: modelId, name: modelName } = gm
+                    const isActive = modelId === model && group.providerId === provider
+                    const hasMeta =
+                      gm.contextLength !== undefined ||
+                      gm.supportsTools ||
+                      gm.supportsVision ||
+                      gm.supportsReasoning
+                    return (
+                      <ModelSelectorItem
+                        key={`${group.providerId}:${modelId}`}
+                        ref={isActive ? positionActiveModelItem : undefined}
+                        // Include both name and id so the command filter matches
+                        // either the friendly name or the raw id the user types.
+                        value={`${group.providerId} ${modelName} ${modelId}`}
+                        onSelect={() => {
+                          setOpen(false)
+                          onSelect({ providerId: group.providerId, modelId })
+                        }}
+                        className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span
+                            className={cn(
+                              "truncate text-xs leading-none",
+                              isActive && "font-medium text-foreground"
+                            )}
+                          >
+                            {modelName}
                           </span>
-                        ) : null}
-                      </span>
-                      {/* Metadata reads as one right-aligned cluster: the
+                          {modelName !== modelId ? (
+                            <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
+                              {modelId}
+                            </span>
+                          ) : null}
+                        </span>
+                        {/* Metadata reads as one right-aligned cluster: the
                               context window, then the capability glyphs in a
                               fixed order so the same capability sits in the
                               same place on every row. */}
-                      {hasMeta ? (
-                        <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-                          {gm.contextLength !== undefined ? (
-                            <span title={t("contextWindowLabel")}>
-                              {formatContextWindow(gm.contextLength)}
-                            </span>
-                          ) : null}
-                          {gm.supportsTools ? (
-                            <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                          ) : null}
-                          {gm.supportsVision ? (
-                            <EyeIcon className="size-3" aria-label={t("capVision")} />
-                          ) : null}
-                          {gm.supportsReasoning ? (
-                            <BrainIcon className="size-3" aria-label={t("capReasoning")} />
-                          ) : null}
-                        </span>
-                      ) : null}
-                      <CheckIcon
-                        className={cn(
-                          "size-3.5 shrink-0 text-primary",
-                          isActive ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                    </ModelSelectorItem>
-                  )
-                })}
-              </ModelSelectorGroup>
-            </div>
-          ))
-        )}
-      </ModelSelectorList>
-    </ResponsivePicker>
+                        {hasMeta ? (
+                          <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                            {gm.contextLength !== undefined ? (
+                              <span title={t("contextWindowLabel")}>
+                                {formatContextWindow(gm.contextLength)}
+                              </span>
+                            ) : null}
+                            {gm.supportsTools ? (
+                              <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                            ) : null}
+                            {gm.supportsVision ? (
+                              <EyeIcon className="size-3" aria-label={t("capVision")} />
+                            ) : null}
+                            {gm.supportsReasoning ? (
+                              <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                            ) : null}
+                          </span>
+                        ) : null}
+                        <CheckIcon
+                          className={cn(
+                            "size-3.5 shrink-0 text-primary",
+                            isActive ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                      </ModelSelectorItem>
+                    )
+                  })}
+                </ModelSelectorGroup>
+              </div>
+            ))
+          )}
+        </ModelSelectorList>
+      </ResponsivePicker>
+      <TooltipContent side="top">{t("switchModelAria")}</TooltipContent>
+    </Tooltip>
   )
 }

@@ -167,3 +167,13 @@ describe("resolveSteerDisplayState", () => {
     ).toBe("failed")
   })
 })
+
+it("keeps extracted attachment text out of steering prose and retains it for replay", () => {
+  const attachment = { type: "text" as const, text: "[Attachment source] the extracted report" }
+  const content = [attachment, { type: "text" as const, text: "Please compare these" }]
+  expect(steerTextOf(content, 1)).toBe("Please compare these")
+  expect(steerBlocksOf(content, 1)).toEqual([attachment])
+  expect(
+    buildSteerPayload([{ text: steerTextOf(content, 1), blocks: steerBlocksOf(content, 1) }])
+  ).toEqual([attachment, { type: "text", text: `${STEER_PREFIX}Please compare these` }])
+})

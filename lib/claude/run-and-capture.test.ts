@@ -14,7 +14,8 @@ import {
   type CaptureStreamEvent,
 } from "./run-and-capture"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
-import type { ClaudeEvent } from "@cognia/agent-config-types"
+import type { AppSettings, ClaudeEvent } from "@cognia/agent-config-types"
+import { __resetFusionScopesForTesting } from "@/lib/router-fusion/gate/explicit-run"
 import {
   registerChatMiddleware,
   __resetChatMiddlewareRegistryForTesting,
@@ -2461,5 +2462,140 @@ describe("host-owned external agent capture", () => {
     expect(startExternalTurnMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ externalSessionId: "pi-native-1" })
     )
+  })
+})
+
+// ── Router + Fusion action (ADR-0188 B5, D3) ─────────────────────────────
+// The agent surface's real entry point: `runAndCaptureAssistantReply` itself,
+// with only the dynamic host import stubbed, so a chosen mode is proven to
+// reach a fusion run and an unset one is proven to reach the sidecar.
+describe("Router + Fusion action", () => {
+  const ON = {
+    routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } },
+  } as unknown as AppSettings
+  const OFF = {
+    routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } },
+  } as unknown as AppSettings
+  const answer = {
+    kind: "answered" as const,
+    runId: "run-fusion-1",
+    mode: "cascade" as const,
+    text: "the checked answer",
+    qualityStatus: "accepted" as const,
+    usage: { promptTokens: 30, completionTokens: 7, totalTokens: 37 },
+    spentMicrousd: 4500,
+    modelCalls: 2,
+    warnings: [],
+  }
+
+  afterEach(() => {
+    __resetFusionScopesForTesting()
+  })
+
+  it("runs the turn as a fusion run and never sends a prompt to the sidecar", async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const result = await runAndCaptureAssistantReply(SESSION, "compare the tariffs", undefined, {
+      execution: { skip: true },
+      fusion: {
+        action: "cascade",
+        settings: ON,
+        featureId: "teammate:tm1",
+        workspaceId: "project-1",
+        loadHost: async () =>
+          ({
+            runAgentsWorkflowsFusion: async (input: Record<string, unknown>) => {
+              calls.push(input)
+              return answer
+            },
+          }) as never,
+      },
+    })
+    expect(result.text).toBe("the checked answer")
+    expect(result.messageId).toBe("run-fusion-1")
+    expect(result.usage).toMatchObject({ inputTokens: 30, outputTokens: 7 })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(calls[0]).toMatchObject({
+      mode: "cascade",
+      origin: "agent",
+      featureId: "teammate:tm1",
+      workspaceId: "project-1",
+      hasFusionAncestor: false,
+    })
+  })
+
+  it("carries the turn's system prompt into the run's messages", async () => {
+    const calls: Array<{ messages?: unknown }> = []
+    await runAndCaptureAssistantReply(
+      SESSION,
+      "compare the tariffs",
+      { systemPrompt: "Be terse.", appendSystemPrompt: "Cite sources." },
+      {
+        execution: { skip: true },
+        fusion: {
+          action: "panel",
+          settings: ON,
+          loadHost: async () =>
+            ({
+              runAgentsWorkflowsFusion: async (input: { messages?: unknown }) => {
+                calls.push(input)
+                return answer
+              },
+            }) as never,
+        },
+      }
+    )
+    expect(calls[0]?.messages).toEqual([
+      { role: "system", content: "Be terse.\n\nCite sources." },
+      { role: "user", content: "compare the tariffs" },
+    ])
+  })
+
+  it("[ACC:OFF-AGENTS] runs the ordinary sidecar turn when the surface is off", async () => {
+    const loadHost = jest.fn()
+    const promise = runAndCaptureAssistantReply(SESSION, "hello", undefined, {
+      execution: { skip: true },
+      timeoutMs: 200,
+      fusion: { action: "cascade", settings: OFF, loadHost: loadHost as never },
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("plain reply"))
+    fire(sessionEnded())
+    await expect(promise).resolves.toMatchObject({ text: "plain reply" })
+    expect(loadHost).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("[ACC:OFF-AGENTS] an unset action never reads settings or loads the engine", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hello", undefined, {
+      execution: { skip: true },
+      timeoutMs: 200,
+    })
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("plain reply"))
+    fire(sessionEnded())
+    await expect(promise).resolves.toMatchObject({ text: "plain reply" })
+  })
+
+  it("fails explicitly when the chosen mode is refused", async () => {
+    await expect(
+      runAndCaptureAssistantReply(SESSION, "compare", undefined, {
+        execution: { skip: true },
+        fusion: {
+          action: "panel",
+          settings: ON,
+          loadHost: async () =>
+            ({
+              runAgentsWorkflowsFusion: async () => ({
+                kind: "refused",
+                code: "ROUTE_NO_SOLUTION",
+                reasons: ["panel_review:FUSION_RECURSION"],
+              }),
+            }) as never,
+        },
+      })
+    ).rejects.toMatchObject({ code: "ROUTE_NO_SOLUTION" })
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 })

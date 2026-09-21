@@ -290,7 +290,7 @@
     "sandboxedUntiered": "Sandbox",
     "tooltip": {
       "bundle": "Agent bundle: {tag} ({libc})",
-      "credentials": "Credentials: this host's own ({mode}); per-sandbox gateway tickets are not available yet",
+      "credentials": "Credentials: {mode} — host provider keys are stripped before the container starts",
       "egressEnforced": "Network: {tier}, enforced",
       "egressNotEnforced": "Network: {tier}, recorded but not enforced",
       "image": "Image: {image}",
@@ -652,7 +652,17 @@
     },
     "devinPresetDescription": "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools.",
     "opencodeV2EndpointPlaceholder": "Leave blank to discover the local service",
-    "opencodeV2EndpointHint": "Local discovery uses ephemeral authentication. For an explicit native service endpoint, use its server password; the Basic Auth username defaults to opencode. The optional API key is for Bearer-authenticated proxy endpoints."
+    "opencodeV2EndpointHint": "Local discovery uses ephemeral authentication. For an explicit native service endpoint, use its server password; the Basic Auth username defaults to opencode. The optional API key is for Bearer-authenticated proxy endpoints.",
+    "allAgents": "All agents",
+    "navConfigure": "Configure",
+    "fleetBannerConnected": "{connected} of {total} agents connected",
+    "fleetBannerCollapsed": "{connected}/{total} connected",
+    "fleetHideSummary": "Hide summary",
+    "fleetShowSummary": "Show summary",
+    "inspectorTabOverview": "Overview",
+    "inspectorTabConnection": "Connection",
+    "inspectorTabAdvanced": "Advanced",
+    "inspectorUnsaved": "You have unsaved changes"
   },
   "statusConnected": "Connected",
   "statusConnecting": "Connecting",
@@ -726,5 +736,39 @@
     "modelsLoaded": "Account model information updated.",
     "unknown": "unknown",
     "outputUnknown": "Maximum output: unknown"
+  },
+  "readiness": {
+    "pipelineLabel": "Agent readiness",
+    "dotsLabel": "Readiness: {summary}",
+    "steps": {
+      "configured": "Configured",
+      "runnable": "Runnable",
+      "connected": "Connected",
+      "routed": "Routed"
+    },
+    "stepStates": {
+      "done": "done",
+      "current": "in progress",
+      "failed": "failed",
+      "todo": "pending",
+      "off": "skipped"
+    },
+    "states": {
+      "disabled": "Disabled",
+      "blocked": "Blocked",
+      "error": "Error",
+      "connecting": "Connecting",
+      "connected": "Connected",
+      "off": "Not connected",
+      "checking": "Checking…",
+      "ready": "Ready"
+    },
+    "actions": {
+      "enable": "Enable",
+      "inspect": "Inspect",
+      "retry": "Retry",
+      "connect": "Connect",
+      "addRule": "Add routing rule"
+    }
   }
 }

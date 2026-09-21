@@ -18,12 +18,24 @@
  * Failure is always `null`, never a throw and never a guess: the caller keeps
  * the deterministic tier, so this layer can only improve a decision the router
  * was already unsure about.
+ *
+ * Router + Fusion (ADR-0188 D18, B5): the opt-in LLM classifier absorbs this
+ * judge. Only while the `utilityLedger` surface — the one the judge's own call
+ * is booked on — is on AND `llmClassifier.enabled`, a consultation is answered
+ * by one classification (ledgered, PII-gated, 1500 ms, HMAC-cached) whose labels
+ * name the tier. Otherwise — every user by default — the judge below runs
+ * exactly as it always has, and no Router + Fusion module is loaded.
  */
 
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { RoutingDifficultyTier } from "@cognia/provider-types/auto-router"
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { currentRouterFusionGateSettings } from "@/lib/router-fusion/gate/current-settings"
+import { RouterFusionInfrastructureError } from "@/lib/router-fusion/gate/faults"
+import { breakerThresholdOf, routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
+import { runOrdinaryWithFallback } from "@/lib/router-fusion/gate/guard"
 
 export interface DifficultyVerdict {
   tier: RoutingDifficultyTier
@@ -94,14 +106,80 @@ export interface JudgeDifficultyInput {
   now?: () => number
 }
 
+/** The surface the judge's own call is booked on: it is a background utility call. */
+const JUDGE_SURFACE = "utilityLedger" as const
+
+/** Test seam: where the gate reads the settings from. */
+export interface JudgeDifficultyRouting {
+  settings?: () => Promise<AppSettings | null>
+}
+
+async function gateSettings(read: () => Promise<AppSettings | null>): Promise<AppSettings | null> {
+  try {
+    return await read()
+  } catch (error) {
+    // An unreadable switch never turns Router + Fusion on.
+    console.warn("[router-fusion] settings unreadable; the difficulty judge runs as before", error)
+    return null
+  }
+}
+
 /**
  * Ask a cheap model which tier this prompt needs.
  *
  * Returns `null` — never throws — when the prompt is empty, carries PII, the
  * model fails or times out, or the reply cannot be parsed. Every one of those
  * means "the deterministic tier stands".
+ *
+ * With Router + Fusion's LLM classifier absorbing the judge (see the module
+ * note), the classifier answers instead; an infrastructure fault reaching it
+ * sends the consultation down the original path below, unledgered, and counts
+ * towards the surface breaker (D38).
  */
 export async function judgeDifficulty(
+  client: LlmClient,
+  input: JudgeDifficultyInput,
+  routing: JudgeDifficultyRouting = {}
+): Promise<DifficultyVerdict | null> {
+  const settings = await gateSettings(routing.settings ?? currentRouterFusionGateSettings)
+  if (
+    routerFusionGate(settings, JUDGE_SURFACE) !== "on" ||
+    settings?.routerFusion?.llmClassifier?.enabled !== true
+  ) {
+    return judgeDifficultyDirect(client, input)
+  }
+  const absorbedBy = settings
+  return runOrdinaryWithFallback<DifficultyVerdict | null>({
+    surface: JUDGE_SURFACE,
+    threshold: breakerThresholdOf(absorbedBy),
+    fusion: async () => {
+      const classifier = await import("@/lib/router-fusion/routing/llm-classifier").catch(
+        (error: unknown) => {
+          throw new RouterFusionInfrastructureError(
+            "import_failed",
+            `The Router + Fusion classifier could not be loaded: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            error
+          )
+        }
+      )
+      return classifier.judgeDifficultyWithClassifier(absorbedBy, {
+        promptText: input.promptText,
+      })
+    },
+    onBypass: (notice) => {
+      console.warn(
+        "[router-fusion] the difficulty judge ran on the original path, unledgered",
+        notice.fault
+      )
+    },
+    original: () => judgeDifficultyDirect(client, input),
+  })
+}
+
+/** The judge itself: what `judgeDifficulty` has always done. */
+async function judgeDifficultyDirect(
   client: LlmClient,
   input: JudgeDifficultyInput
 ): Promise<DifficultyVerdict | null> {

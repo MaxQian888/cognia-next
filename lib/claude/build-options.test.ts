@@ -4317,6 +4317,9 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
   // orthogonal to Computer Use gating, so these assertions exclude them to stay
   // focused. Both have their own coverage elsewhere in this file.
   const ALWAYS_ON = new Set([
+    "attachment_list",
+    "attachment_search",
+    "attachment_read",
     "web_search",
     "web_fetch",
     "artifact_create",
@@ -4570,6 +4573,9 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       "canvas_read",
       "canvas_open",
       "working_set",
+      "attachment_list",
+      "attachment_search",
+      "attachment_read",
     ])
   })
 
@@ -6088,7 +6094,7 @@ describe("plugin conversion skill tools", () => {
     })
 
     expect(toolNames(opts)).toEqual(
-      expect.arrayContaining(["inspect_plugin_conversion", "apply_plugin_conversion"])
+      expect.arrayContaining(["plugin_conversion_inspect", "plugin_conversion_apply"])
     )
   })
 
@@ -6098,8 +6104,8 @@ describe("plugin conversion skill tools", () => {
       activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
     })
 
-    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
-    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("plugin_conversion_inspect")
+    expect(toolNames(opts)).not.toContain("plugin_conversion_apply")
   })
 
   it("preloads conversion tools when Skill self-invocation can load the prompt skill", async () => {
@@ -6110,7 +6116,7 @@ describe("plugin conversion skill tools", () => {
     })
 
     expect(toolNames(opts)).toEqual(
-      expect.arrayContaining(["Skill", "inspect_plugin_conversion", "apply_plugin_conversion"])
+      expect.arrayContaining(["Skill", "plugin_conversion_inspect", "plugin_conversion_apply"])
     )
   })
 
@@ -6138,8 +6144,8 @@ describe("plugin conversion skill tools", () => {
       ephemeralSkillIds: ["skill_builtin_plugin_conversion"],
     })
 
-    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
-    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("plugin_conversion_inspect")
+    expect(toolNames(opts)).not.toContain("plugin_conversion_apply")
   })
 })
 
@@ -6191,6 +6197,43 @@ describe("anthropic-managed (container) skills", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("sk-1"))
 
     warn.mockRestore()
+  })
+
+  it("forwards explicit selection to plugin skill resolution", async () => {
+    mResolveSkillsForCharacter.mockResolvedValue([])
+    mExtractContainerSkillIds.mockReturnValue([])
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", pluginSkillIds: ["restricted"] }),
+      ephemeralSkillIds: ["restricted"],
+    })
+    expect(mResolveSkillsForCharacter).toHaveBeenCalledWith(["restricted"], expect.anything(), [
+      "restricted",
+    ])
+  })
+
+  it("resolves an explicitly selected plugin skill without character attachment", async () => {
+    const { registerSkill, unregisterSkillById } =
+      await import("@/lib/plugin/registries/skill-registry")
+    registerSkill("restricted", {
+      id: "restricted",
+      name: "Restricted",
+      description: "",
+      invocationPolicy: "explicit",
+      source: { kind: "inline", markdown: "body" },
+    })
+    try {
+      mResolveSkillsForCharacter.mockResolvedValue([])
+      mExtractContainerSkillIds.mockReturnValue([])
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        ephemeralSkillIds: ["restricted"],
+      })
+      expect(mResolveSkillsForCharacter).toHaveBeenCalledWith(["restricted"], expect.anything(), [
+        "restricted",
+      ])
+    } finally {
+      unregisterSkillById("restricted")
+    }
   })
 
   it("does not warn when no managed skills are resolved", async () => {

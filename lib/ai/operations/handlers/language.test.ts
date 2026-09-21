@@ -127,6 +127,81 @@ describe("language handlers", () => {
     ).rejects.toThrow(ProviderOperationFailureError)
   })
 
+  it("hoists system content into instructions instead of messages", async () => {
+    // AI SDK 7 throws InvalidPromptError on a `{ role: "system" }` entry inside
+    // `messages`, and `chatMessageSchema` accepts one at any position.
+    surface.generateTextGated.mockResolvedValueOnce({
+      text: "out",
+      finishReason: "stop",
+      usage: {},
+      toolCalls: [],
+    })
+    await languageGenerateHandler.handler(
+      ctx("language.generate", {
+        model: "m",
+        system: "be terse",
+        messages: [
+          { role: "system" as const, content: "you are a linter" },
+          { role: "user" as const, content: "hi" },
+        ],
+      })
+    )
+    const args = surface.generateTextGated.mock.calls[0][0]
+    expect(args.instructions).toEqual([
+      { role: "system", content: "be terse" },
+      { role: "system", content: "you are a linter" },
+    ])
+    expect(args.messages).toEqual([{ role: "user", content: "hi" }])
+    expect(args.system).toBeUndefined()
+    expect(args.allowSystemInMessages).toBeUndefined()
+  })
+
+  it("keeps an interleaved system turn in place and opts it back in", async () => {
+    surface.streamTextGated.mockReturnValueOnce({
+      textStream: (async function* () {})(),
+      text: Promise.resolve(""),
+      finishReason: Promise.resolve("stop"),
+      usage: Promise.resolve({}),
+    })
+    await languageStreamHandler.handler(
+      ctx("language.stream", {
+        model: "m",
+        messages: [
+          { role: "system" as const, content: "head" },
+          { role: "user" as const, content: "hi" },
+          { role: "system" as const, content: "switch to bullets" },
+          { role: "user" as const, content: "again" },
+        ],
+      })
+    )
+    const args = surface.streamTextGated.mock.calls[0][0]
+    expect(args.instructions).toEqual([{ role: "system", content: "head" }])
+    expect(args.messages).toEqual([
+      { role: "user", content: "hi" },
+      { role: "system", content: "switch to bullets" },
+      { role: "user", content: "again" },
+    ])
+    expect(args.allowSystemInMessages).toBe(true)
+  })
+
+  it("leaves instructions off a structured-output call with no system content", async () => {
+    surface.generateObjectGated.mockResolvedValueOnce({
+      object: { ok: true },
+      finishReason: "stop",
+      usage: {},
+    })
+    const native = LANGUAGE_HANDLERS.filter(
+      (h) => h.operationId === "language.structured-output"
+    )[2]
+    await native.handler(
+      ctx("language.structured-output", { model: "m", messages: user, schema: { type: "object" } })
+    )
+    const args = surface.generateObjectGated.mock.calls[0][0]
+    expect(args).not.toHaveProperty("instructions")
+    expect(args).not.toHaveProperty("system")
+    expect(args.messages).toEqual(user)
+  })
+
   it("passes JSON-schema tools and the tool choice through the surface helper", async () => {
     surface.generateTextGated.mockResolvedValueOnce({
       text: "",

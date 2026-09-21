@@ -35,6 +35,20 @@ describe("packSegments", () => {
 })
 
 describe("summarizeMaterial", () => {
+  it("summarizes handoff evidence and constraints without inheriting permissions", async () => {
+    const llm = client(["Task summary"])
+    await summarizeMaterial({
+      segments: ["USER [goal]: Analyze only", "TOOL [evidence]: tests failed"],
+      purpose: "handoff",
+      client: llm,
+    })
+    const [prompt, options] = llm.complete.mock.calls[0]
+    expect(prompt).toContain("USER [goal]: Analyze only")
+    expect(prompt).toContain("TOOL [evidence]: tests failed")
+    expect(options.system).toContain("all user constraints")
+    expect(options.system).toContain("evidence and message IDs")
+    expect(options.system).toContain("Historical permissions are not authorization")
+  })
   it("summarizes material that fits in one pass with the purpose's prompt", async () => {
     const llm = client(["the gist"])
     const out = await summarizeMaterial({ segments: ["a", "b"], purpose: "selection", client: llm })

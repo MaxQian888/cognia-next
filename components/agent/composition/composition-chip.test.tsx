@@ -3,6 +3,7 @@
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 import { CompositionChip } from "./composition-chip"
 import compositionMessages from "@/i18n/messages/en/agentComposition.json"
@@ -38,9 +39,11 @@ const messages = {
 
 function renderChip(props: React.ComponentProps<typeof CompositionChip> = {}) {
   return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      <CompositionChip {...props} />
-    </NextIntlClientProvider>
+    <TooltipProvider>
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <CompositionChip {...props} />
+      </NextIntlClientProvider>
+    </TooltipProvider>
   )
 }
 

@@ -184,6 +184,8 @@ const externalStoreState = {
   setShowConnectionNotifications: jest.fn(),
   chatFailurePolicy: "fallback",
   setChatFailurePolicy: jest.fn(),
+  overviewBannerCollapsed: false,
+  setOverviewBannerCollapsed: jest.fn(),
   // Delegation-rules section (Thread B): empty rules + no enabled agents map.
   delegationRules: [] as unknown[],
   agents: {} as Record<string, unknown>,
@@ -234,6 +236,7 @@ jest.mock("@/lib/ai/agent/external/presets", () => {
 jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
   getExternalAgentEcosystemReadiness: () => undefined,
   getExternalAgentExecutionBlockReason: () => null,
+  getExternalAgentExecutionBlock: () => null,
 }))
 
 // Platform gate for the mandatory-sandbox banner. jsdom is not Tauri, so the
@@ -249,6 +252,14 @@ jest.mock("@tauri-apps/plugin-os", () => ({
 }))
 
 // ---- Tests -----------------------------------------------------------------
+
+// Landing view is the All-agents overview board; the preset gallery is a rail
+// destination. Tests exercising presets navigate there first.
+async function openQuickStart(user: ReturnType<typeof userEvent.setup>) {
+  await act(async () => {
+    await user.click(screen.getByTestId("nav-quick-start"))
+  })
+}
 
 describe("ExternalAgentSettings — preset onboarding", () => {
   beforeEach(() => {
@@ -271,8 +282,10 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
   })
 
-  it("renders the Quick-start preset gallery with one card per preset", () => {
+  it("renders the Quick-start preset gallery with one card per preset", async () => {
+    const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     const gallery = screen.getByTestId("preset-gallery-card")
     expect(gallery).toBeInTheDocument()
     // Documented-only presets are hidden by default.
@@ -283,8 +296,10 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(within(gallery).getByTestId("preset-card-opencode-v2-service")).toBeInTheDocument()
   })
 
-  it("renders agent brand icons in preset cards and configured-agent rows", () => {
+  it("renders agent brand icons in preset cards and configured-agent rows", async () => {
+    const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
 
     expect(screen.getByTestId("preset-card-codex").querySelector("img")).toHaveAttribute(
       "src",
@@ -301,7 +316,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   })
 
   it("shows the native Codex app-server preset and marks it Recommended when the codex CLI is detected", async () => {
+    const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     const gallery = screen.getByTestId("preset-gallery-card")
     expect(within(gallery).getByTestId("preset-card-codex-app-server")).toBeInTheDocument()
     // Detection resolves to the app-server preset → it gets the Recommended badge.
@@ -321,6 +338,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("clicking a preset card opens the editor dialog", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     const codex = screen.getByTestId("preset-pick-codex")
     await act(async () => {
       await user.click(codex)
@@ -332,6 +350,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("opens the Devin preset with a native ACP command and localized description", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     expect(
       screen.getByText(
         "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Cognia tools are available in each conversation alongside Devin’s native tools."
@@ -366,6 +385,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     try {
       const user = userEvent.setup()
       render(<ExternalAgentSettings />)
+      await openQuickStart(user)
       await act(async () => {
         await user.click(screen.getByTestId("preset-pick-argless-preset"))
       })
@@ -395,6 +415,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("shows the Codex options section for codex-app-server and saves codexOptions", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex-app-server"))
     })
@@ -418,6 +439,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("saves trimmed, de-duped extra skill roots from the folders textarea", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex-app-server"))
     })
@@ -441,6 +463,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     isTauriMock.mockReturnValue(true)
     pickDirectoryMock.mockResolvedValue("/picked/skills")
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex-app-server"))
     })
@@ -460,6 +483,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     isTauriMock.mockReturnValue(true)
     pickDirectoryMock.mockResolvedValue(null)
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex-app-server"))
     })
@@ -473,6 +497,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("shows the Pi runtime section for pi-rpc and saves global extensions by default", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-pi-rpc"))
     })
@@ -494,6 +519,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("saves the shared Cognia model and account binding from the settings editor", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await user.click(screen.getByTestId("preset-pick-pi-rpc"))
     await user.click(await screen.findByRole("button", { name: "Select Cognia fixture" }))
     await user.click(screen.getByRole("button", { name: /^add$/i }))
@@ -511,6 +537,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("shows the exact isolation flags so the claim is inspectable", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-pi-rpc"))
     })
@@ -524,6 +551,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("does not render the Pi runtime section for other protocols", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-claude-code"))
     })
@@ -534,6 +562,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("does not render the Codex options section for non-codex protocols", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-claude-code"))
     })
@@ -546,6 +575,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     async (preset) => {
       const user = userEvent.setup()
       render(<ExternalAgentSettings />)
+      await openQuickStart(user)
       await user.click(screen.getByTestId(`preset-pick-${preset}`))
       const section = await screen.findByTestId("connection-section")
       expect(within(section).getByLabelText(/^command$/i)).toBeDisabled()
@@ -569,6 +599,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("creates a current OpenCode service configuration using local discovery", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
     const section = await screen.findByTestId("opencode-v2-options-section")
     expect(within(section).getByLabelText("Endpoint URL")).toHaveValue("")
@@ -589,6 +620,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("persists an explicit current OpenCode endpoint, credentials, and workspace", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
     const section = await screen.findByTestId("opencode-v2-options-section")
     await user.type(within(section).getByLabelText("Endpoint URL"), "https://opencode.example.test")
@@ -609,6 +641,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     async (endpoint) => {
       const user = userEvent.setup()
       render(<ExternalAgentSettings />)
+      await openQuickStart(user)
       await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
       const section = await screen.findByTestId("opencode-v2-options-section")
       await user.type(within(section).getByLabelText("Endpoint URL"), endpoint)
@@ -622,6 +655,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("persists native OpenCode Basic authentication alongside optional proxy credentials", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await user.click(screen.getByTestId("preset-pick-opencode-v2-service"))
     const section = await screen.findByTestId("opencode-v2-options-section")
     await user.type(within(section).getByLabelText("Endpoint URL"), "https://opencode.example.test")
@@ -708,6 +742,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     const detail = await screen.findByTestId("agent-detail-agent-2")
     await act(async () => {
+      await user.click(within(detail).getByRole("tab", { name: /advanced/i }))
+    })
+    await act(async () => {
       await user.click(within(detail).getByTestId("reset-provider-undo-warning"))
     })
     expect(updateConfigMock).toHaveBeenCalledWith("agent-2", {
@@ -722,6 +759,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       await user.click(screen.getByTestId("agent-row-agent-2"))
     })
     const detail = await screen.findByTestId("agent-detail-agent-2")
+    await act(async () => {
+      await user.click(within(detail).getByRole("tab", { name: /advanced/i }))
+    })
     expect(within(detail).getByTestId("acp-feature-settings")).toBeInTheDocument()
     await act(async () => {
       await user.click(within(detail).getByLabelText(/dynamic mcp/i))
@@ -769,11 +809,13 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
   })
 
-  it("shows the quick-start gallery in the detail pane until an agent is selected", () => {
+  it("lands on the All-agents overview until an agent is selected", () => {
     render(<ExternalAgentSettings />)
-    // Nothing selected → the detail pane hosts the gallery, no agent detail.
-    expect(screen.getByTestId("preset-gallery-card")).toBeInTheDocument()
+    // Landing view is the fleet board, not the preset store; no agent detail.
+    expect(screen.getByTestId("agent-overview-board")).toBeInTheDocument()
     expect(screen.queryByTestId("agent-detail-agent-1")).not.toBeInTheDocument()
+    // The gallery is still reachable from the rail.
+    expect(screen.getByTestId("nav-quick-start")).toBeInTheDocument()
   })
 
   it("renders the selected agent's ecosystem metadata and a disconnect action when connected", async () => {
@@ -816,7 +858,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("switches the detail pane between the general rail entries", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
-    // Landing view is the gallery; global settings and delegation are one click.
+    // Landing view is the overview; global settings and delegation are one click.
     await act(async () => {
       await user.click(screen.getByTestId("nav-global-settings"))
     })
@@ -888,6 +930,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // the surface consuming them stays reachable.
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("nav-runtimes"))
     })
@@ -898,6 +941,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("returns to the quick-start gallery after an agent has been selected", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("agent-row-agent-1"))
     })
@@ -927,6 +971,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("keeps the timeout & retry fields collapsed until the section is opened", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex"))
     })
@@ -941,6 +986,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
   it("offers the Codex app-server protocol in the manual editor and pins its transport", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     // The app-server preset seeds protocol codex-app-server; the transport
     // picker is then locked to stdio (the backend has no network transport).
     await act(async () => {
@@ -962,6 +1008,45 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     // The AlertDialog confirmation surfaces (delete title from the messages).
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+  })
+})
+
+describe("ExternalAgentSettings — overview board", () => {
+  it("renders one readiness row per agent with its state pill and next action", () => {
+    render(<ExternalAgentSettings />)
+    const board = screen.getByTestId("agent-overview-board")
+    // Five fixture agents: agent-3 is connected, agent-4/-5 are disabled.
+    expect(within(board).getByTestId("overview-row-agent-1")).toBeInTheDocument()
+    expect(within(board).getByTestId("overview-row-agent-5")).toBeInTheDocument()
+    // agent-1 is enabled + disconnected → the model offers Connect.
+    expect(within(board).getByTestId("overview-action-agent-1")).toHaveTextContent("Connect")
+    // agent-4 is deliberately off → the action is Enable, not a fake failure.
+    expect(within(board).getByTestId("overview-action-agent-4")).toHaveTextContent("Enable")
+  })
+
+  it("opens the agent inspector from an overview row", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("overview-open-agent-1"))
+    })
+    expect(await screen.findByTestId("agent-detail-agent-1")).toBeInTheDocument()
+    expect(screen.getByTestId("inspector-readiness")).toBeInTheDocument()
+    // And back — the overview stays one click away in the rail.
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-all-agents"))
+    })
+    expect(screen.getByTestId("agent-overview-board")).toBeInTheDocument()
+  })
+
+  it("collapses the fleet banner through the persisted store flag", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    expect(screen.getByTestId("fleet-banner-expanded")).toBeInTheDocument()
+    await act(async () => {
+      await user.click(screen.getByTestId("fleet-banner-collapse"))
+    })
+    expect(externalStoreState.setOverviewBannerCollapsed).toHaveBeenCalledWith(true)
   })
 })
 
@@ -1004,6 +1089,7 @@ describe("ExternalAgentSettings — mandatory sandbox platform gate", () => {
     const user = userEvent.setup()
     isTauriMock.mockReturnValue(false)
     render(<ExternalAgentSettings />)
+    await openQuickStart(user)
     await act(async () => {
       await user.click(screen.getByTestId("preset-pick-codex-app-server"))
     })

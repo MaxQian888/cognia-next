@@ -66,7 +66,18 @@ const EMPTY_FORM: RuleFormData = {
   description: "",
 }
 
-export function DelegationRulesSection({ disabled = false }: { disabled?: boolean }) {
+export function DelegationRulesSection({
+  disabled = false,
+  createForAgent,
+}: {
+  disabled?: boolean
+  /**
+   * Fresh object each time the caller wants the create dialog opened with the
+   * target pre-selected — the readiness "Add routing rule" action hands the
+   * agent over this way so the user lands mid-flow instead of on the list.
+   */
+  createForAgent?: { agentId: string } | null
+}) {
   const t = useTranslations("externalAgent.settings.delegation")
   const tCommon = useTranslations("common")
 
@@ -81,6 +92,22 @@ export function DelegationRulesSection({ disabled = false }: { disabled?: boolea
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<RuleFormData>(EMPTY_FORM)
+
+  // Consume the caller's seed during render (the documented alternative to a
+  // setState-in-effect). Only enabled agents can be targeted — a seed pointing
+  // at anything else is dropped rather than producing a rule the target
+  // dropdown cannot display.
+  // Starts at null even when mounted with a seed — the seed is consumed on
+  // that first render, not swallowed by the initializer.
+  const [consumedSeed, setConsumedSeed] = useState<{ agentId: string } | null>(null)
+  if (createForAgent && createForAgent !== consumedSeed) {
+    setConsumedSeed(createForAgent)
+    if (!disabled && agents.some((agent) => agent.id === createForAgent.agentId)) {
+      setEditingId(null)
+      setForm({ ...EMPTY_FORM, targetAgentId: createForAgent.agentId })
+      setEditorOpen(true)
+    }
+  }
 
   const openCreate = useCallback(() => {
     setEditingId(null)

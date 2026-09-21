@@ -219,6 +219,21 @@ pub struct SandboxRoutingBackend {
     existing: Arc<dyn ExecBackend>,
     sandbox: Arc<dyn SandboxExecBackend>,
     owners: Mutex<HashMap<String, Owner>>,
+    pending: Arc<Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+}
+
+struct RoutingReservation {
+    id: String,
+    pending: Arc<Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
+    armed: bool,
+}
+
+impl Drop for RoutingReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.pending.lock().remove(&self.id);
+        }
+    }
 }
 
 impl SandboxRoutingBackend {
@@ -227,6 +242,7 @@ impl SandboxRoutingBackend {
             existing,
             sandbox,
             owners: Mutex::new(HashMap::new()),
+            pending: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -237,27 +253,35 @@ impl SandboxRoutingBackend {
         }
     }
 
-    fn owner(&self, id: &str) -> Result<Arc<dyn ExecBackend>, String> {
-        let owner = self
-            .owners
-            .lock()
-            .get(id)
-            .copied()
-            .ok_or_else(|| format!("Agent {id} not found"))?;
-        Ok(self.backend(owner))
+    async fn owner(&self, id: &str) -> Result<Arc<dyn ExecBackend>, String> {
+        let owner = self.owners.lock().get(id).copied();
+        if let Some(owner) = owner {
+            return Ok(self.backend(owner));
+        }
+        // Cancelled child creation can retain a registry entry without ever
+        // returning success to publish an owner here. Keep status and cleanup
+        // reachable for that entry, without guessing if both sides claim it.
+        let existing = self.existing.status(id).await.is_some();
+        let sandbox = self.sandbox.status(id).await.is_some();
+        match (existing, sandbox) {
+            (true, false) => Ok(self.backend(Owner::Existing)),
+            (false, true) => Ok(self.backend(Owner::Sandbox)),
+            (true, true) => Err(format!("Agent {id} has conflicting backend owners")),
+            (false, false) => Err(format!("Agent {id} not found")),
+        }
     }
 
     /// Refuse an id that is still running on either side. An owner entry
     /// whose agent has exited is stale, not a conflict: each backend forgets
     /// an agent when it exits, and this map only learns that on the next use.
     async fn ensure_free(&self, id: &str) -> Result<(), String> {
-        let owner = self.owners.lock().get(id).copied();
-        if let Some(owner) = owner {
-            if self.backend(owner).status(id).await.is_some() {
-                return Err(format!("Agent {id} already exists"));
-            }
-            self.owners.lock().remove(id);
+        // A cancelled child can retain its id while daemon cleanup finishes
+        // before a successful spawn ever publishes an owner in this router.
+        // Both registries are authoritative; the routing cache alone is not.
+        if self.existing.status(id).await.is_some() || self.sandbox.status(id).await.is_some() {
+            return Err(format!("Agent {id} already exists"));
         }
+        self.owners.lock().remove(id);
         Ok(())
     }
 }
@@ -265,6 +289,166 @@ impl SandboxRoutingBackend {
 #[async_trait]
 impl ExecBackend for SandboxRoutingBackend {
     async fn spawn(
+        &self,
+        config: ExternalAgentSpawnConfig,
+        sink: Arc<dyn ExternalAgentEventSink>,
+    ) -> Result<String, String> {
+        let id = config.id.clone();
+        let mut cancellation = {
+            let mut pending = self.pending.lock();
+            if pending.contains_key(&id) {
+                return Err(format!("Agent {id} already exists"));
+            }
+            let (sender, receiver) = tokio::sync::watch::channel(false);
+            pending.insert(id.clone(), sender);
+            receiver
+        };
+        let mut reservation = RoutingReservation {
+            id: id.clone(),
+            pending: Arc::clone(&self.pending),
+            armed: true,
+        };
+        let result = tokio::select! {
+            biased;
+            _ = cancellation.wait_for(|cancelled| *cancelled) => Err(format!("Agent {id} creation cancelled")),
+            result = self.spawn_routed(config, sink) => result,
+        };
+        if result.is_ok() {
+            // Publish the owner and finish cancellation admission atomically.
+            // A kill before this point cancels creation; one after it reaches
+            // the adopted runner through the owner map.
+            let cancelled = {
+                let mut pending = self.pending.lock();
+                let cancelled = *cancellation.borrow();
+                if !cancelled {
+                    pending.remove(&id);
+                    reservation.armed = false;
+                }
+                cancelled
+            };
+            if cancelled {
+                let owner = self.owner(&id).await?;
+                let cleanup_id = id.clone();
+                tokio::spawn(async move {
+                    let _reservation = reservation;
+                    if let Err(error) = owner.kill(&cleanup_id).await {
+                        log::warn!("cancelled routed runner {cleanup_id} kill failed: {error}");
+                    }
+                });
+                return Err(format!("Agent {id} creation cancelled"));
+            }
+        }
+        result
+    }
+
+    async fn send(&self, id: &str, message: &str) -> Result<(), String> {
+        self.owner(id).await?.send(id, message).await
+    }
+
+    async fn kill(&self, id: &str) -> Result<(), String> {
+        let cancelled_pending = {
+            let pending = self.pending.lock();
+            if let Some(cancelled) = pending.get(id) {
+                cancelled.send_replace(true);
+                true
+            } else {
+                false
+            }
+        };
+        // An attempted duplicate may be awaiting the existing owner's status.
+        // Cancelling that attempt must not consume a kill of the live agent.
+        if let Ok(owner) = self.owner(id).await {
+            if owner.status(id).await.is_some() {
+                return owner.kill(id).await;
+            }
+        }
+        if cancelled_pending {
+            return Ok(());
+        }
+        self.owner(id).await?.kill(id).await
+    }
+
+    async fn kill_all(&self) -> Result<(), String> {
+        for cancelled in self.pending.lock().values() {
+            cancelled.send_replace(true);
+        }
+        let existing = self.existing.kill_all().await;
+        let sandbox = self.sandbox.kill_all().await;
+        match (existing, sandbox) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(first), Err(second)) => Err(format!("{first}; {second}")),
+        }
+    }
+
+    async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
+        if let Some(cancelled) = self.pending.lock().get(id) {
+            return Some(if *cancelled.borrow() {
+                ExternalAgentProcessState::Stopping
+            } else {
+                ExternalAgentProcessState::Starting
+            });
+        }
+        self.owner(id).await.ok()?.status(id).await
+    }
+
+    async fn list(&self) -> Vec<String> {
+        let mut ids = self.existing.list().await;
+        ids.extend(self.sandbox.list().await);
+        ids.extend(self.pending.lock().keys().cloned());
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    async fn is_running(&self, id: &str) -> Result<bool, String> {
+        if self.pending.lock().contains_key(id) {
+            return Ok(false);
+        }
+        self.owner(id).await?.is_running(id).await
+    }
+
+    async fn get_info(&self, id: &str) -> Result<Value, String> {
+        self.owner(id).await?.get_info(id).await
+    }
+
+    async fn set_running(&self, id: &str) -> Result<(), String> {
+        self.owner(id).await?.set_running(id).await
+    }
+
+    async fn set_failed(&self, id: &str) -> Result<(), String> {
+        self.owner(id).await?.set_failed(id).await
+    }
+
+    fn kind(&self) -> &'static str {
+        self.existing.kind()
+    }
+
+    fn routes_sandboxes(&self) -> bool {
+        true
+    }
+
+    async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        let existing = self.existing.reap_orphans().await;
+        let sandbox = self.sandbox.reap_orphans().await;
+        match (existing, sandbox) {
+            (Ok(mut reaped), Ok(more)) => {
+                reaped.extend(more);
+                reaped.sort();
+                reaped.dedup();
+                Ok(reaped)
+            }
+            (Ok(reaped), Err(error)) | (Err(error), Ok(reaped)) => {
+                log::warn!("orphan sweep incomplete: {error}");
+                Ok(reaped)
+            }
+            (Err(first), Err(second)) => Err(format!("{first}; {second}")),
+        }
+    }
+}
+
+impl SandboxRoutingBackend {
+    async fn spawn_routed(
         &self,
         config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
@@ -313,81 +497,6 @@ impl ExecBackend for SandboxRoutingBackend {
             Err(error) => Err(error.to_string()),
         }
     }
-
-    async fn send(&self, id: &str, message: &str) -> Result<(), String> {
-        self.owner(id)?.send(id, message).await
-    }
-
-    async fn kill(&self, id: &str) -> Result<(), String> {
-        self.owner(id)?.kill(id).await
-    }
-
-    async fn kill_all(&self) -> Result<(), String> {
-        let existing = self.existing.kill_all().await;
-        let sandbox = self.sandbox.kill_all().await;
-        match (existing, sandbox) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(first), Err(second)) => Err(format!("{first}; {second}")),
-        }
-    }
-
-    async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
-        self.owner(id).ok()?.status(id).await
-    }
-
-    async fn list(&self) -> Vec<String> {
-        let mut ids = self.existing.list().await;
-        ids.extend(self.sandbox.list().await);
-        ids.sort();
-        ids.dedup();
-        ids
-    }
-
-    async fn is_running(&self, id: &str) -> Result<bool, String> {
-        self.owner(id)?.is_running(id).await
-    }
-
-    async fn get_info(&self, id: &str) -> Result<Value, String> {
-        self.owner(id)?.get_info(id).await
-    }
-
-    async fn set_running(&self, id: &str) -> Result<(), String> {
-        self.owner(id)?.set_running(id).await
-    }
-
-    async fn set_failed(&self, id: &str) -> Result<(), String> {
-        self.owner(id)?.set_failed(id).await
-    }
-
-    /// The host's own kind: logs, health and every `kind() ==
-    /// "local-process"` check keep describing the path a spawn without a
-    /// placement takes, which is exactly what they described before.
-    fn kind(&self) -> &'static str {
-        self.existing.kind()
-    }
-
-    fn routes_sandboxes(&self) -> bool {
-        true
-    }
-
-    async fn reap_orphans(&self) -> Result<Vec<String>, String> {
-        let existing = self.existing.reap_orphans().await;
-        let sandbox = self.sandbox.reap_orphans().await;
-        match (existing, sandbox) {
-            (Ok(mut reaped), Ok(more)) => {
-                reaped.extend(more);
-                reaped.sort();
-                reaped.dedup();
-                Ok(reaped)
-            }
-            (Ok(reaped), Err(error)) | (Err(error), Ok(reaped)) => {
-                log::warn!("orphan sweep incomplete: {error}");
-                Ok(reaped)
-            }
-            (Err(first), Err(second)) => Err(format!("{first}; {second}")),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -404,6 +513,10 @@ mod tests {
         running: Mutex<Vec<String>>,
         sandbox_result: Mutex<Option<SandboxSpawnError>>,
         multi_tenant: bool,
+        start_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+        start_entered: tokio::sync::Notify,
+        status_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+        status_entered: tokio::sync::Notify,
     }
 
     impl Recording {
@@ -439,6 +552,11 @@ mod tests {
             Ok(())
         }
         async fn status(&self, id: &str) -> Option<ExternalAgentProcessState> {
+            let gate = self.status_gate.lock().clone();
+            if let Some(gate) = gate {
+                self.status_entered.notify_one();
+                gate.acquire().await.unwrap().forget();
+            }
             self.running
                 .lock()
                 .contains(&id.to_string())
@@ -471,6 +589,11 @@ mod tests {
             config: ExternalAgentSpawnConfig,
             sink: Arc<dyn ExternalAgentEventSink>,
         ) -> Result<String, SandboxSpawnError> {
+            let gate = self.start_gate.lock().clone();
+            if let Some(gate) = gate {
+                self.start_entered.notify_one();
+                gate.acquire().await.unwrap().forget();
+            }
             if let Some(error) = self.sandbox_result.lock().clone() {
                 return Err(error);
             }
@@ -782,6 +905,158 @@ mod tests {
             "{faulted}"
         );
         assert!(existing.spawned.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_pending_sandbox_blocks_the_same_id_on_the_other_backend_and_cancels() {
+        let sandbox = Recording::new("sandbox");
+        *sandbox.start_gate.lock() = Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        let (existing, router, emitter) = router(sandbox.clone());
+        let first = tokio::spawn({
+            let router = router.clone();
+            let emitter = emitter.clone();
+            async move {
+                router
+                    .spawn(
+                        config("pending", Some(placement(false))),
+                        EmitterEventSink::new(emitter),
+                    )
+                    .await
+            }
+        });
+        sandbox.start_entered.notified().await;
+        assert_eq!(
+            router.status("pending").await,
+            Some(ExternalAgentProcessState::Starting)
+        );
+        assert_eq!(router.is_running("pending").await, Ok(false));
+        assert_eq!(router.list().await, vec!["pending".to_string()]);
+        let duplicate = router
+            .spawn(
+                config("pending", None),
+                EmitterEventSink::new(emitter.clone()),
+            )
+            .await
+            .unwrap_err();
+        assert!(duplicate.contains("already exists"));
+        assert!(existing.spawned.lock().is_empty());
+        router.kill_all().await.unwrap();
+        assert!(first.await.unwrap().unwrap_err().contains("cancelled"));
+        assert!(router.list().await.is_empty());
+        router
+            .spawn(config("pending", None), EmitterEventSink::new(emitter))
+            .await
+            .unwrap();
+        router.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn aborting_a_routed_creation_releases_the_id() {
+        let sandbox = Recording::new("sandbox");
+        *sandbox.start_gate.lock() = Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        let (_, router, emitter) = router(sandbox.clone());
+        let first = tokio::spawn({
+            let router = router.clone();
+            let emitter = emitter.clone();
+            async move {
+                router
+                    .spawn(
+                        config("pending", Some(placement(false))),
+                        EmitterEventSink::new(emitter),
+                    )
+                    .await
+            }
+        });
+        sandbox.start_entered.notified().await;
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        router
+            .spawn(config("pending", None), EmitterEventSink::new(emitter))
+            .await
+            .unwrap();
+        router.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_child_still_cleaning_up_blocks_reuse_on_the_other_backend() {
+        let sandbox = Recording::new("sandbox");
+        let (existing, router, emitter) = router(sandbox.clone());
+        // A cancelled spawn has returned before its owned daemon worker
+        // finishes. No routed owner was published, but the child still owns
+        // the id until its resource cleanup completes.
+        sandbox.running.lock().push("cleanup".into());
+        assert_eq!(
+            router.status("cleanup").await,
+            Some(ExternalAgentProcessState::Running)
+        );
+        assert_eq!(router.get_info("cleanup").await.unwrap()["kind"], "sandbox");
+        let result = router
+            .spawn(
+                config("cleanup", None),
+                EmitterEventSink::new(emitter.clone()),
+            )
+            .await;
+        assert!(result.unwrap_err().contains("already exists"));
+        assert!(existing.spawned.lock().is_empty());
+        router.kill("cleanup").await.unwrap();
+        assert!(sandbox.running.lock().is_empty());
+        assert_eq!(router.status("cleanup").await, None);
+        router
+            .spawn(config("cleanup", None), EmitterEventSink::new(emitter))
+            .await
+            .unwrap();
+        assert_eq!(existing.spawned.lock().len(), 1);
+        router.kill_all().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn conflicting_unpublished_child_owners_are_not_guessed() {
+        let sandbox = Recording::new("sandbox");
+        let (existing, router, _) = router(sandbox.clone());
+        existing.running.lock().push("conflict".into());
+        sandbox.running.lock().push("conflict".into());
+        assert!(router
+            .get_info("conflict")
+            .await
+            .unwrap_err()
+            .contains("conflicting backend owners"));
+        assert!(router
+            .kill("conflict")
+            .await
+            .unwrap_err()
+            .contains("conflicting backend owners"));
+        assert_eq!(existing.running.lock().len(), 1);
+        assert_eq!(sandbox.running.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_duplicate_pending_owner_check_does_not_consume_the_live_agents_kill() {
+        let sandbox = Recording::new("sandbox");
+        let (existing, router, emitter) = router(sandbox);
+        router
+            .spawn(config("live", None), EmitterEventSink::new(emitter.clone()))
+            .await
+            .unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *existing.status_gate.lock() = Some(gate.clone());
+        let duplicate = tokio::spawn({
+            let router = router.clone();
+            async move {
+                router
+                    .spawn(config("live", None), EmitterEventSink::new(emitter))
+                    .await
+            }
+        });
+        existing.status_entered.notified().await;
+        let kill = tokio::spawn({
+            let router = router.clone();
+            async move { router.kill("live").await }
+        });
+        existing.status_entered.notified().await;
+        gate.add_permits(2);
+        kill.await.unwrap().unwrap();
+        assert!(duplicate.await.unwrap().is_err());
+        assert!(existing.running.lock().is_empty());
     }
 
     #[tokio::test]

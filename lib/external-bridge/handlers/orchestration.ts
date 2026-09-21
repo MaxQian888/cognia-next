@@ -205,6 +205,12 @@ export async function teamRunCore(input: TeamRunInput): Promise<TeamRunOutput> {
           error: `this pickup is addressed to '${pickup.targetId}'`,
         }
       }
+      if (
+        !isPickupFree(pickup, team.status) &&
+        (pickup.claimant?.id ?? pickup.claimedBy) !== claimant.id
+      ) {
+        return { ok: false, error: "This task is already claimed by another agent" }
+      }
       if (isPickupFree(pickup, team.status)) {
         store.updateTeam(input.teamId, {
           externalPickup: {

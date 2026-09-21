@@ -46,6 +46,13 @@ import { isChatMiddlewareExecutionEnabled } from "@/lib/claude/chat-middleware/f
 import type { ChatMiddlewareRequest } from "@/types/plugin/plugin-chat-middleware"
 import type { PluginMessage } from "@/types/plugin/plugin"
 import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
+import {
+  fusionActionRequested,
+  runExplicitAgentFusionTurn,
+  type ExplicitFusionTurnInput,
+  type FusionActionChoice,
+} from "@/lib/router-fusion/gate/explicit-run"
+import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
 import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
@@ -543,6 +550,46 @@ export interface RunAndCaptureOptions {
    * caller that is already governed elsewhere (e.g. a nested re-entry).
    */
   execution?: ExecutionLeaseInfo
+  /**
+   * Router + Fusion action for this turn (ADR-0188 B5, master plan D3).
+   *
+   * An agent turn may be run as fusion work instead of as one sidecar turn:
+   * `cascade` re-asks a cheap model and escalates, `panel` runs a review board,
+   * `delegate` hands the work to a bounded worker graph. `auto` — and omitting
+   * the whole object, which is every caller today — is byte-for-byte the
+   * existing path, decided by one property read before anything is loaded.
+   *
+   * The choice runs under the `agentsWorkflows` surface: off, the turn is the
+   * sidecar turn it always was; on, the run is routed, reserved and settled
+   * through the CallLedger and its verified answer becomes this turn's text.
+   */
+  fusion?: FusionTurnRequest
+}
+
+/** What a caller says about this turn's Router + Fusion action. */
+export interface FusionTurnRequest {
+  /** `auto` (or absent) keeps the existing path untouched. */
+  action?: FusionActionChoice
+  /** Which run list the turn appears in; `agent` when omitted. */
+  origin?: ExplicitFusionTurnInput["origin"]
+  /** Stable id of the caller, e.g. `teammate:<id>`. Defaults to the session. */
+  featureId?: string
+  /** The project the turn belongs to; it may raise the data class (D30). */
+  workspaceId?: string | null
+  /** The directory the turn works in; a panel may read files there. */
+  workspaceRoot?: string | null
+  /**
+   * The conversation or run whose turns nest (INV-09). Defaults to the chat
+   * session id, so an agent turn on a session that is already running a chat
+   * fusion turn is refused with `FUSION_RECURSION` rather than nested.
+   */
+  scopeId?: string | null
+  /** Force the ancestor flag; normally derived from {@link scopeId}. */
+  hasFusionAncestor?: boolean
+  /** The account settings the gate reads; read from this host when omitted. */
+  settings?: ExplicitFusionTurnInput["settings"]
+  /** Test seam. */
+  loadHost?: ExplicitFusionTurnInput["loadHost"]
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
@@ -570,7 +617,7 @@ export async function runAndCaptureAssistantReply(
   // Admission bypass: a caller that is already governed (or a context with no
   // broker, e.g. some CLI paths) opts out via `execution.skip`.
   if (cap?.execution?.skip) {
-    return runCaptureWithMiddleware(sessionId, prompt, options, cap)
+    return runCaptureWithFusionAction(sessionId, prompt, options, cap)
   }
 
   const info = cap?.execution
@@ -595,10 +642,97 @@ export async function runAndCaptureAssistantReply(
       const effectiveCap: RunAndCaptureOptions | undefined = combined
         ? { ...cap, signal: combined.signal }
         : cap
-      const run = runCaptureWithMiddleware(sessionId, prompt, options, effectiveCap)
+      const run = runCaptureWithFusionAction(sessionId, prompt, options, effectiveCap)
       return combined ? run.finally(combined.cleanup) : run
     }
   )
+}
+
+/** The turn's prompt as the plain text a fusion run is routed and executed on. */
+export function promptTextOf(prompt: SendContent): string {
+  if (typeof prompt === "string") return prompt
+  return prompt
+    .filter((block): block is { type: "text"; text: string } => block.type === "text")
+    .map((block) => block.text)
+    .join("\n\n")
+}
+
+/**
+ * Run the turn as Router + Fusion work when the caller chose a fusion action
+ * and the `agentsWorkflows` surface is on; otherwise run the turn exactly as
+ * before.
+ *
+ * `fusionActionRequested` is one property read, so a caller that named no
+ * action — every caller today — reaches `runCaptureWithMiddleware` having
+ * evaluated nothing else (D37). A chosen mode that the surface cannot serve is
+ * reported, never quietly replaced by an ordinary turn (D38): an infrastructure
+ * fault surfaces as `RouterFusionUnavailableError` from the guard, and a
+ * refusal — no route, no budget, a fusion ancestor — as a
+ * `RouterFusionRefusalError` carrying the router's own code.
+ */
+async function runCaptureWithFusionAction(
+  sessionId: string,
+  prompt: SendContent,
+  options?: SendOptions,
+  cap?: RunAndCaptureOptions
+): Promise<RunAndCaptureResult> {
+  const request = cap?.fusion
+  if (!request || !fusionActionRequested(request.action)) {
+    return runCaptureWithMiddleware(sessionId, prompt, options, cap)
+  }
+  const settings =
+    request.settings ??
+    (await (
+      await import("@/lib/router-fusion/gate/current-settings")
+    ).currentRouterFusionGateSettings())
+  const system = [options?.systemPrompt, options?.appendSystemPrompt]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join("\n\n")
+  const text = promptTextOf(prompt)
+  const outcome = await runExplicitAgentFusionTurn({
+    mode: request.action,
+    origin: request.origin ?? "agent",
+    featureId: request.featureId ?? `agent-turn:${sessionId}`,
+    messages: [
+      ...(system ? [{ role: "system" as const, content: system }] : []),
+      { role: "user" as const, content: text.trim() || "(no text)" },
+    ],
+    workspaceId: request.workspaceId ?? null,
+    workspaceRoot: request.workspaceRoot ?? null,
+    scopeId: request.scopeId ?? sessionId,
+    ...(request.hasFusionAncestor !== undefined
+      ? { hasFusionAncestor: request.hasFusionAncestor }
+      : {}),
+    settings,
+    ...(cap?.signal ? { signal: cap.signal } : {}),
+    ...(request.loadHost ? { loadHost: request.loadHost } : {}),
+  })
+  // The surface is off: the turn is the turn it always was.
+  if (outcome.kind === "skipped") {
+    return runCaptureWithMiddleware(sessionId, prompt, options, cap)
+  }
+  if (outcome.kind === "refused") {
+    throw new RouterFusionRefusalError(
+      outcome.code,
+      `Router + Fusion refused this ${request.action} turn: ${outcome.code}`,
+      { reasons: outcome.reasons, ...(outcome.runId ? { runId: outcome.runId } : {}) }
+    )
+  }
+  cap?.onPartial?.(outcome.text)
+  cap?.onEvent?.({ type: "text-delta", delta: outcome.text })
+  return {
+    text: outcome.text,
+    // A fusion run has no SDK assistant message; its run id is the stable
+    // idempotency key a caller would otherwise take from one.
+    messageId: outcome.runId,
+    a2uiSurfaces: {},
+    a2uiSurfaceOrder: [],
+    usage: {
+      inputTokens: outcome.usage.promptTokens,
+      outputTokens: outcome.usage.completionTokens,
+    },
+    resultSubtype: outcome.qualityStatus === "degraded" ? "degraded" : "success",
+  }
 }
 
 /**

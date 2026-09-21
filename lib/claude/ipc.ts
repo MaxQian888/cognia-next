@@ -6,6 +6,8 @@ import type { Page, PageRequest } from "@/lib/tauri/companion-paging"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "@/types"
 import { transport } from "@/lib/tauri"
+import { detectHostProfile } from "@/lib/platform/capabilities"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import type {
   AgentId,
@@ -883,11 +885,27 @@ export async function toolResultDecision(
 }
 
 /**
+ * Whether this window's turns run on a paired host's sidecar rather than its
+ * own: a phone or a browser paired to a host, or a desktop driving a remote
+ * host. Keyed on the host profile, never on `isTauri()` (which every node and
+ * jsdom suite would read as "paired").
+ */
+function turnsRunOnPairedHost(): boolean {
+  const profile = detectHostProfile()
+  return profile === "mobile-companion" || profile === "cloud-companion" || isRemoteHostActive()
+}
+
+/**
  * Answer a Router + Fusion `call_reserve_request` (ADR-0188). `granted` lets the
  * sidecar send the call (the attempt is already durably dispatched in the fusion
  * ledger); `refused` stops the turn with the refusal code; `bypass` tells the
  * sidecar the ledger is unavailable and the turn continues unledgered.
- * Desktop-only: the ledger lives in this renderer's fusion database.
+ *
+ * The ledger is this window's fusion database either way. On the desktop the
+ * answer goes to its own sidecar (`claude_call_reserve_decision`, a local-only
+ * command); a window whose turn runs on a paired host's sidecar answers through
+ * that host (`claude_call_reserve_respond`, ADR-0188 D25), which relays it
+ * while its companion switch is on.
  */
 export async function callReserveDecision(
   sessionId: string,
@@ -898,11 +916,20 @@ export async function callReserveDecision(
     | { decision: "refused"; code: string; message?: string }
     | { decision: "bypass"; code: string }
 ): Promise<void> {
-  await transport.call("claude_call_reserve_decision", {
-    sessionId,
-    requestId,
-    ...decision,
-  })
+  const command = turnsRunOnPairedHost()
+    ? "claude_call_reserve_respond"
+    : "claude_call_reserve_decision"
+  const answer = await transport.call<{ ok?: unknown; error?: { code?: unknown } } | null>(
+    command,
+    { sessionId, requestId, ...decision }
+  )
+  // The paired host answers in the Router + Fusion envelope; a refusal (its
+  // companion switch is off) means nothing reached the sidecar, so the caller
+  // must know the reservation is still open rather than assume it was answered.
+  if (command === "claude_call_reserve_respond" && answer && answer.ok === false) {
+    const code = typeof answer.error?.code === "string" ? answer.error.code : "relay_refused"
+    throw new Error(`the paired host did not relay the reservation answer: ${code}`)
+  }
 }
 
 export async function closeSession(

@@ -356,6 +356,20 @@ function safeText(value: string): string {
   return redactText(value).redacted
 }
 
+/**
+ * The name Pi advertises to the model for a projected MCP tool.
+ *
+ * Cognia tool names may contain dots (`ocr.extract`), which Anthropic-style
+ * APIs accept but OpenAI-compatible providers reject — the whole request fails
+ * with "string does not match pattern '^[a-zA-Z0-9_-]+$'". The MCP wire keeps
+ * the real `tool.name` for dispatch; only the advertised identifier is
+ * rewritten. `known`/`available`/`owns` key off this same name, so the
+ * `tool_call` event Pi reports matches what was registered.
+ */
+export function sanitizePiToolName(name: string): string {
+  return name.replace(/\./g, "_")
+}
+
 /** Pi supports text and image tool blocks. Preserve resource text explicitly. */
 export function piMcpResult(value: unknown): PiToolResult {
   const result = value as {
@@ -469,7 +483,7 @@ export function createMcpProjection(pi: PiExtensionApi, servers: McpServerConfig
           )
             throw new Error("MCP tool catalog blocked by the PII gate")
           for (const tool of page.tools) {
-            const name = `mcp__${server}__${tool.name}`
+            const name = sanitizePiToolName(`mcp__${server}__${tool.name}`)
             if (!/^[a-zA-Z0-9_.-]+$/.test(tool.name) || next.has(name))
               throw new Error("Invalid or duplicate MCP tool name")
             next.set(name, { server, client, tool })

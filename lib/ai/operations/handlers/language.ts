@@ -20,6 +20,7 @@ import type {
   languageToolsInput,
   languageToolsOutput,
 } from "@cognia/provider-types"
+import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import { createFeatureProviderModel, type ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { ProviderOperationFailureError } from "../failure"
@@ -105,7 +106,12 @@ export function toModelMessages(messages: readonly ChatMessage[]): PromptMessage
 
 type CallArgs = Pick<
   GenerateTextArgs,
-  "system" | "maxOutputTokens" | "temperature" | "topP" | "stopSequences"
+  | "instructions"
+  | "allowSystemInMessages"
+  | "maxOutputTokens"
+  | "temperature"
+  | "topP"
+  | "stopSequences"
 > & { messages: PromptMessages }
 
 function callArgsOf(input: LanguageGenerateInput): CallArgs {
@@ -116,9 +122,17 @@ function callArgsOf(input: LanguageGenerateInput): CallArgs {
       message: "a language request needs at least one message",
     })
   }
+  // `chatMessageSchema` admits `role: "system"` at any position and the request
+  // carries its own `system` field, but AI SDK 7 throws `InvalidPromptError`
+  // when a system entry reaches `messages`. `partitionPrompt` hoists
+  // `input.system` plus the leading system run into `instructions`; a system
+  // turn interleaved with the history stays where the caller put it and opts
+  // back in through `allowSystemInMessages`, so the model sees the same order
+  // it saw before the SDK 7 upgrade.
+  const partitioned = partitionPrompt(toModelMessages(input.messages), input.system)
   return {
-    messages: toModelMessages(input.messages),
-    ...(input.system ? { system: input.system } : {}),
+    ...partitioned,
+    messages: partitioned.messages as PromptMessages,
     ...(input.maxOutputTokens !== undefined ? { maxOutputTokens: input.maxOutputTokens } : {}),
     ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
     ...(input.topP !== undefined ? { topP: input.topP } : {}),

@@ -537,6 +537,10 @@ export const createExternalAgentActionsSlice = (
     set({ chatFailurePolicy: policy })
   },
 
+  setOverviewBannerCollapsed: (collapsed: boolean): void => {
+    set({ overviewBannerCollapsed: collapsed })
+  },
+
   // ========================================
   // Bulk Operations
   // ========================================

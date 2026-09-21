@@ -39,18 +39,19 @@ describe("preflightExternalAgent", () => {
   })
 
   it("refuses a requirement the protocol row DECLARES unsupported", () => {
-    // `pi-rpc` has no per-session mcpServers parameter.
+    // `pi-rpc` owns its plugin runtime; Cognia cannot project plugins into the
+    // agent's native surface, so the protocol row declares it unsupported.
     const result = preflightExternalAgent({
       protocol: "pi-rpc",
-      requires: ["mcp"],
+      requires: ["plugins.native"],
       hasAdapter: always,
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe("unsupported_capability")
-    expect(result.error.capability).toBe("mcp")
+    expect(result.error.capability).toBe("plugins.native")
     expect(result.error.detail?.missing).toEqual([
-      expect.objectContaining({ capability: "mcp", level: "unsupported" }),
+      expect.objectContaining({ capability: "plugins.native", level: "unsupported" }),
     ])
   })
 

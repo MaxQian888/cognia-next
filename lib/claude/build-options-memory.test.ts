@@ -217,17 +217,37 @@ describe("resolveSendOptions memory injection", () => {
     })
   })
 
-  it("injects the procedural block", async () => {
+  it("injects a verified procedural block and records its delivery reference", async () => {
     const opts = await resolveSendOptions({
       character: baseCharacter,
       appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
       memoryDeps: deps({
-        loadProcedural: async () => [mem("Reply in Chinese", { type: "procedural" })],
+        loadProcedural: async () => [
+          mem("Reply in Chinese", {
+            id: "procedure",
+            type: "procedural",
+            reviewStatus: "verified",
+          }),
+        ],
       }),
       memoryUserMessage: "anything",
     })
     expect(opts.systemPrompt).toContain("Working preferences you've learned")
     expect(opts.memoryContext?.proceduralCount).toBe(1)
+    expect(opts.memoryContext?.snapshot?.memoryRefs).toEqual([{ id: "procedure", version: 1 }])
+  })
+
+  it("withholds an unreviewed procedure at the real send-options boundary", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
+      memoryDeps: deps({
+        loadProcedural: async () => [mem("Unreviewed directive", { type: "procedural" })],
+      }),
+      memoryUserMessage: "anything",
+    })
+    expect(opts.systemPrompt).not.toContain("Unreviewed directive")
+    expect(opts.memoryContext).toBeUndefined()
   })
 
   it("degrades cleanly (memoryContext.degraded) when the runtime throws", async () => {

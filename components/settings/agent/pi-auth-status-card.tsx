@@ -201,15 +201,17 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
 
       {status.listing === "ok" && status.models.length > 0 && (
         <div className="space-y-1" data-testid="pi-auth-models">
-          <button
+          <Button
             type="button"
-            className="text-xs font-medium text-muted-foreground hover:text-foreground"
+            variant="ghost"
+            size="sm"
+            className="h-auto px-0 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
             onClick={() => setModelsOpen((open) => !open)}
             aria-expanded={modelsOpen}
             data-testid="pi-auth-models-toggle"
           >
             {t("modelsSummary", { count: status.models.length, providers: groups.length })}
-          </button>
+          </Button>
           {modelsOpen && (
             <ul className="space-y-1">
               {groups.map(([provider, models]) => (

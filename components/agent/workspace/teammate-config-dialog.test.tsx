@@ -416,3 +416,60 @@ describe("teammate Cognia model binding", () => {
     )
   })
 })
+
+/**
+ * The Squad member's Router + Fusion action (ADR-0188 D3/D21). The picker is
+ * the third axis of the member surface: the type carries the field, the
+ * runtime reads it (`member-fusion-turn.ts`), and this is where a person sets
+ * it.
+ */
+describe("teammate Router + Fusion action", () => {
+  beforeEach(() => {
+    updateTeammateMock.mockReset()
+    listTwinsMock.mockReturnValue(TWINS)
+    mockSettings.settings = {
+      routerFusion: { enabled: true, surfaces: { agentsWorkflows: true } },
+    }
+  })
+
+  it("persists the member's chosen action onto its config", async () => {
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={teammate} team={team} />)
+
+    fireEvent.click(screen.getByTestId("fusion-action-trigger"))
+    fireEvent.click(await screen.findByRole("option", { name: /actions\.cascade/ }))
+
+    expect(updateTeammateMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ config: expect.objectContaining({ fusionAction: "cascade" }) })
+    )
+  })
+
+  it("shows the member's stored action and disables delegate for a team with no project", async () => {
+    render(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...teammate, config: { fusionAction: "panel" } }}
+        team={team}
+      />
+    )
+    expect(screen.getByTestId("fusion-action-trigger")).toHaveTextContent("actions.panel")
+    fireEvent.click(screen.getByTestId("fusion-action-trigger"))
+    expect(await screen.findByRole("option", { name: /actions\.delegate/ })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
+  it("[ACC:OFF-AGENTS] offers nothing but Auto while the surface is off", async () => {
+    mockSettings.settings = {
+      routerFusion: { enabled: true, surfaces: { agentsWorkflows: false } },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={teammate} team={team} />)
+    fireEvent.click(screen.getByTestId("fusion-action-trigger"))
+    expect(await screen.findByRole("option", { name: /actions\.panel/ })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+})

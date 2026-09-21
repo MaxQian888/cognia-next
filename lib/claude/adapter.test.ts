@@ -1,3 +1,7 @@
+import {
+  projectMiningAttachmentExcerpts,
+  memoryTranscriptProse,
+} from "@/lib/memory/write/project-transcript-text"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
 import type { UIMessage } from "ai"
@@ -1269,6 +1273,47 @@ describe("makeUserMessage", () => {
     expect(file.type).toBe("file")
     expect(file.url).toBe("data:image/png;base64,AAAA")
     expect(file.mediaType).toBe("image/png")
+  })
+
+  it("keeps native document provenance without base64 in the transcript", () => {
+    const original = new Blob(["pdf"], { type: "application/pdf" })
+    const extractedContent = {
+      attachmentId: "pdf-1",
+      contentHash: "a".repeat(64),
+      status: "ready" as const,
+      processor: { id: "pdf", version: "1" },
+      segments: [{ id: "p1", text: "first page", locator: { type: "page" as const, page: 1 } }],
+    }
+    const msg = makeUserMessage(
+      [
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: "cGRm" },
+        },
+      ],
+      "native-pdf",
+      [
+        {
+          filename: "report.pdf",
+          mediaType: "application/pdf",
+          kind: "document",
+          original,
+          extractedContent,
+        },
+      ]
+    )
+    expect(msg.parts).toEqual([
+      {
+        type: "file",
+        filename: "report.pdf",
+        mediaType: "application/pdf",
+        text: "first page",
+        attachmentOriginal: original,
+        attachmentOriginalMediaType: "application/pdf",
+        extractedContent,
+      },
+    ])
+    expect(msg.parts[0]).not.toHaveProperty("url")
   })
 
   it("ignores unknown block kinds in a multimodal payload", () => {
@@ -2574,6 +2619,95 @@ describe("makeUserMessage — videos", () => {
     engine: "browser" as const,
   }
 
+  it("stores source evidence once across many frames and keeps every mining interval", () => {
+    const text = "verified video scene ".repeat(180)
+    const original = new Blob(["original video"], { type: "video/mp4" })
+    const extractedContent = {
+      attachmentId: "video-source",
+      contentHash: "a".repeat(64),
+      status: "ready" as const,
+      processor: { id: "video", version: "1" },
+      segments: [
+        { id: "scene-1", text, locator: { type: "time" as const, startSec: 0, endSec: 30 } },
+      ],
+    }
+    const entry: AttachmentManifestEntry = {
+      filename: "demo.mp4",
+      mediaType: "video/mp4",
+      kind: "video",
+      video: { info },
+      original,
+      extractedContent,
+    }
+    const blocks: SendContent = [
+      { type: "text", text: "Video description" },
+      ...Array.from({ length: 20 }, () => ({
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: "image/jpeg" as const, data: "FRAME" },
+      })),
+      { type: "text", text: "What happened?" },
+    ]
+    const message = makeUserMessage(
+      blocks,
+      "video-turn",
+      Array.from({ length: 21 }, () => ({ ...entry }))
+    )
+    const parts = message.parts as unknown as Record<string, unknown>[]
+    expect(parts.filter((part) => part.extractedContent)).toHaveLength(1)
+    expect(parts.filter((part) => part.attachmentOriginal)).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      extractedContent,
+      attachmentOriginal: original,
+      attachmentOriginalMediaType: "video/mp4",
+    })
+    expect(parts.slice(0, 21).every((part) => part.videoAttachment === info)).toBe(true)
+    const excerpts = projectMiningAttachmentExcerpts(message.parts, message.id)
+    expect(excerpts.map((excerpt) => excerpt.text).join("")).toBe(text)
+    expect(excerpts.every((excerpt) => excerpt.source.partIndex === 0)).toBe(true)
+    expect(memoryTranscriptProse(message.parts)).toBe("What happened?")
+  })
+
+  it("deduplicates image OCR source metadata while keeping the OCR text external", () => {
+    const extractedContent = {
+      attachmentId: "image-source",
+      contentHash: "b".repeat(64),
+      status: "ready" as const,
+      processor: { id: "ocr", version: "1" },
+      segments: [
+        {
+          id: "ocr-1",
+          text: "external text",
+          locator: { type: "image" as const },
+          derivation: "ocr" as const,
+        },
+      ],
+    }
+    const original = new Blob(["image"], { type: "image/png" })
+    const entry: AttachmentManifestEntry = {
+      filename: "shot.png",
+      mediaType: "image/png",
+      kind: "image",
+      original,
+      extractedContent,
+    }
+    const message = makeUserMessage(
+      [
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "IMAGE" } },
+        { type: "text", text: "external text" },
+        { type: "text", text: "My request" },
+      ],
+      "ocr-turn",
+      [entry, { ...entry }]
+    )
+    const parts = message.parts as unknown as Record<string, unknown>[]
+    expect(parts[0]).toHaveProperty("extractedContent")
+    expect(parts[1]).not.toHaveProperty("extractedContent")
+    expect(parts[1]).not.toHaveProperty("attachmentOriginal")
+    expect(parts[1]).toMatchObject({ type: "file", text: "external text" })
+    expect(projectMiningAttachmentExcerpts(message.parts, message.id)).toHaveLength(1)
+    expect(memoryTranscriptProse(message.parts)).toBe("My request")
+  })
+
   it("tags a sampled video's description and images with one descriptor", () => {
     const entry: AttachmentManifestEntry = {
       filename: "demo.mp4",
@@ -2591,7 +2725,13 @@ describe("makeUserMessage — videos", () => {
       [entry, entry]
     )
     expect(msg.parts).toEqual([
-      { type: "text", text: 'Attached video "demo.mp4"', state: "done", videoAttachment: info },
+      {
+        type: "file",
+        filename: "demo.mp4",
+        mediaType: "text/plain",
+        text: 'Attached video "demo.mp4"',
+        videoAttachment: info,
+      },
       {
         type: "file",
         url: "data:image/jpeg;base64,Qk9BUkQ=",

@@ -341,6 +341,8 @@ export interface AgentCompositionSelectionV1 {
    * composition identity must not move because of it.
    */
   verifiedNativeResume?: true
+  /** Exact verified runtime instance; a preset alone cannot identify an account. */
+  verifiedNativeResumeAgentId?: string
   /**
    * The `agentModeId` this selection was migrated from, kept so an older
    * client (or an export) can still round-trip the session.

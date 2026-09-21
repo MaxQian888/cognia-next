@@ -1090,6 +1090,28 @@ describe("AcpClientAdapter — basic state", () => {
     const a = new AcpClientAdapter()
     expect(() => a.clearSessionExtensionSupportCache()).not.toThrow()
   })
+
+  it("ignores `_`-prefixed extension notifications at debug, warns on unknown standard methods", () => {
+    const a = new AcpClientAdapter()
+    const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
+    const debugSpy = jest.spyOn(loggers.agent, "debug").mockImplementation(() => {})
+    try {
+      const notify = (
+        a as unknown as { handleNotification: (notification: unknown) => void }
+      ).handleNotification.bind(a)
+      notify({ jsonrpc: "2.0", method: "_cognition.ai/turn_stats", params: {} })
+      notify({ jsonrpc: "2.0", method: "_cognition.ai/agent_stopped", params: {} })
+      expect(warnSpy).not.toHaveBeenCalled()
+      expect(debugSpy).toHaveBeenCalledTimes(2)
+      notify({ jsonrpc: "2.0", method: "vendor/feature", params: {} })
+      expect(warnSpy).toHaveBeenCalledWith("Unknown notification type", {
+        method: "vendor/feature",
+      })
+    } finally {
+      warnSpy.mockRestore()
+      debugSpy.mockRestore()
+    }
+  })
 })
 
 describe("AcpClientAdapter — unsupported transports and missing config", () => {

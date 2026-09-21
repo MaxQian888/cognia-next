@@ -44,6 +44,26 @@ jest.mock("./squad-review-form", () => ({
 jest.mock("@/hooks/agent-runs/use-execution-run-detail", () => ({
   useExecutionRunDetail: () => detailState,
 }))
+// The delegate review reads the fusion database behind the gate; its own test
+// covers that. Here the contract is the mount: which run kind gets it, which
+// interrupt it is handed, and that it owns approve / deny.
+jest.mock("./delegate-review-pane", () => ({
+  isFusionApprovalInterrupt: (interrupt: { type?: string } | null | undefined) =>
+    interrupt?.type === "fusion_approval",
+  DelegateReviewPane: ({
+    runId,
+    interrupt,
+    onDecide,
+  }: {
+    runId: string
+    interrupt?: { id: string } | null
+    onDecide?: (action: "approve" | "deny") => void
+  }) => (
+    <button type="button" data-testid="delegate-review-pane" onClick={() => onDecide?.("approve")}>
+      pane:{runId}:{interrupt?.id ?? "none"}
+    </button>
+  ),
+}))
 
 function emptyDetail(over: Partial<RunDetailProjection> = {}): RunDetailProjection {
   return {
@@ -643,6 +663,68 @@ describe("RunDetailPane", () => {
       reviewDecision: { kind: "budget_extension", extraTokens: 5000 },
       reviewedRun: detailState.run,
     })
+  })
+
+  it("hands approve / deny to the delegate review when a fusion run is parked on one", async () => {
+    detailState = {
+      ...detailState,
+      run: {
+        id: "run-9",
+        kind: "fusion",
+        sourceId: "run-9",
+        title: "Delegation",
+        status: "waiting_input",
+        currentRevision: 4,
+        startedAt: 1,
+        updatedAt: 2,
+        latestSnapshot: {
+          runId: "run-9",
+          revision: 4,
+          status: "waiting_input",
+          elapsedMs: 1,
+          artifacts: [],
+          allowedActions: ["approve", "deny", "stop", "open_details"],
+          pendingInterrupt: { id: "fusion-approval-1", title: "Approval required" },
+        },
+      } as never,
+      interrupts: [
+        {
+          id: "fusion-approval-1",
+          runId: "run-9",
+          type: "fusion_approval",
+          title: "Router + Fusion approval",
+          status: "pending",
+          requestDigest: "d".repeat(64),
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        } as never,
+      ],
+    }
+    const dispatch = jest.fn().mockResolvedValue({ accepted: true })
+    render(
+      <RunDetailPane
+        row={row({
+          kind: "fusion",
+          runId: "run-9",
+          allowedActions: ["approve", "deny", "stop", "open_details"],
+        })}
+        actions={makeActions({ dispatch })}
+      />
+    )
+    expect(screen.getByTestId("delegate-review-pane")).toHaveTextContent(
+      "pane:run-9:fusion-approval-1"
+    )
+    expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "actions.deny" })).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByTestId("delegate-review-pane"))
+    expect(dispatch).toHaveBeenCalledWith(expect.anything(), "approve", {
+      reviewedRun: detailState.run,
+    })
+  })
+
+  it("mounts no delegate review for a run of another kind", () => {
+    render(<RunDetailPane row={row()} actions={makeActions()} />)
+    expect(screen.queryByTestId("delegate-review-pane")).not.toBeInTheDocument()
   })
 
   it("keeps the bare approve / deny for a pending interrupt that is not a Squad review", () => {

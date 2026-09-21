@@ -107,6 +107,38 @@ describe("DelegationRulesSection", () => {
     expect(removeRule).toHaveBeenCalledWith("r1")
   })
 
+  it("opens the create dialog pre-targeted when a caller seeds an agent", () => {
+    mockAgents = [
+      { id: "a1", name: "Claude Code" },
+      { id: "a2", name: "Codex" },
+    ]
+    render(<DelegationRulesSection createForAgent={{ agentId: "a2" }} />)
+    const dialog = screen.getByRole("dialog")
+    // The target select shows the seeded agent rather than the first agent.
+    expect(within(dialog).getByText("Codex")).toBeInTheDocument()
+  })
+
+  it("ignores a seed pointing at an agent that cannot be targeted", () => {
+    mockAgents = [{ id: "a1", name: "Claude Code" }]
+    render(<DelegationRulesSection createForAgent={{ agentId: "missing" }} />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("does not reopen the dialog for the same seed object twice", async () => {
+    mockAgents = [{ id: "a1", name: "Claude Code" }]
+    const seed = { agentId: "a1" }
+    const { rerender } = render(<DelegationRulesSection createForAgent={seed} />)
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    // Same identity on a re-render must not reopen after the user closes it.
+    rerender(<DelegationRulesSection createForAgent={seed} />)
+    const user = userEvent.setup()
+    await act(async () => {
+      await user.keyboard("{Escape}")
+    })
+    rerender(<DelegationRulesSection createForAgent={seed} />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
   it("reorders rules with the move buttons", async () => {
     const user = userEvent.setup()
     mockRules = [rule({ id: "r1" }), rule({ id: "r2", name: "Tests" })]

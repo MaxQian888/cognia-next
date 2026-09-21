@@ -413,7 +413,7 @@ export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSection
           {/* The platform's import, with its signature, manifest and size
               checks. The store's `importTemplates` took bare JSON with none of
               them and had no caller at all. */}
-          <input
+          <Input
             ref={importRef}
             type="file"
             accept=".cognia-template,application/zip"

@@ -62,6 +62,7 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
 import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
+import { FusionActionField } from "@/components/router-fusion/fusion-action-field"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
 import { getPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { ExternalAgentCogniaModelBinding } from "@/types/agent/external-agent"
@@ -119,6 +120,7 @@ export function TeammateConfigDialog({
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
+  const tFusion = useTranslations("routerFusionModes")
   const tSandboxNetwork = useTranslations("settings.sandbox.policy.network")
 
   // The prop is the opener's click-time SNAPSHOT; every inline field persists
@@ -250,6 +252,25 @@ export function TeammateConfigDialog({
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    {/* Router + Fusion action (ADR-0188 D3/D21). Auto — the
+                        default — keeps the member's ordinary channel; the
+                        other modes run the member turn as a session-less
+                        child fusion run of the team run. */}
+                    <div className="space-y-1">
+                      <Label className="text-xs" htmlFor="teammate-fusion-action">
+                        {tFusion("field.label")}
+                      </Label>
+                      <FusionActionField
+                        id="teammate-fusion-action"
+                        value={teammate.config.fusionAction}
+                        hasWorkspace={Boolean(team.projectId)}
+                        onChange={(value) => {
+                          updateTeammate(teammate.id, {
+                            config: { ...teammate.config, fusionAction: value },
+                          })
+                        }}
+                      />
                     </div>
                     {teammate.role === "lead" && (
                       <div className="space-y-1">

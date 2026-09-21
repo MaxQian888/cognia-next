@@ -51,6 +51,18 @@ beforeEach(() => {
 })
 
 describe("resolveSkillsForCharacter", () => {
+  it("excludes explicit-only plugin skills until explicitly selected", async () => {
+    const { buildSkill } = await import("@/lib/plugin/convert/skill-source")
+    const { skill } = buildSkill(
+      "---\nname: restricted\ndisable-model-invocation: true\n---\nRestricted body."
+    )
+    registerSkill(skill.id, skill, { pluginId: "converted" })
+    expect(await resolveSkillsForCharacter([skill.id])).toEqual([])
+    const selected = await resolveSkillsForCharacter([skill.id], undefined, [skill.id])
+    expect(renderResolvedSkillsSection(selected)).toContain("Restricted body.")
+    expect(selected[0].pluginSkill?.invocationPolicy).toBe("explicit")
+  })
+
   it("returns an empty array for no ids", async () => {
     const result = await resolveSkillsForCharacter([])
     expect(result).toEqual([])

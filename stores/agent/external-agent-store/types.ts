@@ -85,6 +85,8 @@ export interface ExternalAgentState {
   showConnectionNotifications: boolean
   /** Chat-time failure handling policy for external agent execution */
   chatFailurePolicy: "fallback" | "strict"
+  /** Whether the fleet summary banner on the "All agents" overview is collapsed */
+  overviewBannerCollapsed: boolean
 
   // Runtime state (spawned processes)
   /** Running agent instances */
@@ -170,6 +172,7 @@ export interface ExternalAgentActions {
   setAutoConnectOnStartup: (enabled: boolean) => void
   setShowConnectionNotifications: (enabled: boolean) => void
   setChatFailurePolicy: (policy: ExternalAgentState["chatFailurePolicy"]) => void
+  setOverviewBannerCollapsed: (collapsed: boolean) => void
 
   // Bulk operations
   importAgents: (agents: ExternalAgentConfig[]) => void

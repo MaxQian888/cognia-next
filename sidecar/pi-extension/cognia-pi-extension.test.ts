@@ -208,6 +208,50 @@ test("rejects repeated pagination and duplicate tools", async (t) => {
   }
 })
 
+test("advertises dotted tool names sanitized while dispatching the real MCP name", async (t) => {
+  const calls: string[] = []
+  const f = await fixture(t, {
+    list: () => ({
+      tools: [
+        {
+          name: "ocr.extract",
+          description: "OCR",
+          inputSchema: { type: "object", properties: { source: { type: "string" } } },
+        },
+      ],
+    }),
+    call: (params) => {
+      calls.push(params.name)
+      return { content: [{ type: "text", text: "done" }] }
+    },
+  })
+  await f.projection.start(f.ctx)
+  assert.equal(f.tools.has("mcp__custom__ocr.extract"), false)
+  assert.ok(f.tools.has("mcp__custom__ocr_extract"))
+  assert.ok(f.projection.owns("mcp__custom__ocr_extract"))
+  assert.deepEqual(f.pi.getActiveTools(), ["read", "mcp__custom__ocr_extract"])
+  assert.deepEqual(
+    await f.tools
+      .get("mcp__custom__ocr_extract")
+      .execute("call", { source: "x" }, new AbortController().signal),
+    { content: [{ type: "text", text: "done" }], details: {} }
+  )
+  assert.deepEqual(calls, ["ocr.extract"])
+})
+
+test("rejects tool names that collide once sanitized for the provider", async (t) => {
+  const f = await fixture(t, {
+    list: () => ({
+      tools: [
+        { name: "a.b", inputSchema: { type: "object" } },
+        { name: "a_b", inputSchema: { type: "object" } },
+      ],
+    }),
+  })
+  await assert.rejects(f.projection.start(f.ctx), /Invalid or duplicate MCP tool name/)
+  assert.equal(f.tools.size, 0)
+})
+
 test("remote errors are actual Pi tool failures and cannot disclose server credentials", async (t) => {
   const f = await fixture(t, {
     call: () => {
