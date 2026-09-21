@@ -1,3 +1,7 @@
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: jest.fn(),
+}))
+
 /**
  * Binding-level test: `@/lib/search/standalone-answer` supplies the app's
  * `StandaloneAnswerDeps` — settings-store config plus the BYOK model built
@@ -39,6 +43,12 @@ jest.mock("@/lib/search/configured-search", () => ({
 }))
 
 import { runStandaloneSearchAnswer } from "./standalone-answer"
+import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
+import { loadRouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import type { BeginLedgeredUtilityCallInput } from "@/lib/router-fusion/gate/utility-ledger"
+
+const loadHostMock = loadRouterFusionHost as jest.Mock
 
 const resolved: ProviderResolution = {
   kind: "resolved",
@@ -132,5 +142,99 @@ describe("lib/search/standalone-answer binding", () => {
     const deps = capturedDeps()
     expect(deps.sanitizeText?.("alice@example.com")).not.toContain("alice@example.com")
     expect(deps.wrapUntrustedContent?.("source text")).toContain("Untrusted web content")
+  })
+})
+
+// --- Router + Fusion ledger (ADR-0188 D27) -----------------------------------
+// The synthesis is a utility generation: with `utilityLedger` on the binding
+// hands the package a ledgered seam bound to the very provider `resolveModel`
+// resolved. Off, it hands it nothing.
+
+describe("lib/search/standalone-answer ledger seam", () => {
+  const reserved: BeginLedgeredUtilityCallInput[] = []
+
+  beforeEach(() => {
+    __resetBreakerForTesting()
+    reserved.length = 0
+    createModelMock.mockReturnValue({ modelId: "claude-sonnet-4-6" } as never)
+    loadHostMock.mockReset().mockResolvedValue({
+      beginLedgeredUtilityCall: async (input: BeginLedgeredUtilityCallInput) => {
+        reserved.push(input)
+        return {
+          kind: "granted",
+          handle: {
+            runId: "run-1",
+            maxOutputTokens: 900,
+            succeeded: async () => {},
+            failed: async () => {},
+            unknown: async () => {},
+          },
+        }
+      },
+    } as unknown as RouterFusionHost)
+  })
+
+  it("[ACC:OFF-03] hands the pipeline no seam while the switch is off", async () => {
+    await runStandaloneSearchAnswer({ query: "hello" })
+    const deps = capturedDeps()
+    deps.resolveModel()
+    expect(deps.resolveGenerate?.()).toBeUndefined()
+    expect(loadHostMock).not.toHaveBeenCalled()
+  })
+
+  it("hands no seam when no provider resolved, even with the switch on", async () => {
+    settingsRef.current = {
+      ...settingsRef.current,
+      routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+    }
+    resolveMock.mockReturnValue({ kind: "unresolved", reason: "no key", attemptedProviderIds: [] })
+    await runStandaloneSearchAnswer({ query: "hello" })
+    const deps = capturedDeps()
+    expect(deps.resolveModel()).toBeNull()
+    expect(deps.resolveGenerate?.()).toBeUndefined()
+  })
+
+  it("reserves the synthesis on the ledger, through the real pipeline, when the switch is on", async () => {
+    settingsRef.current = {
+      ...settingsRef.current,
+      searchProviders: { exa: { providerId: "exa", enabled: true, apiKey: "exa-key" } },
+      routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+    }
+    // Run the real package pipeline for this one case: search and the model call
+    // are injected, everything between them is the shipped code.
+    const core = jest.requireActual("@cognia/web-search/standalone-answer") as {
+      runStandaloneSearchAnswer: typeof runStandaloneSearchAnswer
+    }
+    runCoreMock.mockImplementation(
+      core.runStandaloneSearchAnswer as unknown as (...args: unknown[]) => unknown
+    )
+    const generateTextImpl = jest.fn().mockResolvedValue({
+      text: "Cited answer [1].",
+      usage: { inputTokens: 300, outputTokens: 50 },
+    })
+
+    const out = await runStandaloneSearchAnswer({
+      query: "hello",
+      searchImpl: jest.fn().mockResolvedValue({
+        provider: "exa",
+        query: "hello",
+        results: [{ title: "A", url: "https://a.com", content: "alpha", score: 1 }],
+        responseTime: 5,
+      }) as never,
+      generateTextImpl: generateTextImpl as never,
+    })
+
+    expect(out.answer).toBe("Cited answer [1].")
+    expect(reserved).toEqual([
+      expect.objectContaining({
+        featureId: "standalone-search-answer:web-search.standalone-answer",
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        workspaceId: null,
+      }),
+    ])
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 900, maxRetries: 0 })
+    )
   })
 })

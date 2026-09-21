@@ -15,6 +15,5 @@
     "unhealthy": "Unhealthy",
     "unknown": "Unknown"
   },
-  "successRate": "{percent}%",
-  "title": "Provider health"
+  "successRate": "{percent}%"
 }

@@ -11,6 +11,7 @@ import type {
   SearchProviderSettings,
 } from "./types"
 import { getEnabledProviders } from "./types"
+import { stripUndefined } from "./strip-undefined"
 
 import {
   searchWithBrave,
@@ -201,9 +202,11 @@ export async function routeSearch(
     throw new Error(`Unknown provider: ${provider}`)
   }
 
+  // Same precedence ladder as `search()` — explicit `undefined` fields in the
+  // call-time options must not clobber the provider's `defaultOptions`.
   const mergedOptions: SearchTypeRouterOptions = {
-    ...(settings.defaultOptions || {}),
-    ...options,
+    ...stripUndefined(settings.defaultOptions || {}),
+    ...stripUndefined(options),
   }
 
   const searchType = mergedOptions.searchType || "general"

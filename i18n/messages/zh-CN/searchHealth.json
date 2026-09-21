@@ -15,6 +15,5 @@
     "unhealthy": "异常",
     "unknown": "未知"
   },
-  "successRate": "{percent}%",
-  "title": "Provider 健康"
+  "successRate": "{percent}%"
 }

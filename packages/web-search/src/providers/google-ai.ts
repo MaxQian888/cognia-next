@@ -5,6 +5,7 @@
  */
 
 import type { SearchOptions, SearchResponse, SearchResult } from "../types"
+import { generateThroughSeam, type GenerationOverrides } from "../generation-seam"
 import { googleAIFetch } from "../proxy-search-fetch"
 import { log } from "../log"
 
@@ -39,6 +40,10 @@ interface GeminiResponse {
     promptTokenCount: number
     candidatesTokenCount: number
     totalTokenCount: number
+    /** Prompt tokens served from a context cache (part of `promptTokenCount`). */
+    cachedContentTokenCount?: number
+    /** Thinking tokens, billed as output but not part of `candidatesTokenCount`. */
+    thoughtsTokenCount?: number
   }
   error?: { code: number; message: string; status: string }
 }
@@ -162,6 +167,70 @@ function getModelId(options: GoogleAISearchOptions): string {
   return options.useLegacyRetrieval ? "gemini-1.5-flash" : "gemini-2.0-flash"
 }
 
+/**
+ * The body a ledgered call sends: the reservation's output bound added as
+ * `generationConfig.maxOutputTokens`. With no bound it is the body itself.
+ */
+function withOutputBound(
+  body: Record<string, unknown>,
+  overrides: GenerationOverrides
+): Record<string, unknown> {
+  return overrides.maxOutputTokens === undefined
+    ? body
+    : { ...body, generationConfig: { maxOutputTokens: overrides.maxOutputTokens } }
+}
+
+/**
+ * Gemini's usage report in the AI SDK's shape, which is what a ledger settles
+ * from. The prompt count already includes cached tokens, and thinking tokens
+ * are output, so both totals are inclusive like the AI SDK's.
+ */
+function usageOf(metadata: GeminiResponse["usageMetadata"]): Record<string, number> | undefined {
+  if (!metadata) return undefined
+  return {
+    inputTokens: metadata.promptTokenCount ?? 0,
+    outputTokens: (metadata.candidatesTokenCount ?? 0) + (metadata.thoughtsTokenCount ?? 0),
+    ...(metadata.cachedContentTokenCount
+      ? { cachedInputTokens: metadata.cachedContentTokenCount }
+      : {}),
+  }
+}
+
+/** The first candidate's text, or "" — never throws on a malformed answer; the caller checks that. */
+function answerOf(data: GeminiResponse): string {
+  return data.candidates?.[0]?.content?.parts?.map((part) => part.text).join("") ?? ""
+}
+
+/**
+ * One grounded generation, through the host's generation seam when it injected
+ * one (ADR-0188 D27). `request` is the caller's own round trip for a body; it
+ * throws on an HTTP or API error exactly as the caller always has. With no seam
+ * the body is sent unchanged.
+ */
+async function runGroundedGeneration(
+  query: string,
+  modelId: string,
+  options: GoogleAISearchOptions,
+  request: (body: Record<string, unknown>) => Promise<GeminiResponse>
+): Promise<GeminiResponse> {
+  const body = buildRequestBody(query, options)
+  // Written by `send` (a closure), so it is widened here rather than narrowed to `undefined`.
+  let data = undefined as GeminiResponse | undefined
+  await generateThroughSeam(
+    options.generate,
+    { stage: "web-search.google-ai", modelId, prompt: query },
+    async (overrides) => {
+      const answered = await request(withOutputBound(body, overrides))
+      data = answered
+      return { text: answerOf(answered), usage: usageOf(answered.usageMetadata) }
+    }
+  )
+  if (!data) {
+    throw new Error("Google AI generation seam resolved without sending the request")
+  }
+  return data
+}
+
 export async function searchWithGoogleAI(
   query: string,
   apiKey: string,
@@ -173,29 +242,31 @@ export async function searchWithGoogleAI(
 
   const startTime = Date.now()
   const modelId = getModelId(options)
-  const requestBody = buildRequestBody(query, options)
 
   try {
-    const response = await googleAIFetch(
-      `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
+    const data = await runGroundedGeneration(query, modelId, options, async (requestBody) => {
+      const response = await googleAIFetch(
+        `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        const errorMessage = errorData?.error?.message || response.statusText
+        throw new Error(`Google AI API error: ${response.status} - ${errorMessage}`)
       }
-    )
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      const errorMessage = errorData?.error?.message || response.statusText
-      throw new Error(`Google AI API error: ${response.status} - ${errorMessage}`)
-    }
+      const answered: GeminiResponse = await response.json()
 
-    const data: GeminiResponse = await response.json()
-
-    if (data.error) {
-      throw new Error(`Google AI API error: ${data.error.message}`)
-    }
+      if (answered.error) {
+        throw new Error(`Google AI API error: ${answered.error.message}`)
+      }
+      return answered
+    })
 
     const candidate = data.candidates?.[0]
     if (!candidate) {
@@ -237,23 +308,25 @@ export async function getGroundedAnswerWithCitations(
   }
 
   const modelId = getModelId(options)
-  const requestBody = buildRequestBody(query, options)
 
-  const response = await googleAIFetch(
-    `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
+  const data = await runGroundedGeneration(query, modelId, options, async (requestBody) => {
+    const response = await googleAIFetch(
+      `${GEMINI_API_URL}/${modelId}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      }
+    )
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(`Google AI API error: ${errorData?.error?.message || response.statusText}`)
     }
-  )
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}))
-    throw new Error(`Google AI API error: ${errorData?.error?.message || response.statusText}`)
-  }
-
-  const data: GeminiResponse = await response.json()
+    const answered: GeminiResponse = await response.json()
+    return answered
+  })
   const candidate = data.candidates?.[0]
 
   if (!candidate) {
@@ -267,6 +340,11 @@ export async function getGroundedAnswerWithCitations(
   return { answer, citedAnswer, sources }
 }
 
+/**
+ * A user-initiated key probe: it tests this one key on purpose, so it never
+ * takes a generation seam — a ledger or route in the way would defeat it (the
+ * named provider-diagnostic exemption of ADR-0188 D27).
+ */
 export async function testGoogleAIConnection(apiKey: string): Promise<boolean> {
   try {
     await searchWithGoogleAI("test connection", apiKey, { maxResults: 1 })

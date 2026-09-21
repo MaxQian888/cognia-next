@@ -98,8 +98,9 @@ describe("ProviderHealth circuit breaker", () => {
     h.recordResult("tavily", true, Number.POSITIVE_INFINITY)
     h.recordResult("tavily", true, -5)
     h.recordResult("tavily", true, 200)
-    // Five successes recorded, only one carried a usable latency.
-    expect(h.snapshot("tavily").avgLatency).toBe(40)
+    // Five successes recorded, only one carried a usable latency — the average
+    // covers sampled successes only, so the missing timers do not dilute it.
+    expect(h.snapshot("tavily").avgLatency).toBe(200)
   })
 
   it("cooldownRemainingMs counts down to zero with the injected clock", () => {
@@ -206,8 +207,6 @@ describe("shared singleton", () => {
   it("derives its defaults from the persisted-settings default", () => {
     // The runtime default and the settings default are one value — the spread
     // keeps them from drifting apart.
-    expect(DEFAULT_PROVIDER_HEALTH_CONFIG).toEqual(
-      DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS
-    )
+    expect(DEFAULT_PROVIDER_HEALTH_CONFIG).toEqual(DEFAULT_SEARCH_PROVIDER_HEALTH_SETTINGS)
   })
 })

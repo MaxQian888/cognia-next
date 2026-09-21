@@ -75,6 +75,33 @@ describe("generateSearchCacheKey", () => {
     expect(first).not.toBe(second)
   })
 
+  it("differs by provider defaultOptions digest", () => {
+    const news = generateSearchCacheKey("q", "tavily", {
+      providerDefaults: { tavily: { searchType: "news" } },
+    })
+    const general = generateSearchCacheKey("q", "tavily", {
+      providerDefaults: { tavily: { searchType: "general" } },
+    })
+    expect(news).not.toBe(general)
+    expect(news).not.toBe(generateSearchCacheKey("q", "tavily"))
+  })
+
+  it("digests provider defaults order-independently", () => {
+    const a = generateSearchCacheKey("q", undefined, {
+      providerDefaults: {
+        tavily: { searchType: "news", maxResults: 5, includeDomains: ["b.com", "a.com"] },
+        exa: { searchDepth: "deep" },
+      },
+    })
+    const b = generateSearchCacheKey("q", undefined, {
+      providerDefaults: {
+        exa: { searchDepth: "deep" },
+        tavily: { includeDomains: ["a.com", "b.com"], maxResults: 5, searchType: "news" },
+      },
+    })
+    expect(a).toBe(b)
+  })
+
   it("starts with 'search:'", () => {
     expect(generateSearchCacheKey("q")).toMatch(/^search:/)
   })

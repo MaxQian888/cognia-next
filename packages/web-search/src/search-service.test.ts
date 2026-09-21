@@ -352,6 +352,19 @@ describe("search() option precedence", () => {
     expect(options.maxResults).toBe(7)
   })
 
+  it("the generate seam rides the call-time options through the merge", async () => {
+    const generate = jest.fn()
+    routeSearchMock.mockResolvedValueOnce(ok("tavily"))
+    await search("q", {
+      provider: "tavily",
+      providerSettings: { tavily: makeSettings("tavily") },
+      baseOptions: { maxResults: 5 },
+      generate,
+    })
+    const options = routeSearchMock.mock.calls[0][3] as { generate?: unknown }
+    expect(options.generate).toBe(generate)
+  })
+
   it("domain filtering reads the effective per-attempt options, not only call-time", async () => {
     routeSearchMock.mockResolvedValueOnce({
       provider: "tavily",

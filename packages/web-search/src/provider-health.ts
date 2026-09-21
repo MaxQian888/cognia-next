@@ -51,6 +51,8 @@ interface ProviderState {
   openedAt: number | null
   totalFailures: number
   totalSuccesses: number
+  /** Successes that carried a usable latency sample — the `avgLatency` denominator. */
+  latencySamples: number
   /** Sum of success latencies (ms); `snapshot` derives `avgLatency` from it. */
   totalSuccessLatency: number
 }
@@ -61,6 +63,7 @@ function emptyState(): ProviderState {
     openedAt: null,
     totalFailures: 0,
     totalSuccesses: 0,
+    latencySamples: 0,
     totalSuccessLatency: 0,
   }
 }
@@ -107,6 +110,7 @@ export class ProviderHealth {
       s.openedAt = null
       s.totalSuccesses += 1
       if (typeof latencyMs === "number" && Number.isFinite(latencyMs) && latencyMs >= 0) {
+        s.latencySamples += 1
         s.totalSuccessLatency += latencyMs
       }
       return
@@ -169,7 +173,7 @@ export class ProviderHealth {
               ? "degraded"
               : "healthy",
       avgLatency:
-        s && s.totalSuccesses > 0 ? Math.round(s.totalSuccessLatency / s.totalSuccesses) : 0,
+        s && s.latencySamples > 0 ? Math.round(s.totalSuccessLatency / s.latencySamples) : 0,
       successRate,
       circuitBreakerOpen: open,
       lastChecked: this.now(),

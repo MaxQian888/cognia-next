@@ -348,3 +348,76 @@ describe("runStandaloneSearchAnswer", () => {
     expect(searchImpl).toHaveBeenCalledWith("hi", expect.objectContaining({ maxResults: 8 }))
   })
 })
+
+// --- Generation seam (ADR-0188 D27) ------------------------------------------
+
+describe("standalone answer generation seam", () => {
+  const modelWithId = { modelId: "claude-sonnet-4-6" } as never
+
+  it("[ACC:OFF-02] calls the model with the same arguments when the host returns no seam", async () => {
+    resolveModelMock.mockReturnValue(modelWithId)
+    const searchImpl = jest.fn().mockResolvedValue(searchResponse)
+    const generateTextImpl = jest.fn().mockResolvedValue({ text: "answer" })
+    const resolveGenerate = jest.fn(() => undefined)
+
+    await runStandaloneSearchAnswer(
+      { query: "hi", searchImpl: searchImpl as never, generateTextImpl: generateTextImpl as never },
+      { ...deps, resolveGenerate }
+    )
+
+    expect(resolveGenerate).toHaveBeenCalledTimes(1)
+    const args = generateTextImpl.mock.calls[0][0] as Record<string, unknown>
+    expect(Object.keys(args).sort()).toEqual(["abortSignal", "model", "prompt", "system"])
+  })
+
+  it("runs the synthesis through the host's seam, which bounds the call", async () => {
+    resolveModelMock.mockReturnValue(modelWithId)
+    const searchImpl = jest.fn().mockResolvedValue(searchResponse)
+    const generateTextImpl = jest.fn().mockResolvedValue({ text: "ledgered answer" })
+    const seen: { stage: string; modelId: string; system?: string }[] = []
+
+    const out = await runStandaloneSearchAnswer(
+      { query: "hi", searchImpl: searchImpl as never, generateTextImpl: generateTextImpl as never },
+      {
+        ...deps,
+        resolveGenerate: () => async (request, send) => {
+          seen.push({ stage: request.stage, modelId: request.modelId, system: request.system })
+          return (await send({ maxOutputTokens: 800, maxRetries: 0 })).text
+        },
+      }
+    )
+
+    expect(out.answer).toBe("ledgered answer")
+    expect(seen[0]).toMatchObject({
+      stage: "web-search.standalone-answer",
+      modelId: "claude-sonnet-4-6",
+    })
+    expect(seen[0].system).toContain("research assistant")
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 800, maxRetries: 0 })
+    )
+  })
+
+  it("surfaces a seam refusal as answer-failed, with the sources kept", async () => {
+    resolveModelMock.mockReturnValue(modelWithId)
+    const searchImpl = jest.fn().mockResolvedValue(searchResponse)
+    const generateTextImpl = jest.fn()
+
+    await expect(
+      runStandaloneSearchAnswer(
+        {
+          query: "hi",
+          searchImpl: searchImpl as never,
+          generateTextImpl: generateTextImpl as never,
+        },
+        {
+          ...deps,
+          resolveGenerate: () => async () => {
+            throw new Error("Router + Fusion refused a standalone-search-answer call: NO_BUDGET")
+          },
+        }
+      )
+    ).rejects.toMatchObject({ code: "answer-failed" })
+    expect(generateTextImpl).not.toHaveBeenCalled()
+  })
+})

@@ -23,6 +23,41 @@ export interface CacheEntry {
 /** Search policy fields that affect cache identity but are not provider request options. */
 export interface SearchCacheKeyOptions extends SearchOptions {
   preferredProviders?: SearchProviderType[]
+  /**
+   * Per-provider `defaultOptions` of every provider that could serve this
+   * request (the pinned provider, or every enabled+configured provider under
+   * auto). Provider defaults sit between host defaults and call-time fields
+   * inside `search()`, so they shape the response just like flat options —
+   * the key digests them so editing an override busts entries it produced.
+   */
+  providerDefaults?: Record<string, Partial<SearchOptions> | undefined>
+}
+
+/** Order-independent serialization so equivalent defaults hash identically. */
+function canonicalizeForKey(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalizeForKey).sort().join(",")}]`
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalizeForKey((value as Record<string, unknown>)[key])}`
+      )
+    return `{${entries.join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+function providerDefaultsDigest(
+  providerDefaults: SearchCacheKeyOptions["providerDefaults"]
+): string {
+  if (!providerDefaults) return ""
+  return Object.keys(providerDefaults)
+    .sort()
+    .map((id) => `${id}=${canonicalizeForKey(providerDefaults[id] ?? {})}`)
+    .join(";")
 }
 
 export interface CacheStats {
@@ -59,6 +94,7 @@ export function generateSearchCacheKey(
     options?.excludeDomains ? [...options.excludeDomains].sort().join(",") : "",
     options?.safeSearch || "moderate",
     options?.preferredProviders?.join(",") || "",
+    providerDefaultsDigest(options?.providerDefaults),
   ]
 
   const keyString = keyParts.join("|")

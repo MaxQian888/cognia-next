@@ -3,6 +3,8 @@
  * Unified types for multi-provider web search
  */
 
+import type { GenerationSeam } from "./generation-seam"
+
 /**
  * Supported search providers
  */
@@ -63,6 +65,14 @@ export interface SearchOptions {
   language?: string
   /** Provider-neutral safe-search level. Unsupported providers ignore it. */
   safeSearch?: SafeSearchLevel
+  /**
+   * Generation seam for a provider whose search is itself a model generation
+   * (`google-ai`: one Gemini `:generateContent` per search). Runtime-only —
+   * never persisted — and read by no other provider. The host passes the
+   * ledgered seam when its Router + Fusion surface is on (ADR-0188 D27);
+   * absent, the request goes out exactly as before. See `./generation-seam.ts`.
+   */
+  generate?: GenerationSeam
 }
 
 /**
@@ -153,7 +163,8 @@ export interface SearchProviderSettings {
   cx?: string
   enabled: boolean
   priority: number
-  defaultOptions?: Partial<SearchOptions>
+  /** Persisted per-provider defaults. The runtime-only `generate` seam is never one of them. */
+  defaultOptions?: Partial<Omit<SearchOptions, "generate">>
 }
 
 /**

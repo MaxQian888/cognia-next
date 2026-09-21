@@ -54,7 +54,7 @@ export function navigationCandidates(ctx: GlobalSearchContext): NavCandidate[] {
       // `aliasKey` carries a localized, comma-separated alias list — the retired
       // name of a surface this one absorbed. Without it, a page that swallowed
       // another simply stops answering to the old name.
-      keywords: [item.id, item.route, item.group, ...aliasesFor(ctx, item.aliasKey)],
+      keywords: [item.id, item.route, item.group, item.category, ...aliasesFor(ctx, item.aliasKey)],
       icon: { lucide: item.Icon },
       action: { type: "navigate", href: item.route },
     })

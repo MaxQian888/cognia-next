@@ -7,10 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { useSettingsStore } from "@/stores/settings"
-import {
-  getProviderHealth,
-  type ProviderHealthRow,
-} from "@cognia/web-search/provider-health"
+import { getProviderHealth, type ProviderHealthRow } from "@cognia/web-search/provider-health"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   SEARCH_PROVIDERS,
@@ -47,8 +44,10 @@ export function SearchProviderHealthPanel() {
 
   // Rows: providers the user has enabled+configured, plus any provider with
   // recorded breaker traffic (a configured-then-unconfigured provider keeps
-  // its stats visible until reset).
-  const snapshotRows = useCallback(() => {
+  // its stats visible until reset). Called synchronously on every render — the
+  // interval tick re-snapshots the breaker singleton, so this is a plain
+  // function, not a memo.
+  const snapshotRows = () => {
     const all = getProviderHealth().snapshotAll(ALL_PROVIDER_IDS)
     const out = {} as Record<SearchProviderType, ProviderHealthRow>
     for (const id of ALL_PROVIDER_IDS) {
@@ -59,11 +58,8 @@ export function SearchProviderHealthPanel() {
       }
     }
     return out
-  }, [searchProviders])
+  }
 
-  // Rows are derived, not seeded: a settings change (provider toggled on/off)
-  // reshapes the board on the next render, and each interval/reset `tick`
-  // re-snapshots the breaker singleton.
   const [, setTick] = useState(0)
   const rows = snapshotRows()
 
@@ -127,9 +123,7 @@ export function SearchProviderHealthPanel() {
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <BrandIcon id={id} label={SEARCH_PROVIDERS[id].name} size={20} />
-                  <span className="text-sm font-medium truncate">
-                    {SEARCH_PROVIDERS[id].name}
-                  </span>
+                  <span className="text-sm font-medium truncate">{SEARCH_PROVIDERS[id].name}</span>
                   <Badge variant={STATUS_VARIANT[row.status]} className="text-[10px] px-1 py-0">
                     {t(`status.${row.status}`)}
                   </Badge>

@@ -11,7 +11,9 @@ Cognia abstracts "letting AI search the web" into a provider bus: the upper laye
   App callers use `lib/search/configured-search.ts:searchWithAppSettings()`; CLI callers inject the
   same resolved policy without Zustand. That entry applies query optimization, PII redaction, live
   defaults, safe search, provider preference/fallback, the shared TTL/LRU cache, hard domain
-  filtering, source verification, and usage reporting. The framework-independent provider bus lives
+  filtering, source verification, and usage reporting. A per-provider circuit breaker
+  (`provider-health.ts`) parks recently-failing providers, and each provider's `defaultOptions`
+  sit between host defaults and call-time fields. The framework-independent provider bus lives
   under `packages/web-search/src/`; callers do not implement provider HTTP requests themselves.
 </TLDR>
 
@@ -131,6 +133,8 @@ Core public facades:
 - `aggregateSearch(query, providerSettings, opts)` — Parallel calls to all enabled providers; results are deduplicated by URL, re-sorted by `score`, and top 20 retained.
 
 Failure fallback covers provider errors and responses that cannot satisfy the hard domain constraint. Desktop and web callers should use `searchWithAppSettings()` instead of assembling these options directly; it also ensures cached hits do not create a second provider request or usage charge.
+
+`search()` resolves each attempt's options by precedence — host `baseOptions` < the provider's `defaultOptions` < explicit call-time fields (explicit `undefined` placeholders are stripped so they never clobber a lower rung) — and consults the shared in-memory circuit breaker (`provider-health.ts`): a provider past its consecutive-failure threshold is parked at the back of the try-order until a cooldown elapses, then a single half-open probe may close it. Persisted tuning (`searchProviderHealth` — enabled / failureThreshold / cooldownMs, clamped by `SEARCH_PROVIDER_HEALTH_LIMITS`) is pushed into the breaker on every configured call, and the cache key digests every candidate provider's `defaultOptions`, so editing an override busts the entries it shaped.
 
 ## Query Optimization
 
@@ -282,7 +286,7 @@ The search system is not a standalone UI surface; it is consumed by these locati
 
 The Research Sources selector distinguishes Provider preferences from Domain constraints. Wikipedia, arXiv, GitHub, and Stack Overflow are built-in domains; custom entries require a valid URL/domain. Provider choices are preference-with-fallback, while domain choices are strict.
 
-The settings UI is under Settings → Search Provider, with one card per provider + enable / priority / default parameters + test connection button.
+The settings UI is under Settings → Search Provider: one card per provider (enable / priority / per-provider `defaultOptions` editor / test-connection button that validates the whole key-rotation pool and reports each backup key), a Performance panel tuning the circuit breaker, and a Diagnostics panel showing each provider's live breaker state, success rate, average latency, and per-provider / global reset.
 
 ## Related Documentation
 
@@ -301,4 +305,5 @@ The settings UI is under Settings → Search Provider, with one card per provide
 | Change default fallback order | Adjust priority comparison in `getEnabledProviders` (in `lib/search/types.ts`)                                                                                           |
 | Add a new SearchType          | Expand union in `types.ts` + add dispatch in `search-type-router.ts` + check provider support                                                                            |
 | Tune cache TTL                | Default values in `search-cache.ts:SearchCacheOptions`                                                                                                                   |
+| Tune the circuit breaker      | `provider-health.ts` + bounds in `SEARCH_PROVIDER_HEALTH_LIMITS` (`types.ts`); persisted shape `searchProviderHealth`                                                     |
 | Adjust credibility scoring    | Domain tables + scoring functions in `source-verification.ts`                                                                                                            |

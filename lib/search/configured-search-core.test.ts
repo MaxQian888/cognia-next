@@ -1,3 +1,12 @@
+jest.mock("@/lib/router-fusion/gate/load-engine", () => ({
+  loadRouterFusionHost: jest.fn(),
+}))
+const googleAIFetchMock = jest.fn()
+jest.mock("@cognia/web-search/proxy-search-fetch", () => ({
+  ...jest.requireActual("@cognia/web-search/proxy-search-fetch"),
+  googleAIFetch: (...args: unknown[]) => googleAIFetchMock(...args),
+}))
+
 // The precedence tests run the real `search()` against a mocked router so the
 // option merge is observable without a provider HTTP call.
 const routeSearchMock = jest.fn()
@@ -40,6 +49,12 @@ jest.mock("@cognia/redact", () => {
 
 import { searchWithSettings } from "./configured-search-core"
 import { getProviderHealth, resetProviderHealth } from "@cognia/web-search/provider-health"
+import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
+import { loadRouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import type { RouterFusionHost } from "@/lib/router-fusion/gate/load-engine"
+import type { BeginLedgeredUtilityCallInput } from "@/lib/router-fusion/gate/utility-ledger"
+
+const loadHostMock = loadRouterFusionHost as jest.Mock
 
 const response: SearchResponse = {
   provider: "tavily",
@@ -113,6 +128,33 @@ describe("searchWithSettings", () => {
     expect(cacheSetConfigMock).toHaveBeenCalledWith({ defaultTTL: 12_000, maxSize: 42 })
     expect(searchMock).not.toHaveBeenCalled()
     expect(cacheSetMock).not.toHaveBeenCalled()
+  })
+
+  it("folds provider defaultOptions into the cache key so edits bust stale entries", async () => {
+    const withDefaults = settings({
+      searchProviders: {
+        tavily: {
+          providerId: "tavily",
+          apiKey: "key",
+          enabled: true,
+          priority: 1,
+          defaultOptions: { searchType: "news", searchDepth: "deep" },
+        },
+      } as AppSettings["searchProviders"],
+    })
+
+    await searchWithSettings("keyed", { settings: withDefaults })
+
+    // Pinned provider: its defaults are the effective middle rung, so they
+    // appear in the flat key fields AND in the digest — editing them must
+    // change the key on both read and write.
+    const getKeyOptions = cacheGetMock.mock.calls[0][2] as Record<string, unknown>
+    expect(getKeyOptions).toMatchObject({
+      searchType: "news",
+      searchDepth: "deep",
+      providerDefaults: { tavily: { searchType: "news", searchDepth: "deep" } },
+    })
+    expect(cacheSetMock.mock.calls[0][3]).toEqual(getKeyOptions)
   })
 
   it("applies the current verification policy to a raw cache hit", async () => {
@@ -282,5 +324,114 @@ describe("searchWithSettings — provider defaultOptions + breaker config", () =
       options: { searchType: "images" },
     })
     expect(routeSearchMock.mock.calls[0][3]).toMatchObject({ searchType: "images" })
+  })
+})
+
+// --- Router + Fusion ledger (ADR-0188 D27) -----------------------------------
+// One search provider is itself a generation: Google AI answers from Gemini.
+// With `utilityLedger` on, the seam goes down with the options and that call is
+// reserved and settled; off, the options are what they always were.
+
+describe("searchWithSettings — the generating search provider's ledger seam", () => {
+  const reserved: BeginLedgeredUtilityCallInput[] = []
+  const withLedger = (): AppSettings =>
+    settings({
+      searchProviders: {
+        "google-ai": { providerId: "google-ai", apiKey: "gemini-key", enabled: true, priority: 1 },
+      } as AppSettings["searchProviders"],
+      defaultSearchProvider: "google-ai",
+      searchCacheEnabled: false,
+      routerFusion: { enabled: true, surfaces: { utilityLedger: true } },
+    } as Partial<AppSettings>)
+
+  beforeEach(() => {
+    __resetBreakerForTesting()
+    reserved.length = 0
+    googleAIFetchMock.mockReset()
+    loadHostMock.mockReset().mockResolvedValue({
+      beginLedgeredUtilityCall: async (input: BeginLedgeredUtilityCallInput) => {
+        reserved.push(input)
+        return {
+          kind: "granted",
+          handle: {
+            runId: "run-1",
+            maxOutputTokens: 700,
+            succeeded: async () => {},
+            failed: async () => {},
+            unknown: async () => {},
+          },
+        }
+      },
+    } as unknown as RouterFusionHost)
+  })
+
+  it("[ACC:OFF-02] adds no seam option at all while the switch is off", async () => {
+    await searchWithSettings("query", { settings: settings() })
+    const options = searchMock.mock.calls[0][1] as Record<string, unknown>
+    expect(options).not.toHaveProperty("generate")
+    expect(loadHostMock).not.toHaveBeenCalled()
+  })
+
+  it("passes the seam with the options when the switch is on", async () => {
+    await searchWithSettings("query", { settings: withLedger() })
+    const options = searchMock.mock.calls[0][1] as Record<string, unknown>
+    expect(typeof options.generate).toBe("function")
+  })
+
+  it("a caller's own options can never displace the seam", async () => {
+    const callerSeam = jest.fn()
+    await searchWithSettings("query", {
+      settings: withLedger(),
+      options: { generate: callerSeam } as never,
+    })
+    const options = searchMock.mock.calls[0][1] as Record<string, unknown>
+    expect(options.generate).not.toBe(callerSeam)
+  })
+
+  it("reserves the Gemini search on the ledger, through the real search service", async () => {
+    // The shipped `search()` and google-ai provider run for this one case; only
+    // the HTTP round trip is faked. `routeSearch` is stubbed module-wide for
+    // the precedence describe — restore the real router here.
+    const core = jest.requireActual("@cognia/web-search/search-service") as {
+      search: (query: string, options: unknown) => Promise<unknown>
+    }
+    const router = jest.requireActual("@cognia/web-search/search-type-router") as {
+      routeSearch: (...args: unknown[]) => Promise<unknown>
+    }
+    searchMock.mockImplementation(core.search)
+    routeSearchMock.mockImplementation(router.routeSearch)
+    googleAIFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "",
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text: "grounded answer" }], role: "model" },
+            groundingMetadata: {
+              groundingChunks: [{ web: { uri: "https://example.com", title: "Example" } }],
+              groundingSupports: [],
+            },
+          },
+        ],
+        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 25, totalTokenCount: 125 },
+      }),
+    })
+
+    const response = await searchWithSettings("what shipped today", { settings: withLedger() })
+
+    expect(response.answer).toBe("grounded answer")
+    expect(reserved).toEqual([
+      expect.objectContaining({
+        featureId: "web-search:web-search.google-ai",
+        providerId: "google",
+        modelId: "gemini-2.0-flash",
+        workspaceId: null,
+      }),
+    ])
+    const body = JSON.parse(
+      (googleAIFetchMock.mock.calls[0][1] as { body: string }).body
+    ) as Record<string, unknown>
+    expect(body).toMatchObject({ generationConfig: { maxOutputTokens: 700 } })
   })
 })

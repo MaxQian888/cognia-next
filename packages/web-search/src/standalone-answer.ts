@@ -14,6 +14,7 @@
 import { generateText } from "ai"
 import type { LanguageModel } from "ai"
 
+import { generateThroughSeam, modelIdOf, type GenerationSeam } from "./generation-seam"
 import { search } from "./search-service"
 import { getEnabledProviders } from "./types"
 import type { SearchProviderSettings, SearchProviderType, SearchResult } from "./types"
@@ -75,6 +76,14 @@ export interface StandaloneAnswerDeps {
    * caller then falls back to the search provider's own answer.
    */
   resolveModel: () => LanguageModel | null
+  /**
+   * Resolve the generation seam for the synthesis call `resolveModel` just
+   * returned a model for (ADR-0188 D27). Called once, only after a model
+   * resolved. The host returns its ledgered seam when its Router + Fusion
+   * surface is on, and `undefined` otherwise; absent or `undefined`, the model
+   * is called directly, exactly as before. See `./generation-seam.ts`.
+   */
+  resolveGenerate?: () => GenerationSeam | undefined
   /** Host PII gate applied to every user/source string sent to the answer model. */
   sanitizeText?: (text: string) => string
   /** Host framing for third-party source text (for example, prompt-injection warnings). */
@@ -176,15 +185,28 @@ export async function runStandaloneSearchAnswer(
   // With sources but a configured model, synthesize a grounded, cited answer.
   try {
     const generate = params.generateTextImpl ?? generateText
-    const { text } = await generate({
-      model,
-      system: ANSWER_SYSTEM_PROMPT,
-      prompt: buildAnswerPrompt(query, sources, {
-        sanitizeText: deps.sanitizeText,
-        wrapUntrustedContent: deps.wrapUntrustedContent,
-      }),
-      abortSignal: params.signal,
+    const prompt = buildAnswerPrompt(query, sources, {
+      sanitizeText: deps.sanitizeText,
+      wrapUntrustedContent: deps.wrapUntrustedContent,
     })
+    const text = await generateThroughSeam(
+      deps.resolveGenerate?.(),
+      {
+        stage: "web-search.standalone-answer",
+        modelId: modelIdOf(model),
+        prompt,
+        system: ANSWER_SYSTEM_PROMPT,
+        ...(params.signal ? { abortSignal: params.signal } : {}),
+      },
+      (overrides) =>
+        generate({
+          model,
+          system: ANSWER_SYSTEM_PROMPT,
+          prompt,
+          abortSignal: params.signal,
+          ...overrides,
+        })
+    )
     return {
       query,
       answer: text.trim() || response.answer,

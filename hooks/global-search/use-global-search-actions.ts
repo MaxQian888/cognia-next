@@ -153,9 +153,17 @@ export function useGlobalSearchActions({
           }
           return
         }
-        case "toggle-theme":
-          setTheme(theme === "dark" ? "light" : "dark")
+        case "toggle-theme": {
+          const next = theme === "dark" ? "light" : "dark"
+          setTheme(next)
+          // Persist like every other theme switch does — a live-only flip is
+          // reverted by the next settings write replaying the stored theme.
+          // Dynamic import keeps the settings-store module graph (Dexie,
+          // keyring) out of this hook's eager imports.
+          const { useSettingsStore } = await import("@/stores/settings")
+          void useSettingsStore.getState().save({ theme: next })
           return
+        }
         case "toggle-sidebar":
           useUIStore.getState().toggleSidebar()
           return

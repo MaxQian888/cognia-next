@@ -17,8 +17,11 @@ import {
 import { providerSupportsType } from "@cognia/web-search/search-type-router"
 import {
   SEARCH_PROVIDERS,
+  type SearchDepth,
   type SearchProviderSettings,
   type SearchProviderType,
+  type SearchRecency,
+  type SearchType,
 } from "@cognia/web-search/types"
 
 /**
@@ -32,9 +35,23 @@ const INHERIT = "__inherit__"
 
 type ProviderDefaultOptions = NonNullable<SearchProviderSettings["defaultOptions"]>
 
-const SEARCH_TYPES = ["general", "news", "academic", "images", "videos"] as const
-const SEARCH_DEPTHS = ["basic", "advanced", "deep"] as const
-const RECENCIES = ["any", "day", "week", "month", "year"] as const
+// `satisfies` pins these lists to the `SearchOptions` unions — a new variant
+// there fails typecheck here instead of silently missing a choice.
+const SEARCH_TYPES = [
+  "general",
+  "news",
+  "academic",
+  "images",
+  "videos",
+] as const satisfies readonly SearchType[]
+const SEARCH_DEPTHS = ["basic", "advanced", "deep"] as const satisfies readonly SearchDepth[]
+const RECENCIES = [
+  "any",
+  "day",
+  "week",
+  "month",
+  "year",
+] as const satisfies readonly SearchRecency[]
 const MAX_RESULTS_LIMIT = 50
 
 export interface ProviderDefaultsEditorProps {
@@ -170,8 +187,7 @@ export function ProviderDefaultsEditor({
                   value={value?.recency ?? INHERIT}
                   onValueChange={(v) =>
                     update({
-                      recency:
-                        v === INHERIT ? undefined : (v as ProviderDefaultOptions["recency"]),
+                      recency: v === INHERIT ? undefined : (v as ProviderDefaultOptions["recency"]),
                     })
                   }
                 >

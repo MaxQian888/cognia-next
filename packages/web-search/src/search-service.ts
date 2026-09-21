@@ -13,6 +13,7 @@ import type {
 import { getEnabledProviders, isProviderConfigured } from "./types"
 import { normalizeSearchDomain } from "./search-constants"
 import { getProviderHealth } from "./provider-health"
+import { stripUndefined } from "./strip-undefined"
 import { log } from "./log"
 
 import { routeSearch } from "./search-type-router"
@@ -60,18 +61,10 @@ export interface UnifiedSearchOptions extends SearchOptions {
 /** Default extra attempts per provider before falling through to the next one. */
 const DEFAULT_MAX_RETRIES = 2
 
-/**
- * Copy `o` dropping keys whose value is `undefined`. Call-time options are
- * always emitted fully populated (often with `undefined` placeholders); a
- * naive spread would clobber provider `defaultOptions` with those undefineds.
- */
-export function stripUndefined<T extends object>(o: T): Partial<T> {
-  const out: Partial<T> = {}
-  for (const [key, value] of Object.entries(o)) {
-    if (value !== undefined) (out as Record<string, unknown>)[key] = value
-  }
-  return out
-}
+// Re-exported so existing importers through this module keep working; the
+// implementation lives in `./strip-undefined` so `search-type-router` can use
+// it without closing an import cycle with this file.
+export { stripUndefined }
 
 /**
  * Unified search function. Searches using the specified provider or falls

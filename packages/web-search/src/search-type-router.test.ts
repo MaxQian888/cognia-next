@@ -207,6 +207,16 @@ describe("routeSearch", () => {
     expect(result.query).toBe("general")
   })
 
+  it("does not let explicit undefined call-time fields clobber defaultOptions", async () => {
+    const settings = makeSettings("brave", {
+      defaultOptions: { searchType: "news" },
+    })
+    const result = await routeSearch("q", "brave", settings, {
+      searchType: undefined,
+    })
+    expect(result.query).toBe("news")
+  })
+
   it("requires google cx", async () => {
     await expect(routeSearch("q", "google", makeSettings("google", { cx: "" }))).rejects.toThrow(
       /cx.*required/i

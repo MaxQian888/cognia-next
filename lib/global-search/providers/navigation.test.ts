@@ -49,7 +49,7 @@ describe("navigation provider", () => {
   it("leaves candidates without an aliasKey untouched", () => {
     const rows = navigationCandidates(makeTestContext())
     const scheduler = rows.find((r) => r.id === "page:scheduler")!
-    expect(scheduler.keywords).toEqual(["scheduler", "/scheduler", "feature"])
+    expect(scheduler.keywords).toEqual(["scheduler", "/scheduler", "feature", "agents"])
   })
 
   it("suggests the first few destinations", async () => {
