@@ -25,9 +25,11 @@ import { createBedrockSidecarEmbeddingModel } from "@/lib/claude/feature-call"
 import type { EmbeddingConfig } from "@cognia/provider-embedding/embedding"
 import { isLocalEmbeddingProvider } from "@cognia/rag"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /** Single global collection for memory vectors. */
 export const MEMORY_VECTOR_COLLECTION = "cognia_memory"
+const VECTOR_READ_BATCH_SIZE = 256
 
 /** The (non-undefined) shape returned by `tryBuildTwinDeps`. */
 type PrebuiltTwinDeps = NonNullable<Awaited<ReturnType<typeof tryBuildTwinDeps>>>
@@ -156,19 +158,24 @@ export async function tryBuildMemoryDeps(
         })
       }
       const embeddingTransport = createProviderEmbeddingAdapter(embedConfig)
-      deps.embed = async (text) =>
-        (
-          await generateSafeEmbedding(text, {
-            profileId: "memory",
-            purpose: "query",
-            embedding: embedConfig as EmbeddingConfig & {
-              provider: PrebuiltTwinDeps["embedding"]["provider"]
-            },
-            vectorBackend: prebuiltTwinDeps?.vectorBackend ?? "native",
-            transport: embeddingTransport,
-          })
-        ).embedding
+      deps.embed = async (text, options) => {
+        options?.signal?.throwIfAborted()
+        const result = await generateSafeEmbedding(text, {
+          profileId: "memory",
+          purpose: "query",
+          embedding: embedConfig as EmbeddingConfig & {
+            provider: PrebuiltTwinDeps["embedding"]["provider"]
+          },
+          vectorBackend: prebuiltTwinDeps?.vectorBackend ?? "native",
+          transport: options?.signal
+            ? createProviderEmbeddingAdapter({ ...embedConfig, abortSignal: options.signal })
+            : embeddingTransport,
+        })
+        options?.signal?.throwIfAborted()
+        return result.embedding
+      }
       deps.vectorSearch = async (vector, topK, plan) => {
+        plan?.signal?.throwIfAborted()
         const scopedIds = plan?.vectorDocIds
         if (scopedIds === undefined) {
           // No plan: a legacy caller that did not compute an eligible corpus.
@@ -187,16 +194,32 @@ export async function tryBuildMemoryDeps(
         // rather than querying the global collection and post-filtering (the
         // starvation bug this replaces: unauthorized rows crowded the top-K
         // before the filter could run).
-        const docs = await backend.store.getDocuments(MEMORY_VECTOR_COLLECTION, [...scopedIds])
         const { cosineSimilarity } = await import("@cognia/provider-embedding/embedding-utils")
-        return docs
-          .filter(
-            (doc): doc is typeof doc & { embedding: number[] } =>
-              Array.isArray(doc.embedding) && doc.embedding.length === vector.length
-          )
-          .map((doc) => ({ id: doc.id, score: cosineSimilarity(vector, doc.embedding) }))
-          .sort((left, right) => right.score - left.score)
-          .slice(0, topK)
+        // Read the whole eligible corpus without retaining its entire embedding
+        // matrix. Keep only the best K scores between bounded backend requests.
+        const best: { id: string; score: number }[] = []
+        const ids = [...new Set(scopedIds)]
+        for (let offset = 0; offset < ids.length; offset += VECTOR_READ_BATCH_SIZE) {
+          plan?.signal?.throwIfAborted()
+          const batch = ids.slice(offset, offset + VECTOR_READ_BATCH_SIZE)
+          const allowed = new Set(batch)
+          const docs = await backend.store.getDocuments(MEMORY_VECTOR_COLLECTION, batch)
+          plan?.signal?.throwIfAborted()
+          for (const doc of docs) {
+            if (
+              !allowed.delete(doc.id) ||
+              !Array.isArray(doc.embedding) ||
+              doc.embedding.length !== vector.length ||
+              !doc.embedding.every(Number.isFinite)
+            )
+              continue
+            const score = cosineSimilarity(vector, doc.embedding)
+            if (Number.isFinite(score)) best.push({ id: doc.id, score })
+          }
+          best.sort((left, right) => right.score - left.score)
+          best.splice(topK)
+        }
+        return best
       }
     }
   } catch {
@@ -242,6 +265,7 @@ export async function tryBuildMemoryVectorSink(
     if (typeof store.addDocuments !== "function") return undefined
     const sink: MemoryVectorSink = {
       upsert: async (id, text) => {
+        if (!hasNoLeakingPii(text)) throw new Error("memory_vector_pii_blocked")
         await store.addDocuments!(MEMORY_VECTOR_COLLECTION, [{ id, content: text }])
       },
       delete: async (ids) => {

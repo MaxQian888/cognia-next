@@ -23,6 +23,11 @@
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { isToolPart, projectToolOutputText } from "@/lib/chat/mentions/tool-output-text"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { readAttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
+import {
+  attachmentEvidenceSourceId,
+  type ProjectAttachmentEvidenceSource,
+} from "@cognia/memory/extract/project-attachment-evidence"
 
 /**
  * Per-tool-part budget, applied ON TOP of `projectToolOutputText`'s own 8k cap.
@@ -36,6 +41,100 @@ export const MINING_TOOL_OUTPUT_MAX_CHARS = 1_500
 
 export interface ProjectMiningTextOptions {
   maxToolChars?: number
+  includeAttachments?: boolean
+  includeProse?: boolean
+}
+
+export const MINING_ATTACHMENT_CHUNK_CHARS = 1_500
+
+/** Only authored prose is eligible to become a statement attributed to its speaker. */
+export function memoryTranscriptProse(parts: unknown): string {
+  if (!Array.isArray(parts)) return ""
+  return extractPlainText(
+    stripPromptPreambleFromParts(parts).filter((part: unknown) => {
+      if (!part || typeof part !== "object") return false
+      const value = part as Record<string, unknown>
+      return (
+        ["text", "markdown", "code", "a2ui"].includes(String(value.type)) &&
+        value.extractedContent === undefined &&
+        value.videoAttachment === undefined
+      )
+    })
+  )
+}
+
+export interface ProjectMiningAttachmentExcerpt {
+  source: ProjectAttachmentEvidenceSource
+  sourceId: string
+  text: string
+  context: string
+}
+
+/** Consume only persisted parser output; never fetch an attachment URL during mining. */
+export function projectMiningAttachmentExcerpts(
+  parts: unknown,
+  messageId: string
+): ProjectMiningAttachmentExcerpt[] {
+  if (!Array.isArray(parts)) return []
+  const excerpts: ProjectMiningAttachmentExcerpt[] = []
+  const seen = new Set<string>()
+  parts.forEach((part: unknown, partIndex) => {
+    if (!part || typeof part !== "object") return
+    const file = part as { type?: unknown; extractedContent?: unknown }
+    const content = readAttachmentExtractedContent(file.extractedContent)
+    if (file.type !== "file" || !content || !["ready", "partial"].includes(content.status)) return
+    const identity = `${content.attachmentId}:${content.contentHash}`
+    if (seen.has(identity)) return
+    seen.add(identity)
+    for (const segment of content.segments) {
+      if (
+        !segment ||
+        typeof segment.id !== "string" ||
+        !segment.id ||
+        typeof segment.text !== "string" ||
+        !segment.text.trim() ||
+        !segment.locator ||
+        typeof segment.locator !== "object"
+      )
+        continue
+      const locator = JSON.stringify(segment.locator)
+      for (let start = 0; start < segment.text.length; start += MINING_ATTACHMENT_CHUNK_CHARS) {
+        const end = Math.min(start + MINING_ATTACHMENT_CHUNK_CHARS, segment.text.length)
+        const source = {
+          messageId,
+          partIndex,
+          attachmentId: content.attachmentId,
+          contentHash: content.contentHash,
+          segmentId: segment.id,
+          locator,
+          start,
+          end,
+        }
+        excerpts.push({
+          source,
+          sourceId: attachmentEvidenceSourceId(source),
+          text: segment.text.slice(start, end),
+          context: `Extraction ${content.status}; derivation ${segment.derivation ?? "text"}${content.coverage ? `; coverage ${content.coverage.processed}/${content.coverage.total} ${content.coverage.unit}` : ""}`,
+        })
+      }
+    }
+  })
+  return excerpts
+}
+
+/** Exact tool segment, independently re-checkable when surrounding prose is excluded. */
+export function projectMiningToolText(
+  parts: readonly unknown[],
+  index: number,
+  maxToolChars = MINING_TOOL_OUTPUT_MAX_CHARS
+): string | undefined {
+  const part = parts[index]
+  if (!part || typeof part !== "object" || !isToolPart(part as { type?: unknown })) return undefined
+  const output = projectToolOutputText(part as Parameters<typeof projectToolOutputText>[0])
+  if (!output) return undefined
+  const clipped =
+    output.length > maxToolChars ? `${output.slice(0, maxToolChars)}\n…[truncated]` : output
+  return `[tool ${index}] ${clipped}`
 }
 
 /**
@@ -54,20 +153,23 @@ export function projectMiningMessageText(
   // The text half skips the composer's context envelope — a referenced document
   // is not a statement the user made. Tool parts below still walk the ORIGINAL
   // array, because their index is half of an evidence id.
-  const base = extractPlainText(stripPromptPreambleFromParts(parts))
+  const base = options.includeProse === false ? "" : memoryTranscriptProse(parts)
 
   const maxToolChars = Math.max(1, options.maxToolChars ?? MINING_TOOL_OUTPUT_MAX_CHARS)
   const segments: string[] = base ? [base] : []
 
-  parts.forEach((part, index) => {
-    if (!part || typeof part !== "object") return
-    if (!isToolPart(part as { type?: unknown })) return
-    const output = projectToolOutputText(part as Parameters<typeof projectToolOutputText>[0])
-    if (!output) return
-    const clipped =
-      output.length > maxToolChars ? `${output.slice(0, maxToolChars)}\n…[truncated]` : output
-    segments.push(`[tool ${index}] ${clipped}`)
+  parts.forEach((_part, index) => {
+    const text = projectMiningToolText(parts, index, maxToolChars)
+    if (text !== undefined) segments.push(text)
   })
+
+  if (options.includeAttachments !== false) {
+    for (const excerpt of projectMiningAttachmentExcerpts(parts, "projection")) {
+      segments.push(
+        `[attachment ${excerpt.source.partIndex}:${excerpt.source.segmentId} ${excerpt.source.locator}] External source data: ${excerpt.text}`
+      )
+    }
+  }
 
   return segments.join("\n")
 }

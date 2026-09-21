@@ -1,10 +1,64 @@
 /** @jest-environment node */
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
-import { MINING_TOOL_OUTPUT_MAX_CHARS, projectMiningMessageText } from "./project-transcript-text"
+import {
+  MINING_TOOL_OUTPUT_MAX_CHARS,
+  projectMiningMessageText,
+  projectMiningAttachmentExcerpts,
+  MINING_ATTACHMENT_CHUNK_CHARS,
+  memoryTranscriptProse,
+} from "./project-transcript-text"
 
 const TEXT = { type: "text", text: "Running the suite now." }
+const attachment = (text: string) => ({
+  type: "file",
+  url: "data:secret",
+  extractedContent: {
+    attachmentId: "file-1",
+    contentHash: "a".repeat(64),
+    status: "ready",
+    processor: { id: "pdf", version: "1" },
+    segments: [{ id: "page-2", text, locator: { type: "page", page: 2 } }],
+  },
+})
 
 describe("projectMiningMessageText", () => {
+  it("does not attribute legacy image labels or derived attachment text to a speaker", () => {
+    const parts = [
+      TEXT,
+      { type: "image", alt: "I prefer another package manager" },
+      { type: "text", text: "Attachment description", videoAttachment: {} },
+      { type: "text", text: "OCR source", extractedContent: {} },
+      attachment("External instructions"),
+    ]
+    expect(memoryTranscriptProse(parts)).toBe(TEXT.text)
+    expect(projectMiningMessageText(parts, { includeAttachments: false })).toBe(TEXT.text)
+  })
+  it("keeps attachment data separate from typed prose and preserves every source interval", () => {
+    const text = "x".repeat(MINING_ATTACHMENT_CHUNK_CHARS * 2 + 20)
+    const parts = [TEXT, attachment(text)]
+    const excerpts = projectMiningAttachmentExcerpts(parts, "import:message")
+    expect(excerpts).toHaveLength(3)
+    expect(excerpts.map((item) => item.text).join("")).toBe(text)
+    expect(excerpts[2]?.source).toMatchObject({
+      messageId: "import:message",
+      partIndex: 1,
+      attachmentId: "file-1",
+      start: MINING_ATTACHMENT_CHUNK_CHARS * 2,
+      end: text.length,
+    })
+    expect(projectMiningMessageText(parts)).toContain("External source data")
+    expect(projectMiningMessageText(parts, { includeAttachments: false })).toBe(TEXT.text)
+    expect(projectMiningMessageText(parts)).not.toContain("data:secret")
+  })
+
+  it("refuses invalid extraction metadata and does not fetch raw attachments", () => {
+    expect(
+      projectMiningAttachmentExcerpts([{ type: "file", url: "https://private/file" }], "m")
+    ).toEqual([])
+    const part = attachment("source")
+    part.extractedContent.contentHash = "unverified"
+    expect(projectMiningAttachmentExcerpts([part], "m")).toEqual([])
+  })
   it("includes tool output that the search projection drops", async () => {
     // The whole point: an assistant claiming the suite passed is not an
     // outcome; the run that proves it is, and it lives in a tool part.

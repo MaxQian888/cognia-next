@@ -11,13 +11,14 @@ import {
   failMemoryJob,
 } from "@/lib/db/memory-governance"
 import { listMemories, listProjectClaimsNeedingRecheck, updateMemory } from "@/lib/db/memories"
-import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { memoryTranscriptProse } from "@/lib/memory/write/project-transcript-text"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import type { MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import { startMemoryJobHeartbeat } from "@/lib/memory/lifecycle/job-heartbeat"
 import { recordMemoryJobOutcome } from "@/lib/memory/lifecycle/record-memory-outcome"
 import { resolveJobTranscriptWindow } from "@/lib/memory/lifecycle/transcript-window"
 import { detectMemoryExternalContext } from "@/lib/memory/control-plane/contamination"
+import { parseAttachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
 import { hasUntrustedMemoryContext } from "@/lib/memory/control-plane/policy"
 import { resolveAgentMemoryPolicy } from "@/lib/memory/agent-policy"
 import {
@@ -27,7 +28,6 @@ import {
 } from "@/lib/memory/consolidate/consolidator"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 import { hasNoLeakingPii } from "@cognia/redact"
-import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 export interface MemoryJobWorkerDeps {
   claimNext: (workerId: string) => Promise<MemoryJob | undefined>
@@ -56,6 +56,8 @@ export interface MemoryJobProcessOutcome {
 export interface DrainMemoryJobsOptions {
   workerId?: string
   maxJobs?: number
+  /** Stop claiming new work; an already claimed job still finishes under its lease. */
+  signal?: AbortSignal
 }
 
 export async function drainMemoryJobs(
@@ -65,7 +67,7 @@ export async function drainMemoryJobs(
   const workerId = options.workerId ?? "memory-job-worker"
   const maxJobs = options.maxJobs ?? 20
   let processed = 0
-  while (processed < maxJobs) {
+  while (processed < maxJobs && !options.signal?.aborted) {
     const job = await deps.claimNext(workerId)
     if (!job) break
     let lost = false
@@ -156,7 +158,17 @@ export interface StartMemoryJobWorkerOptions extends DrainMemoryJobsOptions {
 
 export function startMemoryJobWorker(options: StartMemoryJobWorkerOptions = {}): () => void {
   const deps = options.deps ?? defaultWorkerDeps
-  const tick = () => withDrainLock(() => drainMemoryJobs(options, deps))
+  const controller = new AbortController()
+  const tick = () => {
+    if (controller.signal.aborted || options.signal?.aborted) return
+    void withDrainLock(() =>
+      drainMemoryJobs({ ...options, signal: controller.signal }, deps)
+    ).catch(() => {
+      // Storage errors may contain transcript text or paths. Log a stable,
+      // content-free diagnostic and let the next interval retry the queue.
+      console.warn("Memory job worker drain failed")
+    })
+  }
   // Repair unreadable `workspace` rows once per start. It hangs off the worker
   // rather than off a renderer initializer because every host that can process
   // memory at all already starts this worker, and the repair is idempotent by
@@ -164,9 +176,15 @@ export function startMemoryJobWorker(options: StartMemoryJobWorkerOptions = {}):
   if (options.repairNamespaces !== false) {
     void (options.repair ?? defaultRepairNamespaces)().catch(() => undefined)
   }
-  void tick()
-  const timer = setInterval(() => void tick(), options.intervalMs ?? 30_000)
-  return () => clearInterval(timer)
+  const stopClaims = () => controller.abort()
+  options.signal?.addEventListener("abort", stopClaims, { once: true })
+  tick()
+  const timer = setInterval(tick, options.intervalMs ?? 30_000)
+  return () => {
+    controller.abort()
+    clearInterval(timer)
+    options.signal?.removeEventListener("abort", stopClaims)
+  }
 }
 
 class MemoryJobProcessingError extends Error {
@@ -221,6 +239,14 @@ async function loadJobContext(job: MemoryJob): Promise<{
     listMessages(job.sessionId),
   ])
   if (!settings || !session) throw new MemoryJobTerminalError("session_unavailable")
+  // A durable checkpoint identifies content, not permission to learn it under
+  // an old workspace after the session was moved. Never rebind queued work.
+  if (job.projectId !== undefined && job.projectId !== session.projectId) {
+    throw new MemoryJobTerminalError("project_changed")
+  }
+  if (job.characterId !== undefined && job.characterId !== session.characterId) {
+    throw new MemoryJobTerminalError("character_changed")
+  }
   const config = effectiveConfig(settings)
   const character = session.characterId
     ? await resolveCharacterById(session.characterId).catch(() => undefined)
@@ -229,7 +255,7 @@ async function loadJobContext(job: MemoryJob): Promise<{
     id: message.id,
     role: message.role,
     // Typed text only: context the composer attached is not something the user said.
-    text: extractPlainText(stripPromptPreambleFromParts(message.parts ?? [])),
+    text: memoryTranscriptProse(message.parts ?? []),
     createdAt: messageCreatedAt(message),
     parts: message.parts,
   }))
@@ -330,8 +356,15 @@ async function processTurnExtraction(job: MemoryJob): Promise<MemoryJobProcessOu
   if (!deps) throw new MemoryJobProcessingError("dependencies_unavailable")
   const result = await runMemoryExtraction(
     {
-      newPair: { userText: pair.userText, assistantText: pair.assistantText },
-      recentMessages: context.transcript.slice(-10),
+      newPair: {
+        userText: pair.userText,
+        assistantText: context.contaminationState === "external-context" ? "" : pair.assistantText,
+      },
+      recentMessages: context.transcript
+        .slice(-10)
+        .filter(
+          (message) => context.contaminationState !== "external-context" || message.role === "user"
+        ),
       scope: job.scope,
       characterId: job.characterId,
       projectId: job.projectId,
@@ -372,7 +405,9 @@ async function processSessionDistill(job: MemoryJob): Promise<MemoryJobProcessOu
   if (!deps) throw new MemoryJobProcessingError("dependencies_unavailable")
   await runMemoryMaintenance(
     {
-      transcript: context.transcript,
+      transcript: context.transcript.filter(
+        (message) => context.contaminationState !== "external-context" || message.role === "user"
+      ),
       scope: job.scope,
       characterId: job.characterId,
       projectId: job.projectId,
@@ -406,52 +441,75 @@ async function recordProjectClaimOutcome(params: {
   transcriptRevision?: number
   roleByMessageId: Map<string, string>
   excerpts: ReadonlyMap<string, string> | undefined
+  toolExcerpts?: ReadonlyMap<string, string>
 }): Promise<void> {
   const { job, operation } = params
   const memoryId = consolidationOpMemoryId(operation)
   const auditAction = consolidationAuditAction(operation)
   if (!memoryId || !auditAction) return
 
+  const claim =
+    operation.op === "ADD" ||
+    operation.op === "CONFLICT" ||
+    operation.op === "QUARANTINE" ||
+    operation.op === "UPDATE"
+      ? operation.candidate?.projectClaim
+      : undefined
+  const attachmentDerived = claim?.evidence?.some((reference) => reference.kind === "file")
   await updateMemory(memoryId, {
     evidenceState: "supported",
     reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
-    contaminationState: params.contaminationState,
+    contaminationState: attachmentDerived ? "external-context" : params.contaminationState,
     sensitivity: "normal",
+    ...(attachmentDerived ? { trustState: "quarantined" as const } : {}),
   })
-
-  const claim =
-    operation.op === "ADD" || operation.op === "CONFLICT" || operation.op === "QUARANTINE"
-      ? operation.candidate.projectClaim
-      : undefined
 
   for (const reference of claim?.evidence ?? []) {
     // `code-location` is checkable in principle but not on every shell, so it
     // is recorded with strategy `none` and contributes no support. See ADR
     // deviation #4 in the plan: making it real needs a batched native stat.
+    const attachment =
+      reference.kind === "file" ? parseAttachmentEvidenceSourceId(reference.sourceId) : undefined
+    if (reference.kind === "file" && !attachment) continue
     const messageId =
-      reference.kind === "code-location"
+      attachment?.messageId ??
+      (reference.kind === "code-location"
         ? undefined
-        : (reference.sourceId.split(":")[0] ?? undefined)
-    const excerpt = messageId ? params.excerpts?.get(messageId) : undefined
+        : reference.kind === "message"
+          ? reference.sourceId
+          : reference.sourceId.slice(0, reference.sourceId.lastIndexOf(":")))
+    const toolExcerpt =
+      reference.kind === "tool-result" ? params.toolExcerpts?.get(reference.sourceId) : undefined
+    const excerpt =
+      toolExcerpt ??
+      (attachment
+        ? params.excerpts?.get(reference.sourceId)
+        : messageId
+          ? params.excerpts?.get(messageId)
+          : undefined)
     await createMemoryEvidence({
       memoryId,
       kind: reference.kind,
       sourceId: reference.sourceId,
       sessionId: job.sessionId,
       messageId,
-      sourceRole: normalizeSourceRole(
-        messageId ? params.roleByMessageId.get(messageId) : undefined
-      ),
+      sourceRole: attachment
+        ? undefined
+        : normalizeSourceRole(messageId ? params.roleByMessageId.get(messageId) : undefined),
       excerptHash: excerpt !== undefined ? hashContent(excerpt) : undefined,
-      contaminationState: params.contaminationState,
+      contaminationState: attachment ? "external-context" : params.contaminationState,
       reviewed: false,
       sourceRevision: params.transcriptRevision,
       validationStrategy:
-        reference.kind === "message"
-          ? "message-presence"
-          : reference.kind === "tool-result"
-            ? "tool-result-hash"
-            : "none",
+        reference.kind === "file"
+          ? "attachment-content-hash"
+          : reference.kind === "message"
+            ? "message-presence"
+            : reference.kind === "tool-result"
+              ? toolExcerpt !== undefined
+                ? "tool-output-hash"
+                : "tool-result-hash"
+              : "none",
     })
   }
 
@@ -553,6 +611,7 @@ async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOut
       transcriptRevision: context.session.transcriptRevision,
       roleByMessageId,
       excerpts: result.redactedExcerpts,
+      toolExcerpts: result.redactedToolExcerpts,
     })
   }
 
@@ -569,15 +628,35 @@ async function processProjectMining(job: MemoryJob): Promise<MemoryJobProcessOut
     }
   }
 
+  const partialAttachments =
+    result.attachmentCoverage &&
+    result.attachmentCoverage.mined < result.attachmentCoverage.available
+  if (result.attachmentCoverage) {
+    await appendMemoryAuditEvent({
+      action: "learn-allowed",
+      sessionId: job.sessionId,
+      reason: partialAttachments ? "attachment_mining_partial" : "attachment_mining_completed",
+      metadata: {
+        attachmentChunksAvailable: result.attachmentCoverage.available,
+        attachmentChunksMined: result.attachmentCoverage.mined,
+      },
+    })
+  }
   if (result.applied.some((operation) => operation.op !== "NOOP")) {
     return {
       status: "succeeded",
-      resultCode: withWindowOutcome("claims_applied", context.windowResultCode),
+      resultCode: withWindowOutcome(
+        partialAttachments ? "claims_applied_attachment_partial" : "claims_applied",
+        context.windowResultCode
+      ),
     }
   }
   return {
     status: "no_output",
-    resultCode: withWindowOutcome(result.skipReason ?? "nothing_durable", context.windowResultCode),
+    resultCode: withWindowOutcome(
+      partialAttachments ? "attachment_mining_partial" : (result.skipReason ?? "nothing_durable"),
+      context.windowResultCode
+    ),
   }
 }
 

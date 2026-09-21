@@ -34,8 +34,16 @@ export function assembleProceduralBlock(
   memories: Memory[],
   options: AssembleProceduralOptions = {}
 ): string | null {
+  return assembleProceduralContext(memories, options).text
+}
+
+/** Exact rows that fit, for delivery receipts and multiline-safe counts. */
+export function assembleProceduralContext(
+  memories: Memory[],
+  options: AssembleProceduralOptions = {}
+): { text: string | null; memories: Memory[] } {
   const procedural = memories.filter((m) => m.type === "procedural" && m.status === "active")
-  if (procedural.length === 0) return null
+  if (procedural.length === 0) return { text: null, memories: [] }
 
   const heading = options.heading ?? DEFAULT_HEADING
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS
@@ -49,15 +57,14 @@ export function assembleProceduralBlock(
   })
 
   const lines: string[] = []
-  let used = ctx.estimateTokens(heading)
+  const selected: Memory[] = []
   for (const m of ordered) {
     const line = `- ${m.text}`
-    const cost = ctx.estimateTokens(line)
-    if (used + cost > maxTokens) break
-    used += cost
+    if (ctx.estimateTokens(`${heading}\n${[...lines, line].join("\n")}`) > maxTokens) continue
     lines.push(line)
+    selected.push(m)
   }
 
-  if (lines.length === 0) return null
-  return `${heading}\n${lines.join("\n")}`
+  if (lines.length === 0) return { text: null, memories: [] }
+  return { text: `${heading}\n${lines.join("\n")}`, memories: selected }
 }

@@ -26,7 +26,9 @@
  */
 
 import type { Memory, MemoryReaderContext, ProjectMemoryKind } from "../types/memory"
-import { retrieveMemories, type MemoryRetrieverDeps } from "../retrieve/retriever"
+import { DEFAULT_MEMORY_CONFIG } from "../types/memory"
+import { retrieveMemoriesWithOutcome, type MemoryRetrieverDeps } from "../retrieve/retriever"
+import { memoryRuntimeDegraded } from "../control-plane/retrieval-telemetry"
 import { createContextManager } from "@cognia/rag/context-manager"
 import { hasNoLeakingPii } from "@cognia/redact"
 
@@ -120,7 +122,9 @@ function claimFrom(memory: Memory, relevance: number): AppliedProjectClaim | und
 export async function applyProjectContinuityContext(
   input: ApplyProjectContinuityInput
 ): Promise<ApplyProjectContinuityResult> {
-  const maxTokens = Math.max(0, input.maxTokens)
+  const maxTokens = Number.isFinite(input.maxTokens)
+    ? Math.max(0, Math.floor(input.maxTokens))
+    : DEFAULT_MEMORY_CONFIG.projectRecallTokenBudget
   const budget = { limit: maxTokens, used: 0, truncated: false }
   const query = input.userMessage.trim()
   // No workspace, no query, no budget → nothing this function could contribute.
@@ -128,7 +132,7 @@ export async function applyProjectContinuityContext(
 
   const tokenCounter = createContextManager({ maxTokens: Math.max(1, maxTokens) })
   try {
-    const retrieved = await retrieveMemories(
+    const outcome = await retrieveMemoriesWithOutcome(
       {
         queryText: query,
         reader: input.reader,
@@ -144,7 +148,9 @@ export async function applyProjectContinuityContext(
       },
       input.deps
     )
-    if (retrieved.length === 0) return { ...EMPTY, budget }
+    const retrieved = outcome.hits
+    const degraded = memoryRuntimeDegraded(outcome.reasons)
+    if (retrieved.length === 0) return { ...EMPTY, degraded, budget }
 
     const aboveFloor = retrieved.filter((hit) => hit.relevance >= input.relevanceFloor)
     const belowFloorCount = retrieved.length - aboveFloor.length
@@ -160,20 +166,20 @@ export async function applyProjectContinuityContext(
     const capped = safe.slice(0, Math.max(0, input.topK))
     const overCountCount = safe.length - capped.length
 
-    const headingCost = tokenCounter.estimateTokens(
-      `${PROJECT_CONTINUITY_HEADING}\n${PROJECT_CONTINUITY_PREAMBLE}`
-    )
+    const render = (claims: AppliedProjectClaim[], includeWeakNote = false) =>
+      [
+        PROJECT_CONTINUITY_HEADING,
+        PROJECT_CONTINUITY_PREAMBLE,
+        ...claims.map((claim) => `- ${claim.text}`),
+        ...(includeWeakNote ? [WEAK_RECALL_NOTE] : []),
+      ].join("\n")
     const claims: AppliedProjectClaim[] = []
-    let used = 0
     for (const hit of capped) {
       const claim = claimFrom(hit.memory, hit.relevance)
       if (!claim) continue
-      const lineCost = tokenCounter.estimateTokens(`- ${claim.text}`)
-      const opening = claims.length === 0 ? headingCost : 0
       // `continue`, not `break`: a single long claim must not hide every shorter
       // one behind it.
-      if (used + opening + lineCost > maxTokens) continue
-      used += opening + lineCost
+      if (tokenCounter.estimateTokens(render([...claims, claim])) > maxTokens) continue
       claims.push(claim)
     }
 
@@ -183,24 +189,25 @@ export async function applyProjectContinuityContext(
       claims.length === 0 ? belowFloorCount > 0 : withheldCount > 0 || belowFloorCount > 0
 
     if (claims.length === 0) {
-      return { ...EMPTY, withheldCount, weak, budget: { ...budget, truncated: withheldCount > 0 } }
-    }
-
-    const lines = claims.map((claim) => `- ${claim.text}`)
-    if (weak) {
-      const noteCost = tokenCounter.estimateTokens(WEAK_RECALL_NOTE)
-      if (used + noteCost <= maxTokens) {
-        lines.push(WEAK_RECALL_NOTE)
-        used += noteCost
+      return {
+        ...EMPTY,
+        degraded,
+        withheldCount,
+        weak,
+        budget: { ...budget, truncated: withheldCount > 0 },
       }
     }
+
+    const includeWeakNote = weak && tokenCounter.estimateTokens(render(claims, true)) <= maxTokens
+    const systemPromptSection = render(claims, includeWeakNote)
+    const used = tokenCounter.estimateTokens(systemPromptSection)
     return {
-      systemPromptSection: `${PROJECT_CONTINUITY_HEADING}\n${PROJECT_CONTINUITY_PREAMBLE}\n${lines.join("\n")}`,
+      systemPromptSection,
       claims,
       withheldCount,
       budget: { limit: maxTokens, used, truncated: withheldCount > 0 },
       weak,
-      degraded: false,
+      degraded,
     }
   } catch {
     // Isolated from the personal section on purpose: this degrading must not

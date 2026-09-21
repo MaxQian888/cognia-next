@@ -38,8 +38,20 @@ import {
 import { projectMiningExcerpt } from "@cognia/memory/extract/project-excerpt"
 import { isToolPart } from "@/lib/chat/mentions/tool-output-text"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
+import {
+  parseAttachmentEvidenceSourceId,
+  type ProjectAttachmentEvidenceSource,
+} from "@cognia/memory/extract/project-attachment-evidence"
+import { readAttachmentExtractedContent } from "@cognia/agent-config-types/attachment"
 
 export interface RevalidateClaimDeps {
+  readToolExcerpt?: (
+    messageId: string,
+    partIndex: number
+  ) => Promise<{ excerpt?: string } | undefined>
+  readAttachmentExcerpt?: (
+    source: ProjectAttachmentEvidenceSource
+  ) => Promise<{ excerpt?: string } | undefined>
   getMemory: (id: string) => Promise<Memory | undefined>
   listEvidence: (memoryId: string) => Promise<MemoryEvidence[]>
   /** The mining excerpt of a message as it stands today, or undefined if it is gone. */
@@ -64,16 +76,6 @@ export interface RevalidateClaimResult {
   verdict?: ClaimSupportVerdict
 }
 
-/** `<messageId>` or `<messageId>:<partIndex>`. */
-function splitSourceId(sourceId: string): { messageId: string; partIndex?: number } {
-  const [messageId = "", rawIndex] = sourceId.split(":")
-  const partIndex = rawIndex === undefined ? undefined : Number.parseInt(rawIndex, 10)
-  return {
-    messageId,
-    ...(partIndex !== undefined && Number.isInteger(partIndex) ? { partIndex } : {}),
-  }
-}
-
 async function verdictFor(
   evidence: MemoryEvidence,
   memory: Memory,
@@ -84,9 +86,33 @@ async function verdictFor(
   if (strategy === "user-confirmation") {
     return memory.reviewStatus === "verified" ? "valid" : "unvalidated"
   }
+  if (strategy === "attachment-content-hash") {
+    const source = parseAttachmentEvidenceSourceId(evidence.sourceId)
+    if (!source || !deps.readAttachmentExcerpt) return "unverifiable"
+    const current = await deps.readAttachmentExcerpt(source)
+    if (!current) return "revoked"
+    // Failed/partial extraction of an unchanged source is not source deletion.
+    if (current.excerpt === undefined || !evidence.excerptHash) return "unvalidated"
+    return hashContent(current.excerpt) === evidence.excerptHash ? "valid" : "revoked"
+  }
 
-  const { messageId, partIndex } = splitSourceId(evidence.sourceId)
+  // Message ids are opaque and may contain colons. Only tool evidence has a
+  // numeric suffix, and malformed indices must never certify a prose message.
+  const toolStrategy = strategy === "tool-result-hash" || strategy === "tool-output-hash"
+  const toolAnchor = toolStrategy ? /^(.*):(\d+)$/.exec(evidence.sourceId) : null
+  const partIndex = toolAnchor ? Number(toolAnchor[2]) : undefined
+  if (toolStrategy && (!toolAnchor || !Number.isSafeInteger(partIndex))) {
+    return "unverifiable"
+  }
+  const messageId = toolAnchor ? toolAnchor[1] : evidence.sourceId
   if (!messageId) return "unverifiable"
+  if (strategy === "tool-output-hash") {
+    if (!deps.readToolExcerpt || partIndex === undefined) return "unverifiable"
+    const current = await deps.readToolExcerpt(messageId, partIndex)
+    if (!current) return "revoked"
+    if (current.excerpt === undefined || !evidence.excerptHash) return "unvalidated"
+    return hashContent(current.excerpt) === evidence.excerptHash ? "valid" : "revoked"
+  }
   const source = await deps.readExcerpt(messageId)
   // The message is gone. This is the case the whole sweep exists for: a claim
   // whose source was deleted must stop being injected.
@@ -138,10 +164,11 @@ export async function revalidateClaim(
   await deps.patchMemory(memoryId, {
     staleness: verdict.staleness,
     validatedAt: now,
-    // A claim that verified is no longer merely unjudged. Quarantine is lifted
-    // ONLY by evidence — never by the passage of time — and only upward: a row
-    // a human marked untrusted stays untrusted.
-    ...(verdict.staleness === "fresh" && memory.trustState === "quarantined"
+    // An unchanged source proves freshness, not that the mined claim or failed
+    // consolidation judgment was correct. Only explicit review lifts quarantine.
+    ...(verdict.staleness === "fresh" &&
+    memory.trustState === "quarantined" &&
+    memory.reviewStatus === "verified"
       ? { trustState: "trusted" as const }
       : {}),
   })
@@ -160,25 +187,31 @@ export async function revalidateClaim(
  * redaction pass.
  */
 export async function buildClaimRevalidationDeps(): Promise<RevalidateClaimDeps> {
-  const [memDb, governance, { getDb }, { allRootPaths }, { projectMiningMessageText }] =
-    await Promise.all([
-      import("@/lib/db/memories"),
-      import("@/lib/db/memory-governance"),
-      import("@/lib/db/schema"),
-      import("@/lib/workspace/roots"),
-      import("@/lib/memory/write/project-transcript-text"),
-    ])
+  const [
+    memDb,
+    governance,
+    { getDb },
+    { allRootPaths },
+    { projectMiningMessageText, projectMiningToolText },
+    { listSessionAssets },
+  ] = await Promise.all([
+    import("@/lib/db/memories"),
+    import("@/lib/db/memory-governance"),
+    import("@/lib/db/schema"),
+    import("@/lib/workspace/roots"),
+    import("@/lib/memory/write/project-transcript-text"),
+    import("@/lib/db/session-assets"),
+  ])
 
   const rootsByProject = new Map<string, readonly string[]>()
   const excerptCache = new Map<string, Awaited<ReturnType<RevalidateClaimDeps["readExcerpt"]>>>()
+  const assetsBySession = new Map<string, Awaited<ReturnType<typeof listSessionAssets>>>()
 
   async function rootsFor(projectId: string | undefined): Promise<readonly string[]> {
     if (!projectId) return []
     const cached = rootsByProject.get(projectId)
     if (cached) return cached
-    const project = await getDb()
-      .projects.get(projectId)
-      .catch(() => undefined)
+    const project = await getDb().projects.get(projectId)
     const roots = project ? allRootPaths(project) : []
     rootsByProject.set(projectId, roots)
     return roots
@@ -187,11 +220,61 @@ export async function buildClaimRevalidationDeps(): Promise<RevalidateClaimDeps>
   return {
     getMemory: (id) => memDb.getMemory(id),
     listEvidence: (memoryId) => governance.listMemoryEvidence(memoryId),
+    readToolExcerpt: async (messageId, partIndex) => {
+      const row = await getDb().messages.get(messageId)
+      if (!row) return undefined
+      const text = projectMiningToolText(Array.isArray(row.parts) ? row.parts : [], partIndex)
+      if (text === undefined) return undefined
+      return { excerpt: projectMiningExcerpt(text, { roots: await rootsFor(row.projectId) }) }
+    },
+    readAttachmentExcerpt: async (source) => {
+      const row = await getDb().messages.get(source.messageId)
+      if (!row) return undefined
+      const part = Array.isArray(row.parts) ? row.parts[source.partIndex] : undefined
+      if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file")
+        return undefined
+      const content = readAttachmentExtractedContent(
+        (part as { extractedContent?: unknown }).extractedContent
+      )
+      if (
+        !content ||
+        content.attachmentId !== source.attachmentId ||
+        content.contentHash !== source.contentHash
+      )
+        return undefined
+      // The transcript is only a snapshot. Deleting an asset or replacing its
+      // extraction must not leave that snapshot certifying removed evidence.
+      if (!row.sessionId) return undefined
+      let assets = assetsBySession.get(row.sessionId)
+      if (!assets) {
+        assets = await listSessionAssets(row.sessionId)
+        assetsBySession.set(row.sessionId, assets)
+      }
+      const asset = assets.find((item) => item.assetId === source.attachmentId)
+      if (!asset || asset.contentHash !== source.contentHash) return undefined
+      const current = readAttachmentExtractedContent(asset.extractedContent)
+      if (!current) return {}
+      if (
+        current.attachmentId !== source.attachmentId ||
+        current.contentHash !== source.contentHash
+      )
+        return undefined
+      const segment = current.segments.find((item) => item.id === source.segmentId)
+      if (!segment) return current.status === "ready" ? undefined : {}
+      if (JSON.stringify(segment.locator) !== source.locator || source.end > segment.text.length)
+        return undefined
+      if (current.status !== "ready" && current.status !== "partial") return {}
+      return {
+        excerpt: projectMiningExcerpt(segment.text.slice(source.start, source.end), {
+          roots: await rootsFor(row.projectId),
+        }),
+      }
+    },
     readExcerpt: async (messageId) => {
       if (excerptCache.has(messageId)) return excerptCache.get(messageId)
-      const row = await getDb()
-        .messages.get(messageId)
-        .catch(() => undefined)
+      // A failed read is not evidence of deletion. Propagate it to the job's
+      // retry path rather than caching absence and revoking supported claims.
+      const row = await getDb().messages.get(messageId)
       if (!row) {
         excerptCache.set(messageId, undefined)
         return undefined
@@ -201,7 +284,10 @@ export async function buildClaimRevalidationDeps(): Promise<RevalidateClaimDeps>
       const result = {
         // Re-derived through the SAME pair of functions mining used, so a
         // mismatch really means the source changed.
-        excerpt: projectMiningExcerpt(projectMiningMessageText(parts), { roots }),
+        excerpt: projectMiningExcerpt(
+          projectMiningMessageText(parts, { includeAttachments: false }),
+          { roots }
+        ),
         partIsTool: (index: number) => {
           const part = parts[index]
           return Boolean(part && typeof part === "object" && isToolPart(part as { type?: unknown }))

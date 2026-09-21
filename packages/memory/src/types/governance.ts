@@ -53,6 +53,10 @@ export const MEMORY_VALIDATION_STRATEGIES = [
   "message-presence",
   /** The tool part still exists at the recorded index and its output still hashes the same. */
   "tool-result-hash",
+  /** Exact cited tool segment, excluding unrelated participant prose. */
+  "tool-output-hash",
+  /** The exact extracted attachment segment, original content hash, and locator still exist. */
+  "attachment-content-hash",
   /** A human marked the memory verified. Outranks anything the miner concluded. */
   "user-confirmation",
   /** Not checkable on this platform. Contributes no support. */

@@ -19,8 +19,13 @@ import type {
   MemoryReviewStatus,
   MemoryType,
 } from "../types/memory"
-import { retrieveMemories, type MemoryRetrieverDeps } from "../retrieve/retriever"
-import { assembleProceduralBlock } from "../procedural"
+import {
+  retrieveMemoriesWithOutcome,
+  isMemoryEligibleForRetrieval,
+  type MemoryRetrieverDeps,
+} from "../retrieve/retriever"
+import { memoryRuntimeDegraded } from "../control-plane/retrieval-telemetry"
+import { assembleProceduralContext } from "../procedural"
 import { buildMemoryContextSnapshot, type MemoryContextSnapshot } from "../types/context-snapshot"
 import { createContextManager } from "@cognia/rag/context-manager"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -35,6 +40,8 @@ export interface ApplyMemoryContextInput {
   characterId?: string
   reader?: MemoryReaderContext
   topK: number
+  signal?: AbortSignal
+  vectorTimeoutMs?: number
   relevanceFloor: number
   /** Shared budget for semantic, episodic, and procedural learned memory. */
   maxTokens?: number
@@ -104,7 +111,9 @@ export async function applyMemoryContext(
   input: ApplyMemoryContextInput
 ): Promise<ApplyMemoryContextResult> {
   const query = input.userMessage.trim()
-  const maxTokens = input.maxTokens ?? 900
+  const maxTokens = Number.isFinite(input.maxTokens)
+    ? Math.max(0, Math.floor(input.maxTokens!))
+    : 900
   const tokenCounter = createContextManager({ maxTokens })
   const reader = input.reader ?? (input.characterId ? { characterId: input.characterId } : {})
   const now = input.now ?? Date.now()
@@ -112,7 +121,7 @@ export async function applyMemoryContext(
   // turn that injected nothing still leaves a falsifiable record.
   const snapshotFor = (
     sectionText: string,
-    refs: AppliedMemory[],
+    refs: Array<{ id: string; version?: number }>,
     budget: { limit: number; used: number; truncated: boolean },
     degraded: boolean
   ) =>
@@ -125,31 +134,43 @@ export async function applyMemoryContext(
       now,
     })
   try {
-    const [retrieved, proceduralAll] = await Promise.all([
-      query
-        ? retrieveMemories(
-            {
-              queryText: query,
-              reader,
-              topK: input.topK,
-              relevanceFloor: input.relevanceFloor,
-              types: RECALLED_TYPES,
-              // THE guard for this section. Without it, the day project mining
-              // stamps its first claim, every claim also renders under
-              // "What you remember about the user" — silently, with no error and
-              // no failing test, in a first-person voice that reads as though the
-              // user personally told the agent a fact about their own repo.
-              claimFilter: "personal-only",
-              precomputedQueryEmbedding: input.precomputedQueryEmbedding,
-              enableQueryExpansion: input.enableQueryExpansion,
-              recencyHalfLifeDays: input.recencyHalfLifeDays,
-            },
-            input.deps
-          )
-        : Promise.resolve([]),
-      input.deps.loadProcedural(reader),
+    const [recallResult, proceduralResult] = await Promise.allSettled([
+      Promise.resolve().then(() =>
+        query
+          ? retrieveMemoriesWithOutcome(
+              {
+                queryText: query,
+                signal: input.signal,
+                vectorTimeoutMs: input.vectorTimeoutMs,
+                reader,
+                topK: input.topK,
+                relevanceFloor: input.relevanceFloor,
+                types: RECALLED_TYPES,
+                // THE guard for this section. Without it, the day project mining
+                // stamps its first claim, every claim also renders under
+                // "What you remember about the user" — silently, with no error and
+                // no failing test, in a first-person voice that reads as though the
+                // user personally told the agent a fact about their own repo.
+                claimFilter: "personal-only",
+                precomputedQueryEmbedding: input.precomputedQueryEmbedding,
+                enableQueryExpansion: input.enableQueryExpansion,
+                recencyHalfLifeDays: input.recencyHalfLifeDays,
+                now,
+              },
+              input.deps
+            )
+          : null
+      ),
+      Promise.resolve().then(() => input.deps.loadProcedural(reader)),
     ])
 
+    const retrieved = recallResult.status === "fulfilled" ? (recallResult.value?.hits ?? []) : []
+    const proceduralAll = proceduralResult.status === "fulfilled" ? proceduralResult.value : []
+    const degraded =
+      recallResult.status === "rejected" ||
+      proceduralResult.status === "rejected" ||
+      (recallResult.status === "fulfilled" &&
+        memoryRuntimeDegraded(recallResult.value?.reasons ?? []))
     const twinTexts = input.twinChunkTexts ?? []
     const unsafeRecalledCount = retrieved.filter((r) => !hasNoLeakingPii(r.memory.text)).length
     const recalledCandidates = retrieved
@@ -166,39 +187,40 @@ export async function applyMemoryContext(
         reviewStatus: r.memory.reviewStatus ?? "unreviewed",
       }))
 
-    const proceduralBudget = Math.min(input.proceduralMaxTokens ?? 600, Math.floor(maxTokens * 0.4))
-    const safeProcedural = proceduralAll.filter((memory) => hasNoLeakingPii(memory.text))
-    const unsafeProceduralCount = proceduralAll.length - safeProcedural.length
-    const proceduralBlock = assembleProceduralBlock(safeProcedural, {
-      maxTokens: proceduralBudget,
-    })
-    const proceduralCount = proceduralBlock
-      ? Math.max(0, proceduralBlock.split("\n").length - 1)
-      : 0
+    const proceduralLimit = Number.isFinite(input.proceduralMaxTokens)
+      ? Math.max(0, input.proceduralMaxTokens!)
+      : 600
+    const proceduralBudget = Math.min(proceduralLimit, Math.floor(maxTokens * 0.4))
+    const safeProcedural = proceduralAll.filter(
+      (memory) => isMemoryEligibleForRetrieval(memory, now) && hasNoLeakingPii(memory.text)
+    )
+    const withheldProceduralCount = proceduralAll.length - safeProcedural.length
+    const procedural = assembleProceduralContext(safeProcedural, { maxTokens: proceduralBudget })
+    const proceduralBlock = procedural.text
+    const proceduralCount = procedural.memories.length
     const activeProceduralCount = safeProcedural.filter(
-      (memory) => memory.type === "procedural" && memory.status === "active"
+      (memory) => memory.type === "procedural"
     ).length
-    let used = proceduralBlock ? tokenCounter.estimateTokens(proceduralBlock) : 0
-    const recallHeadingCost = tokenCounter.estimateTokens(RECALL_HEADING)
+    const render = (memories: AppliedMemory[]) =>
+      [
+        memories.length
+          ? `${RECALL_HEADING}\n${memories.map((m) => `- ${m.text}`).join("\n")}`
+          : null,
+        proceduralBlock,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
     const recalled: AppliedMemory[] = []
     for (const memory of recalledCandidates) {
-      const lineCost = tokenCounter.estimateTokens(`- ${memory.text}`)
-      const headingCost = recalled.length === 0 ? recallHeadingCost : 0
-      if (used + headingCost + lineCost > maxTokens) continue
-      used += headingCost + lineCost
+      if (tokenCounter.estimateTokens(render([...recalled, memory])) > maxTokens) continue
       recalled.push(memory)
     }
 
-    const sections: string[] = []
-    if (recalled.length > 0) {
-      sections.push(`${RECALL_HEADING}\n${recalled.map((m) => `- ${m.text}`).join("\n")}`)
-    }
-    if (proceduralBlock) sections.push(proceduralBlock)
-
-    const systemPromptSection = sections.length > 0 ? sections.join("\n\n") : null
+    const systemPromptSection = render(recalled) || null
+    const used = tokenCounter.estimateTokens(systemPromptSection ?? "")
     const withheldCount =
       unsafeRecalledCount +
-      unsafeProceduralCount +
+      withheldProceduralCount +
       recalledCandidates.length -
       recalled.length +
       activeProceduralCount -
@@ -210,8 +232,13 @@ export async function applyMemoryContext(
       proceduralCount,
       withheldCount,
       budget,
-      degraded: false,
-      snapshot: snapshotFor(systemPromptSection ?? "", recalled, budget, false),
+      degraded,
+      snapshot: snapshotFor(
+        systemPromptSection ?? "",
+        [...recalled, ...procedural.memories],
+        budget,
+        degraded
+      ),
     }
   } catch {
     const budget = { limit: maxTokens, used: 0, truncated: false }

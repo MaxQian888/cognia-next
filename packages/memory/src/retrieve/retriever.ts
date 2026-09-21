@@ -20,6 +20,7 @@ import {
   type MemoryReaderContext,
   type MemoryType,
 } from "../types/memory"
+import { withTimeout, TimeoutError } from "@cognia/primitives/with-timeout"
 import { BM25Index, normalizeScores, reciprocalRankFusion } from "@cognia/rag/hybrid-search"
 import { tokenizeMultilingual } from "@cognia/rag/cjk-tokenizer"
 import { sha256Hex } from "@cognia/rag/retrieval-profile"
@@ -182,7 +183,7 @@ export interface MemoryRetrieverDeps {
   /** Active candidate pool for the reader (global + character override layer). */
   loadCandidates: (reader?: MemoryReaderContext | string) => Promise<Memory[]>
   /** Embed the query; absent → BM25-only. */
-  embed?: (text: string) => Promise<number[]>
+  embed?: (text: string, options?: { signal?: AbortSignal }) => Promise<number[]>
   /**
    * Vector search returning `{ id: vectorDocId, score }`; absent → BM25-only.
    *
@@ -196,7 +197,7 @@ export interface MemoryRetrieverDeps {
   vectorSearch?: (
     embedding: number[],
     topK: number,
-    plan?: { vectorDocIds: readonly string[] }
+    plan?: { vectorDocIds: readonly string[]; signal?: AbortSignal }
   ) => Promise<{ id: string; score: number }[]>
   /** Mark hits accessed (recency). Optional; failures are swallowed by the caller. */
   touch?: (memoryIds: string[]) => Promise<void>
@@ -214,6 +215,8 @@ export interface MemoryRetrieverDeps {
   killSwitchEngaged?: () => boolean | Promise<boolean>
   /** Control-plane identity and sink for the trace this recall produces. */
   telemetry?: MemoryRetrievalTelemetry
+  /** Combined kill-switch, embedding and vector deadline; defaults to 700ms. */
+  vectorTimeoutMs?: number
 }
 
 export interface MemoryRetrievalTelemetry {
@@ -227,6 +230,10 @@ export interface MemoryRetrievalTelemetry {
 
 export interface RetrieveMemoriesInput {
   queryText: string
+  /** Cancel the vector leg; already available lexical results remain usable. */
+  signal?: AbortSignal
+  /** Per-call vector deadline override. Zero explicitly requests lexical-only. */
+  vectorTimeoutMs?: number
   characterId?: string
   /** Full namespace-aware reader context; supersedes `characterId` when present. */
   reader?: MemoryReaderContext
@@ -288,17 +295,12 @@ export interface RetrievedMemory {
 
 const OVERFETCH = 4
 
-// Signature-cached BM25 index over the candidate corpus. Mirrors the twin
-// runtime's per-twin cache (`lib/twin/runtime/bm25-index.ts`): rebuild only when
-// the corpus changes (cheap `{count}:{latestUpdatedAt}` signal), so we tokenise
-// once per corpus change instead of on every retrieval — and, in a team turn,
-// once instead of per member. `updatedAt` is used (not `lastAccessedAt`, which
-// `touch()` bumps every turn and would defeat the cache).
-// TODO(retrieval): fold this + the twin cache into a shared
-// `lib/ai/retrieval/` helper when the two hybrid pipelines are unified.
+// Cache the lexical index by exact document identity and text. A count/latest-
+// timestamp fingerprint misses replacements and edits to older rows. Comparing
+// the strings already held by the corpus avoids hashing/tokenizing every turn.
 interface CachedMemoryBm25 {
   index: BM25Index
-  signature: string
+  documents: Map<string, string>
 }
 const memoryBm25Cache = new Map<string, CachedMemoryBm25>()
 // Two entries per reader, not one: a turn that recalls personal memory AND
@@ -307,16 +309,17 @@ const memoryBm25Cache = new Map<string, CachedMemoryBm25>()
 // turn, whose members already compete for slots.
 const MAX_CACHED_CORPORA = 8
 
-function corpusSignature(candidates: Memory[]): string {
-  let latest = 0
-  for (const m of candidates) if (m.updatedAt > latest) latest = m.updatedAt
-  return `${candidates.length}:${latest}`
+function matchesCorpus(cached: CachedMemoryBm25 | undefined, candidates: Memory[]): boolean {
+  return (
+    !!cached &&
+    cached.documents.size === candidates.length &&
+    candidates.every((memory) => cached.documents.get(memory.id) === memory.text)
+  )
 }
 
 function getMemoryBm25Index(cacheKey: string, candidates: Memory[]): BM25Index {
-  const signature = corpusSignature(candidates)
   const cached = memoryBm25Cache.get(cacheKey)
-  if (cached && cached.signature === signature) {
+  if (cached && matchesCorpus(cached, candidates)) {
     // Refresh LRU recency (most-recently-used moves to the end).
     memoryBm25Cache.delete(cacheKey)
     memoryBm25Cache.set(cacheKey, cached)
@@ -324,7 +327,10 @@ function getMemoryBm25Index(cacheKey: string, candidates: Memory[]): BM25Index {
   }
   const index = new BM25Index()
   index.addDocuments(candidates.map((m) => ({ id: m.id, content: m.text })))
-  memoryBm25Cache.set(cacheKey, { index, signature })
+  memoryBm25Cache.set(cacheKey, {
+    index,
+    documents: new Map(candidates.map((m) => [m.id, m.text])),
+  })
   while (memoryBm25Cache.size > MAX_CACHED_CORPORA) {
     const oldest = memoryBm25Cache.keys().next().value
     if (oldest === undefined) break
@@ -463,7 +469,7 @@ export async function retrieveMemoriesWithOutcome(
     .slice()
     .sort()
     .join(",")}::${input.claimFilter ?? "all"}`
-  cacheHit = memoryBm25Cache.get(cacheKey)?.signature === corpusSignature(candidates)
+  cacheHit = matchesCorpus(memoryBm25Cache.get(cacheKey), candidates)
   const bm25 = getMemoryBm25Index(cacheKey, candidates)
   const keywordQuery = input.enableQueryExpansion ? buildExpandedKeywordQuery(query) : query
   const rawKeywordHits = bm25.search(keywordQuery, input.topK * OVERFETCH)
@@ -485,50 +491,12 @@ export async function retrieveMemoriesWithOutcome(
           return false
         })
 
-  // Vector leg. Best effort, but no longer SILENT: a failure here used to be
-  // caught, emptied, and reported as an ordinary BM25 result, so "the backend
-  // is down" and "the corpus has nothing" looked identical from outside.
-  let vectorHits: { id: string; score: number }[] = []
-  const killSwitch = await resolveKillSwitch(deps)
-  if (killSwitch) {
-    // BM25 keeps running. `KILL_SWITCH_ALLOWED` in the control plane permits
-    // `lexical_read` precisely so a stopped rollout still answers from the
-    // keyword index rather than silently returning nothing.
-    reasons.push({ code: "kill_switch_active", stage: "vector", retryable: false })
-  } else if (!deps.vectorSearch || !(input.precomputedQueryEmbedding || deps.embed)) {
-    reasons.push({ code: "vector_not_configured", stage: "vector", retryable: false })
-  } else {
-    let embedding: number[] | undefined
-    try {
-      embedding = input.precomputedQueryEmbedding ?? (await deps.embed!(query))
-    } catch {
-      reasons.push({ code: "embedding_unavailable", stage: "query", retryable: true })
-    }
-    if (embedding && embedding.length === 0) {
-      reasons.push({ code: "vector_dimension_mismatch", stage: "vector", retryable: false })
-      embedding = undefined
-    }
-    if (embedding) {
-      try {
-        // The plan carries the eligible corpus down to the backend: when it can
-        // scope, ineligible rows cannot crowd the top-K; when it cannot, the
-        // contract says it returns [] and the post-filter still guarantees that
-        // nothing unauthorized maps through.
-        const raw = await deps.vectorSearch(embedding, input.topK * OVERFETCH, {
-          vectorDocIds: [...byVectorDocId.keys()],
-        })
-        vectorHits = raw
-          .map((h) => {
-            const m = byVectorDocId.get(h.id)
-            return m ? { id: m.id, score: h.score } : null
-          })
-          .filter((h): h is { id: string; score: number } => h !== null)
-      } catch {
-        vectorHits = []
-        reasons.push({ code: "vector_unavailable", stage: "vector", retryable: true })
-      }
-    }
-  }
+  const vectorOutcome = await retrieveVectorLeg(query, [...byVectorDocId.keys()], input, deps)
+  reasons.push(...vectorOutcome.reasons)
+  const vectorHits = vectorOutcome.hits.flatMap((hit) => {
+    const memory = byVectorDocId.get(hit.id)
+    return memory && Number.isFinite(hit.score) ? [{ id: memory.id, score: hit.score }] : []
+  })
 
   // Fuse (or pass through the single leg), then normalize to [0,1] for the floor.
   const fused =
@@ -584,13 +552,143 @@ export async function retrieveMemoriesWithOutcome(
 
   if (deps.touch && result.length > 0) {
     try {
-      await deps.touch(result.map((r) => r.memory.id))
+      void Promise.resolve(deps.touch(result.map((r) => r.memory.id))).catch(() => undefined)
     } catch {
       // Touch is best-effort; a failure must not break retrieval.
     }
   }
 
   return finish(result, candidateIds, scoreTrace(), query)
+}
+
+interface VectorLegOutcome {
+  hits: { id: string; score: number }[]
+  reasons: RetrievalDegradeReason[]
+}
+
+interface InFlightVectorLeg {
+  controller: AbortController
+  promise: Promise<VectorLegOutcome>
+}
+
+// A provider that ignores abort must not accumulate work forever. Retain timed-
+// out entries until their original promise settles; at capacity use lexical
+// fallback. The process-wide cap also covers rebuilt dependency wrappers.
+const inFlightVectorLegs = new WeakMap<object, Map<string, InFlightVectorLeg>>()
+let activeVectorLegCount = 0
+const MAX_IN_FLIGHT_VECTOR_LEGS = 8
+const VECTOR_TIMEOUT_MS = 700
+const timedOutVectorLeg = (): VectorLegOutcome => ({
+  hits: [],
+  reasons: [{ code: "retrieval_timeout", stage: "vector", retryable: true }],
+})
+
+async function retrieveVectorLeg(
+  query: string,
+  vectorDocIds: string[],
+  input: RetrieveMemoriesInput,
+  deps: MemoryRetrieverDeps
+): Promise<VectorLegOutcome> {
+  // Configured lexical-only readers consume no remote-work capacity. Preserve
+  // kill-switch telemetry when a host supplies its policy callback.
+  if (
+    !deps.killSwitchEngaged &&
+    (!deps.vectorSearch || !(input.precomputedQueryEmbedding || deps.embed))
+  ) {
+    return {
+      hits: [],
+      reasons: [{ code: "vector_not_configured", stage: "vector", retryable: false }],
+    }
+  }
+  const requestedTimeout = input.vectorTimeoutMs ?? deps.vectorTimeoutMs ?? VECTOR_TIMEOUT_MS
+  const timeoutMs = Number.isFinite(requestedTimeout)
+    ? Math.max(0, requestedTimeout)
+    : VECTOR_TIMEOUT_MS
+  if (input.signal?.aborted || timeoutMs === 0) return timedOutVectorLeg()
+  let active = inFlightVectorLegs.get(deps)
+  if (!active) {
+    active = new Map()
+    inFlightVectorLegs.set(deps, active)
+  }
+  // Reader/corpus and embedding identity are part of the key: no cross-scope
+  // result sharing even when the same user text is submitted in parallel.
+  const key = JSON.stringify([query, vectorDocIds, input.precomputedQueryEmbedding, input.topK])
+  let operation = active.get(key)
+  if (operation?.controller.signal.aborted) return timedOutVectorLeg()
+  if (!operation) {
+    if (activeVectorLegCount >= MAX_IN_FLIGHT_VECTOR_LEGS) return timedOutVectorLeg()
+    activeVectorLegCount += 1
+    const controller = new AbortController()
+    const { signal } = controller
+    const promise = (async (): Promise<VectorLegOutcome> => {
+      if (await resolveKillSwitch(deps)) {
+        return {
+          hits: [],
+          reasons: [{ code: "kill_switch_active", stage: "vector", retryable: false }],
+        }
+      }
+      if (signal.aborted) return timedOutVectorLeg()
+      if (!deps.vectorSearch || !(input.precomputedQueryEmbedding || deps.embed)) {
+        return {
+          hits: [],
+          reasons: [{ code: "vector_not_configured", stage: "vector", retryable: false }],
+        }
+      }
+      let embedding: number[]
+      try {
+        embedding = input.precomputedQueryEmbedding ?? (await deps.embed!(query, { signal }))
+      } catch {
+        return {
+          hits: [],
+          reasons: [{ code: "embedding_unavailable", stage: "query", retryable: true }],
+        }
+      }
+      if (signal.aborted) return timedOutVectorLeg()
+      if (!embedding.length || !embedding.every(Number.isFinite)) {
+        return {
+          hits: [],
+          reasons: [{ code: "vector_dimension_mismatch", stage: "vector", retryable: false }],
+        }
+      }
+      try {
+        const hits = await deps.vectorSearch(embedding, input.topK * OVERFETCH, {
+          vectorDocIds,
+          signal,
+        })
+        return signal.aborted ? timedOutVectorLeg() : { hits, reasons: [] }
+      } catch {
+        return {
+          hits: [],
+          reasons: [{ code: "vector_unavailable", stage: "vector", retryable: true }],
+        }
+      }
+    })()
+    operation = { controller, promise }
+    active.set(key, operation)
+    // Both outcomes release the slot; no detached rejection can escape.
+    const release = () => {
+      activeVectorLegCount -= 1
+      active.delete(key)
+    }
+    void promise.then(release, release)
+  }
+  const running = operation
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      running.controller.abort()
+      reject(new TimeoutError("memory-vector-aborted", timeoutMs))
+    }
+    input.signal?.addEventListener("abort", onAbort, { once: true })
+  })
+  try {
+    return await withTimeout(Promise.race([running.promise, aborted]), timeoutMs, "memory-vector")
+  } catch {
+    running.controller.abort()
+    return timedOutVectorLeg()
+  } finally {
+    if (onAbort) input.signal?.removeEventListener("abort", onAbort)
+  }
 }
 
 /** Fail closed: an unanswerable kill switch is treated as engaged. */

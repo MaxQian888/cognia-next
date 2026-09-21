@@ -20,10 +20,69 @@ jest.mock("@/lib/db/schema", () => ({
 import {
   revokeClaimsForDeletedMessages,
   revokeClaimsForDeletedSession,
+  revokeClaimsForChangedAttachment,
 } from "./claim-deletion-closure"
+import { attachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
 
 const CLAIM = { id: "claim1", status: "active", projectMemoryKind: "constraint" }
 const PERSONAL = { id: "personal1", status: "active" }
+
+describe("revokeClaimsForChangedAttachment", () => {
+  it("atomically revokes matching attachment claims without invalidating personal or unrelated rows", async () => {
+    const sourceId = attachmentEvidenceSourceId({
+      messageId: "m1",
+      partIndex: 0,
+      attachmentId: "a1",
+      contentHash: "a".repeat(64),
+      segmentId: "page-1",
+      locator: '{"type":"page","page":1}',
+      start: 0,
+      end: 20,
+    })
+    const affected = { id: "e1", sessionId: "s1", kind: "file", sourceId, memoryId: "claim1" }
+    const where = jest.fn(() => ({
+      equals: jest.fn(() => ({
+        toArray: async () => [
+          affected,
+          { ...affected, id: "e2", memoryId: "personal1" },
+          { ...affected, id: "e3", sourceId: "unrelated" },
+        ],
+      })),
+    }))
+    const bulkPut = jest.fn(async (_rows: unknown[]) => undefined)
+    const update = jest.fn(async () => undefined)
+    const db = {
+      memoryEvidence: { where, bulkPut },
+      memories: { bulkGet: jest.fn(async () => [CLAIM, PERSONAL]), update },
+    }
+    expect(await revokeClaimsForChangedAttachment("s1", "a1", db as never, 100)).toBe(1)
+    expect(where).toHaveBeenCalledWith("sessionId")
+    expect(bulkPut.mock.calls[0]?.[0]).toHaveLength(2)
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenCalledWith(
+      "claim1",
+      expect.objectContaining({ status: "invalidated", staleness: "expired", validatedAt: 100 })
+    )
+  })
+
+  it("propagates evidence write failures so the caller can roll back source deletion", async () => {
+    const db = {
+      memoryEvidence: {
+        where: () => ({
+          equals: () => ({
+            toArray: async () => {
+              throw new Error("storage failed")
+            },
+          }),
+        }),
+      },
+      memories: {},
+    }
+    await expect(revokeClaimsForChangedAttachment("s1", "a1", db as never)).rejects.toThrow(
+      "storage failed"
+    )
+  })
+})
 
 beforeEach(() => {
   jest.clearAllMocks()

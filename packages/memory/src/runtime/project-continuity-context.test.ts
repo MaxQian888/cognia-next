@@ -4,6 +4,7 @@ import {
 } from "./project-continuity-context"
 import type { Memory } from "../types/memory"
 import type { MemoryRetrieverDeps } from "../retrieve/retriever"
+import { createContextManager } from "@cognia/rag/context-manager"
 
 function claim(id: string, text: string, over: Partial<Memory> = {}): Memory {
   const now = 1_700_000_000_000
@@ -159,6 +160,42 @@ describe("applyProjectContinuityContext", () => {
     expect(result).toMatchObject({ degraded: true, systemPromptSection: null, claims: [] })
   })
 
+  it.each<[string, number, number]>([
+    ["rust build pin", 450, 1],
+    ["unrelated zebras", 450, 0],
+    ["rust build pin", 1, 0],
+  ])(
+    "reports vector failure with query %s and budget %s",
+    async (userMessage, maxTokens, count) => {
+      const vectorSearch = jest.fn(async () => {
+        throw new Error("vector offline")
+      })
+      const result = await applyProjectContinuityContext({
+        ...BASE,
+        userMessage,
+        maxTokens,
+        precomputedQueryEmbedding: [1, 0],
+        deps: {
+          ...deps([claim("c1", "rust build pin", { vectorDocId: "v1" })]),
+          vectorSearch,
+        },
+      })
+      expect(vectorSearch).toHaveBeenCalled()
+      expect(result.degraded).toBe(true)
+      expect(result.claims).toHaveLength(count)
+      if (count) expect(result.systemPromptSection).toContain("rust build pin")
+    }
+  )
+
+  it("does not report configured keyword-only recall as degraded", async () => {
+    const result = await applyProjectContinuityContext({
+      ...BASE,
+      deps: deps([claim("c1", "rust build pin")]),
+    })
+    expect(result.claims).toHaveLength(1)
+    expect(result.degraded).toBe(false)
+  })
+
   it("renders nothing when given no budget", async () => {
     const result = await applyProjectContinuityContext({
       ...BASE,
@@ -166,5 +203,60 @@ describe("applyProjectContinuityContext", () => {
       deps: deps([claim("c1", "rust build pin")]),
     })
     expect(result.systemPromptSection).toBeNull()
+  })
+
+  it.each(["", "x", "xx", "xxx"])("accounts for every rendered separator (%s)", async (suffix) => {
+    const tokenCounter = createContextManager({ maxTokens: 4_000 })
+    const input = {
+      ...BASE,
+      deps: deps([claim("c1", `rust build pins compiler${suffix}`)]),
+    }
+    const complete = await applyProjectContinuityContext(input)
+    const renderedTokens = tokenCounter.estimateTokens(complete.systemPromptSection!)
+    expect(complete.budget.used).toBe(renderedTokens)
+
+    const capped = await applyProjectContinuityContext({ ...input, maxTokens: renderedTokens - 1 })
+    expect(capped.systemPromptSection).toBeNull()
+    expect(capped.budget).toMatchObject({ used: 0, truncated: true })
+    expect(capped.withheldCount).toBe(1)
+  })
+
+  it("includes the weak recall note only when the complete section fits", async () => {
+    const tokenCounter = createContextManager({ maxTokens: 4_000 })
+    const input = {
+      ...BASE,
+      topK: 1,
+      deps: deps([
+        claim("c1", "rust build pins compiler"),
+        claim("c2", "rust build pins toolchain"),
+      ]),
+    }
+    const complete = await applyProjectContinuityContext(input)
+    expect(complete.systemPromptSection).toContain("project_history_search")
+    const renderedTokens = tokenCounter.estimateTokens(complete.systemPromptSection!)
+    expect(complete.budget.used).toBe(renderedTokens)
+
+    const capped = await applyProjectContinuityContext({ ...input, maxTokens: renderedTokens - 1 })
+    expect(capped.claims).toHaveLength(1)
+    expect(capped.weak).toBe(true)
+    expect(capped.systemPromptSection).not.toContain("project_history_search")
+    expect(capped.budget.used).toBe(tokenCounter.estimateTokens(capped.systemPromptSection!))
+    expect(capped.budget.used).toBeLessThanOrEqual(capped.budget.limit)
+  })
+
+  it.each([
+    [Number.NaN, 450],
+    [Number.POSITIVE_INFINITY, 450],
+    [Number.NEGATIVE_INFINITY, 450],
+    [90.9, 90],
+    [-1, 0],
+  ])("normalizes the token budget %s to %s", async (maxTokens, limit) => {
+    const result = await applyProjectContinuityContext({
+      ...BASE,
+      maxTokens,
+      deps: deps([claim("c1", "rust build pins compiler")]),
+    })
+    expect(result.budget.limit).toBe(limit)
+    expect(result.budget.used).toBeLessThanOrEqual(limit)
   })
 })

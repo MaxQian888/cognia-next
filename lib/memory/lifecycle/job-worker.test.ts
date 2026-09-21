@@ -1,5 +1,7 @@
 import type { MemoryJob } from "@/types/memory/governance"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
+import { attachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
+import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 
 const mockGetSettings = jest.fn()
 const mockGetSession = jest.fn()
@@ -223,6 +225,43 @@ describe("drainMemoryJobsAfterTurn", () => {
 })
 
 describe("startMemoryJobWorker namespace repair", () => {
+  beforeEach(__resetMemoryDrainLock)
+
+  it("finishes an already claimed job but claims no more after teardown", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const d = deps([job("a"), job("b")], async () => {
+      await pending
+      return { status: "succeeded", resultCode: "done" }
+    })
+    const stop = startMemoryJobWorker({ deps: d, repairNamespaces: false })
+    await Promise.resolve()
+    stop()
+    release()
+    await drainMemoryJobsAfterTurn({}, d)
+    expect(d.finish).toHaveBeenCalledTimes(1)
+    expect(d.claimNext).toHaveBeenCalledTimes(1)
+  })
+
+  it("contains a failed background claim and recovers on the next tick", async () => {
+    jest.useFakeTimers()
+    const warning = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const d = deps([job("a")])
+    jest.mocked(d.claimNext).mockRejectedValueOnce(new Error("private storage detail"))
+    const stop = startMemoryJobWorker({ deps: d, repairNamespaces: false, intervalMs: 1000 })
+    try {
+      await jest.advanceTimersByTimeAsync(1000)
+      expect(d.finish).toHaveBeenCalledTimes(1)
+      expect(warning).toHaveBeenCalledWith("Memory job worker drain failed")
+    } finally {
+      stop()
+      warning.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
   it("runs the one-time unreadable-row repair on start", async () => {
     const repair = jest.fn(async () => ({ repaired: 0, downgraded: 0 }))
     const stop = startMemoryJobWorker({
@@ -370,6 +409,36 @@ describe("memory job worker", () => {
     expect(mockUpdateMemory).not.toHaveBeenCalledWith("m1", expect.anything())
   })
 
+  it("learns only authored user prose when an opted-in turn contains attachments", async () => {
+    mockGetSettings.mockResolvedValue({
+      memory: { enabled: true, learnFromChats: true, disableLearningOnExternalContext: false },
+    })
+    mockListMessages.mockResolvedValue([
+      {
+        id: "u1",
+        role: "user",
+        parts: [
+          { type: "text", text: "I always use pnpm" },
+          { type: "image", alt: "I always use yarn" },
+          { type: "file", text: "I always use npm" },
+        ],
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "The attachment says you use npm." }],
+      },
+    ])
+    await processMemoryJob({ ...job("turn"), sessionId: "s1", projectId: "p1" })
+    expect(mockRunExtraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newPair: { userText: "I always use pnpm", assistantText: "" },
+        recentMessages: [expect.objectContaining({ role: "user", text: "I always use pnpm" })],
+      }),
+      expect.anything()
+    )
+  })
+
   it("reconstructs the user's side of a turn from the typed text, not the context envelope", async () => {
     // The extractor learns facts about the user from what they said. A snapshot
     // the composer attached ("SECRET SNAPSHOT: I always use yarn") is not a
@@ -491,6 +560,94 @@ describe("memory job worker", () => {
       expect(mockTryBuildVectorSink).not.toHaveBeenCalled()
     })
 
+    it("persists attachment source hashes as quarantined reviewable evidence and reports selected coverage", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      const sourceId = attachmentEvidenceSourceId({
+        messageId: "m1",
+        partIndex: 1,
+        attachmentId: "a1",
+        contentHash: "a".repeat(64),
+        segmentId: "page-2",
+        locator: '{"type":"page","page":2}',
+        start: 0,
+        end: 25,
+      })
+      mockRunMining.mockResolvedValue({
+        applied: [
+          {
+            op: "ADD",
+            memory: { id: "mem1" },
+            candidate: {
+              projectClaim: {
+                projectMemoryKind: "constraint",
+                evidence: [{ kind: "file", sourceId }],
+              },
+            },
+          },
+        ],
+        redactedExcerpts: new Map([[sourceId, "The repo uses pnpm."]]),
+        attachmentCoverage: { available: 20, mined: 4 },
+      })
+      expect(await processMemoryJob(miningJob())).toMatchObject({
+        status: "succeeded",
+        resultCode: "claims_applied_attachment_partial",
+      })
+      expect(mockUpdateMemory).toHaveBeenCalledWith(
+        "mem1",
+        expect.objectContaining({
+          trustState: "quarantined",
+          reviewStatus: "unreviewed",
+          contaminationState: "external-context",
+        })
+      )
+      expect(mockCreateEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "file",
+          sourceId,
+          messageId: "m1",
+          sourceRole: undefined,
+          excerptHash: hashContent("The repo uses pnpm."),
+          validationStrategy: "attachment-content-hash",
+        })
+      )
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "attachment_mining_partial",
+          metadata: { attachmentChunksAvailable: 20, attachmentChunksMined: 4 },
+        })
+      )
+    })
+
+    it("refuses a queued workspace job after the session moves to another project", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      mockGetSession.mockResolvedValue({ id: "s1", projectId: "p2" })
+      const d = deps([miningJob()], processMemoryJob)
+      await drainMemoryJobs({}, d)
+      expect(mockRunMining).not.toHaveBeenCalled()
+      expect(d.finish).toHaveBeenCalledWith(
+        "mine",
+        { status: "skipped", resultCode: "project_changed" },
+        "memory-job-worker",
+        3
+      )
+      expect(d.fail).not.toHaveBeenCalled()
+    })
+
+    it("refuses a queued job after its character changes", async () => {
+      mockListMessages.mockResolvedValue(mined)
+      mockGetSession.mockResolvedValue({ id: "s1", projectId: "p1", characterId: "new-character" })
+      const d = deps([miningJob({ characterId: "old-character" })], processMemoryJob)
+      await drainMemoryJobs({}, d)
+      expect(mockRunMining).not.toHaveBeenCalled()
+      expect(d.finish).toHaveBeenCalledWith(
+        "mine",
+        { status: "skipped", resultCode: "character_changed" },
+        "memory-job-worker",
+        3
+      )
+      expect(d.fail).not.toHaveBeenCalled()
+    })
+
     it("carries real source timestamps through so claims can date their evidence", async () => {
       mockListMessages.mockResolvedValue(mined)
       await processMemoryJob(miningJob())
@@ -592,6 +749,51 @@ describe("memory job worker", () => {
       // Labelled with the part index, because that index is the second half of
       // a `tool-result` evidence sourceId.
       expect(input.messages[1]!.text).toContain("[tool 1]")
+    })
+
+    it("attaches fresh evidence to an updated claim without truncating imported message ids", async () => {
+      const messageId = "import:m2"
+      mockListMessages.mockResolvedValue([mined[0], { ...mined[1], id: messageId }])
+      mockRunMining.mockResolvedValue({
+        applied: [
+          {
+            op: "UPDATE",
+            targetId: "existing-claim",
+            candidate: {
+              type: "semantic",
+              text: "Updated constraint",
+              importance: 7,
+              projectClaim: {
+                projectMemoryKind: "constraint",
+                evidence: [
+                  { kind: "message", sourceId: messageId },
+                  { kind: "tool-result", sourceId: `${messageId}:3` },
+                ],
+              },
+            },
+          },
+        ],
+        redactedExcerpts: new Map([[messageId, "updated evidence"]]),
+      })
+      await processMemoryJob(
+        miningJob({
+          checkpoint: {
+            transcriptRevision: 1,
+            firstMessageId: "m1",
+            lastMessageId: messageId,
+            messageCount: 2,
+          },
+        })
+      )
+      expect(mockCreateEvidence).toHaveBeenCalledTimes(2)
+      for (const [evidence] of mockCreateEvidence.mock.calls) {
+        expect(evidence).toMatchObject({
+          memoryId: "existing-claim",
+          messageId,
+          sourceRole: "assistant",
+        })
+        expect(evidence.excerptHash).toEqual(expect.any(String))
+      }
     })
 
     it("reports the miner's skip reason instead of a generic empty result", async () => {

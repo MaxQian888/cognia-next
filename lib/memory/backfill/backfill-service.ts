@@ -25,14 +25,13 @@ import {
   transitionProjectMiningRun,
 } from "@/lib/db/project-mining-runs"
 import { enqueueProjectMiningJobs } from "@/lib/memory/write/project-mining-enqueue"
-import { extractPlainText } from "@/lib/inbox/extract-plain-text"
+import { memoryTranscriptProse } from "@/lib/memory/write/project-transcript-text"
 import {
   estimateProjectMiningBackfill,
   stepProjectMiningBackfill,
   type ProjectMiningBackfillDeps,
   type ProjectMiningStepOutcome,
 } from "./project-mining-backfill"
-import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
 /** This renderer's identity for the run lease. One per window, stable. */
 let workerId: string | null = null
@@ -95,7 +94,7 @@ function backfillDeps(): ProjectMiningBackfillDeps {
                 role: message.role,
                 // The extractor must not credit the user with context the
                 // composer attached to their turn.
-                text: extractPlainText(stripPromptPreambleFromParts(message.parts ?? [])),
+                text: memoryTranscriptProse(message.parts ?? []),
                 parts: Array.isArray(message.parts) ? message.parts : undefined,
               },
             ]

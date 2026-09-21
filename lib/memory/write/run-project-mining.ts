@@ -49,6 +49,21 @@ import {
 } from "@/lib/memory/consolidate/consolidator"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
+import {
+  isToolPart,
+  projectToolOutputText,
+  type ToolOutputPartLike,
+} from "@/lib/chat/mentions/tool-output-text"
+import {
+  projectMiningAttachmentExcerpts,
+  projectMiningMessageText,
+  projectMiningToolText,
+} from "./project-transcript-text"
+import {
+  estimateMessageTokens,
+  DEFAULT_WINDOW_MAX_TOKENS,
+} from "@cognia/memory/extract/project-windows"
+import { BM25Index } from "@cognia/rag/hybrid-search"
 
 /** Why a window produced nothing. Surfaced as the job's `resultCode`. */
 export type ProjectMiningSkipReason =
@@ -61,6 +76,8 @@ export type ProjectMiningSkipReason =
   | "payload_pii_blocked"
   | "no_candidates"
   | "no_safe_candidates"
+  | "no_applicable_candidates"
+  | "external_context_blocked"
 
 export interface RunProjectMiningInput {
   /** One mining window. Text is RAW — this function owns normalization + redaction. */
@@ -83,6 +100,8 @@ export interface RunProjectMiningInput {
 }
 
 export interface RunProjectMiningDeps {
+  /** Background jobs must preserve transport/storage failures for retry. */
+  propagateErrors?: boolean
   extract: (input: ExtractProjectClaimsInput) => Promise<ProjectClaimCandidate[]>
   consolidate: (input: ConsolidateInput) => Promise<{ applied: ConsolidationOp[] }>
   /** Per-claim PII gate; defaults to `hasNoLeakingPii`. */
@@ -111,6 +130,9 @@ export interface RunProjectMiningResult {
    * changed, not that the two sides normalized differently.
    */
   redactedExcerpts?: ReadonlyMap<string, string>
+  redactedToolExcerpts?: ReadonlyMap<string, string>
+  /** Actual bounded mining coverage, not the attachment parser's coverage. */
+  attachmentCoverage?: { available: number; mined: number }
 }
 
 /**
@@ -129,6 +151,15 @@ function skipped(reason: ProjectMiningSkipReason): RunProjectMiningResult {
   return { applied: [], skipReason: reason }
 }
 
+/** Path hints are subtrees, never absolute paths, traversal, or glob programs. */
+function normalizePathHint(path: string): string | undefined {
+  const slashes = path.trim().replaceAll("\\", "/")
+  if (/^(?:[\/~]|[a-zA-Z]:)/.test(slashes) || /[\x00-\x1f*?\[\]{}]/.test(slashes)) return undefined
+  const segments = slashes.split("/")
+  if (segments.includes("..")) return undefined
+  return segments.filter((segment) => segment && segment !== ".").join("/") || undefined
+}
+
 export async function runProjectMining(
   input: RunProjectMiningInput,
   deps: RunProjectMiningDeps
@@ -143,8 +174,27 @@ export async function runProjectMining(
     if (config.temporary) return skipped("temporary_session")
     if (!input.projectId) return skipped("project_missing")
 
-    const usable = input.messages.filter((message) => message.id && message.text.trim())
+    const usable = input.messages.filter(
+      (message) =>
+        message.id &&
+        (message.text.trim() || projectMiningAttachmentExcerpts(message.parts, message.id).length)
+    )
     if (usable.length === 0) return skipped("window_empty")
+    const attachmentExcerpts = usable.flatMap((message) =>
+      projectMiningAttachmentExcerpts(message.parts, message.id)
+    )
+    const hasAttachments = usable.some((message) =>
+      message.parts?.some(
+        (part) =>
+          part &&
+          typeof part === "object" &&
+          ["file", "image"].includes(String((part as { type?: unknown }).type))
+      )
+    )
+    if (hasAttachments && config.disableLearningOnExternalContext)
+      return skipped("external_context_blocked")
+    if (attachmentExcerpts.length && input.scope !== "workspace")
+      return skipped("no_applicable_candidates")
 
     // Step 0 — path normalization. A single message that still carries an
     // identifying path fails the WHOLE window: a claim mined from text we had to
@@ -152,7 +202,10 @@ export async function runProjectMining(
     const roots = input.workspaceRoots ?? []
     const normalized: ProjectWindowMessage[] = []
     for (const message of usable) {
-      const result = normalizeProjectPaths(message.text, { roots })
+      const result = normalizeProjectPaths(
+        message.parts ? projectMiningMessageText(message.parts) : message.text,
+        { roots }
+      )
       if (!result.ok) return skipped("identifying_path")
       normalized.push({ ...message, text: result.text })
     }
@@ -168,11 +221,32 @@ export async function runProjectMining(
     // every claim would then look revoked on its first check — a hashing bug
     // wearing the costume of evidence rot.
     const excerptOptions = { roots, ...(deps.redact ? { redact: deps.redact } : {}) }
-    const prepared: { id: string; role: string; text: string }[] = []
+    const prepared: Array<ExtractProjectClaimsInput["messages"][number]> = []
     for (const message of usable) {
-      const excerpt = projectMiningExcerpt(message.text, excerptOptions)
+      const excerpt = projectMiningExcerpt(
+        message.parts
+          ? projectMiningMessageText(message.parts, {
+              includeAttachments: false,
+              includeProse: !(hasAttachments && message.role === "assistant"),
+            })
+          : message.text,
+        excerptOptions
+      )
       if (excerpt === undefined) return skipped("identifying_path")
-      prepared.push({ id: message.id, role: message.role, text: excerpt })
+      const toolResultIndices = message.parts?.flatMap((part, index) =>
+        part &&
+        typeof part === "object" &&
+        isToolPart(part as ToolOutputPartLike) &&
+        projectToolOutputText(part as ToolOutputPartLike)
+          ? [index]
+          : []
+      )
+      prepared.push({
+        id: message.id,
+        role: message.role,
+        text: excerpt,
+        ...(toolResultIndices ? { toolResultIndices } : {}),
+      })
     }
     const extractionInput: ExtractProjectClaimsInput = {
       messages: prepared,
@@ -181,69 +255,197 @@ export async function runProjectMining(
     const redactedExcerpts = new Map(
       extractionInput.messages.map((message) => [message.id, message.text])
     )
+    const redactedToolExcerpts = new Map<string, string>()
+    for (const message of usable) {
+      message.parts?.forEach((_part, index) => {
+        const text = projectMiningToolText(message.parts!, index)
+        const excerpt = text === undefined ? undefined : projectMiningExcerpt(text, excerptOptions)
+        if (excerpt !== undefined) redactedToolExcerpts.set(`${message.id}:${index}`, excerpt)
+      })
+    }
     const isPayloadPiiSafe = deps.isPayloadPiiSafe ?? hasNoLeakingPiiDeep
     if (!isPayloadPiiSafe(extractionInput)) return skipped("payload_pii_blocked")
 
-    const claims = await deps.extract(extractionInput)
+    const claims = prepared.some((message) => message.text.trim())
+      ? await deps.extract(extractionInput)
+      : []
+    let attachmentCoverage: RunProjectMiningResult["attachmentCoverage"]
+    if (attachmentExcerpts.length) {
+      // Parse/index completeness and model-mining completeness are independent.
+      // Select relevant excerpts locally and spend at most one extra model call
+      // per window; the persisted coverage never labels the rest as mined.
+      const index = new BM25Index()
+      index.addDocuments(
+        attachmentExcerpts.map((item) => ({ id: item.sourceId, content: item.text }))
+      )
+      const query = prepared
+        .filter((message) => message.role === "user")
+        .map((message) => message.text)
+        .join(" ")
+      const ranks = new Map(
+        index.search(query, attachmentExcerpts.length).map((item, rank) => [item.id, rank])
+      )
+      const ordered = [...attachmentExcerpts].sort(
+        (a, b) =>
+          (ranks.get(a.sourceId) ?? Number.MAX_SAFE_INTEGER) -
+            (ranks.get(b.sourceId) ?? Number.MAX_SAFE_INTEGER) || a.source.start - b.source.start
+      )
+      const selected: NonNullable<ExtractProjectClaimsInput["attachments"]>[number][] = []
+      let tokens = 0
+      for (const item of ordered) {
+        const text = projectMiningExcerpt(item.text, excerptOptions)
+        if (text === undefined) continue
+        const next = estimateMessageTokens({
+          id: item.sourceId,
+          role: "attachment",
+          text: `${item.sourceId} ${item.context} ${text}`,
+        })
+        if (tokens + next > DEFAULT_WINDOW_MAX_TOKENS) continue
+        tokens += next
+        selected.push({
+          sourceId: item.sourceId,
+          messageId: item.source.messageId,
+          text,
+          context: item.context,
+        })
+        redactedExcerpts.set(item.sourceId, text)
+      }
+      attachmentCoverage = { available: attachmentExcerpts.length, mined: selected.length }
+      if (selected.length) {
+        // The second pass cites attachments only. Repeating the complete prose
+        // window here would double the input budget and let model summaries
+        // become alternate sources for the attachment-derived claim.
+        const selectedMessageIds = new Set(selected.map((item) => item.messageId))
+        const attachmentInput = {
+          ...extractionInput,
+          messages: prepared
+            .filter((message) => selectedMessageIds.has(message.id))
+            .map((message) => ({ id: message.id, role: message.role, text: "" })),
+          attachments: selected,
+        }
+        if (!isPayloadPiiSafe(attachmentInput)) return skipped("payload_pii_blocked")
+        const extracted = await deps.extract(attachmentInput)
+        const selectedIds = new Set(selected.map((item) => item.sourceId))
+        claims.push(
+          ...extracted.filter((claim) =>
+            claim.evidence.some((ref) => ref.kind === "file" && selectedIds.has(ref.sourceId))
+          )
+        )
+      }
+    }
     if (claims.length === 0)
-      return { applied: [], skipReason: "no_candidates", signals: salience.signals }
+      return {
+        applied: [],
+        skipReason: "no_candidates",
+        signals: salience.signals,
+        attachmentCoverage,
+      }
 
     const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
     const safe = claims.filter((claim) => isPiiSafe(claim.text))
     if (safe.length === 0) {
-      return { applied: [], skipReason: "no_safe_candidates", signals: salience.signals }
+      return {
+        applied: [],
+        skipReason: "no_safe_candidates",
+        signals: salience.signals,
+        attachmentCoverage,
+      }
+    }
+
+    const applicable = safe.flatMap((claim) => {
+      const pathPattern = claim.pathHint ? normalizePathHint(claim.pathHint) : undefined
+      if (claim.pathHint && !pathPattern) return []
+      if ((pathPattern || claim.branchScoped) && !claim.scopeRationale?.trim()) return []
+      // A current checkout is not evidence of the historical source branch.
+      // The job path leaves it absent until an authoritative branch is captured.
+      if (claim.branchScoped && !input.branch?.trim()) return []
+      return [{ claim, pathPattern, branch: claim.branchScoped ? input.branch : undefined }]
+    })
+    if (applicable.length === 0) {
+      return {
+        applied: [],
+        skipReason: "no_applicable_candidates",
+        signals: salience.signals,
+        attachmentCoverage,
+      }
     }
 
     const observedAtById = new Map(usable.map((message) => [message.id, message.createdAt]))
-    const candidates: ConsolidationCandidate[] = safe.map((claim) => ({
-      // Project claims are semantic by construction. `type` answers "what kind
-      // of memory" (the LangMem axis); `projectMemoryKind` answers "about what".
-      type: "semantic",
-      text: claim.text,
-      importance: claim.importance,
-      ...(claim.key ? { key: claim.key } : {}),
-      projectClaim: {
-        projectMemoryKind: claim.kind,
-        observedAtMessageId: claim.observedAtMessageId,
-        ...(observedAtById.get(claim.observedAtMessageId) !== undefined
-          ? { observedAt: observedAtById.get(claim.observedAtMessageId) }
-          : {}),
-        confidence: claim.confidence,
-        ...(claim.scopeRationale ? { scopeRationale: claim.scopeRationale } : {}),
-        ...(deps.extractorIdentity
-          ? {
-              extractor: {
-                provider: deps.extractorIdentity.provider,
-                model: deps.extractorIdentity.model,
-                promptVersion: PROJECT_PROMPT_VERSION,
-              },
-            }
-          : {}),
-        evidenceHash: projectClaimEvidenceHash(claim),
-        ...(input.transcriptRevision !== undefined
-          ? { sourceRevision: String(input.transcriptRevision) }
-          : {}),
-        evidence: claim.evidence,
-      },
-    }))
+    const groups = new Map<
+      string,
+      { branch?: string; pathPattern?: string; candidates: ConsolidationCandidate[] }
+    >()
+    for (const { claim, branch, pathPattern } of applicable) {
+      const candidate: ConsolidationCandidate = {
+        // Project claims are semantic by construction. `type` answers "what kind
+        // of memory" (the LangMem axis); `projectMemoryKind` answers "about what".
+        type: "semantic",
+        text: claim.text,
+        importance: claim.importance,
+        ...(claim.key ? { key: claim.key } : {}),
+        projectClaim: {
+          projectMemoryKind: claim.kind,
+          observedAtMessageId: claim.observedAtMessageId,
+          ...(observedAtById.get(claim.observedAtMessageId) !== undefined
+            ? { observedAt: observedAtById.get(claim.observedAtMessageId) }
+            : {}),
+          confidence: claim.confidence,
+          ...(claim.scopeRationale ? { scopeRationale: claim.scopeRationale } : {}),
+          ...(deps.extractorIdentity
+            ? {
+                extractor: {
+                  provider: deps.extractorIdentity.provider,
+                  model: deps.extractorIdentity.model,
+                  promptVersion: PROJECT_PROMPT_VERSION,
+                },
+              }
+            : {}),
+          evidenceHash: projectClaimEvidenceHash(claim),
+          ...(input.transcriptRevision !== undefined
+            ? { sourceRevision: String(input.transcriptRevision) }
+            : {}),
+          evidence: claim.evidence,
+        },
+      }
+      const key = JSON.stringify([
+        branch,
+        pathPattern,
+        claim.evidence.some((item) => item.kind === "file"),
+      ])
+      const group = groups.get(key) ?? { branch, pathPattern, candidates: [] }
+      group.candidates.push(candidate)
+      groups.set(key, group)
+    }
 
-    const result = await deps.consolidate({
-      candidates,
-      scope: input.scope,
-      characterId: input.characterId,
-      projectId: input.projectId,
-      agentId: input.agentId,
-      branch: input.branch,
-      provenance: input.provenance,
-      source: input.source,
-      // A claim the judge could not place is persisted but quarantined, never
-      // silently ADDed — see the module header.
-      failureMode: "quarantine",
-    })
-    return { applied: result.applied, signals: salience.signals, redactedExcerpts }
-  } catch {
-    // Mining must never break a send, and never throws into the job worker's
-    // retry budget for a reason that will not change on the next attempt.
+    const applied: ConsolidationOp[] = []
+    for (const group of groups.values()) {
+      const result = await deps.consolidate({
+        candidates: group.candidates,
+        scope: input.scope,
+        characterId: input.characterId,
+        projectId: input.projectId,
+        agentId: input.agentId,
+        branch: group.branch,
+        pathPattern: group.pathPattern,
+        provenance: input.provenance,
+        source: input.source,
+        // A claim the judge could not place is persisted but quarantined, never
+        // silently ADDed — see the module header.
+        failureMode: "quarantine",
+      })
+      applied.push(...result.applied)
+    }
+    return {
+      applied,
+      signals: salience.signals,
+      redactedExcerpts,
+      redactedToolExcerpts,
+      attachmentCoverage,
+    }
+  } catch (error) {
+    if (deps.propagateErrors) throw error
+    // Direct callers retain fail-soft behavior; the background factory opts
+    // into the worker's bounded retry policy instead of reporting false success.
     return { applied: [] }
   }
 }
@@ -304,7 +506,7 @@ export async function buildProjectMiningDeps(
       const hits = await retrieveMemories(
         {
           queryText: candidate.text,
-          reader: namespace,
+          reader: { ...namespace, path: namespace.pathPattern },
           topK: 5,
           relevanceFloor: 0,
           types: [candidate.type],
@@ -334,9 +536,20 @@ export async function buildProjectMiningDeps(
       }
       return row
     },
-    update: async (id, text) => {
+    update: async (id, text, candidate) => {
       if (!hasNoLeakingPii(text)) return
-      await memDb.updateMemory(id, { text, bumpVersion: true })
+      const claim = candidate?.projectClaim
+      await memDb.updateMemory(id, {
+        text,
+        bumpVersion: true,
+        ...(claim ? { projectMemoryKind: claim.projectMemoryKind } : {}),
+        ...(claim?.observedAt !== undefined ? { observedAt: claim.observedAt } : {}),
+        ...(claim?.confidence !== undefined ? { confidence: claim.confidence } : {}),
+        ...(claim?.scopeRationale !== undefined ? { scopeRationale: claim.scopeRationale } : {}),
+        ...(claim?.extractor !== undefined ? { extractor: claim.extractor } : {}),
+        ...(claim?.evidenceHash !== undefined ? { evidenceHash: claim.evidenceHash } : {}),
+        ...(claim?.sourceRevision !== undefined ? { sourceRevision: claim.sourceRevision } : {}),
+      })
       if (vectorSink) {
         try {
           await vectorSink.upsert(id, text)
@@ -357,8 +570,65 @@ export async function buildProjectMiningDeps(
   }
 
   return {
-    extract: (eInput) => extractProjectClaims(eInput, client),
-    consolidate: (cInput) => consolidate(cInput, consolidateDeps),
+    propagateErrors: true,
+    extract: (eInput) => extractProjectClaims(eInput, client, { propagateErrors: true }),
+    consolidate: async (cInput) => {
+      const attachmentDerived = cInput.candidates.some((candidate) =>
+        candidate.projectClaim?.evidence?.some((reference) => reference.kind === "file")
+      )
+      if (!attachmentDerived) return consolidate(cInput, consolidateDeps)
+      const replayed: ConsolidationOp[] = []
+      let candidates = cInput.candidates
+      if (attachmentDerived) {
+        const existing = await memDb.listMemories({
+          scope: cInput.scope,
+          projectId: cInput.projectId,
+          characterId: cInput.characterId,
+          agentId: cInput.agentId,
+          branch: cInput.branch,
+          pathPattern: cInput.pathPattern,
+          exactNamespace: true,
+          status: "active",
+        })
+        candidates = []
+        for (const candidate of cInput.candidates) {
+          const previous = existing.find(
+            (memory) =>
+              memory.trustState === "quarantined" &&
+              memory.text === candidate.text &&
+              memory.projectMemoryKind === candidate.projectClaim?.projectMemoryKind &&
+              memory.evidenceHash === candidate.projectClaim?.evidenceHash
+          )
+          if (!previous) {
+            candidates.push(candidate)
+            continue
+          }
+          // A replay still repairs evidence if the previous worker persisted the
+          // draft but stopped before attaching its provenance rows.
+          await consolidateDeps.update(previous.id, candidate.text, candidate)
+          replayed.push({ op: "UPDATE", targetId: previous.id, candidate })
+        }
+      }
+      if (!candidates.length) return { applied: replayed }
+      const result = await consolidate(
+        { ...cInput, candidates },
+        attachmentDerived
+          ? {
+              ...consolidateDeps,
+              // External source instructions must never overwrite trusted workspace
+              // facts. Keep new attachment findings as explicit review drafts.
+              findSimilar: async () => [],
+              persist: (pInput) =>
+                consolidateDeps.persist({
+                  ...pInput,
+                  trustState: "quarantined",
+                  reviewStatus: "unreviewed",
+                }),
+            }
+          : consolidateDeps
+      )
+      return { applied: [...replayed, ...result.applied] }
+    },
     // Only stamped when the client actually reports what it resolved to. A
     // fabricated `"unknown"` would be worse than an absent `extractor`: the
     // bulk re-mine query would match rows it cannot actually re-derive.

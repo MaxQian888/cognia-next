@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cognia/primitives": "workspace:*",
     "@cognia/provider-embedding": "workspace:*",
     "@cognia/rag": "workspace:*",
     "@cognia/redact": "workspace:*"

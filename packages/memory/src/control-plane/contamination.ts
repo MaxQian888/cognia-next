@@ -86,7 +86,7 @@ export function detectMemoryExternalContext(
         sources.add("web-search")
         continue
       }
-      if (part.type === "source-document") {
+      if (part.type === "source-document" || part.type === "file" || part.type === "image") {
         sources.add("document")
         continue
       }

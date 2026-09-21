@@ -261,6 +261,7 @@ describe("retrieveMemories", () => {
     // authorized candidate's vector doc id — never a global search.
     expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number), {
       vectorDocIds: ["vsem"],
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -284,6 +285,7 @@ describe("retrieveMemories", () => {
     expect(out.map((r) => r.memory.id)).toEqual(["sem"])
     expect(vectorSearch).toHaveBeenCalledWith([0.9, 0.8], expect.any(Number), {
       vectorDocIds: ["vsem"],
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -527,4 +529,232 @@ describe("retrieval telemetry", () => {
     expect(outcome.trace.queryHash).toMatch(/^[0-9a-f]{64}$/)
     expect(outcome.trace.queryHash).not.toContain("pnpm")
   })
+})
+
+describe("recall cache and vector validation regressions", () => {
+  it("rebuilds when corpus membership changes without changing count or newest timestamp", async () => {
+    let corpus = [
+      mem("pnpm workspace", { id: "old", updatedAt: 100 }),
+      mem("yarn", { id: "newest", updatedAt: 200 }),
+    ]
+    const deps = { loadCandidates: async () => corpus }
+    await retrieveMemories({ ...base, queryText: "pnpm" }, deps)
+    corpus = [mem("pnpm replacement", { id: "replacement", updatedAt: 100 }), corpus[1]]
+    const outcome = await retrieveMemoriesWithOutcome({ ...base, queryText: "pnpm" }, deps)
+    expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["replacement"])
+    expect(outcome.trace.cacheHit).toBe(false)
+  })
+
+  it("rebuilds when a non-newest row changes its text, even at the same timestamp", async () => {
+    const corpus = [
+      mem("pnpm", { id: "edited", updatedAt: 100 }),
+      mem("yarn", { id: "newest", updatedAt: 200 }),
+    ]
+    const deps = { loadCandidates: async () => corpus }
+    await retrieveMemories({ ...base, queryText: "pnpm" }, deps)
+    corpus[0].text = "cargo"
+    const outcome = await retrieveMemoriesWithOutcome({ ...base, queryText: "cargo" }, deps)
+    expect(outcome.hits.map((hit) => hit.memory.id)).toEqual(["edited"])
+    expect(outcome.trace.cacheHit).toBe(false)
+  })
+
+  it.each([[[NaN]], [[Infinity]], [[]]])(
+    "rejects an invalid query embedding %j before vector search",
+    async (embedding) => {
+      const vectorSearch = jest.fn(async () => [])
+      const outcome = await retrieveMemoriesWithOutcome(
+        { ...base, queryText: "pnpm", precomputedQueryEmbedding: embedding },
+        { loadCandidates: async () => [mem("pnpm")], vectorSearch }
+      )
+      expect(vectorSearch).not.toHaveBeenCalled()
+      expect(outcome.hits).toHaveLength(1)
+      expect(outcome.reasons).toContainEqual({
+        code: "vector_dimension_mismatch",
+        stage: "vector",
+        retryable: false,
+      })
+    }
+  )
+})
+
+it("does not block recall on an outstanding access metadata write", async () => {
+  let finish!: () => void
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  const result = await retrieveMemories(
+    { ...base, queryText: "pnpm" },
+    {
+      loadCandidates: async () => [mem("pnpm")],
+      touch: () => pending,
+    }
+  )
+  expect(result).toHaveLength(1)
+  finish()
+  await pending
+})
+
+describe("bounded vector recall", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it("returns BM25 at the deadline, aborts embedding, and never starts a late vector search", async () => {
+    let finish!: (embedding: number[]) => void
+    const embed = jest.fn(
+      (_text: string, _options?: { signal?: AbortSignal }) =>
+        new Promise<number[]>((resolve) => {
+          finish = resolve
+        })
+    )
+    const vectorSearch = jest.fn(async () => [])
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("pnpm")],
+      embed,
+      vectorSearch,
+    }
+    const resultPromise = retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm", vectorTimeoutMs: 50 },
+      deps
+    )
+    await jest.advanceTimersByTimeAsync(50)
+    const result = await resultPromise
+    expect(result.hits).toHaveLength(1)
+    expect(result.reasons).toContainEqual({
+      code: "retrieval_timeout",
+      stage: "vector",
+      retryable: true,
+    })
+    expect(embed.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    const repeated = await retrieveMemoriesWithOutcome({ ...base, queryText: "pnpm" }, deps)
+    expect(repeated.hits).toHaveLength(1)
+    expect(embed).toHaveBeenCalledTimes(1)
+    finish([0.1])
+    await jest.advanceTimersByTimeAsync(0)
+    expect(vectorSearch).not.toHaveBeenCalled()
+    expect(result.reasons).toHaveLength(1)
+  })
+
+  it("deduplicates concurrent identical scopes but never shares another reader's corpus", async () => {
+    let finish!: (embedding: number[]) => void
+    const embed = jest.fn(
+      () =>
+        new Promise<number[]>((resolve) => {
+          finish = resolve
+        })
+    )
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("pnpm", { vectorDocId: "v" })],
+      embed,
+      vectorSearch: async () => [],
+    }
+    const first = retrieveMemoriesWithOutcome({ ...base, queryText: "pnpm" }, deps)
+    const second = retrieveMemoriesWithOutcome({ ...base, queryText: "pnpm" }, deps)
+    await jest.advanceTimersByTimeAsync(0)
+    expect(embed).toHaveBeenCalledTimes(1)
+    finish([0.1])
+    await Promise.all([first, second])
+  })
+
+  it("aborts a pending vector search on caller cancellation without waiting for the deadline", async () => {
+    let finish!: (hits: { id: string; score: number }[]) => void
+    const vectorSearch = jest.fn(
+      (_embedding, _topK, _plan) =>
+        new Promise<{ id: string; score: number }[]>((resolve) => {
+          finish = resolve
+        })
+    )
+    const controller = new AbortController()
+    const resultPromise = retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm", precomputedQueryEmbedding: [0.1], signal: controller.signal },
+      {
+        loadCandidates: async () => [mem("pnpm", { vectorDocId: "v" })],
+        vectorSearch,
+      }
+    )
+    await jest.advanceTimersByTimeAsync(0)
+    controller.abort()
+    const result = await resultPromise
+    expect(result.hits).toHaveLength(1)
+    expect(vectorSearch.mock.calls[0][2].signal.aborted).toBe(true)
+    expect(result.reasons[0].code).toBe("retrieval_timeout")
+    finish([{ id: "v", score: 1 }])
+    await jest.advanceTimersByTimeAsync(0)
+  })
+
+  it("caps stalled operations across newly constructed dependencies and releases slots when they settle", async () => {
+    const finishers: Array<(embedding: number[]) => void> = []
+    const embed = jest.fn(
+      () =>
+        new Promise<number[]>((resolve) => {
+          finishers.push(resolve)
+        })
+    )
+    const pending = Array.from({ length: 10 }, (_, i) =>
+      retrieveMemoriesWithOutcome(
+        { ...base, queryText: `pnpm ${i}`, vectorTimeoutMs: 10 },
+        {
+          loadCandidates: async () => [mem("pnpm")],
+          embed,
+          vectorSearch: async () => [],
+        }
+      )
+    )
+    await jest.advanceTimersByTimeAsync(10)
+    const results = await Promise.all(pending)
+    expect(embed).toHaveBeenCalledTimes(8)
+    expect(
+      results.every(
+        (result) => result.hits.length === 1 && result.reasons[0].code === "retrieval_timeout"
+      )
+    ).toBe(true)
+    finishers.forEach((finish) => finish([0.1]))
+    await jest.advanceTimersByTimeAsync(0)
+    const vectorSearch = jest.fn(async () => [])
+    await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm", precomputedQueryEmbedding: [0.1] },
+      {
+        loadCandidates: async () => [mem("pnpm")],
+        vectorSearch,
+      }
+    )
+    expect(vectorSearch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not start vector work when already cancelled or explicitly given a zero budget", async () => {
+    const embed = jest.fn(async () => [0.1])
+    const controller = new AbortController()
+    controller.abort()
+    const deps: MemoryRetrieverDeps = {
+      loadCandidates: async () => [mem("pnpm")],
+      embed,
+      vectorSearch: async () => [],
+    }
+    const cancelled = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm", signal: controller.signal },
+      deps
+    )
+    const zero = await retrieveMemoriesWithOutcome(
+      { ...base, queryText: "pnpm", vectorTimeoutMs: 0 },
+      deps
+    )
+    expect(cancelled.hits).toHaveLength(1)
+    expect(zero.hits).toHaveLength(1)
+    expect(embed).not.toHaveBeenCalled()
+  })
+})
+
+it("keeps concurrent lexical-only reads independent of remote-work capacity", async () => {
+  const results = await Promise.all(
+    Array.from({ length: 20 }, () =>
+      retrieveMemoriesWithOutcome(
+        { ...base, queryText: "pnpm" },
+        { loadCandidates: async () => [mem("pnpm")] }
+      )
+    )
+  )
+  expect(
+    results.every(
+      (result) => result.reasons.length === 1 && result.reasons[0].code === "vector_not_configured"
+    )
+  ).toBe(true)
 })

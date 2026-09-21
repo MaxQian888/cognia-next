@@ -150,6 +150,18 @@ describe("consolidate", () => {
     expect(deps.updates).toEqual([{ id: "t1", text: "The user uses pnpm v9" }])
   })
 
+  it("preserves the two-argument update contract for personal memories", async () => {
+    const update = jest.fn(async () => undefined)
+    const deps = makeDeps({
+      update,
+      findSimilar: async () => [existing("Uses pnpm", { id: "t1" })],
+      client: { complete: async () => JSON.stringify({ op: "UPDATE", targetId: "t1" }) },
+    })
+    const result = await consolidate({ ...baseInput, candidates: [cand("Uses pnpm v9")] }, deps)
+    expect(update).toHaveBeenCalledWith("t1", "Uses pnpm v9")
+    expect(result.applied).toEqual([{ op: "UPDATE", targetId: "t1" }])
+  })
+
   it("DELETE soft-invalidates the contradicted memory and adds the new fact", async () => {
     const target = existing("The user uses npm", { id: "t1" })
     const deps = makeDeps({
@@ -482,6 +494,25 @@ describe("project claim attributes", () => {
     sourceRevision: "7",
     evidence: [{ kind: "message" as const, sourceId: "m2" }],
   }
+
+  it("carries updated claim provenance to persistence and the evidence recorder", async () => {
+    const candidate = { ...cand("Rust is pinned to 1.77.2"), projectClaim: claim }
+    const update = jest.fn(async () => undefined)
+    const deps = makeDeps({
+      update,
+      findSimilar: async () => [existing("Rust is pinned", { id: "t1" })],
+      client: {
+        complete: async () =>
+          JSON.stringify({ op: "UPDATE", targetId: "t1", mergedText: "Build pins Rust 1.77.2" }),
+      },
+    })
+    const result = await consolidate(
+      { candidates: [candidate], scope: "workspace", projectId: "p1", provenance: "user" },
+      deps
+    )
+    expect(update).toHaveBeenCalledWith("t1", "Build pins Rust 1.77.2", candidate)
+    expect(result.applied).toEqual([{ op: "UPDATE", targetId: "t1", candidate }])
+  })
 
   it("forwards the claim vocabulary onto the persisted row", async () => {
     const deps = makeDeps({ findSimilar: async () => [] })

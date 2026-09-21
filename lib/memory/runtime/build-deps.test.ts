@@ -181,6 +181,82 @@ describe("tryBuildMemoryDeps", () => {
     expect(mockSearchByEmbedding).not.toHaveBeenCalled()
   })
 
+  it("scores all authorized vectors in bounded batches, retaining late best matches", async () => {
+    const ids = Array.from({ length: 601 }, (_, index) => `memory-${index}`)
+    const getDocuments = jest.fn(async (_collection: string, batch: string[]) => {
+      expect(batch.length).toBeLessThanOrEqual(256)
+      return batch.map((id) => ({
+        id,
+        embedding: id === "memory-600" ? [1, 0] : [0, 1],
+      }))
+    })
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    await expect(deps!.vectorSearch!([1, 0], 1, { vectorDocIds: ids })).resolves.toEqual([
+      { id: "memory-600", score: 1 },
+    ])
+    expect(getDocuments.mock.calls.flatMap(([, batch]) => batch)).toEqual(ids)
+  })
+
+  it("excludes non-finite vectors and unexpected ids returned by a scoped backend", async () => {
+    const getDocuments = jest.fn(async () => [
+      { id: "unauthorized", embedding: [1, 0] },
+      { id: "nan", embedding: [NaN, 1] },
+      { id: "infinite", embedding: [Infinity, 0] },
+      { id: "safe", embedding: [0, 1] },
+    ])
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    await expect(
+      deps!.vectorSearch!([1, 0], 5, {
+        vectorDocIds: ["nan", "infinite", "safe"],
+      })
+    ).resolves.toEqual([{ id: "safe", score: 0 }])
+  })
+
+  it("stops a cancelled vector scan before requesting the next batch", async () => {
+    const controller = new AbortController()
+    const getDocuments = jest.fn(async () => {
+      controller.abort()
+      return []
+    })
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, getDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    await expect(
+      deps!.vectorSearch!([1, 0], 1, {
+        vectorDocIds: Array.from({ length: 600 }, (_, index) => String(index)),
+        signal: controller.signal,
+      })
+    ).rejects.toThrow()
+    expect(getDocuments).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes cancellation to the embedding adapter and refuses an aborted query", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg())
+    const controller = new AbortController()
+    await deps!.embed!("bounded query", { signal: controller.signal })
+    expect(mockCreateProviderEmbeddingAdapter).toHaveBeenLastCalledWith(
+      expect.objectContaining({ abortSignal: controller.signal })
+    )
+    controller.abort()
+    const count = mockCreateProviderEmbeddingAdapter.mock.calls.length
+    await expect(deps!.embed!("aborted query", { signal: controller.signal })).rejects.toThrow()
+    expect(mockCreateProviderEmbeddingAdapter).toHaveBeenCalledTimes(count)
+  })
+
   it("drops unembedded or dimension-mismatched docs and respects topK", async () => {
     const getDocuments = jest.fn(async () => [
       { id: "no-vec" },
@@ -226,6 +302,19 @@ describe("tryBuildMemoryDeps", () => {
 })
 
 describe("tryBuildMemoryVectorSink", () => {
+  it("blocks unsafe content at the sink before provider embedding or persistence", async () => {
+    const addDocuments = jest.fn(async () => undefined)
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments },
+      embedding: { provider: "openai", model: "x", apiKey: "k" },
+    })
+    const sink = await tryBuildMemoryVectorSink(cfg({ allowCloudEmbedding: true }))
+    await expect(sink!.upsert("m1", "Email bob@example.com")).rejects.toThrow(
+      "memory_vector_pii_blocked"
+    )
+    expect(addDocuments).not.toHaveBeenCalled()
+  })
+
   it("returns undefined when memory is disabled", async () => {
     expect(await tryBuildMemoryVectorSink(cfg({ enabled: false }))).toBeUndefined()
   })

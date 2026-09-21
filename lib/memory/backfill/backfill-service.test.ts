@@ -129,7 +129,10 @@ describe("the background tick", () => {
       sessionId: "s1",
       projectId: "p1",
       role: "user",
-      parts: [{ type: "text", text }],
+      parts: [
+        { type: "text", text },
+        { type: "image", alt: "I always use yarn" },
+      ],
       createdAt: 100,
     } as never)
     const run = await proposeWorkspaceBackfill("p1")

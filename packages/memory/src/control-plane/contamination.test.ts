@@ -1,6 +1,11 @@
 import { detectMemoryExternalContext } from "./contamination"
 
 describe("detectMemoryExternalContext", () => {
+  it("classifies uploaded file and image parts as external documents", () => {
+    expect(detectMemoryExternalContext([{ parts: [{ type: "file" }, { type: "image" }] }])).toEqual(
+      ["document"]
+    )
+  })
   it("marks web, document, MCP, screen, tool-search, and connector results", () => {
     expect(
       detectMemoryExternalContext([

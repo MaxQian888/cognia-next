@@ -1,11 +1,9 @@
 import type { Memory } from "../types/memory"
 import { applyMemoryContext, type ApplyMemoryContextDeps } from "./apply-memory-context"
+import { createContextManager } from "@cognia/rag/context-manager"
 import { __resetMemoryBm25Cache } from "../retrieve/retriever"
 
-// The retriever's BM25 index is module-level cached by a `{count}:{updatedAt}`
-// signature. These tests use a fixed `updatedAt`, so single-candidate corpora
-// across tests collide on that signature and would return a stale index —
-// reset it between tests so each case tokenises its own corpus (test isolation).
+// Keep cache state independent between retrieval scenarios.
 beforeEach(() => __resetMemoryBm25Cache())
 
 let seq = 0
@@ -27,6 +25,7 @@ function mem(text: string, over: Partial<Memory> = {}): Memory {
     status: "active",
     pinned: false,
     provenance: "user",
+    ...(over.type === "procedural" ? { reviewStatus: "verified" as const } : {}),
     ...over,
   }
 }
@@ -76,7 +75,7 @@ describe("applyMemoryContext", () => {
     expect(res.snapshot.memoryRefs).toEqual([{ id: "hit", version: 7 }])
     expect(res.snapshot.degraded).toBe(false)
     // The receipt binds the exact bytes the model was shown.
-    expect(res.snapshot.contentHash).toMatch(/^[0-9a-z]+$/)
+    expect(res.snapshot.contentHash).toMatch(/^[0-9a-z_]+$/)
     // An empty pass still issues a receipt — "nothing was injected" is a fact.
     const resEmpty = await applyMemoryContext({ userMessage: "zzz", ...base, deps: deps() })
     expect(resEmpty.snapshot.delivery).toBe("prepared")
@@ -246,4 +245,104 @@ describe("personal/project corpus isolation", () => {
     })
     expect(result.retrievedMemories.map((m) => m.id)).toEqual(["legacy-1"])
   })
+})
+
+describe("independent recall sources and delivery governance", () => {
+  it("preserves recall when procedural loading fails", async () => {
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "pnpm",
+      deps: deps({
+        loadCandidates: async () => [mem("pnpm preference")],
+        loadProcedural: async () => {
+          throw new Error("procedural unavailable")
+        },
+      }),
+    })
+    expect(result.systemPromptSection).toContain("pnpm preference")
+    expect(result.degraded).toBe(true)
+    expect(result.snapshot.degraded).toBe(true)
+  })
+
+  it("preserves verified procedures when recall fails", async () => {
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "pnpm",
+      deps: deps({
+        loadCandidates: async () => {
+          throw new Error("recall unavailable")
+        },
+        loadProcedural: async () => [
+          mem("Use pnpm", { type: "procedural", reviewStatus: "verified" }),
+        ],
+      }),
+    })
+    expect(result.systemPromptSection).toContain("Use pnpm")
+    expect(result.degraded).toBe(true)
+  })
+
+  it("withholds unsafe procedural states at the injection boundary", async () => {
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "",
+      now: 100,
+      deps: deps({
+        loadProcedural: async () => [
+          mem("pending", { type: "procedural", reviewStatus: "pending_instruction" }),
+          mem("legacy", { type: "procedural", reviewStatus: undefined }),
+          mem("expired", { type: "procedural", reviewStatus: "verified", expiresAt: 100 }),
+          mem("quarantined", {
+            type: "procedural",
+            reviewStatus: "verified",
+            trustState: "quarantined",
+          }),
+          mem("verified", { type: "procedural", reviewStatus: "verified" }),
+        ],
+      }),
+    })
+    expect(result.systemPromptSection).toContain("- verified")
+    expect(result.systemPromptSection).not.toMatch(/pending|legacy|expired|quarantined/)
+    expect(result.proceduralCount).toBe(1)
+    expect(result.withheldCount).toBe(4)
+  })
+
+  it("counts multiline procedural rows once and records their delivered versions", async () => {
+    const result = await applyMemoryContext({
+      ...base,
+      userMessage: "",
+      deps: deps({
+        loadProcedural: async () => [
+          mem("Use pnpm\nRun tests", {
+            id: "p",
+            type: "procedural",
+            reviewStatus: "verified",
+            version: 3,
+          }),
+        ],
+      }),
+    })
+    expect(result.proceduralCount).toBe(1)
+    expect(result.withheldCount).toBe(0)
+    expect(result.snapshot.memoryRefs).toEqual([{ id: "p", version: 3 }])
+  })
+
+  it.each([0, 1, 9, 18, 23, 24, 32, 64, 90])(
+    "fits complete rendered sections within %i tokens",
+    async (maxTokens) => {
+      const result = await applyMemoryContext({
+        ...base,
+        userMessage: "pnpm",
+        maxTokens,
+        deps: deps({
+          loadCandidates: async () => [mem("pnpm a"), mem("pnpm b"), mem("pnpm c")],
+          loadProcedural: async () => [
+            mem("Use pnpm", { type: "procedural", reviewStatus: "verified" }),
+          ],
+        }),
+      })
+      const actual = createContextManager().estimateTokens(result.systemPromptSection ?? "")
+      expect(actual).toBeLessThanOrEqual(maxTokens)
+      expect(result.budget.used).toBe(actual)
+    }
+  )
 })

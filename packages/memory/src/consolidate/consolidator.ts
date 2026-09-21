@@ -111,8 +111,8 @@ export interface ConsolidateDeps {
   ) => Promise<Memory[]>
   /** ADD — create + persist a new memory; returns the row. */
   persist: (input: PersistMemoryInput) => Promise<Memory>
-  /** UPDATE — replace text + bump version. */
-  update: (id: string, text: string) => Promise<void>
+  /** UPDATE — replace text + bump version; project claims also refresh provenance. */
+  update: (id: string, text: string, candidate?: ConsolidationCandidate) => Promise<void>
   /** DELETE — soft-invalidate, optionally linking the superseding memory. */
   invalidate: (id: string, supersededById?: string) => Promise<void>
   /** Mark both sides of an unresolved contradiction for explicit review. */
@@ -121,7 +121,7 @@ export interface ConsolidateDeps {
 
 export type ConsolidationOp =
   | { op: "ADD"; memory: Memory; candidate: ConsolidationCandidate }
-  | { op: "UPDATE"; targetId: string }
+  | { op: "UPDATE"; targetId: string; candidate?: ConsolidationCandidate }
   | { op: "DELETE"; targetId: string }
   | { op: "CONFLICT"; memory: Memory; targetId: string; candidate: ConsolidationCandidate }
   | {
@@ -402,8 +402,13 @@ export async function consolidate(
             ? decision.mergedText.trim()
             : candidate.text
           : candidate.text
-      await deps.update(targetId, mergedText)
-      applied.push({ op: "UPDATE", targetId })
+      if (candidate.projectClaim) {
+        await deps.update(targetId, mergedText, candidate)
+        applied.push({ op: "UPDATE", targetId, candidate })
+      } else {
+        await deps.update(targetId, mergedText)
+        applied.push({ op: "UPDATE", targetId })
+      }
     } else if (op === "DELETE" && targetId) {
       const memory = await persistCandidate(candidate, input, deps)
       await deps.invalidate(targetId, memory.id)

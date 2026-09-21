@@ -1,3 +1,6 @@
+import type { CogniaDB } from "@/lib/db/schema"
+import { parseAttachmentEvidenceSourceId } from "@cognia/memory/extract/project-attachment-evidence"
+
 /**
  * When a message or a session is deleted, the claims that cited it must stop
  * being injected.
@@ -83,4 +86,39 @@ export async function revokeClaimsForDeletedSession(sessionId: string): Promise<
   } catch {
     return 0
   }
+}
+
+/**
+ * Revoke attachment evidence and its claims in the asset mutation transaction.
+ * Unlike the legacy message-delete fanout, this must finish before changed or
+ * removed source bytes become visible. The caller includes both memory tables
+ * in its transaction; failures propagate so source and evidence roll back together.
+ */
+export async function revokeClaimsForChangedAttachment(
+  sessionId: string,
+  assetId: string,
+  db: Pick<CogniaDB, "memoryEvidence" | "memories">,
+  now = Date.now()
+): Promise<number> {
+  const evidence = (await db.memoryEvidence.where("sessionId").equals(sessionId).toArray()).filter(
+    (row) =>
+      row.kind === "file" && parseAttachmentEvidenceSourceId(row.sourceId)?.attachmentId === assetId
+  )
+  if (!evidence.length) return 0
+  await db.memoryEvidence.bulkPut(
+    evidence.map((row) => ({ ...row, validationState: "revoked" as const, validatedAt: now }))
+  )
+  const ids = [...new Set(evidence.flatMap((row) => (row.memoryId ? [row.memoryId] : [])))]
+  const memories = await db.memories.bulkGet(ids)
+  const claims = memories.filter((row) => row?.projectMemoryKind && row.status === "active")
+  for (const row of claims) {
+    await db.memories.update(row!.id, {
+      status: "invalidated",
+      staleness: "expired",
+      invalidatedAt: now,
+      validatedAt: now,
+      updatedAt: now,
+    })
+  }
+  return claims.length
 }

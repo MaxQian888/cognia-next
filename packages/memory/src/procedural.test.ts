@@ -1,5 +1,5 @@
 import type { Memory } from "./types/memory"
-import { assembleProceduralBlock } from "./procedural"
+import { assembleProceduralBlock, assembleProceduralContext } from "./procedural"
 
 let seq = 0
 function mem(text: string, over: Partial<Memory> = {}): Memory {
@@ -75,4 +75,14 @@ describe("assembleProceduralBlock", () => {
     )
     expect(block).toBeNull()
   })
+})
+
+it("skips oversized instructions while preserving smaller complete rows and their identities", () => {
+  const small = mem("Use pnpm", { id: "small", version: 2 })
+  const result = assembleProceduralContext(
+    [mem("very long ".repeat(100), { pinned: true }), small],
+    { maxTokens: 20 }
+  )
+  expect(result.text).toContain("- Use pnpm")
+  expect(result.memories).toEqual([small])
 })

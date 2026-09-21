@@ -60,6 +60,90 @@ function deps(overrides: Partial<RunProjectMiningDeps> = {}): RunProjectMiningDe
 }
 
 describe("runProjectMining gates", () => {
+  it("respects the external-content learning switch before reading attachment facts", async () => {
+    const d = deps()
+    const file = {
+      type: "file",
+      extractedContent: {
+        attachmentId: "a1",
+        contentHash: "a".repeat(64),
+        status: "ready",
+        processor: { id: "text", version: "1" },
+        segments: [
+          {
+            id: "s1",
+            text: "src/index.ts uses pnpm",
+            locator: { type: "text", start: 0, end: 23 },
+          },
+        ],
+      },
+    }
+    const result = await runProjectMining(
+      input({
+        messages: [{ ...SALIENT[0]!, parts: [file] }],
+        config: { ...DEFAULT_MEMORY_CONFIG, disableLearningOnExternalContext: true },
+      }),
+      d
+    )
+    expect(result.skipReason).toBe("external_context_blocked")
+    expect(d.extract).not.toHaveBeenCalled()
+  })
+
+  it("bounds attachment model work, selects relevant late content, and records partial mining", async () => {
+    const extracted = jest.fn(async (request) =>
+      request.attachments
+        ? [
+            claim({
+              observedAtMessageId: "m1",
+              evidence: [{ kind: "file", sourceId: request.attachments[0].sourceId }],
+            }),
+          ]
+        : []
+    )
+    const d = deps({ extract: extracted })
+    const file = {
+      type: "file",
+      extractedContent: {
+        attachmentId: "a1",
+        contentHash: "a".repeat(64),
+        status: "ready",
+        processor: { id: "text", version: "1" },
+        segments: [
+          {
+            id: "large",
+            text: "unrelated prose ".repeat(6000),
+            locator: { type: "text", start: 0, end: 96000 },
+          },
+          {
+            id: "relevant",
+            text: "SERVER_ONLY_PACKAGES pnpm build constraint in src/index.ts",
+            locator: { type: "page", page: 99 },
+          },
+        ],
+      },
+    }
+    const result = await runProjectMining(
+      input({
+        messages: [
+          {
+            ...SALIENT[0]!,
+            text: "Explain SERVER_ONLY_PACKAGES pnpm build",
+            parts: [{ type: "text", text: "Explain SERVER_ONLY_PACKAGES pnpm build" }, file],
+          },
+          SALIENT[1]!,
+        ],
+        config: { ...DEFAULT_MEMORY_CONFIG, disableLearningOnExternalContext: false },
+      }),
+      d
+    )
+    expect(extracted).toHaveBeenCalledTimes(2)
+    const request = extracted.mock.calls[1]![0]
+    expect(request.attachments[0].text).toContain("SERVER_ONLY_PACKAGES")
+    expect(request.messages).toEqual([{ id: "m1", role: "user", text: "" }])
+    expect(result.attachmentCoverage?.mined).toBe(request.attachments.length)
+    expect(result.attachmentCoverage!.mined).toBeLessThan(result.attachmentCoverage!.available)
+    expect(result.redactedExcerpts?.has(request.attachments[0].sourceId)).toBe(true)
+  })
   it("mines nothing when the mining switch is off", async () => {
     const d = deps()
     const result = await runProjectMining(
@@ -138,6 +222,38 @@ describe("runProjectMining gates", () => {
 })
 
 describe("runProjectMining consolidation", () => {
+  it("keeps workspace, subtree, and branch claims in distinct consolidation namespaces", async () => {
+    const d = deps({
+      extract: jest.fn(async () => [
+        claim(),
+        claim({ pathHint: "./src\\memory//", scopeRationale: "Only this subtree" }),
+        claim({ branchScoped: true, scopeRationale: "Only on the experiment branch" }),
+      ]),
+    })
+    await runProjectMining(input({ branch: "experiment" }), d)
+    expect(d.consolidateCalls).toEqual([
+      expect.objectContaining({ branch: undefined, pathPattern: undefined }),
+      expect.objectContaining({ branch: undefined, pathPattern: "src/memory" }),
+      expect.objectContaining({ branch: "experiment", pathPattern: undefined }),
+    ])
+    expect(d.consolidateCalls.every((call) => call.candidates.length === 1)).toBe(true)
+  })
+
+  it.each([
+    { pathHint: "../other", scopeRationale: "subtree" },
+    { pathHint: "/absolute", scopeRationale: "subtree" },
+    { pathHint: "C:\\project", scopeRationale: "subtree" },
+    { pathHint: "src/**", scopeRationale: "subtree" },
+    { pathHint: "./", scopeRationale: "subtree" },
+    { pathHint: "src" },
+    { branchScoped: true },
+    { branchScoped: true, scopeRationale: "Only the source branch" },
+  ])("refuses to widen an inapplicable claim: %j", async (fields) => {
+    const d = deps({ extract: jest.fn(async () => [claim(fields)]) })
+    expect((await runProjectMining(input(), d)).skipReason).toBe("no_applicable_candidates")
+    expect(d.consolidate).not.toHaveBeenCalled()
+  })
+
   it("always fails closed, so an unjudged claim is quarantined not silently added", async () => {
     const d = deps()
     await runProjectMining(input(), d)
@@ -158,7 +274,7 @@ describe("runProjectMining consolidation", () => {
       observedAt: 2_000,
       confidence: 0.9,
       sourceRevision: "12",
-      extractor: { provider: "anthropic", model: "claude-haiku", promptVersion: "project-v2" },
+      extractor: { provider: "anthropic", model: "claude-haiku", promptVersion: "project-v4" },
     })
   })
 
@@ -200,6 +316,33 @@ describe("runProjectMining consolidation", () => {
     expect(result.redactedExcerpts?.get("m2")).toBe(`redacted:${SALIENT[1]!.text}`)
   })
 
+  it("pins tool citations to actual parts and excludes prose and pending calls", async () => {
+    const d = deps()
+    await runProjectMining(
+      input({
+        messages: [
+          SALIENT[0]!,
+          {
+            ...SALIENT[1]!,
+            parts: [
+              { type: "text", text: "[tool 0] invented success" },
+              { type: "tool-bash", state: "output-available", output: "tests passed" },
+              { type: "tool-bash", state: "input-available" },
+            ],
+          },
+        ],
+      }),
+      d
+    )
+    expect(d.extract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: "m2", toolResultIndices: [1] }),
+        ]),
+      })
+    )
+  })
+
   it("never throws when a dependency does", async () => {
     const d = deps({
       extract: jest.fn(async () => {
@@ -207,6 +350,18 @@ describe("runProjectMining consolidation", () => {
       }),
     })
     await expect(runProjectMining(input(), d)).resolves.toEqual({ applied: [] })
+  })
+
+  it("propagates background extraction failures into the worker retry policy", async () => {
+    const failure = new Error("provider unavailable")
+    const d = deps({
+      propagateErrors: true,
+      extract: jest.fn(async () => {
+        throw failure
+      }),
+    })
+    await expect(runProjectMining(input(), d)).rejects.toBe(failure)
+    expect(d.consolidate).not.toHaveBeenCalled()
   })
 })
 
