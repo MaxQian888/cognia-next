@@ -18,6 +18,23 @@ jest.mock("@/components/context-workbench/session-results-section", () => ({
 // `@tauri-apps/plugin-dialog`'s `open()` is only meaningful inside Tauri; the
 // header's working-dir picker calls it conditionally on `isTauri()`. Stubbed
 // so the import resolves under jsdom.
+import { WebStatusProvider } from "@/components/shell/web-status"
+
+jest.mock("@/components/shell/use-bar-layout", () => ({
+  useBarLayout: () => ({
+    resolved: {
+      zones: {
+        start: [{ id: "connectivity" }],
+        center: [{ id: "runStatus" }],
+        end: [],
+      },
+    },
+  }),
+}))
+jest.mock("@/components/desktop/status-bar-zone", () => ({
+  StatusBarZone: ({ items }: { items: { id: string }[] }) =>
+    items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
+}))
 jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: jest.fn(async () => null),
 }))
@@ -741,4 +758,19 @@ describe("ChatHeader — title-bar projection", () => {
     // The chat-local slot is unaffected either way.
     expect(slot("chat.header")).not.toBeNull()
   })
+})
+
+it("mounts the last session fallback at the header's right end", () => {
+  const Wrapper = withAdapter(makeAdapter())
+  render(
+    <WebStatusProvider enabled>
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    </WebStatusProvider>
+  )
+  expect(screen.getByTestId("chat-header")).toContainElement(
+    screen.getByTestId("segment-connectivity")
+  )
+  expect(screen.queryByTestId("segment-runStatus")).toBeNull()
 })

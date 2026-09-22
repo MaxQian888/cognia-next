@@ -2,6 +2,23 @@
  * @jest-environment jsdom
  */
 
+import { WebStatusProvider } from "@/components/shell/web-status"
+
+jest.mock("@/components/shell/use-bar-layout", () => ({
+  useBarLayout: () => ({
+    resolved: {
+      zones: {
+        start: [{ id: "connectivity" }],
+        center: [{ id: "runStatus" }],
+        end: [],
+      },
+    },
+  }),
+}))
+jest.mock("@/components/desktop/status-bar-zone", () => ({
+  StatusBarZone: ({ items }: { items: { id: string }[] }) =>
+    items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
+}))
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
@@ -886,4 +903,16 @@ describe("BottomToolbar — every layout keeps the whole roster reachable", () =
     expect(screen.getByTestId("composer-footer")).toBeInTheDocument()
     expect(screen.queryByTestId("composer-toolbar-embedded")).toBeNull()
   })
+})
+
+it("mounts session status in the ambient composer cluster", () => {
+  render(
+    <WebStatusProvider enabled>
+      <BottomToolbar session={session} variant="detached" />
+    </WebStatusProvider>
+  )
+  expect(screen.getByTestId("composer-status-cluster")).toContainElement(
+    screen.getByTestId("segment-connectivity")
+  )
+  expect(screen.queryByTestId("segment-runStatus")).toBeNull()
 })

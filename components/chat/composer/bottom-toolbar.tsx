@@ -43,6 +43,7 @@
 // rule with it (the rule is a `::before`, which `:empty` does not count), so a
 // default install never shows a rule with nothing on one side of it.
 
+import { WebSessionStatus } from "@/components/shell/web-status"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -641,6 +642,7 @@ function GenericBottomToolbar({
         className={cn("ms-auto flex shrink-0 items-center gap-0.5 ps-1.5 empty:hidden", ZONE_RULE)}
         data-testid="composer-status-cluster"
       >
+        <WebSessionStatus host="composer" />
         {!shapeInline && runtimeChip(true)}
         {!ambientOnRail && !costFolded && costBadge(costShort)}
         {!ambientOnRail && credentialBadge}

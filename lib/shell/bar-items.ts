@@ -107,6 +107,23 @@ export interface ResolvedBar {
   zones: Record<BarZone, BarCatalogItem[]>
 }
 
+/** Where this turn runs. runStatus aggregates all sessions and remains global. */
+export const SESSION_IDS: ReadonlySet<string> = new Set([
+  "connectivity",
+  "executionHost",
+  "branch",
+  "sync",
+])
+
+/** Preserve the resolved order and visibility when distributing web chrome. */
+export function splitStatusBarScopes({ zones }: ResolvedBar) {
+  const items = [...zones.start, ...zones.center, ...zones.end]
+  return {
+    session: items.filter((item) => SESSION_IDS.has(item.id)),
+    global: items.filter((item) => !SESSION_IDS.has(item.id)),
+  }
+}
+
 /**
  * Partition `catalog` according to `layout`, then normalise the result into
  * zone blocks.

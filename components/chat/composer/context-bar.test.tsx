@@ -1,4 +1,21 @@
 /** @jest-environment jsdom */
+import { WebStatusProvider } from "@/components/shell/web-status"
+
+jest.mock("@/components/shell/use-bar-layout", () => ({
+  useBarLayout: () => ({
+    resolved: {
+      zones: {
+        start: [{ id: "connectivity" }],
+        center: [{ id: "runStatus" }],
+        end: [],
+      },
+    },
+  }),
+}))
+jest.mock("@/components/desktop/status-bar-zone", () => ({
+  StatusBarZone: ({ items }: { items: { id: string }[] }) =>
+    items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
+}))
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { useState } from "react"
 
@@ -251,6 +268,24 @@ describe("ContextBar", () => {
     expect(await screen.findByTestId("ctxbar-gitref")).toBeInTheDocument()
   })
 
+  it("edits the pull-request base without accepting an invalid request number", async () => {
+    await renderBar()
+    fireEvent.click(screen.getByTestId("ctxbar-worktree"))
+    fireEvent.click(await screen.findByTestId("ctxbar-base"))
+    fireEvent.click(await screen.findByText("Pull request"))
+    const repository = screen.getByRole("textbox", { name: "Repository" })
+    fireEvent.change(repository, { target: { value: "owner/repo" } })
+    expect(repository).toHaveValue("owner/repo")
+    const number = screen.getByRole("spinbutton", { name: "Pull request number" })
+    fireEvent.change(number, { target: { value: "12" } })
+    expect(number).toHaveValue(12)
+    fireEvent.change(number, { target: { value: "0" } })
+    expect(number).toHaveValue(12)
+    fireEvent.click(screen.getByTestId("ctxbar-base"))
+    fireEvent.click(await screen.findByText("Local HEAD"))
+    expect(screen.queryByRole("spinbutton")).toBeNull()
+  })
+
   it("shows the rootless hint and keeps notify + overflow available", async () => {
     await renderBar({ project: { id: "p1", roots: [] } as unknown as Project })
     expect(screen.queryByTestId("ctxbar-repo")).not.toBeInTheDocument()
@@ -330,4 +365,18 @@ describe("ContextBar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Needs input" }))
     expect(useImNotifyStore.getState().events.attention).toBe(true)
   })
+})
+
+it("mounts session status inside the context strip", async () => {
+  await act(async () => {
+    render(
+      <WebStatusProvider enabled>
+        <Harness />
+      </WebStatusProvider>
+    )
+  })
+  expect(screen.getByTestId("context-bar")).toContainElement(
+    screen.getByTestId("segment-connectivity")
+  )
+  expect(screen.queryByTestId("segment-runStatus")).toBeNull()
 })

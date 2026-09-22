@@ -1,6 +1,23 @@
 /**
  * @jest-environment jsdom
  */
+import { WebStatusProvider } from "@/components/shell/web-status"
+
+jest.mock("@/components/shell/use-bar-layout", () => ({
+  useBarLayout: () => ({
+    resolved: {
+      zones: {
+        start: [{ id: "connectivity" }],
+        center: [{ id: "runStatus" }],
+        end: [],
+      },
+    },
+  }),
+}))
+jest.mock("@/components/desktop/status-bar-zone", () => ({
+  StatusBarZone: ({ items }: { items: { id: string }[] }) =>
+    items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
+}))
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -700,4 +717,28 @@ describe("which edge the rail occupies", () => {
     expect(container.querySelector("aside")).toHaveAttribute("data-side", "left")
     expect(container.querySelector("aside")!.className).not.toContain("border-l")
   })
+})
+
+test("mounts global status above Settings outside the squads scroll area", () => {
+  const { rerender } = render(
+    withTooltipProvider(
+      <WebStatusProvider enabled>
+        <GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+      </WebStatusProvider>
+    )
+  )
+  const status = screen.getByTestId("web-status-rail")
+  const settings = screen.getByTestId("guild-open-settings")
+  expect(status).toContainElement(screen.getByTestId("segment-runStatus"))
+  expect(status.parentElement).toBe(settings.parentElement)
+  expect(status.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(status.closest('[data-slot="scroll-area"]')).toBeNull()
+  rerender(
+    withTooltipProvider(
+      <WebStatusProvider enabled>
+        <GuildRail collapsed onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+      </WebStatusProvider>
+    )
+  )
+  expect(screen.queryByTestId("web-status-rail")).toBeNull()
 })

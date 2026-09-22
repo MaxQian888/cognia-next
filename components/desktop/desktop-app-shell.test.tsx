@@ -69,6 +69,10 @@ jest.mock("@/components/onboarding/finish-setup-bar", () => ({
 jest.mock("@/components/desktop/title-bar", () => ({
   TitleBar: () => <div data-testid="title-bar" />,
 }))
+jest.mock("@/components/shell/use-bar-layout", () => ({
+  useBarLayout: () => ({ resolved: { zones: { start: [], center: [], end: [] } } }),
+}))
+jest.mock("@/components/desktop/status-bar-zone", () => ({ StatusBarZone: () => null }))
 jest.mock("@/components/desktop/status-bar", () => ({
   StatusBar: ({ collapsed }: { collapsed?: boolean }) => (
     <div data-testid="status-bar" data-collapsed={collapsed ? "true" : "false"} />
@@ -189,7 +193,7 @@ test("does not register the sidebar toggle on mobile or on bypass routes", () =>
   expect(getAppRegistration("shell.sidebar.toggle")).toBeUndefined()
 })
 
-test("renders StatusBar, GuildRail, CommandPalette, and resize edges — but no TitleBar on the web default", () => {
+test("renders GuildRail, CommandPalette, and resize edges without StatusBar — but no TitleBar on the web default", () => {
   render(
     <DesktopAppShell>
       <div data-testid="route-content" />
@@ -198,7 +202,7 @@ test("renders StatusBar, GuildRail, CommandPalette, and resize edges — but no 
   // The bar is off by default on the web shell (`webTitleBarEnabled`): a
   // browser tab already has chrome, so the columns draw their own headers.
   expect(screen.queryByTestId("title-bar")).toBeNull()
-  expect(screen.getByTestId("status-bar")).toBeInTheDocument()
+  expect(screen.queryByTestId("status-bar")).toBeNull()
   expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
   expect(screen.getByTestId("command-palette")).toBeInTheDocument()
   expect(screen.getByTestId("resize-edges")).toBeInTheDocument()
@@ -444,6 +448,7 @@ describe("collapse toggles from ui-store", () => {
   })
 
   test("collapses — rather than unmounts — the status bar when statusBarCollapsed is true", () => {
+    platformValue = "tauri"
     uiStateRef.statusBarCollapsed = true
     render(
       <DesktopAppShell>
@@ -454,7 +459,8 @@ describe("collapse toggles from ui-store", () => {
     expect(screen.getByTestId("route-content")).toBeInTheDocument()
   })
 
-  test("renders both when collapsed flags are false", () => {
+  test("renders both on Tauri when collapsed flags are false", () => {
+    platformValue = "tauri"
     render(
       <DesktopAppShell>
         <div data-testid="route-content" />

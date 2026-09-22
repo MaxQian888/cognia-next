@@ -129,11 +129,13 @@ describe("<RemoteSessionDetail />", () => {
         loadingOlder: false,
         hasMore: false,
         expandedTurnKeys: new Set(),
+        loadingTurnKeys: new Set(),
         error: null,
       },
       getDetail: jest.fn(),
       loadOlder: jest.fn(),
       expandTurn: jest.fn(),
+      pageTurn: jest.fn(),
       collapseTurn: jest.fn(),
       retry: jest.fn(),
     })
@@ -149,11 +151,13 @@ describe("<RemoteSessionDetail />", () => {
         loadingOlder: false,
         hasMore: false,
         expandedTurnKeys: new Set(),
+        loadingTurnKeys: new Set(),
         error: null,
       },
       getDetail: jest.fn(),
       loadOlder: jest.fn(),
       expandTurn: jest.fn(),
+      pageTurn: jest.fn(),
       collapseTurn: jest.fn(),
       retry: jest.fn(),
     })
@@ -162,6 +166,9 @@ describe("<RemoteSessionDetail />", () => {
     render(<RemoteSessionDetail sessionId="s1" />)
 
     expect(screen.getByTestId("remote-timeline-surface")).toBeInTheDocument()
+    const props = timelineSurfaceMock.mock.calls.at(-1)?.[0] as { onPageTurn: (key: string, direction: string) => void }
+    props.onPageTurn("turn:u1", "previous")
+    expect(transcriptControllerMock().pageTurn).toHaveBeenCalledWith("turn:u1", "previous")
   })
 
   it("resolves a synced host session override when the remote session row is available", () => {
@@ -184,11 +191,13 @@ describe("<RemoteSessionDetail />", () => {
         loadingOlder: false,
         hasMore: false,
         expandedTurnKeys: new Set(),
+        loadingTurnKeys: new Set(),
         error: null,
       },
       getDetail: jest.fn(),
       loadOlder: jest.fn(),
       expandTurn: jest.fn(),
+      pageTurn: jest.fn(),
       collapseTurn: jest.fn(),
       retry: jest.fn(),
     })

@@ -5,6 +5,8 @@
  * StatusBar, CommandPalette, window observers) so every desktop route
  * inherits a unified frame. Mounted from `app/layout.tsx` between
  * `MobileShellWrapper` and the routed children.
+ * Web has no footer: session status uses the composer/header and global status
+ * uses the rail (or corner pill). Only Tauri retains the 24px StatusBar.
  *
  *   ┌────────── TitleBar ──────────┐  ← Tauri always (window controls live here);
  *   │  {children}           │ Guild │    web only when `webTitleBarEnabled` —
@@ -36,6 +38,7 @@ import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { TitleBarOutletsProvider } from "@/components/shell/title-bar-outlets"
+import { WebStatusProvider, WebGlobalStatusPill } from "@/components/shell/web-status"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { FindBar } from "@/components/desktop/find-bar"
@@ -216,68 +219,71 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     // The provider is what lets the chat workspace's column headers render into
     // the title bar's outlets (`components/shell/title-bar-outlets.tsx`); it
     // has to sit above both the bar and the routed children.
-    <TitleBarOutletsProvider>
-      <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
-        <WindowFocusTracker />
-        <WindowResizeEdges />
-        <ZoomShortcuts />
-        <TerminalToggleShortcut />
-        <PanelQuickSwitch />
-        {/* Unmounted rather than hidden: nothing is projected, persisted, or
+    <WebStatusProvider enabled={platform === "web"}>
+      <TitleBarOutletsProvider>
+        <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
+          <WindowFocusTracker />
+          <WindowResizeEdges />
+          <ZoomShortcuts />
+          <TerminalToggleShortcut />
+          <PanelQuickSwitch />
+          {/* Unmounted rather than hidden: nothing is projected, persisted, or
             kept warm inside it, and mounting the bar on the web default would
             still register the outlets that pull the column headers off their
             rows. When it is absent the headers draw inline — see
             `title-bar-outlets.tsx`. */}
-        {titleBarMounted ? <TitleBar /> : null}
-        {/* Residual notice for a first run the user left early (ADR-0122).
+          {titleBarMounted ? <TitleBar /> : null}
+          {/* Residual notice for a first run the user left early (ADR-0122).
           Mounted here rather than at the body level: this shell is `h-screen`
           and the body it sits in is `overflow:hidden`, so an in-flow bar after
           the shell was laid out past the bottom edge and clipped — visible on
           no route. As a row of the shell's own column it takes real height and
           the content row below simply absorbs it. Self-hiding, so the normal
           path costs one selector. */}
-        <FinishSetupBar />
-        {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
+          <FinishSetupBar />
+          {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}
-        <TerminalDockMoveProvider>
-          <div className="flex flex-1 overflow-hidden">
-            {sidebarSide === "left" ? guildRail : null}
-            <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-              <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
-                {children}
+          <TerminalDockMoveProvider>
+            <div className="flex flex-1 overflow-hidden">
+              {sidebarSide === "left" ? guildRail : null}
+              <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+                <div data-find-scope className="flex min-h-0 flex-1 overflow-hidden">
+                  {children}
+                </div>
+                <TerminalDockRegion slot="bottom" />
               </div>
-              <TerminalDockRegion slot="bottom" />
-            </div>
-            {/* Right-docked terminal. Sits inboard of the extension host bar and
+              {/* Right-docked terminal. Sits inboard of the extension host bar and
               the rail so those stay pinned to the window edge. */}
-            <TerminalDockRegion slot="right" />
-            {/*
-             * VS Code extension host bar — hosts webviews + terminals from
-             * any activated extension. Returns `null` until an extension
-             * registers a surface, so the layout is unchanged in the
-             * default case. Phase A4 of the LSP reuse work.
-             */}
-            <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
-            {sidebarSide === "right" ? guildRail : null}
-          </div>
-        </TerminalDockMoveProvider>
-        {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
-        <FindBar />
-        {/* Global, like the palette beside it. It used to live inside the terminal
+              <TerminalDockRegion slot="right" />
+              {/*
+               * VS Code extension host bar — hosts webviews + terminals from
+               * any activated extension. Returns `null` until an extension
+               * registers a surface, so the layout is unchanged in the
+               * default case. Phase A4 of the LSP reuse work.
+               */}
+              <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
+              {sidebarSide === "right" ? guildRail : null}
+            </div>
+          </TerminalDockMoveProvider>
+          {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
+          <FindBar />
+          {/* Global, like the palette beside it. It used to live inside the terminal
           dock, which renders only while that panel is open — so clicking a file
           reference in chat with the terminal closed wrote to the store and showed
           nothing at all. */}
-        <FileViewerDialog />
-        {/* The four workspace editors, mounted once so the command palette
+          <FileViewerDialog />
+          {/* The four workspace editors, mounted once so the command palette
             can open one. The palette closes before it runs an action, so it
             cannot mount what the action opens. */}
-        <WorkspaceDialogHost />
-        <ShellLayoutNotice />
-        {/* Collapses to zero height on the same clock rather than unmounting —
+          <WorkspaceDialogHost />
+          <ShellLayoutNotice />
+          {/* Collapses to zero height on the same clock rather than unmounting —
           hiding it used to drop 24px out of the window in one frame. */}
-        <StatusBar collapsed={statusBarCollapsed} />
-      </div>
-    </TitleBarOutletsProvider>
+          {platform === "tauri" ? <StatusBar collapsed={statusBarCollapsed} /> : null}
+          {platform === "web" ? <WebGlobalStatusPill /> : null}
+        </div>
+      </TitleBarOutletsProvider>
+    </WebStatusProvider>
   )
 }

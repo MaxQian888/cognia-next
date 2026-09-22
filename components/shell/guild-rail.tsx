@@ -1,5 +1,6 @@
 "use client"
 
+import { WebGlobalStatusRail } from "@/components/shell/web-status"
 import { createContext, useContext, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -441,6 +442,8 @@ export function GuildRail({
           </ScrollArea>
 
           <Separator className="my-2 w-4" />
+
+          <WebGlobalStatusRail collapsed={collapsed} />
 
           <RailButton
             active={pathname === "/settings" || pathname.startsWith("/settings/")}

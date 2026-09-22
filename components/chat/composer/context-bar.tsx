@@ -24,6 +24,7 @@
  *     pushed through `notifyConversationOverIM` by `ImNotifyInitializer`.
  */
 
+import { WebSessionStatus } from "@/components/shell/web-status"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -820,6 +821,7 @@ export function ContextBar({ execution, onExecutionChange, project }: ContextBar
         )}
         {/* The sentence tokens are the execution context; notify is a flag, so
             it parks with the overflow on the right rather than in the sentence. */}
+        <WebSessionStatus host="context" />
         <div className="ms-auto flex shrink-0 items-center ps-1">
           <NotifyToggle />
           <Popover>

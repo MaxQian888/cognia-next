@@ -1,5 +1,6 @@
 "use client"
 
+import { WebSessionStatus } from "@/components/shell/web-status"
 import { useState } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
@@ -256,6 +257,8 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
       {outlet ? null : (
         <ArtifactDockToggle className={cn(HEADER_ICON_BUTTON, "hidden md:inline-flex")} />
       )}
+
+      <WebSessionStatus host="header" />
 
       {/* The settings sheet backs the inline summary opener above, so it mounts
           only on the same non-workspace surfaces; inside the scope the pane's

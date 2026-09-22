@@ -5,6 +5,7 @@ import {
   mergeVisibleOrder,
   migrateLegacyBarItems,
   resolveBarLayout,
+  splitStatusBarScopes,
 } from "@/lib/shell/bar-items"
 import {
   DEFAULT_STATUS_BAR_LAYOUT,
@@ -211,5 +212,22 @@ describe("migrateLegacyBarItems", () => {
   it("keeps the canonical order — the legacy map had none", () => {
     const migrated = migrateLegacyBarItems("status", { sync: false })
     expect(migrated?.order).toEqual(DEFAULT_STATUS_BAR_LAYOUT.order)
+  })
+})
+
+describe("splitStatusBarScopes", () => {
+  it("keeps app-wide runStatus global and respects hidden items and order", () => {
+    const catalog = getBarCatalog("status", "tauri")
+    const resolved = resolveBarLayout(catalog, {
+      order: ["sync", "connectivity", "branch", "executionHost", "runStatus", "jobs"],
+      hidden: ["branch"],
+    })
+    const scopes = splitStatusBarScopes(resolved)
+    expect(ids(scopes.session)).toEqual(
+      ids(resolved.visible).filter((id) => ["sync", "connectivity", "executionHost"].includes(id))
+    )
+    expect(ids(scopes.global)).toContain("runStatus")
+    expect(ids(scopes.global)).not.toContain("branch")
+    expect([...scopes.session, ...scopes.global]).toHaveLength(resolved.visible.length)
   })
 })
