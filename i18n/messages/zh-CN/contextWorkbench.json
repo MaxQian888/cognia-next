@@ -423,5 +423,8 @@
     "compactRail": "紧凑图标栏",
     "openPanel": "打开面板",
     "closePanel": "关闭{name}"
+  },
+  "planPanel": {
+    "title": "计划"
   }
 }

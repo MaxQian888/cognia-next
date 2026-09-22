@@ -18,17 +18,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  CheckCircle2Icon,
-  CircleIcon,
-  ClockIcon,
-  ListIcon,
-  MinusCircleIcon,
-  MoreHorizontalIcon,
-  PencilIcon,
-  SparklesIcon,
-  XCircleIcon,
-} from "lucide-react"
+import { ListIcon, MoreHorizontalIcon, PencilIcon, SparklesIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -41,16 +31,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { cn } from "@/lib/utils"
-import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { PlanDocument } from "./plan-document"
 import { PlanHtmlView } from "./plan-html-view"
 import type { PlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 import {
   computePlanCounts,
   type AgentPlan,
+  type PlanEditPatch,
   type PlanRefinementType,
-  type PlanStepStatus,
 } from "@/types/agent/plan"
 
 const REFINE_TYPES: PlanRefinementType[] = ["optimize", "simplify", "expand", "reorder"]
@@ -73,26 +62,10 @@ export type PlanResumeMode = "acceptEdits" | "default" | "auto"
  * An inline plan edit. A plan captured with a full markdown body edits that
  * body (`planText`); a plan without one edits its step titles one per line
  * (`stepTitles`). The discriminant lets the host derive steps either way
- * without a fallback branch.
+ * without a fallback branch. The canonical definition lives in
+ * `types/agent/plan` — re-exported for the card's existing consumers.
  */
-export type PlanEditPatch =
-  { title: string; planText: string } | { title: string; stepTitles: string[] }
-
-export function stepStatusIcon(status: PlanStepStatus) {
-  switch (status) {
-    case "completed":
-      return <CheckCircle2Icon className="size-3.5 shrink-0 text-green-600" />
-    case "in_progress":
-      return <ClockIcon className="size-3.5 shrink-0 animate-pulse text-yellow-600" />
-    case "failed":
-    case "blocked":
-      return <XCircleIcon className="size-3.5 shrink-0 text-rose-600" />
-    case "skipped":
-      return <MinusCircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-    default:
-      return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-  }
-}
+export type { PlanEditPatch }
 
 export interface PlanApprovalCardProps {
   plan: AgentPlan
@@ -339,42 +312,16 @@ export function PlanApprovalCard({
                 disabled={disabled}
               />
             </div>
-          ) : isMarkdownPlan ? (
-            // Faithful plan body: render the captured markdown (headings, lists,
-            // code, tables) instead of the lossy step-title projection, capped +
-            // scrolling in its own container so the actions/composer stay put.
-            // Native overflow (not Radix ScrollArea): the thumb stays grabbable
-            // while text is selected, matching the transcript PlanCard.
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md bg-muted/40">
-              <div data-testid="plan-approval-body" className="p-2 text-sm">
-                <MarkdownRenderer content={planText} />
-              </div>
-            </div>
-          ) : steps.length > 0 ? (
-            // Native overflow, not Radix ScrollArea: a persistent grabbable thumb
-            // that keeps working while text is selected inside the transcript.
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md bg-muted/40">
-              <ul className="space-y-1 p-2" data-testid="plan-approval-steps">
-                {steps.map((s) => (
-                  <li key={s.id} className="flex items-start gap-2 text-xs" data-status={s.status}>
-                    {stepStatusIcon(s.status)}
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 break-words",
-                        s.status === "completed" && "text-muted-foreground line-through"
-                      )}
-                    >
-                      {s.title}
-                    </span>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {s.kind}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
           ) : (
-            <p className="text-xs italic text-muted-foreground">{t("approval.noSteps")}</p>
+            // Document body: the captured markdown (headings, lists, code,
+            // tables) with the executable step list embedded in place — the
+            // document-first surface from the plan-preview prototype. Edits
+            // autosave through the same `onEdit` channel as the pencil editor.
+            // Native overflow (not Radix ScrollArea): a persistent grabbable
+            // thumb that keeps working while text is selected.
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md bg-muted/40">
+              <PlanDocument plan={plan} editable={canEdit} onEdit={onEdit} className="p-2" />
+            </div>
           )}
 
           <Textarea

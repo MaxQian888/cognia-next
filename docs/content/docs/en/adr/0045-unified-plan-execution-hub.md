@@ -276,3 +276,46 @@ turn from blocking on its own stream. Every step of a plan shares the plan's
 session, so naming it would exempt every step after the first and the slot would
 serialize nothing at all. Cancellation still reaches the steps: the plan's own
 `AbortController` is chained into the lease as its caller signal.
+
+## Document-surface amendment (2026-11-25)
+
+§6 named two surfaces (approval card, tracker) and left the plan's *document*
+shape implicit. The plan-preview prototype work pinned it down, and what shipped
+follows the "the plan file is the interface" model that Cursor and Windsurf use
+rather than a bespoke viewer.
+
+**`metadata.planText` is the faithful source; `steps[]` is its projection.** A
+plan captured from `exit_plan_mode` renders its markdown body — not the lossy
+title list — through `PlanDocument`
+(`components/agent/plan/plan-document.tsx`). The executable steps are embedded
+in place of the document's own steps list, so editing a step row literally
+rewrites the markdown (`lib/agent/plan/plan-doc.ts` splits the body around the
+steps section and rebuilds it). `steps[]` and the document cannot drift apart,
+which is the whole point of carrying both.
+
+The projection collects *every* list item in the body (`parsePlanText`
+semantics), so on multi-list documents the embedded editor owns only the
+contiguous window of `steps[]` that maps to the steps section — a `## Files`
+checklist stays prose, and an edit rewrites just the section it lives in.
+
+**Editing is file-semantics, not form-semantics.** Step rows edit inline and
+autosave (debounced) through `applyPlanEditPatch`
+(`lib/agent/plan/draft-edit.ts`) — one persistence path shared by the approval
+card and the dock panel, so the two surfaces cannot disagree about what an
+edit means. Conceptual changes still go through the chat-side refinement /
+keep-planning channels; the document chrome carries no Save/Reset footer
+because there is no draft buffer to commit.
+
+**A plan gets a dock panel.** `PlanPanel`
+(`components/agent/plan/plan-panel.tsx`, panel id `plan`, `review` activity)
+lists the session's plans newest-first — the GUI counterpart of the CLI's
+`/plan list`, which the `listPlansBySession` store already supported but no
+surface consumed. Terminal plans render read-only with their `agentPlanEvents`
+trail, the counterpart of `/plan show`; execution status stays on
+`PlanTrackerPanel` and out of the pre-approval editor.
+
+**React, not iframe.** The doc surface renders through `MarkdownRenderer` and
+uses `IntersectionObserver`-free scroll-spy over the rendered heading DOM —
+deliberately not the `srcdoc` + inline-script path, which ADR-0158 records as
+nonfunctional inside packaged Tauri. The interactive iframe editor remains an
+opt-in enhancement behind `planSettings.interactiveHtmlView`.

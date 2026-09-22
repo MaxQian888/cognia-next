@@ -72,7 +72,8 @@
       "tool_call": "插件工具调用",
       "mcp_tool_call": "MCP 工具调用",
       "sub_workflow": "子工作流",
-      "approval_gate": "人工审批点"
+      "approval_gate": "人工审批点",
+      "editor_review": "编辑器评审"
     },
     "kindLabel": "类型",
     "openLabel": "编写计划",
@@ -108,5 +109,43 @@
     "statusPending": "待处理",
     "statusReady": "就绪",
     "statusSkipped": "已跳过"
+  },
+  "document": {
+    "activity": "动态",
+    "addStep": "添加步骤",
+    "currentPlan": "当前",
+    "deleteStep": "删除步骤",
+    "empty": "还没有步骤。",
+    "eventKind": {
+      "approved": "已批准",
+      "cancelled": "已取消",
+      "deferred": "已暂缓",
+      "exit": "已退出",
+      "paused": "已暂停",
+      "plan_created": "已创建",
+      "plan_updated": "已更新",
+      "refined": "已修订",
+      "replanned": "已重新规划",
+      "rejected": "已拒绝",
+      "resumed": "已恢复",
+      "step_completed": "步骤完成",
+      "step_failed": "步骤失败",
+      "step_started": "步骤开始"
+    },
+    "history": "计划历史",
+    "moveDown": "下移步骤",
+    "moveUp": "上移步骤",
+    "noPlans": "此会话还没有计划。",
+    "save": {
+      "edited": "已编辑",
+      "error": "保存失败",
+      "saved": "已保存",
+      "saving": "保存中…"
+    },
+    "stepN": "第 {index} 步",
+    "stepPlaceholder": "描述这一步…",
+    "stepsHeading": "步骤",
+    "titleLabel": "计划标题",
+    "toc": "章节"
   }
 }

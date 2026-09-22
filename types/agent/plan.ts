@@ -212,6 +212,14 @@ export const DEFAULT_PLAN_CONFIG: PlanConfig = {
   maxConcurrency: 1,
 }
 
+/**
+ * Edit payload produced by the plan document surface. `planText` rewrites the
+ * source markdown (the host re-derives `steps[]` from it); `stepTitles` edits
+ * only the executable projection and leaves the markdown body untouched.
+ */
+export type PlanEditPatch =
+  { title: string; planText: string } | { title: string; stepTitles: string[] }
+
 export interface AgentPlan {
   /** UUIDv4. Globally unique; safe as a Dexie primary key. */
   id: string

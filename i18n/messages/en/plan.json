@@ -72,7 +72,8 @@
       "tool_call": "Plugin tool call",
       "mcp_tool_call": "MCP tool call",
       "sub_workflow": "Sub-workflow",
-      "approval_gate": "Approval checkpoint"
+      "approval_gate": "Approval checkpoint",
+      "editor_review": "Editor review"
     },
     "kindLabel": "Type",
     "openLabel": "Write a plan",
@@ -108,5 +109,43 @@
     "statusPending": "Pending",
     "statusReady": "Ready",
     "statusSkipped": "Skipped"
+  },
+  "document": {
+    "activity": "Activity",
+    "addStep": "Add step",
+    "currentPlan": "current",
+    "deleteStep": "Delete step",
+    "empty": "No steps yet.",
+    "eventKind": {
+      "approved": "approved",
+      "cancelled": "cancelled",
+      "deferred": "deferred",
+      "exit": "exited",
+      "paused": "paused",
+      "plan_created": "created",
+      "plan_updated": "updated",
+      "refined": "refined",
+      "replanned": "replanned",
+      "rejected": "rejected",
+      "resumed": "resumed",
+      "step_completed": "step done",
+      "step_failed": "step failed",
+      "step_started": "step started"
+    },
+    "history": "Plan history",
+    "moveDown": "Move step down",
+    "moveUp": "Move step up",
+    "noPlans": "No plan for this session.",
+    "save": {
+      "edited": "Edited",
+      "error": "Save failed",
+      "saved": "Saved",
+      "saving": "Saving…"
+    },
+    "stepN": "Step {index}",
+    "stepPlaceholder": "Describe this step…",
+    "stepsHeading": "Steps",
+    "titleLabel": "Plan title",
+    "toc": "Sections"
   }
 }

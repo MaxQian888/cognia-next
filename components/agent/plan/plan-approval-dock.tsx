@@ -31,10 +31,9 @@ import {
   type PlanChatResumeFailure,
 } from "@/lib/agent/plan/runtime"
 import { Button } from "@/components/ui/button"
-import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
+import { applyPlanEditPatch } from "@/lib/agent/plan/draft-edit"
 import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
-import { linearAgentTurnSteps, materializeSteps } from "@/lib/agent/plan/steps"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -71,11 +70,6 @@ export function buildPlanApprovedPrompt(plan: AgentPlan): string {
     "",
     "Implement it now, step by step, following the approved plan above.",
   ].join("\n")
-}
-
-/** Build the linear `agent_turn` step chain `exit-plan-capture` / edits share. */
-function linearSteps(titles: string[]) {
-  return materializeSteps(linearAgentTurnSteps(titles))
 }
 
 export interface PlanApprovalDockProps {
@@ -239,26 +233,13 @@ export function PlanApprovalDock({
 
   const handleEdit = async (patch: PlanEditPatch) => {
     if (busy) return
-    const title = patch.title.slice(0, 120)
-    // A markdown edit carries the raw body; a step edit carries one title per
-    // line. Either way we re-derive the same linear agent_turn chain so
-    // execution stays in sync with what the user sees.
-    const titles = "planText" in patch ? parsePlanText(patch.planText) : patch.stepTitles
-    if (titles.length === 0) return
     setBusyPlanId(plan.id)
     try {
-      await getPlanRuntime().updatePlanDraft(plan.id, {
-        title,
-        steps: linearSteps(titles),
-        // Keep the full body in metadata so the card can render it back, and
-        // stamp `userEdited` so approval embeds the adjusted plan (the model's
-        // transcript still holds its original proposal).
-        metadata: {
-          ...plan.metadata,
-          userEdited: true,
-          ...("planText" in patch ? { planText: patch.planText } : {}),
-        },
-      })
+      // Shared with the dock's plan panel: a markdown edit carries the raw
+      // body; a step edit carries one title per line. Either way the same
+      // linear agent_turn chain is re-derived so execution stays in sync with
+      // what the user sees, and `userEdited` marks the draft as adjusted.
+      await applyPlanEditPatch(plan, patch)
     } finally {
       setBusyPlanId(null)
     }

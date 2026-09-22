@@ -214,3 +214,39 @@ Plan persistence、approval、projection、execution 以及 plan/goal/team integ
 是为了让前台聊天回合不被自己的流阻塞。计划的每个步骤共享计划的会话，所以带上它会让第一个
 之后的每个步骤都被豁免，执行位将什么都不串行。取消仍然能到达这些步骤：计划自己的
 `AbortController` 作为调用方信号链进了租约。
+
+## 文档界面修订（2026-11-25）
+
+§6 提到了两个界面（审批卡、追踪器），但计划的*文档*形态一直是隐式的。
+plan-preview 原型工作把它确定下来，落地遵循 Cursor 与 Windsurf 采用的
+「计划文件即界面」模型，而非自定义查看器。
+
+**`metadata.planText` 是忠实来源；`steps[]` 是它的投影。** 从
+`exit_plan_mode` 捕获的计划通过 `PlanDocument`
+（`components/agent/plan/plan-document.tsx`）渲染其 markdown 正文 —— 而非
+有损的标题列表。可执行步骤内嵌在文档自身步骤列表的位置，因此编辑步骤行
+就是在改写 markdown 本身（`lib/agent/plan/plan-doc.ts` 围绕步骤章节切分
+正文并重建）。`steps[]` 与文档不可能再出现漂移，这正是同时携带两者的
+意义。
+
+投影收集正文中的*每一个*列表项（`parsePlanText` 语义），因此在多列表
+文档上，内嵌编辑器只拥有映射到步骤章节的那段连续 `steps[]` 窗口 ——
+`## Files` 清单保持为正文，一次编辑只重写它所属于的章节。
+
+**编辑是文件语义，而非表单语义。** 步骤行就地编辑并防抖自动保存，经由
+`applyPlanEditPatch`（`lib/agent/plan/draft-edit.ts`）—— 审批卡与 dock
+面板共享同一持久化路径，两个界面对「一次编辑」的定义不可能不一致。
+概念性的调整仍走聊天侧的 refinement / keep-planning 通道；文档界面上
+没有 Save/Reset 底栏，因为根本不存在待提交的草稿缓冲。
+
+**计划拥有了自己的 dock 面板。** `PlanPanel`
+（`components/agent/plan/plan-panel.tsx`，面板 id `plan`，`review`
+活动组）按时间倒序列出会话的全部计划 —— 即 CLI `/plan list` 的 GUI
+对应物，`listPlansBySession` 存储层早已支持但此前没有界面消费它。终态
+计划以只读呈现并附 `agentPlanEvents` 动态轨迹（对应 `/plan show`）；
+执行状态仍归属 `PlanTrackerPanel`，不进入审批前的编辑器。
+
+**用 React 而非 iframe。** 文档界面经由 `MarkdownRenderer` 渲染，并基于
+渲染出的标题 DOM 做 scroll-spy —— 刻意不走 `srcdoc` + 内联脚本路径，
+ADR-0158 已记录该路径在打包后的 Tauri 中不可用。交互式 iframe 编辑器仍
+作为 `planSettings.interactiveHtmlView` 之后的可选增强保留。

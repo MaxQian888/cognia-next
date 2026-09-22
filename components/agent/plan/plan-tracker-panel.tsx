@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils"
 import { resolvePlanHtmlStyle, type PlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { useSettingsStore } from "@/stores/settings"
 import type { AgentPlan, PlanStepStatus } from "@/types/agent/plan"
-import { stepStatusIcon } from "./plan-approval-card"
+import { stepStatusIcon } from "./step-status-icon"
 
 const STEP_STATUS_LABEL_KEY: Record<PlanStepStatus, string> = {
   pending: "tracker.statusPending",

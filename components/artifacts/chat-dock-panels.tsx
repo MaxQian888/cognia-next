@@ -41,9 +41,11 @@ import {
   GlobeIcon,
   CornerUpLeftIcon,
   ListChecksIcon,
+  ListTodoIcon,
   UsersIcon,
 } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
@@ -85,6 +87,8 @@ import {
   TeamMembersPanel,
 } from "@/components/context-workbench/panels/team-members-panel"
 import { RunContextPanel } from "@/components/context-workbench/panels/run-context-panel"
+import { PlanPanel } from "@/components/agent/plan/plan-panel"
+import { listPlansBySession } from "@/lib/db/plans"
 import type {
   ContextPanelDefinition,
   ContextPanelMode,
@@ -628,6 +632,11 @@ function SessionSourcesRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   return <SessionSourcesPanel messages={sessionMessages} />
 }
 
+function SessionPlanRenderer({ inputs }: Inputs<SessionPanelInputs>) {
+  const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
+  return activeSessionId ? <PlanPanel sessionId={activeSessionId} /> : null
+}
+
 function SessionSquadRenderer({ inputs }: Inputs<SessionPanelInputs>) {
   const activeSessionId = usePanelInput(inputs, (input) => input.activeSessionId)
   return <SquadContextPanel sessionId={activeSessionId} />
@@ -655,6 +664,14 @@ export function useSessionSurfacePanels({
   onWidthHint,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
   const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
+  // The plan panel claims its rail slot only when the session actually has a
+  // plan — the badge counts plans awaiting a decision.
+  const sessionPlans = useLiveQuery(
+    () => (activeSessionId ? listPlansBySession(activeSessionId) : Promise.resolve([])),
+    [activeSessionId]
+  )
+  const planCount = sessionPlans?.length ?? 0
+  const pendingPlanCount = sessionPlans?.filter((p) => p.status === "awaiting_approval").length ?? 0
   const inputs = usePanelInputs<SessionPanelInputs>({
     activeSessionId,
     session,
@@ -683,6 +700,7 @@ export function useSessionSurfacePanels({
       sourceControl: () => <SessionSourceControlRenderer key={key} inputs={inputs} />,
       comments: () => <SessionCommentsRenderer key={key} inputs={inputs} />,
       runContext: () => <DockRunContextPanel key={key} inputs={inputs} />,
+      plan: () => <SessionPlanRenderer key={key} inputs={inputs} />,
       sources: () => <SessionSourcesRenderer key={key} inputs={inputs} />,
       memory: () => <DockMemoryPanel key={key} inputs={inputs} />,
       logs: () => <LogsWorkbenchPanel key={key} />,
@@ -706,6 +724,20 @@ export function useSessionSurfacePanels({
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
         renderer: renderers.artifactList,
+      },
+      {
+        // The session's plans — current draft plus terminal history (the GUI
+        // counterpart of the CLI's `/plan list`). Sits beside the artifact
+        // list: both are the session's reviewable outputs.
+        id: "plan",
+        activity: "review",
+        labelKey: "contextWorkbench.planPanel.title",
+        icon: ListTodoIcon,
+        order: 12,
+        appliesTo: (resource) => resource.kind === "session" && planCount > 0,
+        retention: "stateful",
+        getBadge: () => pendingPlanCount,
+        renderer: renderers.plan,
       },
       {
         // Sidechat belongs on the session surface: it is an aside to the main
@@ -879,7 +911,9 @@ export function useSessionSurfacePanels({
       hasActiveSession,
       hasProjectRoots,
       isTeamSession,
+      pendingPlanCount,
       pendingRunLearningCount,
+      planCount,
       renderers,
       sourceCount,
       uncommittedChangeCount,

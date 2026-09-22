@@ -90,17 +90,20 @@ describe("PlanApprovalCard", () => {
     expect(screen.getByText("status.awaiting_approval")).toBeInTheDocument()
   })
 
-  it("renders the full markdown body (not the step list) when metadata.planText is present", () => {
+  it("renders the full markdown body with the step list embedded when metadata.planText is present", () => {
     render(
       <PlanApprovalCard
         plan={plan({ metadata: { planText: "## Plan\n\n- step one\n- step two" } })}
         {...noop}
       />
     )
-    expect(screen.getByTestId("plan-approval-body")).toBeInTheDocument()
+    // The document surface renders the faithful markdown…
+    expect(screen.getByTestId("plan-document")).toBeInTheDocument()
     expect(screen.getByTestId("md")).toHaveTextContent("step one")
-    // The lossy step-title projection is replaced by the faithful markdown.
-    expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+    // …with the executable step projection embedded inside it (read-only here:
+    // no onEdit channel was provided).
+    expect(screen.getByTestId("plan-doc-steps")).toBeInTheDocument()
+    expect(screen.getByText("First step")).toBeInTheDocument()
   })
 
   it("edits the raw markdown (not step titles) and saves planText via onEdit", async () => {
@@ -142,9 +145,9 @@ describe("PlanApprovalCard", () => {
     const { container } = render(<PlanApprovalCard plan={plan()} {...noop} />)
     // Card max-h (not h): compact when short, capped when long.
     expect(screen.getByTestId("plan-approval-card").className).toContain("max-h-[45vh]")
-    // Native overflow scroller wraps the step list (no hover-only Radix thumb).
-    const steps = screen.getByTestId("plan-approval-steps")
-    expect(steps.parentElement?.className).toContain("overflow-y-auto")
+    // Native overflow scroller inside the document body (no hover-only Radix thumb).
+    const steps = screen.getByTestId("plan-doc-steps")
+    expect(screen.getByTestId("plan-doc-scroll").className).toContain("overflow-y-auto")
     expect(container.querySelector("[data-radix-scroll-area-viewport]")).toBeNull()
   })
 
@@ -244,8 +247,7 @@ describe("PlanApprovalCard", () => {
 
   it("renders the empty state when there are no steps", () => {
     render(<PlanApprovalCard plan={plan({ steps: [] })} {...noop} />)
-    expect(screen.getByText("approval.noSteps")).toBeInTheDocument()
-    expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+    expect(screen.getByText("document.empty")).toBeInTheDocument()
     // No steps → no progress bar.
     expect(screen.queryByTestId("plan-approval-progress")).not.toBeInTheDocument()
   })
@@ -254,7 +256,7 @@ describe("PlanApprovalCard", () => {
     render(<PlanApprovalCard plan={plan()} {...noop} onEdit={jest.fn()} interactiveView />)
     expect(screen.getByTestId("plan-html-view-stub")).toBeInTheDocument()
     // Static bodies are replaced…
-    expect(screen.queryByTestId("plan-approval-steps")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("plan-doc-steps")).not.toBeInTheDocument()
     // …and the pencil is redundant (inline editing lives in the HTML view).
     expect(screen.queryByTestId("plan-approval-edit")).not.toBeInTheDocument()
     // Approval actions stay native (trusted DOM).
@@ -265,7 +267,7 @@ describe("PlanApprovalCard", () => {
     // No onEdit → the interactive editor has no save channel.
     const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} interactiveView />)
     expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
-    expect(screen.getByTestId("plan-approval-steps")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-doc-steps")).toBeInTheDocument()
     expect(screen.queryByTestId("plan-approval-view-toggle")).not.toBeInTheDocument()
     unmount()
 
@@ -287,7 +289,7 @@ describe("PlanApprovalCard", () => {
 
     await userEvent.click(screen.getByTestId("plan-approval-view-toggle"))
     expect(screen.queryByTestId("plan-html-view-stub")).not.toBeInTheDocument()
-    expect(screen.getByTestId("plan-approval-steps")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-doc-steps")).toBeInTheDocument()
     // Classic mode restores the pencil editor.
     expect(screen.getByTestId("plan-approval-edit")).toBeInTheDocument()
 

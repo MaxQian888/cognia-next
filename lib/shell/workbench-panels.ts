@@ -54,6 +54,7 @@ export const WORKBENCH_PANEL_CATALOG: readonly WorkbenchPanelCatalogItem[] = [
   { id: "preview", activity: "preview-run", labelKey: "artifacts.dock.artifactMode" },
   { id: "browser", activity: "preview-run", labelKey: "browser.title" },
   { id: "artifacts", activity: "review", labelKey: "artifacts.dock.browseArtifacts" },
+  { id: "plan", activity: "review", labelKey: "contextWorkbench.planPanel.title" },
   { id: "proposal-review", activity: "review", labelKey: "contextWorkbench.proposalReview" },
   { id: "resource-chat", activity: "ai", labelKey: "contextWorkbench.resourceChat" },
   { id: "session-sidechat", activity: "ai", labelKey: "contextWorkbench.sessionSidechat" },

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { GitCompareArrowsIcon } from "lucide-react"
+import { CodeIcon, GitCompareArrowsIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
@@ -185,6 +185,7 @@ function WorkspaceEditorBody({
   layout: "desktop" | "mobile"
 }) {
   const t = useTranslations("artifacts.workspace")
+  const editorLabels = useTranslations("projectEditor")
   const request = useArtifactDockLayoutStore((state) => state.workspaceRevealRequest)
   const clearRequest = useArtifactDockLayoutStore((state) => state.clearWorkspaceRevealRequest)
   const addContextSelection = useChatStore((state) => state.addContextSelection)
@@ -448,7 +449,7 @@ function WorkspaceEditorBody({
     >
       {roots.length > 1 || hasTaskScope || rootTarget.root ? (
         <div
-          className="flex shrink-0 items-center gap-2 border-b px-2 py-1"
+          className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1"
           data-testid="dock-workspace-toolbar"
         >
           <ProjectRootSwitcher
@@ -524,6 +525,17 @@ function WorkspaceEditorBody({
             fixedTabs={
               hasReview
                 ? [
+                    ...(engine === "codeserver" || openFiles.length === 0
+                      ? [
+                          {
+                            id: "file",
+                            label: editorLabels("editorTab"),
+                            icon: <CodeIcon className="size-3.5" />,
+                            active: visibleSurface === "file",
+                            onSelect: showFileSurface,
+                          },
+                        ]
+                      : []),
                     {
                       id: "review",
                       label: t("review"),
@@ -590,6 +602,23 @@ function WorkspaceEditorBody({
             </div>
           ) : null}
 
+          {engine === "monaco" ? (
+            <div
+              className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
+              data-testid="workspace-file-layout"
+              hidden={visibleSurface !== "file"}
+            >
+              <ProjectEditorFileWorkbench
+                workbench={workbench}
+                active={visibleSurface === "file"}
+                sidebarPosition="right"
+                panelIdPrefix="workspace"
+                showContextWorkbench={false}
+                layout={layout === "mobile" ? "mobile" : "split"}
+              />
+            </div>
+          ) : null}
+
           {visibleSurface === "review" && hasReview ? (
             <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
               {layout === "mobile" ? (
@@ -640,19 +669,6 @@ function WorkspaceEditorBody({
               ) : (
                 reviewEmpty
               )}
-            </div>
-          ) : engine === "monaco" ? (
-            <div
-              className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
-              data-testid="workspace-file-layout"
-            >
-              <ProjectEditorFileWorkbench
-                workbench={workbench}
-                sidebarPosition="right"
-                panelIdPrefix="workspace"
-                showContextWorkbench={false}
-                layout={layout === "mobile" ? "mobile" : "split"}
-              />
             </div>
           ) : null}
         </>

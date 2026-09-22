@@ -32,8 +32,8 @@ import {
   type PlanHtmlStyle,
 } from "@/lib/agent/plan/plan-html"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { AgentPlan } from "@/types/agent/plan"
-import type { PlanEditPatch } from "./plan-approval-card"
+import { rebuildPlanText } from "@/lib/agent/plan/plan-doc"
+import type { AgentPlan, PlanEditPatch } from "@/types/agent/plan"
 
 const MIN_HEIGHT = 140
 const MAX_HEIGHT = 560
@@ -125,9 +125,10 @@ export function PlanHtmlView({
           // Title-only edit on a markdown plan — keep the rich body intact.
           onSave({ title, planText: originalPlanText })
         } else if (originalPlanText) {
-          // Steps were adjusted: the edited list is now the source of truth;
-          // regenerate the body so display and execution can't diverge.
-          onSave({ title, planText: stepTitles.map((s) => `- ${s}`).join("\n") })
+          // Steps were adjusted: rewrite the document's steps section in place
+          // rather than discarding the prose body — display and execution
+          // stay one source of truth.
+          onSave({ title, planText: rebuildPlanText(originalPlanText, stepTitles) })
         } else {
           onSave({ title, stepTitles })
         }

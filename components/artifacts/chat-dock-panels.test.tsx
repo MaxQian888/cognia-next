@@ -28,6 +28,22 @@ jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }))
 
+// The plan panel reads the session's plans through a live query — controlled
+// here so the catalogue tests can exercise the panel's `appliesTo` gate.
+let sessionPlans: Array<{ id: string; status: string }> = []
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => sessionPlans,
+}))
+jest.mock("@/lib/db/plans", () => ({
+  listPlansBySession: jest.fn(async () => sessionPlans),
+  listPlanEvents: jest.fn(async () => []),
+}))
+jest.mock("@/components/agent/plan/plan-panel", () => ({
+  PlanPanel: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="plan-panel" data-session={sessionId} />
+  ),
+}))
+
 jest.mock("@/stores/context-workbench/context-workbench-store", () => ({
   useContextWorkbenchStore: { getState: () => ({ navigatePanel, smartReveal }) },
 }))
@@ -337,6 +353,7 @@ beforeEach(() => {
   jumpToMessage = null
   browserRequestUrl = null
   browserRequestId = 0
+  sessionPlans = []
 })
 
 describe("useArtifactSurfacePanels", () => {
@@ -617,10 +634,11 @@ describe("the selection composer inside the resource chat", () => {
 })
 
 describe("useSessionSurfacePanels", () => {
-  it("offers exactly the fourteen session-surface panels, in a stable order", () => {
+  it("offers exactly the fifteen session-surface panels, in a stable order", () => {
     const panels = collect(useSessionSurfacePanels, sessionInput())
     expect(panels.map((p) => [p.id, p.activity, p.order])).toEqual([
       ["artifacts", "review", 10],
+      ["plan", "review", 12],
       ["session-sidechat", "ai", 15],
       ["browser", "preview-run", 20],
       [PROJECT_OVERVIEW_PANEL_ID, "workspace", 25],
@@ -638,7 +656,9 @@ describe("useSessionSurfacePanels", () => {
   })
 
   it("claims session resources and nothing else", () => {
-    // Team members is the one conditional entry — see the test below.
+    // Team members and plan are the conditional entries — see the tests below.
+    // Give the plan query a record so the panel claims its slot.
+    sessionPlans = [{ id: "p1", status: "completed" }]
     const panels = collect(useSessionSurfacePanels, sessionInput({ session: teamSession })).filter(
       (p) => p.id !== "team-members"
     )
@@ -662,6 +682,26 @@ describe("useSessionSurfacePanels", () => {
     renderPanel(team, SESSION_RESOURCE)
     expect(screen.getByTestId("team-members-panel")).toHaveAttribute("data-team", "t1")
     expect(screen.getByTestId("team-members-panel")).toHaveAttribute("data-session", "s1")
+  })
+
+  it("claims a rail slot for plans only when the session has one, and badges pending approvals", () => {
+    sessionPlans = []
+    const noPlan = panelById(collect(useSessionSurfacePanels, sessionInput()), "plan")
+    expect(noPlan.appliesTo(SESSION_RESOURCE)).toBe(false)
+    expect(noPlan.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+    expect(noPlan.getBadge?.(SESSION_RESOURCE)).toBe(0)
+
+    sessionPlans = [
+      { id: "p1", status: "awaiting_approval" },
+      { id: "p2", status: "completed" },
+    ]
+    const withPlans = panelById(collect(useSessionSurfacePanels, sessionInput()), "plan")
+    expect(withPlans.appliesTo(SESSION_RESOURCE)).toBe(true)
+    expect(withPlans.appliesTo(ARTIFACT_RESOURCE)).toBe(false)
+    // Only plans waiting on a decision count toward the badge.
+    expect(withPlans.getBadge?.(SESSION_RESOURCE)).toBe(1)
+    renderPanel(withPlans, SESSION_RESOURCE)
+    expect(screen.getByTestId("plan-panel")).toHaveAttribute("data-session", "s1")
   })
 
   it("keeps sidechat off an embedded resource workbench", () => {

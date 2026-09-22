@@ -501,10 +501,10 @@ describe("DockWorkspace", () => {
     render(<DockWorkspace activeSessionId="session-1" />)
 
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
-    expect(screen.getByTestId("editor-tabs")).toHaveAttribute("data-fixed", "review")
+    expect(screen.getByTestId("editor-tabs")).toHaveAttribute("data-fixed", "file,review")
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
     expect(screen.getByTestId("review-diff")).toBeInTheDocument()
-    expect(screen.queryByTestId("file-tree")).not.toBeInTheDocument()
+    expect(screen.getByTestId("file-tree")).not.toBeVisible()
   })
 
   it("keeps the review tab and engine toggle on the same toolbar row", () => {
@@ -590,7 +590,7 @@ describe("DockWorkspace", () => {
     render(<DockWorkspace activeSessionId="session-1" />)
 
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
-    expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-file-layout")).not.toBeVisible()
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
   })
 
@@ -613,7 +613,7 @@ describe("DockWorkspace", () => {
     gitState = { ...gitState, repoState: { isRepo: true }, rootDir: "/repo" }
     rerender(<DockWorkspace activeSessionId="session-1" />)
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
-    expect(screen.queryByTestId("workspace-file-layout")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-file-layout")).not.toBeVisible()
   })
 
   it("uses a single-column Changes/Diff review flow on mobile", async () => {
@@ -663,9 +663,15 @@ describe("DockWorkspace", () => {
 
     expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
 
+    const fileLayout = screen.getByTestId("workspace-file-layout")
+    const treeNode = screen.getByTestId("file-tree")
     fireEvent.click(screen.getByTestId("root-switcher"))
     fireEvent.click(screen.getByTestId("fixed-review"))
+    expect(fileLayout).toBeInTheDocument()
+    expect(fileLayout).not.toBeVisible()
     fireEvent.click(screen.getByTestId("select-file"))
+    expect(screen.getByTestId("file-tree")).toBe(treeNode)
+    expect(fileLayout).toBeVisible()
     fireEvent.click(screen.getByTestId("close-file"))
     fireEvent.click(screen.getByTestId("save-all"))
     expect(selectRoot).toHaveBeenCalledWith("/other")
@@ -788,7 +794,7 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("mock-code-server")).toBeInTheDocument()
     expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "false")
 
-    fireEvent.click(screen.getByTestId("mock-code-server"))
+    fireEvent.click(screen.getByTestId("fixed-file"))
 
     expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
     expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "true")

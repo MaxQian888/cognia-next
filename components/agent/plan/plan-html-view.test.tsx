@@ -159,16 +159,34 @@ describe("PlanHtmlView", () => {
     })
   })
 
-  it("regenerates the markdown body when steps were adjusted", () => {
+  it("rewrites the document's steps section in place when steps were adjusted", () => {
     const onSave = jest.fn()
-    render(<PlanHtmlView plan={plan({ metadata: { planText: "# Rich body" } })} onSave={onSave} />)
+    const planText = [
+      "# Rich body",
+      "",
+      "## Steps",
+      "",
+      "1. Research",
+      "2. Old",
+      "",
+      "## Risks",
+      "",
+      "keep me",
+    ].join("\n")
+    render(<PlanHtmlView plan={plan({ metadata: { planText } })} onSave={onSave} />)
     postFromFrame({
       type: PLAN_HTML_MSG.save,
       title: "Ship it",
       stepTitles: ["Research", "Ship"],
       stepsChanged: true,
     })
-    expect(onSave).toHaveBeenCalledWith({ title: "Ship it", planText: "- Research\n- Ship" })
+    // The prose body survives — only the steps list is rebuilt.
+    const patch = onSave.mock.calls[0][0] as { planText: string }
+    expect(patch.planText).toContain("# Rich body")
+    expect(patch.planText).toContain("keep me")
+    expect(patch.planText).toContain("1. Research")
+    expect(patch.planText).toContain("2. Ship")
+    expect(patch.planText).not.toContain("2. Old")
   })
 
   it("drops malformed or empty saves", () => {
