@@ -12,9 +12,10 @@ describe("resolvePetAvailability", () => {
     expect(resolvePetAvailability(base)).toEqual({ available: true })
   })
 
-  it("allows the enabled pet on the web", () => {
+  it("refuses the enabled pet on the web", () => {
     expect(resolvePetAvailability({ ...base, role: "web", platform: "web" })).toEqual({
-      available: true,
+      available: false,
+      reason: "unsupported-host",
     })
   })
 

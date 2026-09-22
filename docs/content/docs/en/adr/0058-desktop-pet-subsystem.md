@@ -30,7 +30,7 @@ The pet's Next.js route tree is shared across three Tauri webview roles, resolve
 | `overlay` | `"pet"` | `/pet-overlay` | Presentation only — the transparent, always-on-top, frameless sprite window (`components/pet/pet-overlay-view.tsx`) |
 | `popup` | `"pet-popup"` | `/pet-popup` | Presentation only — the right-click quick-menu + talk composer, a dedicated window (not a resize of the overlay, to avoid a resize/reposition race — see `src-tauri/src/pet_window/popup.rs`) |
 
-`components/pet/pet-mount.tsx` mounts the controller/event-bus/command-registration logic **only** in `main` (and the web/browser equivalent) — `overlay`/`popup` explicitly no-op, so XP is never double-awarded across windows. Cross-window state (visual state, bubbles, one-shots, user interactions) flows over a `BroadcastChannel` bridge (`lib/pet/events/cross-window-bridge.ts`).
+`components/pet/pet-mount.tsx` mounts the controller/event-bus/command-registration logic **only** in the Tauri `main` window (web and mobile are excluded by the shared availability gate) — `overlay`/`popup` explicitly no-op, so XP is never double-awarded across windows. Cross-window state (visual state, bubbles, one-shots, user interactions) flows over a `BroadcastChannel` bridge (`lib/pet/events/cross-window-bridge.ts`).
 
 ### Data flow
 

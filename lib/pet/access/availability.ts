@@ -17,10 +17,9 @@ import { getPetWindowRole, isSecondaryOverlayRole, type PetWindowRole } from "@/
 /**
  * Why the pet may not act here.
  *
- * - `unsupported-host`: the Capacitor mobile shell. The floating widget would
- *   dock to a viewport corner over page content with a 96px hit area, most
- *   visibly covering bottom-right action buttons. The whole subsystem is
- *   excluded there, mirroring the Perf HUD.
+ * - `unsupported-host`: web and Capacitor mobile. The pet belongs to the
+ *   native desktop shell; these hosts must not mount its widget or controller,
+ *   even when synced settings still have the pet enabled.
  * - `secondary-window`: a transparent least-privilege pet window (overlay or
  *   popup) or another secondary overlay. These render presentation only. The
  *   controller lives solely in the main window, or XP double-awards.
@@ -46,12 +45,12 @@ const AVAILABLE: PetAvailability = { available: true }
  * Pure availability decision.
  *
  * Structural reasons are reported before the setting: "you are in the overlay
- * window" and "you are on mobile" stay true no matter what the user toggles,
+ * window" and "this is not the desktop app" stay true no matter what the user toggles,
  * so surfacing them first gives a caller the reason it can actually act on
  * rather than one that would still be wrong after flipping the switch.
  */
 export function resolvePetAvailability(input: PetAvailabilityInput): PetAvailability {
-  if (input.platform === "mobile") return { available: false, reason: "unsupported-host" }
+  if (input.platform !== "tauri") return { available: false, reason: "unsupported-host" }
   if (isSecondaryOverlayRole(input.role)) return { available: false, reason: "secondary-window" }
   if (!input.enabled) return { available: false, reason: "disabled" }
   return AVAILABLE

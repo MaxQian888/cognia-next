@@ -78,7 +78,7 @@ beforeEach(() => {
   isTauri.mockReset()
   isTauri.mockReturnValue(false)
   usePlatform.mockReset()
-  usePlatform.mockReturnValue("web")
+  usePlatform.mockReturnValue("tauri")
   startMainPetBridge.mockReset()
   mainBridgeDispose.mockReset()
   startMainPetBridge.mockReturnValue(mainBridgeDispose)
@@ -387,4 +387,19 @@ describe("PetMount", () => {
     render(<PetMount />)
     expect(startMainPetBridge).not.toHaveBeenCalled()
   })
+})
+
+it("does not mount or initialize any pet runtime on web with saved enabled settings", () => {
+  settingsValue = ENABLED_SETTINGS
+  usePlatform.mockReturnValue("web")
+  getPetWindowRole.mockReturnValue("web")
+  const { container } = render(<PetMount />)
+  expect(container).toBeEmptyDOMElement()
+  expect(usePetEventBus).toHaveBeenCalledWith(false, undefined)
+  expect(ensurePetAccountId).not.toHaveBeenCalled()
+  expect(ensurePetProfile).not.toHaveBeenCalled()
+  expect(registerPetInteractionCommands).not.toHaveBeenCalled()
+  expect(registerPetWindowCommand).not.toHaveBeenCalled()
+  expect(startMainPetBridge).not.toHaveBeenCalled()
+  expect(openPetWindow).not.toHaveBeenCalled()
 })

@@ -265,11 +265,11 @@ describe("PetConsole", () => {
 })
 
 describe("hosts where the pet cannot run", () => {
-  it("explains itself on the mobile shell instead of spinning forever", () => {
+  it.each(["web", "mobile"])("explains itself on %s instead of spinning forever", (platform) => {
     // The surface contract lists /pet as a navigable route, and `PetMount`
     // refuses to initialize the profile on the Capacitor shell, so a phone
     // reaching this page used to wait at a spinner that never resolved.
-    mockUsePlatform.mockReturnValue("mobile")
+    mockUsePlatform.mockReturnValue(platform)
     mockUsePet.mockReturnValue(petResult(null))
     render(<PetConsole />)
     expect(screen.getByTestId("pet-console-unavailable")).toBeInTheDocument()

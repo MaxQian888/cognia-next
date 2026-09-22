@@ -90,7 +90,7 @@ export function PetMount() {
   // In-window requests to open the console. The popup's request already came
   // through the bridge below; this is the same destination for callers inside
   // the main window (the agent's pet_show, a command) that cannot hold the
-  // router themselves. Not gated on Tauri: the console exists on the web too.
+  // router themselves. The shared availability gate limits this to Tauri.
   useEffect(() => {
     if (!widgetEnabled) return
     return onPetConsoleRequest(({ tab }) => router.push(tab ? `/pet?tab=${tab}` : "/pet"))
