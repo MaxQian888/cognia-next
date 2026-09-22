@@ -8510,6 +8510,8 @@
       "expandTurn": "展开完整轮次",
       "loadOlder": "加载更早轮次",
       "loading": "正在加载聊天记录…",
+      "nextDetails": "后续消息",
+      "previousDetails": "之前的消息",
       "retry": "重试加载聊天记录"
     },
     "transcriptSelection": {
@@ -10414,6 +10416,9 @@
     },
     "panelError": "面板暂不可用",
     "panelErrorDescription": "此面板意外停止，其他工作内容未受影响。",
+    "planPanel": {
+      "title": "计划"
+    },
     "projectProposal": {
       "apply": "应用已接受项",
       "discard": "放弃",
@@ -14920,6 +14925,11 @@
       "quickStartDescription": "选择一个预设即可基于合理的默认值创建外部代理，之后可继续自定义。",
       "quickStartPreset": "快速预设",
       "quickStartTitle": "从预设快速创建",
+      "railGroupAttention": "需要处理",
+      "railGroupInactive": "未激活",
+      "railPickerLabel": "选择 Agent 或页面",
+      "railSearchEmpty": "没有匹配的 Agent",
+      "railSearchPlaceholder": "搜索 Agent…",
       "recommendedPreset": "推荐",
       "retryDelayMs": "重试间隔（毫秒）",
       "retryErrorPatterns": "重试错误模式（逗号或换行分隔）",
@@ -24009,7 +24019,7 @@
       },
       "title": "你的宠物",
       "unavailable": {
-        "unsupportedHost": "桌面宠物不在移动端运行。请在桌面端打开 Cognia 来照顾它。"
+        "unsupportedHost": "桌宠仅在 Cognia 桌面客户端可用。请打开桌面客户端来照顾它。"
       }
     },
     "customize": {
@@ -24410,6 +24420,7 @@
       "kind": {
         "agent_turn": "智能体轮次",
         "approval_gate": "人工审批点",
+        "editor_review": "编辑器评审",
         "mcp_tool_call": "MCP 工具调用",
         "sub_workflow": "子工作流",
         "teammate_dispatch": "委派给队友",
@@ -24423,6 +24434,44 @@
       "title": "编写计划",
       "titleLabel": "计划标题",
       "titlePlaceholder": "迁移认证模块"
+    },
+    "document": {
+      "activity": "动态",
+      "addStep": "添加步骤",
+      "currentPlan": "当前",
+      "deleteStep": "删除步骤",
+      "empty": "还没有步骤。",
+      "eventKind": {
+        "approved": "已批准",
+        "cancelled": "已取消",
+        "deferred": "已暂缓",
+        "exit": "已退出",
+        "paused": "已暂停",
+        "plan_created": "已创建",
+        "plan_updated": "已更新",
+        "refined": "已修订",
+        "rejected": "已拒绝",
+        "replanned": "已重新规划",
+        "resumed": "已恢复",
+        "step_completed": "步骤完成",
+        "step_failed": "步骤失败",
+        "step_started": "步骤开始"
+      },
+      "history": "计划历史",
+      "moveDown": "下移步骤",
+      "moveUp": "上移步骤",
+      "noPlans": "此会话还没有计划。",
+      "save": {
+        "edited": "已编辑",
+        "error": "保存失败",
+        "saved": "已保存",
+        "saving": "保存中…"
+      },
+      "stepN": "第 {index} 步",
+      "stepPlaceholder": "描述这一步…",
+      "stepsHeading": "步骤",
+      "titleLabel": "计划标题",
+      "toc": "章节"
     },
     "status": {
       "approved": "已批准",
@@ -26597,6 +26646,7 @@
       "localVsCodeFailed": "无法打开本机 VS Code：{error}",
       "openFileFailed": "无法在 VS Code 中打开文件：{error}",
       "openLocalVsCode": "用本机 VS Code 打开",
+      "openSuperseded": "工作区主机已更改或编辑器已停止，请重试以打开当前工作区。",
       "profileChanged": "另一个编辑器已更改此工作区的扩展配置。请重试以打开所选配置。",
       "profileLabel": "扩展配置",
       "profileManaged": "托管",
@@ -26651,6 +26701,7 @@
     "rootLabel": "项目根目录",
     "rootMain": "main（主仓库）",
     "saveAll": "全部保存（{count}）",
+    "saveContextChanged": "文件或工作区主机已更改，请重新打开文件后再保存。",
     "saveFailed": "保存失败：{error}",
     "search": "搜索",
     "searchEmpty": "无匹配",

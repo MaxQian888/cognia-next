@@ -8510,6 +8510,8 @@
       "expandTurn": "Expand full turn",
       "loadOlder": "Load older turns",
       "loading": "Loading transcript…",
+      "nextDetails": "Next messages",
+      "previousDetails": "Previous messages",
       "retry": "Retry transcript"
     },
     "transcriptSelection": {
@@ -10414,6 +10416,9 @@
     },
     "panelError": "Panel unavailable",
     "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
+    "planPanel": {
+      "title": "Plan"
+    },
     "projectProposal": {
       "apply": "Apply accepted",
       "discard": "Discard",
@@ -14920,6 +14925,11 @@
       "quickStartDescription": "Pick a preset to instantiate an external agent with sensible defaults. You can customize fields after.",
       "quickStartPreset": "Quick start preset",
       "quickStartTitle": "Quick start from preset",
+      "railGroupAttention": "Needs attention",
+      "railGroupInactive": "Inactive",
+      "railPickerLabel": "Select an agent or page",
+      "railSearchEmpty": "No agents match your search",
+      "railSearchPlaceholder": "Search agents…",
       "recommendedPreset": "Recommended",
       "retryDelayMs": "Retry Delay (ms)",
       "retryErrorPatterns": "Retry Error Patterns (comma/newline separated)",
@@ -24009,7 +24019,7 @@
       },
       "title": "Your Pet",
       "unavailable": {
-        "unsupportedHost": "The desktop pet does not run on mobile. Open Cognia on your desktop to look after it."
+        "unsupportedHost": "The pet is only available in the Cognia desktop app. Open the desktop app to look after it."
       }
     },
     "customize": {
@@ -24410,6 +24420,7 @@
       "kind": {
         "agent_turn": "Agent turn",
         "approval_gate": "Approval checkpoint",
+        "editor_review": "Editor review",
         "mcp_tool_call": "MCP tool call",
         "sub_workflow": "Sub-workflow",
         "teammate_dispatch": "Delegate to teammate",
@@ -24423,6 +24434,44 @@
       "title": "Write a plan",
       "titleLabel": "Plan title",
       "titlePlaceholder": "Migrate the auth module"
+    },
+    "document": {
+      "activity": "Activity",
+      "addStep": "Add step",
+      "currentPlan": "current",
+      "deleteStep": "Delete step",
+      "empty": "No steps yet.",
+      "eventKind": {
+        "approved": "approved",
+        "cancelled": "cancelled",
+        "deferred": "deferred",
+        "exit": "exited",
+        "paused": "paused",
+        "plan_created": "created",
+        "plan_updated": "updated",
+        "refined": "refined",
+        "rejected": "rejected",
+        "replanned": "replanned",
+        "resumed": "resumed",
+        "step_completed": "step done",
+        "step_failed": "step failed",
+        "step_started": "step started"
+      },
+      "history": "Plan history",
+      "moveDown": "Move step down",
+      "moveUp": "Move step up",
+      "noPlans": "No plan for this session.",
+      "save": {
+        "edited": "Edited",
+        "error": "Save failed",
+        "saved": "Saved",
+        "saving": "Saving…"
+      },
+      "stepN": "Step {index}",
+      "stepPlaceholder": "Describe this step…",
+      "stepsHeading": "Steps",
+      "titleLabel": "Plan title",
+      "toc": "Sections"
     },
     "status": {
       "approved": "Approved",
@@ -26597,6 +26646,7 @@
       "localVsCodeFailed": "Couldn't open your local VS Code: {error}",
       "openFileFailed": "Couldn't open the file in VS Code: {error}",
       "openLocalVsCode": "Open in VS Code",
+      "openSuperseded": "The workspace host changed or the editor was stopped. Retry to open the current workspace.",
       "profileChanged": "Another editor changed this workspace’s extension profile. Retry to open your selected profile.",
       "profileLabel": "Extension profile",
       "profileManaged": "Managed",
@@ -26651,6 +26701,7 @@
     "rootLabel": "Project root",
     "rootMain": "main (repository)",
     "saveAll": "Save All ({count})",
+    "saveContextChanged": "The file or workspace host changed. Reopen the file before saving.",
     "saveFailed": "Save failed: {error}",
     "search": "Search",
     "searchEmpty": "No matches",
