@@ -14,7 +14,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import React from "react"
-import { render, screen, within, act, fireEvent } from "@testing-library/react"
+import { render, screen, within, act, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ExternalAgentSettings } from "./external-agent-settings"
 import type { CreateExternalAgentInput, ExternalAgentConfig } from "@/types/agent/external-agent"
@@ -95,6 +95,14 @@ const removeAgentMock = jest.fn()
 const createConfigMock = jest.fn(async (_input: CreateExternalAgentInput) => "agent-new")
 const updateConfigMock = jest.fn(async () => {})
 const removeConfigMock = jest.fn(async () => {})
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
+}))
 jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
   CogniaModelPicker: ({ onChange }: { onChange: (binding: unknown) => void }) => (
     <button
@@ -271,6 +279,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     removeConfigMock.mockClear()
     connectMock.mockClear()
     disconnectMock.mockClear()
+    toastSuccess.mockClear()
+    toastError.mockClear()
     pickDirectoryMock.mockReset()
   })
 
@@ -1009,6 +1019,209 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // The AlertDialog confirmation surfaces (delete title from the messages).
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
   })
+
+  it("confirms the deletion and lands back on the overview", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    await act(async () => {
+      await user.click(within(detail).getByRole("button", { name: /delete/i }))
+    })
+    const dialog = await screen.findByRole("alertdialog")
+    await act(async () => {
+      await user.click(within(dialog).getByRole("button", { name: /^delete$/i }))
+    })
+    await waitFor(() => expect(removeConfigMock).toHaveBeenCalledWith("agent-1"))
+    // Deleting the agent under the detail pane must not leave a blank section.
+    expect(await screen.findByTestId("agent-overview-board")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-detail-agent-1")).not.toBeInTheDocument()
+  })
+
+  it("runs the readiness next action straight from an overview row", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    const board = screen.getByTestId("agent-overview-board")
+    // Blocked-at-startup agent: enabling it goes through the lifecycle service.
+    await act(async () => {
+      await user.click(within(board).getByTestId("overview-action-agent-4"))
+    })
+    await waitFor(() => expect(updateConfigMock).toHaveBeenCalledWith("agent-4", { enabled: true }))
+    // Off agent: connecting goes through the external-agent hook.
+    await act(async () => {
+      await user.click(within(board).getByTestId("overview-action-agent-1"))
+    })
+    await waitFor(() => expect(connectMock).toHaveBeenCalledWith("agent-1"))
+  })
+
+  it("routes the add-rule affordance to the delegation panel", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    // agent-3 is connected but has no routing rule → nextAction "add-rule".
+    const board = screen.getByTestId("agent-overview-board")
+    await act(async () => {
+      await user.click(within(board).getByTestId("overview-action-agent-3"))
+    })
+    // Board row action → straight to the delegation panel, seeded.
+    expect(screen.getAllByText(/delegation rules/i).length).toBeGreaterThan(1)
+    // The inspector's readiness strip offers the same affordance.
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-3"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-3")
+    await act(async () => {
+      await user.click(within(detail).getByTestId("inspector-next-action"))
+    })
+    expect(screen.getAllByText(/delegation rules/i).length).toBeGreaterThan(1)
+  })
+
+  it("routes a blocked agent's Inspect action to the editor", async () => {
+    const blocked = {
+      ...mockAgentManual,
+      id: "agent-b",
+      name: "Blocked Fixture",
+      validitySnapshot: { executable: false, blockingReason: "binary missing" },
+    } as unknown as ExternalAgentConfig
+    const original = externalStoreState.getAllAgents
+    externalStoreState.getAllAgents = () => [blocked]
+    try {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      const board = screen.getByTestId("agent-overview-board")
+      await act(async () => {
+        await user.click(within(board).getByTestId("overview-action-agent-b"))
+      })
+      // Inspect opens the editor in edit mode — the preset picker stays hidden.
+      const dialog = await screen.findByRole("dialog")
+      expect(within(dialog).getByText("Edit Agent")).toBeInTheDocument()
+      expect(within(dialog).queryByTestId("preset-picker")).not.toBeInTheDocument()
+    } finally {
+      externalStoreState.getAllAgents = original
+    }
+  })
+
+  it("surfaces a toast when connecting fails", async () => {
+    connectMock.mockRejectedValueOnce(new Error("handshake timed out"))
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-power-agent-1"))
+    })
+    await waitFor(() => expect(connectMock).toHaveBeenCalledWith("agent-1"))
+    // The failure surfaces as a sonner toast with the error's message.
+    expect(toastError).toHaveBeenCalledWith(
+      "Connection failed",
+      expect.objectContaining({ description: "handshake timed out" })
+    )
+  })
+
+  it("toasts instead of crashing on connect guard, disconnect, delete, and enable failures", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+
+    // Enable rejection through the readiness action (start on the overview,
+    // where the board rows live).
+    updateConfigMock.mockRejectedValueOnce(new Error("write conflict"))
+    const board = screen.getByTestId("agent-overview-board")
+    await act(async () => {
+      await user.click(within(board).getByTestId("overview-action-agent-4"))
+    })
+    await waitFor(() => expect(updateConfigMock).toHaveBeenCalled())
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+
+    // Connect guard: agent vanished between render and click.
+    getAgentMock.mockReturnValueOnce(undefined)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-power-agent-1"))
+    })
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Connection failed",
+        expect.objectContaining({ description: "Agent not found" })
+      )
+    )
+
+    // Disconnect rejection.
+    disconnectMock.mockRejectedValueOnce(new Error("pipe closed"))
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-power-agent-3"))
+    })
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Failed to disconnect"))
+
+    // Delete rejection.
+    removeConfigMock.mockRejectedValueOnce(new Error("store locked"))
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-1")
+    await act(async () => {
+      await user.click(within(detail).getByRole("button", { name: /delete/i }))
+    })
+    const dialog = await screen.findByRole("alertdialog")
+    await act(async () => {
+      await user.click(within(dialog).getByRole("button", { name: /^delete$/i }))
+    })
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+
+  it("opens the editor from the rail's New-agent row and the header button", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-new-agent"))
+    })
+    // The add-mode editor shows the preset picker.
+    expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+    await act(async () => {
+      await user.keyboard("{Escape}")
+    })
+    await act(async () => {
+      await user.click(screen.getByTestId("add-agent-button"))
+    })
+    expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+  })
+
+  it("offers the empty-board add action when no agents are configured", async () => {
+    const original = externalStoreState.getAllAgents
+    externalStoreState.getAllAgents = () => []
+    try {
+      const user = userEvent.setup()
+      render(<ExternalAgentSettings />)
+      await act(async () => {
+        await user.click(await screen.findByTestId("overview-add-agent"))
+      })
+      expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
+    } finally {
+      externalStoreState.getAllAgents = original
+    }
+  })
+
+  it("persists the global settings selects through the store setters", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-global-settings"))
+    })
+    const card = await screen.findByTestId("global-settings-card")
+    const selects = within(card).getAllByRole("combobox")
+    // Permission mode → plan; failure policy → strict.
+    await act(async () => {
+      await user.click(selects[0])
+    })
+    await act(async () => {
+      await user.click(await screen.findByRole("option", { name: /plan/i }))
+    })
+    expect(externalStoreState.setDefaultPermissionMode).toHaveBeenCalledWith("plan")
+    await act(async () => {
+      await user.click(selects[1])
+    })
+    await act(async () => {
+      await user.click(await screen.findByRole("option", { name: /strict/i }))
+    })
+    expect(externalStoreState.setChatFailurePolicy).toHaveBeenCalledWith("strict")
+  })
 })
 
 describe("ExternalAgentSettings — overview board", () => {
@@ -1066,6 +1279,17 @@ describe("ExternalAgentSettings — mandatory sandbox platform gate", () => {
   it("says nothing on a platform that can sandbox", () => {
     isTauriMock.mockReturnValue(true)
     platformMock.mockReturnValue("macos")
+    render(<ExternalAgentSettings />)
+    expect(screen.queryByTestId("external-agent-sandbox-unavailable")).not.toBeInTheDocument()
+  })
+
+  it("stays silent when the OS plugin itself is unavailable", () => {
+    // Older shells lack the os plugin — refusing here would banner users we
+    // know nothing about, so the gate fails open.
+    isTauriMock.mockReturnValue(true)
+    platformMock.mockImplementationOnce(() => {
+      throw new Error("plugin:os not registered")
+    })
     render(<ExternalAgentSettings />)
     expect(screen.queryByTestId("external-agent-sandbox-unavailable")).not.toBeInTheDocument()
   })

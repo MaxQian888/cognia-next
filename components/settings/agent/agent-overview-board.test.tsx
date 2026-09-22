@@ -104,6 +104,32 @@ describe("AgentOverviewBoard", () => {
     ).toBeInTheDocument()
   })
 
+  it("spins a connecting row and softens a transient block reason", () => {
+    renderBoard({
+      entries: [
+        {
+          agent: agent("a4", "Delta"),
+          readiness: readiness({ state: "connecting" }),
+        },
+        {
+          agent: agent("a5", "Epsilon"),
+          readiness: readiness({
+            state: "blocked",
+            blockReason: "runtime update in progress",
+            blockTransient: true,
+          }),
+        },
+      ],
+    })
+    const connectingRow = screen.getByTestId("overview-row-a4")
+    expect(connectingRow.querySelector(".animate-spin")).toBeInTheDocument()
+    // A transient reason is informational, not alarming — muted, not amber.
+    const reason = within(screen.getByTestId("overview-row-a5")).getByText(
+      "runtime update in progress"
+    )
+    expect(reason).toHaveClass("text-muted-foreground")
+  })
+
   it("renders the empty state with an add action when no agents exist", async () => {
     const user = userEvent.setup()
     const { onNewAgent } = renderBoard({ entries: [] })

@@ -64,7 +64,7 @@ export function AgentOverviewBoard({
   const percent = total > 0 ? Math.round((connectedCount / total) * 100) : 0
 
   return (
-    <div className="space-y-4" data-testid="agent-overview-board">
+    <div className="flex min-h-full flex-col gap-4" data-testid="agent-overview-board">
       {/* Fleet banner — collapsible. The collapsed one-liner keeps the
           connected/total count on screen without the card chrome, and the
           state persists in the store so a reload does not reopen it. */}
@@ -119,7 +119,7 @@ export function AgentOverviewBoard({
           </div>
         )
       ) : (
-        <Empty className="border" data-testid="overview-empty">
+        <Empty className="flex-1 border" data-testid="overview-empty">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <Plus className="h-4 w-4" />
@@ -139,75 +139,77 @@ export function AgentOverviewBoard({
       )}
 
       {/* One row per agent: name, pill, pipeline, block reason, next action. */}
-      <div className="divide-y rounded-lg border" data-testid="overview-rows">
-        {entries.map(({ agent, readiness }) => {
-          const presetId = isFromPreset(agent)
-          const action = readiness.nextAction
-          return (
-            <div
-              key={agent.id}
-              className="flex items-center gap-3 px-3 py-2.5"
-              data-testid={`overview-row-${agent.id}`}
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-auto min-w-0 flex-1 justify-start gap-3 whitespace-normal rounded-md px-1 py-1 text-left font-normal hover:bg-transparent"
-                onClick={() => onOpenAgent(agent.id)}
-                data-testid={`overview-open-${agent.id}`}
+      {entries.length > 0 ? (
+        <div className="divide-y rounded-lg border" data-testid="overview-rows">
+          {entries.map(({ agent, readiness }) => {
+            const presetId = isFromPreset(agent)
+            const action = readiness.nextAction
+            return (
+              <div
+                key={agent.id}
+                className="flex items-center gap-3 px-3 py-2.5"
+                data-testid={`overview-row-${agent.id}`}
               >
-                <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium">{agent.name}</span>
-                    <AgentStatePill readiness={readiness} />
-                  </span>
-                  <span className="mt-1 flex items-center gap-2">
-                    <AgentReadinessPipeline readiness={readiness} compact />
-                    {readiness.blockReason ? (
-                      <span
-                        className={cn(
-                          "truncate text-[11px]",
-                          readiness.blockTransient
-                            ? "text-muted-foreground"
-                            : "text-amber-600 dark:text-amber-400"
-                        )}
-                      >
-                        {readiness.blockReason}
-                      </span>
-                    ) : (
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {agent.protocol} · {agent.transport}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </Button>
-              {action ? (
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  data-testid={`overview-action-${agent.id}`}
-                  disabled={!enabled && (action === "connect" || action === "retry")}
-                  onClick={() => onAction(agent.id, action)}
+                  type="button"
+                  variant="ghost"
+                  className="h-auto min-w-0 flex-1 justify-start gap-3 whitespace-normal rounded-md px-1 py-1 text-left font-normal hover:bg-transparent"
+                  onClick={() => onOpenAgent(agent.id)}
+                  data-testid={`overview-open-${agent.id}`}
                 >
-                  {tReadiness(ACTION_LABEL_KEY[action])}
+                  <BrandIcon id={presetId ?? agent.name} label={agent.name} size={20} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{agent.name}</span>
+                      <AgentStatePill readiness={readiness} />
+                    </span>
+                    <span className="mt-1 flex items-center gap-2">
+                      <AgentReadinessPipeline readiness={readiness} compact />
+                      {readiness.blockReason ? (
+                        <span
+                          className={cn(
+                            "truncate text-[11px]",
+                            readiness.blockTransient
+                              ? "text-muted-foreground"
+                              : "text-amber-600 dark:text-amber-400"
+                          )}
+                        >
+                          {readiness.blockReason}
+                        </span>
+                      ) : (
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {agent.protocol} · {agent.transport}
+                        </span>
+                      )}
+                    </span>
+                  </span>
                 </Button>
-              ) : readiness.state === "connecting" ? (
-                <Loader2
-                  className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-                  aria-hidden
-                />
-              ) : (
-                <Badge variant="outline" className="shrink-0 font-normal">
-                  {tReadiness("states.ready")}
-                </Badge>
-              )}
-            </div>
-          )
-        })}
-      </div>
+                {action ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    data-testid={`overview-action-${agent.id}`}
+                    disabled={!enabled && (action === "connect" || action === "retry")}
+                    onClick={() => onAction(agent.id, action)}
+                  >
+                    {tReadiness(ACTION_LABEL_KEY[action])}
+                  </Button>
+                ) : readiness.state === "connecting" ? (
+                  <Loader2
+                    className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+                    aria-hidden
+                  />
+                ) : (
+                  <Badge variant="outline" className="shrink-0 font-normal">
+                    {tReadiness("states.ready")}
+                  </Badge>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }

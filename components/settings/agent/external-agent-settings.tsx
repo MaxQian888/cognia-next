@@ -1,16 +1,16 @@
 "use client"
 
 /**
- * ExternalAgentSettings — the rail + overview + inspector layout.
+ * ExternalAgentSettings — list/detail layout on `SettingsListDetail`.
  *
  * Landing view is the "All agents" board (fleet rollup + per-agent next
- * action) rather than the preset store. The left rail groups the pinned
- * overview, the configured agents (each carrying a mini readiness pipeline
- * and a quick-connect button), and the non-agent destinations (global
- * settings, delegation, quick start, runtimes, host). Selecting an agent
- * opens the inspector: header actions, the full readiness strip, and tabs
- * with inline editing for the common fields. The editor dialog remains the
- * deep editor for protocol-specific options.
+ * action) rather than the preset store. The left rail is a searchable,
+ * readiness-grouped list of agents — problems sort to the top — followed by
+ * the CONFIGURE destinations (global settings, delegation, quick start,
+ * runtimes, host). Selecting an agent opens the inspector in the bordered
+ * detail pane: header actions, the full readiness strip, and tabs with
+ * inline editing for the common fields. The editor dialog remains the deep
+ * editor for protocol-specific options.
  */
 
 import { useState, useCallback, useMemo } from "react"
@@ -54,6 +54,7 @@ import {
 import { useExternalAgentStore, selectDelegationRules } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
+import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 import { DeepSeekHarnessCard } from "./deepseek-harness-card"
 import { AgentEditorDialog } from "./agent-editor-dialog"
 import { PresetGalleryCard } from "./preset-gallery-card"
@@ -293,14 +294,15 @@ export function ExternalAgentSettings() {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
-      {/* Page header — title, the master enable switch, and the add action stay
-          pinned above the scrolling body so they are always reachable. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b pb-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <ExternalLink className="h-5 w-5 shrink-0" />
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold">{t("title")}</h2>
-            <p className="text-sm text-muted-foreground">{t("description")}</p>
+      {/* Section header — the same compact shape the other agent sections
+          use (small muted icon, tracking-tight title, one-line description);
+          the master switch and add action sit on the right. */}
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <ExternalLink aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 space-y-0.5">
+            <h2 className="text-base font-semibold tracking-tight">{t("title")}</h2>
+            <p className="text-xs text-pretty text-muted-foreground">{t("description")}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -343,8 +345,12 @@ export function ExternalAgentSettings() {
         </p>
       )}
 
-      <div className="min-h-0 flex-1 pt-3 @container/agents-pane">
-        <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-0.5 @3xl/agents-pane:flex-row @3xl/agents-pane:overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col pt-4 @container/agents-pane">
+        <SettingsListDetail
+          listWidth={280}
+          className="min-h-0 flex-1"
+          data-testid="agents-list-detail"
+        >
           <ExternalAgentRail
             agents={agents}
             readinessById={readinessById}
@@ -361,164 +367,180 @@ export function ExternalAgentSettings() {
             isConnecting={isConnecting}
           />
 
-          {/* Detail pane */}
-          <section className="min-w-0 flex-1 @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
-            {view.kind === "overview" && (
-              <AgentOverviewBoard
-                entries={agents.map((agent) => ({
-                  agent,
-                  readiness: readinessById.get(agent.id)!,
-                }))}
-                enabled={enabled}
-                bannerCollapsed={overviewBannerCollapsed}
-                onBannerCollapsedChange={setOverviewBannerCollapsed}
-                onOpenAgent={(id) => setView({ kind: "agent", id })}
-                onAction={(id, action) => void runReadinessAction(id, action)}
-                onNewAgent={() => {
-                  setEditingAgentId(null)
-                  setSelectedPresetForNew("")
-                  setEditorOpen(true)
-                }}
-              />
-            )}
+          {/* Detail pane — the agent inspector gets the bordered frame; the
+              card-based destinations carry their own chrome. */}
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            {view.kind === "agent" && selectedAgent ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-card">
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <AgentInspector
+                    key={selectedAgent.id}
+                    agent={selectedAgent}
+                    readiness={readinessById.get(selectedAgent.id)!}
+                    isConnecting={isConnecting(selectedAgent.id)}
+                    onConnect={() => handleConnect(selectedAgent.id)}
+                    onDisconnect={() => handleDisconnect(selectedAgent.id)}
+                    onEdit={() => handleEditAgent(selectedAgent.id)}
+                    onDelete={() => setDeleteConfirmId(selectedAgent.id)}
+                    onAddRule={() => {
+                      setDelegationSeed({ agentId: selectedAgent.id })
+                      setView({ kind: "delegation" })
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+                {view.kind === "overview" && (
+                  <AgentOverviewBoard
+                    entries={agents.map((agent) => ({
+                      agent,
+                      readiness: readinessById.get(agent.id)!,
+                    }))}
+                    enabled={enabled}
+                    bannerCollapsed={overviewBannerCollapsed}
+                    onBannerCollapsedChange={setOverviewBannerCollapsed}
+                    onOpenAgent={(id) => setView({ kind: "agent", id })}
+                    onAction={(id, action) => void runReadinessAction(id, action)}
+                    onNewAgent={() => {
+                      setEditingAgentId(null)
+                      setSelectedPresetForNew("")
+                      setEditorOpen(true)
+                    }}
+                  />
+                )}
 
-            {view.kind === "delegation" && (
-              <DelegationRulesSection disabled={!enabled} createForAgent={delegationSeed} />
-            )}
+                {view.kind === "delegation" && (
+                  <DelegationRulesSection disabled={!enabled} createForAgent={delegationSeed} />
+                )}
 
-            {/* The catalog, the version probe and the certification policy all
+                {/* The catalog, the version probe and the certification policy all
                 existed with no caller: a verdict was computed for nobody. This
                 is where they surface. */}
-            {view.kind === "runtimes" && <RuntimeGovernancePanel />}
+                {view.kind === "runtimes" && <RuntimeGovernancePanel />}
 
-            {view.kind === "host" && <HostExternalAgentConfigs />}
+                {view.kind === "host" && <HostExternalAgentConfigs />}
 
-            {view.kind === "gallery" && (
-              <div className="space-y-4">
-                <PresetGalleryCard
-                  disabled={!enabled}
-                  onPick={(presetId) => {
-                    setSelectedPresetForNew(presetId)
-                    setEditingAgentId(null)
-                    setEditorOpen(true)
-                  }}
-                />
-                {/* Managed DeepSeek Harness installation and certification. */}
-                <DeepSeekHarnessCard />
+                {view.kind === "gallery" && (
+                  <div className="space-y-4">
+                    <PresetGalleryCard
+                      disabled={!enabled}
+                      onPick={(presetId) => {
+                        setSelectedPresetForNew(presetId)
+                        setEditingAgentId(null)
+                        setEditorOpen(true)
+                      }}
+                    />
+                    {/* Managed DeepSeek Harness installation and certification. */}
+                    <DeepSeekHarnessCard />
+                  </div>
+                )}
+
+                {view.kind === "global" && (
+                  <Card data-testid="global-settings-card">
+                    <CardHeader>
+                      <CardTitle>{t("globalSettings")}</CardTitle>
+                      <CardDescription>{t("globalSettingsDesc")}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Auto Connect */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>{t("autoConnect")}</Label>
+                          <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
+                        </div>
+                        <Switch
+                          checked={autoConnectOnStartup}
+                          onCheckedChange={setAutoConnectOnStartup}
+                          disabled={!enabled}
+                        />
+                      </div>
+
+                      {/* Notifications */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>{t("showNotifications")}</Label>
+                          <p className="text-sm text-muted-foreground">
+                            {t("showNotificationsDesc")}
+                          </p>
+                        </div>
+                        <Switch
+                          checked={showConnectionNotifications}
+                          onCheckedChange={setShowConnectionNotifications}
+                          disabled={!enabled}
+                        />
+                      </div>
+
+                      <Separator />
+
+                      {/* Default Permission Mode */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>{t("defaultPermissionMode")}</Label>
+                          <p className="text-sm text-muted-foreground">
+                            {t("defaultPermissionModeDesc")}
+                          </p>
+                        </div>
+                        <Select
+                          value={defaultPermissionMode}
+                          onValueChange={(v) =>
+                            setDefaultPermissionMode(
+                              v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
+                            )
+                          }
+                          disabled={!enabled}
+                        >
+                          <SelectTrigger className="w-full sm:w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">{t("permissionDefault")}</SelectItem>
+                            <SelectItem value="acceptEdits">
+                              {t("permissionAcceptEdits")}
+                            </SelectItem>
+                            <SelectItem value="bypassPermissions">
+                              {t("permissionBypass")}
+                            </SelectItem>
+                            <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <Separator />
+
+                      {/* External Failure Policy */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>{t("chatFailurePolicy")}</Label>
+                          <p className="text-sm text-muted-foreground">
+                            {t("chatFailurePolicyDesc")}
+                          </p>
+                        </div>
+                        <Select
+                          value={chatFailurePolicy}
+                          onValueChange={(value) =>
+                            setChatFailurePolicy(value as "fallback" | "strict")
+                          }
+                          disabled={!enabled}
+                        >
+                          <SelectTrigger className="w-full sm:w-[220px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fallback">
+                              {t("chatFailurePolicyFallback")}
+                            </SelectItem>
+                            <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             )}
-
-            {view.kind === "agent" &&
-              (selectedAgent ? (
-                <AgentInspector
-                  key={selectedAgent.id}
-                  agent={selectedAgent}
-                  readiness={readinessById.get(selectedAgent.id)!}
-                  isConnecting={isConnecting(selectedAgent.id)}
-                  onConnect={() => handleConnect(selectedAgent.id)}
-                  onDisconnect={() => handleDisconnect(selectedAgent.id)}
-                  onEdit={() => handleEditAgent(selectedAgent.id)}
-                  onDelete={() => setDeleteConfirmId(selectedAgent.id)}
-                  onAddRule={() => {
-                    setDelegationSeed({ agentId: selectedAgent.id })
-                    setView({ kind: "delegation" })
-                  }}
-                />
-              ) : null)}
-
-            {view.kind === "global" && (
-              <Card data-testid="global-settings-card">
-                <CardHeader>
-                  <CardTitle>{t("globalSettings")}</CardTitle>
-                  <CardDescription>{t("globalSettingsDesc")}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Auto Connect */}
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>{t("autoConnect")}</Label>
-                      <p className="text-sm text-muted-foreground">{t("autoConnectDesc")}</p>
-                    </div>
-                    <Switch
-                      checked={autoConnectOnStartup}
-                      onCheckedChange={setAutoConnectOnStartup}
-                      disabled={!enabled}
-                    />
-                  </div>
-
-                  {/* Notifications */}
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>{t("showNotifications")}</Label>
-                      <p className="text-sm text-muted-foreground">{t("showNotificationsDesc")}</p>
-                    </div>
-                    <Switch
-                      checked={showConnectionNotifications}
-                      onCheckedChange={setShowConnectionNotifications}
-                      disabled={!enabled}
-                    />
-                  </div>
-
-                  <Separator />
-
-                  {/* Default Permission Mode */}
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>{t("defaultPermissionMode")}</Label>
-                      <p className="text-sm text-muted-foreground">
-                        {t("defaultPermissionModeDesc")}
-                      </p>
-                    </div>
-                    <Select
-                      value={defaultPermissionMode}
-                      onValueChange={(v) =>
-                        setDefaultPermissionMode(
-                          v as "default" | "acceptEdits" | "bypassPermissions" | "plan"
-                        )
-                      }
-                      disabled={!enabled}
-                    >
-                      <SelectTrigger className="w-full sm:w-[180px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="default">{t("permissionDefault")}</SelectItem>
-                        <SelectItem value="acceptEdits">{t("permissionAcceptEdits")}</SelectItem>
-                        <SelectItem value="bypassPermissions">{t("permissionBypass")}</SelectItem>
-                        <SelectItem value="plan">{t("permissionPlan")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <Separator />
-
-                  {/* External Failure Policy */}
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>{t("chatFailurePolicy")}</Label>
-                      <p className="text-sm text-muted-foreground">{t("chatFailurePolicyDesc")}</p>
-                    </div>
-                    <Select
-                      value={chatFailurePolicy}
-                      onValueChange={(value) =>
-                        setChatFailurePolicy(value as "fallback" | "strict")
-                      }
-                      disabled={!enabled}
-                    >
-                      <SelectTrigger className="w-full sm:w-[220px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="fallback">{t("chatFailurePolicyFallback")}</SelectItem>
-                        <SelectItem value="strict">{t("chatFailurePolicyStrict")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </section>
-        </div>
+        </SettingsListDetail>
       </div>
 
       {/* Agent Editor Dialog */}
