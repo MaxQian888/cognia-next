@@ -13,6 +13,8 @@ export function createIncrementalMarkdownBlockParser(
 ): MarkdownBlockParser {
   let previousText: string | null = null
   let previousBlocks: string[] = []
+  let preservesSource = false
+  let stableLength = 0
 
   return (markdown) => {
     if (markdown === previousText) return previousBlocks
@@ -22,22 +24,26 @@ export function createIncrementalMarkdownBlockParser(
       previousText !== null &&
       previousBlocks.length > 0 &&
       markdown.startsWith(previousText) &&
-      previousBlocks.join("") === previousText
+      preservesSource
 
     if (canReuse) {
       const stableBlocks = previousBlocks.slice(0, -1)
-      let stableLength = 0
-      for (const block of stableBlocks) stableLength += block.length
-      blocks = [...stableBlocks, ...parseMarkdownIntoBlocks(markdown.slice(stableLength))]
-      if (blocks.join("") !== markdown) {
+      const tail = markdown.slice(stableLength)
+      const tailBlocks = parseMarkdownIntoBlocks(tail)
+      preservesSource = tailBlocks.join("") === tail
+      blocks = [...stableBlocks, ...tailBlocks]
+      if (!preservesSource) {
         blocks = parseMarkdownIntoBlocks(markdown)
+        preservesSource = blocks.join("") === markdown
       }
     } else {
       blocks = parseMarkdownIntoBlocks(markdown)
+      preservesSource = blocks.join("") === markdown
     }
 
     previousText = markdown
     previousBlocks = blocks
+    stableLength = markdown.length - (blocks.at(-1)?.length ?? 0)
     return blocks
   }
 }

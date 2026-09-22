@@ -11,6 +11,44 @@ const msg = (id: string, parts: unknown[]): UIMessage =>
   ({ id, role: "assistant", parts }) as unknown as UIMessage
 
 describe("virtualization-threshold (ADR-0127 §3)", () => {
+  it("does not inspect any part once the row-count trigger fires", () => {
+    const parts = jest.fn(() => [])
+    const messages = Array.from({ length: 2000 }, (_, i) => ({
+      id: `m${i}`,
+      role: "assistant",
+      get parts() {
+        return parts()
+      },
+    })) as UIMessage[]
+    expect(shouldVirtualizeMessages(messages)).toBe(true)
+    expect(parts).not.toHaveBeenCalled()
+  })
+
+  it("stops inspecting a heavy short transcript after crossing the text limit", () => {
+    const output = jest.fn(() => "unused")
+    const heavy = [
+      msg("long", [
+        { type: "text", text: "x".repeat(VIRTUALIZE_TEXT_BYTES_THRESHOLD + 1) },
+        {
+          type: "tool-Bash",
+          get output() {
+            return output()
+          },
+        },
+      ]),
+    ]
+    expect(shouldVirtualizeMessages(heavy)).toBe(true)
+    expect(output).not.toHaveBeenCalled()
+  })
+
+  it("includes nested commentary text and re-evaluates replacements and clipping", () => {
+    const heavy = msg("m", [
+      { type: "data-commentary", data: { text: "x".repeat(VIRTUALIZE_TEXT_BYTES_THRESHOLD + 1) } },
+    ])
+    expect(shouldVirtualizeMessages([heavy])).toBe(true)
+    expect(shouldVirtualizeMessages([msg("m", [{ type: "text", text: "short" }])])).toBe(false)
+    expect(shouldVirtualizeMessages([])).toBe(false)
+  })
   it("keeps the historical count trigger", () => {
     expect(VIRTUALIZE_THRESHOLD).toBe(40)
     expect(shouldVirtualize({ rowCount: 40, textLength: 0 })).toBe(false)

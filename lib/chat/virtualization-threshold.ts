@@ -37,17 +37,29 @@ interface MessageLike {
  * input/output only when they are already strings — no JSON.stringify of
  * arbitrary payloads on the render path.
  */
-export function transcriptTextLength(messages: ReadonlyArray<MessageLike>): number {
+export function transcriptTextLength(
+  messages: ReadonlyArray<MessageLike>,
+  stopAfter = Number.POSITIVE_INFINITY
+): number {
   let total = 0
   for (const message of messages) {
     const parts = message.parts
     if (!parts) continue
     for (const part of parts) {
       if (!part || typeof part !== "object") continue
-      const p = part as { text?: unknown; output?: unknown; input?: unknown }
+      const p = part as {
+        type?: unknown
+        text?: unknown
+        output?: unknown
+        input?: unknown
+        data?: { text?: unknown }
+      }
       if (typeof p.text === "string") total += p.text.length
       if (typeof p.output === "string") total += p.output.length
       if (typeof p.input === "string") total += p.input.length
+      if (p.type === "data-commentary" && typeof p.data?.text === "string")
+        total += p.data.text.length
+      if (total > stopAfter) return total
     }
   }
   return total
@@ -70,8 +82,11 @@ export function shouldVirtualizeMessages(
   messages: ReadonlyArray<UIMessage>,
   extraRows = 0
 ): boolean {
+  // Most long agent histories already exceed the count limit. Never walk all
+  // their tool/text parts just to rediscover that on each streaming frame.
+  if (messages.length + extraRows > VIRTUALIZE_THRESHOLD) return true
   return shouldVirtualize({
     rowCount: messages.length + extraRows,
-    textLength: transcriptTextLength(messages),
+    textLength: transcriptTextLength(messages, VIRTUALIZE_TEXT_BYTES_THRESHOLD),
   })
 }

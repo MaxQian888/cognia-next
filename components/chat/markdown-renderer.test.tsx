@@ -125,7 +125,7 @@ jest.mock("@/lib/tauri/opener", () => ({
   openExternal: jest.fn(async () => undefined),
 }))
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -133,10 +133,42 @@ import os from "node:os"
 import path from "node:path"
 import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
+import { clearAllLinkMatchers, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
 
 const mockOpenExternal = openExternal as jest.Mock
 
 describe("MarkdownRenderer", () => {
+  afterEach(() => act(() => clearAllLinkMatchers()))
+
+  it("updates finalized links on plugin registration with message metadata", () => {
+    const renderer = jest.fn(({ href, children, messageId, isStreaming }) => (
+      <a href={href} data-message-id={messageId} data-streaming={String(isStreaming)}>
+        {children}
+      </a>
+    ))
+    const { container } = render(
+      <MarkdownRenderer content="[Review](https://example.com/pr/1)" messageId="final-message" />
+    )
+    act(() => {
+      registerLinkMatcher("final-test", {
+        id: "reference",
+        patterns: ["example.com/**"],
+        component: renderer,
+      })
+    })
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "data-message-id",
+      "final-message"
+    )
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("data-streaming", "false")
+    expect(container.querySelector("p div")).toBeNull()
+    expect(renderer.mock.calls.every(([props]) => props.href === "https://example.com/pr/1")).toBe(
+      true
+    )
+    act(() => clearAllLinkMatchers())
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("target", "_blank")
+  })
+
   // ── basic text ──────────────────────────────────────────────────────────────
 
   it("renders plain text content", () => {

@@ -49,12 +49,14 @@ import {
   StreamingTextPart,
   blockRendersCode,
   mathScaleClass,
+  createStreamingComponents,
 } from "./streaming-text-part"
 import {
   selectStreamdownPlugins,
   streamdownPlugins,
 } from "@/components/ai-elements/streamdown-plugins"
 import { MESSAGE_MATH_FONT_SCALES, type MessageMarkdownOptions } from "@/types/appearance"
+import { clearAllLinkMatchers, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
 
 const MARKDOWN_DEFAULTS: MessageMarkdownOptions = {
   math: true,
@@ -68,6 +70,81 @@ const MARKDOWN_DEFAULTS: MessageMarkdownOptions = {
 }
 
 describe("StreamingTextPart", () => {
+  it("refreshes link metadata when only the message identity changes", () => {
+    const { rerender } = render(<StreamingTextPart text="same" messageId="first" isStreaming />)
+    const first = mockMessageResponse.mock.calls.at(-1)?.[0].components
+    rerender(<StreamingTextPart text="same" messageId="second" isStreaming />)
+    const second = mockMessageResponse.mock.calls.at(-1)?.[0].components
+    expect(second).not.toBe(first)
+    registerLinkMatcher("identity-test", {
+      id: "reference",
+      patterns: ["example.com/**"],
+      component: ({ href, messageId, children }) => (
+        <a href={href} data-message-id={messageId}>
+          {children}
+        </a>
+      ),
+    })
+    const Anchor = second.a as React.ComponentType<{ href: string; children: ReactNode }>
+    render(<Anchor href="https://example.com/pr/1">Review</Anchor>)
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "data-message-id",
+      "second"
+    )
+  })
+
+  it("keeps reasoning links on the host renderer when plugins are opted out", () => {
+    const component = jest.fn(() => <span>plugin</span>)
+    registerLinkMatcher("reasoning-test", {
+      id: "reference",
+      patterns: ["example.com/**"],
+      component,
+    })
+    const Anchor = createStreamingComponents(undefined, true, undefined, false)
+      .a as React.ComponentType<{ href: string; children: ReactNode }>
+    render(<Anchor href="https://example.com/pr/1">Review</Anchor>)
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("target", "_blank")
+    expect(component).not.toHaveBeenCalled()
+  })
+
+  afterEach(() => act(() => clearAllLinkMatchers()))
+
+  it("updates the streaming anchor after registration and forwards message metadata", () => {
+    render(
+      <StreamingTextPart
+        text="[Review](https://example.com/pr/1)"
+        messageId="stream-message"
+        isStreaming
+      />
+    )
+    const Anchor = mockMessageResponse.mock.calls.at(-1)?.[0].components.a as React.ComponentType<{
+      href: string
+      children: ReactNode
+    }>
+    render(
+      <p>
+        <Anchor href="https://example.com/pr/1">Review</Anchor>
+      </p>
+    )
+    act(() => {
+      registerLinkMatcher("stream-test", {
+        id: "reference",
+        patterns: ["example.com/**"],
+        component: ({ href, children, messageId, isStreaming }) => (
+          <a href={href} data-message-id={messageId} data-streaming={String(isStreaming)}>
+            {children}
+          </a>
+        ),
+      })
+    })
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "data-message-id",
+      "stream-message"
+    )
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("data-streaming", "true")
+    expect(screen.getByRole("link", { name: "Review" }).parentElement?.tagName).toBe("SPAN")
+  })
+
   beforeEach(() => {
     flowMotion.reduce = false
     flowMotion.durationScale = 1
@@ -390,7 +467,8 @@ describe("markdown knobs (ADR-0127)", () => {
       expect(css).toContain(`.${className} .katex-display {`)
       expect(css).toContain(`.${className} .katex {`)
     }
-    expect(css).toContain(".chat-math-left .katex-display {")
+    expect(css).toContain(".chat-math-left .katex-display,")
+    expect(css).toContain(".chat-math-left .katex-display > .katex {")
   })
 
   it("defaults to the full plugin set with line numbers and no wrap when no knobs are given", () => {

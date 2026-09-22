@@ -44,6 +44,20 @@ function text(value: string): StoredMessage["parts"][number] {
 }
 
 describe("transcript projection", () => {
+  it("keeps clipped previews expandable and preserves Unicode boundaries", () => {
+    const content = "a".repeat(24 * 1024 - 3) + "😀tail"
+    const messages = [
+      message("u1", "user", [text("question")]),
+      message("a2", "assistant", [text(content)]),
+    ]
+    const [turn] = projectTranscriptTimeline({ sessionId: "session-1", revision: 1, messages })
+    expect(turn.kind).toBe("completed-turn")
+    if (turn.kind !== "completed-turn") throw new Error("Expected completed turn")
+    expect(turn.finalResponse?.text).toBe("a".repeat(24 * 1024 - 3))
+    expect(turn.finalResponse?.truncated).toBe(true)
+    expect(turn.collapsed.exists).toBe(true)
+    expect(messages[1].parts).toEqual([text(content)])
+  })
   it("publishes the negotiated paging and preview budgets", () => {
     expect({
       timelineDefault: TRANSCRIPT_TIMELINE_PAGE_DEFAULT,

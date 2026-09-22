@@ -143,3 +143,18 @@ describe("StructuredToolPart", () => {
     expect(screen.getByTestId("structured-tool-part").textContent).toContain("Provided Label")
   })
 })
+
+it("honors controlled disclosure and keeps its row mounted", () => {
+  const onToggle = jest.fn()
+  const tool = part("tool-Unknown")
+  const { getByTestId, rerender } = render(
+    <StructuredToolPart part={tool} expanded={false} onToggle={onToggle} />
+  )
+  const toggle = getByTestId("structured-tool-part-toggle")
+  fireEvent.click(toggle)
+  expect(onToggle).toHaveBeenCalledTimes(1)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  rerender(<StructuredToolPart part={tool} expanded onToggle={onToggle} />)
+  expect(getByTestId("structured-tool-part-toggle")).toBe(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+})

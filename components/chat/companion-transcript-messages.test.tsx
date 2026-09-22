@@ -6,6 +6,8 @@ import {
   selectActiveTurnMessages,
 } from "./companion-transcript-messages"
 
+const mockPageTurn = jest.fn()
+
 const surfaceProps: Array<Record<string, unknown>> = []
 
 jest.mock("./transcript-timeline-surface", () => ({
@@ -24,6 +26,7 @@ jest.mock("@/hooks/chat/use-transcript-controller", () => ({
     snapshot: {
       items: [],
       expandedTurnKeys: new Set(),
+      loadingTurnKeys: new Set(["turn:u1"]),
       hasMore: false,
       loading: false,
       loadingOlder: false,
@@ -31,6 +34,7 @@ jest.mock("@/hooks/chat/use-transcript-controller", () => ({
     },
     getDetail: jest.fn(),
     expandTurn: jest.fn(),
+    pageTurn: mockPageTurn,
     collapseTurn: jest.fn(),
     loadOlder: jest.fn(),
     retry: jest.fn(),
@@ -103,6 +107,9 @@ describe("<CompanionTranscriptMessages />", () => {
     )
 
     expect(screen.getByTestId("timeline-surface")).toBeInTheDocument()
+    ;(surfaceProps[0].onPageTurn as (key: string, direction: string) => void)("turn:u1", "next")
+    expect(mockPageTurn).toHaveBeenCalledWith("turn:u1", "next")
+    expect(surfaceProps[0].loadingTurnKeys).toEqual(new Set(["turn:u1"]))
     expect((surfaceProps[0]?.liveMessages as UIMessage[]).map((message) => message.id)).toEqual([
       "u2",
       "a2",

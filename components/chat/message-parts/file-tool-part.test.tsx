@@ -287,3 +287,18 @@ describe("FileToolBody", () => {
     expect(screen.getByTestId("generic-tool-body")).toBeTruthy()
   })
 })
+
+it("honors controlled disclosure and keeps its row mounted", () => {
+  const onToggle = jest.fn()
+  const tool = part("tool-Read")
+  const { getByTestId, rerender } = render(
+    <FileToolPart part={tool} expanded={false} onToggle={onToggle} />
+  )
+  const toggle = getByTestId("file-tool-part-toggle")
+  fireEvent.click(toggle)
+  expect(onToggle).toHaveBeenCalledTimes(1)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  rerender(<FileToolPart part={tool} expanded onToggle={onToggle} />)
+  expect(getByTestId("file-tool-part-toggle")).toBe(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+})

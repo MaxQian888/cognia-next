@@ -56,6 +56,19 @@ jest.mock("@/components/ai-elements/message", () => ({
     ReactForMocks.createElement("span", { "data-test": "message-response" }, children),
 }))
 
+jest.mock("./streaming-text-part", () => ({
+  ...jest.requireActual("./streaming-text-part"),
+  StreamingTextPart: ({ text, messageId }: { text: string; messageId?: string }) =>
+    ReactForMocks.createElement(
+      "span",
+      {
+        "data-test": "message-response",
+        "data-message-id": messageId,
+      },
+      text
+    ),
+}))
+
 jest.mock("@/components/ai-elements/reasoning", () => ({
   Reasoning: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", { "data-test": "reasoning" }, children),
@@ -329,6 +342,7 @@ jest.mock("@cognia/logging", () => {
 // Agent-flow display mode + grouping (covered in depth by their own suites;
 // here we only assert MessageRenderer's dispatch wiring).
 let mockFlowMode = "standard"
+let mockToolsVisibility = "auto"
 let mockActions: "hover" | "core" | "all" = "all"
 // Mutable so a test can move a markdown knob off its default; every other
 // field stays at the resolved default the presets ship.
@@ -362,7 +376,7 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
     actions: mockActions,
     agentFlowMode: mockFlowMode,
     reasoning: "auto",
-    tools: "auto",
+    tools: mockToolsVisibility,
     sources: "collapsed",
     richControls: "hover",
     motion: "off",
@@ -380,21 +394,23 @@ jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => ({ reduce: true }),
 }))
 // Stands in for the real group's chrome but keeps its contract: every child is
-// rendered through the caller's `renderChild`, in both open-state styles. That
+// rendered through the caller's `renderChild` with controlled open state. That
 // is what makes a grouped tool go through `renderToolPart` (and pick up its
 // per-call plugin action slot) exactly like a standalone one.
 jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
   ToolActivityGroup: ({
     entries,
     mode,
+    defaultOpen,
     renderChild,
   }: {
-    entries: Array<{ part: { type: string }; key: string }>
+    entries: Array<{ part: { type: string }; key: string; defaultOpen?: boolean }>
     mode: string
+    defaultOpen?: boolean
     renderChild: (
       part: { type: string },
       key: string,
-      opts: { forceOpen?: boolean; expanded?: boolean; onToggle?: () => void }
+      opts: { expanded?: boolean; onToggle?: () => void }
     ) => ReactForMocks.ReactNode
   }) =>
     ReactForMocks.createElement(
@@ -403,21 +419,23 @@ jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
         "data-test": "activity-group",
         "data-mode": mode,
         "data-count": entries.length,
+        "data-open": String(defaultOpen),
       },
       entries.map((e) =>
-        renderChild(
-          e.part,
-          e.key,
-          mode === "simplified"
-            ? { expanded: false, onToggle: () => {} }
-            : { forceOpen: mode === "detailed" ? true : undefined }
-        )
+        renderChild(e.part, e.key, {
+          expanded: e.defaultOpen ?? mode === "detailed",
+          onToggle: () => {},
+        })
       )
     ),
 }))
 jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
-  ToolCallRow: ({ part }: { part: { type: string } }) =>
-    ReactForMocks.createElement("div", { "data-test": "tool-call-row", "data-type": part.type }),
+  ToolCallRow: ({ part, expanded }: { part: { type: string }; expanded?: boolean }) =>
+    ReactForMocks.createElement("div", {
+      "data-test": "tool-call-row",
+      "data-type": part.type,
+      "data-expanded": String(expanded),
+    }),
 }))
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -591,6 +609,10 @@ describe("text parts", () => {
     expect(document.querySelector("[data-test='markdown']")).toBeNull()
     expect(document.querySelector("[data-test='message-response']")).toBeTruthy()
     expect(screen.getByText("Hello")).toBeInTheDocument()
+    expect(document.querySelector("[data-test='message-response']")).toHaveAttribute(
+      "data-message-id",
+      assistantMsg().id
+    )
   })
 })
 
@@ -701,6 +723,11 @@ describe("reasoning parts", () => {
       mode: "streaming",
       rehypePlugins: ["shared-rehype"],
     })
+    const link = mockReasoningRow.mock.calls.at(-1)?.[0].streamdownProps.components.a({
+      href: "https://example.com/reasoning",
+      children: "Reasoning link",
+    })
+    expect(link.props.allowPlugins).toBe(false)
   })
 
   it("gives reasoning bodies the same math classes as the answer body", () => {
@@ -1904,6 +1931,22 @@ describe("agent-flow grouping + mode", () => {
     expect(document.querySelector("[data-testid='structured-tool-part']")).toBeNull()
   })
 
+  it("forwards expanded visibility to simplified groups and their children", () => {
+    mockFlowMode = "simplified"
+    mockToolsVisibility = "expanded"
+    try {
+      render(<MessageRenderer message={toolMsg("expanded-group", "tool-Read", "tool-Grep")} />)
+      expect(
+        document.querySelector("[data-test='activity-group']")?.getAttribute("data-open")
+      ).toBe("true")
+      for (const row of document.querySelectorAll("[data-test='tool-call-row']")) {
+        expect(row.getAttribute("data-expanded")).toBe("true")
+      }
+    } finally {
+      mockToolsVisibility = "auto"
+    }
+  })
+
   it("forwards the active mode to the activity group", () => {
     mockFlowMode = "detailed"
     render(<MessageRenderer message={toolMsg("g4", "tool-A", "tool-B", "tool-C")} />)
@@ -1960,13 +2003,8 @@ describe("agent-flow grouping + mode", () => {
 
 // ── display-mode reactivity (standard ⇄ detailed) ─────────────────────────────
 //
-// standard and detailed differ ONLY in the `defaultOpen`/`forceOpen` handed to
-// each tool card's (and reasoning block's) uncontrolled Collapsible, which is
-// read once at mount. So flipping the header switch on an already-rendered
-// transcript changed the prop but never re-opened/re-collapsed a mounted card —
-// the "standard and detailed look identical" bug. The renderer folds the mode
-// into the KEY of just the mode-sensitive parts so a mode switch remounts them
-// and re-applies the per-mode default, while leaving prose untouched.
+// Standalone rows still seed their state from defaultOpen and remount by mode.
+// Groups keep their DOM and update controlled per-call defaults instead.
 describe("display-mode reactivity (standard ⇄ detailed)", () => {
   afterEach(() => {
     mockFlowMode = "standard"
@@ -2016,7 +2054,7 @@ describe("display-mode reactivity (standard ⇄ detailed)", () => {
     expect(second).not.toBe(first)
   })
 
-  it("remounts the activity group when the mode switches standard → detailed", () => {
+  it("preserves the activity group when the mode switches standard → detailed", () => {
     mockFlowMode = "standard"
     const msg = {
       id: "grp-remount",
@@ -2034,7 +2072,7 @@ describe("display-mode reactivity (standard ⇄ detailed)", () => {
     rerender(<MessageRenderer message={msg} {...forceRender()} />)
     const second = document.querySelector("[data-test='activity-group']")
     expect(second?.getAttribute("data-mode")).toBe("detailed")
-    expect(second).not.toBe(first)
+    expect(second).toBe(first)
   })
 
   it("remounts a reasoning block when the mode switches standard → detailed", () => {

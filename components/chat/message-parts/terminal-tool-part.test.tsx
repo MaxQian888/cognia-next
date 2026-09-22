@@ -316,3 +316,18 @@ describe("TerminalToolPart", () => {
     expect(screen.queryByTestId("terminal-tool-part-run-in-dock")).toBeNull()
   })
 })
+
+it("honors controlled disclosure and keeps its row mounted", () => {
+  const onToggle = jest.fn()
+  const tool = bashPart("output-available")
+  const { getByTestId, rerender } = render(
+    <TerminalToolPart part={tool} expanded={false} onToggle={onToggle} />
+  )
+  const toggle = getByTestId("terminal-tool-part-toggle")
+  fireEvent.click(toggle)
+  expect(onToggle).toHaveBeenCalledTimes(1)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  rerender(<TerminalToolPart part={tool} expanded onToggle={onToggle} />)
+  expect(getByTestId("terminal-tool-part-toggle")).toBe(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+})

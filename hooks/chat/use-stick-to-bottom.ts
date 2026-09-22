@@ -31,7 +31,7 @@
  * hook only has to be the single answer to "who moved the scroll position".
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject, type MouseEvent } from "react"
 
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 
@@ -72,8 +72,10 @@ export interface StickToBottom {
   atBottom: boolean
   /** `onScroll` handler for the viewport. Stable identity. */
   handleScroll: () => void
+  /** Read a disclosure in place; reaching the physical foot re-arms following. */
+  handleContentClick: (event: MouseEvent<HTMLElement>) => void
   /**
-   * Pin now, honouring the enabled/active/at-bottom gate. For callers that
+   * Pin now, honouring the enabled/at-bottom gate. For callers that
    * change the transcript's geometry outside a render (re-measuring a
    * virtualizer, handing the live tail back to the virtual list). Must be
    * called from a layout effect to stay in the same frame as the change.
@@ -150,8 +152,25 @@ export function useStickToBottom({
     const el = scrollRef.current
     if (!el) return
     const next = el.scrollHeight - el.scrollTop - el.clientHeight < thresholdPx
+    // A resize observer may fire before React commits this state update.
+    // User intent must win immediately, including within the same event.
+    gateRef.current = { ...gateRef.current, atBottom: next }
     setAtBottom((prev) => (prev === next ? prev : next))
   }, [scrollRef, thresholdPx])
+
+  const handleContentClick = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const disclosure = target.closest(
+        "button[aria-expanded]:not([aria-haspopup]), [data-scroll-disclosure]"
+      )
+      if (!disclosure || !contentRef.current?.contains(disclosure)) return
+      gateRef.current = { ...gateRef.current, atBottom: false }
+      setAtBottom(false)
+    },
+    [contentRef]
+  )
 
   // Transcript commits. A layout effect, NOT `useEffect`: the whole point is
   // that the correction lands in the frame that painted the growth.
@@ -170,7 +189,9 @@ export function useStickToBottom({
     if (!content) return
     const observer = new ResizeObserver(() => {
       const gate = gateRef.current
-      if (!gate.enabled || !gate.active || !gate.atBottom) return
+      // Late image/diagram layout also lands after a turn has completed.
+      // Disclosures explicitly disarm following via handleContentClick.
+      if (!gate.enabled || !gate.atBottom) return
       pin()
     })
     observer.observe(content)
@@ -194,5 +215,5 @@ export function useStickToBottom({
     return () => observer.disconnect()
   }, [scrollRef, pin])
 
-  return { atBottom, handleScroll, pinNow, resetToBottom }
+  return { atBottom, handleScroll, handleContentClick, pinNow, resetToBottom }
 }

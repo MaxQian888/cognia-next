@@ -23,6 +23,14 @@ export class TranscriptDetailCache<T> {
     } = {}
   ) {}
 
+  get softByteLimit(): number {
+    return this.budget.softBytes ?? TRANSCRIPT_DETAIL_CACHE_SOFT_BYTES
+  }
+
+  get hardByteLimit(): number {
+    return Math.max(this.softByteLimit, this.budget.hardBytes ?? TRANSCRIPT_DETAIL_CACHE_HARD_BYTES)
+  }
+
   get(key: string): T | undefined {
     const entry = this.entries.get(key)
     if (!entry) return undefined
@@ -30,7 +38,17 @@ export class TranscriptDetailCache<T> {
     return entry.value
   }
 
-  set(key: string, value: T, bytes: number, sessionId = key.split(":", 1)[0] ?? ""): void {
+  has(key: string): boolean {
+    return this.entries.has(key)
+  }
+
+  set(
+    key: string,
+    value: T,
+    bytes: number,
+    sessionId = key.split(":", 1)[0] ?? "",
+    pinned = false
+  ): void {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
       throw new Error("transcript detail cache bytes must be a non-negative safe integer")
     }
@@ -40,7 +58,8 @@ export class TranscriptDetailCache<T> {
       value,
       bytes,
       sessionId,
-      pinned: previous?.pinned ?? false,
+      // Pin before eviction: an expanded turn can exceed the soft budget.
+      pinned: pinned || (previous?.pinned ?? false),
       touchedAt: this.clock++,
     }
     this.entries.set(key, entry)
@@ -91,11 +110,8 @@ export class TranscriptDetailCache<T> {
   }
 
   private evict(): void {
-    const softBytes = this.budget.softBytes ?? TRANSCRIPT_DETAIL_CACHE_SOFT_BYTES
-    const hardBytes = Math.max(
-      softBytes,
-      this.budget.hardBytes ?? TRANSCRIPT_DETAIL_CACHE_HARD_BYTES
-    )
+    const softBytes = this.softByteLimit
+    const hardBytes = this.hardByteLimit
 
     while (this.totalBytes > softBytes) {
       const candidate = this.oldest((entry) => !entry.pinned)

@@ -50,6 +50,278 @@ function page(overrides: Partial<SessionTimelinePage> = {}): SessionTimelinePage
 }
 
 describe("TranscriptController", () => {
+  it("bounds a 20,000-message turn and navigates every window without losing history", async () => {
+    const turnMessages = jest.fn(async ({ cursor }: { cursor?: string }) => {
+      const start = Number(cursor ?? 0)
+      return {
+        messages: Array.from({ length: 50 }, (_, offset) => ({
+          id: `m${start + offset}`,
+          sessionId: "s1",
+          role: "assistant" as const,
+          parts: [{ type: "text" as const, text: `message ${start + offset}` }],
+          createdAt: start + offset,
+        })),
+        revision: 1,
+        detailRevision: 1,
+        total: 20000,
+        approximateBytes: 1000,
+        hasMore: start + 50 < 20000,
+        nextCursor: start + 50 < 20000 ? String(start + 50) : undefined,
+      }
+    })
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => null,
+      timeline: jest.fn(),
+      turnMessages,
+    })
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(turnMessages).toHaveBeenCalledTimes(4)
+    expect(controller.getDetail("turn:u1")?.hasPrevious).toBeUndefined()
+    const ids: string[] = []
+    for (;;) {
+      const detail = controller.getDetail("turn:u1")!
+      expect(detail.messages).toHaveLength(200)
+      ids.push(...detail.messages.map((message) => message.id))
+      if (!detail.hasMore) break
+      await controller.pageTurn("turn:u1", "next")
+    }
+    expect(ids).toEqual(Array.from({ length: 20000 }, (_, index) => `m${index}`))
+    expect(turnMessages).toHaveBeenCalledTimes(400)
+    await controller.pageTurn("turn:u1", "next")
+    expect(turnMessages).toHaveBeenCalledTimes(400)
+    await controller.pageTurn("turn:u1", "previous")
+    expect(controller.getDetail("turn:u1")?.messages[0].id).toBe("m19600")
+    await controller.pageTurn("turn:u1", "next")
+    expect(controller.getDetail("turn:u1")?.messages[0].id).toBe("m19800")
+    expect(controller.getSnapshot().loadingTurnKeys.size).toBe(0)
+  })
+
+  it("retains the readable window on paging failure and clears loading after failed refresh", async () => {
+    const pending = deferred<SessionTurnMessagesPage>()
+    const detail = {
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      total: 2,
+      approximateBytes: 10,
+      hasMore: true,
+      nextCursor: "next",
+    }
+    const turnMessages = jest
+      .fn()
+      .mockResolvedValueOnce(detail)
+      .mockImplementation(() => pending.promise)
+    const controller = new TranscriptController(
+      "s1",
+      {
+        capabilities: async () => transcriptCapabilitiesV1(),
+        timeline: jest.fn().mockRejectedValue(new Error("offline")),
+        turnMessages,
+      },
+      { softBytes: 10, hardBytes: 20 }
+    )
+    await controller.expandTurn("turn:u1", 1, 1)
+    const navigation = controller.pageTurn("turn:u1", "next")
+    expect(controller.getSnapshot().loadingTurnKeys.has("turn:u1")).toBe(true)
+    expect(controller.getDetail("turn:u1")).toEqual(detail)
+    await controller.pageTurn("turn:u1", "next")
+    expect(turnMessages).toHaveBeenCalledTimes(2)
+    await controller.loadInitial()
+    expect(controller.getSnapshot().loadingTurnKeys.size).toBe(0)
+    pending.reject(new Error("late failure"))
+    await navigation
+    expect(controller.getDetail("turn:u1")).toEqual(detail)
+    expect(controller.getSnapshot().error).toEqual(new Error("offline"))
+  })
+
+  it("requests only the remaining capacity when host pages vary in size", async () => {
+    const turnMessages = jest.fn(async ({ cursor, limit }: { cursor?: string; limit?: number }) => {
+      const start = Number(cursor ?? 0)
+      const count = Math.min(limit ?? 200, 75, 250 - start)
+      return {
+        messages: Array.from({ length: count }, (_, offset) => ({
+          id: `m${start + offset}`,
+          sessionId: "s1",
+          role: "assistant" as const,
+          parts: [],
+          createdAt: start + offset,
+        })),
+        revision: 1,
+        detailRevision: 1,
+        total: 250,
+        approximateBytes: count,
+        hasMore: start + count < 250,
+        nextCursor: String(start + count),
+      }
+    })
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => null,
+      timeline: jest.fn(),
+      turnMessages,
+    })
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(controller.getDetail("turn:u1")?.messages).toHaveLength(200)
+    expect(turnMessages.mock.calls.map(([request]) => request.limit)).toEqual([200, 125, 50])
+    await controller.pageTurn("turn:u1", "next")
+    expect(controller.getDetail("turn:u1")?.messages).toHaveLength(50)
+    expect(controller.getDetail("turn:u1")?.messages[0].id).toBe("m200")
+  })
+
+  it("keeps a new expansion visible when a concurrent timeline refresh fails", async () => {
+    const timeline = deferred<SessionTimelinePage>()
+    const detail = deferred<SessionTurnMessagesPage>()
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => transcriptCapabilitiesV1(),
+      timeline: () => timeline.promise,
+      turnMessages: () => detail.promise,
+    })
+    const refresh = controller.loadInitial()
+    const expansion = controller.expandTurn("turn:u1", 1, 1)
+    await flushRequests()
+    timeline.reject(new Error("offline"))
+    await refresh
+    expect(controller.getSnapshot().expandedTurnKeys.has("turn:u1")).toBe(true)
+    expect(controller.getSnapshot().loadingTurnKeys.has("turn:u1")).toBe(true)
+    detail.resolve({
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      total: 0,
+      approximateBytes: 0,
+      hasMore: false,
+    })
+    await expansion
+    expect(controller.getSnapshot().expandedTurnKeys.has("turn:u1")).toBe(true)
+    expect(controller.getDetail("turn:u1")).toBeDefined()
+    expect(controller.getSnapshot().loadingTurnKeys.size).toBe(0)
+  })
+
+  it("starts a new window before exceeding the hard byte limit", async () => {
+    const turnMessages = jest.fn(async ({ cursor }: { cursor?: string }) => ({
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      total: 0,
+      approximateBytes: cursor ? 9 : 6,
+      hasMore: !cursor,
+      nextCursor: cursor ? undefined : "next",
+    }))
+    const controller = new TranscriptController(
+      "s1",
+      {
+        capabilities: async () => null,
+        timeline: jest.fn(),
+        turnMessages,
+      },
+      { softBytes: 10, hardBytes: 12 }
+    )
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(controller.getDetail("turn:u1")).toMatchObject({ approximateBytes: 6, hasMore: true })
+    await controller.pageTurn("turn:u1", "next")
+    expect(controller.getDetail("turn:u1")).toMatchObject({
+      approximateBytes: 9,
+      hasMore: false,
+      hasPrevious: true,
+    })
+    await controller.pageTurn("turn:u1", "previous")
+    expect(controller.getDetail("turn:u1")).toMatchObject({ approximateBytes: 6, hasMore: true })
+    await controller.pageTurn("turn:u1", "previous")
+    expect(turnMessages).toHaveBeenCalledTimes(5)
+  })
+
+  it.each([-1, NaN, Infinity])("rejects invalid page byte sizes (%s)", async (approximateBytes) => {
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => null,
+      timeline: jest.fn(),
+      turnMessages: async () => ({
+        messages: [],
+        revision: 1,
+        detailRevision: 1,
+        total: 0,
+        approximateBytes,
+        hasMore: false,
+      }),
+    })
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(controller.getDetail("turn:u1")).toBeUndefined()
+    expect(controller.getSnapshot().expandedTurnKeys.size).toBe(0)
+    expect(controller.getSnapshot().loadingTurnKeys.size).toBe(0)
+    expect(controller.getSnapshot().error).toBeInstanceOf(Error)
+  })
+
+  it("publishes a new snapshot when asynchronously loaded detail becomes readable", async () => {
+    const pending = deferred<SessionTurnMessagesPage>()
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => null,
+      timeline: jest.fn(),
+      turnMessages: () => pending.promise,
+    })
+    const loading = controller.expandTurn("turn:u1", 1, 1)
+    const before = controller.getSnapshot()
+    pending.resolve({
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      approximateBytes: 0,
+      total: 0,
+      hasMore: false,
+    })
+    await loading
+    expect(controller.getDetail("turn:u1")).toBeDefined()
+    expect(controller.getSnapshot()).not.toBe(before)
+  })
+
+  it("stops paginating a collapsed turn and can immediately reopen it", async () => {
+    const pending = deferred<SessionTurnMessagesPage>()
+    const finished = {
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      approximateBytes: 0,
+      total: 0,
+      hasMore: false,
+    }
+    const turnMessages = jest
+      .fn()
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValue(finished)
+    const controller = new TranscriptController("s1", {
+      capabilities: async () => null,
+      timeline: jest.fn(),
+      turnMessages,
+    })
+    const first = controller.expandTurn("turn:u1", 1, 1)
+    controller.collapseTurn("turn:u1")
+    const reopened = controller.expandTurn("turn:u1", 1, 1)
+    pending.resolve({ ...finished, hasMore: true, nextCursor: "obsolete" })
+    await Promise.all([first, reopened])
+    expect(turnMessages).toHaveBeenCalledTimes(2)
+    expect(turnMessages.mock.calls.every(([request]) => !request.cursor)).toBe(true)
+    expect(controller.getDetail("turn:u1")).toEqual(finished)
+  })
+
+  it("keeps an expanded detail between the soft and hard byte budgets readable", async () => {
+    const detail = {
+      messages: [],
+      revision: 1,
+      detailRevision: 1,
+      approximateBytes: 15,
+      total: 0,
+      hasMore: false,
+    }
+    const controller = new TranscriptController(
+      "s1",
+      {
+        capabilities: async () => null,
+        timeline: jest.fn(),
+        turnMessages: async () => detail,
+      },
+      { softBytes: 10, hardBytes: 20 }
+    )
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(controller.getDetail("turn:u1")).toEqual(detail)
+  })
+
   it("bounds revision-burst transfer volume with a fixed 30-row payload", async () => {
     const samples: { requests: number; bytes: number; revision: number | null }[] = []
     for (let sample = 0; sample < 11; sample++) {
@@ -299,6 +571,7 @@ describe("TranscriptController", () => {
       turnKey: "turn:u1",
       revision: 1,
       detailRevision: 1,
+      limit: 199,
       cursor: "second",
     })
     expect(controller.getDetail("turn:u1")).toMatchObject({
@@ -508,7 +781,7 @@ describe("TranscriptController", () => {
     expect(controller.getSnapshot().items.map((item) => item.itemKey)).toEqual(["old", "new"])
   })
 
-  it("uses cached details on re-expansion and stops pinning a collapsed pending detail", async () => {
+  it("discards collapsed pending details and uses a completed cache on subsequent re-expansion", async () => {
     const pending = deferred<SessionTurnMessagesPage>()
     const detail = {
       messages: [],
@@ -518,7 +791,10 @@ describe("TranscriptController", () => {
       total: 0,
       hasMore: false,
     }
-    const turnMessages = jest.fn().mockImplementationOnce(() => pending.promise)
+    const turnMessages = jest
+      .fn()
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValue(detail)
     const controller = new TranscriptController("s1", {
       capabilities: async () => transcriptCapabilitiesV1(),
       timeline: jest.fn(),
@@ -529,8 +805,11 @@ describe("TranscriptController", () => {
     pending.resolve(detail)
     await expansion
     expect(controller.getSnapshot().expandedTurnKeys.size).toBe(0)
+    expect(controller.getDetail("turn:u1")).toBeUndefined()
     await controller.expandTurn("turn:u1", 1, 1)
-    expect(turnMessages).toHaveBeenCalledTimes(1)
+    controller.collapseTurn("turn:u1")
+    await controller.expandTurn("turn:u1", 1, 1)
+    expect(turnMessages).toHaveBeenCalledTimes(2)
     expect(controller.getDetail("turn:u1")).toEqual(detail)
   })
 
@@ -699,7 +978,7 @@ describe("TranscriptController", () => {
     })
   })
 
-  it("keeps expanded state while an evicted detail is fetched again", async () => {
+  it("reports an oversized host page instead of leaving an expanded turn loading forever", async () => {
     const details: SessionTurnMessagesPage = {
       messages: [],
       revision: 1,
@@ -719,7 +998,8 @@ describe("TranscriptController", () => {
     })
 
     await controller.expandTurn("turn:u1", 1, 1)
-    expect(controller.getSnapshot().expandedTurnKeys.has("turn:u1")).toBe(true)
+    expect(controller.getSnapshot().expandedTurnKeys.has("turn:u1")).toBe(false)
+    expect(controller.getSnapshot().error).toMatchObject({ code: "TRANSCRIPT_DETAIL_TOO_LARGE" })
     expect(controller.getDetail("turn:u1")).toBeUndefined()
 
     await controller.expandTurn("turn:u1", 1, 1)

@@ -155,10 +155,10 @@ describe("useStickToBottom", () => {
     expect(box.writes).toEqual([])
   })
 
-  it("stops pinning once the reader scrolls away from the foot", () => {
+  it.each([true, false])("stops pinning after scrolling up (active=%s)", (active) => {
     const box = makeScrollBox()
     const content = document.createElement("div")
-    const { result } = setup(box, content)
+    const { result } = setup(box, content, { active })
     box.writes.length = 0
 
     // 1000 - 100 - 200 = 700 from the foot.
@@ -171,6 +171,40 @@ describe("useStickToBottom", () => {
 
     box.setHeight(1600)
     act(() => {
+      observers.fire(content)
+    })
+    expect(box.writes).toEqual([])
+  })
+
+  it("resumes following when collapse leaves the reader at the physical foot", () => {
+    const box = makeScrollBox(1600)
+    const content = document.createElement("div")
+    const button = document.createElement("button")
+    button.setAttribute("aria-expanded", "true")
+    content.append(button)
+    const { result } = setup(box, content)
+    act(() => result.current.handleContentClick({ target: button } as never))
+    expect(result.current.atBottom).toBe(false)
+    box.setHeight(600)
+    // A browser clamps the viewport to the shortened content's foot and emits scroll.
+    box.el.scrollTop = 400
+    act(() => result.current.handleScroll())
+    expect(result.current.atBottom).toBe(true)
+    box.writes.length = 0
+    box.setHeight(800)
+    act(() => observers.fire(content))
+    expect(box.writes).toEqual([800])
+  })
+
+  it("honours a user scroll before React commits the state update", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const { result } = setup(box, content)
+    box.el.scrollTop = 100
+    box.writes.length = 0
+    act(() => {
+      result.current.handleScroll()
+      box.setHeight(1600)
       observers.fire(content)
     })
     expect(box.writes).toEqual([])
@@ -207,15 +241,41 @@ describe("useStickToBottom", () => {
     expect(box.writes).toEqual([])
 
     box.setHeight(1500)
-    // The content observer stays gated on `active`; the viewport one does not.
+    // Late content growth follows the reader at the foot even after completion.
     act(() => {
       observers.fire(content)
     })
-    expect(box.writes).toEqual([])
+    expect(box.writes).toEqual([1500])
     act(() => {
       observers.fire(box.el)
     })
     expect(box.writes).toEqual([1500])
+  })
+
+  it("keeps a disclosure in place and does not disable following for menu buttons", () => {
+    const box = makeScrollBox()
+    const content = document.createElement("div")
+    const button = document.createElement("button")
+    button.setAttribute("aria-expanded", "false")
+    content.append(button)
+    const { result } = setup(box, content)
+    box.writes.length = 0
+    act(() => {
+      result.current.handleContentClick({ target: button } as React.MouseEvent<HTMLElement>)
+      box.setHeight(1800)
+      observers.fire(content)
+    })
+    expect(box.writes).toEqual([])
+    expect(result.current.atBottom).toBe(false)
+    act(() => result.current.resetToBottom())
+    button.setAttribute("aria-haspopup", "menu")
+    box.writes.length = 0
+    act(() => {
+      result.current.handleContentClick({ target: button } as React.MouseEvent<HTMLElement>)
+      box.setHeight(2200)
+      observers.fire(content)
+    })
+    expect(box.writes).toEqual([2200])
   })
 
   it("resetToBottom re-arms following even after the reader scrolled away", () => {

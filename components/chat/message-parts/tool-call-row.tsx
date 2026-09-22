@@ -10,10 +10,10 @@
  * an A2UI surface must stay interactive.
  *
  * Supports both controlled (`expanded` + `onToggle`, driven by the activity
- * group's expand-all/collapse-all in simplified mode) and uncontrolled use. In
- * the uncontrolled case `defaultOpen` seeds the initial state — the activity
- * group's standard/detailed path remounts its children with a fresh key to
- * apply it, the same convention the `<Tool>` cards use.
+ * group's expand-all/collapse-all in every mode) and uncontrolled use. In
+ * the uncontrolled case `defaultOpen` follows display-mode changes until the
+ * user toggles the row. Activity groups control rows in every mode without
+ * remounting their content.
  */
 
 import { memo, useMemo, useState } from "react"
@@ -81,7 +81,7 @@ export interface ToolCallRowProps {
   /** Controlled open state; omit for uncontrolled (internal) toggling. */
   expanded?: boolean
   onToggle?: () => void
-  /** Seeds the uncontrolled open state at mount (read once, like `defaultOpen`). */
+  /** Default for an untouched row; manual toggles override later changes. */
   defaultOpen?: boolean
   /** Owning chat session — threaded to the detail body's structured cards. */
   sessionId?: string
@@ -95,9 +95,9 @@ export const ToolCallRow = memo(function ToolCallRow({
   sessionId,
 }: ToolCallRowProps) {
   const t = useTranslations("chat.agentFlow")
-  const [internalOpen, setInternalOpen] = useState(defaultOpen ?? false)
+  const [internalOpen, setInternalOpen] = useState<boolean | null>(null)
   const controlled = expanded !== undefined
-  const open = controlled ? expanded : internalOpen
+  const open = controlled ? expanded : (internalOpen ?? defaultOpen ?? false)
 
   // Both summarizers scan the tool input/output (describeToolResult splits the
   // full output into lines); memoize on the part identity — which the chat
@@ -117,7 +117,7 @@ export const ToolCallRow = memo(function ToolCallRow({
 
   const handleToggle = () => {
     if (controlled) onToggle?.()
-    else setInternalOpen((v) => !v)
+    else setInternalOpen(!open)
   }
 
   return (
@@ -150,7 +150,15 @@ export const ToolCallRow = memo(function ToolCallRow({
           ) : running ? (
             <RunningProgressChip lines={running.lines} />
           ) : null}
-          <span className="sr-only">{statusLabel}</span>
+          <span
+            className={
+              part.state === "approval-requested" || part.state === "output-denied"
+                ? "shrink-0 text-[11px] text-amber-600"
+                : "sr-only"
+            }
+          >
+            {statusLabel}
+          </span>
         </>
       }
     >

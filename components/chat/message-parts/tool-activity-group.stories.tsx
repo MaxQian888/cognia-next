@@ -59,9 +59,7 @@ const renderChild = (p: ToolUIPart, key: string, opts: ToolActivityChildOptions)
   >
     <span className="size-1.5 shrink-0 rounded-full bg-green-600 dark:bg-green-500" aria-hidden />
     <span className="min-w-0 flex-1 truncate font-mono text-xs">{p.type}</span>
-    {opts.expanded || opts.forceOpen ? (
-      <span className="text-xs text-muted-foreground">— open</span>
-    ) : null}
+    {opts.expanded ? <span className="text-xs text-muted-foreground">— open</span> : null}
   </button>
 )
 
@@ -80,7 +78,7 @@ export const Simplified: Story = {
   args: { mode: "simplified" },
 }
 
-// Standard — expanded by default; children get forceOpen + a remount key.
+// Standard — expanded by default; children receive controlled disclosure state.
 export const Standard: Story = {
   args: { mode: "standard" },
 }

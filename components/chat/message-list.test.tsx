@@ -30,7 +30,11 @@ jest.mock("./thinking-indicator", () => ({
 // Mock it to render every item so message-level assertions work in tests.
 // We also capture the call args so the streaming-row measure-skip assertions
 // below can verify the `estimateSize` projection is wired up.
-const useVirtualizerCalls: Array<{ count: number; estimateSize: (i: number) => number }> = []
+const useVirtualizerCalls: Array<{
+  count: number
+  estimateSize: (i: number) => number
+  getItemKey: (i: number) => string
+}> = []
 const measureSpy = jest.fn()
 const scrollToIndexSpy = jest.fn()
 const messageRendererProps: Array<Record<string, unknown>> = []
@@ -73,13 +77,15 @@ jest.mock("@tanstack/react-virtual", () => ({
     estimateSize,
     getScrollElement,
     measureElement,
+    getItemKey,
   }: {
     count: number
     estimateSize: (i: number) => number
     getScrollElement: () => Element | null
     measureElement: (el: Element | undefined) => number
+    getItemKey: (i: number) => string
   }) => {
-    useVirtualizerCalls.push({ count, estimateSize })
+    useVirtualizerCalls.push({ count, estimateSize, getItemKey })
     virtualizerMock.count = count
     virtualizerMock.options.count = count
     // The real virtualizer calls these; a mock that only stores them would
@@ -302,6 +308,28 @@ beforeEach(() => {
 })
 
 describe("MessageList", () => {
+  it("retains message measurement keys after history is clipped or prepended", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const messages = Array.from({ length: 50 }, (_, i) => userMsg(`m${i}`, `question ${i}`))
+    const { rerender } = render(
+      <Wrapper>
+        <MessageList paneSessionId="pane" messages={messages} status="idle" />
+      </Wrapper>
+    )
+    const key = useVirtualizerCalls.at(-1)!.getItemKey(1)
+    rerender(
+      <Wrapper>
+        <MessageList paneSessionId="pane" messages={messages.slice(1)} status="idle" />
+      </Wrapper>
+    )
+    expect(useVirtualizerCalls.at(-1)!.getItemKey(0)).toBe(key)
+    rerender(
+      <Wrapper>
+        <MessageList paneSessionId="other" messages={messages.slice(1)} status="idle" />
+      </Wrapper>
+    )
+    expect(useVirtualizerCalls.at(-1)!.getItemKey(0)).not.toBe(key)
+  })
   it("renders messages from the input prop", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
@@ -408,7 +436,7 @@ describe("MessageList", () => {
     expect(document.querySelector(`[data-test="msg-hk1"]`)).toBeNull()
   })
 
-  it("renders a short list in document flow (no virtualized [data-index] rows)", () => {
+  it("renders a short list in document flow (no measured rows)", () => {
     const Wrapper = withAdapter(makeAdapter())
     const msgs = manyMsgs(10) // 10 <= threshold → flow path
     const { container } = render(
@@ -419,8 +447,8 @@ describe("MessageList", () => {
     for (let i = 0; i < 10; i++) {
       expect(document.querySelector(`[data-test="msg-vm-${i}"]`)).toBeTruthy()
     }
-    // Flow path attaches no measureElement ref → no [data-index] wrappers.
-    expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+    // Flow rows carry the -1 sentinel, with no measureElement ref.
+    expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(0)
   })
 
   it("renders a long list via the virtualizer ([data-index] rows present)", () => {
@@ -432,7 +460,7 @@ describe("MessageList", () => {
       </Wrapper>
     )
     // The mock virtualizer emits one [data-index] row per message.
-    expect(container.querySelectorAll("[data-index]")).toHaveLength(count)
+    expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(count)
     expect(document.querySelector(`[data-test="msg-vm-0"]`)).toBeTruthy()
     expect(document.querySelector(`[data-test="msg-vm-${count - 1}"]`)).toBeTruthy()
   })
@@ -447,7 +475,7 @@ describe("MessageList", () => {
         <MessageList messages={heavy} status="idle" />
       </Wrapper>
     )
-    expect(container.querySelectorAll("[data-index]")).toHaveLength(3)
+    expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(3)
   })
 
   it("keeps a short, light list on the document-flow path (no virtual rows)", () => {
@@ -457,7 +485,7 @@ describe("MessageList", () => {
         <MessageList messages={manyMsgs(5)} status="idle" />
       </Wrapper>
     )
-    expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+    expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(0)
     expect(document.querySelector(`[data-test="msg-vm-4"]`)).toBeTruthy()
   })
 
@@ -664,16 +692,22 @@ describe("MessageList", () => {
       )
       // Only settled messages are windowed — the live tail is a real DOM row
       // below the virtual container, not row `count` inside it.
-      expect(container.querySelectorAll("[data-index]")).toHaveLength(fillers.length)
+      expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(
+        fillers.length
+      )
       expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
 
       const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
       expect(tail).toBeInTheDocument()
-      expect(tail.textContent).toContain("partial")
+      expect(
+        container.querySelector('[data-slot="conversation-live-message"]')?.textContent
+      ).toContain("partial")
       expect(tail.textContent).toContain("Claude is working…")
       // The tail row is still anchorable, so a search hit on the streaming
       // reply resolves through the DOM path.
-      expect(tail.querySelector('[data-msg-id="a1"]')).toBeInTheDocument()
+      expect(
+        container.querySelector('[data-slot="conversation-live-message"][data-msg-id="a1"]')
+      ).toBeInTheDocument()
     })
 
     it("hands the row back to the virtual list when the turn seals", () => {
@@ -697,6 +731,49 @@ describe("MessageList", () => {
       expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length + 1)
       const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
       expect(tail.textContent).toBe("")
+    })
+
+    it("preserves a live message node and focus when it becomes a measured row", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      const messages = [...manyMsgs(VIRTUALIZE_THRESHOLD), assistantStreaming("a1", "partial")]
+      const { container, rerender } = render(
+        <Wrapper>
+          <MessageList messages={messages} status="streaming" />
+        </Wrapper>
+      )
+      const body = container.querySelector('[data-test="msg-a1"]') as HTMLElement
+      body.tabIndex = 0
+      body.focus()
+      rerender(
+        <Wrapper>
+          <MessageList messages={messages} status="idle" />
+        </Wrapper>
+      )
+      expect(container.querySelector('[data-test="msg-a1"]')).toBe(body)
+      expect(document.activeElement).toBe(body)
+    })
+
+    it("preserves message state when crossing the virtualization threshold in either direction", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      const messages = manyMsgs(VIRTUALIZE_THRESHOLD)
+      const { container, rerender } = render(
+        <Wrapper>
+          <MessageList messages={messages} status="idle" />
+        </Wrapper>
+      )
+      const row = container.querySelector("[data-msg-id]")!
+      rerender(
+        <Wrapper>
+          <MessageList messages={[...messages, userMsg("new", "next")]} status="idle" />
+        </Wrapper>
+      )
+      expect(container.querySelector("[data-msg-id]")).toBe(row)
+      rerender(
+        <Wrapper>
+          <MessageList messages={messages} status="idle" />
+        </Wrapper>
+      )
+      expect(container.querySelector("[data-msg-id]")).toBe(row)
     })
 
     it("does not blanket-remeasure every row when the turn seals", () => {
@@ -734,9 +811,9 @@ describe("MessageList", () => {
           />
         </Wrapper>
       )
-      // Flow path → no [data-index]; the streaming text still renders in place
+      // Flow path → no measured rows; the streaming text still renders in place
       // (only the virtualized branch lifts it into the tail region).
-      expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+      expect(container.querySelectorAll('[data-index]:not([data-index="-1"])')).toHaveLength(0)
       expect(document.querySelector(`[data-test="msg-a1"]`)?.textContent).toContain("partial")
       const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
       expect(tail.textContent).toContain("Claude is working…")
@@ -1231,7 +1308,7 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     expect(scroll.scrollTop).toBe(0)
   })
 
-  it("does not follow on resize when idle (no active turn)", () => {
+  it("follows late content layout while idle when parked at the foot", () => {
     useSettingsStore.setState({ settings: {} as never })
     const Wrapper = withAdapter(makeAdapter())
     const { container } = render(
@@ -1242,14 +1319,14 @@ describe("MessageList — content-resize follow (deferred markdown growth)", () 
     const scrollEl = container.querySelector('[role="log"]')!
     const scroll = primeScroll(scrollEl)
     fireResize()
-    expect(scroll.scrollTop).toBe(0)
+    expect(scroll.scrollTop).toBe(1000)
   })
 
   it("re-pins to the bottom on a viewport resize while idle (dock toggle / drag / window resize)", () => {
     // B fix: resizing the scroll viewport — dragging the artifact dock divider,
     // toggling it with Cmd/Ctrl+J, or resizing the window — rewraps text taller,
     // so a user parked at the bottom drifts up. The viewport observer re-pins
-    // even when idle, dropping the `active` gate the content observer keeps.
+    // even when idle, including content whose layout finishes after streaming.
     useSettingsStore.setState({ settings: {} as never })
     const Wrapper = withAdapter(makeAdapter())
     const { container } = render(
@@ -2012,8 +2089,9 @@ describe("MessageList — the live tail carries real height, not a projection", 
     )
 
     expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
-    const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
-    expect(tail.querySelector('[data-msg-id="a-stream"]')).toBeInTheDocument()
+    expect(
+      container.querySelector('[data-slot="conversation-live-message"][data-msg-id="a-stream"]')
+    ).toBeInTheDocument()
   })
 
   it("changes no estimate the virtualizer is given as the streamed text grows", () => {

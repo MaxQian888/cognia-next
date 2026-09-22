@@ -333,3 +333,9 @@ describe("summarizeContextCounts", () => {
     expect(summarizeContextCounts([])).toEqual([])
   })
 })
+
+it("does not summarize denied or approval-responded calls as completed", () => {
+  expect(aggregateToolStatus(["output-available", "output-denied"])).toBe("warning")
+  expect(aggregateToolStatus(["approval-responded"])).toBe("warning")
+  expect(aggregateToolStatus(["input-streaming", "output-available"])).toBe("pending")
+})

@@ -23,6 +23,37 @@ describe("useTranscriptController", () => {
     unmount()
   })
 
+  it("publishes completed detail and exposes next/previous window navigation", async () => {
+    const source: TranscriptSource = {
+      capabilities: async () => transcriptCapabilitiesV1(),
+      timeline: async () => ({ items: [], revision: 1, hasMore: false }),
+      turnMessages: jest.fn(async ({ cursor }) => ({
+        messages: Array.from({ length: 200 }, (_, index) => ({
+          id: `${cursor ?? "first"}-${index}`,
+          sessionId: "s1",
+          role: "assistant" as const,
+          parts: [],
+          createdAt: index,
+        })),
+        revision: 1,
+        detailRevision: 1,
+        approximateBytes: 2000,
+        total: 400,
+        hasMore: !cursor,
+        nextCursor: cursor ? undefined : "second",
+      })),
+    }
+    const { result } = renderHook(() => useTranscriptController("s1", source))
+    await waitFor(() => expect(result.current.snapshot.mode).toBe("timeline"))
+    await act(async () => result.current.expandTurn("turn:u1", 1, 1))
+    expect(result.current.getDetail("turn:u1")?.messages[0].id).toBe("first-0")
+    await act(async () => result.current.pageTurn("turn:u1", "next"))
+    expect(result.current.getDetail("turn:u1")?.messages[0].id).toBe("second-0")
+    expect(result.current.snapshot.loadingTurnKeys.size).toBe(0)
+    await act(async () => result.current.pageTurn("turn:u1", "previous"))
+    expect(result.current.getDetail("turn:u1")?.messages[0].id).toBe("first-0")
+  })
+
   it("opens the revision subscription from an effect, never during render", async () => {
     const subscribeRevision = jest.fn(() => jest.fn())
     const source: TranscriptSource = {

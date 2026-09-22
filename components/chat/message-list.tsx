@@ -24,11 +24,7 @@ import { MessageSearchBar } from "./message-search-bar"
 import type { MessageSearchHit } from "@/lib/chat/message-search"
 import { findMessageAnchor } from "@/lib/chat/message-anchor"
 import { FALLBACK_ROW_PX, estimateMessageHeight } from "@/lib/chat/row-height-estimate"
-import {
-  VIRTUALIZE_THRESHOLD,
-  shouldVirtualize,
-  transcriptTextLength,
-} from "@/lib/chat/virtualization-threshold"
+import { VIRTUALIZE_THRESHOLD, shouldVirtualizeMessages } from "@/lib/chat/virtualization-threshold"
 import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
 import { useJumpHistory } from "@/hooks/chat/use-jump-history"
 import { JumpFlash } from "./jump-flash"
@@ -203,6 +199,7 @@ export function MessageList({
   const {
     atBottom: isAtBottom,
     handleScroll: trackScrollPosition,
+    handleContentClick,
     pinNow,
     resetToBottom,
   } = useStickToBottom({
@@ -284,15 +281,16 @@ export function MessageList({
 
   const thinking = thinkingMode(messages, status)
   const showThinking = thinking !== null
-  const totalCount = messages.length + (showThinking ? 1 : 0)
   // Short, light lists skip virtualization entirely (count OR total-text
   // trigger — see `lib/chat/virtualization-threshold`). The virtualizer hook +
   // measure effects below stay unconditional (Rules of Hooks); the flow branch
   // simply never attaches its measureElement ref, so no ResizeObservers spin
-  // up there. Text length is memoized on the array identity: mid-stream the
-  // array is replaced once per coalesced frame, and the sum is O(parts).
-  const textLength = useMemo(() => transcriptTextLength(messages), [messages])
-  const virtualize = shouldVirtualize({ rowCount: totalCount, textLength })
+  // up there. The count check short-circuits long histories; short histories
+  // stop counting text as soon as the weight threshold is reached.
+  const virtualize = useMemo(
+    () => shouldVirtualizeMessages(messages, showThinking ? 1 : 0),
+    [messages, showThinking]
+  )
 
   // ── The live tail (ADR-0138) ────────────────────────────────────────────
   // The row currently being streamed into. It is the one row whose height
@@ -319,7 +317,6 @@ export function MessageList({
       ? lastIndex
       : -1
   const hasLiveTail = liveTailIndex >= 0
-  const liveTailMessage = hasLiveTail ? messages[liveTailIndex] : null
 
   // ── Selection mode ──────────────────────────────────────────────────────
   // Every row that is a message someone sent, in transcript order. Markers
@@ -426,13 +423,23 @@ export function MessageList({
   // path) by the minimap, whose geometry is normalised against the scroller's
   // full extent and would otherwise under-report by exactly this box.
   const liveTailRef = useRef<HTMLDivElement | null>(null)
-  const getTailSize = useCallback(() => liveTailRef.current?.offsetHeight ?? 0, [])
+  const liveMessageRef = useRef<HTMLDivElement | null>(null)
+  const getTailSize = useCallback(
+    () => (liveTailRef.current?.offsetHeight ?? 0) + (liveMessageRef.current?.offsetHeight ?? 0),
+    []
+  )
+
+  const getItemKey = useCallback(
+    (index: number) => `${paneSessionId ?? sessionId}:${messages[index]?.id ?? index}`,
+    [messages, paneSessionId, sessionId]
+  )
 
   // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
   // React Compiler correctly skips it. Nothing to fix on our side.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: virtualCount,
+    getItemKey,
     getScrollElement: () => scrollParentRef.current,
     estimateSize: (index) => estimateRowSize(index, messages),
     overscan: 5,
@@ -461,10 +468,11 @@ export function MessageList({
   // conversation starts at its latest message, and carrying the previous
   // session's `atBottom=false` over would disarm stick-to-bottom for the
   // whole new thread (short lists never emit a scroll event to correct it).
+  const hasMessages = messages.length > 0
   useIsomorphicLayoutEffect(() => {
     rowVirtualizer.measure()
     resetToBottom()
-  }, [sessionId, rowVirtualizer, resetToBottom])
+  }, [sessionId, hasMessages, rowVirtualizer, resetToBottom])
 
   // Layout and disclosure changes can alter every row's geometry at once.
   // Drop cached measurements without moving a reader who is inspecting older
@@ -476,6 +484,12 @@ export function MessageList({
 
   const virtualItems = rowVirtualizer.getVirtualItems()
   const totalSize = rowVirtualizer.getTotalSize()
+  // Keep every message under the same parent across live/settled and
+  // flow/virtual transitions, so disclosure state and keyboard focus survive.
+  const rows = virtualize
+    ? virtualItems.map((item) => ({ index: item.index, start: item.start as number | undefined }))
+    : messages.map((_, index) => ({ index, start: undefined as number | undefined }))
+  if (virtualize && hasLiveTail) rows.push({ index: liveTailIndex, start: undefined })
 
   // ── The one floating offer at the foot of the pane ──────────────────────
   const {
@@ -728,6 +742,7 @@ export function MessageList({
             >
               <div
                 ref={contentRef}
+                onClickCapture={handleContentClick}
                 className={cn(
                   "mx-auto w-full max-w-[52rem] py-[calc(1.25rem*var(--density-spacing,1))] sm:py-[calc(1.75rem*var(--density-spacing,1))]",
                   // Room under the last message for the floating bar, which is
@@ -737,109 +752,63 @@ export function MessageList({
                 data-slot="conversation-reading-column"
                 data-selecting={selecting ? "" : undefined}
               >
-                {virtualize ? (
-                  <div style={{ height: totalSize, position: "relative" }}>
-                    {virtualItems.map((virtualItem) => {
-                      const m = messages[virtualItem.index]!
-                      const rowSelection = rowSelectionProps(m)
-                      return (
-                        <div
-                          key={m.id}
-                          {...rowSelection.rowProps}
-                          data-index={virtualItem.index}
-                          // Same anchor attribute the document-flow branch emits.
-                          // Without it, every DOM-path jump (and the timeline's
-                          // own fallback) silently resolved to nothing as soon as
-                          // the list crossed VIRTUALIZE_THRESHOLD.
-                          data-msg-id={m.id}
-                          data-search-hit={m.id === activeHitId ? "" : undefined}
-                          ref={rowVirtualizer.measureElement}
-                          className={cn(
-                            "px-3 sm:px-5",
-                            rowSelection.rowClassName,
-                            m.id === activeHitId &&
-                              "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
-                          )}
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            width: "100%",
-                            transform: `translateY(${virtualItem.start}px)`,
-                          }}
-                        >
-                          {m.id === firstUnreadId && <UnreadDivider />}
-                          {m.id === flashId && (
-                            <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
-                          )}
-                          {rowSelection.control}
-                          {renderRow(m, false)}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  // Document-flow path for short lists: intrinsic heights, no
-                  // absolute positioning, no measureElement ref (zero ResizeObservers),
-                  // no remount-on-scroll.
-                  <div>
-                    {messages.map((m, index) => {
-                      // The live tail is already in document flow here, so this
-                      // branch renders it in place; only the virtualized branch
-                      // lifts it into the tail region below.
-                      const rowSelection = rowSelectionProps(m)
-                      return (
-                        <div
-                          key={m.id}
-                          {...rowSelection.rowProps}
-                          data-msg-id={m.id}
-                          data-search-hit={m.id === activeHitId ? "" : undefined}
-                          className={cn(
-                            // `relative` so the landing mark can overlay this row.
-                            // The virtualized branch is already a containing block
-                            // via its inline `position: absolute`.
-                            "relative px-3 sm:px-5",
-                            rowSelection.rowClassName,
-                            m.id === activeHitId &&
-                              "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
-                          )}
-                        >
-                          {m.id === firstUnreadId && <UnreadDivider />}
-                          {m.id === flashId && (
-                            <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
-                          )}
-                          {rowSelection.control}
-                          {renderRow(m, index === liveTailIndex)}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-                {/* ── The live tail (ADR-0138) ──────────────────────────────
-                    Real document flow, always: the row being streamed into
-                    (virtualized lists only — in flow mode it is already above)
-                    plus the thinking indicator. One place owns the foot of the
-                    transcript in both modes, and neither element is ever sized
-                    by a projection. */}
+                <div
+                  style={{ paddingTop: virtualize ? totalSize : undefined, position: "relative" }}
+                >
+                  {rows.map(({ index, start }) => {
+                    const m = messages[index]!
+                    const rowSelection = rowSelectionProps(m)
+                    // A retained row can still receive a queued virtualizer observer
+                    // callback after moving to flow. -1 makes that callback a no-op.
+                    const measured = start !== undefined
+                    return (
+                      <div
+                        key={m.id}
+                        {...rowSelection.rowProps}
+                        data-index={measured ? index : -1}
+                        data-msg-id={m.id}
+                        data-search-hit={m.id === activeHitId ? "" : undefined}
+                        data-slot={
+                          virtualize && index === liveTailIndex
+                            ? "conversation-live-message"
+                            : undefined
+                        }
+                        ref={
+                          measured
+                            ? rowVirtualizer.measureElement
+                            : virtualize && index === liveTailIndex
+                              ? liveMessageRef
+                              : undefined
+                        }
+                        className={cn(
+                          "relative px-3 sm:px-5",
+                          rowSelection.rowClassName,
+                          m.id === activeHitId &&
+                            "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                        )}
+                        style={
+                          measured
+                            ? {
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                transform: `translateY(${start}px)`,
+                              }
+                            : undefined
+                        }
+                      >
+                        {m.id === firstUnreadId && <UnreadDivider />}
+                        {m.id === flashId && <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />}
+                        {rowSelection.control}
+                        {renderRow(m, index === liveTailIndex)}
+                      </div>
+                    )
+                  })}
+                </div>
+                {/* Thinking remains in real flow. The live message above shares
+                    its parent with settled rows but contributes to getTailSize. */}
                 <div ref={liveTailRef} data-slot="conversation-live-tail">
-                  {virtualize && liveTailMessage ? (
-                    <div
-                      key={liveTailMessage.id}
-                      data-msg-id={liveTailMessage.id}
-                      data-search-hit={liveTailMessage.id === activeHitId ? "" : undefined}
-                      className={cn(
-                        "relative px-3 sm:px-5",
-                        liveTailMessage.id === activeHitId &&
-                          "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
-                      )}
-                    >
-                      {liveTailMessage.id === firstUnreadId && <UnreadDivider />}
-                      {liveTailMessage.id === flashId && (
-                        <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
-                      )}
-                      {renderRow(liveTailMessage, true)}
-                    </div>
-                  ) : null}
                   {showThinking ? (
                     <div className="px-3 sm:px-5">
                       <ChatThinkingIndicator

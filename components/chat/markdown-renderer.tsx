@@ -29,7 +29,7 @@ import {
   chatMarkdownUrlTransform,
 } from "@/components/chat/markdown/rendering-policy"
 import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
-import { ExternalLink } from "@/components/shared/external-link"
+import { ChatLink } from "@/components/chat/markdown/chat-link"
 import { ProjectFileLink } from "@/components/chat/project-file-link"
 import {
   parseProjectFileReference,
@@ -503,22 +503,16 @@ function buildComponents(
       return <>{children}</>
     },
     a({ href, children }) {
-      const target = href ? parseProjectFileReference(href, projectRoot) : null
-      if (target) {
-        return (
-          <ProjectFileLink target={target} onOpenFile={onOpenProjectFile} projectRoot={projectRoot}>
-            {children}
-          </ProjectFileLink>
-        )
-      }
-      // `ExternalLink` keeps `target="_blank"` on web but routes http(s) clicks
-      // through `openExternal` on Capacitor/Tauri (the WebView can't rely on
-      // `target="_blank"` — Android blocks new-window creation, WKWebView is
-      // inconsistent). Non-http hrefs (anchors, mailto:) pass through untouched.
       return (
-        <ExternalLink href={href ?? ""} className="text-primary hover:underline" preferEmbedded>
+        <ChatLink
+          href={href}
+          projectRoot={projectRoot}
+          onOpenProjectFile={onOpenProjectFile}
+          messageId={messageId}
+          isStreaming={isStreaming}
+        >
           {children}
-        </ExternalLink>
+        </ChatLink>
       )
     },
   }

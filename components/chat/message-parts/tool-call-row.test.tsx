@@ -263,9 +263,7 @@ describe("ToolCallRow", () => {
     expect(queryByTestId("tool-result-chip")).toBeNull()
   })
 
-  // The activity group's standard/detailed path drives its children by
-  // remounting them with a fresh key; a row that ignored `defaultOpen` made the
-  // group's expand-all button inert inside a sub-agent tree.
+  // Standalone subagent rows use the display mode as their untouched default.
   it("seeds the uncontrolled open state from defaultOpen", () => {
     const { getByTestId } = render(
       <ToolCallRow part={partWith("tool-MysteryTool", { output: "raw" })} defaultOpen />
@@ -300,4 +298,30 @@ describe("ToolCallRow", () => {
     )
     expect(getByTestId("tool-call-row-Read").getAttribute("data-status")).toBe("output-error")
   })
+})
+
+it.each(["approval-requested", "output-denied"])("shows %s text while collapsed", (state) => {
+  const { getByText } = render(<ToolCallRow part={part("tool-Read", {}, state)} />)
+  const label = getByText(state === "output-denied" ? "status.denied" : "status.awaitingApproval")
+  expect(label.className).not.toContain("sr-only")
+})
+
+it("follows untouched default changes without remounting, then preserves the user's choice", () => {
+  const tool = partWith("tool-MysteryTool", { output: "raw" })
+  const { getByTestId, rerender } = render(<ToolCallRow part={tool} defaultOpen={false} />)
+  const toggle = getByTestId("tool-call-row-MysteryTool-toggle")
+  toggle.focus()
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  rerender(<ToolCallRow part={tool} defaultOpen />)
+  expect(getByTestId("tool-call-row-MysteryTool-toggle")).toBe(toggle)
+  expect(document.activeElement).toBe(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  rerender(<ToolCallRow part={tool} defaultOpen={false} />)
+  expect(toggle.getAttribute("aria-expanded")).toBe("false")
+  fireEvent.click(toggle)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  rerender(<ToolCallRow part={tool} defaultOpen />)
+  rerender(<ToolCallRow part={tool} defaultOpen={false} />)
+  expect(toggle.getAttribute("aria-expanded")).toBe("true")
+  expect(document.activeElement).toBe(toggle)
 })

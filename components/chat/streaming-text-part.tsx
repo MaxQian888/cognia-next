@@ -24,9 +24,7 @@ import { Block, parseMarkdownIntoBlocks, type BlockProps } from "streamdown"
 import { MessageResponse, type MessageResponseProps } from "@/components/ai-elements/message"
 import { createSharedMarkdownComponents } from "@/components/chat/markdown/shared-components"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
-import { ProjectFileLink } from "@/components/chat/project-file-link"
-import { ExternalLink } from "@/components/shared/external-link"
-import { parseProjectFileReference } from "@/lib/files/project-file-reference"
+import { ChatLink } from "@/components/chat/markdown/chat-link"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "./markdown-renderer"
 import { chatMarkdownUrlTransform, chatStreamdownRehypePlugins } from "./markdown/rendering-policy"
@@ -42,6 +40,7 @@ import {
 } from "./incremental-markdown-blocks"
 
 interface Props {
+  messageId?: string
   text: string
   isStreaming: boolean
   projectRoot?: string | null
@@ -213,7 +212,9 @@ type StreamdownComponents = NonNullable<MessageResponseProps["components"]>
 
 export function createStreamingComponents(
   projectRoot?: string | null,
-  isStreaming = false
+  isStreaming = false,
+  messageId?: string,
+  allowPlugins = true
 ): StreamdownComponents {
   return {
     // Shared with `MarkdownRenderer` so images, tables, GitHub alerts,
@@ -228,23 +229,17 @@ export function createStreamingComponents(
     // chat sanitization policy supplied to `MessageResponse` below.
     ...createSharedMarkdownComponents({ isStreaming }),
     a({ href, children, node: _node, ...props }) {
-      const target = href ? parseProjectFileReference(href, projectRoot) : null
-      if (target) {
-        return (
-          <ProjectFileLink target={target} projectRoot={projectRoot}>
-            {children}
-          </ProjectFileLink>
-        )
-      }
       return (
-        <ExternalLink
-          href={href ?? ""}
-          className="text-primary hover:underline"
-          preferEmbedded
+        <ChatLink
+          href={href}
+          projectRoot={projectRoot}
+          messageId={messageId}
+          isStreaming={isStreaming}
+          allowPlugins={allowPlugins}
           {...props}
         >
           {children}
-        </ExternalLink>
+        </ChatLink>
       )
     },
   }
@@ -267,6 +262,7 @@ export function mathScaleClass(scale: MessageMathFontScale | number): string | u
 }
 
 function StreamingTextPartInner({
+  messageId,
   text,
   isStreaming,
   projectRoot,
@@ -277,8 +273,8 @@ function StreamingTextPartInner({
     createIncrementalMarkdownBlockParser(parseMarkdownIntoBlocks)
   )
   const components = useMemo(
-    () => createStreamingComponents(projectRoot, isStreaming),
-    [isStreaming, projectRoot]
+    () => createStreamingComponents(projectRoot, isStreaming, messageId),
+    [isStreaming, projectRoot, messageId]
   )
   // ADR-0127: the same resolved knobs the finalized branch reads. Plugin
   // variants are prebuilt (stable identity); `lineNumbers` is a Streamdown
@@ -351,6 +347,7 @@ function StreamingTextPartInner({
 export const StreamingTextPart = memo(
   StreamingTextPartInner,
   (prev, next) =>
+    prev.messageId === next.messageId &&
     prev.text === next.text &&
     prev.isStreaming === next.isStreaming &&
     prev.projectRoot === next.projectRoot &&

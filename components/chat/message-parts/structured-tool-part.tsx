@@ -254,22 +254,28 @@ export interface StructuredToolPartProps {
   sessionId?: string
   /**
    * Seeds the row's open state at mount (read once, like a Collapsible's
-   * `defaultOpen`). Set by the activity group's expand-all / collapse-all and
-   * by `detailed` mode; when absent a running or failed call starts open.
+   * `defaultOpen`). Used for standalone rows; when absent a running or failed call starts open.
    */
   defaultOpen?: boolean
+  expanded?: boolean
+  onToggle?: () => void
 }
 
 export const StructuredToolPart = memo(function StructuredToolPart({
   part,
   sessionId,
   defaultOpen,
+  expanded,
+  onToggle,
 }: StructuredToolPartProps) {
   const t = useTranslations()
   const tRow = useTranslations("chat.toolRow")
   const tFlow = useTranslations("chat.agentFlow")
   const running = part.state === "input-available"
-  const [open, setOpen] = useState(defaultOpen ?? (running || part.state === "output-error"))
+  const [internalOpen, setInternalOpen] = useState(
+    defaultOpen ?? (running || part.state === "output-error")
+  )
+  const open = expanded ?? internalOpen
 
   const name = resolveToolPartName(part) ?? "tool"
   const spec = SPEC[name.toLowerCase()]
@@ -332,7 +338,7 @@ export const StructuredToolPart = memo(function StructuredToolPart({
     <ToolRowShell
       status={part.state}
       open={open}
-      onToggle={() => setOpen((v) => !v)}
+      onToggle={() => (expanded !== undefined ? onToggle?.() : setInternalOpen((v) => !v))}
       ariaLabel={tRow("rowAria", {
         verb: verbLabel,
         target: target ?? "",

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { UIMessage } from "ai"
+import { useTranslations } from "next-intl"
+import type { TranscriptTurnDetail } from "@/lib/chat/transcript/controller"
 import type {
   Character,
-  SessionTurnMessagesPage,
   TranscriptMessage,
   TranscriptMessagePreview,
   TranscriptTimelineItem,
@@ -30,7 +31,9 @@ export interface TranscriptTimelineSurfaceProps {
   sessionId: string
   items: TranscriptTimelineItem[]
   expandedTurnKeys: ReadonlySet<string>
-  getDetail: (turnKey: string) => SessionTurnMessagesPage | undefined
+  getDetail: (turnKey: string) => TranscriptTurnDetail | undefined
+  onPageTurn?: (turnKey: string, direction: "previous" | "next") => void
+  loadingTurnKeys?: ReadonlySet<string>
   onExpand: (turnKey: string, revision: number, detailRevision: number) => void
   onCollapse: (turnKey: string) => void
   onLoadOlder: () => void
@@ -227,6 +230,11 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
                       labels={props.labels}
                       onExpand={props.onExpand}
                       onCollapse={props.onCollapse}
+                      onPageTurn={props.onPageTurn}
+                      loadingDetail={
+                        item.kind === "completed-turn" &&
+                        Boolean(props.loadingTurnKeys?.has(item.turnKey))
+                      }
                     />
                   ) : null}
                 </div>
@@ -250,17 +258,22 @@ function TranscriptTimelineRow({
   labels,
   onExpand,
   onCollapse,
+  onPageTurn,
+  loadingDetail,
 }: {
   item: TranscriptTimelineItem
   sessionId: string
   expanded: boolean
-  detail?: SessionTurnMessagesPage
+  detail?: TranscriptTurnDetail
   adapters: TranscriptTimelineSurfaceProps["renderAdapters"]
   allowRegenerate: boolean
   labels: TranscriptTimelineLabels
   onExpand: TranscriptTimelineSurfaceProps["onExpand"]
   onCollapse: TranscriptTimelineSurfaceProps["onCollapse"]
+  onPageTurn?: TranscriptTimelineSurfaceProps["onPageTurn"]
+  loadingDetail: boolean
 }) {
+  const t = useTranslations("chat.transcript")
   const messages = useMemo(() => {
     if (item.kind === "active-turn") return item.messages.map(fullMessage)
     if (item.kind === "system") return [previewMessage(item.message, sessionId)]
@@ -278,6 +291,28 @@ function TranscriptTimelineRow({
       {renderMessages(messages, false, adapters, allowRegenerate)}
       {expanded && !detail ? (
         <p className="px-3 py-2 text-xs text-muted-foreground">{labels.loading}</p>
+      ) : null}
+      {expanded && detail && onPageTurn && (detail.hasPrevious || detail.hasMore) ? (
+        <div className="flex items-center gap-2 px-3 py-2 sm:px-5" aria-busy={loadingDetail}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loadingDetail || !detail.hasPrevious}
+            onClick={() => onPageTurn(item.turnKey, "previous")}
+          >
+            {t("previousDetails")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loadingDetail || !detail.hasMore}
+            onClick={() => onPageTurn(item.turnKey, "next")}
+          >
+            {t("nextDetails")}
+          </Button>
+        </div>
       ) : null}
       {item.collapsed.exists || detail ? (
         <div className="px-3 pb-3 sm:px-5">

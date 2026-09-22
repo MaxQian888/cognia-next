@@ -35,12 +35,39 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
 }))
 // Inline tool list children — assert via entry counts, not their internals.
 jest.mock("@/components/chat/message-parts/tool-activity-group", () => ({
-  ToolActivityGroup: ({ entries }: { entries: unknown[] }) => (
-    <div data-testid="tool-activity-group" data-count={entries.length} />
+  ToolActivityGroup: ({
+    entries,
+    renderChild,
+  }: {
+    entries: Array<{ part: never; key: string }>
+    renderChild: (
+      part: never,
+      key: string,
+      opts: { expanded: boolean; onToggle: () => void }
+    ) => React.ReactNode
+  }) => (
+    <div data-testid="tool-activity-group" data-count={entries.length}>
+      {entries.map((e) => renderChild(e.part, e.key, { expanded: true, onToggle: () => {} }))}
+    </div>
   ),
 }))
 jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
-  ToolCallRow: () => <div data-testid="tool-call-row" />,
+  ToolCallRow: ({
+    expanded,
+    onToggle,
+    defaultOpen,
+  }: {
+    expanded?: boolean
+    onToggle?: () => void
+    defaultOpen?: boolean
+  }) => (
+    <div
+      data-testid="tool-call-row"
+      tabIndex={0}
+      data-expanded={String(expanded ?? defaultOpen)}
+      data-controlled={String(!!onToggle)}
+    />
+  ),
 }))
 
 const cancelSubagentRun = jest.fn()
@@ -634,4 +661,56 @@ describe("SubagentPart", () => {
       }
     })
   })
+})
+
+it("forwards controlled child state in standard subagent tool groups", () => {
+  render(
+    <SubagentPart
+      part={{
+        ...basePart,
+        toolCalls: [
+          { id: "a", name: "Read", state: "done" },
+          { id: "b", name: "Grep", state: "done" },
+        ],
+      }}
+      mode="standard"
+      open
+      onToggle={() => {}}
+    />
+  )
+  const rows = screen.getAllByTestId("tool-call-row")
+  expect(rows).toHaveLength(2)
+  for (const row of rows) {
+    expect(row.getAttribute("data-expanded")).toBe("true")
+    expect(row.getAttribute("data-controlled")).toBe("true")
+  }
+})
+
+it("updates untouched subagent defaults across modes and preserves manual overrides", () => {
+  const { rerender } = render(<SubagentPart part={basePart} mode="standard" />)
+  const row = screen.getByTestId("subagent-part-sa-1")
+  expect(row.getAttribute("data-open")).toBe("false")
+  rerender(<SubagentPart part={basePart} mode="detailed" />)
+  expect(row.getAttribute("data-open")).toBe("true")
+  fireEvent.click(screen.getByTestId("subagent-toggle-sa-1"))
+  rerender(<SubagentPart part={basePart} mode="standard" />)
+  rerender(<SubagentPart part={basePart} mode="detailed" />)
+  expect(row.getAttribute("data-open")).toBe("false")
+})
+
+it("keeps the single subagent tool row and focus while changing its mode default", () => {
+  const snapshot = {
+    ...basePart,
+    toolCalls: [{ id: "only-call", name: "Read", state: "done" as const }],
+  }
+  const { rerender } = render(
+    <SubagentPart part={snapshot} mode="standard" open onToggle={() => {}} />
+  )
+  const row = screen.getByTestId("tool-call-row")
+  row.focus()
+  expect(row.getAttribute("data-expanded")).toBe("false")
+  rerender(<SubagentPart part={snapshot} mode="detailed" open onToggle={() => {}} />)
+  expect(screen.getByTestId("tool-call-row")).toBe(row)
+  expect(document.activeElement).toBe(row)
+  expect(row.getAttribute("data-expanded")).toBe("true")
 })

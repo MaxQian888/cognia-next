@@ -38,9 +38,7 @@ function entry(type: string, state = "output-available"): ToolActivityGroupEntry
 }
 
 /**
- * Stand-in for whatever the caller renders per child. Mirrors both open-state
- * channels the group drives: controlled (`expanded`/`onToggle`) and
- * seeded-at-mount (`forceOpen`).
+ * Stand-in for a caller-rendered child using the controlled disclosure contract.
  */
 function renderRow(part: { type: string }, key: string, opts: ToolActivityChildOptions) {
   return ReactForMock.createElement(
@@ -49,7 +47,6 @@ function renderRow(part: { type: string }, key: string, opts: ToolActivityChildO
       key,
       "data-testid": `row-${part.type}`,
       "data-expanded": String(opts.expanded),
-      "data-force-open": String(opts.forceOpen),
       onClick: opts.onToggle,
     },
     part.type
@@ -68,6 +65,25 @@ function renderedTypes(spy: jest.Mock): string[] {
 const ROWS = [entry("tool-Read"), entry("tool-Grep"), entry("tool-Bash")]
 
 describe("ToolActivityGroup", () => {
+  it("does not construct hidden tool cards, and restores every child on expansion", () => {
+    const renderChild = jest.fn(renderRow)
+    const entries = Array.from({ length: 2000 }, () => entry("tool-Read"))
+    const { getByTestId, rerender } = render(
+      <ToolActivityGroup entries={entries} mode="simplified" renderChild={renderChild} />
+    )
+    rerender(
+      <ToolActivityGroup entries={[...entries]} mode="simplified" renderChild={renderChild} />
+    )
+    expect(renderChild).not.toHaveBeenCalled()
+    fireEvent.click(getByTestId("tool-activity-group-toggle"))
+    expect(renderChild).toHaveBeenCalledTimes(2000)
+    fireEvent.click(getByTestId("tool-activity-group-toggle"))
+    renderChild.mockClear()
+    rerender(
+      <ToolActivityGroup entries={[...entries]} mode="simplified" renderChild={renderChild} />
+    )
+    expect(renderChild).not.toHaveBeenCalled()
+  })
   it("summarizes the count and aggregate status", () => {
     const { getByTestId } = render(
       <ToolActivityGroup entries={ROWS} mode="standard" renderChild={renderRow} />
@@ -191,46 +207,129 @@ describe("ToolActivityGroup", () => {
     expect(getByTestId("row-tool-Bash").getAttribute("data-expanded")).toBe("true")
   })
 
-  it("expand-all forces cards open via forceOpen in standard mode", () => {
-    const seen: Array<boolean | undefined> = []
-    const renderChild = (part: { type: string }, key: string, opts: ToolActivityChildOptions) => {
-      seen.push(opts.forceOpen)
-      return renderRow(part, key, opts)
+  it.each(["standard", "detailed"] as const)(
+    "tracks bulk and individual state without remounting in %s",
+    (mode) => {
+      const { getByTestId } = render(
+        <ToolActivityGroup entries={ROWS} mode={mode} renderChild={renderRow} />
+      )
+      const row = getByTestId("row-tool-Read")
+      const bulk = getByTestId("tool-activity-group-expand-all")
+      expect(bulk.textContent).toBe(mode === "detailed" ? "group.collapseAll" : "group.expandAll")
+      row.focus()
+      fireEvent.click(bulk)
+      expect(getByTestId("row-tool-Read")).toBe(row)
+      expect(document.activeElement).toBe(row)
+      expect(row.getAttribute("data-expanded")).toBe(String(mode !== "detailed"))
+      fireEvent.click(row)
+      expect(bulk.textContent).toBe("group.expandAll")
+      fireEvent.click(bulk)
+      expect(row.getAttribute("data-expanded")).toBe("true")
+      expect(bulk.textContent).toBe("group.collapseAll")
     }
-    const { getByTestId } = render(
-      <ToolActivityGroup entries={ROWS} mode="standard" renderChild={renderChild} />
+  )
+
+  it("keeps expansion by identity on reorder, clipping and same-position replacement", () => {
+    const a = entry("tool-Read"),
+      b = entry("tool-Grep"),
+      c = entry("tool-Bash")
+    const { getByTestId, rerender } = render(
+      <ToolActivityGroup entries={[a, b]} mode="standard" renderChild={renderRow} />
     )
-    seen.length = 0
-    fireEvent.click(getByTestId("tool-activity-group-expand-all"))
-    expect(seen).toContain(true)
+    fireEvent.click(getByTestId("row-tool-Read"))
+    rerender(<ToolActivityGroup entries={[b, a]} mode="standard" renderChild={renderRow} />)
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("true")
+    expect(getByTestId("row-tool-Grep").getAttribute("data-expanded")).toBe("false")
+    rerender(<ToolActivityGroup entries={[a, c]} mode="standard" renderChild={renderRow} />)
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("true")
+    expect(getByTestId("row-tool-Bash").getAttribute("data-expanded")).toBe("false")
+    const replacement = entry("tool-Read")
+    rerender(
+      <ToolActivityGroup entries={[replacement, c]} mode="standard" renderChild={renderRow} />
+    )
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("false")
+    rerender(<ToolActivityGroup entries={[a, c]} mode="standard" renderChild={renderRow} />)
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("false")
   })
 
-  // Expand-all must remount the children so an uncontrolled child re-reads the
-  // new default; a stable key would leave the button inert.
-  it("stamps a fresh key on every child when expand-all fires (standard)", () => {
-    const keys: string[] = []
-    const renderChild = (part: { type: string }, key: string, opts: ToolActivityChildOptions) => {
-      keys.push(key)
-      return renderRow(part, key, opts)
-    }
-    const { getByTestId } = render(
-      <ToolActivityGroup entries={ROWS} mode="standard" renderChild={renderChild} />
+  it("preserves manual row choices across group collapse and mode changes", () => {
+    const { getByTestId, rerender } = render(
+      <ToolActivityGroup entries={ROWS} mode="detailed" renderChild={renderRow} />
     )
-    const before = [...keys]
-    keys.length = 0
-    fireEvent.click(getByTestId("tool-activity-group-expand-all"))
-    expect(keys.length).toBeGreaterThan(0)
-    expect(keys.every((k) => !before.includes(k))).toBe(true)
+    fireEvent.click(getByTestId("row-tool-Read"))
+    fireEvent.click(getByTestId("tool-activity-group-toggle"))
+    fireEvent.click(getByTestId("tool-activity-group-toggle"))
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("false")
+    expect(getByTestId("row-tool-Grep").getAttribute("data-expanded")).toBe("true")
+    rerender(<ToolActivityGroup entries={ROWS} mode="standard" renderChild={renderRow} />)
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("false")
+    expect(getByTestId("row-tool-Grep").getAttribute("data-expanded")).toBe("false")
+    rerender(<ToolActivityGroup entries={ROWS} mode="detailed" renderChild={renderRow} />)
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("false")
+    expect(getByTestId("row-tool-Grep").getAttribute("data-expanded")).toBe("true")
   })
 
-  it("detailed mode passes forceOpen=true to cards by default", () => {
-    const seen: Array<boolean | undefined> = []
-    const renderChild = (part: { type: string }, key: string, opts: ToolActivityChildOptions) => {
-      seen.push(opts.forceOpen)
-      return renderRow(part, key, opts)
+  it.each(["row", "bulk"])(
+    "pins a live group after a %s interaction when calls complete",
+    (action) => {
+      const a = entry("tool-Read", "input-available"),
+        b = entry("tool-Grep")
+      const { getByTestId, rerender } = render(
+        <ToolActivityGroup entries={[a, b]} mode="simplified" renderChild={renderRow} />
+      )
+      fireEvent.click(
+        getByTestId(action === "row" ? "row-tool-Read" : "tool-activity-group-expand-all")
+      )
+      rerender(
+        <ToolActivityGroup
+          entries={[{ ...a, part: { ...a.part, state: "output-available" } as never }, b]}
+          mode="simplified"
+          renderChild={renderRow}
+        />
+      )
+      expect(getByTestId("tool-activity-group-toggle").getAttribute("aria-expanded")).toBe("true")
+      expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("true")
     }
-    render(<ToolActivityGroup entries={ROWS} mode="detailed" renderChild={renderChild} />)
-    expect(seen.every((v) => v === true)).toBe(true)
+  )
+
+  it.each(["input-streaming", "output-denied", "approval-requested"])(
+    "keeps %s visible in simplified mode",
+    (state) => {
+      const { getByTestId } = render(
+        <ToolActivityGroup
+          entries={[entry("tool-Read", state), entry("tool-Grep")]}
+          mode="simplified"
+          renderChild={renderRow}
+        />
+      )
+      expect(getByTestId("tool-activity-group-toggle").getAttribute("aria-expanded")).toBe("true")
+      expect(getByTestId("tool-activity-group").getAttribute("data-status")).not.toBe("complete")
+    }
+  )
+
+  it("honors explicit expanded preferences and stable handlers across stream updates", () => {
+    const entries = ROWS.map((e) => ({ ...e, defaultOpen: true }))
+    const renderChild = jest.fn(renderRow)
+    const { getByTestId, rerender } = render(
+      <ToolActivityGroup
+        entries={entries}
+        mode="simplified"
+        defaultOpen
+        renderChild={renderChild}
+      />
+    )
+    const first = renderChild.mock.calls[0][2].onToggle
+    expect(getByTestId("row-tool-Read").getAttribute("data-expanded")).toBe("true")
+    renderChild.mockClear()
+    rerender(
+      <ToolActivityGroup
+        entries={[...entries]}
+        mode="simplified"
+        defaultOpen
+        renderChild={renderChild}
+      />
+    )
+    expect(renderChild.mock.calls[0][2].onToggle).toBe(first)
   })
 
   it("renders the animated (AnimatePresence) body when motion is enabled", () => {

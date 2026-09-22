@@ -321,12 +321,13 @@ export function tallyToolNames(parts: ToolPartLike[]): ToolTally[] {
 }
 
 /** Aggregate status for a run of tool calls, used by the activity-group header. */
-export type AggregateStatus = "running" | "error" | "complete" | "pending"
+export type AggregateStatus = "running" | "error" | "complete" | "pending" | "warning"
 
 export function aggregateToolStatus(states: ToolPartLike["state"][]): AggregateStatus {
   if (states.some((s) => s === "output-error")) return "error"
   if (states.some((s) => s === "input-available" || s === "approval-requested")) return "running"
   if (states.some((s) => s === "input-streaming")) return "pending"
+  if (states.some((s) => s === "output-denied" || s === "approval-responded")) return "warning"
   return "complete"
 }
 

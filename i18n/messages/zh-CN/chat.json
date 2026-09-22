@@ -2594,6 +2594,8 @@
     "expandTurn": "展开完整轮次",
     "loadOlder": "加载更早轮次",
     "loading": "正在加载聊天记录…",
+    "nextDetails": "后续消息",
+    "previousDetails": "之前的消息",
     "retry": "重试加载聊天记录"
   },
   "transcriptSelection": {

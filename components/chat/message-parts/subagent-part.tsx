@@ -135,24 +135,12 @@ const SubagentLogBody = memo(function SubagentLogBody({
   const t = useTranslations("chat.subagentPart")
   const tailLogs = useMemo(() => logs.slice(-50), [logs])
   const entries = useMemo(() => toToolActivityEntries(toolCalls), [toolCalls])
-  // A sub-agent's tool list is compact in every display mode, so the child is
-  // always a row. Honour whichever open-state channel the group is using —
-  // controlled (`expanded`/`onToggle`, simplified) or seeded-at-mount
-  // (`forceOpen` + the group's generation-stamped key, standard/detailed) —
-  // otherwise the group's expand-all button is inert here.
+  // Shared group controls each compact row in every mode.
   const renderToolRow = (
     part: (typeof entries)[number]["part"],
     key: string,
     opts: ToolActivityChildOptions
-  ) => (
-    <ToolCallRow
-      key={key}
-      part={part}
-      expanded={opts.expanded}
-      onToggle={opts.onToggle}
-      defaultOpen={opts.forceOpen}
-    />
-  )
+  ) => <ToolCallRow key={key} part={part} expanded={opts.expanded} onToggle={opts.onToggle} />
   return (
     <>
       {summary ? <p className="rounded bg-muted/30 p-2 text-xs">{summary}</p> : null}
@@ -164,7 +152,11 @@ const SubagentLogBody = memo(function SubagentLogBody({
         </div>
       ) : entries.length === 1 ? (
         <div data-testid="subagent-tool-activity">
-          <ToolCallRow part={entries[0].part} />
+          <ToolCallRow
+            key={entries[0].key}
+            part={entries[0].part}
+            defaultOpen={mode === "detailed"}
+          />
         </div>
       ) : null}
       {toolCalls.length >= 100 ? (
@@ -319,11 +311,11 @@ export const SubagentPart = memo(function SubagentPart({
     part.completedAt != null ? part.completedAt - part.startedAt : now - part.startedAt
 
   const controlled = open !== undefined
-  const [internalOpen, setInternalOpen] = useState(mode === "detailed")
-  const isOpen = controlled ? (open as boolean) : internalOpen
+  const [internalOpen, setInternalOpen] = useState<boolean | null>(null)
+  const isOpen = controlled ? (open as boolean) : (internalOpen ?? mode === "detailed")
   const toggle = () => {
     if (controlled) onToggle?.()
-    else setInternalOpen((v) => !v)
+    else setInternalOpen(!isOpen)
   }
 
   const statusLabel = tStatus(cfg.labelKey)

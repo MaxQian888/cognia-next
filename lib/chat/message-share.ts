@@ -62,6 +62,35 @@ interface SourceDocumentPart {
 
 /** Build one ordered, portable projection for message copy and native sharing. */
 export function buildMessageShareContent(message: UIMessage): MessageShareContent {
+  // Rows only need availability until the user invokes an action. Preparing
+  // HTML and decoding every screenshot into Files during a streaming render
+  // duplicates megabytes of data even when nothing is ever copied or shared.
+  const parts = stripPromptPreambleFromParts(message.parts)
+  const hasContent = parts.some((part) =>
+    part.type === "text"
+      ? Boolean((part as { text?: string }).text)
+      : part.type === "file" || part.type === "source-url" || part.type === "source-document"
+  )
+  let prepared: MessageShareContent | undefined
+  const prepare = () => (prepared ??= materializeMessageShareContent(parts))
+  return {
+    hasContent,
+    get plainText() {
+      return prepare().plainText
+    },
+    get nativeShareText() {
+      return prepare().nativeShareText
+    },
+    get html() {
+      return prepare().html
+    },
+    get shareFiles() {
+      return prepare().shareFiles
+    },
+  }
+}
+
+function materializeMessageShareContent(parts: UIMessage["parts"]): MessageShareContent {
   const plainParts: string[] = []
   const nativeShareParts: string[] = []
   const htmlParts: string[] = []
@@ -70,7 +99,7 @@ export function buildMessageShareContent(message: UIMessage): MessageShareConten
 
   // Copy and share hand over what the user wrote, not the context envelope the
   // composer put in front of it (`lib/chat/prompt-preamble.ts`).
-  for (const part of stripPromptPreambleFromParts(message.parts)) {
+  for (const part of parts) {
     if (part.type === "text") {
       const text = (part as { text?: string }).text ?? ""
       if (text) {

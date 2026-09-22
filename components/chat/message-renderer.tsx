@@ -832,7 +832,16 @@ function MessageRendererInner({
                   if (segment.kind === "group") {
                     const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
                       part: e.part as ToolUIPart,
-                      key: `${message.id}-${e.index}`,
+                      key: `${message.id}-${(e.part as ToolUIPart).toolCallId ?? e.index}`,
+                      defaultOpen:
+                        display.tools === "expanded"
+                          ? true
+                          : display.tools === "collapsed"
+                            ? false
+                            : agentFlowMode === "detailed" ||
+                              (agentFlowMode === "standard" &&
+                                ((e.part as ToolUIPart).state === "input-available" ||
+                                  (e.part as ToolUIPart).state === "output-error")),
                     }))
                     return (
                       <MotionReveal
@@ -841,15 +850,10 @@ function MessageRendererInner({
                         disabled={display.motion === "off"}
                         intensity={display.motion === "expressive" ? "expressive" : "restrained"}
                       >
-                        {/* Key the group on the display mode: the tool cards it wraps
-                        own their open state in uncontrolled Collapsibles
-                        (`defaultOpen`, read once at mount), so a live
-                        standard⇄detailed switch only takes effect if the group
-                        remounts and re-applies the per-mode default. */}
                         <ToolActivityGroup
-                          key={`${agentFlowMode}-${display.tools}`}
                           entries={entries}
                           mode={agentFlowMode}
+                          defaultOpen={display.tools === "expanded" ? true : undefined}
                           renderChild={(part, key, opts) =>
                             renderToolPart(
                               part,
@@ -1741,10 +1745,8 @@ MessagePart.displayName = "MessagePart"
  * group.
  *
  * The body itself lives in `ToolDetailBody` and is identical across modes; only
- * the chrome differs (card + header vs. one-line row). `opts.forceOpen` (from
- * the group's expand-all/collapse-all, and from `detailed`) overrides the
- * per-state default-open heuristic; `opts.expanded` / `opts.onToggle` make a
- * simplified row's open state controlled by its group.
+ * the chrome differs by mode. Grouped children receive controlled disclosure
+ * state; standalone children retain their per-state default-open heuristic.
  */
 function renderToolPart(
   tp: ToolUIPart,
@@ -1780,7 +1782,7 @@ function renderToolPart(
           sessionId={sessionId}
           expanded={opts.expanded}
           onToggle={opts.onToggle}
-          defaultOpen={opts.forceOpen ?? preferenceOpen}
+          defaultOpen={preferenceOpen}
         />
         {slot}
       </React.Fragment>
@@ -1790,7 +1792,6 @@ function renderToolPart(
   // A failed call and a still-running one open by default (the user needs the
   // trace / the live output); a settled success stays collapsed.
   const defaultOpen =
-    opts.forceOpen ??
     preferenceOpen ??
     (mode === "detailed" || tp.state === "output-error" || tp.state === "input-available")
 
@@ -1801,11 +1802,28 @@ function renderToolPart(
   // expanded body is `ToolDetailBody` in every case, so a row never decides
   // how a payload renders.
   const toolEl = isBashToolPart(tp) ? (
-    <TerminalToolPart part={tp} defaultOpen={defaultOpen} />
+    <TerminalToolPart
+      part={tp}
+      defaultOpen={defaultOpen}
+      expanded={opts.expanded}
+      onToggle={opts.onToggle}
+    />
   ) : isFileToolPart(tp) ? (
-    <FileToolPart part={tp} sessionId={sessionId} defaultOpen={defaultOpen} />
+    <FileToolPart
+      part={tp}
+      sessionId={sessionId}
+      defaultOpen={defaultOpen}
+      expanded={opts.expanded}
+      onToggle={opts.onToggle}
+    />
   ) : (
-    <StructuredToolPart part={tp} sessionId={sessionId} defaultOpen={defaultOpen} />
+    <StructuredToolPart
+      part={tp}
+      sessionId={sessionId}
+      defaultOpen={defaultOpen}
+      expanded={opts.expanded}
+      onToggle={opts.onToggle}
+    />
   )
 
   return (
@@ -1926,6 +1944,7 @@ function renderPart(
         <StreamingTextPart
           key={key}
           text={text}
+          messageId={messageId}
           isStreaming={isStreaming}
           projectRoot={projectRoot}
           richControls={display.richControls}
@@ -1998,7 +2017,8 @@ function renderPart(
               mathScaleClass(display.markdown.mathFontScale),
               display.markdown.mathAlign === "left" && "chat-math-left"
             ),
-            components: createStreamingComponents(projectRoot, stillStreaming),
+            // Reasoning uses the same typography, but stays outside plugin URL matching.
+            components: createStreamingComponents(projectRoot, stillStreaming, undefined, false),
             controls: { table: false },
             isAnimating: stillStreaming,
             // ADR-0127: reasoning bodies honour the same markdown knobs.

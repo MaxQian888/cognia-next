@@ -2594,6 +2594,8 @@
     "expandTurn": "Expand full turn",
     "loadOlder": "Load older turns",
     "loading": "Loading transcript…",
+    "nextDetails": "Next messages",
+    "previousDetails": "Previous messages",
     "retry": "Retry transcript"
   },
   "transcriptSelection": {

@@ -81,6 +81,8 @@ export function CompanionTranscriptMessages({
         items={transcript.snapshot.items}
         expandedTurnKeys={transcript.snapshot.expandedTurnKeys}
         getDetail={transcript.getDetail}
+        onPageTurn={(turnKey, direction) => void transcript.pageTurn(turnKey, direction)}
+        loadingTurnKeys={transcript.snapshot.loadingTurnKeys}
         onExpand={(turnKey, revision, detailRevision) => {
           void transcript.expandTurn(turnKey, revision, detailRevision)
         }}

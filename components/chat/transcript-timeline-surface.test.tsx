@@ -235,6 +235,25 @@ describe("<TranscriptTimelineSurface />", () => {
     rerender(<TranscriptTimelineSurface {...expandedProps} {...streaming} />)
     expect(messageRenderMock.mock.calls.map(([message]) => message.id)).toEqual(["live"])
     expect(screen.getByTestId("message-a1")).toHaveTextContent("Full answer")
+    const onPageTurn = jest.fn()
+    const pagedProps = {
+      ...expandedProps,
+      onPageTurn,
+      getDetail: () => ({ ...detail, hasPrevious: true, hasMore: true, nextCursor: "next" }),
+    }
+    rerender(<TranscriptTimelineSurface {...pagedProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Previous messages" }))
+    fireEvent.click(screen.getByRole("button", { name: "Next messages" }))
+    expect(onPageTurn.mock.calls).toEqual([
+      [item.turnKey, "previous"],
+      [item.turnKey, "next"],
+    ])
+    rerender(
+      <TranscriptTimelineSurface {...pagedProps} loadingTurnKeys={new Set([item.turnKey])} />
+    )
+    expect(screen.getByRole("button", { name: "Previous messages" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Next messages" })).toBeDisabled()
+    expect(screen.getByTestId("message-a1")).toHaveTextContent("Full answer")
   })
 
   it("renders a folded turn through MessageRenderer and expands lazily", () => {

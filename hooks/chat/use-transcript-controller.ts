@@ -16,6 +16,7 @@ const EMPTY_SNAPSHOT: TranscriptControllerSnapshot = {
   loadingOlder: false,
   hasMore: false,
   expandedTurnKeys: new Set(),
+  loadingTurnKeys: new Set(),
   error: null,
 }
 
@@ -25,6 +26,7 @@ export interface UseTranscriptControllerResult {
   loadOlder: TranscriptController["loadOlder"]
   expandTurn: TranscriptController["expandTurn"]
   collapseTurn: TranscriptController["collapseTurn"]
+  pageTurn: TranscriptController["pageTurn"]
   retry: TranscriptController["loadInitial"]
 }
 
@@ -57,6 +59,7 @@ export function useTranscriptController(
     loadOlder: controller?.loadOlder.bind(controller) ?? (async () => {}),
     expandTurn: controller?.expandTurn.bind(controller) ?? (async () => {}),
     collapseTurn: controller?.collapseTurn.bind(controller) ?? (() => {}),
+    pageTurn: controller?.pageTurn.bind(controller) ?? (async () => {}),
     retry: controller?.loadInitial.bind(controller) ?? (async () => {}),
   }
 }

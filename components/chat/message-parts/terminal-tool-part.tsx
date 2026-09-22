@@ -48,10 +48,11 @@ interface TerminalToolPartProps {
   part: ToolUIPart
   /**
    * Seeds the row's open state at mount (read once, like a Collapsible's
-   * `defaultOpen`). Set by the activity group's expand-all / collapse-all and
-   * by `detailed` mode; when absent a running or failed call starts open.
+   * `defaultOpen`). Used for standalone rows; when absent a running or failed call starts open.
    */
   defaultOpen?: boolean
+  expanded?: boolean
+  onToggle?: () => void
 }
 
 interface TerminalToolBodyProps {
@@ -250,12 +251,17 @@ export const TerminalToolBody = memo(function TerminalToolBody({ part }: Termina
 export const TerminalToolPart = memo(function TerminalToolPart({
   part,
   defaultOpen,
+  expanded,
+  onToggle,
 }: TerminalToolPartProps) {
   const t = useTranslations("chat.toolRow")
   const tDock = useTranslations("chat.terminalTool")
   const tFlow = useTranslations("chat.agentFlow")
   const running = part.state === "input-available"
-  const [open, setOpen] = useState(defaultOpen ?? (running || part.state === "output-error"))
+  const [internalOpen, setInternalOpen] = useState(
+    defaultOpen ?? (running || part.state === "output-error")
+  )
+  const open = expanded ?? internalOpen
   const command = useMemo(() => extractCommand(part.input), [part.input])
   const io = useMemo(() => extractBashIO(part.output), [part.output])
   const { canRun, busy, pickerOpen, setPickerOpen, handlePick } = useRunInDock(command)
@@ -293,7 +299,7 @@ export const TerminalToolPart = memo(function TerminalToolPart({
     }
   }, [part, io, t, tFlow])
 
-  const toggle = () => setOpen((v) => !v)
+  const toggle = () => (expanded !== undefined ? onToggle?.() : setInternalOpen((v) => !v))
 
   return (
     <ToolRowShell

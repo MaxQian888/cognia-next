@@ -50,15 +50,12 @@ function byteLength(value: unknown): number {
 }
 
 function truncateUtf8(value: string, maxBytes: number): { text: string; truncated: boolean } {
-  if (encoder.encode(value).byteLength <= maxBytes) return { text: value, truncated: false }
-  let low = 0
-  let high = value.length
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    if (encoder.encode(value.slice(0, mid)).byteLength <= maxBytes) low = mid
-    else high = mid - 1
-  }
-  return { text: value.slice(0, low), truncated: true }
+  // encodeInto stops at a whole code point when the preview buffer fills.
+  // Encoding the entire response, then binary-searching and re-encoding its
+  // prefixes, needlessly scans megabytes to display at most 24 KB.
+  const buffer = new Uint8Array(Math.min(maxBytes, value.length * 3))
+  const { read } = encoder.encodeInto(value, buffer)
+  return { text: value.slice(0, read), truncated: read < value.length }
 }
 
 function messageText(message: StoredMessage): string {
@@ -170,7 +167,11 @@ function fitSummary(item: TranscriptTimelineItem): TranscriptTimelineItem {
       (value.text?.length ?? 0) > (longest.text?.length ?? 0) ? value : longest
     )
     const current = target.text ?? ""
-    const nextLength = Math.max(0, Math.floor(current.length * 0.75))
+    let nextLength = Math.max(0, Math.floor(current.length * 0.75))
+    // The combined-summary budget also clips text; do not leave half an emoji.
+    const last = current.charCodeAt(nextLength - 1)
+    const next = current.charCodeAt(nextLength)
+    if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) nextLength--
     target.text = current.slice(0, nextLength)
     target.truncated = true
     remaining -= current.length - nextLength
@@ -214,7 +215,15 @@ function completedTurn(
     completedAt: messages.at(-1)?.createdAt,
     durationMs: Math.max(0, (messages.at(-1)?.createdAt ?? 0) - (messages[0]?.createdAt ?? 0)),
   }
-  return fitSummary(item)
+  const fitted = fitSummary(item)
+  if (fitted.kind === "completed-turn") {
+    // A two-message turn still has hidden detail when a preview was clipped.
+    // Keep its expansion route available without altering persisted messages.
+    fitted.collapsed.exists ||= Boolean(
+      fitted.finalResponse?.truncated || fitted.userMessages.some((message) => message.truncated)
+    )
+  }
+  return fitted
 }
 
 export function projectTranscriptTimeline(

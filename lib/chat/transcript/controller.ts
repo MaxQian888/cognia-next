@@ -9,6 +9,18 @@ import type { TranscriptSource } from "./source"
 
 export type { SessionTimelinePage, SessionTurnMessagesPage, TranscriptSource }
 
+export interface TranscriptTurnDetail extends SessionTurnMessagesPage {
+  /** Local window navigation; not part of the host protocol. */
+  hasPrevious?: boolean
+}
+
+interface DetailWindow {
+  index: number
+  starts: Array<string | undefined>
+}
+
+export const TRANSCRIPT_DETAIL_WINDOW_MESSAGES = 200
+
 export interface TranscriptControllerSnapshot {
   mode: "unknown" | "timeline" | "legacy"
   items: TranscriptTimelineItem[]
@@ -17,6 +29,7 @@ export interface TranscriptControllerSnapshot {
   loadingOlder: boolean
   hasMore: boolean
   expandedTurnKeys: ReadonlySet<string>
+  loadingTurnKeys: ReadonlySet<string>
   error: unknown | null
 }
 
@@ -47,7 +60,8 @@ function prependPage(older: TranscriptTimelineItem[], newer: TranscriptTimelineI
 
 export class TranscriptController {
   private readonly listeners = new Set<() => void>()
-  private readonly detailCache: TranscriptDetailCache<SessionTurnMessagesPage>
+  private readonly detailCache: TranscriptDetailCache<TranscriptTurnDetail>
+  private readonly detailWindows = new Map<string, DetailWindow>()
   private nextCursor: string | undefined
   private unsubscribeRevision: (() => void) | undefined
   private started = false
@@ -56,6 +70,8 @@ export class TranscriptController {
   private requestedRevision = 0
   private refreshPromise: Promise<void> | undefined
   private readonly detailRequests = new Map<string, Promise<void>>()
+  private readonly detailReadVersions = new Map<string, number>()
+  private nextDetailReadVersion = 0
   private snapshot: TranscriptControllerSnapshot = {
     mode: "unknown",
     items: [],
@@ -64,6 +80,7 @@ export class TranscriptController {
     loadingOlder: false,
     hasMore: false,
     expandedTurnKeys: new Set(),
+    loadingTurnKeys: new Set(),
     error: null,
   }
 
@@ -100,7 +117,7 @@ export class TranscriptController {
 
   getSnapshot = (): TranscriptControllerSnapshot => this.snapshot
 
-  getDetail(turnKey: string): SessionTurnMessagesPage | undefined {
+  getDetail(turnKey: string): TranscriptTurnDetail | undefined {
     return this.detailCache.get(this.cacheKey(turnKey))
   }
 
@@ -108,6 +125,8 @@ export class TranscriptController {
     if (this.refreshPromise) return this.refreshPromise
     const generation = this.generation
     const epoch = ++this.readEpoch
+    this.detailReadVersions.clear()
+    this.update({ loadingTurnKeys: new Set() })
     const request = Promise.resolve().then(() => this.refresh(generation, epoch))
     this.refreshPromise = request
     void request.finally(() => {
@@ -188,7 +207,9 @@ export class TranscriptController {
         // Old detail requests belong to the previous page generation too.
         if (epoch !== this.readEpoch) return
         this.readEpoch++
+        this.detailReadVersions.clear()
         this.detailCache.clearSession(this.sessionId)
+        this.detailWindows.clear()
         this.nextCursor = page.nextCursor
         const expandedTurnKeys = new Set(
           [...this.snapshot.expandedTurnKeys].filter((key) =>
@@ -203,6 +224,7 @@ export class TranscriptController {
           loadingOlder: false,
           hasMore: page.hasMore,
           expandedTurnKeys,
+          loadingTurnKeys: new Set(),
           error: null,
         })
         for (const item of page.items) {
@@ -214,7 +236,17 @@ export class TranscriptController {
       }
     } catch (error) {
       if (generation === this.generation)
-        this.update({ loading: false, loadingOlder: false, error })
+        this.update({
+          loading: false,
+          loadingOlder: false,
+          expandedTurnKeys: new Set(
+            [...this.snapshot.expandedTurnKeys].filter(
+              (key) =>
+                this.detailCache.has(this.cacheKey(key)) || this.snapshot.loadingTurnKeys.has(key)
+            )
+          ),
+          error,
+        })
     }
   }
 
@@ -253,28 +285,63 @@ export class TranscriptController {
     return this.loadTurn(turnKey, revision, detailRevision, true)
   }
 
+  pageTurn(turnKey: string, direction: "previous" | "next"): Promise<void> {
+    if (this.snapshot.loadingTurnKeys.has(turnKey)) return Promise.resolve()
+    const detail = this.getDetail(turnKey)
+    const window = this.detailWindows.get(turnKey)
+    if (!detail || !window) return Promise.resolve()
+    const index = window.index + (direction === "next" ? 1 : -1)
+    if (index < 0 || (direction === "next" && !detail.hasMore)) return Promise.resolve()
+    const starts = window.starts.slice(0, index + 1)
+    if (direction === "next") starts[index] = detail.nextCursor
+    return this.loadTurn(turnKey, detail.revision, detail.detailRevision, true, { index, starts })
+  }
+
   private loadTurn(
     turnKey: string,
     revision: number,
     detailRevision: number,
-    allowReconcile: boolean
+    allowReconcile: boolean,
+    window?: DetailWindow
   ): Promise<void> {
     const expanded = new Set(this.snapshot.expandedTurnKeys)
     expanded.add(turnKey)
     this.update({ expandedTurnKeys: expanded, error: null })
     const key = this.cacheKey(turnKey)
-    if (this.detailCache.get(key)) {
+    if (!window && this.detailCache.get(key)) {
       this.detailCache.pin(key)
       return Promise.resolve()
     }
-    const requestKey = `${this.readEpoch}:${turnKey}:${revision}:${detailRevision}`
+    const readVersion = this.detailReadVersions.get(turnKey) ?? ++this.nextDetailReadVersion
+    this.detailReadVersions.set(turnKey, readVersion)
+    const requestKey = `${this.readEpoch}:${readVersion}:${turnKey}:${revision}:${detailRevision}`
     const existing = this.detailRequests.get(requestKey)
     if (existing) return existing
+    this.update({ loadingTurnKeys: new Set([...this.snapshot.loadingTurnKeys, turnKey]) })
     const epoch = this.readEpoch
-    const request = this.readDetail(turnKey, revision, detailRevision, epoch, allowReconcile)
+    const request = this.readDetail(
+      turnKey,
+      revision,
+      detailRevision,
+      epoch,
+      readVersion,
+      allowReconcile,
+      window ?? { index: 0, starts: [undefined] }
+    )
     this.detailRequests.set(requestKey, request)
     void request.finally(() => {
       if (this.detailRequests.get(requestKey) === request) this.detailRequests.delete(requestKey)
+      if (this.detailReadVersions.get(turnKey) === readVersion) {
+        this.detailReadVersions.delete(turnKey)
+        const loadingTurnKeys = new Set(this.snapshot.loadingTurnKeys)
+        loadingTurnKeys.delete(turnKey)
+        const expandedTurnKeys = new Set(this.snapshot.expandedTurnKeys)
+        for (const expanded of expandedTurnKeys) {
+          if (!this.detailCache.has(this.cacheKey(expanded)) && !loadingTurnKeys.has(expanded))
+            expandedTurnKeys.delete(expanded)
+        }
+        this.update({ loadingTurnKeys, expandedTurnKeys })
+      }
     })
     return request
   }
@@ -284,12 +351,19 @@ export class TranscriptController {
     revision: number,
     detailRevision: number,
     epoch: number,
-    allowReconcile: boolean
+    readVersion: number,
+    allowReconcile: boolean,
+    window: DetailWindow
   ): Promise<void> {
+    const isCurrent = () =>
+      epoch === this.readEpoch && readVersion === this.detailReadVersions.get(turnKey)
     try {
-      let detail: SessionTurnMessagesPage | undefined
-      let cursor: string | undefined
-      const cursors = new Set<string>()
+      let detail: TranscriptTurnDetail | undefined
+      // This array is private until the whole read commits. Appending avoids
+      // copying all earlier pages on every request of a long-running turn.
+      const messages: SessionTurnMessagesPage["messages"] = []
+      let cursor = window.starts[window.index]
+      const cursors = new Set(window.starts.filter((value): value is string => value !== undefined))
       const seen = new Set<string>()
       for (;;) {
         const page = await this.source.turnMessages({
@@ -297,33 +371,77 @@ export class TranscriptController {
           turnKey,
           revision,
           detailRevision,
+          limit: TRANSCRIPT_DETAIL_WINDOW_MESSAGES - messages.length,
           ...(cursor ? { cursor } : {}),
         })
-        if (epoch !== this.readEpoch) return
+        if (!isCurrent()) return
         if (page.revision !== revision || page.detailRevision !== detailRevision)
           throw staleTranscript()
-        const messages = page.messages.filter((message) => {
-          if (seen.has(message.id)) return false
+        if (!Number.isSafeInteger(page.approximateBytes) || page.approximateBytes < 0) {
+          throw new Error("transcript detail page has an invalid byte size")
+        }
+        if (page.approximateBytes > this.detailCache.hardByteLimit) {
+          throw Object.assign(new Error("A transcript detail page exceeds the memory budget"), {
+            code: "TRANSCRIPT_DETAIL_TOO_LARGE",
+          })
+        }
+        // Keep the previous window readable during navigation. If this page
+        // would overflow the hard cap, it starts the next window instead.
+        if (
+          detail &&
+          detail.approximateBytes + page.approximateBytes > this.detailCache.hardByteLimit
+        ) {
+          detail = { ...detail, hasMore: true, nextCursor: cursor }
+          break
+        }
+        for (const message of page.messages) {
+          if (seen.has(message.id)) continue
           seen.add(message.id)
-          return true
-        })
+          messages.push(message)
+        }
         detail = {
           ...page,
-          messages: [...(detail?.messages ?? []), ...messages],
+          messages,
           approximateBytes: (detail?.approximateBytes ?? 0) + page.approximateBytes,
+          ...(window.index > 0 ? { hasPrevious: true } : {}),
         }
         if (!page.hasMore) break
         if (!page.nextCursor || cursors.has(page.nextCursor))
           throw new Error("transcript detail cursor did not advance")
         cursors.add(page.nextCursor)
         cursor = page.nextCursor
+        // Window presentation only: authoritative messages stay on the host.
+        if (
+          detail.approximateBytes >= this.detailCache.softByteLimit ||
+          messages.length >= TRANSCRIPT_DETAIL_WINDOW_MESSAGES
+        )
+          break
       }
       const key = this.cacheKey(turnKey)
-      this.detailCache.set(key, detail, detail.approximateBytes, this.sessionId)
-      if (this.snapshot.expandedTurnKeys.has(turnKey)) this.detailCache.pin(key)
-      this.emit()
+      this.detailCache.set(
+        key,
+        detail,
+        detail.approximateBytes,
+        this.sessionId,
+        this.snapshot.expandedTurnKeys.has(turnKey)
+      )
+      this.detailWindows.set(turnKey, window)
+      const expandedTurnKeys = new Set(this.snapshot.expandedTurnKeys)
+      for (const expanded of expandedTurnKeys) {
+        if (
+          !this.detailCache.has(this.cacheKey(expanded)) &&
+          !this.snapshot.loadingTurnKeys.has(expanded)
+        ) {
+          expandedTurnKeys.delete(expanded)
+        }
+      }
+      for (const key of this.detailWindows.keys()) {
+        if (!this.detailCache.has(this.cacheKey(key))) this.detailWindows.delete(key)
+      }
+      // useSyncExternalStore observes snapshot identity, not notifications.
+      this.update({ expandedTurnKeys })
     } catch (error) {
-      if (epoch !== this.readEpoch) return
+      if (!isCurrent()) return
       // A refreshed turn gets one automatic detail attempt. Re-reconciling a
       // persistently stale host here would produce an endless history RPC loop.
       if (
@@ -333,15 +451,23 @@ export class TranscriptController {
         await this.loadInitial()
         return
       }
-      this.update({ error })
+      const expandedTurnKeys = new Set(this.snapshot.expandedTurnKeys)
+      if (!this.getDetail(turnKey)) expandedTurnKeys.delete(turnKey)
+      this.update({ error, expandedTurnKeys })
     }
   }
 
   collapseTurn(turnKey: string): void {
+    // Invalidate this read independently of other expanded turns. A collapse
+    // stops further downloads even if the same turn is immediately reopened.
+    this.detailReadVersions.delete(turnKey)
     const expanded = new Set(this.snapshot.expandedTurnKeys)
     expanded.delete(turnKey)
     this.detailCache.unpin(this.cacheKey(turnKey))
-    this.update({ expandedTurnKeys: expanded })
+    if (!this.getDetail(turnKey)) this.detailWindows.delete(turnKey)
+    const loadingTurnKeys = new Set(this.snapshot.loadingTurnKeys)
+    loadingTurnKeys.delete(turnKey)
+    this.update({ expandedTurnKeys: expanded, loadingTurnKeys })
   }
 
   clear(): void {
@@ -349,6 +475,8 @@ export class TranscriptController {
     this.readEpoch++
     this.refreshPromise = undefined
     this.detailRequests.clear()
+    this.detailReadVersions.clear()
+    this.detailWindows.clear()
     this.requestedRevision = 0
     this.unsubscribeRevision?.()
     this.unsubscribeRevision = undefined
