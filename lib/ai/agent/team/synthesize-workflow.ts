@@ -48,8 +48,8 @@ export interface SynthesizeInput {
   /** Forwarded into node executor via TeamRunContext; not encoded into VW. */
   perTaskTimeoutMs?: number
   /**
-   * Dependency task ids that are satisfied OUTSIDE this workflow (executed in a
-   * prior wave, or cancelled). Used by adaptive re-planning's wave runner: a
+   * Dependency task ids verified complete OUTSIDE this workflow (executed in a
+   * prior wave). Used by adaptive re-planning's wave runner: a
    * wave is a subset of the full task DAG, so its tasks may depend on tasks not
    * present here. Such deps skip reference-validation, edge creation, and
    * in-degree counting, but are KEPT in node params so the dispatch executor
@@ -81,20 +81,26 @@ export function classifyTeamTaskAccess(task: AgentTeamTask): "read" | "write" {
   return task.tags.some((tag) => readOnlyTags.has(tag.toLowerCase())) ? "read" : "write"
 }
 
-export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult {
-  if (input.tasks.length === 0) {
+export function validateTeamTaskGraph(
+  tasks: AgentTeamTask[],
+  satisfiedDependencyIds: ReadonlySet<string> = new Set<string>()
+): void {
+  if (tasks.length === 0) {
     throw new SynthesizeError("empty", "task list is empty")
   }
 
-  const taskIdSet = new Set(input.tasks.map((t) => t.id))
-  const satisfied = input.satisfiedDependencyIds ?? new Set<string>()
+  const taskIdSet = new Set(tasks.map((t) => t.id))
+  if (taskIdSet.size !== tasks.length || tasks.some((task) => !task.id)) {
+    throw new SynthesizeError("invalid_dep", "task ids must be nonempty and unique")
+  }
+  const satisfied = satisfiedDependencyIds
   // Intra-workflow deps drive validation / edges / scheduling; deps satisfied
   // outside this workflow are skipped (kept in params only).
   const isIntra = (dep: string): boolean => taskIdSet.has(dep)
 
   // Validate dep references. A dep is valid if it is in this workflow OR was
-  // declared satisfied outside it (prior wave / cancelled).
-  for (const t of input.tasks) {
+  // declared complete outside it (prior wave).
+  for (const t of tasks) {
     for (const dep of t.dependencies) {
       if (!taskIdSet.has(dep) && !satisfied.has(dep)) {
         throw new SynthesizeError("invalid_dep", `task "${t.id}" depends on unknown task "${dep}"`)
@@ -105,7 +111,7 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   // Cycle detection via Kahn's algorithm — only over intra-workflow edges.
   const inDegree = new Map<string, number>()
   const adj = new Map<string, string[]>()
-  for (const t of input.tasks) {
+  for (const t of tasks) {
     const intraDeps = t.dependencies.filter(isIntra)
     inDegree.set(t.id, intraDeps.length)
     for (const dep of intraDeps) {
@@ -119,8 +125,8 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
     if (d === 0) queue.push(id)
   }
   let visited = 0
-  while (queue.length > 0) {
-    const id = queue.shift()!
+  for (let index = 0; index < queue.length; index += 1) {
+    const id = queue[index]!
     visited += 1
     for (const next of adj.get(id) ?? []) {
       const d = (inDegree.get(next) ?? 0) - 1
@@ -128,12 +134,18 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
       if (d === 0) queue.push(next)
     }
   }
-  if (visited !== input.tasks.length) {
+  if (visited !== tasks.length) {
     throw new SynthesizeError(
       "cycle",
-      `dependency cycle in tasks (visited ${visited} of ${input.tasks.length})`
+      `dependency cycle in tasks (visited ${visited} of ${tasks.length})`
     )
   }
+}
+
+export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult {
+  validateTeamTaskGraph(input.tasks, input.satisfiedDependencyIds)
+  const taskIdSet = new Set(input.tasks.map((task) => task.id))
+  const isIntra = (dependency: string): boolean => taskIdSet.has(dependency)
 
   const nodes: WorkflowNode[] = input.tasks.map(
     (t) =>

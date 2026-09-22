@@ -15,6 +15,18 @@
 // The Registry workspace controller opens Bundle Turn leases through the
 // native task-workspace crate. A fake keeps the durable dispatch path honest
 // (leases are opened and settled) without a Registry.
+const abortWorkspaceMock = jest.fn(async () => undefined)
+const executeEnvironmentMock = jest.fn(async () => ({ success: true }))
+const getProjectEnvironmentVersionMock = jest.fn()
+jest.mock("@/lib/db/project-environments", () => ({
+  ...jest.requireActual("@/lib/db/project-environments"),
+  getProjectEnvironmentVersion: (...args: unknown[]) => getProjectEnvironmentVersionMock(...args),
+}))
+const updateRunIfCurrentMock = jest.fn()
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  ...jest.requireActual("@/lib/db/agent-team-runtime"),
+  updateAgentTeamRunIfCurrent: (...args: unknown[]) => updateRunIfCurrentMock(...args),
+}))
 jest.mock("./team/workspace/registry-controller", () => ({
   AgentTeamRegistryWorkspaceController: class FakeController {
     constructor(public readonly options: { roots: unknown[] }) {}
@@ -23,7 +35,7 @@ jest.mock("./team/workspace/registry-controller", () => ({
         primaryAlias: `/alias/${input.taskId}`,
         run: { runId: `ws-${input.taskId}` },
         settle: async () => [],
-        abort: async () => undefined,
+        abort: () => abortWorkspaceMock(),
       }
     }
     getDispatchExecutionRoot() {
@@ -35,7 +47,7 @@ jest.mock("./team/workspace/registry-controller", () => ({
   },
 }))
 jest.mock("@/lib/project-environment/executor", () => ({
-  executeProjectEnvironment: async () => ({ success: true }),
+  executeProjectEnvironment: () => executeEnvironmentMock(),
 }))
 // Mock plugin hooks so we don't need to boot the plugin store.
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
@@ -89,9 +101,12 @@ import { resolveTeamTwinRuntime } from "./team/twin-context"
 const resolveTeamTwinRuntimeMock = resolveTeamTwinRuntime as jest.Mock
 
 import { getDb } from "@/lib/db/schema"
+import { createSquadRunRecords } from "./team/squad-run-records"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import {
   runTeamLifecycle,
+  abortTeam,
+  getInflightController,
   parseProposedPlan,
   __resetInflightForTesting,
   type RunTeamLifecycleDeps,
@@ -261,6 +276,18 @@ async function pendingReviews(kind: SquadReviewKind) {
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  getProjectEnvironmentVersionMock
+    .mockReset()
+    .mockImplementation(
+      jest.requireActual("@/lib/db/project-environments").getProjectEnvironmentVersion
+    )
+  updateRunIfCurrentMock
+    .mockReset()
+    .mockImplementation(
+      jest.requireActual("@/lib/db/agent-team-runtime").updateAgentTeamRunIfCurrent
+    )
+  abortWorkspaceMock.mockReset().mockResolvedValue(undefined)
+  executeEnvironmentMock.mockReset().mockResolvedValue({ success: true })
   await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
@@ -396,6 +423,19 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
       allowedTools: ["Read"],
       disallowedTools: ["Bash"],
     })
+  })
+
+  it("abandons the isolated workspace when setup fails after opening its lease", async () => {
+    executeEnvironmentMock.mockRejectedValue(new Error("setup failed"))
+    const deps = buildDeps(
+      { ...baseTeam, config: { ...baseTeam.config, enableTaskRetry: false } },
+      [task("t1")],
+      [lead, worker("w1")]
+    )
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("failed")
+    expect(abortWorkspaceMock).toHaveBeenCalled()
+    expect(executeAgent).not.toHaveBeenCalled()
   })
 
   it("registers one Registry workspace controller for writable team repositories", async () => {
@@ -538,6 +578,115 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     const first = runTeamLifecycle("team-1", deps)
     await expect(runTeamLifecycle("team-1", deps)).rejects.toThrow(/already running/)
     await first
+  })
+
+  it("does not abort the current lifecycle for a different run id", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId: "current-run",
+    }
+    const active = runTeamLifecycle("team-1", deps)
+    expect(abortTeam("team-1", new Error("shutdown"), "previous-run")).toBe(false)
+    expect(getInflightController("team-1")?.signal.aborted).toBe(false)
+    await expect(active).resolves.toMatchObject({ status: "completed" })
+  })
+
+  it("preserves cancellation when durable environment admission fails late", async () => {
+    const runId = "cancelled-admission"
+    await createSquadRunRecords({
+      runId,
+      teamId: "team-1",
+      objective: "o",
+      origin: "interactive",
+      startedAt: 1,
+    })
+    getProjectEnvironmentVersionMock.mockImplementationOnce(async () => {
+      await getDb().agentTeamRuns.update(runId, { status: "cancelled" })
+      throw new Error("environment lookup failed")
+    })
+    const result = await runTeamLifecycle("team-1", {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId,
+    })
+    expect(result.status).toBe("cancelled")
+    expect((await getDb().agentTeamRuns.get(runId))?.status).toBe("cancelled")
+    expect((await getDb().executionRuns.get(`execution:team:${runId}`))?.status).toBe("cancelled")
+  })
+
+  it("uses the authoritative cancelled status after losing final settlement CAS", async () => {
+    const runId = "cancelled-settlement"
+    await createSquadRunRecords({
+      runId,
+      teamId: "team-1",
+      objective: "o",
+      origin: "interactive",
+      startedAt: 1,
+    })
+    ;(executeAgent as jest.Mock).mockImplementation(async () => {
+      updateRunIfCurrentMock.mockImplementationOnce(async () => {
+        await getDb().agentTeamRuns.update(runId, { status: "cancelled" })
+        return false
+      })
+      return {
+        text: "late result",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      }
+    })
+    const result = await runTeamLifecycle("team-1", {
+      ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId,
+    })
+    expect(result.status).toBe("cancelled")
+    expect((await getDb().agentTeamRuns.get(runId))?.status).toBe("cancelled")
+    expect((await getDb().executionRuns.get(`execution:team:${runId}`))?.status).toBe("cancelled")
+  })
+
+  it("waits for an aborted predecessor's workspace cleanup before starting its replacement", async () => {
+    let releaseCleanup!: () => void
+    let cleanupStarted!: () => void
+    const cleaning = new Promise<void>((resolve) => {
+      cleanupStarted = resolve
+    })
+    const cleanup = new Promise<void>((resolve) => {
+      releaseCleanup = resolve
+    })
+    abortWorkspaceMock.mockImplementationOnce(async () => {
+      cleanupStarted()
+      await cleanup
+    })
+    executeEnvironmentMock.mockRejectedValueOnce(new Error("setup failed"))
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "replacement result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const team = {
+      ...baseTeam,
+      config: { ...baseTeam.config, enableTaskRetry: false, maxRetries: 0 },
+    }
+    const previousDeps = {
+      ...buildDeps(team, [task("old-task")], [lead, worker("w1")]),
+      runId: "old-run",
+    }
+    const nextDeps = {
+      ...buildDeps(team, [task("next-task")], [lead, worker("w1")]),
+      runId: "next-run",
+    }
+    const readNextTeam = jest.spyOn(nextDeps.storeReader, "getTeam")
+    const previous = runTeamLifecycle("team-1", previousDeps)
+    await cleaning
+    expect(abortTeam("team-1", new Error("shutdown"), "old-run")).toBe(true)
+    const replacement = runTeamLifecycle("team-1", nextDeps)
+    await Promise.resolve()
+    expect(readNextTeam).not.toHaveBeenCalled()
+    releaseCleanup()
+    await previous
+    await expect(replacement).resolves.toMatchObject({ runId: "next-run", status: "completed" })
+    expect(readNextTeam).toHaveBeenCalled()
+    expect(getInflightController("team-1")).toBeUndefined()
   })
 })
 

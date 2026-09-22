@@ -12,43 +12,70 @@ export interface FairTeamSchedulerOptions {
 }
 
 export function createFairTeamScheduler(options: FairTeamSchedulerOptions) {
-  if (options.globalConcurrency < 1 || options.agingIntervalMs < 1) {
+  if (
+    !Number.isSafeInteger(options.globalConcurrency) ||
+    options.globalConcurrency < 1 ||
+    !Number.isFinite(options.agingIntervalMs) ||
+    options.agingIntervalMs < 1
+  ) {
     throw new Error("Fair scheduler concurrency and aging interval must be positive")
   }
   const queued = new Map<string, FairTeamJob>()
   const active = new Map<string, FairTeamJob>()
-
-  const activeForTeam = (teamId: string): number =>
-    [...active.values()].filter((job) => job.teamId === teamId).length
+  const activeByTeam = new Map<string, number>()
 
   return {
     enqueue(job: FairTeamJob): void {
-      if (job.teamConcurrency < 1) throw new Error("Team concurrency must be positive")
+      if (!Number.isSafeInteger(job.teamConcurrency) || job.teamConcurrency < 1) {
+        throw new Error("Team concurrency must be a positive integer")
+      }
+      if (
+        !job.id ||
+        !job.teamId ||
+        !Number.isFinite(job.priority) ||
+        !Number.isFinite(job.enqueuedAt)
+      ) {
+        throw new Error("Scheduler jobs require stable ids and finite priority and enqueue time")
+      }
       if (queued.has(job.id) || active.has(job.id)) return
-      queued.set(job.id, job)
+      queued.set(job.id, { ...job })
     },
 
     acquire(now: number): FairTeamJob | null {
+      if (!Number.isFinite(now)) throw new Error("Scheduler clock must be finite")
       if (active.size >= options.globalConcurrency) return null
-      const eligible = [...queued.values()].filter(
-        (job) => activeForTeam(job.teamId) < job.teamConcurrency
-      )
-      eligible.sort((a, b) => {
-        const scoreA =
-          a.priority + Math.floor(Math.max(0, now - a.enqueuedAt) / options.agingIntervalMs)
-        const scoreB =
-          b.priority + Math.floor(Math.max(0, now - b.enqueuedAt) / options.agingIntervalMs)
-        return scoreB - scoreA || a.enqueuedAt - b.enqueuedAt || a.id.localeCompare(b.id)
-      })
-      const next = eligible[0]
+      let next: FairTeamJob | undefined
+      let bestScore = -Infinity
+      for (const job of queued.values()) {
+        if ((activeByTeam.get(job.teamId) ?? 0) >= job.teamConcurrency) continue
+        const score =
+          job.priority + Math.floor(Math.max(0, now - job.enqueuedAt) / options.agingIntervalMs)
+        if (
+          !next ||
+          score > bestScore ||
+          (score === bestScore &&
+            (job.enqueuedAt < next.enqueuedAt ||
+              (job.enqueuedAt === next.enqueuedAt && job.id.localeCompare(next.id) < 0)))
+        ) {
+          next = job
+          bestScore = score
+        }
+      }
       if (!next) return null
       queued.delete(next.id)
       active.set(next.id, next)
-      return next
+      activeByTeam.set(next.teamId, (activeByTeam.get(next.teamId) ?? 0) + 1)
+      return { ...next }
     },
 
     release(jobId: string): boolean {
-      return active.delete(jobId)
+      const job = active.get(jobId)
+      if (!job) return false
+      active.delete(jobId)
+      const remaining = (activeByTeam.get(job.teamId) ?? 1) - 1
+      if (remaining === 0) activeByTeam.delete(job.teamId)
+      else activeByTeam.set(job.teamId, remaining)
+      return true
     },
 
     cancel(jobId: string): boolean {
@@ -56,7 +83,10 @@ export function createFairTeamScheduler(options: FairTeamSchedulerOptions) {
     },
 
     snapshot(): { queued: FairTeamJob[]; active: FairTeamJob[] } {
-      return { queued: [...queued.values()], active: [...active.values()] }
+      return {
+        queued: [...queued.values()].map((job) => ({ ...job })),
+        active: [...active.values()].map((job) => ({ ...job })),
+      }
     },
   }
 }

@@ -166,12 +166,14 @@ const externalCancelMock = jest.fn<Promise<void>, unknown[]>(async () => undefin
 // profile" path; individual tests set it to assert the projection reaches the
 // frozen spec.
 let externalCapabilityProfileMock: unknown
+let externalProtocolMock = "acp"
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
     execute: (...a: Parameters<typeof externalExecuteMock>) => externalExecuteMock(...a),
     steerSession: (...args: unknown[]) => externalSteerMock(...args),
     cancel: (...args: unknown[]) => externalCancelMock(...args),
     getAgentCapabilityProfile: () => externalCapabilityProfileMock,
+    getAgent: () => ({ config: { protocol: externalProtocolMock } }),
   }),
 }))
 
@@ -377,6 +379,7 @@ function makeCtx(
 
 beforeEach(() => {
   jest.clearAllMocks()
+  externalProtocolMock = "acp"
   resolveSendOptionsMock.mockResolvedValue({})
   isTauriMock.mockReturnValue(false)
   // Task Workspace is GA — a dispatch with a working dir always opens a lease,
@@ -606,6 +609,69 @@ describe("dispatchTeammate — text-only fallback", () => {
 })
 
 describe("dispatchTeammate — durable execution environment", () => {
+  it("preserves settlement and disposal errors and never reports success", async () => {
+    executeAgentMock.mockResolvedValue({ text: "answer" })
+    const complete = jest.fn()
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-1",
+      capture: jest.fn(),
+      attachEnvironment: jest.fn(),
+      prepareTurnContext: async () => "",
+      setWorkspace: jest.fn(),
+      run: (operation: () => Promise<unknown>) => operation(),
+      complete,
+      fail: jest.fn(),
+    })
+    const settleError = new Error("snapshot failed")
+    const disposeError = new Error("release failed")
+    const settle = jest.fn().mockRejectedValue(settleError)
+    const dispose = jest.fn().mockRejectedValue(disposeError)
+    const { ctx, pool } = makeCtx(makeTeammate(), {
+      repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
+    })
+    Object.assign(ctx, {
+      durableEnvironment: {
+        adapter: {
+          openChild: async () => ({ childRunId: "child-1", executionRoot: "/isolated", settle }),
+          dispose,
+        },
+        profile: { id: "env-v1" },
+        preparedByRepository: new Map([["primary", { executionRoot: "/repo" }]]),
+      },
+    })
+    await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toMatchObject({
+      errors: [settleError, disposeError],
+    })
+    expect(settle).toHaveBeenCalledTimes(1)
+    expect(dispose).toHaveBeenCalledTimes(1)
+    expect(complete).not.toHaveBeenCalled()
+    expect(pool.recordSuccess).not.toHaveBeenCalled()
+    expect(hookFns.dispatchOnTeammateRelease).toHaveBeenCalledTimes(1)
+  })
+
+  it("settles failure and releases the teammate when completion persistence rejects", async () => {
+    executeAgentMock.mockResolvedValue({ text: "answer" })
+    const fail = jest.fn(async () => undefined)
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-1",
+      prepareTurnContext: async () => "",
+      capture: jest.fn(),
+      run: (operation: () => Promise<unknown>) => operation(),
+      complete: async () => {
+        throw new Error("completion persistence failed")
+      },
+      fail,
+    })
+    const { ctx, pool } = makeCtx(makeTeammate())
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "work" })).rejects.toThrow(
+      "completion persistence failed"
+    )
+    expect(fail).toHaveBeenCalledTimes(1)
+    expect(pool.recordFailure).toHaveBeenCalledTimes(1)
+    expect(hookFns.dispatchOnTeammateRelease).toHaveBeenCalledTimes(1)
+    expect(pool.recordSuccess).not.toHaveBeenCalled()
+  })
+
   it("opens, settles, and disposes the child through the run-scoped environment adapter", async () => {
     executeAgentMock.mockResolvedValue({ text: "durable answer" })
     const setWorkspace = jest.fn(async () => undefined)
@@ -622,7 +688,16 @@ describe("dispatchTeammate — durable execution environment", () => {
       complete,
       fail: jest.fn(async () => undefined),
     })
-    const settle = jest.fn(async () => [{ path: "src/index.ts", kind: "modified" }])
+    const changes = [
+      {
+        runId: "workspace-1",
+        path: "src/index.ts",
+        kind: "modified",
+        hash: "content-hash",
+        revision: 1,
+      },
+    ]
+    const settle = jest.fn(async () => changes)
     const openChild = jest.fn(async () => ({
       childRunId: "child-1",
       executionRoot: "/repo/.worktrees/child-1",
@@ -670,7 +745,8 @@ describe("dispatchTeammate — durable execution environment", () => {
     expect(dispose).toHaveBeenCalledWith("child-1")
     expect(complete).toHaveBeenCalledWith(
       expect.objectContaining({
-        diffContent: JSON.stringify([{ path: "src/index.ts", kind: "modified" }]),
+        diffContent: JSON.stringify(changes),
+        workspaceRevision: expect.stringMatching(/^workspace:sha256:[a-f0-9]{64}$/),
         environmentEvidence: [{ kind: "test", title: "pnpm test", content: "passed" }],
       })
     )
@@ -678,6 +754,39 @@ describe("dispatchTeammate — durable execution environment", () => {
 })
 
 describe("dispatchTeammate — remote durable worker", () => {
+  it("refuses remote dispatch when the handoff cannot enforce inherited permissions", async () => {
+    process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-remote",
+      capture: jest.fn(),
+      prepareTurnContext: async () => "",
+      run: (operation: () => Promise<unknown>) => operation(),
+      fail: jest.fn(),
+    })
+    const { ctx, pool } = makeCtx(
+      makeTeammate({
+        config: {
+          execution: {
+            mode: "pinned",
+            deploymentRef: "anthropic",
+            executionTarget: { mode: "auto" },
+          },
+        },
+      }),
+      { defaultPermissionMode: "default" }
+    )
+    try {
+      await expect(dispatchTeammate(ctx, { taskId: "task", prompt: "work" })).rejects.toThrow(
+        "cannot enforce"
+      )
+      expect(remoteRunMock).not.toHaveBeenCalled()
+      expect(claimDispatchLeaseMock).not.toHaveBeenCalled()
+      expect(pool.recordSuccess).not.toHaveBeenCalled()
+    } finally {
+      delete process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH
+    }
+  })
+
   it("claims a child lease, dispatches by stable repository ref, and captures events once", async () => {
     process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
     const complete = jest.fn(async () => undefined)
@@ -1476,6 +1585,36 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
 })
 
 describe("dispatchTeammate — team permission ceiling", () => {
+  it.each(["sandbox", "allow-list", "unsupported-mode"])(
+    "refuses external %s policy loss",
+    async (constraint) => {
+      resolveExternalMock.mockResolvedValue("agent-1")
+      const { ctx } = makeCtx(
+        makeTeammate({ config: { runtime: "codex", sandboxEnabled: false } }),
+        constraint === "sandbox" ? { sandboxEnabled: true } : {}
+      )
+      if (constraint === "allow-list") ctx.parentPermissionCeiling = { allowedTools: [] }
+      if (constraint === "unsupported-mode") {
+        ctx.parentPermissionCeiling = { permissionMode: "plan" }
+        externalProtocolMock = "http"
+      }
+      await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "work" })).rejects.toThrow(
+        "cannot enforce"
+      )
+      expect(externalExecuteMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("refuses an external runtime that cannot enforce an inherited deny policy", async () => {
+    resolveExternalMock.mockResolvedValue("agent-1")
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+    ctx.parentPermissionCeiling = { permissionMode: "plan", disallowedTools: ["Write"] }
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "work" })).rejects.toThrow(
+      "cannot enforce"
+    )
+    expect(externalExecuteMock).not.toHaveBeenCalled()
+  })
+
   it("intersects the IM parent ceiling with Team policy", async () => {
     isTauriMock.mockReturnValue(true)
     createSessionMock.mockResolvedValue({ id: "sess1" })

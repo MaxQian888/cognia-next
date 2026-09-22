@@ -29,14 +29,18 @@ export interface BuildTeamRiskInputParams {
  * Tool ids union each worker's explicit `tools` allowlist with its resolved
  * `nativeAnthropicToolIds` — a teammate can reach a native tool through the
  * team's capability bundle without ever naming it in `tools`, so reading only
- * one of the two would under-report. Sandbox posture is an OR across the team
- * default and every worker override, matching `teammateToCharacter`'s resolution:
+ * one of the two would under-report. Sandbox posture resolves each worker
+ * against the team default, matching `teammateToCharacter`'s resolution:
  * one unsandboxed worker means the run is unsandboxed.
  */
 export function buildTeamRiskInput({ team, workers, tasks }: BuildTeamRiskInputParams): RiskInput {
   const toolIds = new Set<string>()
   const capabilityIds = new Set<string>()
-  let sandboxEnabled = team.config.sandboxEnabled === true
+  const sandboxEnabled =
+    workers.length > 0 &&
+    workers.every(
+      (worker) => (worker.config.sandboxEnabled ?? team.config.sandboxEnabled ?? false) === true
+    )
 
   for (const worker of workers) {
     for (const id of worker.config.tools ?? []) toolIds.add(id)
@@ -51,16 +55,6 @@ export function buildTeamRiskInput({ team, workers, tasks }: BuildTeamRiskInputP
     ]) {
       capabilityIds.add(id)
     }
-
-    // A teammate may enable the sandbox individually even when the team default
-    // is unset — but it may not be *disabled* here, because the classifier only
-    // downgrades on sandbox coverage and a partial roster has none.
-    if (worker.config.sandboxEnabled === true) sandboxEnabled = true
-  }
-
-  // The team default only counts as coverage if no worker opted out of it.
-  if (sandboxEnabled && workers.some((w) => w.config.sandboxEnabled === false)) {
-    sandboxEnabled = false
   }
 
   return {

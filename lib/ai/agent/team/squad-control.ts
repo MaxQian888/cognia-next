@@ -30,16 +30,16 @@ import { LEGACY_RUN_NOT_RESUMABLE } from "@/lib/agent-team/legacy-run-history"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import {
   getAgentTeamRun,
-  getLatestAgentTeamCheckpoint,
   listAgentTeamChildRuns,
-  updateAgentTeamRun,
+  updateAgentTeamRunIfCurrent,
 } from "@/lib/db/agent-team-runtime"
 import { getExecutionRun, runEventJournal, semanticRunEvent } from "@/lib/db/execution-runs"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 import type { AgentTeamRunRecord, AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 import { abortTeam } from "../agent-team-runtime"
 import { controlDurableRun } from "./durable-control"
-import { isTerminalSquadRunStatus } from "./squad-run-records"
+import { isDurableChildReplaySafe } from "./durable-runtime"
+import { isTerminalSquadRunStatus, parkActiveSquadRun } from "./squad-run-records"
 import { getTeamRunContext } from "./team-run-context"
 
 export type SquadControlAction = "pause" | "resume" | "stop"
@@ -60,6 +60,7 @@ export interface SquadControlResult {
 
 const PAUSABLE: ReadonlySet<AgentTeamRunStatus> = new Set(["queued", "running", "recovering"])
 const RESUMABLE: ReadonlySet<AgentTeamRunStatus> = new Set([
+  "recovering",
   "paused",
   "pausing",
   "sleeping",
@@ -118,16 +119,32 @@ async function defaultDenyPendingInterrupts(executionRunId: string, now: number)
 }
 
 async function defaultReenter(input: { teamId: string; runId: string }): Promise<unknown> {
-  const { guardSquadResume, prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
-    await import("./squad-lifecycle-runner")
+  const {
+    guardSquadResume,
+    prepareSquadResume,
+    resumeTaskFilter,
+    runSquadLifecycle,
+    restoreSquadRunInput,
+  } = await import("./squad-lifecycle-runner")
   // A Squad that could not start must not resume either. The guard parks the
   // run and raises the recovery review; there is nothing to re-enter.
   const guard = await guardSquadResume(input.teamId, input.runId)
   if (guard.blocked) return undefined
+  const restored = await restoreSquadRunInput(input.teamId, input.runId)
+  if (!restored) return undefined
   const { remaining } = await prepareSquadResume(input.teamId)
   if (remaining === 0) {
     const now = Date.now()
-    await updateAgentTeamRun(input.runId, { status: "completed", completedAt: now, updatedAt: now })
+    const current = await getAgentTeamRun(input.runId)
+    if (!current || isTerminalSquadRunStatus(current.status)) return undefined
+    if (
+      !(await updateAgentTeamRunIfCurrent(input.runId, current, {
+        status: "completed",
+        completedAt: now,
+        updatedAt: now,
+      }))
+    )
+      return undefined
     const { settleAgentTeamExecutionRun } = await import("@/lib/execution/agent-team-bridge")
     const run = await getAgentTeamRun(input.runId)
     if (run) await settleAgentTeamExecutionRun(run, "completed", now).catch(() => undefined)
@@ -137,8 +154,7 @@ async function defaultReenter(input: { teamId: string; runId: string }): Promise
     return undefined
   }
   return runSquadLifecycle({
-    teamId: input.teamId,
-    runId: input.runId,
+    ...restored,
     taskFilter: resumeTaskFilter,
   })
 }
@@ -157,16 +173,10 @@ export async function assessSquadRunReplay(
   const uncertain: string[] = []
   for (const child of children) {
     if (["completed", "cancelled", "terminated"].includes(child.status)) continue
-    const checkpoint = await getLatestAgentTeamCheckpoint(child.id)
-    const unsafe =
-      !checkpoint ||
-      checkpoint.replay === "needs_input" ||
-      checkpoint.sideEffects.some(
-        (effect) =>
-          effect.state === "unknown" || (effect.state === "intent" && effect.replay !== "safe")
-      )
     // A child that never started has nothing to replay and is safe to re-queue.
-    if (unsafe && child.status !== "queued") uncertain.push(child.id)
+    if (child.status !== "queued" && !(await isDurableChildReplaySafe(child.id))) {
+      uncertain.push(child.id)
+    }
   }
   return { safe: uncertain.length === 0, uncertainChildIds: uncertain }
 }
@@ -207,14 +217,19 @@ export async function controlSquadRun(
       useAgentTeamStore.getState().setTeamStatus(run.teamId, "executing")
       return { ok: true, status: "running" }
     }
+    if (run.executionConstraints?.version !== 1 || !run.executionConstraints.teamConfig) {
+      if (!(await parkActiveSquadRun(runId, "missing_execution_constraints", now()))) {
+        return { ok: false, reason: "already_terminal" }
+      }
+      await (deps.openRecovery ?? defaultOpenRecovery)(runId).catch(() => undefined)
+      return { ok: false, reason: "recovery_required", status: "needs_input" }
+    }
     const replay = await assessSquadRunReplay(runId)
     if (!replay.safe) {
       const at = now()
-      await updateAgentTeamRun(runId, {
-        status: "needs_input",
-        recoveryReason: "uncertain_side_effect",
-        updatedAt: at,
-      })
+      if (!(await parkActiveSquadRun(runId, "uncertain_side_effect", at))) {
+        return { ok: false, reason: "already_terminal" }
+      }
       await journal(runId, "run.waiting", "team_recovery", at)
       useAgentTeamStore.getState().setTeamStatus(run.teamId, "paused")
       // The question a person has to answer, as a durable interrupt every
@@ -223,11 +238,33 @@ export async function controlSquadRun(
       return { ok: false, reason: "recovery_required", status: "needs_input" }
     }
     const at = now()
-    await updateAgentTeamRun(runId, { status: "running", recoveryReason: undefined, updatedAt: at })
+    if (
+      !(await updateAgentTeamRunIfCurrent(runId, run, {
+        status: "running",
+        recoveryReason: undefined,
+        updatedAt: at,
+      }))
+    ) {
+      const current = await getAgentTeamRun(runId)
+      return {
+        ok: false,
+        reason:
+          current && isTerminalSquadRunStatus(current.status)
+            ? "already_terminal"
+            : "not_resumable",
+        status: current?.status,
+      }
+    }
     await journal(runId, "run.resumed", "operator_resume", at)
     // Fire-and-forget, like a start: a re-entered lifecycle can run for
     // minutes and every caller has something to acknowledge quickly.
-    void (deps.reenter ?? defaultReenter)({ teamId: run.teamId, runId }).catch(() => undefined)
+    void (deps.reenter ?? defaultReenter)({ teamId: run.teamId, runId })
+      .catch(async () => {
+        if (await parkActiveSquadRun(runId, "reentry_failed", now())) {
+          await (deps.openRecovery ?? defaultOpenRecovery)(runId)
+        }
+      })
+      .catch(() => undefined)
     return { ok: true, status: "running" }
   }
 
@@ -235,7 +272,7 @@ export async function controlSquadRun(
   // journals the terminal event when it is alive), cascade to the children and
   // deny whatever was waiting on a person.
   const at = now()
-  abortTeam(run.teamId, new Error("shutdown"))
+  abortTeam(run.teamId, new Error("shutdown"), runId)
   await controlDurableRun(runId, "stop", { now })
   await (deps.denyPendingInterrupts ?? defaultDenyPendingInterrupts)(
     agentTeamExecutionRunId(runId),

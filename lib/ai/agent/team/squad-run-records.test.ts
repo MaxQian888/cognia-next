@@ -9,6 +9,7 @@ import {
   findLiveSquadRun,
   isLiveSquadRunStatus,
   isTerminalSquadRunStatus,
+  parkActiveSquadRun,
   type SquadRunSeed,
 } from "./squad-run-records"
 
@@ -84,6 +85,77 @@ describe("createSquadRunRecords", () => {
     expect(await getDb().executionRunEvents.count()).toBe(1)
   })
 
+  it("admits only one concurrent start for the same Squad inside the transaction", async () => {
+    const results = await Promise.allSettled([
+      createSquadRunRecords(seed),
+      createSquadRunRecords({ ...seed, runId: "run_team_racing" }),
+    ])
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(await getDb().agentTeamRuns.count()).toBe(1)
+  })
+
+  it("atomically replaces a parked run and preserves terminal history on replay", async () => {
+    await createSquadRunRecords(seed)
+    await getDb().agentTeamRuns.update(seed.runId, { status: "needs_input" })
+    const replacement = await createSquadRunRecords({
+      ...seed,
+      runId: "replacement",
+      parentRunId: `execution:team:${seed.runId}`,
+    })
+    expect(replacement.replacedRunId).toBe(seed.runId)
+    expect((await getDb().agentTeamRuns.get(seed.runId))?.status).toBe("cancelled")
+    expect((await getDb().executionRuns.get(`execution:team:${seed.runId}`))?.status).toBe(
+      "cancelled"
+    )
+    expect((await createSquadRunRecords(seed)).created).toBe(false)
+    expect((await getDb().agentTeamRuns.get(seed.runId))?.status).toBe("cancelled")
+  })
+
+  it("does not replace an actively executing run", async () => {
+    await createSquadRunRecords(seed)
+    await getDb().agentTeamRuns.update(seed.runId, { status: "running" })
+    await expect(
+      createSquadRunRecords({
+        ...seed,
+        runId: "replacement",
+        parentRunId: `execution:team:${seed.runId}`,
+      })
+    ).rejects.toThrow(/already has a live run/)
+    expect(await getDb().agentTeamRuns.count()).toBe(1)
+  })
+
+  it("reuses a settled replacement when the same parent restart is delivered again", async () => {
+    await createSquadRunRecords(seed)
+    await getDb().agentTeamRuns.update(seed.runId, { status: "needs_input" })
+    const parentRunId = `execution:team:${seed.runId}`
+    const first = await createSquadRunRecords({ ...seed, runId: "first-replacement", parentRunId })
+    await getDb().agentTeamRuns.update(first.runId, { status: "completed" })
+    const replay = await createSquadRunRecords({
+      ...seed,
+      runId: "second-replacement",
+      parentRunId,
+    })
+    expect(replay).toMatchObject({
+      created: false,
+      runId: first.runId,
+      executionRunId: first.executionRunId,
+    })
+    expect(await getDb().agentTeamRuns.count()).toBe(2)
+  })
+
+  it("converges concurrent restart deliveries onto one replacement", async () => {
+    await createSquadRunRecords(seed)
+    await getDb().agentTeamRuns.update(seed.runId, { status: "needs_input" })
+    const results = await Promise.all(
+      ["replacement-a", "replacement-b"].map((runId) =>
+        createSquadRunRecords({ ...seed, runId, parentRunId: `execution:team:${seed.runId}` })
+      )
+    )
+    expect(new Set(results.map((result) => result.runId)).size).toBe(1)
+    expect(results.filter((result) => result.created)).toHaveLength(1)
+    expect(await getDb().agentTeamRuns.count()).toBe(2)
+  })
+
   it("converges when only one of the two rows already exists", async () => {
     await getDb().agentTeamRuns.add({
       id: seed.runId,
@@ -96,7 +168,7 @@ describe("createSquadRunRecords", () => {
       updatedAt: 1,
     })
     const result = await createSquadRunRecords(seed)
-    expect(result.created).toBe(true)
+    expect(result.created).toBe(false)
     expect(result.run.objective).toBe("older")
     expect(await getDb().executionRuns.get(result.executionRunId)).toBeDefined()
   })
@@ -107,6 +179,31 @@ describe("createSquadRunRecords", () => {
       /belongs to another Squad/
     )
     expect(await getDb().executionRuns.count()).toBe(1)
+  })
+
+  it("restores a missing execution row without resurrecting terminal history", async () => {
+    await getDb().agentTeamRuns.add({
+      id: seed.runId,
+      teamId: seed.teamId,
+      objective: "finished",
+      status: "terminated",
+      priority: 0,
+      decisionVersion: 0,
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 2,
+    })
+    const result = await createSquadRunRecords(seed)
+    expect(result.created).toBe(false)
+    expect(result.executionRun.status).toBe("cancelled")
+  })
+
+  it("ignores late recovery failures after cancellation", async () => {
+    await createSquadRunRecords(seed)
+    expect(await parkActiveSquadRun(seed.runId, "launch_failed", 2_000)).toBe(true)
+    await getDb().agentTeamRuns.update(seed.runId, { status: "cancelled" })
+    expect(await parkActiveSquadRun(seed.runId, "reentry_failed", 3_000)).toBe(false)
+    expect((await getDb().agentTeamRuns.get(seed.runId))?.status).toBe("cancelled")
   })
 
   it("links a replacement to the run it replaces", async () => {
@@ -132,7 +229,8 @@ describe("createSquadRunRecords", () => {
     // The execution row exists and is terminal, so the durable row is created
     // and no event is appended: converge, do not throw.
     const result = await createSquadRunRecords(seed)
-    expect(result.created).toBe(true)
+    expect(result.created).toBe(false)
+    expect(result.run.status).toBe("completed")
 
     // Now force a real failure: a broken table write.
     const spy = jest

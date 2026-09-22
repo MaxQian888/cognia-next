@@ -30,12 +30,14 @@ jest.mock("../agent-team-runtime-deps", () => ({
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+import type { RunTeamLifecycleDeps } from "../agent-team-runtime"
 import {
   __resetAgentTeamRuntimeForTesting,
   configureAgentTeamRuntime,
   prepareSquadResume,
   resumeTaskFilter,
   runSquadLifecycle,
+  restoreSquadRunInput,
 } from "./squad-lifecycle-runner"
 
 function makeTeam(overrides: Partial<AgentTeam> = {}): AgentTeam {
@@ -99,10 +101,147 @@ beforeEach(() => {
   useAgentTeamStore.getState().reset()
   __resetAgentTeamRuntimeForTesting()
   jest.clearAllMocks()
-  getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "t1", status: "running" })
+  getAgentTeamRun.mockResolvedValue({
+    id: "run-1",
+    teamId: "t1",
+    status: "running",
+    executionConstraints: { version: 1, teamConfig: {} },
+  })
 })
 
 describe("runSquadLifecycle", () => {
+  it("does not fill absent frozen authority fields from caller overrides", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam())
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints: {
+        version: 1,
+        teamConfig: {},
+        origin: "interactive",
+        triggeredFrom: { source: "ui" },
+        requirePlanApprovalFloor: false,
+      },
+    })
+    const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
+    await runSquadLifecycle(
+      {
+        teamId: "t1",
+        runId: "run-1",
+        sessionWorkingDir: "/unexpected-root",
+        permissionCeiling: { permissionMode: "bypassPermissions" },
+        entryPersona: { id: "injected", name: "Injected", systemPrompt: "replacement authority" },
+      },
+      { run }
+    )
+    expect(run).toHaveBeenCalledWith(
+      "t1",
+      expect.not.objectContaining({ sessionWorkingDir: expect.anything() })
+    )
+    expect(run).toHaveBeenCalledWith(
+      "t1",
+      expect.not.objectContaining({ parentPermissionCeiling: expect.anything() })
+    )
+    expect(buildAgentTeamRuntimeDeps).not.toHaveBeenCalledWith(
+      expect.objectContaining({ entryPersona: expect.anything() })
+    )
+  })
+  it("does not execute a lifecycle whose run was already cancelled", async () => {
+    getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "t1", status: "cancelled" })
+    const run = jest.fn()
+    expect(await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })).toEqual({
+      runId: "run-1",
+      status: "cancelled",
+    })
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it("rechecks cancellation after awaiting runtime dependencies", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam())
+    getAgentTeamRun
+      .mockResolvedValueOnce({
+        id: "run-1",
+        teamId: "t1",
+        status: "running",
+        executionConstraints: { version: 1, teamConfig: {} },
+      })
+      .mockResolvedValue({ id: "run-1", teamId: "t1", status: "cancelled" })
+    const run = jest.fn()
+    expect(await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })).toMatchObject({
+      status: "cancelled",
+    })
+    expect(run).not.toHaveBeenCalled()
+    expect(useAgentTeamStore.getState().teams.t1.status).not.toBe("executing")
+  })
+
+  it("freezes the security configuration without changing the editable team definition", async () => {
+    const team = makeTeam()
+    team.config.workingDir = "/new-root"
+    team.config.sandboxEnabled = false
+    team.config.repositories = [{ id: "new", role: "primary", path: "/new-root" }] as never
+    useAgentTeamStore.getState().upsertTeam(team)
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints: {
+        version: 1,
+        teamConfig: { workingDir: "/original", sandboxEnabled: true },
+      },
+    })
+    const run = jest.fn(async (_id: string, options: RunTeamLifecycleDeps) => {
+      const executing = options.storeReader.getTeam("t1")
+      expect(executing?.config).toMatchObject({ workingDir: "/original", sandboxEnabled: true })
+      expect(executing?.config.repositories).toBeUndefined()
+      return { runId: "run-1", status: "completed" as const }
+    })
+    await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })
+    expect(useAgentTeamStore.getState().teams.t1.config.workingDir).toBe("/new-root")
+  })
+  it("restores the frozen permission ceiling and approval floor on every re-entry", async () => {
+    useAgentTeamStore.getState().upsertTeam(makeTeam())
+    const executionConstraints = {
+      version: 1,
+      teamConfig: {},
+      origin: "scheduler",
+      triggeredFrom: { source: "ui" },
+      permissionCeiling: { permissionMode: "plan", disallowedTools: ["Write"] },
+      requirePlanApprovalFloor: true,
+      sessionWorkingDir: "/frozen",
+      sessionId: "s1",
+      entryPersona: { id: "p1", name: "Reviewer", systemPrompt: "Review only" },
+    }
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints,
+    })
+    const restored = await restoreSquadRunInput("t1", "run-1")
+    expect(restored).toMatchObject(executionConstraints)
+    const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
+    await runSquadLifecycle(
+      {
+        ...restored!,
+        permissionCeiling: { permissionMode: "acceptEdits" },
+        requirePlanApprovalFloor: false,
+      },
+      { run }
+    )
+    expect(run).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        parentPermissionCeiling: executionConstraints.permissionCeiling,
+        requirePlanApprovalFloor: true,
+        origin: "scheduler",
+        sessionWorkingDir: "/frozen",
+      })
+    )
+    expect(buildAgentTeamRuntimeDeps).toHaveBeenCalledWith({
+      entryPersona: executionConstraints.entryPersona,
+    })
+  })
   it("auto-configures default deps (with a warning) when nothing was configured", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     useAgentTeamStore.getState().upsertTeam(makeTeam())
@@ -117,6 +256,20 @@ describe("runSquadLifecycle", () => {
     useAgentTeamStore.getState().upsertTeam(makeTeam())
     const runLeadPlanning = jest.fn()
     configureAgentTeamRuntime({ runLeadPlanning, notifierDeps: { marker: "configured" } as never })
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints: {
+        version: 1,
+        teamConfig: {},
+        origin: "scheduler",
+        triggeredFrom: { source: "ui" },
+        ultracode: true,
+        requirePlanApprovalFloor: true,
+        sessionWorkingDir: "/work",
+      },
+    })
     const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
     await runSquadLifecycle(
       {
@@ -149,6 +302,16 @@ describe("runSquadLifecycle", () => {
   it("builds persona-bound deps when the caller enters as a Character", async () => {
     useAgentTeamStore.getState().upsertTeam(makeTeam())
     configureAgentTeamRuntime({ runLeadPlanning: jest.fn(), notifierDeps: {} })
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints: {
+        version: 1,
+        teamConfig: {},
+        entryPersona: { id: "c1", name: "Ada", systemPrompt: "be Ada" },
+      },
+    })
     const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
     await runSquadLifecycle(
       {
@@ -190,7 +353,12 @@ describe("runSquadLifecycle", () => {
     "does not settle over a durable %s status",
     async (durableStatus) => {
       useAgentTeamStore.getState().upsertTeam(makeTeam())
-      getAgentTeamRun.mockResolvedValue({ id: "run-1", teamId: "t1", status: durableStatus })
+      getAgentTeamRun.mockResolvedValue({
+        id: "run-1",
+        teamId: "t1",
+        status: durableStatus,
+        executionConstraints: { version: 1, teamConfig: {} },
+      })
       const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
       await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })
       expect(useAgentTeamStore.getState().teams.t1?.status).toBe("paused")
@@ -222,6 +390,17 @@ describe("runSquadLifecycle", () => {
     prepareAndPublishGithubStack.mockRejectedValueOnce(
       new Error("token for alice@example.com expired")
     )
+    getAgentTeamRun.mockResolvedValue({
+      id: "run-1",
+      teamId: "t1",
+      status: "running",
+      executionConstraints: {
+        version: 1,
+        teamConfig: {
+          githubDeliveryPolicy: useAgentTeamStore.getState().teams.t1.config.githubDeliveryPolicy,
+        },
+      },
+    })
     const run = jest.fn(async () => ({ runId: "run-1", status: "completed" as const }))
     await runSquadLifecycle({ teamId: "t1", runId: "run-1" }, { run })
     expect(updateAgentTeamRun).toHaveBeenCalledWith(

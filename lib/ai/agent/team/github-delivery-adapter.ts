@@ -47,7 +47,13 @@ export function createGithubDeliveryAdapter(
         Date.now()
       )
       return {
-        ci: observation.fetched ? observation.ci.summary : "unknown",
+        ...(observation.fetched
+          ? { headSha: observation.pr.headSha, merged: observation.pr.merged }
+          : {}),
+        ci:
+          observation.fetched && observation.ci.headSha === observation.pr.headSha
+            ? observation.ci.summary
+            : "unknown",
         approved: observation.fetched && observation.review.decision === "approved",
         mergeable: observation.fetched && observation.mergeability.mergeable,
         conflict: observation.fetched && observation.mergeability.conflict,
@@ -57,24 +63,57 @@ export function createGithubDeliveryAdapter(
   return {
     async createPullRequest(input) {
       const repo = repository(input.repositoryId)
-      const response = await options.octokit.request("POST /repos/{owner}/{repo}/pulls", {
-        owner: repo.owner,
-        repo: repo.name,
-        title: input.title,
-        head: input.branch,
-        base: input.baseBranch,
-        body: `AgentTeam stacked delivery layer ${input.order + 1}`,
-      })
-      ensureSuccess(response.status, "create pull request")
-      const data = response.data as {
+      type Pull = {
         number?: number
         html_url?: string
-        head?: { sha?: string }
+        head?: { sha?: string; ref?: string; repo?: { full_name?: string } }
+        base?: { ref?: string }
       }
-      if (!data.number || !data.html_url || !data.head?.sha) {
-        throw new Error("GitHub create pull request returned an incomplete response")
+      const result = (data: Pull) => {
+        if (!data.number || !data.html_url || !data.head?.sha)
+          throw new Error("GitHub create pull request returned an incomplete response")
+        return { number: data.number, url: data.html_url, headSha: data.head.sha }
       }
-      return { number: data.number, url: data.html_url, headSha: data.head.sha }
+      // Branch/base identity survives an ambiguous POST response and a process restart.
+      const existing = async () => {
+        const found = await options.octokit.request("GET /repos/{owner}/{repo}/pulls", {
+          owner: repo.owner,
+          repo: repo.name,
+          state: "open",
+          head: `${repo.owner}:${input.branch}`,
+          base: input.baseBranch,
+          per_page: 100,
+        })
+        ensureSuccess(found.status, "find pull request")
+        if (!Array.isArray(found.data))
+          throw new Error("GitHub pull request lookup returned an invalid response")
+        const matches = (found.data as Pull[]).filter(
+          (pull) =>
+            pull.head?.ref === input.branch &&
+            pull.base?.ref === input.baseBranch &&
+            pull.head.repo?.full_name?.toLowerCase() === repo.fullName.toLowerCase()
+        )
+        if (matches.length > 1) throw new Error("Multiple pull requests match this delivery branch")
+        return matches[0] ? result(matches[0]) : undefined
+      }
+      const prior = await existing()
+      if (prior) return prior
+      try {
+        const response = await options.octokit.request("POST /repos/{owner}/{repo}/pulls", {
+          owner: repo.owner,
+          repo: repo.name,
+          title: input.title,
+          head: input.branch,
+          base: input.baseBranch,
+          body: `AgentTeam stacked delivery layer ${input.order + 1}`,
+        })
+        ensureSuccess(response.status, "create pull request")
+        return result(response.data as Pull)
+      } catch (error) {
+        const recovered = await existing().catch(() => undefined)
+        if (recovered) return recovered
+        throw error
+      }
     },
 
     async observe(node) {
@@ -106,7 +145,23 @@ export function createGithubDeliveryAdapter(
     },
 
     async merge(node) {
+      if (!node.approvedHeadSha || node.headSha !== node.approvedHeadSha)
+        throw new Error("Delivery requires an approved matching revision before merge")
+      if (!node.approvedBaseBranch || node.baseBranch !== node.approvedBaseBranch)
+        throw new Error("Delivery requires an approved matching target before merge")
       const repo = repository(node.repositoryId)
+      const current = await options.octokit.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+        {
+          owner: repo.owner,
+          repo: repo.name,
+          pull_number: pullNumber(node),
+        }
+      )
+      ensureSuccess(current.status, "verify pull request target")
+      const pull = current.data as { base?: { ref?: string }; head?: { sha?: string } }
+      if (pull.base?.ref !== node.approvedBaseBranch || pull.head?.sha !== node.approvedHeadSha)
+        throw new Error("Delivery target or revision changed; renewed approval required")
       const response = await options.octokit.request(
         "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge",
         {
@@ -114,11 +169,12 @@ export function createGithubDeliveryAdapter(
           repo: repo.name,
           pull_number: pullNumber(node),
           merge_method: "squash",
+          sha: node.approvedHeadSha,
         }
       )
       ensureSuccess(response.status, "merge pull request")
       const data = response.data as { merged?: boolean; message?: string }
-      if (data.merged === false)
+      if (data.merged !== true)
         throw new Error(data.message || "GitHub refused to merge pull request")
     },
   }
@@ -278,7 +334,11 @@ export async function prepareAndPublishGithubStack(
   if (!stackedDeliveryOn(policy) || !policy) return undefined
   const db = getDb()
   const existing = await db.agentTeamDeliveryGraphs.where("runId").equals(runId).first()
-  if (existing) return existing.id
+  if (existing && existing.status !== "draft") return existing.id
+  const persistedNodes = existing
+    ? await db.agentTeamDeliveryNodes.where("graphId").equals(existing.id).sortBy("order")
+    : undefined
+  if (persistedNodes?.length === 0) throw new Error("Draft delivery graph has no persisted layers")
   const children = await db.agentTeamChildRuns.where("runId").equals(runId).toArray()
   const bindings =
     team.config.repositories && team.config.repositories.length > 0
@@ -296,11 +356,19 @@ export async function prepareAndPublishGithubStack(
   const minLayers = Math.max(2, policy.minLayers)
   const maxLayers = Math.min(100, policy.maxLayers)
   const stackBindings = bindings.filter((binding) => {
+    if (persistedNodes) return persistedNodes.some((node) => node.repositoryId === binding.id)
     const count = children.filter(
       (child) => child.repositoryId === binding.id && child.status === "completed" && child.branch
     ).length
     return count >= minLayers
   })
+  if (
+    persistedNodes?.some(
+      (node) => !stackBindings.some((binding) => binding.id === node.repositoryId)
+    )
+  ) {
+    throw new Error("Draft delivery graph repository binding is unavailable")
+  }
   if (stackBindings.length === 0) return undefined
 
   let resolveTeamRepo = options.resolveTeamRepo
@@ -318,7 +386,12 @@ export async function prepareAndPublishGithubStack(
     const resolved = await resolveTeamRepo(binding.path)
     if (!resolved) throw new Error(`Repository ${binding.id} has no GitHub remote`)
     repositories[binding.id] = resolved.fullName
-    defaults[binding.id] = stackRootBase(binding.id, binding.baseBranch, resolved)
+    const persistedBase = persistedNodes?.find(
+      (node) => node.repositoryId === binding.id && node.order === 0
+    )?.baseBranch
+    if (persistedNodes && !persistedBase)
+      throw new Error(`Draft delivery graph has no root for ${binding.id}`)
+    defaults[binding.id] = persistedBase ?? stackRootBase(binding.id, binding.baseBranch, resolved)
   }
   const first = Object.values(repositories)[0]
   if (!first) return undefined
@@ -328,18 +401,22 @@ export async function prepareAndPublishGithubStack(
   const layersByBinding = new Map(
     stackBindings.map((binding) => [
       binding.id,
-      children
-        .filter(
-          (child) =>
-            child.repositoryId === binding.id && child.status === "completed" && child.branch
-        )
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .slice(0, maxLayers)
-        .map((child, index) => ({
-          id: `delivery:${child.id}`,
-          branch: child.branch!,
-          title: `AgentTeam layer ${index + 1}: ${child.taskId}`,
-        })),
+      persistedNodes
+        ? persistedNodes
+            .filter((node) => node.repositoryId === binding.id)
+            .map((node) => ({ id: node.id, branch: node.branch, title: node.title }))
+        : children
+            .filter(
+              (child) =>
+                child.repositoryId === binding.id && child.status === "completed" && child.branch
+            )
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .slice(0, maxLayers)
+            .map((child, index) => ({
+              id: `delivery:${child.id}`,
+              branch: child.branch!,
+              title: `AgentTeam layer ${index + 1}: ${child.taskId}`,
+            })),
     ])
   )
 
@@ -379,20 +456,21 @@ export async function prepareAndPublishGithubStack(
   const service = createDeliveryGraphService({
     adapter: createGithubDeliveryAdapter({ octokit, repositories }),
   })
-  const graphId = `delivery:${runId}`
-  await service.create({
-    id: graphId,
-    runId,
-    repositories: stackBindings.map((binding) => ({
-      repositoryId: binding.id,
-      // Every id is populated above or the loop threw; no `"main"` fallback.
-      baseBranch: defaults[binding.id]!,
-      dependsOn: (binding.dependsOn ?? []).filter((id) =>
-        stackBindings.some((item) => item.id === id)
-      ),
-      layers: layersByBinding.get(binding.id) ?? [],
-    })),
-  })
+  const graphId = existing?.id ?? `delivery:${runId}`
+  if (!existing)
+    await service.create({
+      id: graphId,
+      runId,
+      repositories: stackBindings.map((binding) => ({
+        repositoryId: binding.id,
+        // Every id is populated above or the loop threw; no `"main"` fallback.
+        baseBranch: defaults[binding.id]!,
+        dependsOn: (binding.dependsOn ?? []).filter((id) =>
+          stackBindings.some((item) => item.id === id)
+        ),
+        layers: layersByBinding.get(binding.id) ?? [],
+      })),
+    })
   await service.publish(graphId)
   return graphId
 }

@@ -13,6 +13,7 @@
 
 import { nanoid } from "nanoid"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+import type { AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import { openSquadReview, type SquadReviewOutcome } from "./team/squad-review-gate"
 import {
@@ -208,10 +209,46 @@ export interface RunTeamLifecycleResult {
   traceId?: string
 }
 
-const inflightControllers = new Map<string, AbortController>()
+const inflightControllers = new Map<
+  string,
+  { controller: AbortController; runId: string; settled: Promise<void> }
+>()
 
 export function getInflightController(teamId: string): AbortController | undefined {
-  return inflightControllers.get(teamId)
+  return inflightControllers.get(teamId)?.controller
+}
+
+/** Control-plane decisions win over a late executor result or setup error. */
+async function settleDurableRunStatus(
+  runId: string,
+  status: AgentTeamRunStatus,
+  reason?: string
+): Promise<AgentTeamRunStatus | undefined> {
+  const { getAgentTeamRun, updateAgentTeamRunIfCurrent } =
+    await import("@/lib/db/agent-team-runtime")
+  for (;;) {
+    const current = await getAgentTeamRun(runId)
+    if (!current) return undefined
+    if (
+      ["paused", "needs_input", "completed", "cancelled", "failed", "terminated"].includes(
+        current.status
+      )
+    ) {
+      return current.status
+    }
+    const now = Date.now()
+    const updated = await updateAgentTeamRunIfCurrent(runId, current, {
+      status,
+      ...(reason ? { recoveryReason: reason } : {}),
+      ...(["completed", "cancelled", "failed", "terminated"].includes(status)
+        ? { completedAt: now }
+        : {}),
+      updatedAt: now,
+    })
+    if (updated) return status
+    // A control decision or usage update raced us. Read its result before
+    // choosing the canonical journal event; never publish our stale status.
+  }
 }
 
 /** Strict JSON-fenced-block parser preserved from the legacy runtime. */
@@ -296,19 +333,28 @@ export async function runTeamLifecycle(
   deps: RunTeamLifecycleDeps,
   externalSignal?: AbortSignal
 ): Promise<RunTeamLifecycleResult> {
-  const previous = inflightControllers.get(teamId)
-  if (previous && !previous.signal.aborted) {
-    throw new Error(`Team ${teamId} is already running`)
+  let previous = inflightControllers.get(teamId)
+  while (previous) {
+    if (!previous.controller.signal.aborted) throw new Error(`Team ${teamId} is already running`)
+    await previous.settled
+    previous = inflightControllers.get(teamId)
   }
   const ac = new AbortController()
+  const runId = deps.runId ?? `run_team_${nanoid(12)}`
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+  const onExternalAbort = () => ac.abort(externalSignal?.reason)
   if (externalSignal) {
     if (externalSignal.aborted) ac.abort(externalSignal.reason)
     else
-      externalSignal.addEventListener("abort", () => ac.abort(externalSignal.reason), {
+      externalSignal.addEventListener("abort", onExternalAbort, {
         once: true,
       })
   }
-  inflightControllers.set(teamId, ac)
+  let resolveSettled!: () => void
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve
+  })
+  inflightControllers.set(teamId, { controller: ac, runId, settled })
 
   try {
     if (ac.signal.aborted) {
@@ -317,6 +363,13 @@ export async function runTeamLifecycle(
     const storedTeam = deps.storeReader.getTeam(teamId)
     if (!storedTeam) {
       return { runId: "", status: "failed", reason: `Team ${teamId} not found` }
+    }
+    if (storedTeam.config.defaultTimeout && storedTeam.config.defaultTimeout > 0) {
+      deadlineTimer = setTimeout(() => {
+        const timeout = new Error("AgentTeam run deadline exceeded")
+        timeout.name = "TimeoutError"
+        ac.abort(timeout)
+      }, storedTeam.config.defaultTimeout)
     }
     // Fold the caller's directory in ONCE, here, rather than at each of the
     // four places `config.workingDir` is read (root construction, the durable
@@ -344,7 +397,9 @@ export async function runTeamLifecycle(
     const externallySatisfiedIds =
       tasks.length === allTasks.length
         ? undefined
-        : new Set(allTasks.filter((t) => !tasks.includes(t)).map((t) => t.id))
+        : new Set(
+            allTasks.filter((t) => !tasks.includes(t) && t.status === "completed").map((t) => t.id)
+          )
     // Ultracode runs are driven by the team objective (team.task string) + a
     // planned pattern composition, not the flat task list — so they don't
     // require pre-seeded tasks. Flat runs still do.
@@ -354,7 +409,6 @@ export async function runTeamLifecycle(
     }
 
     // ── Allocate runId early so the onTeamStart hook can carry it ──
-    const runId = deps.runId ?? `run_team_${nanoid(12)}`
     const origin: TeamRunOrigin =
       deps.origin ?? (deps.triggeredFrom?.source === "im" ? "im" : "interactive")
     const isoCfg = team.config.workspaceIsolation
@@ -436,7 +490,20 @@ export async function runTeamLifecycle(
               teammateId: input.teammateId,
               repositoryId,
             })
-            await setupAdapter.prepare(input.profile.profile, lease.primaryAlias)
+            try {
+              await setupAdapter.prepare(input.profile.profile, lease.primaryAlias)
+            } catch (error) {
+              try {
+                await lease.abort()
+              } catch (cleanupError) {
+                throw new AggregateError(
+                  [error, cleanupError],
+                  "Workspace setup and lease cleanup failed",
+                  { cause: error }
+                )
+              }
+              throw error
+            }
             return {
               executionRoot: lease.primaryAlias,
               workspaceRunId: lease.run.runId,
@@ -452,28 +519,34 @@ export async function runTeamLifecycle(
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
-        const { updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
-        await updateAgentTeamRun(runId, {
-          status: "failed",
-          recoveryReason: reason,
-          completedAt: Date.now(),
-          updatedAt: Date.now(),
-        }).catch(() => false)
+        const durableStatus = await settleDurableRunStatus(runId, "failed", reason)
+        const status =
+          durableStatus === "cancelled" || durableStatus === "terminated"
+            ? "cancelled"
+            : durableStatus === "completed"
+              ? "completed"
+              : "failed"
         const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
         const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
         const executionRunId = agentTeamExecutionRunId(runId)
-        if (await getExecutionRun(executionRunId).catch(() => undefined)) {
+        const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
+        if (
+          executionRun &&
+          !["completed", "cancelled", "failed"].includes(executionRun.status) &&
+          durableStatus &&
+          ["completed", "cancelled", "failed", "terminated"].includes(durableStatus)
+        ) {
           await runEventJournal
             .append(executionRunId, {
-              id: `execution-event:${runId}:team-terminal:failed`,
+              id: `execution-event:${runId}:team-terminal:${durableStatus}`,
               ts: Date.now(),
-              type: "run.failed",
+              type: `run.${status}`,
               visibility: "summary",
-              payload: { summary: "Agent team run failed during durable admission" },
+              payload: { summary: `Agent team run ${status} during durable admission` },
             })
             .catch(() => undefined)
         }
-        return { runId, status: "failed", reason }
+        return { runId, status, reason }
       }
     }
     const hooks = getPluginLifecycleHooks()
@@ -1072,7 +1145,7 @@ export async function runTeamLifecycle(
     // Run one synthesized workflow with the stable runId + trigger binding.
     // Reused per-wave by the adaptive path so every wave overwrites the same
     // run row (single-run view); the IM-origin binding flows onto each call.
-    const runOneWorkflow = (wf: VisualWorkflow) =>
+    const runOneWorkflow = (wf: VisualWorkflow, signal: AbortSignal = ac.signal) =>
       runWorkflow({
         workflow: wf,
         trigger: {
@@ -1096,7 +1169,7 @@ export async function runTeamLifecycle(
             : {}),
         },
         runId,
-        signal: ac.signal,
+        signal,
         concurrency,
         // IM-origin fan-out: the progress-runner only mirrors runs whose
         // `triggeredBy.source === "im"`. Threading this is the single line
@@ -1109,6 +1182,7 @@ export async function runTeamLifecycle(
     let finalStatus: RunTeamLifecycleResult["status"] = "failed"
     let finalReason: string | undefined
     let suppressCompletionFanout = false
+    let lifecycleResult: RunTeamLifecycleResult | undefined
     try {
       let result: Awaited<ReturnType<typeof runWorkflow>>
       if (adaptiveFlat) {
@@ -1128,7 +1202,10 @@ export async function runTeamLifecycle(
         // between waves; a "cancelled" row is a companion soft-cancel and
         // must still kill the run, so it is honored, never resurrected.
         let executedWaves = 0
-        const runWaveReentrant = async (wf: VisualWorkflow): Promise<RunWorkflowResult> => {
+        const runWaveReentrant = async (
+          wf: VisualWorkflow,
+          signal: AbortSignal
+        ): Promise<RunWorkflowResult> => {
           if (executedWaves > 0) {
             const { getDb } = await import("@/lib/db/schema")
             const row = await getDb().workflowRuns.get(runId)
@@ -1140,11 +1217,12 @@ export async function runTeamLifecycle(
             }
           }
           executedWaves += 1
-          return runOneWorkflow(wf)
+          return runOneWorkflow(wf, signal)
         }
         const waveRes = await runTeamWaves({
           teamCtx: waveCtx,
           tasks,
+          ...(externallySatisfiedIds ? { satisfiedDependencyIds: externallySatisfiedIds } : {}),
           initialConcurrency: concurrency.get(),
           ...(team.config.defaultTimeout ? { wallClockTimeoutMs: team.config.defaultTimeout } : {}),
           signal: ac.signal,
@@ -1180,13 +1258,14 @@ export async function runTeamLifecycle(
           }
         }
       }
-      return {
+      lifecycleResult = {
         runId: result.runId,
         status: finalStatus,
         reason: finalReason,
         output: result.output,
         ...(deps.traceId ? { traceId: deps.traceId } : {}),
       }
+      return lifecycleResult
     } catch (err) {
       finalReason = err instanceof Error ? err.message : String(err)
       throw err
@@ -1199,43 +1278,44 @@ export async function runTeamLifecycle(
         ac.signal.reason instanceof Error
           ? ac.signal.reason.message
           : String(ac.signal.reason ?? "")
-      const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
-      const persistedStatus:
-        import("@/types/agent/agent-team-runtime").AgentTeamRunStatus | undefined = (
-        await getAgentTeamRun(runId).catch(() => undefined)
-      )?.status
-      suppressCompletionFanout = persistedStatus === "needs_input"
       // `paused` and `needs_input` are deliberately NOT terminal: a paused
       // Squad is still the conversation's turn and can be steered.
-      const teamRunStatus =
-        persistedStatus === "needs_input"
-          ? "needs_input"
-          : finalStatus === "cancelled" && abortMessage === "paused"
-            ? "paused"
-            : finalStatus === "cancelled" && abortMessage === "shutdown"
-              ? "terminated"
-              : finalStatus === "completed"
-                ? "completed"
-                : finalStatus === "cancelled"
-                  ? "cancelled"
-                  : "failed"
-      // A paused or needs_input run keeps the status the control plane or the
-      // coordinator wrote. Everything else is settled from the lifecycle result.
-      if (persistedStatus !== "paused" && persistedStatus !== "needs_input") {
-        await updateAgentTeamRun(runId, {
-          status: teamRunStatus,
-          ...(finalReason ? { recoveryReason: finalReason } : {}),
-          ...(["completed", "cancelled", "failed", "terminated"].includes(teamRunStatus)
-            ? { completedAt: Date.now() }
-            : {}),
-          updatedAt: Date.now(),
-        }).catch(() => false)
+      const desiredStatus =
+        finalStatus === "cancelled" && abortMessage === "paused"
+          ? "paused"
+          : finalStatus === "cancelled" && abortMessage === "shutdown"
+            ? "terminated"
+            : finalStatus === "completed"
+              ? "completed"
+              : finalStatus === "cancelled"
+                ? "cancelled"
+                : "failed"
+      let settlementError: unknown
+      const teamRunStatus = await settleDurableRunStatus(runId, desiredStatus, finalReason).catch(
+        (error) => {
+          settlementError = error
+          return undefined
+        }
+      )
+      suppressCompletionFanout =
+        !teamRunStatus ||
+        !["completed", "cancelled", "failed", "terminated"].includes(teamRunStatus)
+      if (!suppressCompletionFanout) {
+        finalStatus =
+          teamRunStatus === "terminated"
+            ? "cancelled"
+            : (teamRunStatus as RunTeamLifecycleResult["status"])
+        if (lifecycleResult) lifecycleResult.status = finalStatus
       }
       const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
       const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
       const executionRunId = agentTeamExecutionRunId(runId)
       const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
-      if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
+      if (
+        teamRunStatus &&
+        executionRun &&
+        !["completed", "failed", "cancelled"].includes(executionRun.status)
+      ) {
         const eventType =
           teamRunStatus === "completed"
             ? "run.completed"
@@ -1303,18 +1383,24 @@ export async function runTeamLifecycle(
       // Cancel any pending resume timer so it can't fire after the run ends.
       rateLimitResume?.dispose()
       unregisterTeamRunContext(runId)
+      if (settlementError) throw settlementError
       // Pending reviews are durable interrupts. A paused run keeps them for
       // its resume, a stopped run has them denied by `squad-control.ts`. The
       // waiters themselves are released by the abort signal.
     }
   } finally {
-    inflightControllers.delete(teamId)
+    clearTimeout(deadlineTimer)
+    externalSignal?.removeEventListener("abort", onExternalAbort)
+    if (inflightControllers.get(teamId)?.controller === ac) inflightControllers.delete(teamId)
+    resolveSettled()
   }
 }
 
 /** Cancel a running team. Returns true if a controller was found + aborted. */
-export function abortTeam(teamId: string, reason?: unknown): boolean {
-  const ctrl = inflightControllers.get(teamId)
+export function abortTeam(teamId: string, reason?: unknown, runId?: string): boolean {
+  const active = inflightControllers.get(teamId)
+  if (runId && active?.runId !== runId) return false
+  const ctrl = active?.controller
   if (!ctrl || ctrl.signal.aborted) return false
   ctrl.abort(reason ?? new Error("Aborted by caller"))
   return true

@@ -13,6 +13,9 @@ import {
   type TeamRecoveryDeps,
 } from "./team-recovery"
 import { createSquadRunRecords } from "./squad-run-records"
+import { createDurableTeamCoordinator } from "./durable-runtime"
+import { controlSquadRun } from "./squad-control"
+import { startSquadRun } from "./start-squad-run"
 
 const RUN = "run_team_rec01"
 const EXECUTION = `execution:team:${RUN}`
@@ -23,6 +26,13 @@ async function seedParkedRun(recoveryReason = "uncertain_side_effect") {
     teamId: "team-1",
     objective: "o",
     origin: "chat",
+    executionConstraints: {
+      version: 1,
+      teamConfig: {},
+      origin: "chat",
+      triggeredFrom: { source: "ui" },
+      requirePlanApprovalFloor: true,
+    },
     projectId: "ws-1",
     startedAt: 1_000,
   })
@@ -149,22 +159,34 @@ describe("team recovery", () => {
       expect(h.armed[0]?.instance).toBe("r2")
     })
 
-    it("raises nothing for a terminal or unknown run", async () => {
-      const h = harness()
-      expect(await ensureTeamRecoveryInterrupt("missing", h.deps)).toBeUndefined()
-      await seedParkedRun()
-      await getDb().agentTeamRuns.update(RUN, { status: "completed" })
-      expect(await ensureTeamRecoveryInterrupt(RUN, h.deps)).toBeUndefined()
-      expect(h.armed).toEqual([])
-    })
+    it.each(["completed", "failed", "cancelled", "terminated"] as const)(
+      "raises nothing for a %s or unknown run",
+      async (status) => {
+        const h = harness()
+        expect(await ensureTeamRecoveryInterrupt("missing", h.deps)).toBeUndefined()
+        await seedParkedRun()
+        await getDb().agentTeamRuns.update(RUN, { status })
+        expect(await ensureTeamRecoveryInterrupt(RUN, h.deps)).toBeUndefined()
+        expect(h.armed).toEqual([])
+      }
+    )
   })
 
   describe("armPendingTeamRecoveries", () => {
+    it.each(["dispatch_initialization_failed", "evidence_incomplete"])(
+      "re-arms actionable recovery after restart for %s",
+      async (reason) => {
+        await seedParkedRun(reason)
+        const h = harness()
+        expect(await armPendingTeamRecoveries(h.deps)).toEqual({ armed: 1, alreadyPending: 0 })
+        expect(h.armed[0]?.subject).toMatchObject({ reason, choices: ALL_RECOVERY_CHOICES })
+      }
+    )
     it("re-arms every parked run without a pending recovery and counts the rest", async () => {
       await seedParkedRun()
       await createSquadRunRecords({
         runId: "run_team_rec02",
-        teamId: "team-1",
+        teamId: "team-2",
         objective: "o",
         origin: "chat",
         startedAt: 1_000,
@@ -197,6 +219,80 @@ describe("team recovery", () => {
   })
 
   describe("applyTeamRecoveryDecision", () => {
+    it("composes real retry and resume state machines without stranding recovering work", async () => {
+      await seedParkedRun()
+      const coordinator = createDurableTeamCoordinator()
+      await coordinator.registerChild({
+        runId: RUN,
+        childRunId: "real-child",
+        teammateId: "m1",
+        taskId: "task1",
+        repositoryId: "repo",
+        access: "read",
+      })
+      const reenter = jest.fn(async () => undefined)
+      const result = await applyTeamRecoveryDecision(
+        RUN,
+        {
+          subject: { choices: ALL_RECOVERY_CHOICES, uncertainChildIds: ["real-child"] },
+        },
+        "approve",
+        { kind: "team_recovery", choice: "retry_same_host" },
+        {
+          retryChild: (id, host) => coordinator.retryChild(id, host),
+          control: (id, action) => controlSquadRun(id, action, { isLive: () => false, reenter }),
+        }
+      )
+      expect(result).toEqual({ applied: true, choice: "retry_same_host" })
+      expect(reenter).toHaveBeenCalledTimes(1)
+      expect((await getDb().agentTeamRuns.get(RUN))?.status).toBe("running")
+    })
+
+    it("restarts through the real launch transaction while the old run is parked", async () => {
+      await seedParkedRun()
+      const runLifecycle = jest.fn(async () => undefined)
+      const stopReplacedRun = jest.fn(async () => undefined)
+      const result = await applyTeamRecoveryDecision(
+        RUN,
+        {
+          subject: { choices: ALL_RECOVERY_CHOICES, uncertainChildIds: [] },
+        },
+        "approve",
+        { kind: "team_recovery", choice: "restart_run" },
+        {
+          startReplacement: (input) =>
+            startSquadRun(
+              {
+                squadId: input.teamId,
+                goal: input.objective,
+                origin: "interactive",
+                triggeredFrom: { source: "ui" },
+                parentRunId: input.parentExecutionRunId,
+                executionConstraints: input.executionConstraints,
+              },
+              {
+                awaitRuntimeReady: async () => true,
+                loadStore: async () => ({
+                  getTeam: () => ({ id: "team-1", task: "changed after launch", config: {} }),
+                  getTeammates: () => [],
+                  getTeamTasks: () => [],
+                  updateTeam: () => undefined,
+                }),
+                evaluateReadiness: async () => ({ ready: true, blockers: [], evaluatedAt: 1 }),
+                runLifecycle,
+                stopReplacedRun,
+              }
+            ),
+          control: (id, action) => controlSquadRun(id, action),
+        }
+      )
+      expect(result.applied).toBe(true)
+      expect(stopReplacedRun).toHaveBeenCalledWith(RUN, "team-1")
+      expect(runLifecycle).toHaveBeenCalledWith(
+        expect.objectContaining({ requirePlanApprovalFloor: true, origin: "chat" })
+      )
+      expect((await getDb().agentTeamRuns.get(RUN))?.status).toBe("cancelled")
+    })
     const subject = {
       reason: "uncertain_side_effect",
       choices: [...ALL_RECOVERY_CHOICES],

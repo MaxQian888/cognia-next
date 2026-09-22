@@ -15,6 +15,7 @@
 
 import { appendRunEventInsideTransaction } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
+import { getAgentTeamRun, updateAgentTeamRunIfCurrent } from "@/lib/db/agent-team-runtime"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 import type { AgentTeamRunRecord, AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 import type { ExecutionRun } from "@/types/execution/run"
@@ -38,6 +39,7 @@ export interface SquadRunSeed {
   origin: string
   priority?: number
   environmentVersionId?: string
+  executionConstraints?: AgentTeamRunRecord["executionConstraints"]
   /** Previous run this one replaces (a `retry`). Linked by the control plane too. */
   parentRunId?: string
   startedAt: number
@@ -48,8 +50,16 @@ export interface SquadRunRecords {
   executionRunId: string
   /** False when both rows already existed (an idempotent retry). */
   created: boolean
+  replacedRunId?: string
   run: AgentTeamRunRecord
   executionRun: ExecutionRun
+}
+
+export class SquadRunConflictError extends Error {
+  constructor(readonly runId: string) {
+    super(`Squad already has a live run: ${runId}`)
+    this.name = "SquadRunConflictError"
+  }
 }
 
 /**
@@ -73,6 +83,59 @@ export async function createSquadRunRecords(seed: SquadRunSeed): Promise<SquadRu
       if (existingRun && existingRun.teamId !== seed.teamId) {
         throw new Error(`Squad run ${seed.runId} belongs to another Squad`)
       }
+      if (!existingRun && !existingExecution && seed.parentRunId) {
+        const replacements = await db.executionRuns
+          .where("parentRunId")
+          .equals(seed.parentRunId)
+          .toArray()
+        const replacement = replacements.find((row) => row.kind === "team")
+        if (replacement) {
+          const run = await db.agentTeamRuns.get(replacement.sourceId)
+          if (!run || run.teamId !== seed.teamId) {
+            throw new Error("Squad replacement history is incomplete or belongs to another Squad")
+          }
+          return {
+            runId: run.id,
+            executionRunId: replacement.id,
+            created: false,
+            run,
+            executionRun: replacement,
+          }
+        }
+      }
+      let replacedRunId: string | undefined
+      if (!existingRun && !existingExecution) {
+        const live = (await db.agentTeamRuns.where("teamId").equals(seed.teamId).toArray()).filter(
+          (row) => LIVE_SQUAD_RUN_STATUSES.has(row.status)
+        )
+        const parentId = seed.parentRunId?.replace(/^execution:team:/, "")
+        for (const row of live) {
+          if (row.id !== parentId || !["paused", "sleeping", "needs_input"].includes(row.status)) {
+            throw new SquadRunConflictError(row.id)
+          }
+          replacedRunId = row.id
+          await db.agentTeamRuns.update(row.id, {
+            status: "cancelled",
+            completedAt: seed.startedAt,
+            updatedAt: seed.startedAt,
+          })
+          const parentExecutionId = agentTeamExecutionRunId(row.id)
+          const parentExecution = await db.executionRuns.get(parentExecutionId)
+          if (
+            parentExecution &&
+            !["completed", "failed", "cancelled"].includes(parentExecution.status)
+          ) {
+            await appendRunEventInsideTransaction(db, parentExecutionId, {
+              id: `execution-event:${row.id}:replaced:${seed.runId}`,
+              ts: seed.startedAt,
+              type: "run.cancelled",
+              visibility: "summary",
+              payload: { reason: "replaced", replacementRunId: seed.runId },
+              sourceEventId: `agent-team:${row.id}:replaced:${seed.runId}`,
+            })
+          }
+        }
+      }
       let run = existingRun
       if (!run) {
         run = {
@@ -80,11 +143,19 @@ export async function createSquadRunRecords(seed: SquadRunSeed): Promise<SquadRu
           teamId: seed.teamId,
           ...(seed.projectId ? { projectId: seed.projectId } : {}),
           objective: seed.objective,
-          status: "queued",
+          status: existingExecution
+            ? ["completed", "failed", "cancelled"].includes(existingExecution.status)
+              ? (existingExecution.status as AgentTeamRunStatus)
+              : "needs_input"
+            : "queued",
           priority: seed.priority ?? 0,
           queueEnteredAt: seed.startedAt,
           decisionVersion: 0,
           ...(seed.environmentVersionId ? { environmentVersionId: seed.environmentVersionId } : {}),
+          ...(seed.executionConstraints && !existingExecution
+            ? { executionConstraints: seed.executionConstraints }
+            : {}),
+          ...(existingExecution ? { recoveryReason: "missing_execution_constraints" } : {}),
           resourceUsage: {
             promptTokens: 0,
             completionTokens: 0,
@@ -125,12 +196,24 @@ export async function createSquadRunRecords(seed: SquadRunSeed): Promise<SquadRu
           payload: { teamId: seed.teamId, origin: seed.origin },
           sourceEventId: `agent-team:${seed.runId}:started`,
         })
+        if (isTerminalSquadRunStatus(run.status)) {
+          const status = run.status === "terminated" ? "cancelled" : run.status
+          await appendRunEventInsideTransaction(db, executionRunId, {
+            id: `execution-event:${seed.runId}:restored-terminal`,
+            ts: run.completedAt ?? run.updatedAt,
+            type: `run.${status}` as "run.completed" | "run.failed" | "run.cancelled",
+            visibility: "summary",
+            payload: { reason: "restored_terminal_history" },
+            sourceEventId: `agent-team:${seed.runId}:restored-terminal`,
+          })
+        }
         executionRun = (await db.executionRuns.get(executionRunId)) ?? executionRun
       }
       return {
         runId: seed.runId,
         executionRunId,
-        created: !existingRun || !existingExecution,
+        created: !existingRun && !existingExecution,
+        ...(replacedRunId ? { replacedRunId } : {}),
         run,
         executionRun,
       }
@@ -152,4 +235,19 @@ export function isLiveSquadRunStatus(status: AgentTeamRunStatus): boolean {
 
 export function isTerminalSquadRunStatus(status: AgentTeamRunStatus): boolean {
   return TERMINAL_SQUAD_RUN_STATUSES.has(status)
+}
+
+/** A late failure cannot resurrect a run that an operator already stopped. */
+export async function parkActiveSquadRun(
+  runId: string,
+  reason: string,
+  now: number
+): Promise<boolean> {
+  const run = await getAgentTeamRun(runId)
+  if (!run || isTerminalSquadRunStatus(run.status)) return false
+  return updateAgentTeamRunIfCurrent(runId, run, {
+    status: "needs_input",
+    recoveryReason: reason,
+    updatedAt: now,
+  })
 }

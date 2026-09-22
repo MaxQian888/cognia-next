@@ -17,7 +17,7 @@ import type { AgentTeamTask } from "@/types/agent/agent-team"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import type { RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
 import type { TeamRunContext } from "./team-run-context"
-import { synthesizeTeamWorkflow } from "./synthesize-workflow"
+import { synthesizeTeamWorkflow, validateTeamTaskGraph } from "./synthesize-workflow"
 import { runReplanCheckpoint, type ReplanCheckpointOutcome } from "./replan-checkpoint"
 import { continueDecision } from "./replan-schema"
 
@@ -28,14 +28,16 @@ export interface TeamWaveRunnerDeps {
   tasks: AgentTeamTask[]
   initialConcurrency: number
   wallClockTimeoutMs?: number
+  satisfiedDependencyIds?: ReadonlySet<string>
   signal: AbortSignal
   errorPolicy?: "stop" | "continue"
   /** Run one synthesized wave; returns the orchestrator result. */
-  runWave: (workflow: VisualWorkflow) => Promise<RunWorkflowResult>
+  runWave: (workflow: VisualWorkflow, signal: AbortSignal) => Promise<RunWorkflowResult>
   /** Between-wave checkpoint; defaults to `runReplanCheckpoint`. Injectable. */
   checkpoint?: (input: {
     justRanTaskIds: string[]
     remaining: AgentTeamTask[]
+    signal: AbortSignal
   }) => Promise<ReplanCheckpointOutcome>
   /** Injectable synthesizer (defaults to `synthesizeTeamWorkflow`). For tests. */
   synthesize?: typeof synthesizeTeamWorkflow
@@ -49,6 +51,38 @@ export interface TeamWaveRunnerResult {
 }
 
 export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRunnerResult> {
+  const deadline =
+    deps.wallClockTimeoutMs && deps.wallClockTimeoutMs > 0
+      ? Date.now() + deps.wallClockTimeoutMs
+      : undefined
+  const controller = new AbortController()
+  const signal = AbortSignal.any([deps.signal, controller.signal])
+  const timeout =
+    deadline === undefined
+      ? undefined
+      : setTimeout(
+          () => controller.abort(new Error("AgentTeam wave deadline exceeded")),
+          Math.max(0, deadline - Date.now())
+        )
+  try {
+    const result = await runWaves({ ...deps, signal }, deadline)
+    if (controller.signal.aborted) {
+      return {
+        ...result,
+        status: "failed",
+        error: { message: "AgentTeam wave deadline exceeded", code: "timeout" },
+      }
+    }
+    return result
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
+async function runWaves(
+  deps: TeamWaveRunnerDeps,
+  deadline?: number
+): Promise<TeamWaveRunnerResult> {
   const { teamCtx, signal } = deps
   const errorPolicy = deps.errorPolicy ?? "stop"
   const synthesize = deps.synthesize ?? synthesizeTeamWorkflow
@@ -64,7 +98,9 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
       }))
 
   let remaining = [...deps.tasks]
-  const doneIds = new Set<string>()
+  const doneIds = new Set(deps.satisfiedDependencyIds)
+  const failedIds = new Set<string>()
+  let firstFailure: RunWorkflowResult["error"] | undefined
   let waves = 0
   let lastResult: RunWorkflowResult | undefined
 
@@ -73,26 +109,35 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
       return { status: "cancelled", waves, ...(lastResult ? { lastResult } : {}) }
     }
 
-    // Ready = tasks whose deps are all completed OR no longer in the plan
-    // (cancelled / satisfied outside this run).
-    const remainingIds = new Set(remaining.map((t) => t.id))
-    const ready = remaining.filter((t) =>
-      t.dependencies.every((d) => doneIds.has(d) || !remainingIds.has(d))
-    )
+    try {
+      if (remaining.some((task) => doneIds.has(task.id) || failedIds.has(task.id))) {
+        throw new Error("Adaptive plan cannot reuse an already executed task id")
+      }
+      validateTeamTaskGraph(remaining, new Set([...doneIds, ...failedIds]))
+    } catch (error) {
+      return {
+        status: "failed",
+        waves,
+        lastResult,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          code: "invalid_dep",
+        },
+      }
+    }
+    const ready = remaining.filter((t) => t.dependencies.every((d) => doneIds.has(d)))
     if (ready.length === 0) {
       return {
         status: "failed",
         waves,
         ...(lastResult ? { lastResult } : {}),
-        error: { message: "adaptive re-plan: no ready tasks (unsatisfiable dependencies)" },
+        error: firstFailure ?? {
+          message: "adaptive re-plan: no ready tasks (unsatisfiable dependencies)",
+        },
       }
     }
 
     const waveIds = new Set(ready.map((t) => t.id))
-    const externalDeps = new Set<string>()
-    for (const t of ready) {
-      for (const d of t.dependencies) if (!waveIds.has(d)) externalDeps.add(d)
-    }
 
     let workflow: VisualWorkflow
     try {
@@ -100,8 +145,10 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
         team: teamCtx.team,
         tasks: ready,
         initialConcurrency: deps.initialConcurrency,
-        ...(deps.wallClockTimeoutMs ? { wallClockTimeoutMs: deps.wallClockTimeoutMs } : {}),
-        satisfiedDependencyIds: externalDeps,
+        ...(deadline !== undefined
+          ? { wallClockTimeoutMs: Math.max(1, deadline - Date.now()) }
+          : {}),
+        satisfiedDependencyIds: doneIds,
       }))
     } catch (err) {
       return {
@@ -112,12 +159,22 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
       }
     }
 
-    const result = await deps.runWave(workflow)
+    let result: RunWorkflowResult
+    try {
+      result = await deps.runWave(workflow, signal)
+    } catch (error) {
+      return {
+        status: signal.aborted ? "cancelled" : "failed",
+        waves,
+        lastResult,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      }
+    }
     waves += 1
     lastResult = result
 
     if (result.status !== "succeeded") {
-      if (errorPolicy === "stop") {
+      if (errorPolicy === "stop" || result.status === "cancelled") {
         return {
           status: result.status === "cancelled" ? "cancelled" : "failed",
           waves,
@@ -125,10 +182,12 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
           ...(result.error ? { error: result.error } : {}),
         }
       }
-      // errorPolicy "continue": advance anyway.
+      firstFailure ??= result.error ?? { message: "AgentTeam wave failed" }
+      for (const id of waveIds) failedIds.add(id)
+    } else {
+      for (const id of waveIds) doneIds.add(id)
     }
 
-    for (const id of waveIds) doneIds.add(id)
     remaining = remaining.filter((t) => !waveIds.has(t.id))
     if (signal.aborted) return { status: "cancelled", waves, lastResult }
 
@@ -138,7 +197,7 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
     // empty and the lead does not inject.)
     let outcome: ReplanCheckpointOutcome
     try {
-      outcome = await checkpoint({ justRanTaskIds: [...waveIds], remaining })
+      outcome = await checkpoint({ justRanTaskIds: [...waveIds], remaining, signal })
     } catch (err) {
       if (signal.aborted) return { status: "cancelled", waves, lastResult }
       // A checkpoint failure must not corrupt the run — continue with the plan.
@@ -149,5 +208,11 @@ export async function runTeamWaves(deps: TeamWaveRunnerDeps): Promise<TeamWaveRu
     if (outcome.finish) break
   }
 
-  return { status: "succeeded", waves, ...(lastResult ? { lastResult } : {}) }
+  if (signal.aborted) return { status: "cancelled", waves, lastResult }
+  return {
+    status: firstFailure ? "failed" : "succeeded",
+    waves,
+    ...(lastResult ? { lastResult } : {}),
+    ...(firstFailure ? { error: firstFailure } : {}),
+  }
 }

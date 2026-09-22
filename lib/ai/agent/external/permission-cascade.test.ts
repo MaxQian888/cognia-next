@@ -1,9 +1,26 @@
 import {
   deriveExternalSessionPermission,
   deriveCapabilityGuards,
+  teamPermissionCeiling,
   type ExternalSessionPermissionSpec,
 } from "./permission-cascade"
 import type { AcpCapabilities } from "@/types/agent/external-agent"
+
+it("projects the team's security constraints through the shared permission cascade", () => {
+  const config = {
+    defaultPermissionMode: "plan",
+    allowedTools: ["Read"],
+    disallowedTools: ["Write"],
+    sandboxPolicy: { network: "off" },
+  } as import("@/types/agent/agent-team").AgentTeamConfig
+  expect(teamPermissionCeiling(config)).toEqual({
+    permissionMode: "plan",
+    allowedTools: ["Read"],
+    disallowedTools: ["Write"],
+    sandboxPolicy: { network: "off" },
+  })
+  expect(teamPermissionCeiling(undefined)).toBeUndefined()
+})
 
 describe("deriveExternalSessionPermission", () => {
   it("returns the parent spec verbatim when no child is given", () => {

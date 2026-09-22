@@ -160,6 +160,64 @@ reason code and token totals. No prompt, argument or secret is emitted.
 6. The `/squads` Runs tab is the `/agent-runs` panel
    (`squad-fleet-console.test.tsx`, `squads-mobile-body.test.tsx`).
 
+## Runtime hardening amendment (2026-09-22)
+
+The durable runtime continues to reuse the fair scheduler, workflow synthesizer,
+Registry workspace leases, permission cascade, evidence bundle and canonical run
+journal. No second scheduler, recovery store or artifact store is introduced.
+
+- Launch admission checks one live run per team in the same transaction as run
+  creation. Scheduled invocations use a stable execution-derived run ID. A
+  replacement records its parent and waits for the aborted predecessor's cleanup;
+  cancellation targets the exact run rather than whichever run currently owns the team.
+- Admission and workspace waits share cancellation. Compare-and-set transitions
+  preserve control changes and terminal states. Wave deadlines cover both execution
+  and checkpoints; missing dependencies and cycles fail validation, and only
+  verified completed dependencies can satisfy filtered tasks.
+- Recovery uses the frozen launch constraints and a verified checkpoint. Missing
+  snapshots, uncertain side effects, and uncheckpointed remote events require
+  intervention. Remote events and cursors are persisted atomically before projection.
+  Steering remains replayable until completion acknowledges it. Bootstrap starts
+  recoverable lifecycles without awaiting their entire execution.
+- Setup, execution, evidence and settlement failures share cleanup. Child creation and its initial
+  journal entries share one transaction; failures roll back partial creation and
+  park the run. Storage failures abort live dispatch. Cleanup
+  retains both the original error and release errors. Environment settlement keeps
+  its original intent when disposal retries it.
+- Sandbox requirements are probed against the actual runtime. Child constraints
+  cannot widen inherited permissions. External or remote transports that cannot
+  enforce the required permission, tool or sandbox policy reject dispatch. This is
+  a capability boundary; it does not add policy enforcement to those protocols.
+- Evidence belongs to the exact child attempt and workspace revision. Verification
+  must explicitly succeed and is invalidated by later potentially mutating tools.
+  Source changes use Registry content hashes, including deletions and mode changes;
+  generated metadata-only rows are excluded and do not prove generated artifact
+  integrity. Missing source hashes or a missing required revision block acceptance.
+  Content reads verify the stored digest and size.
+- Delivery approvals bind both the proposed head and base. Retrying delivery reuses
+  existing pull requests and settled nodes. Merge revalidates the remote head/base
+  and sends the expected head SHA. The provider has no atomic expected-base guard,
+  so concurrent remote retargeting remains a provider boundary.
+
+Additional concurrency guarantees: restarting the same parent reuses its durable
+replacement, including after settlement. Child dispatch creation is atomic;
+duplicate starts cannot take over an active admission, and stale attempt handles
+cannot settle a newer retry. Concurrent wake operations coalesce and still pass admission. Writer claims are copied and normalized before overlap
+checks. Duplicate environment opens are refused, and terminated children cannot
+resume. Delivery graph creation is atomic, approval rejects stale snapshots, and
+publication retries resume the persisted draft.
+
+A dispatch with an unfinished tool cannot complete. Verification excludes
+non-executing, help/list, mutation-only and shell-composition commands. A failed
+latest check must be successfully rerun before another passing check can satisfy
+the gate. Evidence queries use existing child/task indexes and validate each shared
+content hash once per validation, without caching integrity across validations.
+
+Regression suites cover cancellation during admission, stop/complete races,
+predecessor cleanup, uncertain replay, failed persistence, missing revisions,
+failed verification, workspace cleanup and delivery reconciliation. These tests do
+not substitute for live external-provider, remote-host or GitHub acceptance.
+
 ## Related
 
 - Docs: [HITL reviews](/docs/chat/agent-teams/hitl-gates),

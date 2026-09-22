@@ -19,11 +19,7 @@
  * git can settle the second.
  */
 
-import {
-  listAgentTeamDeliveryNodes,
-  putAgentTeamDeliveryGraph,
-  putAgentTeamDeliveryNodes,
-} from "@/lib/db/agent-team-runtime"
+import { listAgentTeamDeliveryNodes } from "@/lib/db/agent-team-runtime"
 import { getDb } from "@/lib/db/schema"
 import { baseBranches } from "@/lib/stack/model"
 import { topologicalOrder } from "@/lib/stack/topology"
@@ -33,6 +29,8 @@ import type {
 } from "@/types/agent/agent-team-runtime"
 
 export interface ScmDeliveryObservation {
+  headSha?: string
+  merged?: boolean
   ci: "unknown" | "pending" | "passing" | "failing"
   approved: boolean
   mergeable: boolean
@@ -172,8 +170,15 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
         createdAt,
         updatedAt: createdAt,
       }
-      await putAgentTeamDeliveryGraph(graph)
-      await putAgentTeamDeliveryNodes(nodes)
+      const db = getDb()
+      await db.transaction(
+        "rw",
+        [db.agentTeamDeliveryGraphs, db.agentTeamDeliveryNodes],
+        async () => {
+          await db.agentTeamDeliveryGraphs.add(graph)
+          await db.agentTeamDeliveryNodes.bulkAdd(nodes)
+        }
+      )
       return graph
     },
 
@@ -183,6 +188,7 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
       if (graph.status !== "draft") throw new Error("Only draft delivery graphs can publish")
       const nodes = topological(await listAgentTeamDeliveryNodes(graphId))
       for (const node of nodes) {
+        if (node.pullRequestNumber && node.pullRequestUrl && node.headSha) continue
         const created = await options.adapter.createPullRequest({
           repositoryId: node.repositoryId,
           branch: node.branch,
@@ -204,21 +210,54 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
     },
 
     async approve(graphId: string): Promise<void> {
+      if (!options.adapter) throw new Error("Approving a delivery graph requires an SCM adapter")
       const graph = await loadGraph(graphId)
-      if (graph.status !== "running" && graph.status !== "awaiting_approval") {
+      if (!["running", "awaiting_approval", "failed"].includes(graph.status)) {
         throw new Error("Delivery graph is not ready for approval")
       }
       const at = now()
-      await getDb().agentTeamDeliveryGraphs.update(graphId, {
-        status: "awaiting_approval",
-        approvedAt: at,
-        updatedAt: at,
-      })
+      const nodes = topological(await listAgentTeamDeliveryNodes(graphId))
+      const originalNodes = new Map(nodes.map((node) => [node.id, JSON.stringify(node)]))
+      const bases = new Map(
+        nodes.filter((node) => node.order === 0).map((node) => [node.repositoryId, node.baseBranch])
+      )
+      for (const node of nodes) {
+        if (node.status === "merged") continue
+        const observation = await options.adapter.observe(node)
+        if (!observation.headSha)
+          throw new Error(`Cannot approve ${node.id}: current head is unknown`)
+        node.headSha = observation.headSha
+        node.approvedHeadSha = observation.headSha
+        node.approvedBaseBranch = bases.get(node.repositoryId)
+        node.updatedAt = at
+      }
+      const db = getDb()
+      await db.transaction(
+        "rw",
+        [db.agentTeamDeliveryGraphs, db.agentTeamDeliveryNodes],
+        async () => {
+          const currentGraph = await db.agentTeamDeliveryGraphs.get(graphId)
+          const currentNodes = await listAgentTeamDeliveryNodes(graphId)
+          if (
+            JSON.stringify(currentGraph) !== JSON.stringify(graph) ||
+            currentNodes.length !== nodes.length ||
+            currentNodes.some((node) => originalNodes.get(node.id) !== JSON.stringify(node))
+          )
+            throw new Error("Delivery changed during approval; review it again")
+          await db.agentTeamDeliveryNodes.bulkPut(nodes)
+          await db.agentTeamDeliveryGraphs.update(graphId, {
+            status: "awaiting_approval",
+            approvedAt: at,
+            updatedAt: at,
+          })
+        }
+      )
     },
 
     async merge(graphId: string): Promise<AgentTeamDeliveryGraph> {
       if (!options.adapter) throw new Error("Merging a delivery graph requires an SCM adapter")
       const graph = await loadGraph(graphId)
+      if (graph.status === "completed") return graph
       if (!graph.approvedAt) throw new Error("Delivery graph requires user approval before merge")
       const nodes = topological(await listAgentTeamDeliveryNodes(graphId))
       const rootBases = new Map<string, string>()
@@ -226,14 +265,50 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
         if (node.order === 0) rootBases.set(node.repositoryId, node.baseBranch)
       }
       for (const node of nodes) {
-        if (node.order > 0) {
+        if (node.status === "merged") continue
+        let observation = await options.adapter.observe(node)
+        const ensureApprovedHead = async () => {
+          const rootBase = rootBases.get(node.repositoryId)
+          if (
+            !observation.headSha ||
+            !node.approvedHeadSha ||
+            observation.headSha !== node.approvedHeadSha ||
+            !rootBase ||
+            rootBase !== node.approvedBaseBranch
+          ) {
+            await getDb().agentTeamDeliveryGraphs.update(graphId, {
+              status: "awaiting_approval",
+              approvedAt: undefined,
+              updatedAt: now(),
+            })
+            await getDb().agentTeamDeliveryNodes.update(node.id, {
+              headSha: observation.headSha,
+              approvedHeadSha: undefined,
+              status: "needs_remediation",
+              error: "Revision changed; renewed approval required",
+              updatedAt: now(),
+            })
+            throw new Error(`Delivery ${node.id} changed; renewed approval required`)
+          }
+          node.headSha = observation.headSha
+        }
+        await ensureApprovedHead()
+        if (observation.merged) {
+          node.status = "merged"
+          node.updatedAt = now()
+          await getDb().agentTeamDeliveryNodes.put(node)
+          continue
+        }
+        if (node.order > 0 && node.baseBranch !== rootBases.get(node.repositoryId)) {
           const rootBase = rootBases.get(node.repositoryId)
           if (!rootBase) throw new Error(`Missing root base for repository ${node.repositoryId}`)
           await options.adapter.retarget(node, rootBase)
           await options.adapter.updateBranch(node)
           node.baseBranch = rootBase
+          await getDb().agentTeamDeliveryNodes.put(node)
+          observation = await options.adapter.observe(node)
+          await ensureApprovedHead()
         }
-        let observation = await options.adapter.observe(node)
         let remediationAttempt = 0
         while (
           options.remediate &&
@@ -251,6 +326,7 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
           await options.remediate(node, observation, remediationAttempt)
           await options.adapter.updateBranch(node)
           observation = await options.adapter.observe(node)
+          await ensureApprovedHead()
         }
         if (observation.ci !== "passing") {
           await getDb().agentTeamDeliveryNodes.update(node.id, {

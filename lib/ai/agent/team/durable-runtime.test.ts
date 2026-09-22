@@ -3,6 +3,13 @@ import "fake-indexeddb/auto"
 import { __enableDbRuntimeForTesting, __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { AgentTeam, AgentTeamConfig } from "@/types/agent/agent-team"
 import { createDurableTeamCoordinator } from "./durable-runtime"
+import * as runtimeDb from "@/lib/db/agent-team-runtime"
+
+// Keep real Dexie behavior while exposing configurable exports for race injection.
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  __esModule: true,
+  ...jest.requireActual("@/lib/db/agent-team-runtime"),
+}))
 
 const removeManagedFleetSession = jest.fn<Promise<boolean>, [sessionId: string]>(async () => true)
 jest.mock("@/lib/fleet/managed-session-projection", () => ({
@@ -52,9 +59,503 @@ describe("durable AgentTeam coordinator", () => {
   })
 
   afterEach(async () => {
+    jest.restoreAllMocks()
     await getDb().delete()
     __resetDbForTesting()
     disableDbRuntime?.()
+  })
+
+  const register = async (
+    coordinator: ReturnType<typeof createDurableTeamCoordinator>,
+    childRunId: string
+  ) =>
+    coordinator.registerChild({
+      runId: "run-admission",
+      childRunId,
+      teammateId: childRunId,
+      taskId: childRunId,
+      repositoryId: "primary",
+      access: "read",
+    })
+
+  const waitUntil = async (ready: () => boolean): Promise<void> => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (ready()) return
+      await new Promise((resolve) => setTimeout(resolve, 1))
+    }
+    throw new Error("Condition did not settle")
+  }
+
+  it("keeps terminal children terminal during recovery even without checkpoints", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    for (const status of ["completed", "failed", "cancelled", "terminated"] as const) {
+      await register(coordinator, status)
+      await runtimeDb.updateAgentTeamChildRun(status, { status })
+    }
+    const recovered = await coordinator.recover()
+    expect(recovered).toEqual([{ runId: "run-admission", status: "recovering" }])
+    for (const status of ["completed", "failed", "cancelled", "terminated"] as const) {
+      expect((await runtimeDb.getAgentTeamChildRun(status))?.status).toBe(status)
+    }
+  })
+
+  it("gates remote events persisted after the latest safe checkpoint", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "remote")
+    await coordinator.checkpoint("remote", {
+      trajectorySequence: 1,
+      replay: "safe",
+      sideEffects: [],
+    })
+    await runtimeDb.appendAgentTeamTrajectory({
+      runId: "run-admission",
+      childRunId: "remote",
+      kind: "remote_event",
+      correlationId: "event-after-checkpoint",
+      createdAt: Date.now(),
+    })
+    expect(await coordinator.recover()).toEqual([{ runId: "run-admission", status: "needs_input" }])
+    expect((await runtimeDb.getAgentTeamChildRun("remote"))?.status).toBe("needs_input")
+  })
+
+  it("does not recover a run terminated after the recovery scan", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    const list = runtimeDb.listAgentTeamRecoveryCandidates
+    jest.spyOn(runtimeDb, "listAgentTeamRecoveryCandidates").mockImplementationOnce(async () => {
+      const candidates = await list()
+      await runtimeDb.updateAgentTeamRun("run-admission", { status: "terminated" })
+      return candidates
+    })
+    expect(await coordinator.recover()).toEqual([])
+    expect((await runtimeDb.getAgentTeamRun("run-admission"))?.status).toBe("terminated")
+    expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe("running")
+  })
+
+  it("does not replace a terminated run with the budget input gate", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(
+      team({
+        config: config({
+          resourcePolicy: { priority: 0, maxConcurrentChildren: 1, maxTokens: 0 },
+        }),
+      }),
+      "run-admission"
+    )
+    await register(coordinator, "child")
+    const getRun = runtimeDb.getAgentTeamRun
+    jest.spyOn(runtimeDb, "getAgentTeamRun").mockImplementationOnce(async (id) => {
+      const run = await getRun(id)
+      await runtimeDb.updateAgentTeamRun(id, { status: "terminated" })
+      return run
+    })
+    const operation = jest.fn()
+    await expect(coordinator.withChildAdmission("child", operation)).rejects.toThrow("budget")
+    expect((await runtimeDb.getAgentTeamRun("run-admission"))?.status).toBe("terminated")
+    expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe("running")
+    expect(operation).not.toHaveBeenCalled()
+    expect(coordinator.schedulerSnapshot()).toEqual({ queued: [], active: [] })
+  })
+
+  it("does not start a queued run cancelled while preparation reads it", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await runtimeDb.updateAgentTeamRun("run-admission", { status: "queued" })
+    const getRun = runtimeDb.getAgentTeamRun
+    jest.spyOn(runtimeDb, "getAgentTeamRun").mockImplementationOnce(async (id) => {
+      const run = await getRun(id)
+      await runtimeDb.updateAgentTeamRun(id, { status: "cancelled" })
+      return run
+    })
+    await expect(coordinator.prepareRun(team(), "run-admission")).rejects.toThrow("changed")
+    expect((await runtimeDb.getAgentTeamRun("run-admission"))?.status).toBe("cancelled")
+  })
+
+  it.each(["completed", "failed", "cancelled", "terminated"] as const)(
+    "does not revive a %s child through sleep or wake",
+    async (status) => {
+      const coordinator = createDurableTeamCoordinator()
+      await coordinator.prepareRun(team(), "run-admission")
+      await register(coordinator, "child")
+      await runtimeDb.updateAgentTeamChildRun("child", { status })
+      const resume = jest.fn(async () => undefined)
+      coordinator.attachLiveControl("child", { steer: jest.fn(), resume })
+      await coordinator.sleepChild("child")
+      await coordinator.wakeChild("child")
+      expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe(status)
+      expect(resume).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not revive a child that terminates while wake waits for the provider", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await coordinator.sleepChild("child")
+    coordinator.attachLiveControl("child", {
+      steer: jest.fn(),
+      resume: async () => {
+        await runtimeDb.updateAgentTeamChildRun("child", { status: "terminated" })
+      },
+    })
+    await coordinator.wakeChild("child")
+    expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe("terminated")
+  })
+
+  it("rejects remote resume and cross-host migration after uncheckpointed remote work", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await runtimeDb.updateAgentTeamChildRun("child", {
+      hostRef: "device:a",
+      remoteSessionId: "remote-session",
+      status: "paused",
+    })
+    await coordinator.checkpoint("child", {
+      trajectorySequence: 1,
+      replay: "safe",
+      sideEffects: [],
+    })
+    await runtimeDb.appendAgentTeamTrajectory({
+      runId: "run-admission",
+      childRunId: "child",
+      kind: "remote_event",
+      correlationId: "uncheckpointed-command",
+      createdAt: Date.now(),
+    })
+    await expect(coordinator.resumeChild("child")).rejects.toThrow("safe checkpoint")
+    await expect(coordinator.retryChild("child", "device:b")).rejects.toThrow("safe checkpoint")
+    expect((await runtimeDb.getAgentTeamChildRun("child"))?.status).toBe("paused")
+  })
+
+  it.each(["completed", "failed", "cancelled", "terminated"] as const)(
+    "refuses child retry for a %s parent",
+    async (status) => {
+      const coordinator = createDurableTeamCoordinator()
+      await coordinator.prepareRun(team(), "run-admission")
+      await register(coordinator, "child")
+      await runtimeDb.updateAgentTeamChildRun("child", { status: "failed" })
+      await runtimeDb.updateAgentTeamRun("run-admission", { status })
+      await expect(coordinator.retryChild("child")).rejects.toThrow("cannot be retried")
+      expect((await runtimeDb.getAgentTeamRun("run-admission"))?.status).toBe(status)
+    }
+  )
+
+  it("rejects duplicate admission for the same child while the first holds capacity", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "first")
+    let release!: () => void
+    const first = coordinator.withChildAdmission(
+      "first",
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    await expect(coordinator.withChildAdmission("first", jest.fn())).rejects.toThrow(
+      "already has an admission"
+    )
+    expect(coordinator.schedulerSnapshot().active).toHaveLength(1)
+    release()
+    await first
+  })
+
+  it("cancels admission parked on a paused run", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "first")
+    coordinator.setRunPaused("run-admission", true)
+    const controller = new AbortController()
+    const operation = jest.fn()
+    const waiting = coordinator.withChildAdmission("first", operation, controller.signal)
+    const rejected = expect(waiting).rejects.toThrow("cancel parked")
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    controller.abort(new Error("cancel parked"))
+    await rejected
+    coordinator.setRunPaused("run-admission", false)
+    expect(operation).not.toHaveBeenCalled()
+    expect(coordinator.schedulerSnapshot()).toEqual({ queued: [], active: [] })
+  })
+
+  it.each(["terminateChild", "pauseChild"] as const)(
+    "does not execute queued work after %s",
+    async (action) => {
+      const coordinator = createDurableTeamCoordinator({ globalConcurrency: 1 })
+      await coordinator.prepareRun(team(), "run-admission")
+      await register(coordinator, "first")
+      await register(coordinator, "second")
+      let release!: () => void
+      const first = coordinator.withChildAdmission(
+        "first",
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve
+          })
+      )
+      await waitUntil(() => !!release)
+      const operation = jest.fn()
+      const second = coordinator.withChildAdmission("second", operation)
+      const rejected = expect(second).rejects.toThrow()
+      await waitUntil(() => coordinator.schedulerSnapshot().queued.length === 1)
+      await coordinator[action]("second")
+      release()
+      await first
+      await rejected
+      expect(operation).not.toHaveBeenCalled()
+      expect((await runtimeDb.getAgentTeamChildRun("second"))?.status).toBe(
+        action === "terminateChild" ? "terminated" : "paused"
+      )
+      expect(coordinator.schedulerSnapshot()).toEqual({ queued: [], active: [] })
+    }
+  )
+
+  it("releases admission when the running-state write fails", async () => {
+    const coordinator = createDurableTeamCoordinator({ globalConcurrency: 1 })
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "first")
+    const failRunning = (patch: Record<string, unknown>) => {
+      if (patch.status === "running") throw new Error("injected DB failure")
+    }
+    getDb().agentTeamChildRuns.hook("updating", failRunning)
+    await expect(coordinator.withChildAdmission("first", jest.fn())).rejects.toThrow(
+      "injected DB failure"
+    )
+    getDb().agentTeamChildRuns.hook("updating").unsubscribe(failRunning)
+    expect(coordinator.schedulerSnapshot()).toEqual({ queued: [], active: [] })
+  })
+
+  it("cancels queued admission without waiting for the active child", async () => {
+    const coordinator = createDurableTeamCoordinator({ globalConcurrency: 1 })
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "first")
+    await register(coordinator, "second")
+    let release!: () => void
+    const first = coordinator.withChildAdmission(
+      "first",
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    const controller = new AbortController()
+    const second = coordinator.withChildAdmission("second", jest.fn(), controller.signal)
+    const rejected = expect(second).rejects.toThrow("cancel queued")
+    await waitUntil(() => coordinator.schedulerSnapshot().queued.length === 1)
+    controller.abort(new Error("cancel queued"))
+    await rejected
+    expect(coordinator.schedulerSnapshot().queued).toHaveLength(0)
+    release()
+    await first
+  })
+
+  it("retains active capacity until cancelled work settles and rejects its late result", async () => {
+    const coordinator = createDurableTeamCoordinator({ globalConcurrency: 1 })
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "first")
+    await register(coordinator, "second")
+    let release!: () => void
+    const controller = new AbortController()
+    const first = coordinator.withChildAdmission(
+      "first",
+      () =>
+        new Promise<string>((resolve) => {
+          release = () => resolve("late success")
+        }),
+      controller.signal
+    )
+    const rejected = expect(first).rejects.toThrow("cancel active")
+    await waitUntil(() => !!release)
+    controller.abort(new Error("cancel active"))
+    const operation = jest.fn()
+    const second = coordinator.withChildAdmission("second", operation)
+    await waitUntil(() => coordinator.schedulerSnapshot().queued.length === 1)
+    expect(coordinator.schedulerSnapshot().active).toHaveLength(1)
+    expect(operation).not.toHaveBeenCalled()
+    release()
+    await Promise.all([rejected, second])
+    expect(operation).toHaveBeenCalledTimes(1)
+    expect(coordinator.schedulerSnapshot()).toEqual({ queued: [], active: [] })
+  })
+
+  it("cancels a writer wait without releasing the preceding writer lease", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    const request = { runId: "run-admission", repositoryId: "primary", access: "write" as const }
+    let release!: () => void
+    const first = coordinator.withWorkspaceLease(
+      request,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    await waitUntil(() => !!release)
+    const controller = new AbortController()
+    const skipped = jest.fn()
+    const second = coordinator.withWorkspaceLease(request, skipped, controller.signal)
+    const rejected = expect(second).rejects.toThrow("cancel writer")
+    const thirdOperation = jest.fn()
+    const third = coordinator.withWorkspaceLease(request, thirdOperation)
+    controller.abort(new Error("cancel writer"))
+    await rejected
+    expect(skipped).not.toHaveBeenCalled()
+    expect(thirdOperation).not.toHaveBeenCalled()
+    release()
+    await Promise.all([first, third])
+    expect(thirdOperation).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["mutation", "alias", "root"])(
+    "keeps isolated writer ownership exclusive across %s",
+    async (scenario) => {
+      const coordinator = createDurableTeamCoordinator()
+      await coordinator.prepareRun(
+        team({ config: config({ writeMode: "isolated-parallel" }) }),
+        "run-admission"
+      )
+      const ownership = [
+        scenario === "alias" ? "src/../shared" : scenario === "root" ? "." : "shared",
+      ]
+      const request = {
+        runId: "run-admission",
+        repositoryId: "primary",
+        access: "write" as const,
+        fileOwnership: ownership,
+      }
+      let release!: () => void
+      const active = coordinator.withWorkspaceLease(
+        request,
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve
+          })
+      )
+      await waitUntil(() => !!release)
+      if (scenario === "mutation") ownership[0] = "unrelated"
+      const operation = jest.fn()
+      try {
+        await expect(
+          coordinator.withWorkspaceLease(
+            { ...request, fileOwnership: ["shared/file.ts"] },
+            operation
+          )
+        ).rejects.toThrow("overlaps")
+        expect(operation).not.toHaveBeenCalled()
+      } finally {
+        release()
+        await active
+      }
+      await coordinator.withWorkspaceLease(
+        { ...request, fileOwnership: ["shared/file.ts"] },
+        operation
+      )
+      expect(operation).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("coalesces concurrent wake requests into one provider resume", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await coordinator.sleepChild("child")
+    let release!: () => void
+    const resumed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const resume = jest.fn(() => resumed)
+    coordinator.attachLiveControl("child", { steer: jest.fn(), resume })
+    const first = coordinator.wakeChild("child")
+    const second = coordinator.wakeChild("child")
+    await waitUntil(() => resume.mock.calls.length > 0)
+    release()
+    await Promise.all([first, second])
+    expect(resume).toHaveBeenCalledTimes(1)
+    await coordinator.wakeChild("child")
+    expect(resume).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["", "../outside", "/outside", "C:relative", "src\0file"])(
+    "rejects invalid isolated ownership %s before execution",
+    async (path) => {
+      const coordinator = createDurableTeamCoordinator()
+      await coordinator.prepareRun(
+        team({ config: config({ writeMode: "isolated-parallel" }) }),
+        "run-admission"
+      )
+      const operation = jest.fn()
+      await expect(
+        coordinator.withWorkspaceLease(
+          {
+            runId: "run-admission",
+            repositoryId: "primary",
+            access: "write",
+            fileOwnership: [path],
+          },
+          operation
+        )
+      ).rejects.toThrow(/ownership/)
+      expect(operation).not.toHaveBeenCalled()
+    }
+  )
+
+  it("reuses the remote checkpoint gate when waking a sleeping child", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await coordinator.sleepChild("child")
+    await runtimeDb.updateAgentTeamChildRun("child", { remoteSessionId: "remote" })
+    const resume = jest.fn(async () => undefined)
+    coordinator.attachLiveControl("child", { steer: jest.fn(), resume })
+    await expect(coordinator.wakeChild("child")).rejects.toThrow("safe checkpoint")
+    expect(resume).not.toHaveBeenCalled()
+    expect(await runtimeDb.getAgentTeamChildRun("child")).toMatchObject({ status: "sleeping" })
+    await coordinator.checkpoint("child", {
+      replay: "safe",
+      sideEffects: [],
+      trajectorySequence: 1,
+    })
+    await coordinator.wakeChild("child")
+    expect(await runtimeDb.getAgentTeamChildRun("child")).toMatchObject({ status: "queued" })
+  })
+
+  it("does not wake a sleeping child after its parent terminates", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await coordinator.sleepChild("child")
+    await runtimeDb.updateAgentTeamRun("run-admission", { status: "terminated" })
+    const resume = jest.fn(async () => undefined)
+    coordinator.attachLiveControl("child", { steer: jest.fn(), resume })
+    await expect(coordinator.wakeChild("child")).rejects.toThrow("run stopped")
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it("keeps a newer pause when a concurrent wake finishes later", async () => {
+    const coordinator = createDurableTeamCoordinator()
+    await coordinator.prepareRun(team(), "run-admission")
+    await register(coordinator, "child")
+    await coordinator.sleepChild("child")
+    let release!: () => void
+    coordinator.attachLiveControl("child", {
+      steer: jest.fn(),
+      resume: () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+      pause: async () => true,
+    })
+    const wake = coordinator.wakeChild("child")
+    await waitUntil(() => !!release)
+    await coordinator.pauseChild("child")
+    release()
+    await wake
+    expect(await runtimeDb.getAgentTeamChildRun("child")).toMatchObject({ status: "paused" })
   })
 
   it("rejects ambiguous repository topology before creating a run", async () => {

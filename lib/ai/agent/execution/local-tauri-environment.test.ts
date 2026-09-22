@@ -21,6 +21,149 @@ const profile = (
 })
 
 describe("local Tauri AgentTeam execution environment", () => {
+  it("rejects duplicate child opens while the first workspace is still opening", async () => {
+    let resolveOpen!: (workspace: { executionRoot: string; settle: jest.Mock }) => void
+    const settle = jest.fn().mockResolvedValue([])
+    const openWorkspace = jest.fn(
+      () =>
+        new Promise<{ executionRoot: string; settle: jest.Mock }>((resolve) => {
+          resolveOpen = resolve
+        })
+    )
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      openWorkspace,
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+    const input = {
+      runId: "run",
+      childRunId: "child",
+      taskId: "task",
+      teammateId: "mate",
+      repositoryPath: "/repo",
+      profile: prepared,
+    }
+    const first = environment.openChild(input)
+    const duplicate = environment.openChild(input)
+    // Resolve the most recent acquisition so a duplicate acquisition fails explicitly.
+    resolveOpen({ executionRoot: "/worktree", settle })
+    await expect(duplicate).rejects.toThrow(/already open/i)
+    await first
+    await expect(environment.openChild(input)).rejects.toThrow(/already open/i)
+    expect(openWorkspace).toHaveBeenCalledTimes(1)
+    await environment.dispose("child")
+    expect(settle).toHaveBeenCalledTimes(1)
+  })
+
+  it("cannot revive a terminated child by suspending it before resume", async () => {
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      openWorkspace: async () => ({ executionRoot: "/worktree", settle: async () => [] }),
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+    await environment.openChild({
+      runId: "run",
+      childRunId: "child",
+      taskId: "task",
+      teammateId: "mate",
+      repositoryPath: "/repo",
+      profile: prepared,
+    })
+    await environment.terminate("child")
+    await expect(environment.suspend("child")).rejects.toThrow(/terminated/i)
+    await expect(environment.resume("child")).rejects.toThrow(/terminated/i)
+    expect(environment.resourceHealth("child")?.state).toBe("terminated")
+    await environment.dispose("child")
+  })
+  it("retries a failed settlement with its original failed state during disposal", async () => {
+    const settle = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+      .mockResolvedValue([])
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      openWorkspace: async () => ({ executionRoot: "/worktree", settle }),
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+    const child = await environment.openChild({
+      runId: "run",
+      childRunId: "child",
+      taskId: "task",
+      teammateId: "mate",
+      repositoryPath: "/repo",
+      profile: prepared,
+    })
+    await expect(child.settle("failed")).rejects.toThrow("storage unavailable")
+    await environment.dispose("child")
+    expect(settle.mock.calls).toEqual([["failed"], ["failed"]])
+    expect(environment.resourceHealth("child")).toBeNull()
+  })
+
+  it("shares concurrent settlement and retries failed cancellation during disposal", async () => {
+    let rejectSettlement!: (error: Error) => void
+    const settle = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectSettlement = reject
+          })
+      )
+      .mockResolvedValue([])
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      openWorkspace: async () => ({ executionRoot: "/worktree", settle }),
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+    const child = await environment.openChild({
+      runId: "run",
+      childRunId: "child",
+      taskId: "task",
+      teammateId: "mate",
+      repositoryPath: "/repo",
+      profile: prepared,
+    })
+    const first = environment.terminate("child")
+    const concurrent = child.settle("ready")
+    const failures = Promise.allSettled([first, concurrent])
+    expect(settle).toHaveBeenCalledTimes(1)
+    rejectSettlement(new Error("storage unavailable"))
+    expect((await failures).every((result) => result.status === "rejected")).toBe(true)
+    expect(environment.resourceHealth("child")?.state).toBe("terminated")
+    await environment.dispose("child")
+    expect(settle.mock.calls).toEqual([["cancelled"], ["cancelled"]])
+    expect(environment.resourceHealth("child")).toBeNull()
+  })
+
+  it("does not advertise unproven confinement or egress capabilities", () => {
+    const environment = createLocalTauriExecutionEnvironment()
+    expect(environment.capabilities().has("sandbox")).toBe(false)
+    expect(environment.capabilities().has("network_policy")).toBe(false)
+    expect(
+      environment.preflight(
+        profile({ policy: { requiredRuntimeCapabilities: [], network: "off" } })
+      )
+    ).toEqual({ ok: false, missing: ["network_policy", "sandbox"] })
+  })
+
+  it("probes the host before admitting a restricted profile, including an empty setup", async () => {
+    const executeSetup = jest.fn(async () => ({ success: true }))
+    const probeConfinement = jest.fn(async () => ({ confined: false }))
+    const environment = createLocalTauriExecutionEnvironment({ executeSetup, probeConfinement })
+    const secured = profile({
+      setupScript: { default: "" },
+      policy: { requiredRuntimeCapabilities: [], network: "off" },
+    })
+    await expect(environment.prepare(secured, "/repo")).rejects.toThrow("network_policy, sandbox")
+    expect(executeSetup).not.toHaveBeenCalled()
+    probeConfinement.mockResolvedValue({ confined: true })
+    await expect(environment.prepare(secured, "/repo")).resolves.toMatchObject({
+      executionRoot: "/repo",
+    })
+    expect(environment.capabilities().has("sandbox")).toBe(true)
+    expect(executeSetup).toHaveBeenCalledTimes(1)
+  })
+
   it("fails closed when a requested policy cannot be enforced", async () => {
     const environment = createLocalTauriExecutionEnvironment({
       isTauri: () => true,

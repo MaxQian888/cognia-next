@@ -16,6 +16,7 @@
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { stackedDeliveryOn } from "@/lib/stack/team-policy"
+import { isTerminalSquadRunStatus, parkActiveSquadRun } from "./squad-run-records"
 import type {
   AgentTeam,
   AgentTeammate,
@@ -23,6 +24,8 @@ import type {
   TeamTaskStatus,
 } from "@/types/agent/agent-team"
 import type { AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
+import { AGENT_TEAM_SECURITY_CONFIG_KEYS } from "@/types/agent/agent-team-runtime"
+import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import {
@@ -69,9 +72,22 @@ export async function ensureConfiguredSquadRuntimeDeps(): Promise<ConfiguredSqua
   return configuredDeps
 }
 
-export function bindSquadStoreReader(): RunTeamLifecycleDeps["storeReader"] {
+export function bindSquadStoreReader(
+  constraints?: AgentTeamExecutionConstraints
+): RunTeamLifecycleDeps["storeReader"] {
   return {
-    getTeam: (id) => useAgentTeamStore.getState().getTeam(id),
+    getTeam: (id) => {
+      const team = useAgentTeamStore.getState().getTeam(id)
+      if (!team || !constraints?.teamConfig) return team
+      return {
+        ...team,
+        config: {
+          ...team.config,
+          ...Object.fromEntries(AGENT_TEAM_SECURITY_CONFIG_KEYS.map((key) => [key, undefined])),
+          ...constraints.teamConfig,
+        },
+      }
+    },
     getTeammates: (teamId) => useAgentTeamStore.getState().getTeammates(teamId),
     getTeamTasks: (teamId) => useAgentTeamStore.getState().getTeamTasks(teamId),
   }
@@ -155,26 +171,22 @@ export async function guardSquadResume(
     })
   const readiness = await evaluate(team, teammates)
   if (readiness.ready) return { blocked: false, blockers: [] }
-  await (deps.park ?? defaultParkUnreadyRun)(runId, teamId)
+  await (deps.park ?? parkSquadRecovery)(runId, teamId)
   return { blocked: true, blockers: readiness.blockers }
 }
 
-async function defaultParkUnreadyRun(runId: string, teamId: string): Promise<void> {
+export async function parkSquadRecovery(
+  runId: string,
+  teamId: string,
+  reason = SQUAD_NOT_READY_REASON
+): Promise<void> {
   const at = Date.now()
-  const [
-    { updateAgentTeamRun },
-    { agentTeamExecutionRunId },
-    { runEventJournal, semanticRunEvent, getExecutionRun },
-  ] = await Promise.all([
-    import("@/lib/db/agent-team-runtime"),
-    import("@/lib/execution/agent-team-bridge"),
-    import("@/lib/db/execution-runs"),
-  ])
-  await updateAgentTeamRun(runId, {
-    status: "needs_input",
-    recoveryReason: SQUAD_NOT_READY_REASON,
-    updatedAt: at,
-  })
+  const [{ agentTeamExecutionRunId }, { runEventJournal, semanticRunEvent, getExecutionRun }] =
+    await Promise.all([
+      import("@/lib/execution/agent-team-bridge"),
+      import("@/lib/db/execution-runs"),
+    ])
+  if (!(await parkActiveSquadRun(runId, reason, at))) return
   const executionRunId = agentTeamExecutionRunId(runId)
   const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
   if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
@@ -183,7 +195,7 @@ async function defaultParkUnreadyRun(runId: string, teamId: string): Promise<voi
         executionRunId,
         semanticRunEvent(
           "run.recovery_required",
-          { reason: SQUAD_NOT_READY_REASON },
+          { reason },
           { ts: at, sourceEventId: `agent-team:${runId}:recovery_required:${at}` }
         )
       )
@@ -255,6 +267,21 @@ export interface RunSquadLifecycleDeps {
   run?: typeof runTeamLifecycle
 }
 
+/** Re-entry must use the original authority, never today's permissive defaults. */
+export async function restoreSquadRunInput(
+  teamId: string,
+  runId: string
+): Promise<RunSquadLifecycleInput | undefined> {
+  const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+  const record = await getAgentTeamRun(runId)
+  if (!record || record.teamId !== teamId) throw new Error("Unknown Squad run")
+  if (record.executionConstraints?.version !== 1 || !record.executionConstraints.teamConfig) {
+    await parkSquadRecovery(runId, teamId, "missing_execution_constraints")
+    return undefined
+  }
+  return { teamId, runId, ...record.executionConstraints }
+}
+
 /**
  * Execute the lifecycle and settle everything it owns. Never throws on the
  * run's own failure: the result carries the status and the journal carries the
@@ -264,6 +291,40 @@ export async function runSquadLifecycle(
   input: RunSquadLifecycleInput,
   deps: RunSquadLifecycleDeps = {}
 ): Promise<RunTeamLifecycleResult> {
+  const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+  const persisted = await getAgentTeamRun(input.runId)
+  if (persisted && persisted.teamId !== input.teamId)
+    throw new Error("Squad run belongs to another team")
+  if (persisted && isTerminalSquadRunStatus(persisted.status)) {
+    return {
+      runId: input.runId,
+      status:
+        persisted.status === "terminated"
+          ? "cancelled"
+          : (persisted.status as RunTeamLifecycleResult["status"]),
+    }
+  }
+  if (
+    persisted &&
+    (persisted.executionConstraints?.version !== 1 || !persisted.executionConstraints.teamConfig)
+  ) {
+    await parkSquadRecovery(input.runId, input.teamId, "missing_execution_constraints")
+    return { runId: input.runId, status: "failed", reason: "missing_execution_constraints" }
+  }
+  if (persisted?.executionConstraints) {
+    const frozen = persisted.executionConstraints
+    input = {
+      ...input,
+      origin: frozen.origin,
+      triggeredFrom: frozen.triggeredFrom,
+      permissionCeiling: frozen.permissionCeiling,
+      requirePlanApprovalFloor: frozen.requirePlanApprovalFloor,
+      sessionId: frozen.sessionId,
+      sessionWorkingDir: frozen.sessionWorkingDir,
+      entryPersona: frozen.entryPersona,
+      ultracode: frozen.ultracode,
+    }
+  }
   const { teamId, runId } = input
   let runtimeDeps = deps.runtimeDeps
   if (!runtimeDeps) {
@@ -275,6 +336,18 @@ export async function runSquadLifecycle(
     }
   }
   const run = deps.run ?? runTeamLifecycle
+  const { startSquadRunSpan } = await import("./squad-telemetry")
+  const admitted = await getAgentTeamRun(runId)
+  if (admitted && isTerminalSquadRunStatus(admitted.status)) {
+    return {
+      runId,
+      status:
+        admitted.status === "terminated"
+          ? "cancelled"
+          : (admitted.status as RunTeamLifecycleResult["status"]),
+    }
+  }
+  if (persisted && !admitted) return { runId, status: "failed", reason: "run_not_found" }
 
   // The store's `status` is a mirror of the durable run, written here and only
   // here (ADR-0169): surfaces read the run record, and the mirror exists so
@@ -283,7 +356,6 @@ export async function runSquadLifecycle(
 
   // The root span. Teammate dispatch spans join it through `traceId`, reviews
   // and recovery hang off it, and the terminal reason closes it.
-  const { startSquadRunSpan } = await import("./squad-telemetry")
   const team = useAgentTeamStore.getState().teams[teamId]
   const rootSpan = startSquadRunSpan({
     runId,
@@ -295,7 +367,7 @@ export async function runSquadLifecycle(
 
   const result = await run(teamId, {
     runId,
-    storeReader: bindSquadStoreReader(),
+    storeReader: bindSquadStoreReader(persisted?.executionConstraints),
     storeWriter: bindSquadStoreWriter(),
     runLeadPlanning: runtimeDeps.runLeadPlanning,
     ...(runtimeDeps.runLeadReview ? { runLeadReview: runtimeDeps.runLeadReview } : {}),
@@ -322,7 +394,7 @@ export async function runSquadLifecycle(
         : {}),
   })
 
-  await settleSquadRun(teamId, runId, result, runtimeDeps)
+  await settleSquadRun(teamId, runId, result, runtimeDeps, persisted?.executionConstraints)
   return result
 }
 
@@ -373,7 +445,8 @@ async function settleSquadRun(
   teamId: string,
   runId: string,
   result: RunTeamLifecycleResult,
-  runtimeDeps: ConfiguredSquadRuntimeDeps
+  runtimeDeps: ConfiguredSquadRuntimeDeps,
+  constraints?: AgentTeamExecutionConstraints
 ): Promise<void> {
   const [{ getAgentTeamRun, updateAgentTeamRun }, { settleAgentTeamExecutionRun }] =
     await Promise.all([
@@ -382,6 +455,13 @@ async function settleSquadRun(
     ])
   const durableRun = await getAgentTeamRun(runId).catch(() => undefined)
   const durableStatus: AgentTeamRunStatus | undefined = durableRun?.status
+  if (
+    durableStatus === "cancelled" ||
+    durableStatus === "terminated" ||
+    durableStatus === "failed"
+  ) {
+    result = { ...result, status: durableStatus === "terminated" ? "cancelled" : durableStatus }
+  }
 
   useAgentTeamStore
     .getState()
@@ -399,7 +479,7 @@ async function settleSquadRun(
     ).catch(() => undefined)
   }
 
-  const team = useAgentTeamStore.getState().teams[teamId]
+  const team = bindSquadStoreReader(constraints).getTeam(teamId)
   if (
     team &&
     durableRun &&

@@ -30,6 +30,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 import { getExecutionRun } from "@/lib/db/execution-runs"
+import { isTerminalSquadRunStatus } from "./squad-run-records"
 import type { AgentTeamRunRecord } from "@/types/agent/agent-team-runtime"
 import type {
   ExecutionRunInterrupt,
@@ -54,6 +55,12 @@ export const RECOVERY_REASONS: ReadonlySet<string> = new Set([
   "missing_checkpoint",
   "recover_needs_input",
   SQUAD_NOT_READY,
+  "missing_execution_constraints",
+  "replacement_cleanup_failed",
+  "launch_failed",
+  "reentry_failed",
+  "dispatch_initialization_failed",
+  "evidence_incomplete",
   LEGACY_RUN_NOT_RESUMABLE,
 ])
 
@@ -80,6 +87,8 @@ export interface TeamRecoveryDeps {
     teamId: string
     parentExecutionRunId: string
     sessionId?: string
+    objective: string
+    executionConstraints?: AgentTeamRunRecord["executionConstraints"]
   }) => Promise<{ started: boolean; executionRunId?: string; reason?: string }>
   listChildren?: (runId: string) => Promise<Array<{ id: string; status: string; hostRef?: string }>>
   assessReplay?: (runId: string) => Promise<{ safe: boolean; uncertainChildIds: string[] }>
@@ -135,14 +144,17 @@ async function defaultStartReplacement(input: {
   teamId: string
   parentExecutionRunId: string
   sessionId?: string
+  objective: string
+  executionConstraints?: AgentTeamRunRecord["executionConstraints"]
 }) {
   const { startSquadRun } = await import("./start-squad-run")
   return startSquadRun({
     squadId: input.teamId,
-    goal: "",
+    goal: input.objective,
     origin: "interactive",
     triggeredFrom: { source: "ui" },
     parentRunId: input.parentExecutionRunId,
+    ...(input.executionConstraints ? { executionConstraints: input.executionConstraints } : {}),
     ...(input.sessionId
       ? { session: { id: input.sessionId } as import("@cognia/agent-config-types").ChatSession }
       : {}),
@@ -181,7 +193,7 @@ export async function ensureTeamRecoveryInterrupt(
 ): Promise<{ interruptId: string; pending: boolean } | undefined> {
   const run = await getAgentTeamRun(runId)
   if (!run) return undefined
-  if (["completed", "failed", "cancelled"].includes(run.status)) return undefined
+  if (isTerminalSquadRunStatus(run.status)) return undefined
 
   const existing = await listRecoveryInterrupts(runId)
   const pending = existing.find((row) => row.status === "pending")
@@ -190,7 +202,10 @@ export async function ensureTeamRecoveryInterrupt(
   // Nothing to re-queue: a legacy row left no children, and a Squad that is
   // not ready cannot dispatch them. Both restart as a new run or stop.
   const legacy =
-    run.recoveryReason === LEGACY_RUN_NOT_RESUMABLE || run.recoveryReason === SQUAD_NOT_READY
+    run.recoveryReason === LEGACY_RUN_NOT_RESUMABLE ||
+    run.recoveryReason === SQUAD_NOT_READY ||
+    run.recoveryReason === "missing_execution_constraints" ||
+    run.recoveryReason === "replacement_cleanup_failed"
   const children = legacy ? [] : await (deps.listChildren ?? defaultListChildren)(runId)
   const replay = legacy
     ? { safe: false, uncertainChildIds: [] }
@@ -203,7 +218,10 @@ export async function ensureTeamRecoveryInterrupt(
   )
   const subject: TeamRecoverySubject = {
     reason: run.recoveryReason ?? "recover_needs_input",
-    choices: [...(legacy ? LEGACY_RECOVERY_CHOICES : ALL_RECOVERY_CHOICES)],
+    choices:
+      run.executionConstraints?.version !== 1 || !run.executionConstraints.teamConfig
+        ? ["terminate"]
+        : [...(legacy ? LEGACY_RECOVERY_CHOICES : ALL_RECOVERY_CHOICES)],
     uncertainChildIds: replay.uncertainChildIds,
     ...(hosts.size === 1 ? { hostRef: [...hosts][0]! } : {}),
   }
@@ -292,6 +310,9 @@ async function applyTeamRecoveryDecisionInner(
       ? { applied: true, choice }
       : { applied: false, choice, reason: "control_refused" }
   }
+  if (run.executionConstraints?.version !== 1 || !run.executionConstraints.teamConfig) {
+    return { applied: false, choice, reason: "choice_not_offered" }
+  }
 
   if (choice === "restart_run") {
     // The conversation, if the parked run had one, lives on its execution
@@ -302,6 +323,8 @@ async function applyTeamRecoveryDecisionInner(
     const started = await (deps.startReplacement ?? defaultStartReplacement)({
       teamId: run.teamId,
       parentExecutionRunId: agentTeamExecutionRunId(runId),
+      objective: run.objective,
+      ...(run.executionConstraints ? { executionConstraints: run.executionConstraints } : {}),
       ...(parentExecution?.sessionId ? { sessionId: parentExecution.sessionId } : {}),
     })
     if (!started.started || !started.executionRunId) {
@@ -309,6 +332,8 @@ async function applyTeamRecoveryDecisionInner(
     }
     // The old run stops AFTER the replacement exists, so a failed launch
     // leaves the parked run where a person can still decide.
+    // The launch transaction retires the old row and drains its live controls
+    // before replacement dispatch. Injected launchers may still need this no-op.
     await control(runId, "stop").catch(() => undefined)
     return { applied: true, choice, replacementExecutionRunId: started.executionRunId }
   }

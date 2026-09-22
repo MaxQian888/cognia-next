@@ -58,6 +58,8 @@ export interface AgentExecutionEnvironment {
       title: string
       content?: string | Uint8Array
       url?: string
+      status?: "passed" | "failed" | "unknown"
+      revision?: string
     }>
   >
   resourceHealth(childRunId: string): {
@@ -84,6 +86,7 @@ export interface LocalTauriEnvironmentOptions {
   isTauri?: () => boolean
   sandboxSupported?: boolean
   networkPolicySupported?: boolean
+  probeConfinement?: () => Promise<{ confined: boolean }>
   now?: () => number
   executeSetup?: (
     profile: ProjectEnvironmentVersion,
@@ -115,6 +118,8 @@ export function createLocalTauriExecutionEnvironment(
   options: LocalTauriEnvironmentOptions = {}
 ): AgentExecutionEnvironment {
   const now = options.now ?? Date.now
+  let confinementProven = false
+  const openingChildren = new Set<string>()
   const sessions = new Map<
     string,
     AgentChildEnvironmentSession & { settle: OpenWorkspaceResult["settle"] }
@@ -127,15 +132,19 @@ export function createLocalTauriExecutionEnvironment(
       "editor",
       "browser",
     ]
-    if (options.sandboxSupported !== false) values.push("sandbox")
-    if (options.networkPolicySupported !== false) values.push("network_policy")
+    if (options.sandboxSupported ?? confinementProven) values.push("sandbox")
+    if (options.networkPolicySupported ?? confinementProven) values.push("network_policy")
     return new Set(values)
   }
 
   const preflight = (profile: ProjectEnvironmentVersion): { ok: boolean; missing: string[] } => {
     const required = new Set(profile.policy.requiredRuntimeCapabilities)
-    if (profile.policy.requireSandbox) required.add("sandbox")
-    if ((profile.policy.allowedDomains?.length ?? 0) > 0) required.add("network_policy")
+    const restrictNetwork =
+      profile.policy.network === "off" ||
+      profile.policy.network === "allowlist" ||
+      (profile.policy.allowedDomains?.length ?? 0) > 0
+    if (profile.policy.requireSandbox || restrictNetwork) required.add("sandbox")
+    if (restrictNetwork) required.add("network_policy")
     const available = capabilities()
     const missing = [...required].filter((capability) => !available.has(capability)).sort()
     return { ok: missing.length === 0, missing }
@@ -212,6 +221,22 @@ export function createLocalTauriExecutionEnvironment(
     preflight,
 
     async prepare(profile, repositoryPath) {
+      const requested = profile.policy
+      if (
+        (options.sandboxSupported === undefined || options.networkPolicySupported === undefined) &&
+        (requested.requireSandbox ||
+          requested.network === "off" ||
+          requested.network === "allowlist" ||
+          (requested.allowedDomains?.length ?? 0) > 0 ||
+          requested.requiredRuntimeCapabilities.some(
+            (value) => value === "sandbox" || value === "network_policy"
+          ))
+      ) {
+        const probe =
+          options.probeConfinement ??
+          (async () => (await import("@/lib/ai/code-mode/sandbox-status")).codeSandboxStatus())
+        confinementProven = (await probe()).confined === true
+      }
       const check = preflight(profile)
       if (!check.ok) {
         throw new Error(`Execution environment cannot enforce: ${check.missing.join(", ")}`)
@@ -223,31 +248,52 @@ export function createLocalTauriExecutionEnvironment(
     },
 
     async openChild(input) {
-      const workspace = await openWorkspace(input)
-      let settled = false
-      let settlement: unknown[] = []
-      const session = {
-        childRunId: input.childRunId,
-        executionRoot: workspace.executionRoot,
-        ...(workspace.workspaceRunId ? { workspaceRunId: workspace.workspaceRunId } : {}),
-        ...(workspace.branch ? { branch: workspace.branch } : {}),
-        state: "running" as const,
-        openedAt: now(),
-        async settle(finalState: "ready" | "failed" | "cancelled") {
-          if (settled) return settlement
-          const result = await workspace.settle(finalState)
-          settlement = Array.isArray(result) ? result : result === undefined ? [] : [result]
-          settled = true
-          return settlement
-        },
+      if (openingChildren.has(input.childRunId) || sessions.has(input.childRunId)) {
+        throw new Error(`Environment child is already open: ${input.childRunId}`)
       }
-      sessions.set(input.childRunId, session)
-      return session
+      openingChildren.add(input.childRunId)
+      try {
+        const workspace = await openWorkspace(input)
+        let settled = false
+        let settlement: unknown[] = []
+        let settling: Promise<unknown[]> | undefined
+        let settlementState: "ready" | "failed" | "cancelled" | undefined
+        const session = {
+          childRunId: input.childRunId,
+          executionRoot: workspace.executionRoot,
+          ...(workspace.workspaceRunId ? { workspaceRunId: workspace.workspaceRunId } : {}),
+          ...(workspace.branch ? { branch: workspace.branch } : {}),
+          state: "running" as const,
+          openedAt: now(),
+          async settle(finalState: "ready" | "failed" | "cancelled") {
+            if (settled) return settlement
+            if (settling) return settling
+            // An ambiguous failed settlement must retry the same terminal intent.
+            settlementState ??= finalState
+            settling = (async () => {
+              const result = await workspace.settle(settlementState!)
+              settlement = Array.isArray(result) ? result : result === undefined ? [] : [result]
+              settled = true
+              return settlement
+            })()
+            try {
+              return await settling
+            } finally {
+              settling = undefined
+            }
+          },
+        }
+        sessions.set(input.childRunId, session)
+        return session
+      } finally {
+        openingChildren.delete(input.childRunId)
+      }
     },
 
     async suspend(childRunId) {
       const session = sessions.get(childRunId)
       if (!session) throw new Error(`Unknown environment child: ${childRunId}`)
+      if (session.state === "terminated") throw new Error("Terminated child cannot suspend")
       session.state = "suspended"
     },
 
@@ -268,7 +314,7 @@ export function createLocalTauriExecutionEnvironment(
     async dispose(childRunId) {
       const session = sessions.get(childRunId)
       if (!session) return
-      if (session.state !== "terminated") await session.settle("ready")
+      await session.settle(session.state === "terminated" ? "cancelled" : "ready")
       sessions.delete(childRunId)
     },
 

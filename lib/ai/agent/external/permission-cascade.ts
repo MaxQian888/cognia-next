@@ -1,3 +1,4 @@
+import type { AgentTeamConfig } from "@/types/agent/agent-team"
 import type { AcpCapabilities, AcpPermissionMode } from "@/types/agent/external-agent"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { clampSandboxPolicy } from "@/lib/sandbox/policy-bridge"
@@ -145,4 +146,26 @@ export function deriveCapabilityGuards(capabilities: AcpCapabilities | undefined
     !fileTypes || fileTypes.length === 0 || fileTypes.some((t) => t.startsWith("image/"))
 
   return { allowResume, allowImages }
+}
+
+/**
+ * Build the team's permission ceiling — the parent spec every teammate dispatch
+ * is clamped against. Returns `undefined` when the team expresses no ceiling
+ * (no allow-list, deny-list, or mode), so callers skip the clamp entirely.
+ */
+export function teamPermissionCeiling(
+  config: AgentTeamConfig | undefined
+): ExternalSessionPermissionSpec | undefined {
+  if (!config) return undefined
+  const spec: ExternalSessionPermissionSpec = {
+    ...(config.allowedTools && config.allowedTools.length > 0
+      ? { allowedTools: config.allowedTools }
+      : {}),
+    ...(config.disallowedTools && config.disallowedTools.length > 0
+      ? { disallowedTools: config.disallowedTools }
+      : {}),
+    ...(config.defaultPermissionMode ? { permissionMode: config.defaultPermissionMode } : {}),
+    ...(config.sandboxPolicy ? { sandboxPolicy: config.sandboxPolicy } : {}),
+  }
+  return Object.keys(spec).length > 0 ? spec : undefined
 }

@@ -19,15 +19,18 @@ import {
   listAgentTeamRecoveryCandidates,
   listAgentTeamRuns,
   listAgentTeamTrajectory,
+  listAgentTeamEvidence,
   markAgentTeamCheckpoint,
   purgeAgentTeamRun,
   purgeAgentTeam,
   putAgentTeamContent,
+  putAgentTeamEvidenceContent,
   renewAgentTeamDispatchLease,
   settleAgentTeamDispatchLease,
   updateAgentTeamSteeringReceipt,
   updateAgentTeamChildRun,
   updateAgentTeamChildRunIfCurrent,
+  updateAgentTeamRunIfCurrent,
 } from "./agent-team-runtime"
 
 const mockAgentInvoke = jest.fn().mockResolvedValue(undefined)
@@ -49,6 +52,61 @@ describe("durable AgentTeam runtime persistence", () => {
     await getDb().delete()
     __resetDbForTesting()
     disableDbRuntime?.()
+  })
+
+  it("scopes evidence to a run, child, task and attempt in creation order", async () => {
+    for (const row of [
+      { id: "old", runId: "run", childRunId: "child", taskId: "task", attempt: 1, createdAt: 1 },
+      { id: "newer", runId: "run", childRunId: "child", taskId: "task", attempt: 2, createdAt: 4 },
+      {
+        id: "earlier",
+        runId: "run",
+        childRunId: "child",
+        taskId: "task",
+        attempt: 2,
+        createdAt: 3,
+      },
+      {
+        id: "other-child",
+        runId: "run",
+        childRunId: "other",
+        taskId: "task",
+        attempt: 2,
+        createdAt: 2,
+      },
+      {
+        id: "other-task",
+        runId: "run",
+        childRunId: "child",
+        taskId: "other-task",
+        attempt: 2,
+        createdAt: 5,
+      },
+      {
+        id: "other-run",
+        runId: "other-run",
+        childRunId: "child",
+        taskId: "task",
+        attempt: 2,
+        createdAt: 6,
+      },
+    ])
+      await putAgentTeamEvidenceContent({ ...row, kind: "activity", title: row.id })
+    expect(
+      (await listAgentTeamEvidence("run", { childRunId: "child", taskId: "task", attempt: 2 })).map(
+        (row) => row.id
+      )
+    ).toEqual(["earlier", "newer"])
+    expect(
+      (await listAgentTeamEvidence("run", { taskId: "task", attempt: 2 })).map((row) => row.id)
+    ).toEqual(["other-child", "earlier", "newer"])
+    expect((await listAgentTeamEvidence("run")).map((row) => row.id)).toEqual([
+      "old",
+      "other-child",
+      "earlier",
+      "newer",
+      "other-task",
+    ])
   })
 
   it("persists a recoverable child trajectory with monotonic checkpoints", async () => {
@@ -197,8 +255,86 @@ describe("durable AgentTeam runtime persistence", () => {
     expect(await renewAgentTeamDispatchLease("child-lease", "lease-a", 20)).toBe(true)
     expect(await advanceAgentTeamRemoteEvent("child-lease", undefined, "event-1", 21)).toBe(true)
     expect(await advanceAgentTeamRemoteEvent("child-lease", undefined, "event-1", 22)).toBe(false)
+    await expect(
+      advanceAgentTeamRemoteEvent("child-lease", "event-1", "event-2", 23, {
+        runId: "wrong-run",
+        event: { text: "no" },
+      })
+    ).rejects.toThrow("another run")
+    expect((await getAgentTeamChildRun("child-lease"))?.lastRemoteEventId).toBe("event-1")
+    const envelope = { type: "delta", text: "x".repeat(9000) }
+    expect(
+      await advanceAgentTeamRemoteEvent("child-lease", "event-1", "event-2", 24, {
+        runId: "run-lease",
+        event: envelope,
+      })
+    ).toBe(true)
+    expect(
+      await advanceAgentTeamRemoteEvent("child-lease", "event-1", "event-2", 25, {
+        runId: "run-lease",
+        event: envelope,
+      })
+    ).toBe(false)
+    const events = await listAgentTeamTrajectory("run-lease")
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ kind: "remote_event", correlationId: "event-2" })
+    expect(await getDb().agentTeamContentObjects.get(events[0]!.contentHash!)).toMatchObject({
+      byteLength: 9026,
+    })
     expect(await settleAgentTeamDispatchLease("child-lease", "lease-b", 23)).toBe(false)
     expect(await settleAgentTeamDispatchLease("child-lease", "lease-a", 23)).toBe(true)
+  })
+
+  it("rolls content back when evidence reference insertion fails", async () => {
+    const fail = () => {
+      throw new Error("reference rejected")
+    }
+    const db = getDb()
+    db.agentTeamEvidence.hook("creating", fail)
+    try {
+      await expect(
+        putAgentTeamEvidenceContent(
+          {
+            id: "evidence",
+            runId: "run",
+            taskId: "task",
+            kind: "outcome",
+            title: "result",
+            createdAt: 1,
+          },
+          "payload"
+        )
+      ).rejects.toThrow("reference rejected")
+      expect(await db.agentTeamContentObjects.count()).toBe(0)
+    } finally {
+      db.agentTeamEvidence.hook("creating").unsubscribe(fail)
+    }
+  })
+
+  it("atomically retains other runs' shared content while deleting only owned orphans", async () => {
+    const row = { taskId: "task", kind: "outcome" as const, title: "result", createdAt: 1 }
+    const shared = await putAgentTeamEvidenceContent(
+      { ...row, id: "a", runId: "removed" },
+      "shared"
+    )
+    await putAgentTeamEvidenceContent({ ...row, id: "b", runId: "live" }, "shared")
+    const owned = await putAgentTeamEvidenceContent({ ...row, id: "c", runId: "removed" }, "owned")
+    const inFlight = await putAgentTeamContent("not yet referenced", "text/plain", 1)
+    await purgeAgentTeamRun("removed")
+    expect(await getDb().agentTeamContentObjects.get(shared.contentHash!)).toBeDefined()
+    expect(await getDb().agentTeamContentObjects.get(owned.contentHash!)).toBeUndefined()
+    expect(await getDb().agentTeamContentObjects.get(inFlight.hash)).toBeDefined()
+  })
+
+  it("stores trajectory bytes and reference in one transaction", async () => {
+    const event = await appendAgentTeamTrajectory(
+      { runId: "run", kind: "model_turn_completed", createdAt: 1 },
+      { data: "result", mimeType: "text/plain" }
+    )
+    expect(event.contentHash).toMatch(/^sha256:/)
+    expect(await getDb().agentTeamContentObjects.get(event.contentHash!)).toMatchObject({
+      byteLength: 6,
+    })
   })
 
   it("recovers only runs interrupted during active execution", async () => {
@@ -348,6 +484,39 @@ describe("durable AgentTeam runtime persistence", () => {
     ).resolves.toBe(false)
     expect(await getAgentTeamChildRun("child-cas")).toMatchObject({
       status: "pausing",
+      updatedAt: 3,
+    })
+  })
+
+  it("does not let a stale recovery update overwrite a run's terminal state", async () => {
+    await createAgentTeamRun({
+      id: "run-terminal",
+      teamId: "team",
+      objective: "Protect terminal state",
+      decisionVersion: 0,
+      priority: 1,
+      status: "running",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const expected = { status: "running" as const, updatedAt: 2 }
+    const results = await Promise.all([
+      updateAgentTeamRunIfCurrent("run-terminal", expected, { status: "terminated", updatedAt: 3 }),
+      updateAgentTeamRunIfCurrent("run-terminal", expected, { status: "recovering", updatedAt: 4 }),
+    ])
+    expect(results).toEqual([true, false])
+    await expect(
+      updateAgentTeamRunIfCurrent(
+        "run-terminal",
+        { status: "terminated", updatedAt: 2 },
+        { status: "running" }
+      )
+    ).resolves.toBe(false)
+    await expect(
+      updateAgentTeamRunIfCurrent("missing", expected, { status: "running" })
+    ).resolves.toBe(false)
+    expect(await getAgentTeamRun("run-terminal")).toMatchObject({
+      status: "terminated",
       updatedAt: 3,
     })
   })

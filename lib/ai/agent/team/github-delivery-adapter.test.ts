@@ -4,6 +4,7 @@ import type { Stack } from "@/lib/stack/model"
 import {
   assertPublishableStack,
   createGithubDeliveryAdapter,
+  prepareAndPublishGithubStack,
   stackRootBase,
 } from "./github-delivery-adapter"
 
@@ -20,13 +21,96 @@ const node: AgentTeamDeliveryNode = {
   status: "ci_pending",
   pullRequestNumber: 42,
   pullRequestUrl: "https://github.com/acme/repo/pull/42",
+  headSha: "abc",
+  approvedHeadSha: "abc",
+  approvedBaseBranch: "main",
   createdAt: 1,
   updatedAt: 1,
 }
 
+describe("GitHub draft publication recovery", () => {
+  it("resumes persisted draft layers after child records have changed", async () => {
+    const disable = __enableDbRuntimeForTesting()
+    try {
+      const db = getDb()
+      await createDeliveryGraphService({}).create({
+        id: "partial-graph",
+        runId: "partial-run",
+        repositories: [
+          {
+            repositoryId: "primary",
+            baseBranch: "release",
+            layers: [
+              { id: "partial-a", branch: "a", title: "A" },
+              { id: "partial-b", branch: "b", title: "B" },
+            ],
+          },
+        ],
+      })
+      await db.agentTeamDeliveryNodes.update("partial-a", {
+        pullRequestNumber: 1,
+        pullRequestUrl: "https://github.com/acme/repo/pull/1",
+        headSha: "sha-a",
+        status: "ci_pending",
+      })
+      const request = jest.fn(async (route: string) =>
+        route.startsWith("GET")
+          ? { status: 200, headers: {}, data: [] }
+          : {
+              status: 201,
+              headers: {},
+              data: {
+                number: 2,
+                html_url: "https://github.com/acme/repo/pull/2",
+                head: { sha: "sha-b" },
+              },
+            }
+      )
+      const recordParent = jest.fn(async () => {})
+      const team = {
+        config: { workingDir: "/repo", githubDeliveryPolicy: STACKED_DELIVERY_DEFAULTS },
+      } as AgentTeam
+      await expect(
+        prepareAndPublishGithubStack(team, "partial-run", {
+          resolveTeamRepo: async () => ({
+            fullName: "acme/repo",
+            defaultBranch: "main",
+            defaultBranchExists: true,
+          }),
+          resolveOctokit: async () => ({ request }),
+          recordParent,
+          validateLayers: async () => [
+            {
+              branch: "a",
+              parent: "release",
+              head: "sha-a",
+              containsParent: true,
+              checkedOutIn: null,
+            },
+            { branch: "b", parent: "a", head: "sha-b", containsParent: true, checkedOutIn: null },
+          ],
+        })
+      ).resolves.toBe("partial-graph")
+      expect(request).toHaveBeenCalledWith(
+        "POST /repos/{owner}/{repo}/pulls",
+        expect.objectContaining({ head: "b", base: "a" })
+      )
+      expect(recordParent).toHaveBeenCalledWith("/repo", "a", "release")
+      expect((await db.agentTeamDeliveryGraphs.get("partial-graph"))?.status).toBe("running")
+    } finally {
+      await getDb().delete()
+      __resetDbForTesting()
+      disable()
+    }
+  })
+})
+
 describe("GitHub stacked delivery adapter", () => {
   it("uses GitHub pull request, retarget, update and merge endpoints", async () => {
-    const request = jest.fn(async (route: string) => {
+    const request = jest.fn(async (route: string, _params: unknown) => {
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}")
+        return { status: 200, headers: {}, data: { head: { sha: "abc" }, base: { ref: "main" } } }
+      if (route.startsWith("GET")) return { status: 200, headers: {}, data: [] }
       if (route.startsWith("POST")) {
         return {
           status: 201,
@@ -34,7 +118,7 @@ describe("GitHub stacked delivery adapter", () => {
           data: { number: 42, html_url: node.pullRequestUrl, head: { sha: "abc" } },
         }
       }
-      return { status: 200, headers: {}, data: {} }
+      return { status: 200, headers: {}, data: { merged: true } }
     })
     const adapter = createGithubDeliveryAdapter({
       octokit: { request },
@@ -61,11 +145,72 @@ describe("GitHub stacked delivery adapter", () => {
     await adapter.merge(node)
 
     expect(request.mock.calls.map(([route]) => route)).toEqual([
+      "GET /repos/{owner}/{repo}/pulls",
       "POST /repos/{owner}/{repo}/pulls",
       "PATCH /repos/{owner}/{repo}/pulls/{pull_number}",
       "PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch",
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
       "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge",
     ])
+    expect(request).toHaveBeenCalledWith(
+      "PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge",
+      expect.objectContaining({ sha: "abc" })
+    )
+  })
+
+  it("reuses an existing matching pull request after an uncertain publish", async () => {
+    const request = jest.fn().mockResolvedValue({
+      status: 200,
+      data: [
+        {
+          number: 42,
+          html_url: node.pullRequestUrl,
+          head: { sha: "abc", ref: node.branch, repo: { full_name: "acme/repo" } },
+          base: { ref: "main" },
+        },
+      ],
+    })
+    const adapter = createGithubDeliveryAdapter({
+      octokit: { request },
+      repositories: { primary: "acme/repo" },
+    })
+    await expect(
+      adapter.createPullRequest({
+        repositoryId: "primary",
+        branch: node.branch,
+        baseBranch: "main",
+        title: "Layer 1",
+        order: 0,
+      })
+    ).resolves.toMatchObject({ number: 42, headSha: "abc" })
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses a merge without an approved matching revision", async () => {
+    const request = jest.fn()
+    const adapter = createGithubDeliveryAdapter({
+      octokit: { request },
+      repositories: { primary: "acme/repo" },
+    })
+    await expect(adapter.merge({ ...node, approvedHeadSha: undefined })).rejects.toThrow(
+      /approved.*revision/i
+    )
+    await expect(adapter.merge({ ...node, headSha: "new" })).rejects.toThrow(/approved.*revision/i)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("refuses a remotely retargeted pull request before merge", async () => {
+    const request = jest.fn().mockResolvedValue({
+      status: 200,
+      data: { head: { sha: "abc" }, base: { ref: "release" } },
+    })
+    const adapter = createGithubDeliveryAdapter({
+      octokit: { request },
+      repositories: { primary: "acme/repo" },
+    })
+    await expect(adapter.merge(node)).rejects.toThrow(/target.*changed/)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request.mock.calls[0][0]).toBe("GET /repos/{owner}/{repo}/pulls/{pull_number}")
   })
 
   it("fails before network access for an unknown repository binding", async () => {
@@ -199,3 +344,9 @@ describe("assertPublishableStack", () => {
     ).rejects.toThrow("agent/two does not exist")
   })
 })
+import "fake-indexeddb/auto"
+
+import { __enableDbRuntimeForTesting, __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { createDeliveryGraphService } from "./delivery-graph"
+import { STACKED_DELIVERY_DEFAULTS } from "@/lib/stack/team-policy"
+import type { AgentTeam } from "@/types/agent/agent-team"

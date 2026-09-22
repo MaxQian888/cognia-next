@@ -60,6 +60,23 @@ const verdict = (over: Partial<ProgressLedgerVerdict> = {}): ProgressLedgerVerdi
 })
 
 describe("createLedgerCheckpoint", () => {
+  it("uses the wave deadline signal for the persistent judge and replan", async () => {
+    const { ctx } = makeCtx({ stallThreshold: 1 })
+    const replan = jest.fn().mockResolvedValue(outcome())
+    const judge = jest.fn().mockResolvedValue(verdict())
+    const original = new AbortController()
+    const wave = new AbortController()
+    const cp = createLedgerCheckpoint({ ctx, replan, judge, signal: original.signal })
+    await cp({ justRanTaskIds: ["a"], remaining: [], signal: wave.signal })
+    await cp({ justRanTaskIds: ["a"], remaining: [], signal: wave.signal })
+    expect(judge).toHaveBeenCalledWith(expect.objectContaining({ signal: wave.signal }))
+    expect(replan).toHaveBeenLastCalledWith(expect.objectContaining({ signal: wave.signal }))
+    wave.abort(new Error("deadline"))
+    await expect(cp({ justRanTaskIds: ["a"], remaining: [], signal: wave.signal })).rejects.toThrow(
+      "deadline"
+    )
+    expect(judge).toHaveBeenCalledTimes(1)
+  })
   it("delegates to the lead re-plan and skips the judge while progressing", async () => {
     const { ctx, addEvent } = makeCtx()
     const replan = jest.fn().mockResolvedValue(outcome())

@@ -51,6 +51,22 @@ export async function updateAgentTeamRun(
   return (await getDb().agentTeamRuns.update(id, patch)) > 0
 }
 
+/** Atomically update a run only while its durable control state is unchanged. */
+export async function updateAgentTeamRunIfCurrent(
+  id: string,
+  expected: Pick<AgentTeamRunRecord, "status" | "updatedAt">,
+  patch: Partial<Omit<AgentTeamRunRecord, "id" | "teamId" | "createdAt">>
+): Promise<boolean> {
+  const db = getDb()
+  return db.transaction("rw", db.agentTeamRuns, async () => {
+    const run = await db.agentTeamRuns.get(id)
+    if (!run || run.status !== expected.status || run.updatedAt !== expected.updatedAt) {
+      return false
+    }
+    return (await db.agentTeamRuns.update(id, patch)) > 0
+  })
+}
+
 export async function listAgentTeamRuns(teamId?: string): Promise<AgentTeamRunRecord[]> {
   const rows = teamId
     ? await getDb().agentTeamRuns.where("teamId").equals(teamId).toArray()
@@ -205,47 +221,77 @@ export async function advanceAgentTeamRemoteEvent(
   childRunId: string,
   expectedPreviousEventId: string | undefined,
   eventId: string,
-  now: number
+  now: number,
+  envelope?: { runId: string; event: Record<string, unknown> }
 ): Promise<boolean> {
   const db = getDb()
-  return db.transaction("rw", db.agentTeamChildRuns, async () => {
-    const child = await db.agentTeamChildRuns.get(childRunId)
-    if (!child || child.lastRemoteEventId !== expectedPreviousEventId) return false
-    return (
-      (await db.agentTeamChildRuns.update(childRunId, {
-        lastRemoteEventId: eventId,
-        updatedAt: now,
-      })) > 0
-    )
-  })
+  const object = envelope
+    ? await makeAgentTeamContent(JSON.stringify(envelope.event), "application/json", now)
+    : undefined
+  return db.transaction(
+    "rw",
+    [db.agentTeamChildRuns, db.agentTeamTrajectory, db.agentTeamContentObjects],
+    async () => {
+      const child = await db.agentTeamChildRuns.get(childRunId)
+      if (!child || child.lastRemoteEventId !== expectedPreviousEventId) return false
+      if (envelope && object) {
+        if (child.runId !== envelope.runId) throw new Error("Remote event belongs to another run")
+        await db.agentTeamContentObjects.put(object)
+        await appendAgentTeamTrajectory({
+          runId: envelope.runId,
+          childRunId,
+          kind: "remote_event",
+          correlationId: eventId,
+          contentHash: object.hash,
+          createdAt: now,
+        })
+      }
+      return (
+        (await db.agentTeamChildRuns.update(childRunId, {
+          lastRemoteEventId: eventId,
+          updatedAt: now,
+        })) > 0
+      )
+    }
+  )
 }
 
 export type AppendTrajectoryInput = Omit<AgentTeamTrajectoryEvent, "id" | "sequence">
 
 export async function appendAgentTeamTrajectory(
-  input: AppendTrajectoryInput
+  input: AppendTrajectoryInput,
+  content?: { data: string | Uint8Array; mimeType: string }
 ): Promise<AgentTeamTrajectoryEvent> {
   const db = getDb()
-  return db.transaction("rw", db.agentTeamTrajectory, db.agentTeamChildRuns, async () => {
-    const last = await db.agentTeamTrajectory
-      .where("[runId+sequence]")
-      .between([input.runId, -Infinity], [input.runId, Infinity])
-      .last()
-    const sequence = (last?.sequence ?? 0) + 1
-    const event: AgentTeamTrajectoryEvent = {
-      ...input,
-      id: `${input.runId}:${sequence}`,
-      sequence,
+  const object = content
+    ? await makeAgentTeamContent(content.data, content.mimeType, input.createdAt)
+    : undefined
+  return db.transaction(
+    "rw",
+    [db.agentTeamTrajectory, db.agentTeamChildRuns, db.agentTeamContentObjects],
+    async () => {
+      if (object) await db.agentTeamContentObjects.put(object)
+      const last = await db.agentTeamTrajectory
+        .where("[runId+sequence]")
+        .between([input.runId, -Infinity], [input.runId, Infinity])
+        .last()
+      const sequence = (last?.sequence ?? 0) + 1
+      const event: AgentTeamTrajectoryEvent = {
+        ...input,
+        ...(object ? { contentHash: object.hash } : {}),
+        id: `${input.runId}:${sequence}`,
+        sequence,
+      }
+      await db.agentTeamTrajectory.add(event)
+      if (input.childRunId) {
+        await db.agentTeamChildRuns.update(input.childRunId, {
+          lastTrajectorySequence: sequence,
+          updatedAt: input.createdAt,
+        })
+      }
+      return event
     }
-    await db.agentTeamTrajectory.add(event)
-    if (input.childRunId) {
-      await db.agentTeamChildRuns.update(input.childRunId, {
-        lastTrajectorySequence: sequence,
-        updatedAt: input.createdAt,
-      })
-    }
-    return event
-  })
+  )
 }
 
 export async function listAgentTeamTrajectory(
@@ -372,17 +418,55 @@ export async function putAgentTeamEvidence(evidence: AgentTeamEvidence): Promise
   await getDb().agentTeamEvidence.put(evidence)
 }
 
-export async function listAgentTeamEvidence(runId: string): Promise<AgentTeamEvidence[]> {
-  return getDb()
-    .agentTeamEvidence.where("[runId+createdAt]")
-    .between([runId, -Infinity], [runId, Infinity])
-    .toArray()
+/** Commit bytes and their durable reference together; GC observes both or neither. */
+export async function putAgentTeamEvidenceContent(
+  evidence: AgentTeamEvidence,
+  content?: string | Uint8Array,
+  mimeType = "text/plain"
+): Promise<AgentTeamEvidence> {
+  const db = getDb()
+  const object =
+    content === undefined
+      ? undefined
+      : await makeAgentTeamContent(content, mimeType, evidence.createdAt)
+  const row = { ...evidence, ...(object ? { contentHash: object.hash } : {}) }
+  await db.transaction("rw", [db.agentTeamEvidence, db.agentTeamContentObjects], async () => {
+    if (object) await db.agentTeamContentObjects.put(object)
+    await db.agentTeamEvidence.put(row)
+  })
+  return row
+}
+
+export async function listAgentTeamEvidence(
+  runId: string,
+  scope: { childRunId?: string; taskId?: string; attempt?: number } = {}
+): Promise<AgentTeamEvidence[]> {
+  const table = getDb().agentTeamEvidence
+  // Reuse existing indexes so child completion does not scan an entire team's
+  // evidence history. Always keep runId in the predicate for scoped queries.
+  const rows =
+    scope.childRunId !== undefined
+      ? table.where("childRunId").equals(scope.childRunId)
+      : scope.taskId !== undefined
+        ? table.where("taskId").equals(scope.taskId)
+        : table.where("[runId+createdAt]").between([runId, -Infinity], [runId, Infinity])
+  return rows
+    .filter(
+      (item) =>
+        item.runId === runId &&
+        (scope.taskId === undefined || item.taskId === scope.taskId) &&
+        (scope.attempt === undefined || item.attempt === scope.attempt)
+    )
+    .sortBy("createdAt")
 }
 
 export async function getAgentTeamContent(
   hash: string
 ): Promise<AgentTeamContentObject | undefined> {
-  return getDb().agentTeamContentObjects.get(hash)
+  const row = await getDb().agentTeamContentObjects.get(hash)
+  if (!row || row.byteLength !== row.data.byteLength || (await sha256(row.data)) !== hash)
+    return undefined
+  return row
 }
 
 export async function putAgentTeamDeliveryGraph(graph: AgentTeamDeliveryGraph): Promise<void> {
@@ -468,7 +552,18 @@ export async function putAgentTeamContent(
   mimeType: string,
   createdAt = Date.now()
 ): Promise<AgentTeamContentObject> {
-  const data = typeof content === "string" ? new TextEncoder().encode(content) : content
+  const row = await makeAgentTeamContent(content, mimeType, createdAt)
+  await getDb().agentTeamContentObjects.put(row)
+  return row
+}
+
+async function makeAgentTeamContent(
+  content: string | Uint8Array,
+  mimeType: string,
+  createdAt: number
+): Promise<AgentTeamContentObject> {
+  const data =
+    typeof content === "string" ? new TextEncoder().encode(content) : new Uint8Array(content)
   const hash = await sha256(data)
   const row: AgentTeamContentObject = {
     hash,
@@ -477,7 +572,6 @@ export async function putAgentTeamContent(
     data,
     createdAt,
   }
-  await getDb().agentTeamContentObjects.put(row)
   return row
 }
 
@@ -520,8 +614,19 @@ async function purgeAgentTeamRunRows(
       db.agentTeamDeliveryGraphs,
       db.agentTeamDeliveryNodes,
       db.agentTeamRetrospectives,
+      db.agentTeamContentObjects,
     ],
     async () => {
+      const [removedTrajectory, removedEvidence, removedRetrospectives] = await Promise.all([
+        db.agentTeamTrajectory.where("runId").equals(runId).toArray(),
+        db.agentTeamEvidence.where("runId").equals(runId).toArray(),
+        db.agentTeamRetrospectives.where("runId").equals(runId).toArray(),
+      ])
+      const candidateHashes = new Set(
+        [...removedTrajectory, ...removedEvidence, ...removedRetrospectives].flatMap((row) =>
+          row.contentHash ? [row.contentHash] : []
+        )
+      )
       const children = await db.agentTeamChildRuns.where("runId").equals(runId).toArray()
       if (
         children.some(
@@ -551,21 +656,20 @@ async function purgeAgentTeamRunRows(
           .anyOf(graphIds as string[])
           .delete()
       }
+      const [trajectory, evidence, retrospectives] = await Promise.all([
+        db.agentTeamTrajectory.toArray(),
+        db.agentTeamEvidence.toArray(),
+        db.agentTeamRetrospectives.toArray(),
+      ])
+      const liveHashes = new Set<string>([
+        ...trajectory.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+        ...evidence.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+        ...retrospectives.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
+      ])
+      const orphaned = [...candidateHashes].filter((hash) => !liveHashes.has(hash))
+      if (orphaned.length > 0) await db.agentTeamContentObjects.bulkDelete(orphaned)
     }
   )
-  const [trajectory, evidence, retrospectives] = await Promise.all([
-    db.agentTeamTrajectory.toArray(),
-    db.agentTeamEvidence.toArray(),
-    db.agentTeamRetrospectives.toArray(),
-  ])
-  const liveHashes = new Set<string>([
-    ...trajectory.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
-    ...evidence.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
-    ...retrospectives.flatMap((row) => (row.contentHash ? [row.contentHash] : [])),
-  ])
-  const hashes = (await db.agentTeamContentObjects.toCollection().primaryKeys()) as string[]
-  const orphaned = hashes.filter((hash) => !liveHashes.has(hash))
-  if (orphaned.length > 0) await db.agentTeamContentObjects.bulkDelete(orphaned)
 }
 
 export async function purgeAgentTeam(teamId: string): Promise<void> {

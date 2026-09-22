@@ -195,6 +195,15 @@ describe("synthesizeTeamWorkflow — blocking lead review (ADR-0071)", () => {
 })
 
 describe("synthesizeTeamWorkflow", () => {
+  it.each([["a", "a"], [""]])("rejects invalid task identities %j", (...ids) => {
+    expect(() =>
+      synthesizeTeamWorkflow({
+        team,
+        tasks: ids.map((id) => task(id)),
+        initialConcurrency: 1,
+      })
+    ).toThrow(/task ids must be nonempty and unique/)
+  })
   it("converts a flat task list to a VW with no edges", () => {
     const { workflow, nodeIdToTaskId } = synthesizeTeamWorkflow({
       team,

@@ -29,6 +29,160 @@ function makeCtx() {
 const ok = (): RunWorkflowResult => ({ runId: "run1", status: "succeeded" })
 
 describe("runTeamWaves", () => {
+  it("rejects a disconnected cycle before running an otherwise ready task", async () => {
+    const runWave = jest.fn(async () => ok())
+    const result = await runTeamWaves({
+      teamCtx: makeCtx(),
+      tasks: [task("ready"), task("a", ["b"]), task("b", ["a"])],
+      initialConcurrency: 1,
+      signal: new AbortController().signal,
+      runWave,
+    })
+    expect(result.status).toBe("failed")
+    expect(result.error?.message).toMatch(/cycle/)
+    expect(runWave).not.toHaveBeenCalled()
+  })
+
+  it("does not reinterpret a cancelled prerequisite as successful", async () => {
+    const runWave = jest.fn(async () => ok())
+    const result = await runTeamWaves({
+      teamCtx: makeCtx(),
+      tasks: [task("a"), task("b", ["a"]), task("c", ["b"])],
+      initialConcurrency: 1,
+      signal: new AbortController().signal,
+      runWave,
+      checkpoint: async ({ remaining }) => ({
+        remaining: remaining.filter((item) => item.id !== "b"),
+        finish: false,
+        decision: {
+          action: "cancel",
+          reasoning: "",
+          newTasks: [],
+          cancelTaskIds: ["b"],
+          reorderTaskIds: [],
+          newMembers: [],
+        },
+      }),
+    })
+    expect(result.status).toBe("failed")
+    expect(runWave).toHaveBeenCalledTimes(1)
+  })
+
+  it("honors cancellation even under errorPolicy continue", async () => {
+    const runWave = jest.fn(async (): Promise<RunWorkflowResult> => ({
+      runId: "run1",
+      status: "cancelled",
+    }))
+    const result = await runTeamWaves({
+      teamCtx: makeCtx(),
+      tasks: [task("a"), task("b", ["a"])],
+      initialConcurrency: 1,
+      signal: new AbortController().signal,
+      runWave,
+      errorPolicy: "continue",
+    })
+    expect(result.status).toBe("cancelled")
+    expect(runWave).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects unknown dependencies before dispatching any wave", async () => {
+    const runWave = jest.fn(async () => ok())
+    const result = await runTeamWaves({
+      teamCtx: makeCtx(),
+      tasks: [task("a", ["missing"])],
+      initialConcurrency: 1,
+      signal: new AbortController().signal,
+      runWave,
+    })
+    expect(result.status).toBe("failed")
+    expect(result.error?.message).toMatch(/unknown task/)
+    expect(runWave).not.toHaveBeenCalled()
+  })
+
+  it("accepts only explicitly satisfied dependencies from prior execution", async () => {
+    const runWave = jest.fn(async () => ok())
+    const result = await runTeamWaves({
+      teamCtx: makeCtx(),
+      tasks: [task("a", ["prior"])],
+      satisfiedDependencyIds: new Set(["prior"]),
+      initialConcurrency: 1,
+      signal: new AbortController().signal,
+      runWave,
+    })
+    expect(result.status).toBe("succeeded")
+    expect(runWave).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses one deadline across waves and checkpoints", async () => {
+    jest.useFakeTimers()
+    try {
+      const timeouts: number[] = []
+      const result = runTeamWaves({
+        teamCtx: makeCtx(),
+        tasks: [task("a"), task("b", ["a"])],
+        initialConcurrency: 1,
+        wallClockTimeoutMs: 100,
+        signal: new AbortController().signal,
+        runWave: async (workflow, signal) => {
+          timeouts.push(workflow.settings.timeoutMs)
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 60)
+            signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer)
+                resolve()
+              },
+              { once: true }
+            )
+          })
+          return signal.aborted ? { runId: "run1", status: "cancelled" } : ok()
+        },
+        checkpoint: async ({ remaining }) => ({
+          remaining,
+          finish: false,
+          decision: {
+            action: "continue",
+            reasoning: "",
+            newTasks: [],
+            cancelTaskIds: [],
+            reorderTaskIds: [],
+            newMembers: [],
+          },
+        }),
+      })
+      await jest.advanceTimersByTimeAsync(100)
+      expect((await result).error?.code).toBe("timeout")
+      expect(timeouts).toEqual([100, 40])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("expires the same deadline during checkpoint work before another wave starts", async () => {
+    jest.useFakeTimers()
+    try {
+      const runWave = jest.fn(async () => ok())
+      const result = runTeamWaves({
+        teamCtx: makeCtx(),
+        tasks: [task("a"), task("b", ["a"])],
+        initialConcurrency: 1,
+        wallClockTimeoutMs: 100,
+        signal: new AbortController().signal,
+        runWave,
+        checkpoint: ({ signal }) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+          }),
+      })
+      await jest.advanceTimersByTimeAsync(100)
+      expect(await result).toMatchObject({ status: "failed", error: { code: "timeout" } })
+      expect(runWave).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("runs a single wave for independent tasks", async () => {
     const seen: VisualWorkflow[] = []
     const res = await runTeamWaves({
@@ -184,7 +338,7 @@ describe("runTeamWaves", () => {
       runWave: async () => ok(),
     })
     expect(res.status).toBe("failed")
-    expect(res.error?.message).toMatch(/no ready tasks/)
+    expect(res.error?.message).toMatch(/cycle/)
   })
 
   it("fails when the synthesizer throws for a wave", async () => {
@@ -269,7 +423,7 @@ describe("runTeamWaves", () => {
     expect(calls).toBe(2)
   })
 
-  it("continues past a failed wave under errorPolicy=continue", async () => {
+  it("does not satisfy downstream dependencies with a failed wave under errorPolicy=continue", async () => {
     let calls = 0
     const res = await runTeamWaves({
       teamCtx: makeCtx(),
@@ -294,7 +448,8 @@ describe("runTeamWaves", () => {
         },
       }),
     })
-    expect(res.status).toBe("succeeded")
-    expect(res.waves).toBe(2)
+    expect(res.status).toBe("failed")
+    expect(res.waves).toBe(1)
+    expect(calls).toBe(1)
   })
 })

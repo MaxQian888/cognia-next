@@ -84,6 +84,45 @@ export interface AgentTeamResourceUsage {
   failures: number
 }
 
+/** Explicit allowlist: never persist provider credentials with launch authority. */
+export const AGENT_TEAM_SECURITY_CONFIG_KEYS = [
+  "repositories",
+  "environmentRef",
+  "workingDir",
+  "writeMode",
+  "workspaceIsolation",
+  "allowedTools",
+  "disallowedTools",
+  "defaultPermissionMode",
+  "sandboxEnabled",
+  "sandboxPolicy",
+  "requirePlanApproval",
+  "riskGating",
+  "governancePolicy",
+  "taskReview",
+  "evidencePolicy",
+  "githubDeliveryPolicy",
+  "resourcePolicy",
+  "userConstraints",
+] as const satisfies readonly (keyof import("./agent-team").AgentTeamConfig)[]
+
+/** Serializable launch authority. Missing snapshots must never resume with wider defaults. */
+export interface AgentTeamExecutionConstraints {
+  version: 1
+  origin: string
+  triggeredFrom: import("@/types/workflow/visual").WorkflowTriggeredFrom
+  permissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
+  sessionId?: string
+  sessionWorkingDir?: string
+  requirePlanApprovalFloor: boolean
+  entryPersona?: { id: string; name: string; systemPrompt: string }
+  ultracode?: boolean
+  teamConfig?: Pick<
+    import("./agent-team").AgentTeamConfig,
+    (typeof AGENT_TEAM_SECURITY_CONFIG_KEYS)[number]
+  >
+}
+
 export interface AgentTeamRunRecord {
   id: string
   teamId: string
@@ -94,6 +133,7 @@ export interface AgentTeamRunRecord {
   queueEnteredAt?: number
   decisionVersion: number
   environmentVersionId?: string
+  executionConstraints?: AgentTeamExecutionConstraints
   activeWriterRepositoryId?: string
   recoveryReason?: string
   resourceUsage?: AgentTeamResourceUsage
@@ -139,6 +179,7 @@ export interface AgentTeamChildRun {
 }
 
 export type AgentTeamTrajectoryKind =
+  | "remote_event"
   | "child_created"
   | "model_turn_started"
   | "model_turn_completed"
@@ -248,6 +289,9 @@ export interface AgentTeamEvidence {
   runId: string
   childRunId?: string
   taskId: string
+  attempt?: number
+  revision?: string
+  status?: "passed" | "failed" | "unknown"
   kind: AgentTeamEvidenceKind
   title: string
   contentHash?: string
@@ -282,6 +326,8 @@ export interface AgentTeamDeliveryNode {
   pullRequestNumber?: number
   pullRequestUrl?: string
   headSha?: string
+  approvedHeadSha?: string
+  approvedBaseBranch?: string
   error?: string
   createdAt: number
   updatedAt: number

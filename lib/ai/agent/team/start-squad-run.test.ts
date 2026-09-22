@@ -217,6 +217,12 @@ describe("startSquadRun: readiness gate", () => {
 })
 
 describe("startSquadRun: one live run per Squad", () => {
+  it("never redispatches a settled idempotency key", async () => {
+    const h = harness({ recordsCreated: false })
+    expect(await start(h, { runId: "settled" })).toMatchObject({ duplicate: true })
+    expect(h.runCalls).toHaveLength(0)
+    expect(h.updates).toHaveLength(0)
+  })
   it("returns the open run instead of forking a second one", async () => {
     const h = harness({ liveRunId: "run_team_open" })
     const res = await start(h)
@@ -303,6 +309,38 @@ describe("startSquadRun: fail-closed record creation", () => {
     expect(h.seeds[0]?.parentRunId).toBe("execution:team:old")
   })
 
+  it("returns the canonical replacement identity when a parent restart is replayed", async () => {
+    const h = harness({ liveRunId: "canonical-replacement" })
+    h.deps.createRunRecords = async () => ({
+      runId: "canonical-replacement",
+      executionRunId: "execution:team:canonical-replacement",
+      created: false,
+    })
+    expect(await start(h, { parentRunId: "execution:team:parent" })).toMatchObject({
+      runId: "canonical-replacement",
+      executionRunId: "execution:team:canonical-replacement",
+      duplicate: true,
+    })
+    expect(h.runCalls).toHaveLength(0)
+  })
+
+  it("keeps replacement record metadata aligned with the frozen environment", async () => {
+    const h = harness()
+    await start(h, {
+      executionConstraints: {
+        version: 1,
+        origin: "interactive",
+        triggeredFrom: { source: "ui" },
+        requirePlanApprovalFloor: false,
+        teamConfig: {
+          environmentRef: { environmentId: "original-env", versionId: "original:v1" },
+          resourcePolicy: { priority: 9, maxConcurrentChildren: 1 },
+        },
+      },
+    })
+    expect(h.seeds[0]).toMatchObject({ environmentVersionId: "original:v1", priority: 9 })
+  })
+
   it("records the run without a session, so an uncarded run is still listable", async () => {
     const h = harness()
     const res = await start(h)
@@ -380,19 +418,44 @@ describe("startSquadRun: launching", () => {
       planApprovalDelegate: delegate,
       requirePlanApprovalFloor: true,
       ultracode: true,
-      permissionCeiling: { maxMode: "default" },
+      permissionCeiling: { permissionMode: "default" },
     })
     expect(h.runCalls[0]).toMatchObject({
       planApprovalDelegate: delegate,
       requirePlanApprovalFloor: true,
       ultracode: true,
-      permissionCeiling: { maxMode: "default" },
+      permissionCeiling: { permissionMode: "default" },
     })
     const h2 = harness()
     await start(h2)
     expect(h2.runCalls[0]).not.toHaveProperty("planApprovalDelegate")
-    expect(h2.runCalls[0]).not.toHaveProperty("requirePlanApprovalFloor")
+    expect(h2.runCalls[0]?.requirePlanApprovalFloor).toBe(false)
     expect(h2.runCalls[0]).not.toHaveProperty("ultracode")
+  })
+
+  it("freezes effective team restrictions and environment without copying credentials", async () => {
+    const h = harness()
+    const store = await h.deps.loadStore!()
+    const team = store.getTeam("squad-1")!
+    team.config = {
+      ...team.config,
+      defaultApiKey: "private-key",
+      defaultPermissionMode: "plan",
+      disallowedTools: ["Write"],
+      requirePlanApproval: true,
+      workingDir: "/original",
+    }
+    h.deps.loadStore = async () => ({ ...store, getTeam: () => team })
+    await start(h, { permissionCeiling: { permissionMode: "acceptEdits" } })
+    const saved = h.seeds[0].executionConstraints!
+    expect(saved).toMatchObject({
+      permissionCeiling: { permissionMode: "plan", disallowedTools: ["Write"] },
+      requirePlanApprovalFloor: true,
+      teamConfig: { workingDir: "/original", environmentRef: { versionId: "env-1:v2" } },
+    })
+    expect(JSON.stringify(saved)).not.toContain("private-key")
+    team.config.disallowedTools!.push("Bash")
+    expect(saved.permissionCeiling?.disallowedTools).toEqual(["Write"])
   })
 
   it("hands the conversation's working directory to the lifecycle", async () => {

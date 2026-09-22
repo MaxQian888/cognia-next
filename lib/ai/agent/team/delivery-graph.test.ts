@@ -11,6 +11,7 @@ function adapter(): jest.Mocked<ScmDeliveryAdapter> {
       headSha: `sha-${input.order}`,
     })),
     observe: jest.fn(async (_node) => ({
+      headSha: _node.headSha,
       ci: "passing" as const,
       approved: true,
       mergeable: true,
@@ -24,6 +25,151 @@ function adapter(): jest.Mocked<ScmDeliveryAdapter> {
 
 describe("AgentTeam stacked delivery graph", () => {
   let disableDbRuntime: (() => void) | undefined
+
+  async function draft(scm: ScmDeliveryAdapter) {
+    const service = createDeliveryGraphService({ adapter: scm, now: () => 50 })
+    await service.create({
+      id: "graph",
+      runId: "run",
+      repositories: [
+        {
+          repositoryId: "primary",
+          baseBranch: "main",
+          layers: [
+            { id: "a", branch: "a", title: "A" },
+            { id: "b", branch: "b", title: "B" },
+          ],
+        },
+      ],
+    })
+    return service
+  }
+
+  it("invalidates approval when the observed head changes", async () => {
+    const scm = adapter()
+    const service = await draft(scm)
+    await service.publish("graph")
+    await service.approve("graph")
+    scm.observe.mockResolvedValueOnce({
+      headSha: "new-sha",
+      ci: "passing",
+      approved: true,
+      mergeable: true,
+      conflict: false,
+    })
+    await expect(service.merge("graph")).rejects.toThrow(/changed.*approval/i)
+    expect(scm.merge).not.toHaveBeenCalled()
+    expect((await getDb().agentTeamDeliveryGraphs.get("graph"))?.approvedAt).toBeUndefined()
+  })
+
+  it("does not overwrite another graph's node or leave a graph after creation fails", async () => {
+    const service = await draft(adapter())
+    await expect(
+      service.create({
+        id: "other-graph",
+        runId: "other-run",
+        repositories: [
+          {
+            repositoryId: "other",
+            baseBranch: "main",
+            layers: [
+              { id: "a", branch: "other-a", title: "Other A" },
+              { id: "other-b", branch: "other-b", title: "Other B" },
+            ],
+          },
+        ],
+      })
+    ).rejects.toThrow()
+    expect(await getDb().agentTeamDeliveryGraphs.get("other-graph")).toBeUndefined()
+    expect(await getDb().agentTeamDeliveryNodes.get("a")).toMatchObject({
+      graphId: "graph",
+      branch: "a",
+    })
+  })
+
+  it("does not restore stale nodes when delivery changes during approval observation", async () => {
+    const scm = adapter()
+    const service = await draft(scm)
+    await service.publish("graph")
+    const observe = scm.observe.getMockImplementation()!
+    scm.observe.mockImplementationOnce(async (node) => {
+      await getDb().agentTeamDeliveryNodes.update(node.id, { status: "merged" })
+      return observe(node)
+    })
+    await expect(service.approve("graph")).rejects.toThrow(/changed.*approval/i)
+    expect(await getDb().agentTeamDeliveryNodes.get("a")).toMatchObject({ status: "merged" })
+    expect((await getDb().agentTeamDeliveryGraphs.get("graph"))?.approvedAt).toBeUndefined()
+  })
+
+  it("resumes partial publication without recreating the persisted PR", async () => {
+    const scm = adapter()
+    const create = scm.createPullRequest.getMockImplementation()!
+    scm.createPullRequest
+      .mockImplementationOnce(create)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(create)
+    const service = await draft(scm)
+    await expect(service.publish("graph")).rejects.toThrow("offline")
+    await service.publish("graph")
+    expect(scm.createPullRequest.mock.calls.map(([input]) => input.branch)).toEqual(["a", "b", "b"])
+  })
+
+  it("resumes partial merge and never merges a completed layer twice", async () => {
+    const scm = adapter()
+    scm.merge
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined)
+    const service = await draft(scm)
+    await service.publish("graph")
+    await service.approve("graph")
+    await expect(service.merge("graph")).rejects.toThrow("offline")
+    await expect(service.merge("graph")).resolves.toMatchObject({ status: "completed" })
+    expect(scm.merge.mock.calls.map(([node]) => node.id)).toEqual(["a", "b", "b"])
+  })
+
+  it("requires fresh approval after updating a later layer changes its revision", async () => {
+    const scm = adapter()
+    const service = await draft(scm)
+    await service.publish("graph")
+    await service.approve("graph")
+    let changed = false
+    scm.updateBranch.mockImplementation(async () => {
+      changed = true
+    })
+    scm.observe.mockImplementation(async (node) => ({
+      headSha: node.id === "b" && changed ? "sha-new" : node.headSha,
+      ci: "passing",
+      approved: true,
+      mergeable: true,
+      conflict: false,
+    }))
+    await expect(service.merge("graph")).rejects.toThrow(/changed.*approval/i)
+    expect(scm.merge.mock.calls.map(([node]) => node.id)).toEqual(["a"])
+    await service.approve("graph")
+    await expect(service.merge("graph")).resolves.toMatchObject({ status: "completed" })
+    expect(scm.merge.mock.calls.map(([node]) => [node.id, node.approvedHeadSha])).toEqual([
+      ["a", "sha-0"],
+      ["b", "sha-new"],
+    ])
+  })
+
+  it("reconciles a remotely merged layer after an uncertain response", async () => {
+    const scm = adapter()
+    const service = await draft(scm)
+    await service.publish("graph")
+    await service.approve("graph")
+    scm.observe.mockResolvedValueOnce({
+      headSha: "sha-0",
+      merged: true,
+      ci: "unknown",
+      approved: false,
+      mergeable: false,
+      conflict: false,
+    })
+    await expect(service.merge("graph")).resolves.toMatchObject({ status: "completed" })
+    expect(scm.merge.mock.calls.map(([node]) => node.id)).toEqual(["b"])
+  })
 
   beforeEach(async () => {
     disableDbRuntime = __enableDbRuntimeForTesting()
@@ -94,12 +240,13 @@ describe("AgentTeam stacked delivery graph", () => {
 
   it("stops before merging when CI fails", async () => {
     const scm = adapter()
-    scm.observe.mockResolvedValueOnce({
+    scm.observe.mockImplementation(async (node) => ({
+      headSha: node.headSha,
       ci: "failing",
       approved: true,
       mergeable: false,
       conflict: false,
-    })
+    }))
     const service = createDeliveryGraphService({ adapter: scm, now: () => 30 })
     const graph = await service.create({
       id: "graph-3",
@@ -124,19 +271,15 @@ describe("AgentTeam stacked delivery graph", () => {
 
   it("runs a bounded remediation turn and rechecks the layer before merging", async () => {
     const scm = adapter()
-    scm.observe
-      .mockResolvedValueOnce({
-        ci: "failing",
-        approved: true,
-        mergeable: false,
-        conflict: true,
-      })
-      .mockResolvedValue({
-        ci: "passing",
-        approved: true,
-        mergeable: true,
-        conflict: false,
-      })
+    const observe = scm.observe.getMockImplementation()!
+    scm.observe.mockImplementation(observe)
+    const failure = {
+      headSha: "sha-0",
+      ci: "failing",
+      approved: true,
+      mergeable: false,
+      conflict: true,
+    } as const
     const remediate = jest.fn(async () => undefined)
     const service = createDeliveryGraphService({
       adapter: scm,
@@ -161,13 +304,15 @@ describe("AgentTeam stacked delivery graph", () => {
     await service.publish(graph.id)
     await service.approve(graph.id)
 
+    scm.observe.mockResolvedValueOnce(failure)
+
     await expect(service.merge(graph.id)).resolves.toMatchObject({ status: "completed" })
     expect(remediate).toHaveBeenCalledWith(
       expect.objectContaining({ id: "layer-remediate-1" }),
       expect.objectContaining({ ci: "failing", conflict: true }),
       1
     )
-    expect(scm.observe).toHaveBeenCalledTimes(3)
+    expect(scm.observe).toHaveBeenCalledTimes(6)
   })
 
   it("orders a dependency repository after the dependency stack", async () => {

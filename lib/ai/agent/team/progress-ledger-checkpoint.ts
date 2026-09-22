@@ -30,6 +30,7 @@ import { assessProgressDeterministic, judgeProgress, type LedgerSnapshot } from 
 export interface LedgerCheckpointInput {
   justRanTaskIds: string[]
   remaining: AgentTeamTask[]
+  signal?: AbortSignal
 }
 
 export interface CreateLedgerCheckpointDeps {
@@ -60,7 +61,7 @@ export function createLedgerCheckpoint(
         runId: ctx.runId,
         justRanTaskIds: input.justRanTaskIds,
         remaining: input.remaining,
-        ...(deps.signal ? { signal: deps.signal } : {}),
+        ...((input.signal ?? deps.signal) ? { signal: input.signal ?? deps.signal } : {}),
       }))
   const judge = deps.judge ?? judgeProgress
   const openConsensus = deps.consensus ?? createConsensus
@@ -71,6 +72,8 @@ export function createLedgerCheckpoint(
   let stallCount = 0
 
   return async (input) => {
+    const signal = input.signal ?? deps.signal
+    signal?.throwIfAborted()
     for (const id of input.justRanTaskIds) doneIds.add(id)
 
     // ── 1. Deterministic snapshot + stall assessment ──
@@ -106,8 +109,9 @@ export function createLedgerCheckpoint(
       doneTaskIds: [...doneIds],
       remaining: input.remaining,
       stallCount,
-      ...(deps.signal ? { signal: deps.signal } : {}),
+      ...(signal ? { signal } : {}),
     })
+    signal?.throwIfAborted()
 
     ctx.notifier.notify({
       level: "warn",

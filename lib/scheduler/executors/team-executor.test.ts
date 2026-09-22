@@ -9,7 +9,7 @@ jest.mock("@/lib/platform/detect", () => ({
 
 const getMock = jest.fn()
 const startMock = jest.fn()
-const abortTeamMock = jest.fn()
+const getRunMock = jest.fn()
 
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   agentTeamManager: {
@@ -17,8 +17,8 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
     start: (...a: unknown[]) => startMock(...a),
   },
 }))
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
-  abortTeam: (...a: unknown[]) => abortTeamMock(...a),
+jest.mock("@/lib/db/execution-runs", () => ({
+  getExecutionRun: (...a: unknown[]) => getRunMock(...a),
 }))
 
 import { executeAgentTeamTask } from "./team-executor"
@@ -37,8 +37,10 @@ const execution = { id: "exec_1" } as unknown as TaskExecution
 
 beforeEach(() => {
   getMock.mockReset()
-  startMock.mockReset()
-  abortTeamMock.mockReset()
+  startMock
+    .mockReset()
+    .mockResolvedValue({ started: true, runId: "run-1", executionRunId: "execution:team:run-1" })
+  getRunMock.mockReset().mockResolvedValue({ status: "completed" })
 })
 
 describe("executeAgentTeamTask", () => {
@@ -65,7 +67,7 @@ describe("executeAgentTeamTask", () => {
       id: "t1",
       status: "completed",
     })
-    startMock.mockResolvedValue(undefined)
+
     const r = await executeAgentTeamTask(
       makeTask({ teamId: "t1" }),
       execution,
@@ -80,25 +82,50 @@ describe("executeAgentTeamTask", () => {
       id: "t1",
       status: "failed",
     })
-    startMock.mockResolvedValue(undefined)
+    getRunMock.mockResolvedValue({ status: "failed" })
     const r = await executeAgentTeamTask(
       makeTask({ teamId: "t1", ultracode: true }),
       execution,
       new AbortController().signal
     )
-    expect(startMock).toHaveBeenCalledWith("t1", { origin: "scheduler", ultracode: true })
+    expect(startMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        origin: "scheduler",
+        ultracode: true,
+        runId: "run_team_scheduled_exec_1",
+      })
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/failed/)
   })
 
-  it("aborts the team when the signal fires", async () => {
+  it("forwards cancellation and a stable run identity to the shared control facade", async () => {
     getMock.mockReturnValue({ id: "t1", status: "idle" })
     const ac = new AbortController()
-    startMock.mockImplementation(async () => {
-      ac.abort()
-    })
     await executeAgentTeamTask(makeTask({ teamId: "t1" }), execution, ac.signal)
-    expect(abortTeamMock).toHaveBeenCalledWith("t1", expect.any(Error))
+    expect(startMock).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        runId: "run_team_scheduled_exec_1",
+        signal: ac.signal,
+      })
+    )
+  })
+
+  it("uses the canonical run outcome even when the team mirror is stale", async () => {
+    getMock.mockReturnValue({ id: "t1", status: "completed" })
+    getRunMock.mockResolvedValue({ status: "cancelled" })
+    const result = await executeAgentTeamTask(
+      makeTask({ teamId: "t1" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(result.success).toBe(false)
+    expect(result.output).toMatchObject({
+      status: "cancelled",
+      executionRunId: "execution:team:run-1",
+    })
   })
 
   it("rejects when already aborted", async () => {

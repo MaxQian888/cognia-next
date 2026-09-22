@@ -27,11 +27,16 @@ import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { recordTeamUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { priceTokensForModel } from "@/lib/usage/pricing"
 import type { SpanUsage } from "@/types/agent-trace/span"
-import type { AgentTeammate, ResolvedCapabilities, AgentTeamConfig } from "@/types/agent/agent-team"
+import type { AgentTeammate, ResolvedCapabilities } from "@/types/agent/agent-team"
 import {
   deriveExternalSessionPermission,
-  type ExternalSessionPermissionSpec,
+  MODE_RANK,
+  teamPermissionCeiling,
 } from "@/lib/ai/agent/external/permission-cascade"
+import {
+  adaptPermissionMode,
+  PROTOCOL_PERMISSION_MODE_SUPPORT,
+} from "@/lib/ai/agent/external/permission-modes"
 import { resolveTeammateCapabilities } from "./capability-resolver"
 import { teammateToCharacter } from "./teammate-character"
 import { applyTeammateTwinContext } from "./twin-context"
@@ -43,6 +48,8 @@ import type { AgentChildEnvironmentSession } from "../execution/local-tauri-envi
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
 import type { WorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
+import type { ResourceChange } from "@/lib/task-workspace/types"
+import { workspaceEvidenceRevision } from "./evidence-bundle"
 import { useSettingsStore } from "@/stores/settings"
 import type {
   AgentCapabilityEvidence,
@@ -181,28 +188,6 @@ function toSpanUsage(usage: TokenUsage): SpanUsage {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   }
-}
-
-/**
- * Build the team's permission ceiling — the parent spec every teammate dispatch
- * is clamped against. Returns `undefined` when the team expresses no ceiling
- * (no allow-list, deny-list, or mode), so callers skip the clamp entirely.
- */
-function teamPermissionCeiling(
-  config: AgentTeamConfig | undefined
-): ExternalSessionPermissionSpec | undefined {
-  if (!config) return undefined
-  const spec: ExternalSessionPermissionSpec = {
-    ...(config.allowedTools && config.allowedTools.length > 0
-      ? { allowedTools: config.allowedTools }
-      : {}),
-    ...(config.disallowedTools && config.disallowedTools.length > 0
-      ? { disallowedTools: config.disallowedTools }
-      : {}),
-    ...(config.defaultPermissionMode ? { permissionMode: config.defaultPermissionMode } : {}),
-    ...(config.sandboxPolicy ? { sandboxPolicy: config.sandboxPolicy } : {}),
-  }
-  return Object.keys(spec).length > 0 ? spec : undefined
 }
 
 function readUsage(result: unknown): TokenUsage | undefined {
@@ -528,10 +513,37 @@ async function runExternalBacked(
   // Cascade: the team is the parent ceiling; the teammate may only further
   // restrict. The team's allow/deny/mode ceiling (when configured) flows in as
   // the parent so a teammate can never widen beyond it.
-  const merged = deriveExternalSessionPermission(
-    teamPermissionCeiling(teamCtx.team.config) ?? {},
-    teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}
+  const inherited = deriveExternalSessionPermission(
+    teamCtx.parentPermissionCeiling ?? {},
+    teamPermissionCeiling(teamCtx.team.config)
   )
+  const merged = deriveExternalSessionPermission(inherited, {
+    ...(teammate.config?.tools ? { allowedTools: teammate.config.tools } : {}),
+    ...(teammate.config?.sandboxPolicy ? { sandboxPolicy: teammate.config.sandboxPolicy } : {}),
+  })
+  // The external execute contract exposes preapproval, not deny or sandbox
+  // enforcement. Never silently erase constraints unsupported by this rail.
+  if (
+    inherited.allowedTools !== undefined ||
+    merged.disallowedTools?.length ||
+    merged.sandboxPolicy ||
+    merged.mcpServers ||
+    teammate.config?.sandboxEnabled ||
+    teamCtx.team.config.sandboxEnabled
+  ) {
+    throw new Error("External teammate cannot enforce the inherited tool, sandbox, or MCP policy")
+  }
+  if (merged.permissionMode) {
+    const protocol = manager.getAgent(agentId)?.config.protocol
+    if (
+      !protocol ||
+      !(protocol in PROTOCOL_PERMISSION_MODE_SUPPORT) ||
+      ["a2a", "http", "websocket", "custom"].includes(protocol) ||
+      MODE_RANK[adaptPermissionMode(merged.permissionMode, protocol).mode] >
+        MODE_RANK[merged.permissionMode]
+    )
+      throw new Error("External teammate cannot enforce the inherited permission mode")
+  }
 
   // Forward the teammate's explicitly-resolved MCP servers into the external
   // agent's ACP session so it can call the same tools a built-in teammate would
@@ -636,12 +648,32 @@ export async function dispatchTeammate(
   teamCtx: TeamRunContext,
   args: DispatchTeammateArgs
 ): Promise<DispatchTeammateResult> {
+  const environmentPolicy = teamCtx.durableEnvironment?.profile.policy
+  const requiresSandbox =
+    !!environmentPolicy &&
+    (environmentPolicy.requireSandbox ||
+      environmentPolicy.requiredRuntimeCapabilities.includes("sandbox") ||
+      environmentPolicy.requiredRuntimeCapabilities.includes("network_policy") ||
+      environmentPolicy.network === "off" ||
+      environmentPolicy.network === "allowlist" ||
+      !!environmentPolicy.allowedDomains?.length)
+  if (requiresSandbox && environmentPolicy) {
+    const ceiling = deriveExternalSessionPermission(teamCtx.parentPermissionCeiling ?? {}, {
+      sandboxPolicy: {
+        network:
+          environmentPolicy.network ??
+          (environmentPolicy.allowedDomains?.length ? "allowlist" : "on"),
+        networkAllowlist: environmentPolicy.allowedDomains ?? [],
+      },
+    })
+    teamCtx = { ...teamCtx, parentPermissionCeiling: ceiling }
+  }
   const claimOptions: ClaimOptions | undefined = args.requireTeammateId
     ? { requireTeammateId: args.requireTeammateId }
     : args.preferTeammateId
       ? { preferTeammateId: args.preferTeammateId }
       : undefined
-  const teammate = teamCtx.pool.claim(args.taskId, claimOptions)
+  let teammate = teamCtx.pool.claim(args.taskId, claimOptions)
   if (!teammate) {
     if (args.requireTeammateId) {
       // Distinguishable on purpose: an exact-worker claim has no substitute, so
@@ -651,6 +683,8 @@ export async function dispatchTeammate(
     // Retryable — workflow runStep backs off; the pool may free up.
     throw new Error("dispatchTeammate: no available teammate")
   }
+  if (requiresSandbox)
+    teammate = { ...teammate, config: { ...teammate.config, sandboxEnabled: true } }
 
   // Resolve + cache the teammate's plugin capability bundle once per run.
   if (!teamCtx.resolvedCapabilities.has(teammate.id)) {
@@ -692,7 +726,10 @@ export async function dispatchTeammate(
     role: teammate.role,
   })
 
+  let released = false
   const release = (kind: "success" | "failure", error?: Error): void => {
+    if (released) return
+    released = true
     hooks.dispatchOnTeammateRelease({
       teamId: teamCtx.teamId,
       runId: teamCtx.runId,
@@ -728,310 +765,11 @@ export async function dispatchTeammate(
     }
   }
 
-  const timeoutMs =
-    args.timeoutMs ??
-    (typeof teamCtx.team.config?.defaultTimeout === "number" &&
-    teamCtx.team.config.defaultTimeout > 0
-      ? teamCtx.team.config.defaultTimeout
-      : DEFAULT_PER_TASK_TIMEOUT_MS)
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  const combinedSignal = args.signal ? AbortSignal.any([args.signal, timeoutSignal]) : timeoutSignal
-
-  const systemPrompt =
-    args.systemPrompt?.trim() ||
-    teammate.config?.systemPrompt?.trim() ||
-    teamCtx.team.config?.defaultSystemPrompt?.trim() ||
-    DEFAULT_TEAMMATE_SYSTEM_PROMPT
-
-  const modelHint = teamCtx.modelPref.get().modelHint
-  const accountingModel = teammate.config?.cogniaModel?.modelId ?? modelHint
-  const accountingProvider = teammate.config?.cogniaModel?.providerId ?? teammate.config?.provider
-  let promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
-
-  // Resolved agentic step budget: a teammate's own `maxSteps` overrides the
-  // team-level `defaultMaxSteps`. Undefined → the channel keeps its own default
-  // (executeAgent's internal cap / the sidecar dispatcher's 256-turn budget).
-  const positive = (v: unknown): number | undefined =>
-    typeof v === "number" && v > 0 ? v : undefined
-  const maxSteps =
-    positive(teammate.config?.maxSteps) ?? positive(teamCtx.team.config?.defaultMaxSteps)
-
-  const runtime = teammate.config?.runtime ?? "claude"
-  let frozenExecutionSpec: ResolvedAgentExecutionSpec | undefined
-  let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
-  let externalAgentId: string | null = null
-  const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
-  if (teammate.config?.cogniaModel && !wantsExternal) {
-    const failure = new Error(
-      "A Cognia gateway model binding requires an external teammate runtime"
-    )
-    teamCtx.pool.recordFailure(teammate.id, failure)
-    if (args.recordToStore)
-      teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, failure.message)
-    release("failure", failure)
-    throw failure
-  }
-  if (wantsExternal) {
-    // External-backed teammate: route to the external CLI agent. On web/mobile,
-    // with an unknown preset, or with the contributing plugin disabled, this
-    // returns null — which is now a HARD FAILURE, see below.
-    const { resolveTeammateExternalAgent } = await import("./resolve-external-backing")
-    externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
-    if (externalAgentId) channel = "external"
-  }
-
-  // A teammate the user pointed at Codex does not get quietly run on Claude.
-  //
-  // This used to notify and fall back: the resolver was fed `runtime: "claude"`
-  // whenever the external agent had not resolved, so the frozen spec recorded
-  // the built-in rail and everything downstream — model, tools, session store,
-  // cost attribution — described a run the user never asked for. A warning
-  // toast is not consent. The only fallback that would be legitimate is one the
-  // teammate DECLARES, and no such field exists yet, so the honest outcome is
-  // to fail with something a caller can act on.
-  if (wantsExternal && !externalAgentId) {
-    const wantedAgent =
-      runtime !== "claude" ? runtime : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
-    const failure = new ExternalRuntimeUnavailableError(teammate.name, wantedAgent)
-    teamCtx.notifier.notify({
-      level: "critical",
-      title: "External runtime unavailable",
-      body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — the task was not run on a different engine.`,
-      runId: teamCtx.runId,
-      teamId: teamCtx.teamId,
-      taskId: args.taskId,
-      dedupeKey: `external-unavailable:${teamCtx.runId}:${teammate.id}`,
-    })
-    // This throw happens BEFORE the main try/catch that normally settles the
-    // pool, so the claim has to be returned here or the run deadlocks waiting
-    // on a teammate that is still marked busy.
-    teamCtx.pool.recordFailure(teammate.id, failure)
-    if (args.recordToStore) {
-      teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, failure.message)
-    }
-    release("failure", failure)
-    throw failure
-  }
-  // Host truth for this dispatch, derived from the host profile once and used
-  // for both the provisional channel pick and the resolver call below. The
-  // headless brain and a paired companion are hosts too, not web renderers.
-  const { resolveAgentExecutionEnvironment, agentHostAvailable } =
-    await import("@/lib/ai/agent/execution/host-environment")
-  const environment = resolveAgentExecutionEnvironment()
-  if (channel !== "external" && args.preferToolEnabled !== false && runtime === "claude") {
-    if (agentHostAvailable(environment)) channel = "sidecar"
-  }
-
-  // The negotiated capability projection for the resolved external agent.
-  //
-  // Read from the manager (which built it at handshake time) rather than
-  // re-derived here: a second derivation is a second answer, and the point of
-  // the profile is that there is only one. `undefined` for a built-in teammate,
-  // and for an external agent whose profile is not negotiated — the resolver
-  // drops an un-negotiated projection anyway, but not sending one keeps the
-  // reason for the fallback visible at the call site.
-  let externalCapabilities:
-    | {
-        effective: AgentCapabilityId[]
-        support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
-        profileDigest: string
-        negotiated: boolean
-      }
-    | undefined
-  if (externalAgentId) {
-    const [{ getExternalAgentManager }, { projectExternalAgentCapabilitiesToSpec }] =
-      await Promise.all([
-        import("@/lib/ai/agent/external/manager"),
-        import("@cognia/agent-config-types/external-agent-capability"),
-      ])
-    const profile = getExternalAgentManager().getAgentCapabilityProfile(externalAgentId)
-    if (profile) {
-      const projection = projectExternalAgentCapabilitiesToSpec(profile)
-      externalCapabilities = {
-        effective: projection.effective,
-        support: projection.support,
-        profileDigest: profile.digest,
-        negotiated: profile.negotiated,
-      }
-    }
-  }
-
-  // ADR-0090: the unified resolver owns the channel decision. It is fed the
-  // RESOLVED external backing (external-agent availability is environment truth
-  // resolved above, exactly like host availability): a teammate whose external
-  // agent did not resolve executes as built-in — non-claude runtimes on the
-  // text rail, claude on the agent rail.
-  {
-    const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
-    const [
-      { resolveAgentExecutionSpec, channelFromSpec },
-      { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
-    ] = await Promise.all([
-      import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-      import("./execution-binding-resolver"),
-    ])
-    // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
-    // default; run/app-default/managed slots reserved). A legacy raw-cred
-    // member migrates to its provider-id deployment ref at dispatch time
-    // (refs only — the raw values are never copied). The resulting policy
-    // fragment feeds the SAME resolver call.
-    const binding = resolveTeammateExecutionBinding({
-      member: teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
-      teamDefault: teamCtx.team.config?.defaultExecution,
-    })
-    // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
-    // deployment id is the deterministic selection (documented on the field's
-    // pool hint) — never a silent no-op.
-    const poolPick = binding.candidateIds?.[0]
-    const { spec } = resolveAgentExecutionSpec({
-      surface: "team",
-      environment,
-      flags: getAgentExecutionFlags(),
-      policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
-      legacy: {
-        // Honest by construction: the guard above guarantees that a non-claude
-        // runtime reached a resolved external agent, so there is no case left
-        // where this would have to be rewritten to "claude".
-        runtime,
-        modelId: teammate.config?.cogniaModel?.modelId ?? modelHint ?? teammate.config?.model,
-        toolsEnabled: args.preferToolEnabled !== false,
-      },
-      // ADR-0090 external SSOT: the negotiated capability profile is what the
-      // spec freezes against, not the `external` family fallback. Absent for a
-      // built-in teammate and for an agent that has not completed its
-      // handshake — the resolver refuses an un-negotiated profile itself.
-      ...(externalCapabilities ? { externalCapabilities } : {}),
-      identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
-    })
-    frozenExecutionSpec = spec
-    executionTarget = binding.executionTarget
-    channel = channelFromSpec(spec, environment)
-    // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
-    // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
-    // In-place on the per-run cached bundle — the clamp is deterministic per
-    // teammate and only ever removes.
-    const { clampCapabilitiesToRuntime } = await import("./capability-resolver")
-    const clamped = clampCapabilitiesToRuntime(resolvedCaps, spec.capabilities.effective)
-    resolvedCaps.mcpServerIds = clamped.mcpServerIds
-    resolvedCaps.subagentIds = clamped.subagentIds
-    resolvedCaps.nativeAnthropicToolIds = clamped.nativeAnthropicToolIds
-    resolvedCaps.skillIds = clamped.skillIds
-    void import("@/lib/telemetry/events/track-event")
-      .then(({ trackEvent }) =>
-        trackEvent("agent.execution.resolved", {
-          surface: "team",
-          runtime: spec.runtimeAdapter,
-          routeKind: spec.route.kind,
-          executionKind: spec.executionKind,
-          legacyMigrated: spec.legacyMigrated === true,
-        })
-      )
-      .catch(() => undefined)
-  }
-
-  // Degradation is a first-class, machine-readable outcome (ADR-0090 Phase 6):
-  // both notifier copies key off these derived reasons, and the winning reason
-  // rides the dispatch result so workflow events / plugin meta can surface it.
-  const sidecarDegraded =
-    channel === "text" && runtime === "claude" && args.preferToolEnabled !== false
-  const degradedReason: DispatchTeammateResult["degradedReason"] = sidecarDegraded
-    ? "sidecar-unavailable"
-    : undefined
-  if (sidecarDegraded) {
-    // A tool-capable `claude` teammate could not get the desktop sidecar. On a
-    // desktop target this "should never happen"; when it does the teammate
-    // silently loses tools + sub-agent nesting, so surface it instead of
-    // degrading quietly. Excludes external, intentional text
-    // (preferToolEnabled === false), and non-claude runtimes.
-    teamCtx.notifier.notify({
-      level: "warn",
-      title: "Teammate degraded to text channel",
-      body: `${teammate.name} is running without tools or sub-agent nesting — the desktop sidecar was unavailable.`,
-      runId: teamCtx.runId,
-      teamId: teamCtx.teamId,
-      taskId: args.taskId,
-      dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
-    })
-  }
-  const durableRepositoryId =
-    args.repositoryId ??
-    teamCtx.team.config?.repositories?.find((repository) => repository.role === "primary")?.id ??
-    "primary"
-  const durableRepository = teamCtx.team.config?.repositories?.find(
-    (repository) => repository.id === durableRepositoryId
-  )
-  const dispatchWorkingDir = durableRepository?.path ?? teamCtx.team.config?.workingDir
-  // Every Squad dispatches through the durable coordinator (ADR-0169): the
-  // child run, its lease and its checkpoints are what make pause, steer and
-  // recovery possible, so there is no non-durable branch here.
-  const durableDispatch = await (async () => {
-    const [{ beginDurableDispatch }, { getDurableTeamCoordinator }] = await Promise.all([
-      import("./durable-dispatch"),
-      import("./durable-runtime"),
-    ])
-    return beginDurableDispatch({
-      coordinator: getDurableTeamCoordinator(),
-      team: teamCtx.team,
-      runId: teamCtx.runId,
-      teammateId: teammate.id,
-      taskId: args.taskId,
-      access: args.access ?? "write",
-      ...(args.taskKind ? { taskKind: args.taskKind } : {}),
-      repositoryId: durableRepositoryId,
-      ...(args.fileOwnership ? { fileOwnership: args.fileOwnership } : {}),
-      runtime,
-    })
-  })()
-
-  // Live progress streaming → workspace activity panel. Built only when the
-  // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
-  // `streamProgress !== false` (default ON) threads the sidecar capture stream
-  // for live frames; when disabled, only the start/done/failed markers fire so
-  // the panel still reflects completion without per-token churn.
-  const progressSink = teamCtx.storeWriter.addEvent
-  const streamFull = teamCtx.team.config?.streamProgress !== false
-  const reporter = progressSink
-    ? createTeammateProgressReporter(
-        {
-          teamId: teamCtx.teamId,
-          teammateId: teammate.id,
-          teammateName: teammate.name,
-          taskId: args.taskId,
-          channel,
-        },
-        (event) => progressSink(event)
-      )
-    : null
-  reporter?.start()
-  const onTurnCapture =
-    durableDispatch || (streamFull && reporter)
-      ? (event: CaptureStreamEvent) => {
-          if (streamFull) reporter?.onCaptureEvent(event)
-          durableDispatch?.capture(event)
-        }
-      : undefined
-
-  // Emit one `invoke_agent` span per dispatch so eval (and observability) can
-  // assemble the run. The eval team target threads `teamCtx.traceId` so all
-  // dispatch spans share one trace; normal runs fall back to a generated one.
-  const span = startSpan({
-    operationName: "invoke_agent",
-    providerName: "cognia.team",
-    surface: "agent-team",
-    sessionId: teamCtx.runId,
-    ...(teamCtx.traceId ? { traceId: teamCtx.traceId } : {}),
-    agentId: teammate.id,
-    agentName: teammate.name,
-    ...(accountingModel ? { requestModel: accountingModel } : {}),
-  })
-
-  // ADR-0090 Phase 7: draw this dispatch through the run's budget governor
-  // (per-child ledger of usage/attempts/failures on the SAME root pool).
-  // Contexts without a governor keep the legacy guard path.
-  const budgetAccount = teamCtx.governor?.allocate(`${teamCtx.runId}:${teammate.id}:${args.taskId}`)
-  budgetAccount?.recordAttempt()
-
-  let turn: { text: string; usage?: TokenUsage }
+  let durableDispatch:
+    Awaited<ReturnType<typeof import("./durable-dispatch").beginDurableDispatch>> | undefined
+  let reporter: ReturnType<typeof createTeammateProgressReporter> | null = null
+  let span: ReturnType<typeof startSpan> | undefined
+  let budgetAccount: ReturnType<NonNullable<TeamRunContext["governor"]>["allocate"]> | undefined
   let taskWorkspaceLease: WorkspaceBundleTurnLease | undefined
   let durableEnvironmentSession: AgentChildEnvironmentSession | undefined
   let taskWorkspaceExecutionRoot: string | undefined
@@ -1048,16 +786,336 @@ export async function dispatchTeammate(
       >
     | undefined
   const settleDurableEnvironment = async (
-    finalState: "ready" | "failed" | "cancelled"
+    finalState: "ready" | "failed" | "cancelled",
+    collectEvidence = false
   ): Promise<unknown[]> => {
     if (!durableEnvironmentSession || !teamCtx.durableEnvironment) return []
-    const changes = await durableEnvironmentSession.settle(finalState)
-    await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
+    const session = durableEnvironmentSession
+    durableEnvironmentSession = undefined
+    let changes: unknown[] = []
+    const errors: unknown[] = []
+    try {
+      changes = await session.settle(finalState)
+      if (collectEvidence) {
+        environmentEvidence = await teamCtx.durableEnvironment.adapter.collectEvidence(
+          session.childRunId
+        )
+      }
+    } catch (error) {
+      errors.push(error)
+    }
+    try {
+      await teamCtx.durableEnvironment.adapter.dispose(session.childRunId)
+    } catch (error) {
+      errors.push(error)
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1)
+      throw new AggregateError(errors, "Agent environment settlement and disposal failed")
     return changes
   }
   try {
+    const timeoutMs =
+      args.timeoutMs ??
+      (typeof teamCtx.team.config?.defaultTimeout === "number" &&
+      teamCtx.team.config.defaultTimeout > 0
+        ? teamCtx.team.config.defaultTimeout
+        : DEFAULT_PER_TASK_TIMEOUT_MS)
+    const timeoutSignal = AbortSignal.timeout(timeoutMs)
+    let combinedSignal = args.signal ? AbortSignal.any([args.signal, timeoutSignal]) : timeoutSignal
+
+    const systemPrompt =
+      args.systemPrompt?.trim() ||
+      teammate.config?.systemPrompt?.trim() ||
+      teamCtx.team.config?.defaultSystemPrompt?.trim() ||
+      DEFAULT_TEAMMATE_SYSTEM_PROMPT
+
+    const modelHint = teamCtx.modelPref.get().modelHint
+    const accountingModel = teammate.config?.cogniaModel?.modelId ?? modelHint
+    const accountingProvider = teammate.config?.cogniaModel?.providerId ?? teammate.config?.provider
+    let promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
+
+    // Resolved agentic step budget: a teammate's own `maxSteps` overrides the
+    // team-level `defaultMaxSteps`. Undefined → the channel keeps its own default
+    // (executeAgent's internal cap / the sidecar dispatcher's 256-turn budget).
+    const positive = (v: unknown): number | undefined =>
+      typeof v === "number" && v > 0 ? v : undefined
+    const maxSteps =
+      positive(teammate.config?.maxSteps) ?? positive(teamCtx.team.config?.defaultMaxSteps)
+
+    const runtime = teammate.config?.runtime ?? "claude"
+    let frozenExecutionSpec: ResolvedAgentExecutionSpec | undefined
+    let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
+    let externalAgentId: string | null = null
+    const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
+    if (teammate.config?.cogniaModel && !wantsExternal) {
+      const failure = new Error(
+        "A Cognia gateway model binding requires an external teammate runtime"
+      )
+      throw failure
+    }
+    if (wantsExternal) {
+      // External-backed teammate: route to the external CLI agent. On web/mobile,
+      // with an unknown preset, or with the contributing plugin disabled, this
+      // returns null — which is now a HARD FAILURE, see below.
+      const { resolveTeammateExternalAgent } = await import("./resolve-external-backing")
+      externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
+      if (externalAgentId) channel = "external"
+    }
+
+    // A teammate the user pointed at Codex does not get quietly run on Claude.
+    //
+    // This used to notify and fall back: the resolver was fed `runtime: "claude"`
+    // whenever the external agent had not resolved, so the frozen spec recorded
+    // the built-in rail and everything downstream — model, tools, session store,
+    // cost attribution — described a run the user never asked for. A warning
+    // toast is not consent. The only fallback that would be legitimate is one the
+    // teammate DECLARES, and no such field exists yet, so the honest outcome is
+    // to fail with something a caller can act on.
+    if (wantsExternal && !externalAgentId) {
+      const wantedAgent =
+        runtime !== "claude"
+          ? runtime
+          : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
+      const failure = new ExternalRuntimeUnavailableError(teammate.name, wantedAgent)
+      teamCtx.notifier.notify({
+        level: "critical",
+        title: "External runtime unavailable",
+        body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — the task was not run on a different engine.`,
+        runId: teamCtx.runId,
+        teamId: teamCtx.teamId,
+        taskId: args.taskId,
+        dedupeKey: `external-unavailable:${teamCtx.runId}:${teammate.id}`,
+      })
+      throw failure
+    }
+    // Host truth for this dispatch, derived from the host profile once and used
+    // for both the provisional channel pick and the resolver call below. The
+    // headless brain and a paired companion are hosts too, not web renderers.
+    const { resolveAgentExecutionEnvironment, agentHostAvailable } =
+      await import("@/lib/ai/agent/execution/host-environment")
+    const environment = resolveAgentExecutionEnvironment()
+    if (channel !== "external" && args.preferToolEnabled !== false && runtime === "claude") {
+      if (agentHostAvailable(environment)) channel = "sidecar"
+    }
+
+    // The negotiated capability projection for the resolved external agent.
+    //
+    // Read from the manager (which built it at handshake time) rather than
+    // re-derived here: a second derivation is a second answer, and the point of
+    // the profile is that there is only one. `undefined` for a built-in teammate,
+    // and for an external agent whose profile is not negotiated — the resolver
+    // drops an un-negotiated projection anyway, but not sending one keeps the
+    // reason for the fallback visible at the call site.
+    let externalCapabilities:
+      | {
+          effective: AgentCapabilityId[]
+          support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
+          profileDigest: string
+          negotiated: boolean
+        }
+      | undefined
+    if (externalAgentId) {
+      const [{ getExternalAgentManager }, { projectExternalAgentCapabilitiesToSpec }] =
+        await Promise.all([
+          import("@/lib/ai/agent/external/manager"),
+          import("@cognia/agent-config-types/external-agent-capability"),
+        ])
+      const profile = getExternalAgentManager().getAgentCapabilityProfile(externalAgentId)
+      if (profile) {
+        const projection = projectExternalAgentCapabilitiesToSpec(profile)
+        externalCapabilities = {
+          effective: projection.effective,
+          support: projection.support,
+          profileDigest: profile.digest,
+          negotiated: profile.negotiated,
+        }
+      }
+    }
+
+    // ADR-0090: the unified resolver owns the channel decision. It is fed the
+    // RESOLVED external backing (external-agent availability is environment truth
+    // resolved above, exactly like host availability): a teammate whose external
+    // agent did not resolve executes as built-in — non-claude runtimes on the
+    // text rail, claude on the agent rail.
+    {
+      const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
+      const [
+        { resolveAgentExecutionSpec, channelFromSpec },
+        { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
+      ] = await Promise.all([
+        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+        import("./execution-binding-resolver"),
+      ])
+      // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
+      // default; run/app-default/managed slots reserved). A legacy raw-cred
+      // member migrates to its provider-id deployment ref at dispatch time
+      // (refs only — the raw values are never copied). The resulting policy
+      // fragment feeds the SAME resolver call.
+      const binding = resolveTeammateExecutionBinding({
+        member:
+          teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
+        teamDefault: teamCtx.team.config?.defaultExecution,
+      })
+      // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
+      // deployment id is the deterministic selection (documented on the field's
+      // pool hint) — never a silent no-op.
+      const poolPick = binding.candidateIds?.[0]
+      const { spec } = resolveAgentExecutionSpec({
+        surface: "team",
+        environment,
+        flags: getAgentExecutionFlags(),
+        policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
+        legacy: {
+          // Honest by construction: the guard above guarantees that a non-claude
+          // runtime reached a resolved external agent, so there is no case left
+          // where this would have to be rewritten to "claude".
+          runtime,
+          modelId: teammate.config?.cogniaModel?.modelId ?? modelHint ?? teammate.config?.model,
+          toolsEnabled: args.preferToolEnabled !== false,
+        },
+        // ADR-0090 external SSOT: the negotiated capability profile is what the
+        // spec freezes against, not the `external` family fallback. Absent for a
+        // built-in teammate and for an agent that has not completed its
+        // handshake — the resolver refuses an un-negotiated profile itself.
+        ...(externalCapabilities ? { externalCapabilities } : {}),
+        identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
+      })
+      frozenExecutionSpec = spec
+      executionTarget = binding.executionTarget
+      channel = channelFromSpec(spec, environment)
+      // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
+      // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
+      // In-place on the per-run cached bundle — the clamp is deterministic per
+      // teammate and only ever removes.
+      const { clampCapabilitiesToRuntime } = await import("./capability-resolver")
+      const clamped = clampCapabilitiesToRuntime(resolvedCaps, spec.capabilities.effective)
+      resolvedCaps.mcpServerIds = clamped.mcpServerIds
+      resolvedCaps.subagentIds = clamped.subagentIds
+      resolvedCaps.nativeAnthropicToolIds = clamped.nativeAnthropicToolIds
+      resolvedCaps.skillIds = clamped.skillIds
+      void import("@/lib/telemetry/events/track-event")
+        .then(({ trackEvent }) =>
+          trackEvent("agent.execution.resolved", {
+            surface: "team",
+            runtime: spec.runtimeAdapter,
+            routeKind: spec.route.kind,
+            executionKind: spec.executionKind,
+            legacyMigrated: spec.legacyMigrated === true,
+          })
+        )
+        .catch(() => undefined)
+    }
+
+    // Degradation is a first-class, machine-readable outcome (ADR-0090 Phase 6):
+    // both notifier copies key off these derived reasons, and the winning reason
+    // rides the dispatch result so workflow events / plugin meta can surface it.
+    const sidecarDegraded =
+      channel === "text" && runtime === "claude" && args.preferToolEnabled !== false
+    const degradedReason: DispatchTeammateResult["degradedReason"] = sidecarDegraded
+      ? "sidecar-unavailable"
+      : undefined
+    if (sidecarDegraded) {
+      // A tool-capable `claude` teammate could not get the desktop sidecar. On a
+      // desktop target this "should never happen"; when it does the teammate
+      // silently loses tools + sub-agent nesting, so surface it instead of
+      // degrading quietly. Excludes external, intentional text
+      // (preferToolEnabled === false), and non-claude runtimes.
+      teamCtx.notifier.notify({
+        level: "warn",
+        title: "Teammate degraded to text channel",
+        body: `${teammate.name} is running without tools or sub-agent nesting — the desktop sidecar was unavailable.`,
+        runId: teamCtx.runId,
+        teamId: teamCtx.teamId,
+        taskId: args.taskId,
+        dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
+      })
+    }
+    const durableRepositoryId =
+      args.repositoryId ??
+      teamCtx.team.config?.repositories?.find((repository) => repository.role === "primary")?.id ??
+      "primary"
+    const durableRepository = teamCtx.team.config?.repositories?.find(
+      (repository) => repository.id === durableRepositoryId
+    )
+    const dispatchWorkingDir = durableRepository?.path ?? teamCtx.team.config?.workingDir
+    // Every Squad dispatches through the durable coordinator (ADR-0169): the
+    // child run, its lease and its checkpoints are what make pause, steer and
+    // recovery possible, so there is no non-durable branch here.
+    durableDispatch = await (async () => {
+      const [{ beginDurableDispatch }, { getDurableTeamCoordinator }] = await Promise.all([
+        import("./durable-dispatch"),
+        import("./durable-runtime"),
+      ])
+      return beginDurableDispatch({
+        coordinator: getDurableTeamCoordinator(),
+        team: teamCtx.team,
+        runId: teamCtx.runId,
+        teammateId: teammate.id,
+        taskId: args.taskId,
+        access: args.access ?? "write",
+        ...(args.taskKind ? { taskKind: args.taskKind } : {}),
+        repositoryId: durableRepositoryId,
+        ...(args.fileOwnership ? { fileOwnership: args.fileOwnership } : {}),
+        runtime,
+      })
+    })()
+
+    if (durableDispatch?.signal)
+      combinedSignal = AbortSignal.any([combinedSignal, durableDispatch.signal])
+
+    // Live progress streaming → workspace activity panel. Built only when the
+    // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).
+    // `streamProgress !== false` (default ON) threads the sidecar capture stream
+    // for live frames; when disabled, only the start/done/failed markers fire so
+    // the panel still reflects completion without per-token churn.
+    const progressSink = teamCtx.storeWriter.addEvent
+    const streamFull = teamCtx.team.config?.streamProgress !== false
+    reporter = progressSink
+      ? createTeammateProgressReporter(
+          {
+            teamId: teamCtx.teamId,
+            teammateId: teammate.id,
+            teammateName: teammate.name,
+            taskId: args.taskId,
+            channel,
+          },
+          (event) => progressSink(event)
+        )
+      : null
+    reporter?.start()
+    const onTurnCapture =
+      durableDispatch || (streamFull && reporter)
+        ? (event: CaptureStreamEvent) => {
+            if (streamFull) reporter?.onCaptureEvent(event)
+            durableDispatch?.capture(event)
+          }
+        : undefined
+
+    // Emit one `invoke_agent` span per dispatch so eval (and observability) can
+    // assemble the run. The eval team target threads `teamCtx.traceId` so all
+    // dispatch spans share one trace; normal runs fall back to a generated one.
+    span = startSpan({
+      operationName: "invoke_agent",
+      providerName: "cognia.team",
+      surface: "agent-team",
+      sessionId: teamCtx.runId,
+      ...(teamCtx.traceId ? { traceId: teamCtx.traceId } : {}),
+      agentId: teammate.id,
+      agentName: teammate.name,
+      ...(accountingModel ? { requestModel: accountingModel } : {}),
+    })
+
+    // ADR-0090 Phase 7: draw this dispatch through the run's budget governor
+    // (per-child ledger of usage/attempts/failures on the SAME root pool).
+    // Contexts without a governor keep the legacy guard path.
+    budgetAccount = teamCtx.governor?.allocate(`${teamCtx.runId}:${teammate.id}:${args.taskId}`)
+    budgetAccount?.recordAttempt()
+
+    const activeDispatch = durableDispatch
+    const activeSpan = span
     const executeTurn = async (): Promise<{ text: string; usage?: TokenUsage }> => {
-      const durableTurnContext = await durableDispatch?.prepareTurnContext()
+      const durableTurnContext = await activeDispatch?.prepareTurnContext()
       if (durableTurnContext) {
         promptText = [
           "Durable run recovery and steering context:",
@@ -1069,11 +1127,27 @@ export async function dispatchTeammate(
       const { isAgentTeamRemoteDispatchEnabled } =
         await import("@/lib/ai/agent/execution/feature-flags")
       if (
-        durableDispatch &&
+        activeDispatch &&
         frozenExecutionSpec &&
         executionTarget.mode !== "colocate" &&
         isAgentTeamRemoteDispatchEnabled()
       ) {
+        const remoteCeiling = deriveExternalSessionPermission(
+          teamCtx.parentPermissionCeiling ?? {},
+          teamPermissionCeiling(teamCtx.team.config)
+        )
+        if (
+          Object.keys(remoteCeiling).length ||
+          requiresSandbox ||
+          teammate.config?.sandboxEnabled ||
+          teamCtx.team.config.sandboxEnabled ||
+          teammate.config?.sandboxPolicy ||
+          teammate.config?.tools !== undefined
+        ) {
+          throw new Error(
+            "Remote teammate cannot enforce the inherited execution policy with this handoff protocol"
+          )
+        }
         const remoteRuntime = getRemoteWorkerRuntime()
         if (!remoteRuntime) throw new RemoteWorkerWaitingError("no_compatible_capacity")
         if (!teamCtx.team.projectId) {
@@ -1084,8 +1158,8 @@ export async function dispatchTeammate(
         if (!hasNoLeakingPii(remotePrompt)) {
           throw new Error("Remote AgentTeam prompt still contains PII after redaction")
         }
-        const selectedExecutionTarget = durableDispatch.retryTargetHostRef
-          ? ({ mode: "pinned", hostRef: durableDispatch.retryTargetHostRef } as const)
+        const selectedExecutionTarget = activeDispatch.retryTargetHostRef
+          ? ({ mode: "pinned", hostRef: activeDispatch.retryTargetHostRef } as const)
           : executionTarget
         const placementRequirements = {
           spec: frozenExecutionSpec,
@@ -1128,12 +1202,12 @@ export async function dispatchTeammate(
           settleAgentTeamDispatchLease,
           updateAgentTeamChildRun,
         } = await import("@/lib/db/agent-team-runtime")
-        const existingChild = await getAgentTeamChildRun(durableDispatch.childRunId)
+        const existingChild = await getAgentTeamChildRun(activeDispatch.childRunId)
         const leaseId =
           existingChild?.dispatchLeaseId ??
-          `dispatch:${durableDispatch.childRunId}:${globalThis.crypto.randomUUID()}`
+          `dispatch:${activeDispatch.childRunId}:${globalThis.crypto.randomUUID()}`
         const claimed = await claimAgentTeamDispatchLease({
-          childRunId: durableDispatch.childRunId,
+          childRunId: activeDispatch.childRunId,
           leaseId,
           hostRef: target.hostRef,
           executionFingerprint: remoteExecutionSpec.executionFingerprint,
@@ -1141,7 +1215,7 @@ export async function dispatchTeammate(
         })
         if (!claimed) throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef)
         settleRemoteDispatchLease = async () => {
-          await settleAgentTeamDispatchLease(durableDispatch.childRunId, leaseId, Date.now())
+          await settleAgentTeamDispatchLease(activeDispatch.childRunId, leaseId, Date.now())
         }
         const sourceRun = await getAgentTeamRun(teamCtx.runId)
         if (!sourceRun) throw new Error(`Unknown durable AgentTeam run: ${teamCtx.runId}`)
@@ -1149,8 +1223,9 @@ export async function dispatchTeammate(
           sourceRun.status === "recovering" ? claimed.remoteSessionId : undefined
         if (recoverySessionId) {
           const { getLatestAgentTeamCheckpoint } = await import("@/lib/db/agent-team-runtime")
-          const checkpoint = await getLatestAgentTeamCheckpoint(durableDispatch.childRunId)
-          if (checkpoint?.replay !== "safe") {
+          const checkpoint = await getLatestAgentTeamCheckpoint(activeDispatch.childRunId)
+          const { isDurableChildReplaySafe } = await import("./durable-runtime")
+          if (!(await isDurableChildReplaySafe(activeDispatch.childRunId, checkpoint))) {
             throw new Error("Remote session recovery requires a safe checkpoint")
           }
         }
@@ -1166,7 +1241,7 @@ export async function dispatchTeammate(
             envelopeVersion: 1,
             identity: {
               parentRunId: teamCtx.runId,
-              childRunId: durableDispatch.childRunId,
+              childRunId: activeDispatch.childRunId,
               teamId: teamCtx.teamId,
               taskId: args.taskId,
               depth: 1,
@@ -1205,7 +1280,7 @@ export async function dispatchTeammate(
         }).envelope
         await projectAgentTeamChildLifecycle({
           sourceRun,
-          childRunId: durableDispatch.childRunId,
+          childRunId: activeDispatch.childRunId,
           taskId: args.taskId,
           state: "started",
           sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:started`,
@@ -1222,7 +1297,7 @@ export async function dispatchTeammate(
             status,
             agentTeamId: teamCtx.teamId,
             agentTeamRunId: teamCtx.runId,
-            agentTeamChildRunId: durableDispatch.childRunId,
+            agentTeamChildRunId: activeDispatch.childRunId,
             executionRunId: agentTeamExecutionRunId(teamCtx.runId),
             projectName: teamCtx.team.name,
             startedAt: claimed.startedAt,
@@ -1230,11 +1305,11 @@ export async function dispatchTeammate(
         }
         const leaseController = new AbortController()
         const renew = setInterval(() => {
-          void renewAgentTeamDispatchLease(durableDispatch.childRunId, leaseId, Date.now()).then(
-            (ok) => {
+          void renewAgentTeamDispatchLease(activeDispatch.childRunId, leaseId, Date.now())
+            .then((ok) => {
               if (!ok) leaseController.abort(new Error("Remote dispatch lease was lost"))
-            }
-          )
+            })
+            .catch((error) => leaseController.abort(error))
         }, 20_000)
         try {
           const outcome = await remoteRuntime.run({
@@ -1248,7 +1323,7 @@ export async function dispatchTeammate(
             signal: AbortSignal.any([combinedSignal, leaseController.signal]),
             onSession: async (remoteSessionId) => {
               projectedRemoteSessionId = remoteSessionId
-              await updateAgentTeamChildRun(durableDispatch.childRunId, {
+              await updateAgentTeamChildRun(activeDispatch.childRunId, {
                 remoteSessionId,
                 sessionId: remoteSessionId,
                 updatedAt: Date.now(),
@@ -1256,27 +1331,34 @@ export async function dispatchTeammate(
               await projectFleet("working")
             },
             onControl: async (control) => {
-              await durableDispatch.attachControl({
+              await activeDispatch.attachControl({
                 steer: (message, sourceMessageId) => control.steer(message, sourceMessageId),
                 pause: async () => {
                   await control.pause(`${leaseId}:pause`)
-                  return durableDispatch.checkpointPause()
+                  return activeDispatch.checkpointPause()
                 },
                 terminate: () => control.terminate(`${leaseId}:terminate`),
               })
             },
             onEvent: async (envelope) => {
+              const safeEnvelope = redactText(JSON.stringify(envelope)).redacted
+              if (!hasNoLeakingPii(safeEnvelope))
+                throw new Error("Remote event failed the PII gate")
               const advanced = await advanceAgentTeamRemoteEvent(
-                durableDispatch.childRunId,
+                activeDispatch.childRunId,
                 lastRemoteEventId,
                 envelope.eventId,
-                Date.now()
+                Date.now(),
+                {
+                  runId: teamCtx.runId,
+                  event: JSON.parse(safeEnvelope),
+                }
               )
               if (!advanced) return
               lastRemoteEventId = envelope.eventId
               await projectRemoteAgentTeamEvent({
                 sourceRun,
-                childRunId: durableDispatch.childRunId,
+                childRunId: activeDispatch.childRunId,
                 taskId: args.taskId,
                 hostRef: target.hostRef,
                 envelope,
@@ -1303,7 +1385,7 @@ export async function dispatchTeammate(
                   toolName: event.toolName,
                   result: event.result,
                   ...(typeof event.toolCallId === "string" ? { id: event.toolCallId } : {}),
-                  ...(event.isError === true ? { isError: true } : {}),
+                  ...(typeof event.isError === "boolean" ? { isError: event.isError } : {}),
                 })
               }
             },
@@ -1314,14 +1396,14 @@ export async function dispatchTeammate(
           // `requires_action` turn status this used to branch on (ADR-0142).
           if (outcome.recoveryRequired === true) {
             await projectFleet("waiting-input")
-            await updateAgentTeamChildRun(durableDispatch.childRunId, {
+            await updateAgentTeamChildRun(activeDispatch.childRunId, {
               status: "needs_input",
               waitingReason: "recovery_required",
               updatedAt: Date.now(),
             })
             await projectAgentTeamChildLifecycle({
               sourceRun,
-              childRunId: durableDispatch.childRunId,
+              childRunId: activeDispatch.childRunId,
               taskId: args.taskId,
               state: "recovery_required",
               sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:recovery-required`,
@@ -1331,7 +1413,7 @@ export async function dispatchTeammate(
           if (outcome.status !== "completed") {
             await projectAgentTeamChildLifecycle({
               sourceRun,
-              childRunId: durableDispatch.childRunId,
+              childRunId: activeDispatch.childRunId,
               taskId: args.taskId,
               state: "failed",
               sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:${outcome.status}`,
@@ -1344,7 +1426,7 @@ export async function dispatchTeammate(
           }
           await projectAgentTeamChildLifecycle({
             sourceRun,
-            childRunId: durableDispatch.childRunId,
+            childRunId: activeDispatch.childRunId,
             taskId: args.taskId,
             state: "completed",
             sourceEventId: `agent-team:${teamCtx.runId}:${leaseId}:completed`,
@@ -1362,7 +1444,7 @@ export async function dispatchTeammate(
       // Durable-v2 routes through the run-scoped environment adapter, whose
       // local implementation is backed by the same Registry controller.
       const taskWorkspaceRoot = dispatchWorkingDir
-      if (durableDispatch && taskWorkspaceRoot) {
+      if (activeDispatch && taskWorkspaceRoot) {
         const environment = teamCtx.durableEnvironment
         if (!environment) {
           throw new Error("Durable AgentTeam run is missing its prepared execution environment")
@@ -1374,15 +1456,15 @@ export async function dispatchTeammate(
         }
         durableEnvironmentSession = await environment.adapter.openChild({
           runId: teamCtx.runId,
-          childRunId: durableDispatch.childRunId,
+          childRunId: activeDispatch.childRunId,
           taskId: args.taskId,
           teammateId: teammate.id,
           repositoryPath: taskWorkspaceRoot,
           profile: prepared,
         })
-        durableDispatch.attachEnvironment(environment.adapter)
+        activeDispatch.attachEnvironment(environment.adapter)
         taskWorkspaceExecutionRoot = durableEnvironmentSession.executionRoot
-        await durableDispatch.setWorkspace({
+        await activeDispatch.setWorkspace({
           workspacePath: durableEnvironmentSession.executionRoot,
           ...(durableEnvironmentSession.branch ? { branch: durableEnvironmentSession.branch } : {}),
         })
@@ -1395,12 +1477,12 @@ export async function dispatchTeammate(
           teammateId: teammate.id,
           repositoryId: durableRepositoryId,
           ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
-          traceId: span.traceId,
-          traceSpanId: span.spanId,
+          traceId: activeSpan.traceId,
+          traceSpanId: activeSpan.spanId,
         })
         taskWorkspaceLease = lease
         taskWorkspaceExecutionRoot = lease.primaryAlias
-        await durableDispatch?.setWorkspace({
+        await activeDispatch?.setWorkspace({
           workspacePath: lease.primaryAlias,
         })
       }
@@ -1425,8 +1507,8 @@ export async function dispatchTeammate(
       if (channel === "external" && externalAgentId) {
         const { getAgentTeamChildRun } = await import("@/lib/db/agent-team-runtime")
         const { parseGatewaySessionId } = await import("@/lib/ai/agent/external/gateway-task")
-        const retained = durableDispatch
-          ? await getAgentTeamChildRun(durableDispatch.childRunId)
+        const retained = activeDispatch
+          ? await getAgentTeamChildRun(activeDispatch.childRunId)
           : undefined
         const retainedSessionId =
           retained?.sessionId && parseGatewaySessionId(retained.sessionId)
@@ -1444,11 +1526,11 @@ export async function dispatchTeammate(
           executionRoot,
           teammate.config?.model ?? modelHint,
           retainedSessionId,
-          durableDispatch
+          activeDispatch
             ? async (sessionId) => {
                 const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
                 const manager = getExternalAgentManager()
-                return durableDispatch.attachControl(
+                return activeDispatch.attachControl(
                   {
                     steer: (message) => manager.steerSession(externalAgentId, sessionId, message),
                     pause: () => manager.cancel(externalAgentId, sessionId),
@@ -1472,10 +1554,10 @@ export async function dispatchTeammate(
           onTurnCapture,
           maxSteps,
           executionRoot,
-          span.spanId,
-          durableDispatch
+          activeSpan.spanId,
+          activeDispatch
             ? async (sessionId) =>
-                durableDispatch.attachControl(
+                activeDispatch.attachControl(
                   {
                     steer: async (message, sourceMessageId) => {
                       const { steerSession } = await import("@/lib/claude/ipc")
@@ -1514,33 +1596,141 @@ export async function dispatchTeammate(
       }
       return runTextOnly(promptText, textSystemPrompt, modelHint, combinedSignal, maxSteps)
     }
-    turn = durableDispatch ? await durableDispatch.run(executeTurn) : await executeTurn()
-  } catch (err) {
-    if (err instanceof RemoteWorkerWaitingError) {
-      await durableDispatch?.wait(err.reason, err.hostRef).catch(() => undefined)
-    } else {
-      await durableDispatch?.fail(err).catch(() => undefined)
+    const turn = durableDispatch
+      ? await durableDispatch.run(executeTurn, combinedSignal)
+      : await executeTurn()
+
+    const text = (turn.text ?? "").toString()
+    const trimmed = text.trim()
+
+    if (args.validateOutput !== false) {
+      if (trimmed.length === 0) throw new Error("EMPTY_OUTPUT: teammate returned empty response")
+      const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
+      if (minChars > 0 && trimmed.length < minChars) {
+        throw new Error(
+          `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
+        )
+      }
     }
-    await settleRemoteDispatch().catch(() => undefined)
-    if (durableEnvironmentSession) {
-      await settleDurableEnvironment(
-        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
-      ).catch(() => undefined)
+
+    if (taskWorkspaceLease) taskWorkspaceChanges = await taskWorkspaceLease.settle("ready")
+    if (taskWorkspaceLease) {
+      teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
+        ok: true,
+        output: text,
+      })
     }
-    if (taskWorkspaceLease)
-      await taskWorkspaceLease.settle(
-        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
+    if (durableEnvironmentSession && teamCtx.durableEnvironment) {
+      taskWorkspaceChanges = await settleDurableEnvironment("ready", true)
+    }
+    const pricedUsage = turn.usage
+      ? priceTokensForModel(accountingProvider, accountingModel, {
+          inputTokens: turn.usage.promptTokens,
+          outputTokens: turn.usage.completionTokens,
+        })
+      : undefined
+    await durableDispatch?.complete({
+      text,
+      workspaceRevision: await workspaceEvidenceRevision(taskWorkspaceChanges as ResourceChange[]),
+      usage: turn.usage,
+      ...(pricedUsage?.known ? { costUsd: pricedUsage.cost } : {}),
+      ...(taskWorkspaceChanges.length > 0
+        ? { diffContent: JSON.stringify(taskWorkspaceChanges) }
+        : {}),
+      ...(environmentEvidence && environmentEvidence.length > 0 ? { environmentEvidence } : {}),
+    })
+    await settleRemoteDispatch()
+    teamCtx.pool.recordSuccess(teammate.id)
+    if (turn.usage) {
+      // One accounting authority: the governor's child account when present
+      // (it draws the same root guard), the legacy guard otherwise.
+      if (budgetAccount) budgetAccount.add(turn.usage)
+      else teamCtx.budget.add(turn.usage)
+      // Shadow-write into the unified billing table so standalone team runs
+      // (which otherwise only emit agent-trace spans) count toward Usage-tab
+      // spend. Fire-and-forget — never let the billing mirror fail the turn.
+      swallowUsageWrite(
+        recordTeamUsage({
+          runId: teamCtx.runId,
+          teammateId: teammate.id,
+          taskId: args.taskId,
+          usage: {
+            inputTokens: turn.usage.promptTokens,
+            outputTokens: turn.usage.completionTokens,
+            ...(accountingModel ? { model: accountingModel } : {}),
+            ...(accountingProvider ? { providerId: accountingProvider } : {}),
+          },
+        })
       )
+    }
+    if (args.recordToStore) {
+      teamCtx.storeWriter.addMessage({
+        teamId: teamCtx.teamId,
+        senderId: teammate.id,
+        type: "result_share",
+        content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
+        taskId: args.taskId,
+      })
+      // Blocking lead review (ADR-0071) owns the terminal status when it is on:
+      // a dispatch that finished is NOT accepted yet, it is awaiting review, and
+      // the review node writes `completed` / `review` / `failed` once it knows.
+      // Writing `completed` here would make the board claim work is done while it
+      // is still under review — and flip completed → failed when the lead rejects
+      // it. The task stays `in_progress`, which is both true and the board's
+      // runtime-owned column, so no one can hand-move it mid-review.
+      if (!isTaskReviewEnabled(teamCtx.team?.config)) {
+        // Acceptance gate (opt-in): route auto-success through the board's
+        // human-owned `review` column instead of jumping straight to `completed`.
+        // Board acceptance only — the wave runner's in-memory doneIds still
+        // unblocks dependents, so this never stalls the run itself.
+        const requireReview =
+          teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
+        teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
+      }
+    }
+    endSpan(span.spanId, {
+      ...(turn.usage ? { usage: toSpanUsage(turn.usage) } : {}),
+      ...(accountingModel ? { responseModel: accountingModel } : {}),
+      outputPreview: (turn.text ?? "").slice(0, 200),
+    })
+    reporter?.finalize("done")
+    release("success")
+
+    return {
+      text,
+      teammateId: teammate.id,
+      teammateName: teammate.name,
+      usage: turn.usage,
+      channel,
+      ...(degradedReason ? { degradedReason } : {}),
+    }
+  } catch (err) {
+    const cleanup = await Promise.allSettled([
+      err instanceof RemoteWorkerWaitingError
+        ? durableDispatch?.wait(err.reason, err.hostRef)
+        : durableDispatch?.fail(err),
+      settleRemoteDispatch(),
+      settleDurableEnvironment(
+        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
+      ),
+      taskWorkspaceLease?.settle(
+        err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
+      ),
+    ])
+    const cleanupErrors = cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    )
     if (taskWorkspaceLease) {
       teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
         ok: false,
       })
     }
     if (!(err instanceof RemoteWorkerWaitingError)) reporter?.finalize("failed")
-    endSpan(span.spanId, {
-      errorType: err instanceof Error ? err.name : "Error",
-      errorMessage: err instanceof Error ? err.message : String(err),
-    })
+    if (span)
+      endSpan(span.spanId, {
+        errorType: err instanceof Error ? err.name : "Error",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
     if (!(err instanceof RemoteWorkerWaitingError)) {
       teamCtx.pool.recordFailure(teammate.id, err)
       budgetAccount?.recordFailure()
@@ -1553,7 +1743,10 @@ export async function dispatchTeammate(
         err instanceof Error ? err.message : String(err)
       )
     }
-    const error = err instanceof Error ? err : new Error(String(err))
+    const original = err instanceof Error ? err : new Error(String(err))
+    const error = cleanupErrors.length
+      ? new AggregateError([original, ...cleanupErrors], original.message, { cause: original })
+      : original
     // Rate-limit auto-resume: when the failure is a provider rate limit with a
     // known cooldown, schedule a single guarded "continue" nudge (additive — the
     // wave's existing error handling still runs). No-op when nudges are disabled
@@ -1567,150 +1760,9 @@ export async function dispatchTeammate(
         retryAfterMs: cooldown.retryAfterMs,
       })
     }
-    if (!(err instanceof RemoteWorkerWaitingError)) release("failure", error)
+    release("failure", error)
     throw error
-  }
-
-  endSpan(span.spanId, {
-    ...(turn.usage ? { usage: toSpanUsage(turn.usage) } : {}),
-    ...(accountingModel ? { responseModel: accountingModel } : {}),
-    outputPreview: (turn.text ?? "").slice(0, 200),
-  })
-
-  const text = (turn.text ?? "").toString()
-  const trimmed = text.trim()
-
-  if (args.validateOutput !== false) {
-    if (trimmed.length === 0) {
-      const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
-      await durableDispatch?.fail(empty).catch(() => undefined)
-      reporter?.finalize("failed")
-      teamCtx.pool.recordFailure(teammate.id, empty)
-      if (args.recordToStore) {
-        teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, empty.message)
-      }
-      release("failure", empty)
-      if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
-      if (taskWorkspaceLease) {
-        teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
-          ok: false,
-        })
-      }
-      if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
-      await settleRemoteDispatch().catch(() => undefined)
-      throw empty
-    }
-    const minChars = args.minOutputChars ?? teamCtx.team.config?.minOutputChars ?? 0
-    if (minChars > 0 && trimmed.length < minChars) {
-      const short = new Error(
-        `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
-      )
-      await durableDispatch?.fail(short).catch(() => undefined)
-      reporter?.finalize("failed")
-      teamCtx.pool.recordFailure(teammate.id, short)
-      if (args.recordToStore) {
-        teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, short.message)
-      }
-      release("failure", short)
-      if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
-      if (taskWorkspaceLease) {
-        teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
-          ok: false,
-        })
-      }
-      if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
-      await settleRemoteDispatch().catch(() => undefined)
-      throw short
-    }
-  }
-
-  if (taskWorkspaceLease) taskWorkspaceChanges = await taskWorkspaceLease.settle("ready")
-  if (taskWorkspaceLease) {
-    teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
-      ok: true,
-      output: text,
-    })
-  }
-  if (durableEnvironmentSession && teamCtx.durableEnvironment) {
-    taskWorkspaceChanges = await durableEnvironmentSession.settle("ready")
-    environmentEvidence = await teamCtx.durableEnvironment.adapter.collectEvidence(
-      durableEnvironmentSession.childRunId
-    )
-    await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
-  }
-  const pricedUsage = turn.usage
-    ? priceTokensForModel(accountingProvider, accountingModel, {
-        inputTokens: turn.usage.promptTokens,
-        outputTokens: turn.usage.completionTokens,
-      })
-    : undefined
-  await durableDispatch?.complete({
-    text,
-    usage: turn.usage,
-    ...(pricedUsage?.known ? { costUsd: pricedUsage.cost } : {}),
-    ...(taskWorkspaceChanges.length > 0
-      ? { diffContent: JSON.stringify(taskWorkspaceChanges) }
-      : {}),
-    ...(environmentEvidence && environmentEvidence.length > 0 ? { environmentEvidence } : {}),
-  })
-  await settleRemoteDispatch()
-  teamCtx.pool.recordSuccess(teammate.id)
-  if (turn.usage) {
-    // One accounting authority: the governor's child account when present
-    // (it draws the same root guard), the legacy guard otherwise.
-    if (budgetAccount) budgetAccount.add(turn.usage)
-    else teamCtx.budget.add(turn.usage)
-    // Shadow-write into the unified billing table so standalone team runs
-    // (which otherwise only emit agent-trace spans) count toward Usage-tab
-    // spend. Fire-and-forget — never let the billing mirror fail the turn.
-    swallowUsageWrite(
-      recordTeamUsage({
-        runId: teamCtx.runId,
-        teammateId: teammate.id,
-        taskId: args.taskId,
-        usage: {
-          inputTokens: turn.usage.promptTokens,
-          outputTokens: turn.usage.completionTokens,
-          ...(accountingModel ? { model: accountingModel } : {}),
-          ...(accountingProvider ? { providerId: accountingProvider } : {}),
-        },
-      })
-    )
-  }
-  if (args.recordToStore) {
-    teamCtx.storeWriter.addMessage({
-      teamId: teamCtx.teamId,
-      senderId: teammate.id,
-      type: "result_share",
-      content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
-      taskId: args.taskId,
-    })
-    // Blocking lead review (ADR-0071) owns the terminal status when it is on:
-    // a dispatch that finished is NOT accepted yet, it is awaiting review, and
-    // the review node writes `completed` / `review` / `failed` once it knows.
-    // Writing `completed` here would make the board claim work is done while it
-    // is still under review — and flip completed → failed when the lead rejects
-    // it. The task stays `in_progress`, which is both true and the board's
-    // runtime-owned column, so no one can hand-move it mid-review.
-    if (!isTaskReviewEnabled(teamCtx.team?.config)) {
-      // Acceptance gate (opt-in): route auto-success through the board's
-      // human-owned `review` column instead of jumping straight to `completed`.
-      // Board acceptance only — the wave runner's in-memory doneIds still
-      // unblocks dependents, so this never stalls the run itself.
-      const requireReview =
-        teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
-      teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
-    }
-  }
-  reporter?.finalize("done")
-  release("success")
-
-  return {
-    text,
-    teammateId: teammate.id,
-    teammateName: teammate.name,
-    usage: turn.usage,
-    channel,
-    ...(degradedReason ? { degradedReason } : {}),
+  } finally {
+    durableDispatch?.dispose?.()
   }
 }

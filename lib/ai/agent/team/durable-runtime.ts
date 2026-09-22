@@ -8,10 +8,10 @@ import {
   getLatestAgentTeamCheckpoint,
   listAgentTeamChildRuns,
   listAgentTeamRecoveryCandidates,
+  listAgentTeamTrajectory,
   markAgentTeamCheckpoint,
-  updateAgentTeamChildRun,
   updateAgentTeamChildRunIfCurrent,
-  updateAgentTeamRun,
+  updateAgentTeamRunIfCurrent,
   updateAgentTeamSteeringReceipt,
 } from "@/lib/db/agent-team-runtime"
 import type { AgentTeam } from "@/types/agent/agent-team"
@@ -22,6 +22,7 @@ import type {
   AgentTeamRunStatus,
   AgentTeamSideEffect,
   AgentTeamSteeringReceipt,
+  AgentTeamTrajectoryEvent,
   AgentTeamWriteMode,
 } from "@/types/agent/agent-team-runtime"
 import type { AgentTeamResourcePolicy } from "@/types/agent/agent-team-runtime"
@@ -31,6 +32,7 @@ import { createDecisionLedger } from "./decision-ledger"
 import { createEvidenceBundle } from "./evidence-bundle"
 import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
+import { isPathWithinRoot, normalizeFsPath } from "@/lib/files/permissions"
 
 export interface DurableChildControl {
   /** Must route through the runtime's PII-gated steering adapter. */
@@ -65,6 +67,7 @@ export interface WorkspaceLeaseRequest {
   repositoryId: string
   access: "read" | "write"
   fileOwnership?: string[]
+  childRunId?: string
 }
 
 export interface RecoveryOutcome {
@@ -82,6 +85,44 @@ interface RunPolicy {
 interface ActiveOwnership {
   leaseId: string
   paths: string[]
+}
+
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "terminated"])
+export const CHILD_ADMISSION_WAITING_REASON = "scheduler_admission"
+
+/** A checkpoint cannot authorize replay of remote work recorded after it. */
+export async function isDurableChildReplaySafe(
+  childRunId: string,
+  checkpoint?: AgentTeamCheckpoint,
+  trajectory?: readonly AgentTeamTrajectoryEvent[]
+): Promise<boolean> {
+  const candidate = checkpoint ?? (await getLatestAgentTeamCheckpoint(childRunId))
+  if (
+    !candidate ||
+    candidate.childRunId !== childRunId ||
+    candidate.replay !== "safe" ||
+    candidate.sideEffects.some(
+      (effect) =>
+        effect.state === "unknown" || (effect.state === "intent" && effect.replay !== "safe")
+    )
+  )
+    return false
+  const events = trajectory ?? (await listAgentTeamTrajectory(candidate.runId))
+  return !events.some(
+    (event) =>
+      event.childRunId === childRunId &&
+      event.kind === "remote_event" &&
+      event.sequence > candidate.trajectorySequence
+  )
+}
+
+function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason)
+    signal.addEventListener("abort", abort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
+  })
 }
 
 const EMPTY_USAGE: AgentTeamChildRun["resourceUsage"] = {
@@ -139,13 +180,8 @@ function normalizeRepositories(team: AgentTeam): Map<string, AgentTeamRepository
 }
 
 function overlaps(a: string[], b: string[]): boolean {
-  const normalize = (path: string) => path.replace(/^\.\//, "").replace(/\/$/, "")
   return a.some((left) =>
-    b.some((right) => {
-      const x = normalize(left)
-      const y = normalize(right)
-      return x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`)
-    })
+    b.some((right) => isPathWithinRoot(left, right) || isPathWithinRoot(right, left))
   )
 }
 
@@ -166,6 +202,66 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   const admissionWaiters = new Map<string, () => void>()
   const pausedRuns = new Set<string>()
   const runResumeWaiters = new Map<string, Set<() => void>>()
+  const admissions = new Map<string, { controller: AbortController; runId?: string }>()
+  const pendingWakes = new Map<string, Promise<void>>()
+
+  const assertRunnable = async (childRunId: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted()
+    const child = await getAgentTeamChildRun(childRunId)
+    if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
+    if (TERMINAL_STATUSES.has(child.status)) {
+      throw new Error(`Durable child ${childRunId} is terminal: ${child.status}`)
+    }
+    if (["pausing", "paused", "sleeping", "needs_input"].includes(child.status)) {
+      throw new Error(
+        `Durable child ${childRunId} is not accepting new turns while ${child.status}`
+      )
+    }
+    const run = await getAgentTeamRun(child.runId)
+    if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
+    if (TERMINAL_STATUSES.has(run.status) || run.status === "needs_input") {
+      throw new Error(
+        `Durable AgentTeam run ${run.id} is not accepting new turns while ${run.status}`
+      )
+    }
+    signal?.throwIfAborted()
+    return { child, run }
+  }
+
+  const assertBudget = async (
+    childRunId: string,
+    run: NonNullable<Awaited<ReturnType<typeof getAgentTeamRun>>>
+  ) => {
+    const resource = policies.get(run.id)?.resourcePolicy
+    if (!resource) return
+    const usage = run.resourceUsage
+    const wallTimeMs = Math.max(0, now() - (run.startedAt ?? run.createdAt))
+    if (
+      (resource.maxTokens !== undefined && (usage?.totalTokens ?? 0) >= resource.maxTokens) ||
+      (resource.maxCostUsd !== undefined && (usage?.costUsd ?? 0) >= resource.maxCostUsd) ||
+      (resource.maxWallTimeMs !== undefined && wallTimeMs >= resource.maxWallTimeMs)
+    ) {
+      const at = now()
+      const child = await getAgentTeamChildRun(childRunId)
+      const gated = await updateAgentTeamRunIfCurrent(
+        run.id,
+        { status: run.status, updatedAt: run.updatedAt },
+        {
+          status: "needs_input",
+          recoveryReason: "resource_budget_exhausted",
+          updatedAt: at,
+        }
+      )
+      if (gated && child && !TERMINAL_STATUSES.has(child.status)) {
+        await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+          status: "needs_input",
+          error: "Resource budget exhausted",
+          updatedAt: at,
+        })
+      }
+      throw new Error("Durable AgentTeam resource budget exhausted")
+    }
+  }
 
   const pumpAdmissions = (): void => {
     let next = scheduler.acquire(now())
@@ -207,7 +303,12 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     } else if (existing.status === "queued") {
       // `startSquadRun` journals the row as `queued` before dispatch
       // (ADR-0169). Admission is what moves it to `running`.
-      await updateAgentTeamRun(runId, { status: "running", startedAt: at, updatedAt: at })
+      const started = await updateAgentTeamRunIfCurrent(runId, existing, {
+        status: "running",
+        startedAt: at,
+        updatedAt: at,
+      })
+      if (!started) throw new Error(`Durable AgentTeam run ${runId} changed before preparation`)
     }
     // The execution row is addressed the way `agent-team-bridge` addresses it,
     // never by the bare `runId`. Both this path and `startSquadRun` create a
@@ -311,9 +412,25 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
 
   const withWorkspaceLease = async <T>(
     request: WorkspaceLeaseRequest,
-    operation: () => Promise<T> | T
+    operation: () => Promise<T> | T,
+    signal?: AbortSignal
   ): Promise<T> => {
-    if (request.access === "read") return operation()
+    const execute = async () => {
+      signal?.throwIfAborted()
+      if (request.childRunId) {
+        const { run } = await assertRunnable(request.childRunId, signal)
+        if (pausedRuns.has(run.id) || ["pausing", "paused", "sleeping"].includes(run.status)) {
+          throw new Error(`Durable AgentTeam run ${run.id} is paused`)
+        }
+        await assertBudget(request.childRunId, run)
+      }
+      signal?.throwIfAborted()
+      const result = await operation()
+      signal?.throwIfAborted()
+      return result
+    }
+    signal?.throwIfAborted()
+    if (request.access === "read") return execute()
     const policy = policies.get(request.runId)
     const mode = policy?.writeMode ?? "single-writer"
     const key = `${request.runId}:${request.repositoryId}`
@@ -322,14 +439,27 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       if (!request.fileOwnership || request.fileOwnership.length === 0) {
         throw new Error("Isolated parallel writers require explicit file ownership")
       }
+      const repository = policy?.repositories.get(request.repositoryId)
+      if (!repository) throw new Error(`Unknown repository: ${request.repositoryId}`)
+      const paths = request.fileOwnership.map((claim) => {
+        const path = claim.trim().replace(/\\/g, "/")
+        if (!path || path.includes("\0")) throw new Error("Invalid writer ownership path")
+        const normalized = normalizeFsPath(
+          /^(?:\/|[A-Za-z]:)/.test(path) ? path : `${repository.path}/${path}`
+        )
+        if (!normalized || !isPathWithinRoot(normalized, repository.path)) {
+          throw new Error("Writer ownership must remain within its repository")
+        }
+        return normalized
+      })
       const active = activeOwnership.get(key) ?? []
-      if (active.some((lease) => overlaps(lease.paths, request.fileOwnership!))) {
+      if (active.some((lease) => overlaps(lease.paths, paths))) {
         throw new Error("Parallel writer ownership overlaps an active lease")
       }
-      const lease: ActiveOwnership = { leaseId: newId("writer"), paths: request.fileOwnership }
+      const lease: ActiveOwnership = { leaseId: newId("writer"), paths }
       activeOwnership.set(key, [...active, lease])
       try {
-        return await operation()
+        return await execute()
       } finally {
         const remaining = (activeOwnership.get(key) ?? []).filter(
           (candidate) => candidate.leaseId !== lease.leaseId
@@ -346,81 +476,97 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     })
     const tail = previous ? previous.then(() => own) : own
     writerTails.set(key, tail)
-    if (previous) await previous
     try {
-      return await operation()
+      if (previous) await (signal ? waitWithSignal(previous, signal) : previous)
+      return await execute()
     } finally {
       release()
-      if (writerTails.get(key) === tail) writerTails.delete(key)
+      // A cancelled waiter still links later writers to the preceding lease.
+      // Removing its tail before that lease settles would let a new writer in.
+      void tail.then(() => {
+        if (writerTails.get(key) === tail) writerTails.delete(key)
+      })
     }
   }
 
   const withChildAdmission = async <T>(
     childRunId: string,
-    operation: () => Promise<T> | T
+    operation: (admissionSignal: AbortSignal) => Promise<T> | T,
+    signal?: AbortSignal
   ): Promise<T> => {
-    const child = await getAgentTeamChildRun(childRunId)
-    if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
-    if (["pausing", "paused", "sleeping", "needs_input"].includes(child.status)) {
-      throw new Error(
-        `Durable child ${childRunId} is not accepting new turns while ${child.status}`
-      )
+    if (admissions.has(childRunId))
+      throw new Error(`Durable child ${childRunId} already has an admission`)
+    const admission: { controller: AbortController; runId?: string } = {
+      controller: new AbortController(),
     }
-    if (["completed", "failed", "cancelled", "terminated"].includes(child.status)) {
-      throw new Error(`Durable child ${childRunId} is terminal: ${child.status}`)
-    }
-    const run = await getAgentTeamRun(child.runId)
-    if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
-    const policy = policies.get(child.runId)
-    const resource = policy?.resourcePolicy ?? {
-      priority: run.priority,
-      maxConcurrentChildren: 1,
-    }
-    if (pausedRuns.has(run.id) || ["pausing", "paused", "sleeping"].includes(run.status)) {
-      await new Promise<void>((resolve) => {
-        const waiters = runResumeWaiters.get(run.id) ?? new Set()
-        waiters.add(resolve)
-        runResumeWaiters.set(run.id, waiters)
-      })
-    }
-    const usage = run.resourceUsage
-    const wallTimeMs = Math.max(0, now() - (run.startedAt ?? run.createdAt))
-    const exhausted =
-      (resource.maxTokens !== undefined && (usage?.totalTokens ?? 0) >= resource.maxTokens) ||
-      (resource.maxCostUsd !== undefined && (usage?.costUsd ?? 0) >= resource.maxCostUsd) ||
-      (resource.maxWallTimeMs !== undefined && wallTimeMs >= resource.maxWallTimeMs)
-    if (exhausted) {
-      const at = now()
-      await Promise.all([
-        updateAgentTeamRun(run.id, {
-          status: "needs_input",
-          recoveryReason: "resource_budget_exhausted",
-          updatedAt: at,
-        }),
-        updateAgentTeamChildRun(childRunId, {
-          status: "needs_input",
-          error: "Resource budget exhausted",
-          updatedAt: at,
-        }),
-      ])
-      throw new Error("Durable AgentTeam resource budget exhausted")
-    }
-    await updateAgentTeamChildRun(childRunId, { status: "queued", updatedAt: now() })
-    scheduler.enqueue({
-      id: childRunId,
-      teamId: child.teamId,
-      priority: resource.priority,
-      enqueuedAt: now(),
-      teamConcurrency: resource.maxConcurrentChildren,
-    })
-    await new Promise<void>((resolve) => {
-      admissionWaiters.set(childRunId, resolve)
-      pumpAdmissions()
-    })
-    await updateAgentTeamChildRun(childRunId, { status: "running", updatedAt: now() })
+    admissions.set(childRunId, admission)
+    const admissionSignal = signal
+      ? AbortSignal.any([signal, admission.controller.signal])
+      : admission.controller.signal
     try {
-      return await operation()
+      let { child, run } = await assertRunnable(childRunId, admissionSignal)
+      admission.runId = run.id
+      while (pausedRuns.has(run.id) || ["pausing", "paused", "sleeping"].includes(run.status)) {
+        let resume!: () => void
+        const resumed = new Promise<void>((resolve) => {
+          resume = resolve
+        })
+        const waiters = runResumeWaiters.get(run.id) ?? new Set()
+        waiters.add(resume)
+        runResumeWaiters.set(run.id, waiters)
+        try {
+          await waitWithSignal(resumed, admissionSignal)
+        } finally {
+          waiters.delete(resume)
+          if (waiters.size === 0) runResumeWaiters.delete(run.id)
+        }
+        ;({ child, run } = await assertRunnable(childRunId, admissionSignal))
+      }
+      await assertBudget(childRunId, run)
+      const resource = policies.get(run.id)?.resourcePolicy ?? {
+        priority: run.priority,
+        maxConcurrentChildren: 1,
+      }
+      const queued = await updateAgentTeamChildRunIfCurrent(
+        childRunId,
+        { status: child.status, updatedAt: child.updatedAt },
+        { status: "queued", waitingReason: CHILD_ADMISSION_WAITING_REASON, updatedAt: now() }
+      )
+      if (!queued) throw new Error(`Durable child ${childRunId} changed before admission`)
+      admissionSignal.throwIfAborted()
+      scheduler.enqueue({
+        id: childRunId,
+        teamId: child.teamId,
+        priority: resource.priority,
+        enqueuedAt: now(),
+        teamConcurrency: resource.maxConcurrentChildren,
+      })
+      await waitWithSignal(
+        new Promise<void>((resolve) => {
+          admissionWaiters.set(childRunId, resolve)
+          pumpAdmissions()
+        }),
+        admissionSignal
+      )
+      ;({ child, run } = await assertRunnable(childRunId, admissionSignal))
+      if (pausedRuns.has(run.id) || ["pausing", "paused", "sleeping"].includes(run.status)) {
+        throw new Error(`Durable AgentTeam run ${run.id} is paused`)
+      }
+      await assertBudget(childRunId, run)
+      const started = await updateAgentTeamChildRunIfCurrent(
+        childRunId,
+        { status: child.status, updatedAt: child.updatedAt },
+        { status: "running", waitingReason: undefined, updatedAt: now() }
+      )
+      if (!started) throw new Error(`Durable child ${childRunId} changed during admission`)
+      await assertRunnable(childRunId, admissionSignal)
+      const result = await operation(admissionSignal)
+      admissionSignal.throwIfAborted()
+      return result
     } finally {
+      admissions.delete(childRunId)
+      admissionWaiters.delete(childRunId)
+      scheduler.cancel(childRunId)
       scheduler.release(childRunId)
       pumpAdmissions()
     }
@@ -508,33 +654,35 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const runs = await listAgentTeamRecoveryCandidates()
     const outcomes: RecoveryOutcome[] = []
     for (const run of runs) {
-      const children = await listAgentTeamChildRuns(run.id)
+      const children = (await listAgentTeamChildRuns(run.id)).filter(
+        (child) => !TERMINAL_STATUSES.has(child.status)
+      )
       const checkpoints = await Promise.all(
         children.map((child) => getLatestAgentTeamCheckpoint(child.id))
       )
-      const uncertain =
-        children.length > 0 &&
-        checkpoints.some(
-          (candidate) =>
-            !candidate ||
-            candidate.replay === "needs_input" ||
-            candidate.sideEffects.some(
-              (effect) =>
-                effect.state === "unknown" ||
-                (effect.state === "intent" && effect.replay !== "safe")
-            )
+      const trajectory = await listAgentTeamTrajectory(run.id)
+      const replaySafety = await Promise.all(
+        children.map((child, index) =>
+          isDurableChildReplaySafe(child.id, checkpoints[index], trajectory)
         )
+      )
+      const uncertain = replaySafety.some((safe) => !safe)
       const status: RecoveryOutcome["status"] = uncertain ? "needs_input" : "recovering"
       const at = now()
-      await updateAgentTeamRun(run.id, {
+      const recovered = await updateAgentTeamRunIfCurrent(run.id, run, {
         status,
         updatedAt: at,
         recoveryReason: uncertain ? "uncertain_side_effect" : "checkpoint_replay",
       })
+      if (!recovered) continue
       await Promise.all(
-        children
-          .filter((child) => child.status !== "completed")
-          .map((child) => updateAgentTeamChildRun(child.id, { status, updatedAt: at }))
+        children.map((child) =>
+          updateAgentTeamChildRunIfCurrent(
+            child.id,
+            { status: child.status, updatedAt: child.updatedAt },
+            { status, updatedAt: at }
+          )
+        )
       )
       outcomes.push({ runId: run.id, status })
     }
@@ -553,13 +701,12 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const run = await getAgentTeamRun(child.runId)
     if (!run) throw new Error(`Unknown durable AgentTeam run: ${child.runId}`)
 
+    if (TERMINAL_STATUSES.has(run.status)) {
+      throw new Error(`Durable AgentTeam run ${run.id} cannot be retried from ${run.status}`)
+    }
+
     const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
-    const safeToMigrate =
-      checkpoint?.replay === "safe" &&
-      checkpoint.sideEffects.every(
-        (effect) =>
-          effect.state !== "unknown" && !(effect.state === "intent" && effect.replay !== "safe")
-      )
+    const safeToMigrate = await isDurableChildReplaySafe(childRunId, checkpoint)
     const changesHost =
       requestedHostRef !== undefined &&
       child.hostRef !== undefined &&
@@ -573,21 +720,21 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const retryHostRef =
       requestedHostRef ?? (!safeToMigrate && child.hostRef ? child.hostRef : undefined)
     const at = now()
-    await Promise.all([
-      updateAgentTeamChildRun(childRunId, {
-        status: "queued",
-        error: undefined,
-        dispatchLeaseId: undefined,
-        dispatchLeaseExpiresAt: undefined,
-        waitingReason: retryHostRef ? `retry_host:${retryHostRef}` : undefined,
-        updatedAt: at,
-      }),
-      updateAgentTeamRun(run.id, {
-        status: "recovering",
-        recoveryReason: retryHostRef ? "operator_retry_host" : "operator_retry_auto",
-        updatedAt: at,
-      }),
-    ])
+    const retried = await updateAgentTeamChildRunIfCurrent(childRunId, child, {
+      status: "queued",
+      error: undefined,
+      dispatchLeaseId: undefined,
+      dispatchLeaseExpiresAt: undefined,
+      waitingReason: retryHostRef ? `retry_host:${retryHostRef}` : undefined,
+      updatedAt: at,
+    })
+    if (!retried) throw new Error(`Durable child ${childRunId} changed before retry`)
+    const recovering = await updateAgentTeamRunIfCurrent(run.id, run, {
+      status: "recovering",
+      recoveryReason: retryHostRef ? "operator_retry_host" : "operator_retry_auto",
+      updatedAt: at,
+    })
+    if (!recovering) throw new Error(`Durable AgentTeam run ${run.id} changed before retry`)
     const updated = await getAgentTeamChildRun(childRunId)
     if (!updated) throw new Error(`Durable child disappeared during retry: ${childRunId}`)
     return updated
@@ -601,6 +748,17 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
     const control = controls.get(childRunId)
     if (["completed", "failed", "cancelled", "terminated"].includes(child.status)) return
+    if (action === "resume") {
+      const run = await getAgentTeamRun(child.runId)
+      if (!run || TERMINAL_STATUSES.has(run.status)) {
+        throw new Error(`Durable child ${childRunId} cannot resume after its run stopped`)
+      }
+    }
+    if (action === "terminate") {
+      admissions
+        .get(childRunId)
+        ?.controller.abort(new DOMException("Child terminated", "AbortError"))
+    }
     // Pause is cooperative: never kill an in-flight tool call. The current
     // turn reaches its next durable boundary, while new admissions wait.
     if (action === "pause") {
@@ -620,11 +778,12 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         }
         throw new Error(`Durable child ${childRunId} changed while pause was requested`)
       }
+      admissions.get(childRunId)?.controller.abort(new DOMException("Child paused", "AbortError"))
     }
     const pauseSafe = action === "pause" ? await control?.pause?.() : undefined
     if (action === "resume" && child.remoteSessionId) {
       const checkpoint = await getLatestAgentTeamCheckpoint(childRunId)
-      if (checkpoint?.replay !== "safe") {
+      if (!(await isDurableChildReplaySafe(childRunId, checkpoint))) {
         throw new Error("Remote child resume requires a safe checkpoint")
       }
     }
@@ -633,6 +792,8 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     const current = await getAgentTeamChildRun(childRunId)
     if (!current) throw new Error(`Durable child disappeared during ${action}: ${childRunId}`)
     if (["completed", "failed", "cancelled", "terminated"].includes(current.status)) return
+    if (action === "pause" && current.status !== "pausing") return
+    if (action === "resume" && current.status !== child.status) return
     const status =
       action === "pause"
         ? pauseSafe === false
@@ -649,15 +810,11 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       ...(action === "terminate" ? { completedAt: now() } : {}),
       updatedAt: now(),
     } as const
-    if (action === "pause") {
-      await updateAgentTeamChildRunIfCurrent(
-        childRunId,
-        { status: current.status, updatedAt: current.updatedAt },
-        patch
-      )
-    } else {
-      await updateAgentTeamChildRun(childRunId, patch)
-    }
+    await updateAgentTeamChildRunIfCurrent(
+      childRunId,
+      { status: current.status, updatedAt: current.updatedAt },
+      patch
+    )
     if (action === "terminate" && child.remoteSessionId) {
       const { removeManagedFleetSession } = await import("@/lib/fleet/managed-session-projection")
       await removeManagedFleetSession(child.remoteSessionId).catch(() => false)
@@ -667,14 +824,28 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   const sleepChild = async (childRunId: string): Promise<void> => {
     const child = await getAgentTeamChildRun(childRunId)
     if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
-    await updateAgentTeamChildRun(childRunId, { status: "sleeping", updatedAt: now() })
+    if (TERMINAL_STATUSES.has(child.status)) return
+    await updateAgentTeamChildRunIfCurrent(
+      childRunId,
+      { status: child.status, updatedAt: child.updatedAt },
+      { status: "sleeping", updatedAt: now() }
+    )
   }
 
-  const wakeChild = async (childRunId: string): Promise<void> => {
-    const child = await getAgentTeamChildRun(childRunId)
-    if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
-    await controls.get(childRunId)?.resume?.()
-    await updateAgentTeamChildRun(childRunId, { status: "running", updatedAt: now() })
+  const wakeChild = (childRunId: string): Promise<void> => {
+    const pending = pendingWakes.get(childRunId)
+    if (pending) return pending
+    const waking = (async () => {
+      const child = await getAgentTeamChildRun(childRunId)
+      if (!child) throw new Error(`Unknown durable child: ${childRunId}`)
+      if (child.status !== "sleeping") return
+      // Reuse resume's remote checkpoint gate and durable control transition.
+      await setChildControlState(childRunId, "resume")
+    })().finally(() => {
+      pendingWakes.delete(childRunId)
+    })
+    pendingWakes.set(childRunId, waking)
+    return waking
   }
 
   const beginTakeover = async (childRunId: string): Promise<AgentTeamChildRun> => {
@@ -764,6 +935,11 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     setRunPaused(runId: string, paused: boolean) {
       if (paused) {
         pausedRuns.add(runId)
+        for (const admission of admissions.values()) {
+          if (admission.runId === runId) {
+            admission.controller.abort(new DOMException("Run paused", "AbortError"))
+          }
+        }
         return
       }
       pausedRuns.delete(runId)

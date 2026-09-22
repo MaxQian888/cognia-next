@@ -120,10 +120,21 @@ describe("buildTeamRiskInput", () => {
       ).toBe(true)
     })
 
-    it("turns on when any single teammate enables it", () => {
+    it("does not treat one opted-in teammate as full sandbox coverage", () => {
       expect(
         build({ workers: [worker("w1"), worker("w2", { sandboxEnabled: true })] }).sandboxEnabled
+      ).toBe(false)
+    })
+
+    it("requires every worker to resolve to sandboxed, including inherited defaults", () => {
+      expect(
+        build({
+          workers: [worker("w1", { sandboxEnabled: true }), worker("w2", { sandboxEnabled: true })],
+        }).sandboxEnabled
       ).toBe(true)
+      expect(build({ team: team({ sandboxEnabled: true }), workers: [] }).sandboxEnabled).toBe(
+        false
+      )
     })
 
     it("turns OFF when a worker opts out of the team default — partial coverage is no coverage", () => {

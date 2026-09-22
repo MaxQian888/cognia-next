@@ -32,6 +32,8 @@ export {
 export type AgentTeamConfig = AgentTeam
 
 export interface AgentTeamStartOptions {
+  runId?: string
+  signal?: AbortSignal
   ultracode?: boolean
   /** Trigger origin. Headless origins resolve HITL gates via gate-policy. */
   origin?: TeamRunOrigin
@@ -89,19 +91,32 @@ export async function recoverDurableAgentTeams(): Promise<
         await ensureTeamRecoveryInterrupt(outcome.runId).catch(() => undefined)
         return
       }
-      const { guardSquadResume, prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
-        await import("./team/squad-lifecycle-runner")
+      const {
+        guardSquadResume,
+        prepareSquadResume,
+        resumeTaskFilter,
+        runSquadLifecycle,
+        restoreSquadRunInput,
+        parkSquadRecovery,
+      } = await import("./team/squad-lifecycle-runner")
       const guard = await guardSquadResume(team.id, outcome.runId)
       if (guard.blocked) {
         outcome.status = "needs_input"
         return
       }
+      const restored = await restoreSquadRunInput(team.id, outcome.runId)
+      if (!restored) {
+        outcome.status = "needs_input"
+        return
+      }
       await prepareSquadResume(team.id)
-      await runSquadLifecycle({
-        teamId: team.id,
-        runId: outcome.runId,
+      // Bootstrap waits for reconciliation, never for recovered work or its gates.
+      void runSquadLifecycle({
+        ...restored,
         taskFilter: resumeTaskFilter,
       })
+        .catch(() => parkSquadRecovery(outcome.runId, team.id, "reentry_failed"))
+        .catch(() => undefined)
     })
   )
   return outcomes
@@ -119,10 +134,12 @@ export const agentTeamManager: AgentTeamManager = {
   },
   delete: (id) => useAgentTeamStore.getState().deleteTeam(id),
   start: async (id, opts) => {
+    opts?.signal?.throwIfAborted()
     const { startSquadRun } = await import("./team/start-squad-run")
     const origin = opts?.origin ?? "interactive"
     const result = await startSquadRun({
       squadId: id,
+      ...(opts?.runId ? { runId: opts.runId } : {}),
       goal: "",
       origin,
       triggeredFrom: { source: origin === "im" ? "im" : "ui" },
@@ -138,9 +155,28 @@ export const agentTeamManager: AgentTeamManager = {
           : (result.reason ?? "dispatch_error")
       throw new Error(`Squad run refused: ${detail}`)
     }
+    if (opts?.signal?.aborted && result.runId) {
+      const { controlSquadRun } = await import("./team/squad-control")
+      await controlSquadRun(result.runId, "stop")
+      opts.signal.throwIfAborted()
+    }
     if (opts?.detached || !result.executionRunId || result.duplicate) return result
     const { awaitSquadRunSettlement } = await import("./team/watch-squad-run")
-    await awaitSquadRunSettlement(result.executionRunId)
+    if (opts?.signal) {
+      const { controlSquadRun } = await import("./team/squad-control")
+      const stop = () => {
+        void controlSquadRun(result.runId!, "stop").catch(() => undefined)
+      }
+      opts.signal.addEventListener("abort", stop, { once: true })
+      try {
+        if (opts.signal.aborted) stop()
+        await awaitSquadRunSettlement(result.executionRunId, { signal: opts.signal })
+      } finally {
+        opts.signal.removeEventListener("abort", stop)
+      }
+    } else {
+      await awaitSquadRunSettlement(result.executionRunId)
+    }
     return result
   },
   pause: async (id) => {
@@ -166,10 +202,14 @@ export const agentTeamManager: AgentTeamManager = {
       error: undefined,
       completedAt: undefined,
     })
-    const { runSquadLifecycle } = await import("./team/squad-lifecycle-runner")
+    const { runSquadLifecycle, restoreSquadRunInput, guardSquadResume } =
+      await import("./team/squad-lifecycle-runner")
+    const guard = await guardSquadResume(team.id, child.runId)
+    if (guard.blocked) return
+    const restored = await restoreSquadRunInput(team.id, child.runId)
+    if (!restored) return
     await runSquadLifecycle({
-      teamId: team.id,
-      runId: child.runId,
+      ...restored,
       taskFilter: (task) => task.id === child.taskId,
     })
   },

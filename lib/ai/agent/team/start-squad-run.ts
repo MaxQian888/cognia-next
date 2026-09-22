@@ -29,6 +29,12 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
+import type { AgentTeamExecutionConstraints } from "@/types/agent/agent-team-runtime"
+import { AGENT_TEAM_SECURITY_CONFIG_KEYS } from "@/types/agent/agent-team-runtime"
+import {
+  deriveExternalSessionPermission,
+  teamPermissionCeiling,
+} from "../external/permission-cascade"
 import type { SquadReadiness, SquadReadinessBlocker } from "@/lib/agent-team/squad-readiness"
 
 /** A request for human sign-off on the lead's plan, raised mid-run. */
@@ -76,6 +82,8 @@ export interface StartSquadRunInput {
   ultracode?: boolean
   /** The settled run this one replaces (a `retry`). */
   parentRunId?: string
+  /** Frozen authority supplied by the governed replacement path. */
+  executionConstraints?: AgentTeamExecutionConstraints
 }
 
 export type StartSquadRunRefusal =
@@ -126,6 +134,7 @@ export interface SquadRunRecordsSeed {
   origin: string
   priority?: number
   environmentVersionId?: string
+  executionConstraints?: AgentTeamExecutionConstraints
   parentRunId?: string
   startedAt: number
 }
@@ -148,7 +157,9 @@ export interface StartSquadRunDeps {
   /** Transactional record creation. Throws on failure. */
   createRunRecords?: (
     seed: SquadRunRecordsSeed
-  ) => Promise<{ executionRunId: string; created: boolean }>
+  ) => Promise<{ runId?: string; executionRunId: string; created: boolean; replacedRunId?: string }>
+  stopReplacedRun?: (runId: string, teamId: string) => Promise<void>
+  parkFailedLaunch?: (runId: string, reason: string) => Promise<void>
   /** IM only: bind the execution run to the conversation. */
   bindConnectorRun?: (input: {
     executionRunId: string
@@ -203,6 +214,20 @@ async function defaultFindLiveRun(teamId: string) {
 async function defaultCreateRunRecords(seed: SquadRunRecordsSeed) {
   const { createSquadRunRecords } = await import("./squad-run-records")
   return createSquadRunRecords(seed)
+}
+
+async function defaultStopReplacedRun(runId: string, teamId: string): Promise<void> {
+  const [{ abortTeam }, { controlDurableRun }] = await Promise.all([
+    import("../agent-team-runtime"),
+    import("./durable-control"),
+  ])
+  abortTeam(teamId, new Error("shutdown"), runId)
+  await controlDurableRun(runId, "stop")
+}
+
+async function defaultParkFailedLaunch(runId: string, reason: string): Promise<void> {
+  const { parkActiveSquadRun } = await import("./squad-run-records")
+  await parkActiveSquadRun(runId, reason, Date.now())
 }
 
 async function defaultBindConnectorRun(input: {
@@ -317,30 +342,21 @@ export async function startSquadRun(
   }
 
   // 2. One live run per Squad. A replay of the same run id is the same run.
-  const runId = input.runId ?? mintSquadRunId()
+  let runId = input.runId ?? mintSquadRunId()
   let live: { id: string } | undefined
   try {
     live = await (deps.findLiveRun ?? defaultFindLiveRun)(squadId)
   } catch {
     return { started: false, reason: "dispatch_error", ...named }
   }
-  if (live && live.id !== runId) {
+  const replacesRunId = input.parentRunId?.replace(/^execution:team:/, "")
+  if (live && live.id !== runId && !replacesRunId && !input.runId) {
     return {
       started: false,
       reason: "already_running",
       runId: live.id,
       executionRunId: `execution:team:${live.id}`,
       ...named,
-    }
-  }
-
-  // Seed the objective from what the user actually asked for. Empty goals
-  // leave the stored objective untouched.
-  if (input.goal.trim()) {
-    try {
-      store.updateTeam(squadId, { task: input.goal.trim() })
-    } catch {
-      /* best-effort: a stored objective still lets the run proceed */
     }
   }
 
@@ -355,6 +371,33 @@ export async function startSquadRun(
   // 3. Records first, in one transaction. Failure means nothing executes.
   let executionRunId: string
   let duplicate = false
+  let replacedRunId: string | undefined
+  const permissionCeiling = deriveExternalSessionPermission(
+    input.permissionCeiling ?? {},
+    teamPermissionCeiling(squad.config)
+  )
+  // Unspecified host settings may change between launches; freeze an asking
+  // mode instead of inheriting a future unattended permission escalation.
+  permissionCeiling.permissionMode ??= "default"
+  const executionConstraints: AgentTeamExecutionConstraints = JSON.parse(
+    JSON.stringify(
+      input.executionConstraints ?? {
+        version: 1,
+        origin: input.origin,
+        triggeredFrom: input.triggeredFrom,
+        requirePlanApprovalFloor:
+          input.requirePlanApprovalFloor === true || squad.config?.requirePlanApproval === true,
+        permissionCeiling,
+        teamConfig: Object.fromEntries(
+          AGENT_TEAM_SECURITY_CONFIG_KEYS.map((key) => [key, squad.config?.[key]])
+        ),
+        ...(input.session ? { sessionId: input.session.id } : {}),
+        ...(sessionWorkingDir ? { sessionWorkingDir } : {}),
+        ...(entryPersona ? { entryPersona } : {}),
+        ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
+      }
+    )
+  ) as AgentTeamExecutionConstraints
   try {
     const records = await (deps.createRunRecords ?? defaultCreateRunRecords)({
       runId,
@@ -363,21 +406,50 @@ export async function startSquadRun(
       ...(projectId ? { projectId } : {}),
       ...(input.session ? { sessionId: input.session.id } : {}),
       origin: input.origin,
-      priority: squad.config?.resourcePolicy?.priority ?? 0,
-      ...(squad.config?.environmentRef
-        ? { environmentVersionId: squad.config.environmentRef.versionId }
+      executionConstraints,
+      priority: executionConstraints.teamConfig?.resourcePolicy?.priority ?? 0,
+      ...(executionConstraints.teamConfig?.environmentRef
+        ? { environmentVersionId: executionConstraints.teamConfig.environmentRef.versionId }
         : {}),
       ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
       startedAt: now(),
     })
     executionRunId = records.executionRunId
+    runId = records.runId ?? runId
     duplicate = !records.created
-  } catch {
+    replacedRunId = records.replacedRunId
+  } catch (error) {
+    if (error instanceof Error && error.name === "SquadRunConflictError" && "runId" in error) {
+      const conflictingRunId = String(error.runId)
+      return {
+        started: false,
+        reason: "already_running",
+        runId: conflictingRunId,
+        executionRunId: `execution:team:${conflictingRunId}`,
+        ...named,
+      }
+    }
     return { started: false, reason: "journal_failed", ...named }
   }
-  if (duplicate && live?.id === runId) {
-    // The records exist AND the run is live: this is a redelivered start.
+  if (duplicate) {
+    // An idempotency key never dispatches again, including after settlement.
     return { started: true, runId, executionRunId, duplicate: true, ...named }
+  }
+  if (replacedRunId) {
+    try {
+      await (deps.stopReplacedRun ?? defaultStopReplacedRun)(replacedRunId, squadId)
+    } catch {
+      await (deps.parkFailedLaunch ?? defaultParkFailedLaunch)(runId, "replacement_cleanup_failed")
+      return { started: false, runId, executionRunId, reason: "dispatch_error", ...named }
+    }
+  }
+  if (input.goal.trim()) {
+    try {
+      store.updateTeam(squadId, { task: input.goal.trim() })
+    } catch {
+      await (deps.parkFailedLaunch ?? defaultParkFailedLaunch)(runId, "launch_failed")
+      return { started: false, runId, executionRunId, reason: "dispatch_error", ...named }
+    }
   }
 
   // The connector binding follows the records, before the lifecycle: a runner
@@ -396,21 +468,17 @@ export async function startSquadRun(
 
   // Fire-and-forget. Progress and failures surface through the run row and the
   // notification path. They must never reject the caller's dispatch.
-  void Promise.resolve(
-    (deps.runLifecycle ?? defaultRunLifecycle)({
-      teamId: squadId,
-      runId,
-      origin: input.origin,
-      triggeredFrom: input.triggeredFrom,
-      ...(input.session ? { sessionId: input.session.id } : {}),
-      ...(input.ultracode !== undefined ? { ultracode: input.ultracode } : {}),
-      ...(input.planApprovalDelegate ? { planApprovalDelegate: input.planApprovalDelegate } : {}),
-      ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
-      ...(input.permissionCeiling ? { permissionCeiling: input.permissionCeiling } : {}),
-      ...(sessionWorkingDir ? { sessionWorkingDir } : {}),
-      ...(entryPersona ? { entryPersona } : {}),
-    })
-  ).catch(() => undefined)
+  void Promise.resolve()
+    .then(() =>
+      (deps.runLifecycle ?? defaultRunLifecycle)({
+        teamId: squadId,
+        runId,
+        ...executionConstraints,
+        ...(input.planApprovalDelegate ? { planApprovalDelegate: input.planApprovalDelegate } : {}),
+      })
+    )
+    .catch(() => (deps.parkFailedLaunch ?? defaultParkFailedLaunch)(runId, "launch_failed"))
+    .catch(() => undefined)
 
   return { started: true, runId, executionRunId, ...named }
 }
