@@ -1,0 +1,132 @@
+{
+  "id": "cognia-laya-guard",
+  "name": "Laya Guard",
+  "version": "0.1.0",
+  "description": "Local System-1 moderation for inbound connector (IM) messages via the laya checkpoint: drops spam/threat/harassment/toxic inbound messages in one ~60 ms forward pass — no LLM call, works en+zh via the laya Router.",
+  "type": "python",
+  "capabilities": ["python", "tools", "hooks"],
+  "pythonMain": "main.py",
+  "bundle_include": ["layaguard/__init__.py", "layaguard/engine.py", "README.md"],
+  "pythonVenv": "isolated",
+  "pythonDependencies": ["laya==0.3.5"],
+  "activationEvents": ["onStartup"],
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0",
+    "python": ">=3.10"
+  },
+  "tools": [
+    {
+      "name": "laya_status",
+      "description": "Report whether the local laya checkpoint is loaded, which checkpoint is configured, and check/block counters.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "laya_moderate_check",
+      "description": "Run the inbound-moderation questions against arbitrary text and return scores for spam/toxic/harassment/threat/severity.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to moderate" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "laya_decide",
+      "description": "Ask arbitrary typed questions (choice/score/noul) about a state object in one forward pass. Passthrough to the underlying laya engine — see the laya docs for the question schema.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "object",
+            "description": "State fields the questions reference, e.g. {\"prompt\": \"...\"}"
+          },
+          "questions": {
+            "type": "object",
+            "description": "Typed questions keyed by answer name"
+          }
+        },
+        "required": ["state", "questions"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "permissions": ["python:execute", "network:fetch"],
+  "permissionJustifications": {
+    "python:execute": "The plugin's hooks and tools run in the desktop Python host.",
+    "network:fetch": "First use downloads the laya checkpoint weights (~1.3 GB) from HuggingFace; they are cached locally afterwards."
+  },
+  "networkAccess": {
+    "allowedDomains": ["huggingface.co", "*.huggingface.co", "*.hf.co", "hf-mirror.com"]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "checkpoint": {
+        "type": "string",
+        "title": "Checkpoint",
+        "description": "'auto' uses the laya Router to pick the checkpoint that can read each input (required for mixed-language traffic — the english checkpoint misfires on non-Latin text).",
+        "enum": ["auto", "english", "multilingual", "typed-decisions"],
+        "default": "auto"
+      },
+      "inboundModeration": {
+        "type": "boolean",
+        "title": "Inbound moderation",
+        "description": "Score inbound connector messages (Lark/Slack/Discord/Telegram) on spam/threat/harassment/toxic.",
+        "default": true
+      },
+      "inboundMode": {
+        "type": "string",
+        "title": "Inbound mode",
+        "description": "'observe' scores messages and counts would-be-blocks in laya_status without dropping anything — the safe default for a fresh install. 'enforce' drops messages above the threshold.",
+        "enum": ["observe", "enforce"],
+        "default": "observe"
+      },
+      "inboundThreshold": {
+        "type": "number",
+        "title": "Inbound threshold",
+        "description": "noul probability above which an inbound message is dropped. Clean en/zh messages measured <=0.06; a clearly toxic message measured 0.77.",
+        "default": 0.75,
+        "minimum": 0.5,
+        "maximum": 1.0
+      },
+      "warmup": {
+        "type": "boolean",
+        "title": "Warm up on startup",
+        "description": "Start loading the checkpoint in the background when the plugin loads, so the first guarded turn is fast. Hooks always pass through while loading.",
+        "default": true
+      },
+      "maxChars": {
+        "type": "integer",
+        "title": "Max input chars",
+        "description": "Only the head window is screened (~700 tokens); longer inputs are truncated and the verdict reports truncated=true.",
+        "default": 2800,
+        "minimum": 200,
+        "maximum": 20000
+      }
+    }
+  },
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
+    }
+  }
+}
