@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 
 export interface WorkspaceFsChange {
   kind: "create" | "modify" | "delete" | "any"
@@ -28,27 +29,40 @@ export function watchWorkspace(
   root: string,
   onChange: (change: WorkspaceFsChange) => void
 ): () => void {
-  if (!isTauri() || typeof window === "undefined") return () => {}
+  if (!isTauri() || isRemoteHostActive() || typeof window === "undefined") return () => {}
 
   watchCounter += 1
   const watchId = `${WATCH_OWNER}:${root}:${watchCounter}`
 
-  void invoke("plugin_fs_watch", { pluginId: WATCH_OWNER, path: root, watchId }).catch(() => {
-    /* watch is best-effort; the tree still refreshes manually */
-  })
-
+  let disposed = false
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "")
   const handler = (event: Event) => {
     const detail = (event as CustomEvent<WorkspaceFsChange>).detail
-    if (detail && (detail.path === root || detail.path.startsWith(`${root}/`))) {
+    const path = typeof detail?.path === "string" ? detail.path.replace(/\\/g, "/") : null
+    if (
+      !disposed &&
+      !isRemoteHostActive() &&
+      path !== null &&
+      (path === normalizedRoot || path.startsWith(`${normalizedRoot}/`))
+    ) {
       onChange(detail)
     }
   }
   window.addEventListener(`plugin-fs-watch:${watchId}`, handler as EventListener)
 
+  // Register the listener before starting the native watch. Teardown waits
+  // for registration: unwatching first can otherwise leak a late-created watch.
+  const started = invoke("plugin_fs_watch", { pluginId: WATCH_OWNER, path: root, watchId }).then(
+    () => true,
+    () => false
+  )
+
   return () => {
+    if (disposed) return
+    disposed = true
     window.removeEventListener(`plugin-fs-watch:${watchId}`, handler as EventListener)
-    void invoke("plugin_fs_unwatch", { watchId }).catch(() => {
-      /* best-effort teardown */
+    void started.then((registered) => {
+      if (registered) return invoke("plugin_fs_unwatch", { watchId }).catch(() => {})
     })
   }
 }

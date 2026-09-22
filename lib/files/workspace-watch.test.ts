@@ -4,6 +4,8 @@
 import { watchWorkspace, type WorkspaceFsChange } from "./workspace-watch"
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: jest.fn(() => false) }))
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(() => Promise.resolve()),
@@ -18,6 +20,7 @@ const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 beforeEach(() => {
   mockInvoke.mockClear()
   mockIsTauri.mockReturnValue(true)
+  jest.mocked(isRemoteHostActive).mockReturnValue(false)
 })
 
 function fireChange(watchId: string, detail: WorkspaceFsChange) {
@@ -54,15 +57,58 @@ describe("watchWorkspace", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("disposing removes the listener and unwatches", () => {
+  it("disposing removes the listener and unwatches", async () => {
     const onChange = jest.fn()
     const dispose = watchWorkspace("/repo", onChange)
     const watchId = (
       mockInvoke.mock.calls.find((c) => c[0] === "plugin_fs_watch")?.[1] as { watchId: string }
     ).watchId
     dispose()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(mockInvoke).toHaveBeenCalledWith("plugin_fs_unwatch", { watchId })
     fireChange(watchId, { kind: "create", path: "/repo/new.ts" })
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("never watches local disk for a remote workspace", () => {
+    jest.mocked(isRemoteHostActive).mockReturnValue(true)
+    watchWorkspace("/repo", jest.fn())()
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("waits for late registration before unwatching exactly once", async () => {
+    let ready!: () => void
+    mockInvoke.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve
+        })
+    )
+    const onChange = jest.fn()
+    const dispose = watchWorkspace("/repo/", onChange)
+    const watchId = (mockInvoke.mock.calls[0][1] as { watchId: string }).watchId
+    fireChange(watchId, { kind: "modify", path: "/repo/src/a.ts" })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    dispose()
+    dispose()
+    expect(mockInvoke).toHaveBeenCalledTimes(1)
+    ready()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+    expect(mockInvoke).toHaveBeenLastCalledWith("plugin_fs_unwatch", { watchId })
+  })
+
+  it("ignores local notifications after a remote host is selected", () => {
+    const onChange = jest.fn()
+    const dispose = watchWorkspace("C:\\repo", onChange)
+    const watchId = (mockInvoke.mock.calls[0][1] as { watchId: string }).watchId
+    fireChange(watchId, { kind: "modify", path: "C:\\repo\\note.txt" })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    jest.mocked(isRemoteHostActive).mockReturnValue(true)
+    fireChange(watchId, { kind: "modify", path: "C:\\repo\\note.txt" })
+    expect(onChange).toHaveBeenCalledTimes(1)
+    dispose()
   })
 })

@@ -212,3 +212,32 @@ cognia-export-*.md
 # manifest is a per-build record enforced at prepack, never a committed pin.
 packages/agent-host-*/bin/
 packages/agent-host-*/integrity.json
+
+# Agent/tooling scratch dropped at repo root: ad-hoc Playwright probe and
+# screenshot scripts (`*.tmp.mjs`, `shot-*.mjs`), flag-as-filename accidents
+# (a stray `--window-size` PNG from a misparsed CLI arg), and the local
+# issue-fixer binding whose config carries absolute machine paths
+# (plugins/issue-fixer is loaded out-of-tree).
+*.tmp.*
+/shot-*.mjs
+/--*
+/fixer.config.json
+
+# Sharded output from agent full-coverage runs (coverage-typecheck/shards,
+# .github-bot-coverage/shards, .tmp/opencode-full-coverage-*). Real coverage
+# reports stay under /coverage.
+/coverage-*/
+/*-coverage/
+/.tmp/
+/.codex-deploy/
+
+# Hourly-rotated dev-server logs written to repo root by local tooling.
+/log/
+
+# Throwaway HTML prototypes — the `prototype` skill's scratch space. Routed
+# prototypes that ship live under app/**/_* or their feature dir.
+/prototype/
+
+# Devin CLI per-user config — parallel to .claude/settings.local.json.
+# (.devin/ itself stays committable: skills and shared config live there.)
+/.devin/config.local.json

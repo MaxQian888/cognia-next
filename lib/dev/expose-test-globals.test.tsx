@@ -89,6 +89,7 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSeedCharacter).toBe("function")
     expect(typeof window.__cogniaSeedTeam).toBe("function")
     expect(typeof window.__cogniaSeedSkill).toBe("function")
+    expect(typeof window.__cogniaSeedPlan).toBe("function")
     expect(typeof window.__cogniaSeedConnectorDraft).toBe("function")
     expect(typeof window.__cogniaSeedRun).toBe("function")
     expect(typeof window.__cogniaSetMockBaseUrls).toBe("function")

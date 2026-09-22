@@ -128,6 +128,22 @@ describe("buildPerfConversation", () => {
     expect(partsOf(messages, "seed-a-code")[0].text).toContain("```ts")
   })
 
+  it("appends a recoverable tool burst with distinct call IDs and real tool payloads", () => {
+    const { messages } = build({ turns: 2, media: { toolCalls: 1000 } })
+    expect(messages).toHaveLength(6)
+    const tools = partsOf(messages, "seed-a-tools")
+    expect(tools).toHaveLength(1000)
+    expect(new Set(tools.map((part) => part.toolCallId)).size).toBe(1000)
+    expect(tools[0]).toMatchObject({ type: "tool-Bash", state: "output-available" })
+    expect(tools[999]).toMatchObject({
+      type: "tool-Read",
+      toolCallId: "seed-tool-999",
+      input: { file_path: "/workspace/file-999.ts" },
+      output: "export const value999 = 999\n",
+    })
+    expect(messages.at(-1)?.metadata.createdAt).toBe(1005)
+  })
+
   it("omits the table and code turns when their counts are zero", () => {
     const { messages } = build({ turns: 1, media: { tableRows: 0, codeLines: 0 } })
 

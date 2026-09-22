@@ -29,6 +29,8 @@ export interface ChatPerfMediaOptions {
   tableRows?: number
   /** When set, append one assistant turn carrying a fenced code block of N lines. */
   codeLines?: number
+  /** Append a single long agent turn with Read/Bash calls and their full outputs. */
+  toolCalls?: number
 }
 
 export interface SeededPerfMessage {
@@ -82,7 +84,14 @@ export function buildPerfConversation({
   makeImage,
   baseTime,
 }: BuildPerfConversationInput): BuildPerfConversationResult {
-  const { images = 0, charts = 0, chartNodes = 12, tableRows = 0, codeLines = 0 } = media
+  const {
+    images = 0,
+    charts = 0,
+    chartNodes = 12,
+    tableRows = 0,
+    codeLines = 0,
+    toolCalls = 0,
+  } = media
 
   const messages: SeededPerfMessage[] = []
   let imageBytes = 0
@@ -166,6 +175,30 @@ export function buildPerfConversation({
       id: "seed-a-code",
       role: "assistant",
       parts: [{ type: "text", text: "```ts\n" + buildCodeBlock(codeLines) + "\n```" }],
+      metadata: { sessionId, createdAt: clock++ },
+    })
+  }
+
+  if (toolCalls > 0) {
+    messages.push({
+      id: "seed-u-tools",
+      role: "user",
+      parts: [{ type: "text", text: "Inspect the workspace files" }],
+      metadata: { sessionId, createdAt: clock++ },
+    })
+    messages.push({
+      id: "seed-a-tools",
+      role: "assistant",
+      parts: Array.from({ length: toolCalls }, (_, index) => ({
+        type: index % 10 === 0 ? "tool-Bash" : "tool-Read",
+        toolCallId: `seed-tool-${index}`,
+        state: "output-available",
+        input:
+          index % 10 === 0
+            ? { command: `cat /workspace/file-${index}.ts` }
+            : { file_path: `/workspace/file-${index}.ts` },
+        output: `export const value${index} = ${index}\n`,
+      })),
       metadata: { sessionId, createdAt: clock++ },
     })
   }

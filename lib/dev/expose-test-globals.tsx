@@ -81,6 +81,18 @@ declare global {
       trigger?: string
       body?: string
     }) => Promise<string>
+    /**
+     * Seed an `AgentPlan` row (+ its `plan_created` event) for a session the
+     * spec already seeded. Used by the plan-panel / document-surface specs.
+     */
+    __cogniaSeedPlan?: (draft: {
+      sessionId: string
+      title?: string
+      status?: "draft" | "awaiting_approval" | "completed" | "failed" | "cancelled"
+      source?: "exit_plan_mode" | "agent_tool" | "manual"
+      planText?: string
+      stepTitles?: string[]
+    }) => Promise<string>
     __cogniaSeedConnectorDraft?: (draft: {
       adapterId: string
       conversationKey: string
@@ -451,6 +463,42 @@ export function ExposeTestGlobals(): null {
         })
         await persistMessages(session.id, messages as never)
         return { sessionId: session.id, messageIds: messages.map((m) => m.id), imageBytes }
+      }
+
+      window.__cogniaSeedPlan = async (draft) => {
+        const { createPlan, appendPlanEvent } = await import("@/lib/db/plans")
+        const { materializeSteps, linearAgentTurnSteps } = await import("@/lib/agent/plan/steps")
+        const { computePlanCounts, DEFAULT_PLAN_CONFIG } = await import("@/types/agent/plan")
+        const titles = draft.stepTitles ?? ["Seed the data", "Verify the result"]
+        const steps = materializeSteps(linearAgentTurnSteps(titles))
+        const status = draft.status ?? "awaiting_approval"
+        const plan = await createPlan({
+          id: crypto.randomUUID(),
+          sessionId: draft.sessionId,
+          title: draft.title ?? "Seeded plan",
+          source: draft.source ?? "manual",
+          executionMode: "in_session",
+          steps,
+          status,
+          ...computePlanCounts(steps),
+          config: DEFAULT_PLAN_CONFIG,
+          refinementCount: 0,
+          generationId: crypto.randomUUID(),
+          ...(status !== "awaiting_approval" && status !== "draft" ? { endedAt: Date.now() } : {}),
+          metadata: draft.planText ? { planText: draft.planText } : {},
+        })
+        await appendPlanEvent({
+          planId: plan.id,
+          kind: "plan_created",
+          ts: Date.now(),
+          payload: {
+            kind: "plan_created",
+            source: plan.source,
+            totalSteps: plan.totalSteps,
+            executionMode: plan.executionMode,
+          },
+        })
+        return plan.id
       }
 
       window.__cogniaSeedTeam = async (draft) => {
