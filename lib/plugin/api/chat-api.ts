@@ -24,6 +24,8 @@ import {
 import { useChatStore } from "@/stores/chat"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import type { PluginSelectionRef } from "@/types/artifact/artifact"
+import type { PluginLinkMatcherRegistrationDef } from "@/types/plugin/plugin-link-matcher"
+import { registerLinkMatcher } from "./link-matchers"
 
 /**
  * What a plugin stages as chat context.
@@ -61,6 +63,9 @@ export interface PluginComposerIntentOptions {
 }
 
 export interface PluginChatAPI {
+  /** Replace matching inline chat links. Requires extension:ui; auto-disposed on disable. */
+  registerLinkMatcher(def: PluginLinkMatcherRegistrationDef): () => void
+
   /**
    * Register a middleware. Returns a disposer the plugin can call to
    * unregister explicitly (the host also unregisters automatically on
@@ -120,9 +125,19 @@ export interface PluginChatAPI {
 
 const ownedByPlugin = new Map<string, Set<string>>()
 
-export function createChatAPI(pluginId: string): PluginChatAPI {
+export function createChatAPI(
+  pluginId: string,
+  hasPermission: (permission: string) => boolean = () => false
+): PluginChatAPI {
   const logger = createPluginSystemLogger(pluginId)
   return {
+    registerLinkMatcher(def) {
+      if (!hasPermission("extension:ui")) {
+        throw new Error("Permission denied: extension:ui is required")
+      }
+      return registerLinkMatcher(pluginId, def)
+    },
+
     use(fn, options) {
       const middlewareId = options?.id ?? `m_${nanoid(8)}`
       const owned = ownedByPlugin.get(pluginId) ?? new Set<string>()

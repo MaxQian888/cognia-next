@@ -23,7 +23,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
 | `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
-| `ctx.chat` | 4 | `session:write` | frontend, hybrid, python | internal |
+| `ctx.chat` | 5 | `session:write`, `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
 | `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid, python | internal |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
@@ -311,6 +311,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `chat.addContextSelection` | `session:write` | low | No |
 | `chat.appendToComposer` | `session:write` | low | No |
 | `chat.stageIntent` | `session:write` | medium | No |
+| `chat.registerLinkMatcher` | `extension:ui` | medium | No |
 | `chat.use` | None | low | No |
 
 ## `ctx.clipboard`

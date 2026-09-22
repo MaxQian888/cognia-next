@@ -499,6 +499,37 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // Trusted inline UI: matched URLs and link text may contain PII. Registration
+    // requires extension:ui; local matching performs no egress, so model/network
+    // PII checks stay at ctx.ai/ctx.vector/ctx.network. Host file links win.
+    // Reasoning-part links intentionally stay plain and do not consult this registry.
+    id: "link-matcher",
+    support: "supported",
+    manifestFields: ["linkMatchers"],
+    manifestFieldsOptional: true,
+    runtimeBinding:
+      "manifest.linkMatchers / ctx.chat.registerLinkMatcher → link-matcher registry → shared ChatLink",
+    hostBindings: [
+      "lib/plugin/bridge/link-matcher-bridge.ts",
+      "lib/plugin/contracts/module-bridge-map.ts",
+      "lib/plugin/api/link-matchers.ts",
+      "lib/plugin/api/chat-api.ts",
+      "components/chat/markdown/chat-link.tsx",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/define/define-link-matcher.ts",
+      "packages/plugin-sdk/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/_generated_contract.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "packages/plugin-sdk/src/define/define-link-matcher.test.ts",
+      "lib/plugin/api/link-matchers.test.ts",
+      "lib/plugin/bridge/link-matcher-bridge.test.tsx",
+      "components/chat/markdown/chat-link.test.tsx",
+    ],
+  },
+  {
     id: "tool-renderer",
     support: "supported",
     manifestFields: ["toolRenderers"],

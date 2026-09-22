@@ -429,7 +429,9 @@ export function createFullPluginContext(
       hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
     }),
     uri: createUriAPI(pluginId),
-    chat: createChatAPI(pluginId),
+    chat: createChatAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),
     goals: createGoalAPI(pluginId),

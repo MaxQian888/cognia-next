@@ -127,6 +127,10 @@ import {
   registerIntegrationsForPlugin,
   unregisterIntegrationsForPlugin,
 } from "@/lib/plugin/bridge/integrations-bridge"
+import {
+  registerLinkMatchersForPlugin,
+  unregisterLinkMatchersForPlugin,
+} from "@/lib/plugin/bridge/link-matcher-bridge"
 
 /**
  * Everything a module-bridge descriptor may need to register a plugin's
@@ -171,6 +175,18 @@ export interface ModuleBridgeCapabilityDescriptor {
  * registration stays compatible with declarative contribution arrays.
  */
 export const MODULE_BRIDGE_CAPABILITIES = {
+  "link-matcher": {
+    key: "link-matcher",
+    manifestField: "linkMatchers",
+    register: async (ctx) => {
+      await registerLinkMatchersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+        hasPermission: ctx.hasPermission,
+      })
+    },
+    // The registry also contains ctx.chat.registerLinkMatcher registrations.
+    unregister: unregisterLinkMatchersForPlugin,
+  },
   "ai-provider": {
     key: "ai-provider",
     manifestField: "aiProviders",

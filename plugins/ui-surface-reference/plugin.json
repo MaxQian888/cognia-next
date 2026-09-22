@@ -6,9 +6,9 @@
   "type": "frontend",
   "author": { "name": "cognia-next" },
   "license": "MIT",
-  "minAppVersion": "0.1.0",
+  "minAppVersion": "0.3.0",
   "engines": {
-    "cognia": ">=0.1.0"
+    "cognia": ">=0.3.0"
   },
   "capabilities": [
     "components",
@@ -18,6 +18,7 @@
     "webview",
     "modal-mount",
     "message-renderer",
+    "link-matcher",
     "tool-renderer",
     "quick-action",
     "tray",
@@ -137,6 +138,15 @@
       "export": "ReferenceMessageRenderer"
     }
   ],
+  "linkMatchers": [
+    {
+      "id": "reference-link",
+      "patterns": ["example.com/**"],
+      "label": "Reference link matcher",
+      "entry": "src/index.tsx",
+      "export": "ReferenceLinkMatcher"
+    }
+  ],
   "toolRenderers": [
     {
       "id": "reference-tool",
@@ -197,6 +207,7 @@
         "surfaces.customView": "Custom view",
         "surfaces.webview": "Webview",
         "surfaces.messageRenderer": "Message renderer",
+        "surfaces.linkMatcher": "Link matcher",
         "surfaces.toolRenderer": "Tool renderer",
         "surfaces.modal": "Modal",
         "surfaces.quickAction": "Quick action",
@@ -218,6 +229,7 @@
         "surfaces.customView": "自定义视图",
         "surfaces.webview": "网页视图",
         "surfaces.messageRenderer": "消息渲染器",
+        "surfaces.linkMatcher": "链接匹配器",
         "surfaces.toolRenderer": "工具渲染器",
         "surfaces.modal": "模态框",
         "surfaces.quickAction": "快捷操作",

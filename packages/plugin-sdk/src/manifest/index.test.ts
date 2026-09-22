@@ -32,6 +32,7 @@ import type {
   PluginManifestWorkflowsBlock,
   PluginMcpServerPresetDef,
   PluginMessageRendererDef,
+  PluginLinkMatcherDef,
   PluginModalMountDef,
   PluginModeDef,
   PluginNativeAnthropicToolDef,
@@ -123,6 +124,7 @@ describe("plugin-sdk: manifest", () => {
         | PluginManifestWorkflowsBlock
         | PluginMcpServerPresetDef
         | PluginMessageRendererDef
+        | PluginLinkMatcherDef
         | PluginModalMountDef
         | PluginModeDef
         | PluginNativeAnthropicToolDef
@@ -186,6 +188,7 @@ describe("plugin-sdk: manifest", () => {
       "PluginManifestWorkflowsBlock",
       "PluginMcpServerPresetDef",
       "PluginMessageRendererDef",
+      "PluginLinkMatcherDef",
       "PluginModalMountDef",
       "PluginModeDef",
       "PluginNativeAnthropicToolDef",

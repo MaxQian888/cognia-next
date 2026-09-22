@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import type { UIMessage } from "ai"
 import { useTranslations } from "next-intl"
 import { MessageRenderer } from "@/components/chat/message-renderer"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { MCPToolCard } from "@/components/chat/message-parts/mcp-tool-card"
 import { PluginQuickActionsMenu } from "@/components/chat/composer/plugin-quick-actions-menu"
 import { PluginContextPanelSurface } from "@/components/context-workbench/context-workbench"
@@ -171,6 +173,7 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
 
   const label = (key: string, fallback: string) =>
     resolvePluginLabel(pluginT as never, PLUGIN_ID, key, fallback)
+  const referenceLink = `[${label("surfaces.linkMatcher", "Link matcher")}](https://example.com/reference)`
   const panels = contextPanelRegistry.resolve(REFERENCE_RESOURCE)
   const modulePanel = panels.find((panel) => panel.id === `${PLUGIN_ID}:reference-panel`)
   const webviewPanel = panels.find((panel) => panel.id === `${PLUGIN_ID}:reference-webview-panel`)
@@ -240,6 +243,22 @@ export function PluginSurfaceReferenceHarness({ force = false }: { force?: boole
           label={label("surfaces.messageRenderer", "Message renderer")}
         >
           <MessageRenderer message={REFERENCE_MESSAGE} />
+        </SurfaceCase>
+        <SurfaceCase
+          id="link-matcher-finalized"
+          label={label("surfaces.linkMatcher", "Link matcher")}
+        >
+          <MarkdownRenderer content={referenceLink} messageId="reference-link-finalized" />
+        </SurfaceCase>
+        <SurfaceCase
+          id="link-matcher-streaming"
+          label={label("surfaces.linkMatcher", "Link matcher")}
+        >
+          <StreamingTextPart
+            text={referenceLink}
+            messageId="reference-link-streaming"
+            isStreaming
+          />
         </SurfaceCase>
         <SurfaceCase id="tool-renderer" label={label("surfaces.toolRenderer", "Tool renderer")}>
           <MCPToolCard part={REFERENCE_TOOL_PART as never} />

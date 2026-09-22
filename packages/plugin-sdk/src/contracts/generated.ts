@@ -579,6 +579,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.chat.stageIntent": {
     kind: "none",
   },
+  "ctx.chat.registerLinkMatcher": {
+    kind: "returned-disposer",
+  },
   "ctx.chat.use": {
     kind: "returned-disposer",
   },

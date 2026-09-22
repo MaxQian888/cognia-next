@@ -10,6 +10,8 @@ import { NextIntlClientProvider } from "next-intl"
 // before the real plugin manager has enabled the plugin. What each host renders
 // is the business of that host's own suite, and of the Playwright spec.
 jest.mock("@/components/chat/message-renderer", () => ({ MessageRenderer: () => null }))
+jest.mock("@/components/chat/markdown-renderer", () => ({ MarkdownRenderer: () => null }))
+jest.mock("@/components/chat/streaming-text-part", () => ({ StreamingTextPart: () => null }))
 jest.mock("@/components/chat/message-parts/mcp-tool-card", () => ({ MCPToolCard: () => null }))
 jest.mock("@/components/chat/composer/plugin-quick-actions-menu", () => ({
   PluginQuickActionsMenu: () => null,
@@ -210,6 +212,8 @@ describe("PluginSurfaceReferenceHarness", () => {
       "modal",
       "view-container",
       "message-renderer",
+      "link-matcher-finalized",
+      "link-matcher-streaming",
       "tool-renderer",
       "quick-action",
       "config",

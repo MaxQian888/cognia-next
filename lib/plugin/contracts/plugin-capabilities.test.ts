@@ -24,6 +24,7 @@ describe("plugin capability contracts", () => {
   const fieldDrivenModuleBridgeContracts = [
     ["workspace-backend", "workspaceBackends"],
     ["message-renderer", "messageRenderers"],
+    ["link-matcher", "linkMatchers"],
     ["density-preset", "densityPresets"],
     ["chat-middleware", "chatMiddlewares"],
     ["modal-mount", "modalMounts"],

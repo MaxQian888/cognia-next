@@ -61,6 +61,7 @@ import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
 import { validateTemplateDefinition } from "@/lib/templates/contracts"
 import { validateTemplatePackageManifest } from "@/lib/templates/package"
+import { isValidLinkMatcherPattern } from "@/lib/plugin/api/link-matchers"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_PERMISSIONS,
@@ -2480,6 +2481,57 @@ export function validatePluginManifest(
     pushError,
     pushWarning,
     m.type
+  )
+  validateLazyFactoryArray(
+    m.linkMatchers,
+    {
+      field: "linkMatchers",
+      requireLabel: false,
+      extra: (entry, _i, push) => {
+        if (
+          typeof entry.id === "string" &&
+          (entry.id.length > 128 || ["__proto__", "constructor", "prototype"].includes(entry.id))
+        ) {
+          push("error", "id.invalid", "linkMatchers id is reserved or exceeds 128 characters")
+        }
+        if (
+          !Array.isArray(entry.patterns) ||
+          entry.patterns.length === 0 ||
+          !entry.patterns.every(isValidLinkMatcherPattern)
+        ) {
+          push(
+            "error",
+            "patterns.invalid",
+            "linkMatchers requires a non-empty array of valid HTTP(S) host/URL glob patterns"
+          )
+        }
+        if (
+          entry.label !== undefined &&
+          (typeof entry.label !== "string" || entry.label.trim().length === 0)
+        ) {
+          push("error", "label.invalid", "linkMatchers label must be a non-empty string")
+        }
+        if (
+          entry.priority !== undefined &&
+          (typeof entry.priority !== "number" || !Number.isFinite(entry.priority))
+        ) {
+          push("error", "priority.invalid", "linkMatchers priority must be a finite number")
+        }
+        if (entry.backend !== undefined && entry.backend !== "js") {
+          push("error", "backend.invalid", "linkMatchers requires a JavaScript component")
+        }
+        if (!Array.isArray(m.permissions) || !m.permissions.includes("extension:ui")) {
+          push(
+            "error",
+            "permission.missing",
+            'linkMatchers requires manifest permission "extension:ui"'
+          )
+        }
+      },
+    },
+    pushError,
+    pushWarning,
+    "frontend"
   )
   validateLazyFactoryArray(
     m.aiProviders,

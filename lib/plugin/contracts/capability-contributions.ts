@@ -42,6 +42,7 @@ interface ContributionManifestShape {
   aiProviders?: Array<{ id?: string; name?: string }>
   workspaceBackends?: Array<{ id?: string; label?: string; name?: string }>
   messageRenderers?: Array<{ partType?: string; id?: string; label?: string; name?: string }>
+  linkMatchers?: Array<{ id?: string; label?: string }>
   modalMounts?: Array<{ id?: string; label?: string; name?: string }>
   terminalCompletionProviders?: Array<{ id?: string; label?: string; name?: string }>
   routingStrategies?: Array<{ id?: string; label?: string; name?: string }>
@@ -147,6 +148,8 @@ export function getContributionsForCapability(
       return compact(
         asArray(m.messageRenderers).map((s) => entry(s.partType ?? s.id, s.label ?? s.name))
       )
+    case "link-matcher":
+      return compact(asArray(m.linkMatchers).map((s) => entry(s.id, s.label)))
     case "density-preset":
       return compact(asArray(m.densityPresets).map((s) => entry(s.name ?? s.id, s.name)))
     case "modal-mount":

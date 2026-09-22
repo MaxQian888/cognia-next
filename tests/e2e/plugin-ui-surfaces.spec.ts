@@ -121,6 +121,35 @@ test.describe("plugin UI surfaces", () => {
     await expect(page.locator('[data-plugin-surface^="quick-action:"]')).toBeVisible()
   })
 
+  test("renders plugin links inline in both Markdown pipelines", async ({ page }) => {
+    const harness = await gotoHarness(page)
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await page.keyboard.press("Escape")
+    for (const state of ["finalized", "streaming"] as const) {
+      const surface = harness.locator(`[data-reference-case="link-matcher-${state}"]`)
+      const link = surface.getByRole("link", { name: "Link matcher" })
+      await expect(link).toHaveAttribute("href", "https://example.com/reference")
+      await expect(link).toHaveAttribute("data-message-id", `reference-link-${state}`)
+      await expect(link).toHaveAttribute("data-streaming", String(state === "streaming"))
+      await expectScoped(link)
+      await expect(surface.locator("p > span[data-plugin-surface]")).toHaveCount(1)
+      await expect(surface.locator("p div")).toHaveCount(0)
+    }
+  })
+
+  test("restores accessible original links after plugin link crashes", async ({ page }) => {
+    const harness = await gotoHarness(page, "?pluginSurfaceCrash=link-matcher")
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await page.keyboard.press("Escape")
+    for (const state of ["finalized", "streaming"]) {
+      const surface = harness.locator(`[data-reference-case="link-matcher-${state}"]`)
+      const link = surface.getByRole("link", { name: "Link matcher" })
+      await expect(link).toHaveAttribute("href", "https://example.com/reference")
+      await expect(link).toHaveAttribute("target", "_blank")
+      await expect(surface.locator("p div")).toHaveCount(0)
+    }
+  })
+
   test("scopes the plugin stylesheet to each surface and to no host DOM", async ({ page }) => {
     const harness = await gotoHarness(page)
 
@@ -248,7 +277,7 @@ test.describe("plugin UI surfaces", () => {
     const harness = await gotoHarness(page, "?pluginSurfaceLocale=zh-CN")
 
     const labels = harness.locator("[data-reference-label]")
-    await expect(labels).toHaveCount(10)
+    await expect(labels).toHaveCount(12)
     await expect(harness.locator('[data-reference-label="composer-action"]')).toHaveText("输入操作")
     await expect(harness.locator('[data-reference-label="message-renderer"]')).toHaveText(
       "消息渲染器"

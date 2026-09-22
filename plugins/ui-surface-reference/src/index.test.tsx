@@ -1,14 +1,17 @@
 import { render, screen } from "@testing-library/react"
 import manifest from "../plugin.json"
+import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import {
   REFERENCE_SURFACE_IDS,
   ReferenceComposerAction,
+  ReferenceLinkMatcher,
   referenceTreeProvider,
   selectionReferenceActions,
 } from "./index"
 
 describe("ui-surface-reference", () => {
   it("declares every UI contribution family without hand-written activation events", () => {
+    expect(validatePluginManifest(manifest).errors).toEqual([])
     expect(manifest).not.toHaveProperty("activationEvents")
     for (const field of [
       "extensions",
@@ -18,6 +21,7 @@ describe("ui-surface-reference", () => {
       "webviews",
       "modalMounts",
       "messageRenderers",
+      "linkMatchers",
       "toolRenderers",
       "quickActions",
       "trayItems",
@@ -26,7 +30,18 @@ describe("ui-surface-reference", () => {
       expect(manifest).toHaveProperty(field)
     }
     expect(REFERENCE_SURFACE_IDS).toContain("view-container")
-    expect(REFERENCE_SURFACE_IDS).toHaveLength(13)
+    expect(REFERENCE_SURFACE_IDS).toHaveLength(14)
+  })
+
+  it("keeps a matched URL navigable and preserves its inline children", () => {
+    render(
+      <p>
+        <ReferenceLinkMatcher href="https://example.com/pr/1">Pull request</ReferenceLinkMatcher>
+      </p>
+    )
+    expect(screen.getByRole("link")).toHaveAttribute("href", "https://example.com/pr/1")
+    expect(screen.getByRole("link")).toHaveTextContent("Pull request")
+    expect(screen.getByRole("link").closest("p")).not.toBeNull()
   })
 
   it("renders a styled reference extension and exports a tree provider", async () => {

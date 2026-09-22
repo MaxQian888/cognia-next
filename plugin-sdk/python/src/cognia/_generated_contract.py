@@ -161,6 +161,7 @@ VALID_CAPABILITIES = (
     "themes",
     "commands",
     "hooks",
+    "command-hooks",
     "processors",
     "providers",
     "exporters",
@@ -171,6 +172,7 @@ VALID_CAPABILITIES = (
     "scheduler",
     "workspace-backend",
     "message-renderer",
+    "link-matcher",
     "tool-renderer",
     "density-preset",
     "chat-middleware",
@@ -250,6 +252,9 @@ CAPABILITY_FIELDS = {
         "commands",
     ],
     "hooks": [],
+    "command-hooks": [
+        "commandHooks",
+    ],
     "processors": [],
     "providers": [],
     "exporters": [],
@@ -272,6 +277,9 @@ CAPABILITY_FIELDS = {
     ],
     "message-renderer": [
         "messageRenderers",
+    ],
+    "link-matcher": [
+        "linkMatchers",
     ],
     "tool-renderer": [
         "toolRenderers",
@@ -429,6 +437,7 @@ CAPABILITY_SUPPORT = {
     "themes": "supported",
     "commands": "supported",
     "hooks": "supported",
+    "command-hooks": "supported",
     "processors": "experimental",
     "providers": "experimental",
     "exporters": "supported",
@@ -439,6 +448,7 @@ CAPABILITY_SUPPORT = {
     "scheduler": "supported",
     "workspace-backend": "supported",
     "message-renderer": "supported",
+    "link-matcher": "supported",
     "tool-renderer": "supported",
     "density-preset": "supported",
     "chat-middleware": "supported",
@@ -503,6 +513,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "themes": "0.1.0",
     "commands": "0.1.0",
     "hooks": "0.1.0",
+    "command-hooks": "0.1.0",
     "processors": "0.1.0",
     "providers": "0.1.0",
     "exporters": "0.1.0",
@@ -513,6 +524,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "scheduler": "0.1.0",
     "workspace-backend": "0.1.0",
     "message-renderer": "0.1.0",
+    "link-matcher": "0.3.0",
     "tool-renderer": "0.1.0",
     "density-preset": "0.1.0",
     "chat-middleware": "0.1.0",
@@ -577,6 +589,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "themes": "0.1.0",
     "commands": "0.1.0",
     "hooks": "0.1.0",
+    "command-hooks": "0.1.0",
     "processors": "0.1.0",
     "providers": "0.1.0",
     "exporters": "0.1.0",
@@ -587,6 +600,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "scheduler": "0.1.0",
     "workspace-backend": "0.1.0",
     "message-renderer": "0.1.0",
+    "link-matcher": "0.3.0",
     "tool-renderer": "0.1.0",
     "density-preset": "0.1.0",
     "chat-middleware": "0.1.0",
@@ -735,6 +749,14 @@ MANIFEST_CONTRIBUTIONS = [
         "entryPath": "extensions[].entry",
     },
     {
+        "field": "linkMatchers",
+        "capabilities": [
+            "link-matcher",
+        ],
+        "execution": "javascript",
+        "entryPath": "linkMatchers[].entry",
+    },
+    {
         "field": "toolRenderers",
         "capabilities": [
             "tool-renderer",
@@ -879,6 +901,13 @@ MANIFEST_CONTRIBUTIONS = [
         "field": "subagents",
         "capabilities": [
             "subagent",
+        ],
+        "execution": "host",
+    },
+    {
+        "field": "commandHooks",
+        "capabilities": [
+            "command-hooks",
         ],
         "execution": "host",
     },
@@ -1293,6 +1322,12 @@ PLUGIN_PATH_FIELD_CONTRACTS = [
     },
     {
         "path": "extensions[].entry",
+        "runtime": "javascript",
+        "requiredFor": [],
+        "executable": True,
+    },
+    {
+        "path": "linkMatchers[].entry",
         "runtime": "javascript",
         "requiredFor": [],
         "executable": True,
@@ -6044,6 +6079,20 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
+                },
+            },
+            {
+                "id": "chat.registerLinkMatcher",
+                "name": "registerLinkMatcher",
+                "requiredPermissions": [
+                    "extension:ui",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
                 },
             },
             {
@@ -16549,6 +16598,7 @@ PLUGIN_PATH_FIELDS = (
     "workspaceBackends[].entry",
     "messageRenderers[].entry",
     "extensions[].entry",
+    "linkMatchers[].entry",
     "toolRenderers[].entry",
     "aiProviders[].entry",
     "modalMounts[].entry",

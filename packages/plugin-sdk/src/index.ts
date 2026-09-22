@@ -253,6 +253,12 @@ export { definePetItem } from "./define/define-pet-item"
 export { defineScheduledTask } from "./define/define-scheduled-task"
 export { defineWorkspaceBackend } from "./define/define-workspace-backend"
 export { defineMessageRenderer } from "./define/define-message-renderer"
+export { defineLinkMatcher } from "./define/define-link-matcher"
+export type {
+  LinkMatcherProps,
+  PluginLinkMatcherDef,
+  PluginLinkMatcherRegistrationDef,
+} from "@/types/plugin/plugin-link-matcher"
 export { defineToolRenderer } from "./define/define-tool-renderer"
 export { defineDensityPreset } from "./define/define-density-preset"
 export { defineChatMiddleware } from "./define/define-chat-middleware"

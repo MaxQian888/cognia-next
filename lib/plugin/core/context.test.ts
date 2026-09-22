@@ -48,6 +48,7 @@ import { PluginRegistry } from "./registry"
 import { subscribePluginApiAudit, pluginApiRuntimeForType } from "../contracts/interface-catalog"
 import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@cognia/plugin-sdk/contracts"
 import { routePythonHostRequest } from "@/lib/plugin/python/host-request-router"
+import { clearAllLinkMatchers, getLinkMatcher } from "@/lib/plugin/api/link-matchers"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -1524,6 +1525,29 @@ describe("createPluginContext", () => {
 })
 
 describe("createFullPluginContext", () => {
+  it("wires link registration to live permission grants and its lifecycle scope", async () => {
+    clearAllLinkMatchers()
+    const scope = new PluginDisposableScope("test-plugin")
+    const manager = {
+      ...mockManager,
+      getPluginDisposableScope: () => scope,
+    } as unknown as PluginManager
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, manager)
+    const definition = { id: "links", patterns: ["github.com/**"], component: () => null }
+    expect(() => context.chat.registerLinkMatcher(definition)).toThrow(/extension:ui/)
+    initializePluginPermissions(plugin.manifest.id, ["extension:ui"])
+    context.chat.registerLinkMatcher(definition)
+    expect(getLinkMatcher("https://github.com/foo")?.pluginId).toBe(plugin.manifest.id)
+    revokePluginPermissions(plugin.manifest.id)
+    expect(() => context.chat.registerLinkMatcher({ ...definition, id: "new" })).toThrow(
+      /extension:ui/
+    )
+    await scope.dispose()
+    expect(getLinkMatcher("https://github.com/foo")).toBeUndefined()
+    clearAllLinkMatchers()
+  })
+
   it("should create context with base APIs", () => {
     const plugin = createMockPlugin()
     const context = createFullPluginContext(plugin, mockManager)

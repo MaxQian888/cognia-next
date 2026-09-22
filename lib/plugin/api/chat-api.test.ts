@@ -20,6 +20,7 @@ import {
   listAllChatMiddlewares,
 } from "@/lib/claude/chat-middleware/registry"
 import type { ChatMiddleware } from "@/types/plugin/plugin-chat-middleware"
+import { clearAllLinkMatchers, getLinkMatcher } from "./link-matchers"
 
 const noop: ChatMiddleware = async (_req, next) => next()
 
@@ -27,6 +28,25 @@ describe("createChatAPI", () => {
   beforeEach(() => {
     __resetChatApiForTesting()
     __resetChatMiddlewareRegistryForTesting()
+    clearAllLinkMatchers()
+  })
+
+  it("gates link registration on a live extension:ui grant and returns a disposer", () => {
+    let allowed = false
+    const hasPermission = jest.fn(() => allowed)
+    const api = createChatAPI("p", hasPermission)
+    const def = { id: "link", patterns: ["github.com/**"], component: () => null }
+    expect(() => api.registerLinkMatcher(def)).toThrow(/extension:ui/)
+    expect(() => createChatAPI("p").registerLinkMatcher(def)).toThrow(/extension:ui/)
+    allowed = true
+    const off = api.registerLinkMatcher(def)
+    expect(hasPermission).toHaveBeenCalledWith("extension:ui")
+    expect(getLinkMatcher("https://github.com/foo")).toMatchObject({ pluginId: "p" })
+    allowed = false
+    expect(() => api.registerLinkMatcher({ ...def, id: "other" })).toThrow(/extension:ui/)
+    off()
+    off()
+    expect(getLinkMatcher("https://github.com/foo")).toBeUndefined()
   })
 
   it("registers a middleware under the plugin id", () => {

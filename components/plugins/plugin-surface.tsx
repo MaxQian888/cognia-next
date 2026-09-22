@@ -80,6 +80,10 @@ export interface PluginSurfaceProps {
    * absolutely positioned descendants.
    */
   container?: boolean
+  /** Phrasing-content host (for example, a Markdown link inside a paragraph). */
+  inline?: boolean
+  /** Restore the host's inline content if the plugin crashes. */
+  fallback?: ReactNode
   /**
    * Notified when the compact boundary removes a crashed child — the signal a
    * slot needs to count the contribution as absent (and fall back) rather than
@@ -95,6 +99,8 @@ interface BoundaryProps {
   pluginName: string
   surfaceId: string
   formFactor: PluginSurfaceFormFactor
+  inline?: boolean
+  fallback?: ReactNode
   diagnosticMessage: (errorMessage: string) => string
   compactDiagnosticHint: string
   retryDiagnosticHint: string
@@ -197,7 +203,9 @@ export class PluginSurfaceBoundary extends Component<BoundaryProps, BoundaryStat
   render(): ReactNode {
     const { error } = this.state
     if (!error) return this.props.children
-    if (this.props.formFactor === "icon" || this.props.formFactor === "row") return null
+    if (this.props.inline || this.props.formFactor === "icon" || this.props.formFactor === "row") {
+      return this.props.fallback ?? null
+    }
     return (
       <PluginSurfaceError pluginName={this.props.pluginName} error={error} retry={this.retry} />
     )
@@ -213,6 +221,8 @@ export function PluginSurface({
   maxWidth,
   variant = "default",
   container = true,
+  inline = false,
+  fallback,
   onSilentFailure,
   className,
   children,
@@ -220,19 +230,22 @@ export function PluginSurface({
   const diagnosticT = useTranslations("plugins.surface.diagnostic")
   const manifestName = usePluginStore((state) => state.plugins[pluginId]?.manifest.name)
   const resolvedPluginName = pluginName ?? manifestName ?? pluginId
+  const Root = inline ? "span" : "div"
   return (
-    <div
+    <Root
       className={className}
       data-plugin-root={variant === "default" ? pluginId : undefined}
       data-plugin-surface={surfaceId}
       data-plugin-form-factor={formFactor}
-      style={surfaceStyle(minWidth, maxWidth, container)}
+      style={inline ? DISPLAY_CONTENTS : surfaceStyle(minWidth, maxWidth, container)}
     >
       <PluginSurfaceBoundary
         pluginId={pluginId}
         pluginName={resolvedPluginName}
         surfaceId={surfaceId}
         formFactor={formFactor}
+        inline={inline}
+        fallback={fallback}
         diagnosticMessage={(errorMessage) =>
           diagnosticT("message", { surfaceId, error: errorMessage })
         }
@@ -242,6 +255,6 @@ export function PluginSurface({
       >
         {children}
       </PluginSurfaceBoundary>
-    </div>
+    </Root>
   )
 }

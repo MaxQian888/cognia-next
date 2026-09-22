@@ -187,6 +187,30 @@ describe("getContributionsForCapability", () => {
     expect(getContributionsForCapability({}, "unknown")).toEqual([])
   })
 
+  it("projects link matcher labels and falls back to ids", () => {
+    const manifest = {
+      linkMatchers: [
+        { id: "github", label: "GitHub pull requests" },
+        { id: "figma" },
+        { id: "same", label: "same" },
+        { label: "Missing id" },
+      ],
+    }
+    expect(getContributionsForCapability(manifest, "link-matcher")).toEqual([
+      { id: "github", label: "GitHub pull requests" },
+      { id: "figma" },
+      { id: "same" },
+    ])
+    expect(getContributionsForCapability({}, "link-matcher")).toEqual([])
+    expect(getAllContributions(["link-matcher"], manifest)).toEqual([
+      {
+        capability: "link-matcher",
+        entries: [{ id: "github", label: "GitHub pull requests" }, { id: "figma" }, { id: "same" }],
+        count: 3,
+      },
+    ])
+  })
+
   it("tolerates missing manifest entirely", () => {
     expect(getContributionsForCapability(null, "tools")).toEqual([])
     expect(getContributionsForCapability(undefined, "tools")).toEqual([])

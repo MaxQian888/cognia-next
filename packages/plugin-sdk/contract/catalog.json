@@ -289,6 +289,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "link-matcher",
+      "support": "supported",
+      "manifestFields": ["linkMatchers"],
+      "introducedIn": "0.3.0",
+      "minimumHostVersion": "0.3.0"
+    },
+    {
       "id": "tool-renderer",
       "support": "supported",
       "manifestFields": ["toolRenderers"],
@@ -789,6 +796,12 @@
       "executable": true
     },
     {
+      "path": "linkMatchers[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
       "path": "toolRenderers[].entry",
       "runtime": "javascript",
       "requiredFor": [],
@@ -1031,6 +1044,12 @@
       "capabilities": ["components"],
       "execution": "javascript",
       "entryPath": "extensions[].entry"
+    },
+    {
+      "field": "linkMatchers",
+      "capabilities": ["link-matcher"],
+      "execution": "javascript",
+      "entryPath": "linkMatchers[].entry"
     },
     {
       "field": "toolRenderers",
@@ -3357,6 +3376,18 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
+          }
+        },
+        {
+          "id": "chat.registerLinkMatcher",
+          "name": "registerLinkMatcher",
+          "requiredPermissions": ["extension:ui"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
           }
         },
         {

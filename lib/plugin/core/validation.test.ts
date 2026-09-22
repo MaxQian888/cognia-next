@@ -2905,6 +2905,99 @@ describe("Plugin Validation", () => {
         expect(result.valid).toBe(true)
       })
 
+      describe("linkMatchers", () => {
+        const definition = {
+          id: "github",
+          patterns: ["github.com/**/pull/*", "https://*.figma.com/*"],
+          entry: "links/github.js",
+          export: "GitHubLink",
+        }
+        const manifest = (entries: unknown = [definition], extra = {}) =>
+          withLazy({
+            capabilities: ["link-matcher"],
+            permissions: ["extension:ui"],
+            linkMatchers: entries,
+            ...extra,
+          })
+
+        it("accepts declarative patterns and optional label and priority", () => {
+          expect(validatePluginManifest(manifest()).valid).toBe(true)
+          expect(
+            validatePluginManifest(
+              manifest([{ ...definition, label: "GitHub", priority: -2, backend: "js" }])
+            ).valid
+          ).toBe(true)
+        })
+
+        it.each([
+          ["invalid_type", "nope"],
+          ["invalid_item", [null]],
+          ["id.missing", [{ ...definition, id: "" }]],
+          ["id.invalid", [{ ...definition, id: "Bad id" }]],
+          ["id.invalid", [{ ...definition, id: "constructor" }]],
+          ["id.invalid", [{ ...definition, id: "a".repeat(129) }]],
+          ["id.duplicate", [definition, definition]],
+          ["entry.missing", [{ ...definition, entry: undefined }]],
+          ["export.missing", [{ ...definition, export: undefined }]],
+          ["export.invalid", [{ ...definition, export: "not-an-export" }]],
+          ["patterns.invalid", [{ ...definition, patterns: [] }]],
+          ["patterns.invalid", [{ ...definition, patterns: "github.com/*" }]],
+          ["patterns.invalid", [{ ...definition, patterns: [42] }]],
+          ["patterns.invalid", [{ ...definition, patterns: ["javascript:alert(1)"] }]],
+          ["patterns.invalid", [{ ...definition, patterns: ["*github.com/*"] }]],
+          ["patterns.invalid", [{ ...definition, patterns: ["github.com/ white space"] }]],
+          ["label.invalid", [{ ...definition, label: " " }]],
+          ["label.invalid", [{ ...definition, label: 1 }]],
+          ["priority.invalid", [{ ...definition, priority: "high" }]],
+          ["priority.invalid", [{ ...definition, priority: Infinity }]],
+          ["priority.invalid", [{ ...definition, priority: NaN }]],
+          ["backend.invalid", [{ ...definition, backend: "python" }]],
+        ])("rejects malformed %s declarations", (code, entries) => {
+          const result = validatePluginManifest(manifest(entries))
+          expect(result.valid).toBe(false)
+          expect(result.diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ code: `manifest.linkMatchers.${code}` }),
+            ])
+          )
+        })
+
+        it.each([
+          ["absolute", "/tmp/link.js"],
+          ["absolute", "C:\\links\\link.js"],
+          ["traversal", "../link.js"],
+          ["invalid_chars", "%2e%2e/link.js"],
+          ["invalid_chars", "links/\0link.js"],
+        ])("rejects unsafe entry paths: %s", (code, entry) => {
+          const result = validatePluginManifest(manifest([{ ...definition, entry }]))
+          expect(result.valid).toBe(false)
+          expect(result.diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ code: `manifest.linkMatchers.entry.${code}` }),
+            ])
+          )
+        })
+
+        it("requires extension:ui permission for declarative registration", () => {
+          const result = validatePluginManifest(manifest([definition], { permissions: [] }))
+          expect(result.valid).toBe(false)
+          expect(result.diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ code: "manifest.linkMatchers.permission.missing" }),
+            ])
+          )
+        })
+
+        it("reports an undeclared capability using the shared contribution contract", () => {
+          const result = validatePluginManifest(manifest([definition], { capabilities: [] }))
+          expect(result.diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ code: "manifest.capability.field_undeclared" }),
+            ])
+          )
+        })
+      })
+
       it("aiProviders rejects unknown kind", () => {
         const manifest = withLazy({
           aiProviders: [

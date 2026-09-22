@@ -39,6 +39,7 @@ import {
   __resetPluginWallpapersForTesting,
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 import type { PluginManifest } from "@/types/plugin"
+import { getLinkMatcher, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
 
 function makeManifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {
@@ -90,6 +91,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "media",
         "workspace-backend",
         "message-renderer",
+        "link-matcher",
         "tool-renderer",
         "connectors",
         "integrations",
@@ -124,7 +126,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     // `bot` (26th) was verified: only `executor: "handler"` imports anything,
     // and `bots-bridge.test.ts` covers the JS export, the python snapshot
     // boundary, the per-bot error isolation and the re-enable drop.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(26)
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(27)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {
@@ -172,5 +174,33 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
 
     descriptor.unregister("wp-plugin")
     expect(listPluginWallpapers().some((w) => w.pluginId === "wp-plugin")).toBe(false)
+  })
+
+  it("passes the live permission resolver and importer into lazy link registration", async () => {
+    const descriptor = MODULE_BRIDGE_CAPABILITIES["link-matcher"]
+    const ctx = makeCtx(
+      makeManifest({
+        linkMatchers: [
+          { id: "links", patterns: ["github.com/**"], entry: "links.js", export: "Link" },
+        ],
+      })
+    )
+    const importer = jest.fn(async () => ({}))
+    ctx.importer = importer
+    ctx.hasPermission = () => false
+    await descriptor.register(ctx)
+    expect(getLinkMatcher("https://github.com/a")).toBeUndefined()
+    ctx.hasPermission = () => true
+    await descriptor.register(ctx)
+    expect(getLinkMatcher("https://github.com/a")?.pluginId).toBe(ctx.pluginId)
+    expect(importer).not.toHaveBeenCalled()
+    registerLinkMatcher(ctx.pluginId, {
+      id: "imperative",
+      patterns: ["example.com/**"],
+      component: () => null,
+    })
+    descriptor.unregister(ctx.pluginId)
+    expect(getLinkMatcher("https://github.com/a")).toBeUndefined()
+    expect(getLinkMatcher("https://example.com/a")).toBeUndefined()
   })
 })

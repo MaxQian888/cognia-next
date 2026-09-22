@@ -35,6 +35,29 @@ function Boom({ enabled = true }: { enabled?: boolean }) {
 }
 
 describe("PluginSurface", () => {
+  it("uses phrasing content and a host fallback for inline failures", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const { container } = render(
+      <p>
+        <PluginSurface
+          pluginId="acme.reference"
+          surfaceId="inline"
+          formFactor="row"
+          inline
+          fallback={<a href="https://example.com">Original link</a>}
+        >
+          <Boom />
+        </PluginSurface>
+      </p>
+    )
+    const link = screen.getByRole("link", { name: "Original link" })
+    expect(link.parentElement?.tagName).toBe("SPAN")
+    expect(link.parentElement).toHaveStyle({ display: "contents" })
+    expect(container.querySelector("p div")).toBeNull()
+    await waitFor(() => expect(recordPluginPointDiagnostic).toHaveBeenCalled())
+    errorSpy.mockRestore()
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
   })

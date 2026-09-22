@@ -53,6 +53,7 @@ import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
+import type { PluginLinkMatcherDef } from "./plugin-link-matcher"
 import type { PluginMessageRendererDef } from "./plugin-message-renderer"
 import type { PluginToolRendererDef } from "./plugin-tool-renderer"
 import type { PluginAiProviderDef } from "./plugin-ai-provider"
@@ -180,6 +181,7 @@ export type PluginCapability =
   | "scheduler" // Provides scheduled tasks
   | "workspace-backend" // Contributes workspace execution backends (sandbox/local runners)
   | "message-renderer" // Contributes per-message-part renderers
+  | "link-matcher" // Replaces matched inline links in chat messages
   | "tool-renderer" // Contributes result cards for its own MCP tools
   | "density-preset" // Contributes named appearance density presets
   | "chat-middleware" // Contributes guarded chat request middleware
@@ -1098,6 +1100,14 @@ export interface PluginManifest {
    * `extension:ui`.
    */
   messageRenderers?: PluginMessageRendererDef[]
+
+  /**
+   * Inline chat-link replacements, loaded only when a declared URL glob matches.
+   * Requires `extension:ui`; host project-file links take precedence. Reasoning
+   * links do not use this surface. Components receive sanitized hrefs, which may
+   * contain sensitive data; outbound use still requires the network/model PII gate.
+   */
+  linkMatchers?: PluginLinkMatcherDef[]
 
   /**
    * Result cards for MCP tools this plugin provides. Tool parts are host-owned

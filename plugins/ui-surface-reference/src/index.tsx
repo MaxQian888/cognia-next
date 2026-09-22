@@ -1,6 +1,7 @@
 "use client"
 
 import type {
+  LinkMatcherProps,
   PluginContext,
   PluginDefinition,
   PluginModalProps,
@@ -29,6 +30,7 @@ export const REFERENCE_SURFACE_IDS = [
   "custom-view",
   "webview",
   "message-renderer",
+  "link-matcher",
   "tool-renderer",
   "quick-action",
   "config",
@@ -39,13 +41,17 @@ interface ConfigComponentProps {
   onSave(next: Record<string, unknown>): Promise<void>
 }
 
-function ReferenceBadge({ surfaceId }: { surfaceId: string }) {
+function throwOnReferenceCrash(surfaceId: string) {
   if (
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("pluginSurfaceCrash") === surfaceId
   ) {
     throw new Error(`Reference crash: ${surfaceId}`)
   }
+}
+
+function ReferenceBadge({ surfaceId }: { surfaceId: string }) {
+  throwOnReferenceCrash(surfaceId)
   return (
     <span className="ref-badge" data-reference-surface={surfaceId}>
       {surfaceId}
@@ -93,6 +99,21 @@ export function ReferenceModal(_props: PluginModalProps) {
 
 export function ReferenceMessageRenderer() {
   return <ReferenceBadge surfaceId="message-renderer" />
+}
+
+export function ReferenceLinkMatcher({ href, children, messageId, isStreaming }: LinkMatcherProps) {
+  throwOnReferenceCrash("link-matcher")
+  return (
+    <a
+      href={href}
+      className="ref-badge"
+      data-reference-surface="link-matcher"
+      data-message-id={messageId}
+      data-streaming={isStreaming}
+    >
+      {children}
+    </a>
+  )
 }
 
 export function ReferenceToolRenderer() {

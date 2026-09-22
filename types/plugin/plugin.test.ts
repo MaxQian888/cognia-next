@@ -52,3 +52,27 @@ describe("PluginManifest.dexie", () => {
     expect(manifest.dexie).toBeUndefined()
   })
 })
+
+describe("PluginManifest.linkMatchers", () => {
+  it("declares inline matchers through the public manifest capability", () => {
+    const manifest: PluginManifest = {
+      id: "links",
+      name: "Links",
+      version: "1.0.0",
+      description: "",
+      type: "frontend",
+      capabilities: ["link-matcher"],
+      main: "index.js",
+      permissions: ["extension:ui"],
+      linkMatchers: [
+        {
+          id: "pr",
+          patterns: ["github.com/**/pull/*"],
+          entry: "links.js",
+          export: "PullRequestLink",
+        },
+      ],
+    }
+    expect(manifest.linkMatchers?.[0].patterns).toEqual(["github.com/**/pull/*"])
+  })
+})
