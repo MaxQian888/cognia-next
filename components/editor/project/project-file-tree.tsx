@@ -70,6 +70,9 @@ import {
   type FileTreeOperation,
 } from "@/lib/files/file-tree-failure"
 import type { WorkspaceEntry } from "@/lib/files/types"
+import { isTauri } from "@/lib/platform/detect"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
+import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import type { GitFileStatus } from "@/types/git"
 import type {
   listWorkspaceDir,
@@ -90,6 +93,8 @@ export interface ProjectFileTreeDeps {
 
 interface Props {
   rootPath: string
+  /** Retain the tree while pausing requests when its navigation panel is hidden. */
+  active?: boolean
   /** Bump to force a reload of every expanded directory (external change). */
   refreshToken?: number
   activePath: string | null
@@ -116,6 +121,12 @@ const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
 const joinRel = (parent: string, name: string) => (parent ? `${parent}/${name}` : name)
 
 const TREE_DRAG_MIME = "application/x-cognia-tree-row"
+const REMOTE_REFRESH_MS = 5_000
+
+interface DirectoryRead {
+  dirty: boolean
+  promise: Promise<void>
+}
 
 /** Status letter shown on a row — the compact gitbadge VS Code popularised. */
 const STATUS_LETTER: Record<GitFileStatus, string> = {
@@ -145,6 +156,7 @@ function worstStatus(a: GitFileStatus | undefined, b: GitFileStatus): GitFileSta
 
 export function ProjectFileTree({
   rootPath,
+  active = true,
   refreshToken,
   activePath,
   onOpenFile,
@@ -177,62 +189,223 @@ export function ProjectFileTree({
   /** Directory relPath currently highlighted as a drop target (`""` = root). */
   const [dropDir, setDropDir] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const latest = useRef({ deps, onFailure, expanded, active })
+  useEffect(() => {
+    latest.current = { deps, onFailure, expanded, active }
+  }, [deps, onFailure, expanded, active])
+  const [transportVersion, setTransportVersion] = useState(0)
+  const listingRef = useRef({
+    rootPath,
+    transportVersion,
+    active: false,
+    pending: new Map<string, DirectoryRead>(),
+    failures: new Map<string, string>(),
+  })
 
   /** One place where a thrown error becomes a typed failure and reaches the caller. */
   const report = useCallback(
     (error: unknown, operation: FileTreeOperation, relPath: string): FileTreeFailure => {
       const failure = classifyFileTreeFailure(error)
-      onFailure?.(failure, operation, relPath)
+      latest.current.onFailure?.(failure, operation, relPath)
       return failure
     },
-    [onFailure]
+    []
   )
 
   const loadDir = useCallback(
-    async (dirRel: string) => {
-      try {
-        const entries = await deps.listDir(rootPath, dirRel || undefined)
-        setChildrenByDir((prev) => ({ ...prev, [dirRel]: entries }))
-        setFailureByDir((prev) => {
-          if (!(dirRel in prev)) return prev
-          const next = { ...prev }
-          delete next[dirRel]
-          return next
-        })
-      } catch (error) {
-        // Deliberately NOT an empty array. That was the old behaviour and it
-        // made a directory the caller may not read indistinguishable from one
-        // that genuinely has nothing in it.
-        const failure = report(error, "list", dirRel)
-        setFailureByDir((prev) => ({ ...prev, [dirRel]: failure }))
-        setChildrenByDir((prev) => {
-          const next = { ...prev }
-          delete next[dirRel]
-          return next
-        })
+    (dirRel: string, invalidate = false, background = false): Promise<void> => {
+      const listing = listingRef.current
+      if (
+        !listing.active ||
+        !latest.current.active ||
+        listing.rootPath !== rootPath ||
+        listing.transportVersion !== transportVersion
+      )
+        return Promise.resolve()
+      const pending = listing.pending.get(dirRel)
+      if (pending) {
+        // Invalidations during a read need a trailing read; expansion/polling
+        // can share the current one. Never overlap reads of one directory.
+        pending.dirty ||= invalidate
+        return pending.promise
       }
+      const current = () => listing.active && latest.current.active
+      const request: DirectoryRead = { dirty: false, promise: Promise.resolve() }
+      listing.pending.set(dirRel, request)
+      request.promise = (async () => {
+        do {
+          request.dirty = false
+          try {
+            const entries = await latest.current.deps.listDir(listing.rootPath, dirRel || undefined)
+            if (!current()) return
+            if (request.dirty) continue
+            listing.failures.delete(dirRel)
+            setChildrenByDir((prev) => ({ ...prev, [dirRel]: entries }))
+            setFailureByDir((prev) => {
+              if (!(dirRel in prev)) return prev
+              const next = { ...prev }
+              delete next[dirRel]
+              return next
+            })
+          } catch (error) {
+            if (!current()) return
+            if (request.dirty) continue
+            const failure = classifyFileTreeFailure(error)
+            // Keep the error visible, without repeating the same toast on
+            // every background retry while a remote host remains offline.
+            if (!background || listing.failures.get(dirRel) !== failure.kind) {
+              report(error, "list", dirRel)
+            }
+            listing.failures.set(dirRel, failure.kind)
+            setFailureByDir((prev) => ({ ...prev, [dirRel]: failure }))
+            setChildrenByDir((prev) => {
+              const next = { ...prev }
+              delete next[dirRel]
+              return next
+            })
+          }
+        } while (current() && request.dirty)
+      })().finally(() => {
+        if (listing.pending.get(dirRel) === request) listing.pending.delete(dirRel)
+      })
+      return request.promise
     },
-    [deps, rootPath, report]
+    [rootPath, transportVersion, report]
   )
 
   // Reset the tree and load the root on mount / root change. The synchronous
   // resets are intentional (a fresh root must start from a clean tree).
   useEffect(() => {
+    const listing = {
+      rootPath,
+      transportVersion,
+      active: true,
+      pending: new Map<string, DirectoryRead>(),
+      failures: new Map<string, string>(),
+    }
+    listingRef.current = listing
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpanded(new Set([""]))
+    latest.current.expanded = new Set([""])
     setChildrenByDir({})
+    setFailureByDir({})
+    setPendingCreate(null)
+    setRenameTarget(null)
+    setDeleteTarget(null)
+    setDropDir(null)
     void loadDir("")
-  }, [loadDir])
+    return () => {
+      listing.active = false
+      listing.pending.clear()
+    }
+  }, [rootPath, transportVersion, loadDir])
+
+  useEffect(() => {
+    const listing = listingRef.current
+    const changed = () => {
+      // Invalidate synchronously; an old response may settle before React
+      // commits the replacement host's tree (the same root may exist there).
+      listing.active = false
+      setTransportVersion((version) => version + 1)
+    }
+    const stopTransport = onTransportChange(changed)
+    const stopRemote = subscribeActiveRemoteTransport(changed)
+    return () => {
+      stopTransport()
+      stopRemote()
+    }
+  }, [rootPath, transportVersion])
+
+  useEffect(() => {
+    if (!active || (isTauri() && !isRemoteHostActive())) return
+    const listing = listingRef.current
+    let stopped = false
+    let running = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const available = () => document.visibilityState !== "hidden" && navigator.onLine !== false
+    const poll = async () => {
+      if (stopped || running || !available()) return
+      running = true
+      try {
+        // Serial traversal bounds remote load regardless of expanded count.
+        // Hidden descendants of a collapsed folder do not need refreshing.
+        for (const dir of latest.current.expanded) {
+          if (stopped || !listing.active || !available()) break
+          if (!latest.current.expanded.has(dir)) continue
+          let parent = dir
+          let shown = true
+          while (parent) {
+            parent = parentOf(parent)
+            if (!latest.current.expanded.has(parent)) {
+              shown = false
+              break
+            }
+          }
+          if (shown) await loadDir(dir, false, true)
+        }
+      } finally {
+        running = false
+        if (!stopped && available()) timer = setTimeout(() => void poll(), REMOTE_REFRESH_MS)
+      }
+    }
+    const onAvailability = () => {
+      clearTimeout(timer)
+      if (available()) void poll()
+    }
+    if (available()) timer = setTimeout(() => void poll(), REMOTE_REFRESH_MS)
+    document.addEventListener("visibilitychange", onAvailability)
+    window.addEventListener("online", onAvailability)
+    window.addEventListener("offline", onAvailability)
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", onAvailability)
+      window.removeEventListener("online", onAvailability)
+      window.removeEventListener("offline", onAvailability)
+    }
+  }, [active, loadDir])
 
   // Reload every currently-expanded dir when the external-change token bumps.
   // `loadDir` sets state only after its async listDir resolves (not a
   // synchronous set-in-effect), so the set-state rule is a false positive here.
+  const previousRefresh = useRef(refreshToken)
+  const refreshExpanded = useCallback(() => {
+    for (const dir of latest.current.expanded) void loadDir(dir, true)
+  }, [loadDir])
   useEffect(() => {
+    if (previousRefresh.current === refreshToken) return
+    previousRefresh.current = refreshToken
     if (refreshToken === undefined) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    for (const dir of expanded) void loadDir(dir)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken])
+    refreshExpanded()
+  }, [refreshToken, refreshExpanded])
+
+  // Hiding never discards expansion or pending-read ownership. A reactivation
+  // invalidates those reads, requesting at most one trailing fresh result.
+  const previousActivation = useRef({ active, loadDir })
+  useEffect(() => {
+    // A new root/host already loaded its root in the lifecycle effect above.
+    const resumed =
+      active && !previousActivation.current.active && previousActivation.current.loadDir === loadDir
+    previousActivation.current = { active, loadDir }
+    if (!active) {
+      // A portaled confirmation must not outlive the panel that opened it.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDeleteTarget(null)
+    }
+    if (!resumed) return
+    for (const dir of latest.current.expanded) {
+      let parent = dir
+      let shown = true
+      while (parent) {
+        parent = parentOf(parent)
+        if (!latest.current.expanded.has(parent)) {
+          shown = false
+          break
+        }
+      }
+      if (shown) void loadDir(dir, true)
+    }
+  }, [active, loadDir])
 
   const toggle = useCallback(
     (dirRel: string) => {
@@ -287,11 +460,11 @@ export function ProjectFileTree({
   // Deferred a frame so revealPath's expansion setState stays out of the
   // effect body (set-state-in-effect) — the scroll already waits two frames.
   useEffect(() => {
-    if (!revealRequest) return
+    if (!active || !revealRequest) return
     const frame = requestAnimationFrame(() => revealPath(revealRequest.path))
     return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealRequest?.nonce])
+  }, [active, revealRequest?.nonce])
 
   const startCreate = useCallback(
     (parent: string, kind: "file" | "folder", templateId?: string) => {
@@ -306,6 +479,7 @@ export function ProjectFileTree({
   )
 
   const submitCreate = useCallback(async () => {
+    const listing = listingRef.current
     if (!pendingCreate || !createName.trim()) {
       setPendingCreate(null)
       return
@@ -320,9 +494,11 @@ export function ProjectFileTree({
           : undefined
         await deps.writeFile(rootPath, rel, template?.content(rel) ?? "")
       }
-      await loadDir(pendingCreate.parent)
+      await loadDir(pendingCreate.parent, true)
+      if (!listing.active) return
       if (pendingCreate.kind === "file") onOpenFile(rel)
     } catch (error) {
+      if (!listing.active) return
       report(error, "create", rel)
     }
     setPendingCreate(null)
@@ -330,6 +506,7 @@ export function ProjectFileTree({
   }, [pendingCreate, createName, deps, rootPath, loadDir, onOpenFile, report])
 
   const submitRename = useCallback(async () => {
+    const listing = listingRef.current
     if (!renameTarget || !renameValue.trim()) {
       setRenameTarget(null)
       return
@@ -338,20 +515,26 @@ export function ProjectFileTree({
     const to = joinRel(parent, renameValue.trim())
     try {
       await deps.renameEntry(rootPath, renameTarget, to)
+      if (!listing.active) return
       await onRenamed?.(renameTarget, to)
-      await loadDir(parent)
+      await loadDir(parent, true)
+      if (!listing.active) return
     } catch (error) {
+      if (!listing.active) return
       report(error, "rename", renameTarget)
     }
     setRenameTarget(null)
   }, [renameTarget, renameValue, deps, rootPath, loadDir, onRenamed, report])
 
   const confirmDelete = useCallback(async () => {
+    const listing = listingRef.current
     if (!deleteTarget) return
     try {
       await deps.deleteEntry(rootPath, deleteTarget.relPath, deleteTarget.isDir)
-      await loadDir(parentOf(deleteTarget.relPath))
+      await loadDir(parentOf(deleteTarget.relPath), true)
+      if (!listing.active) return
     } catch (error) {
+      if (!listing.active) return
       report(error, "delete", deleteTarget.relPath)
     }
     setDeleteTarget(null)
@@ -364,6 +547,7 @@ export function ProjectFileTree({
    */
   const moveInto = useCallback(
     async (fromRel: string, dirRel: string) => {
+      const listing = listingRef.current
       const name = fromRel.split("/").pop() ?? fromRel
       const to = joinRel(dirRel, name)
       if (to === fromRel) return
@@ -372,11 +556,14 @@ export function ProjectFileTree({
       if (dirRel === fromRel || dirRel.startsWith(`${fromRel}/`)) return
       try {
         await deps.renameEntry(rootPath, fromRel, to)
+        if (!listing.active) return
         await onRenamed?.(fromRel, to)
-        await loadDir(parentOf(fromRel))
-        await loadDir(dirRel)
+        await loadDir(parentOf(fromRel), true)
+        await loadDir(dirRel, true)
+        if (!listing.active) return
         setExpanded((prev) => (dirRel ? new Set(prev).add(dirRel) : prev))
       } catch (error) {
+        if (!listing.active) return
         report(error, "rename", fromRel)
       }
     },
@@ -568,7 +755,7 @@ export function ProjectFileTree({
           className={cn("size-6", density === "touch" && "size-11")}
           aria-label={t("refresh")}
           title={t("refresh")}
-          onClick={() => void loadDir("")}
+          onClick={refreshExpanded}
         >
           <RefreshCwIcon className="size-3.5" />
         </Button>
@@ -668,7 +855,7 @@ export function ProjectFileTree({
             {t("newFolder")}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => void loadDir("")}>
+          <ContextMenuItem onSelect={refreshExpanded}>
             <RefreshCwIcon className="size-3.5" />
             {t("refresh")}
           </ContextMenuItem>
@@ -679,7 +866,10 @@ export function ProjectFileTree({
         </ContextMenuContent>
       </ContextMenu>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialog
+        open={active && !!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("delete")}</AlertDialogTitle>

@@ -237,6 +237,14 @@ it("surfaces a dirty-buffer conflict without falling back to a reveal", async ()
   expect(toast.error).toHaveBeenCalledWith("proIde.openFileFailed")
 })
 
+it("localizes a superseded host opening instead of exposing the error code", () => {
+  paneState.phase = "error"
+  paneState.error = "Error: CODESERVER_OPEN_SUPERSEDED"
+  renderPane()
+  expect(screen.getByText("proIde.openSuperseded")).toBeInTheDocument()
+  expect(screen.queryByText("Error: CODESERVER_OPEN_SUPERSEDED")).not.toBeInTheDocument()
+})
+
 it("does not claim the opener before code-server can service an open", () => {
   paneState.phase = "downloading"
   renderPane()

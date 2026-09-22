@@ -171,7 +171,11 @@ function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
         data-testid="code-server-web-error"
       >
         <p className="text-sm font-medium">{t("proIde.errorTitle")}</p>
-        {error ? <p className="text-xs text-muted-foreground">{error}</p> : null}
+        {error ? (
+          <p className="text-xs text-muted-foreground">
+            {error.includes("CODESERVER_OPEN_SUPERSEDED") ? t("proIde.openSuperseded") : error}
+          </p>
+        ) : null}
         <Button size="sm" variant="outline" onClick={retry}>
           <RotateCwIcon className="size-3.5" />
           {t("proIde.retry")}

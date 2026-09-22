@@ -1,10 +1,29 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { DEFAULT_A11Y } from "@/types/appearance"
 import { DEFAULT_CANVAS_SETTINGS } from "@/types/canvas/settings"
 
 let mockIsTauri = true
 let mockResolvedTheme: string | undefined = "dark"
+let mockTransport: object = {}
+let mockRemote: object | null = null
+const mockHostListeners = new Set<() => void>()
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  get transport() {
+    return mockTransport
+  },
+  onTransportChange: (listener: () => void) => {
+    mockHostListeners.add(listener)
+    return () => mockHostListeners.delete(listener)
+  },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: () => mockRemote,
+  subscribeActiveRemoteTransport: (listener: () => void) => {
+    mockHostListeners.add(listener)
+    return () => mockHostListeners.delete(listener)
+  },
+}))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 jest.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: mockResolvedTheme }) }))
@@ -49,6 +68,8 @@ const client = codeServerClient as jest.Mocked<typeof codeServerClient>
 const written = () => JSON.parse(client.writeUserSettings.mock.calls.at(-1)![0] as string)
 
 beforeEach(() => {
+  mockTransport = {}
+  mockRemote = null
   mockIsTauri = true
   mockResolvedTheme = "dark"
   settingsState.colorTheme = "default"
@@ -273,4 +294,194 @@ describe("trust-domain profile", () => {
     expect(client.readUserSettings).toHaveBeenCalledWith("native")
     expect(client.writeUserSettings.mock.calls.at(-1)![1]).toBe("native")
   })
+})
+
+it("waits for an older theme write and commits only the latest pending theme", async () => {
+  let finish!: () => void
+  client.writeUserSettings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { rerender } = renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  mockResolvedTheme = "light"
+  rerender()
+  await act(async () => {})
+  expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+  client.readUserSettings.mockResolvedValue('{"files.autoSave":"afterDelay"}')
+  await act(async () => {
+    finish()
+  })
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(2))
+  expect(written()["workbench.colorTheme"]).toBe("Default Light Modern")
+  expect(written()["files.autoSave"]).toBe("afterDelay")
+})
+
+it("retries a failed sync without requiring another theme change", async () => {
+  jest.useFakeTimers()
+  try {
+    client.readUserSettings.mockRejectedValueOnce(new Error("temporary disconnect"))
+    const { unmount } = renderHook(() => useCodeServerSettingsSync(true))
+    await act(async () => {})
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2_000)
+    })
+    expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+    unmount()
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60_000)
+    })
+    expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+it("never merges an old host's settings into a newly selected host", async () => {
+  let finish!: (value: string) => void
+  client.readUserSettings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.readUserSettings).toHaveBeenCalledTimes(1))
+  client.readUserSettings.mockResolvedValue('{"newHostOnly":true}')
+  await act(async () => {
+    mockTransport = { name: "new browser host" }
+    mockHostListeners.forEach((listener) => listener())
+    finish('{"oldHostOnly":true}')
+  })
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  expect(written().newHostOnly).toBe(true)
+  expect(written()).not.toHaveProperty("oldHostOnly")
+})
+
+it("serializes the same profile across unmount and remount", async () => {
+  let finish!: () => void
+  client.writeUserSettings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const first = renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  first.unmount()
+  mockResolvedTheme = "light"
+  renderHook(() => useCodeServerSettingsSync(true))
+  await act(async () => {})
+  expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    finish()
+  })
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(2))
+  expect(written()["workbench.colorTheme"]).toBe("Default Light Modern")
+})
+
+it("discards a managed read after switching to the native profile", async () => {
+  let finish!: (value: string) => void
+  client.readUserSettings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { rerender } = renderHook(
+    ({ profile }: { profile: "managed" | "native" }) => useCodeServerSettingsSync(true, profile),
+    { initialProps: { profile: "managed" } }
+  )
+  await waitFor(() => expect(client.readUserSettings).toHaveBeenCalledTimes(1))
+  rerender({ profile: "native" })
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  await act(async () => {
+    finish('{"managedOnly":true}')
+  })
+  expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+  expect(client.writeUserSettings.mock.calls[0][1]).toBe("native")
+  expect(written()).not.toHaveProperty("managedOnly")
+})
+
+it("does not write unchanged merged settings", async () => {
+  const first = renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  const current = client.writeUserSettings.mock.calls[0][0]
+  first.unmount()
+  client.readUserSettings.mockResolvedValue(current)
+  renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.readUserSettings).toHaveBeenCalledTimes(2))
+  await act(async () => {})
+  expect(client.writeUserSettings).toHaveBeenCalledTimes(1)
+})
+
+it("retries failed writes with a fresh read and stops retrying on cleanup", async () => {
+  jest.useFakeTimers()
+  try {
+    client.writeUserSettings.mockRejectedValueOnce(new Error("temporarily read-only"))
+    const { unmount } = renderHook(() => useCodeServerSettingsSync(true))
+    await act(async () => {})
+    client.readUserSettings.mockResolvedValue('{"files.autoSave":"onFocusChange"}')
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2_000)
+    })
+    expect(client.readUserSettings).toHaveBeenCalledTimes(2)
+    expect(client.writeUserSettings).toHaveBeenCalledTimes(2)
+    expect(written()["files.autoSave"]).toBe("onFocusChange")
+    unmount()
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60_000)
+    })
+    expect(client.writeUserSettings).toHaveBeenCalledTimes(2)
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+it("coalesces a burst while a write is pending", async () => {
+  let finish!: () => void
+  client.writeUserSettings.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const { rerender } = renderHook(() => useCodeServerSettingsSync(true))
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalledTimes(1))
+  for (const accent of ["#112233", "#223344", "#334455"]) {
+    settingsState.accentColor = accent
+    rerender()
+  }
+  await act(async () => {
+    finish()
+  })
+  expect(client.writeUserSettings).toHaveBeenCalledTimes(2)
+  expect(written()["workbench.colorCustomizations"]["button.background"]).toBe("#334455")
+})
+
+it("does not restart synchronization when an unmounted read fails later", async () => {
+  jest.useFakeTimers()
+  try {
+    let reject!: (cause: Error) => void
+    client.readUserSettings.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail
+        })
+    )
+    const { unmount } = renderHook(() => useCodeServerSettingsSync(true))
+    unmount()
+    await act(async () => {
+      reject(new Error("late failure"))
+    })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60_000)
+    })
+    expect(client.readUserSettings).toHaveBeenCalledTimes(1)
+    expect(client.writeUserSettings).not.toHaveBeenCalled()
+  } finally {
+    jest.useRealTimers()
+  }
 })

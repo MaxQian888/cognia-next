@@ -49,6 +49,9 @@ import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-ses
 import { loggers } from "@cognia/logging"
 import { getDb } from "@/lib/db/schema"
 import { migrateResourceSessionBinding } from "@/lib/context-workbench/resource-session"
+import { isTauri } from "@/lib/platform/detect"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
+import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 const editorLogger = loggers.agent.child("project-editor")
 
@@ -399,6 +402,30 @@ export function useProjectEditor({
     [roots, rootKey]
   )
   const rootPath = activeRoot?.path ?? workingDir
+  const operationEpoch = useRef(0)
+  const documentEpochs = useRef(new Map<string, number>())
+  const [hostRevision, setHostRevision] = useState(0)
+  useEffect(
+    () => () => {
+      operationEpoch.current += 1
+      documentEpochs.current.clear()
+    },
+    [rootPath, d]
+  )
+  const pendingSaves = useRef(new Map<string, Promise<void>>())
+  useEffect(() => {
+    const invalidate = () => {
+      operationEpoch.current += 1
+      setHostRevision((revision) => revision + 1)
+      setOpenFiles((files) => files.map((file) => ({ ...file, externallyChanged: true })))
+    }
+    const stopTransport = onTransportChange(invalidate)
+    const stopRemote = subscribeActiveRemoteTransport(invalidate)
+    return () => {
+      stopTransport()
+      stopRemote()
+    }
+  }, [])
 
   // ── Worktree discovery ──────────────────────────────────────────────────
   useEffect(() => {
@@ -514,6 +541,7 @@ export function useProjectEditor({
   const evictTab = useCallback(
     (relPath: string) => {
       openPathsRef.current.delete(relPath)
+      documentEpochs.current.delete(relPath)
       releaseFileModel(joinRootRel(rootPath, relPath))
       setOpenFiles((prev) => prev.filter((f) => f.relPath !== relPath))
     },
@@ -536,8 +564,11 @@ export function useProjectEditor({
       previousActivePath: string | null,
       preserveOnError: boolean
     ) => {
+      const epoch = operationEpoch.current
       const stillOurs = () =>
-        openPathsRef.current.has(relPath) && openSeqRef.current.get(relPath) === seq
+        operationEpoch.current === epoch &&
+        openPathsRef.current.has(relPath) &&
+        openSeqRef.current.get(relPath) === seq
       const binaryByName = isProbablyBinaryPath(relPath)
       try {
         // Stat first: a file over the ceiling opens as a `too-large`
@@ -563,14 +594,21 @@ export function useProjectEditor({
         // model. Appending anyway would resurrect the evicted file and leave
         // two tabs in the single reusable preview slot.
         if (!stillOurs()) return
+        // Stat can fail or the file can grow between stat and read. The host's
+        // capped preview appends a truncation marker; that is never editable
+        // file content. Check UTF-8 bytes, not UTF-16 string length.
+        const oversizedRead =
+          !allowLarge && read.ok && new Blob([read.content]).size > MAX_EDITOR_BYTES
         const blocked =
           binaryByName || (!read.ok && isUtf8ReadError(read.error))
             ? ("binary" as const)
-            : tooLarge
+            : tooLarge || oversizedRead
               ? ("too-large" as const)
               : undefined
         if (!blocked && !read.ok) throw read.error
         const content = blocked ? "" : read.ok ? read.content : ""
+        // A failed reload must not authorize an old host's retained draft.
+        documentEpochs.current.set(relPath, epoch)
         setOpenFiles((prev) => {
           const entry: OpenFile = {
             relPath,
@@ -704,6 +742,7 @@ export function useProjectEditor({
       const remaining = openFiles.filter((f) => f.relPath !== relPath)
       rememberClosed([relPath])
       openPathsRef.current.delete(relPath)
+      documentEpochs.current.delete(relPath)
       releaseFileModel(joinRootRel(rootPath, relPath))
       setTabState(forgetTab(tabStateRef.current, relPath))
       setOpenFiles(remaining)
@@ -742,6 +781,7 @@ export function useProjectEditor({
       for (const f of openFiles) {
         if (!closing.has(f.relPath)) continue
         openPathsRef.current.delete(f.relPath)
+        documentEpochs.current.delete(f.relPath)
         releaseFileModel(joinRootRel(rootPath, f.relPath))
       }
       let nextTabState = tabStateRef.current
@@ -805,49 +845,71 @@ export function useProjectEditor({
     [setTabState]
   )
 
+  const saveSnapshot = useCallback(
+    (
+      file: OpenFile,
+      epoch = operationEpoch.current,
+      seq = openSeqRef.current.get(file.relPath)
+    ): Promise<void> => {
+      const current = () =>
+        operationEpoch.current === epoch &&
+        documentEpochs.current.get(file.relPath) === epoch &&
+        file.absolutePath === joinRootRel(rootPath, file.relPath) &&
+        openPathsRef.current.has(file.relPath) &&
+        openSeqRef.current.get(file.relPath) === seq
+      const write = async () => {
+        // Queued writes belong to this document incarnation, never a reopened
+        // tab or another root. A failed predecessor must not poison retries.
+        if (!current()) throw new Error(t("saveContextChanged"))
+        await d.writeFile(rootPath, file.relPath, file.draftContent)
+        if (!current()) return
+        const stat = await d.statFile(rootPath, file.relPath).catch(() => null)
+        if (!current()) return
+        setOpenFiles((prev) =>
+          prev.map((f) =>
+            f.absolutePath === file.absolutePath
+              ? {
+                  ...f,
+                  savedContent: file.draftContent,
+                  externallyChanged: false,
+                  mtime: stat?.mtimeMs ?? f.mtime,
+                  sizeBytes: stat?.size ?? f.sizeBytes,
+                }
+              : f
+          )
+        )
+      }
+      const previous = pendingSaves.current.get(file.absolutePath)
+      const saving = previous ? previous.catch(() => {}).then(write) : write()
+      pendingSaves.current.set(file.absolutePath, saving)
+      const release = () => {
+        if (pendingSaves.current.get(file.absolutePath) === saving)
+          pendingSaves.current.delete(file.absolutePath)
+      }
+      void saving.then(release, release)
+      return saving
+    },
+    [d, rootPath, t]
+  )
+
   const saveFile = useCallback(
     async (relPath: string) => {
-      const file = openFiles.find((f) => f.relPath === relPath)
-      // A `binary`/`too-large` placeholder tab holds an empty buffer, not the
-      // file's content — writing it would erase the real file on disk.
+      const file = openFilesRef.current.find((f) => f.relPath === relPath)
+      // Placeholders contain no file bytes and must never be saved.
       if (!file || file.blocked) return
-      await d.writeFile(rootPath, relPath, file.draftContent)
-      const stat = await d.statFile(rootPath, relPath).catch(() => null)
-      setOpenFiles((prev) =>
-        prev.map((f) =>
-          f.relPath === relPath
-            ? {
-                ...f,
-                savedContent: f.draftContent,
-                externallyChanged: false,
-                mtime: stat?.mtimeMs ?? f.mtime,
-              }
-            : f
-        )
-      )
+      await saveSnapshot(file)
     },
-    [d, rootPath, openFiles]
+    [saveSnapshot]
   )
 
   const saveAll = useCallback(async () => {
-    const dirty = openFiles.filter((f) => f.draftContent !== f.savedContent && !f.blocked)
-    const mtimes = new Map<string, number>()
-    for (const f of dirty) {
-      await d.writeFile(rootPath, f.relPath, f.draftContent)
-      const stat = await d.statFile(rootPath, f.relPath).catch(() => null)
-      if (stat?.mtimeMs != null) mtimes.set(f.relPath, stat.mtimeMs)
-    }
-    if (dirty.length > 0) {
-      setOpenFiles((prev) =>
-        prev.map((f) => ({
-          ...f,
-          savedContent: f.draftContent,
-          externallyChanged: false,
-          mtime: mtimes.get(f.relPath) ?? f.mtime,
-        }))
-      )
-    }
-  }, [d, rootPath, openFiles])
+    const dirty = openFilesRef.current.filter(
+      (f) => f.draftContent !== f.savedContent && !f.blocked
+    )
+    const epoch = operationEpoch.current
+    const snapshots = dirty.map((file) => ({ file, seq: openSeqRef.current.get(file.relPath) }))
+    for (const { file, seq } of snapshots) await saveSnapshot(file, epoch, seq)
+  }, [saveSnapshot])
 
   const reloadFile = useCallback(
     async (relPath: string) => {
@@ -867,6 +929,7 @@ export function useProjectEditor({
     (key: string) => {
       setRootKey(key)
       openPathsRef.current.clear()
+      documentEpochs.current.clear()
       // The new root's files live at different absolute paths, so every model
       // held for the old root is now unreachable. The closed-tab history is
       // likewise meaningless — relPaths only resolve inside their own root.
@@ -910,6 +973,66 @@ export function useProjectEditor({
       )
     })
     return dispose
+  }, [d, rootPath, hostRevision])
+
+  // Remote hosts cannot use plugin_fs_watch (it is explicitly client-local).
+  // Probe only metadata for open documents, with one request in flight and no
+  // hidden/offline work. Never replace a draft with bytes fetched behind it.
+  useEffect(() => {
+    let disposed = false
+    let running = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const available = () => document.visibilityState !== "hidden" && navigator.onLine !== false
+    const poll = async () => {
+      if (disposed || running) return
+      if (timer !== undefined) clearTimeout(timer)
+      running = true
+      const epoch = operationEpoch.current
+      try {
+        if (!available()) return
+        if (isTauri() && !isRemoteHostActive()) return
+        for (const file of openFilesRef.current) {
+          if (disposed || epoch !== operationEpoch.current) break
+          if (!available()) break
+          if (file.externallyChanged || documentEpochs.current.get(file.relPath) !== epoch) continue
+          if (pendingSaves.current.has(file.absolutePath)) continue
+          const seq = openSeqRef.current.get(file.relPath)
+          const stat = await d.statFile(rootPath, file.relPath).catch(() => null)
+          if (
+            !stat ||
+            disposed ||
+            epoch !== operationEpoch.current ||
+            pendingSaves.current.has(file.absolutePath)
+          )
+            continue
+          if (seq !== openSeqRef.current.get(file.relPath)) continue
+          if (stat.exists && stat.size === file.sizeBytes && stat.mtimeMs === file.mtime) continue
+          setOpenFiles((files) =>
+            files.map((current) =>
+              current === file ? { ...current, externallyChanged: true } : current
+            )
+          )
+        }
+      } finally {
+        running = false
+        if (!disposed)
+          timer = setTimeout(() => {
+            void poll()
+          }, 5000)
+      }
+    }
+    const resume = () => {
+      void poll()
+    }
+    timer = setTimeout(resume, 5000)
+    document.addEventListener("visibilitychange", resume)
+    window.addEventListener("online", resume)
+    return () => {
+      disposed = true
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", resume)
+      window.removeEventListener("online", resume)
+    }
   }, [d, rootPath])
 
   const renameOpenFile = useCallback(
@@ -951,6 +1074,9 @@ export function useProjectEditor({
         if (relPath === previousRelPath) continue
         openPathsRef.current.delete(previousRelPath)
         openPathsRef.current.add(relPath)
+        const epoch = documentEpochs.current.get(previousRelPath)
+        documentEpochs.current.delete(previousRelPath)
+        if (epoch !== undefined) documentEpochs.current.set(relPath, epoch)
         releaseFileModel(joinRootRel(rootPath, previousRelPath))
         retainFileModel(joinRootRel(rootPath, relPath))
       }

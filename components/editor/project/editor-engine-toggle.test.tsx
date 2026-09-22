@@ -123,6 +123,7 @@ it("disables Pro IDE with an explanation the user can actually reach", async () 
   // through aria-describedby for assistive tech.
   const trigger = screen.getByTestId("editor-mode-codeserver-disabled")
   expect(trigger).toBeInTheDocument()
+  expect(trigger).toHaveAttribute("tabindex", "0")
   expect(proIde).toHaveAttribute("aria-describedby")
 
   fireEvent.focus(trigger)
@@ -250,7 +251,10 @@ describe("<EditorEngineToggle /> against a remote host", () => {
     // act on this machine instead of the one on screen.
     mockRemoteHostActive = true
     renderToggle({ value: "codeserver" })
-    expect(screen.getByTestId("pro-ide-remote-workbench")).toBeInTheDocument()
+    expect(screen.getByTestId("pro-ide-remote-workbench")).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("pro-ide-remote-workbench")).toHaveAccessibleName(
+      "proIde.remoteWorkbenchTooltip"
+    )
   })
 
   it("stays quiet when the workbench is this machine's", () => {

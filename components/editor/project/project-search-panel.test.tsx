@@ -3,6 +3,21 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
+const mockTransportListeners = new Set<() => void>()
+const mockRemoteListeners = new Set<() => void>()
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  onTransportChange: (listener: () => void) => {
+    mockTransportListeners.add(listener)
+    return () => mockTransportListeners.delete(listener)
+  },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  subscribeActiveRemoteTransport: (listener: () => void) => {
+    mockRemoteListeners.add(listener)
+    return () => mockRemoteListeners.delete(listener)
+  },
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -104,6 +119,183 @@ describe("ProjectSearchPanel", () => {
   describe("live search", () => {
     beforeEach(() => jest.useFakeTimers())
     afterEach(() => jest.useRealTimers())
+
+    it("Enter cancels the pending debounce instead of sending the same query twice", async () => {
+      const search = jest.fn(async () => matches)
+      render(<ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={{ search }} />)
+      const input = screen.getByLabelText("search")
+      fireEvent.change(input, { target: { value: "needle" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1_000)
+      })
+      expect(search).toHaveBeenCalledTimes(1)
+    })
+
+    it("invalidates earlier results as soon as a query changes during the debounce", async () => {
+      let resolve!: (results: WorkspaceContentMatch[]) => void
+      const search = jest.fn(
+        () =>
+          new Promise<WorkspaceContentMatch[]>((done) => {
+            resolve = done
+          })
+      )
+      render(<ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={{ search }} />)
+      const input = screen.getByLabelText("search")
+      fireEvent.change(input, { target: { value: "old" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      fireEvent.change(input, { target: { value: "new" } })
+      await act(async () => {
+        resolve(matches)
+      })
+      expect(screen.queryByTestId("search-hit-src/a.ts-2")).toBeNull()
+      expect(search).toHaveBeenCalledTimes(1)
+    })
+
+    it("preserves query and options while inactive, then refreshes and focuses on activation", async () => {
+      const search = jest.fn(async () => matches)
+      const props = { rootPath: "/repo", onOpenMatch: jest.fn(), deps: { search } }
+      const { rerender } = render(<ProjectSearchPanel {...props} active />)
+      const input = screen.getByLabelText("search")
+      fireEvent.change(input, { target: { value: "needle" } })
+      fireEvent.click(screen.getByTestId("search-case-toggle"))
+      fireEvent.click(screen.getByTestId("search-regex-toggle"))
+      rerender(<ProjectSearchPanel {...props} active={false} />)
+      input.blur()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(1_000)
+      })
+      expect(search).not.toHaveBeenCalled()
+      expect(input).toHaveValue("needle")
+      expect(screen.getByTestId("search-case-toggle")).toHaveAttribute("aria-pressed", "true")
+      expect(screen.getByTestId("search-regex-toggle")).toHaveAttribute("aria-pressed", "true")
+      rerender(<ProjectSearchPanel {...props} active />)
+      expect(input).toHaveFocus()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(250)
+      })
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(search).toHaveBeenCalledWith("/repo", "needle", {
+        maxResults: 200,
+        isRegex: true,
+        caseSensitive: true,
+      })
+      expect(screen.getByTestId("search-hit-src/a.ts-2")).toBeInTheDocument()
+    })
+
+    it("ignores a late result while inactive and does not initially focus a hidden panel", async () => {
+      let resolve!: (results: WorkspaceContentMatch[]) => void
+      const search = jest.fn(
+        () =>
+          new Promise<WorkspaceContentMatch[]>((done) => {
+            resolve = done
+          })
+      )
+      const props = { rootPath: "/repo", onOpenMatch: jest.fn(), deps: { search } }
+      const { rerender } = render(<ProjectSearchPanel {...props} active={false} />)
+      const input = screen.getByLabelText("search")
+      expect(input).not.toHaveFocus()
+      rerender(<ProjectSearchPanel {...props} active />)
+      fireEvent.change(input, { target: { value: "needle" } })
+      fireEvent.keyDown(input, { key: "Enter" })
+      rerender(<ProjectSearchPanel {...props} active={false} />)
+      await act(async () => {
+        resolve(matches)
+        await jest.advanceTimersByTimeAsync(1_000)
+      })
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(screen.queryByTestId("search-hit-src/a.ts-2")).toBeNull()
+    })
+
+    it("retains completed results across hide/show and replaces them on refresh", async () => {
+      const search = jest.fn(async () => matches)
+      const props = { rootPath: "/repo", onOpenMatch: jest.fn(), deps: { search } }
+      const { rerender } = render(<ProjectSearchPanel {...props} active />)
+      fireEvent.change(screen.getByLabelText("search"), { target: { value: "needle" } })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(250)
+      })
+      rerender(<ProjectSearchPanel {...props} active={false} />)
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000)
+      })
+      expect(screen.getByTestId("search-hit-src/a.ts-2")).toBeInTheDocument()
+      expect(search).toHaveBeenCalledTimes(1)
+      search.mockResolvedValueOnce([])
+      rerender(<ProjectSearchPanel {...props} active />)
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(250)
+      })
+      expect(search).toHaveBeenCalledTimes(2)
+      expect(screen.queryByTestId("search-hit-src/a.ts-2")).toBeNull()
+    })
+
+    it.each(["transport", "remote"])(
+      "invalidates %s host results and resumes the retained query on the current root",
+      async (source) => {
+        let resolve!: (results: WorkspaceContentMatch[]) => void
+        const search = jest.fn(
+          () =>
+            new Promise<WorkspaceContentMatch[]>((done) => {
+              resolve = done
+            })
+        )
+        const props = { rootPath: "/repo", onOpenMatch: jest.fn(), deps: { search } }
+        const { rerender, unmount } = render(<ProjectSearchPanel {...props} active />)
+        fireEvent.change(screen.getByLabelText("search"), { target: { value: "needle" } })
+        fireEvent.keyDown(screen.getByLabelText("search"), { key: "Enter" })
+        rerender(<ProjectSearchPanel {...props} active={false} />)
+        act(() => {
+          for (const listener of source === "transport"
+            ? mockTransportListeners
+            : mockRemoteListeners)
+            listener()
+        })
+        await act(async () => {
+          resolve(matches)
+          await jest.advanceTimersByTimeAsync(250)
+        })
+        expect(search).toHaveBeenCalledTimes(1)
+        expect(screen.queryByTestId("search-hit-src/a.ts-2")).toBeNull()
+        rerender(<ProjectSearchPanel {...props} rootPath="/current" active />)
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(250)
+        })
+        expect(search).toHaveBeenLastCalledWith("/current", "needle", {
+          maxResults: 200,
+          caseSensitive: false,
+          isRegex: false,
+        })
+        unmount()
+        expect(mockTransportListeners.size).toBe(0)
+        expect(mockRemoteListeners.size).toBe(0)
+      }
+    )
+
+    it("discards active-host completions before the replacement host query starts", async () => {
+      let resolve!: (results: WorkspaceContentMatch[]) => void
+      const search = jest.fn(
+        () =>
+          new Promise<WorkspaceContentMatch[]>((done) => {
+            resolve = done
+          })
+      )
+      render(<ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={{ search }} />)
+      fireEvent.change(screen.getByLabelText("search"), { target: { value: "needle" } })
+      fireEvent.keyDown(screen.getByLabelText("search"), { key: "Enter" })
+      act(() => {
+        for (const listener of mockTransportListeners) listener()
+      })
+      await act(async () => {
+        resolve(matches)
+      })
+      expect(search).toHaveBeenCalledTimes(1)
+      expect(screen.queryByTestId("search-hit-src/a.ts-2")).toBeNull()
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(250)
+      })
+      expect(search).toHaveBeenCalledTimes(2)
+    })
 
     it("debounces keystrokes into a single query", async () => {
       const search = jest.fn(async () => matches)

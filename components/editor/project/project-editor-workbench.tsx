@@ -376,6 +376,8 @@ interface ProjectEditorFileWorkbenchProps {
   showContextWorkbench?: boolean
   emptyTestId?: string
   layout?: "split" | "mobile"
+  /** Retain editor state while another dock surface is selected. */
+  active?: boolean
   /** Injectable git-status deps (tests); defaults to the real transport. */
   gitDeps?: Partial<ProjectGitStatusDeps>
 }
@@ -391,6 +393,7 @@ export function ProjectEditorFileWorkbench({
   showContextWorkbench = true,
   emptyTestId = "editor-empty",
   layout = "split",
+  active = true,
   gitDeps,
 }: ProjectEditorFileWorkbenchProps) {
   const t = useTranslations("projectEditor")
@@ -598,27 +601,56 @@ export function ProjectEditorFileWorkbench({
     return parts.at(-1) ?? rootPath
   }, [rootPath])
 
-  const fileTree = (
-    <ProjectFileTree
-      rootPath={rootPath}
-      refreshToken={treeRefreshToken}
-      activePath={activePath}
-      onOpenFile={openFromTree}
-      onRenamed={editor.renameOpenFile}
-      deps={deps}
-      density={layout === "mobile" ? "touch" : "compact"}
-      gitDecorations={gitDecorations}
-      onCopyPath={copyPath}
-      revealRequest={revealRequest ?? undefined}
-      onFailure={reportTreeFailure}
-    />
+  const filesVisible =
+    active &&
+    (layout === "mobile" ? mobilePane === "files" : sideTab === "files" && !sidebarCollapsed)
+  const searchVisible =
+    active &&
+    (layout === "mobile" ? mobilePane === "search" : sideTab === "search" && !sidebarCollapsed)
+  // Selection/caret state belongs to the editor. Reuse these elements until
+  // their own inputs change so every caret move does not redraw the tree.
+  const fileTree = useMemo(
+    () => (
+      <ProjectFileTree
+        rootPath={rootPath}
+        refreshToken={treeRefreshToken}
+        activePath={activePath}
+        active={filesVisible}
+        onOpenFile={openFromTree}
+        onRenamed={editor.renameOpenFile}
+        deps={deps}
+        density={layout === "mobile" ? "touch" : "compact"}
+        gitDecorations={gitDecorations}
+        onCopyPath={copyPath}
+        revealRequest={revealRequest ?? undefined}
+        onFailure={reportTreeFailure}
+      />
+    ),
+    [
+      rootPath,
+      treeRefreshToken,
+      activePath,
+      filesVisible,
+      openFromTree,
+      editor.renameOpenFile,
+      deps,
+      layout,
+      gitDecorations,
+      copyPath,
+      revealRequest,
+      reportTreeFailure,
+    ]
   )
-  const searchPanel = (
-    <ProjectSearchPanel
-      rootPath={rootPath}
-      onOpenMatch={gotoLine}
-      density={layout === "mobile" ? "touch" : "compact"}
-    />
+  const searchPanel = useMemo(
+    () => (
+      <ProjectSearchPanel
+        rootPath={rootPath}
+        active={searchVisible}
+        onOpenMatch={gotoLine}
+        density={layout === "mobile" ? "touch" : "compact"}
+      />
+    ),
+    [rootPath, searchVisible, gotoLine, layout]
   )
 
   const breadcrumbs = shownFile ? (
@@ -708,13 +740,6 @@ export function ProjectEditorFileWorkbench({
       (loadingPane ?? emptyPane)
     )
 
-    const mobileContent =
-      mobilePane === "files"
-        ? fileTree
-        : mobilePane === "search"
-          ? searchPanel
-          : mobileEditorContent
-
     const mobileNavButton = (
       pane: "files" | "search" | "editor",
       icon: ReactNode,
@@ -753,7 +778,17 @@ export function ProjectEditorFileWorkbench({
     return (
       <>
         <div className="flex h-full min-h-0 flex-col" data-testid="project-editor-mobile-layout">
-          <div className="min-h-0 flex-1">{mobileContent}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div className="h-full" hidden={mobilePane !== "files"}>
+              {fileTree}
+            </div>
+            <div className="h-full" hidden={mobilePane !== "search"}>
+              {searchPanel}
+            </div>
+            <div className="h-full" hidden={mobilePane !== "editor"}>
+              {mobileEditorContent}
+            </div>
+          </div>
           <nav
             className="flex shrink-0 items-stretch border-t bg-background/95 pb-[env(safe-area-inset-bottom)]"
             aria-label={t("mobileNav.aria")}
@@ -880,6 +915,7 @@ export function ProjectEditorFileWorkbench({
             <button
               type="button"
               data-testid="left-tab-files"
+              aria-label={t("filesTab")}
               aria-pressed={sideTab === "files" && !sidebarCollapsed}
               className={railButtonClass(sideTab === "files" && !sidebarCollapsed)}
               onClick={() => selectSideTab("files")}
@@ -894,6 +930,7 @@ export function ProjectEditorFileWorkbench({
             <button
               type="button"
               data-testid="left-tab-search"
+              aria-label={t("searchTab")}
               aria-pressed={sideTab === "search" && !sidebarCollapsed}
               className={railButtonClass(sideTab === "search" && !sidebarCollapsed)}
               onClick={() => selectSideTab("search")}
@@ -911,6 +948,7 @@ export function ProjectEditorFileWorkbench({
                 className={railButtonClass(false)}
                 onClick={() => setQuickOpen(true)}
                 data-testid="rail-quick-open"
+                aria-label={t("quickOpen.hint")}
               >
                 <FolderSearchIcon className="size-4" />
               </button>
@@ -924,6 +962,8 @@ export function ProjectEditorFileWorkbench({
                 className={railButtonClass(false)}
                 onClick={toggleSidebar}
                 data-testid="rail-toggle-sidebar"
+                aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+                aria-expanded={!sidebarCollapsed}
               >
                 {sidebarCollapsed ? (
                   sidebarPosition === "left" ? (
@@ -952,8 +992,8 @@ export function ProjectEditorFileWorkbench({
       id={`${panelIdPrefix}-sidebar`}
       collapsible
       collapsedSize={`${RAIL_WIDTH_PX}px`}
-      minSize="200px"
-      defaultSize="280px"
+      minSize="160px"
+      defaultSize="25%"
       maxSize="45%"
       panelRef={sidebarPanelRef}
       onResize={(size) => setSidebarCollapsed(size.inPixels <= RAIL_WIDTH_PX + 8)}
@@ -970,7 +1010,14 @@ export function ProjectEditorFileWorkbench({
               {sideTab === "files" ? t("sidebar.explorer") : t("sidebar.search")}
             </span>
           </div>
-          <div className="min-h-0 flex-1">{sideTab === "files" ? fileTree : searchPanel}</div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div className="h-full" hidden={!filesVisible}>
+              {fileTree}
+            </div>
+            <div className="h-full" hidden={!searchVisible}>
+              {searchPanel}
+            </div>
+          </div>
         </div>
         {sidebarPosition === "right" ? rail : null}
       </div>
@@ -978,7 +1025,11 @@ export function ProjectEditorFileWorkbench({
   )
 
   const editorPane = (
-    <ResizablePanel id={`${panelIdPrefix}-editor`} minSize="30%" className="min-h-0">
+    <ResizablePanel
+      id={`${panelIdPrefix}-editor`}
+      minSize="30%"
+      className="min-h-0 min-w-0 overflow-hidden"
+    >
       <div className="flex h-full min-h-0 flex-col">
         {showTabs ? (
           <ProjectEditorTabs
@@ -1066,7 +1117,10 @@ export function ProjectEditorFileWorkbench({
 
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="h-full min-h-0 min-w-0 overflow-hidden"
+      >
         {sidebarPosition === "left" ? sidebar : editorPane}
         <ResizableHandle withHandle />
         {sidebarPosition === "left" ? editorPane : sidebar}

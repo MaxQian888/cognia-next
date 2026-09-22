@@ -52,6 +52,8 @@ interface ActiveRelay {
 }
 
 let active: ActiveRelay | null = null
+let ideGeneration = 0
+const IDE_RELAY_KEY = Symbol("IDE relay")
 
 /**
  * Mint the device access token for the relay. The proof returned alongside it
@@ -151,35 +153,55 @@ export async function ensureRemoteIdeRelay(
   endpoint: RemoteHostEndpoint,
   relayPath: string
 ): Promise<DesktopRelayStatus> {
-  const binding = await bindRelay(endpoint, relayPath)
-  // Arm the refresh only once the first bind has actually succeeded, so a
-  // failed ensure does not leave a timer hammering an unreachable host.
-  stopRemoteIdeRelayRefresh()
-  active = {
-    endpoint,
-    relayPath,
-    binding,
-    timer: setInterval(() => {
-      const current = active
-      if (!current || current.refresh) return
-      current.refresh = bindRelay(current.endpoint, current.relayPath, undefined, current.binding)
-        .then((next) => {
-          current.binding = next
+  const generation = ++ideGeneration
+  return serializeRelay(IDE_RELAY_KEY, async () => {
+    if (generation !== ideGeneration) throw new Error("CODESERVER_OPEN_SUPERSEDED")
+    const binding = await bindRelay(endpoint, relayPath)
+    if (generation !== ideGeneration) throw new Error("CODESERVER_OPEN_SUPERSEDED")
+    if (active) clearInterval(active.timer)
+    // Create, refresh, replacement and stop share one queue. A pending token
+    // refresh must finish before another host takes over the singleton socket.
+    active = {
+      endpoint,
+      relayPath,
+      binding,
+      timer: setInterval(() => {
+        const current = active
+        if (!current || current.refresh) return
+        current.refresh = serializeRelay(IDE_RELAY_KEY, async () => {
+          if (active !== current) return
+          const next = await bindRelay(
+            current.endpoint,
+            current.relayPath,
+            undefined,
+            current.binding
+          )
+          if (active === current) current.binding = next
         })
-        .catch(() => undefined)
-        .finally(() => {
-          current.refresh = undefined
-        })
-    }, REFRESH_INTERVAL_MS),
-  }
-  return binding.status
+          .catch(() => undefined)
+          .finally(() => {
+            current.refresh = undefined
+          })
+      }, REFRESH_INTERVAL_MS),
+    }
+    return binding.status
+  })
 }
 
 /** Stop refreshing. Called when the relay itself is torn down. */
 export function stopRemoteIdeRelayRefresh(): void {
+  ideGeneration += 1
   if (!active) return
   clearInterval(active.timer)
   active = null
+}
+
+/** Ordered after outstanding binds so delayed credentials cannot reopen a stopped relay. */
+export function stopRemoteIdeRelay(): Promise<void> {
+  stopRemoteIdeRelayRefresh()
+  return serializeRelay(IDE_RELAY_KEY, async () => {
+    await transport.call("codeserver_remote_relay_stop", {})
+  })
 }
 
 /** Whether a relay credential refresh is currently armed. */
@@ -196,15 +218,15 @@ const portRelays = new Map<
   string,
   { timer?: ReturnType<typeof setInterval>; refresh?: Promise<unknown> }
 >()
-const portOperations = new Map<string, Promise<unknown>>()
+const relayOperations = new Map<string | symbol, Promise<unknown>>()
 
-function serializePort<T>(relayId: string, operation: () => Promise<T>): Promise<T> {
-  const previous = portOperations.get(relayId) ?? Promise.resolve()
+function serializeRelay<T>(relayId: string | symbol, operation: () => Promise<T>): Promise<T> {
+  const previous = relayOperations.get(relayId) ?? Promise.resolve()
   const next = previous.catch(() => undefined).then(operation)
-  portOperations.set(relayId, next)
+  relayOperations.set(relayId, next)
   void next
     .finally(() => {
-      if (portOperations.get(relayId) === next) portOperations.delete(relayId)
+      if (relayOperations.get(relayId) === next) relayOperations.delete(relayId)
     })
     .catch(() => undefined)
   return next
@@ -225,7 +247,7 @@ export function ensureRemotePortRelay(
   relayPath: string,
   relayId: string
 ): Promise<DesktopRelayStatus> {
-  return serializePort(relayId, async () => {
+  return serializeRelay(relayId, async () => {
     await stopPort(relayId)
     let binding = await bindRelay(endpoint, relayPath, relayId)
     const owner: { timer?: ReturnType<typeof setInterval>; refresh?: Promise<unknown> } = {
@@ -248,7 +270,7 @@ export function ensureRemotePortRelay(
 
 /** Queued behind create/refresh so a late bind cannot resurrect the socket. */
 export function stopRemotePortRelay(relayId: string): Promise<void> {
-  return serializePort(relayId, () => stopPort(relayId))
+  return serializeRelay(relayId, () => stopPort(relayId))
 }
 
 /** Local desktop requests stay inside the native Host; no fabricated device credential. */
@@ -256,7 +278,7 @@ export function ensureLocalPortRelay(
   localPort: { projectId: string; containerId: string; port: number },
   relayId: string
 ): Promise<DesktopRelayStatus> {
-  return serializePort(relayId, async () => {
+  return serializeRelay(relayId, async () => {
     await stopPort(relayId)
     const status = await transport.call<DesktopRelayStatus>("codeserver_remote_relay_ensure", {
       relayId,

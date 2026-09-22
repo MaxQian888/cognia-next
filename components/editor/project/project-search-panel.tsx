@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input"
 import { searchWorkspaceContent } from "@/lib/files/workspace-fs"
 import type { WorkspaceContentMatch } from "@/lib/files/types"
 import { cn } from "@/lib/utils"
+import { onTransportChange } from "@/lib/tauri/transport-instance"
+import { subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 export interface ProjectSearchDeps {
   search: typeof searchWorkspaceContent
@@ -24,6 +26,7 @@ export interface ProjectSearchDeps {
 
 interface Props {
   rootPath: string
+  active?: boolean
   onOpenMatch: (relPath: string, line: number, column: number) => void
   deps?: Partial<ProjectSearchDeps>
   density?: "compact" | "touch"
@@ -32,7 +35,13 @@ interface Props {
 /** Keystroke-to-query delay; short enough to feel live, long enough to batch. */
 const SEARCH_DEBOUNCE_MS = 250
 
-export function ProjectSearchPanel({ rootPath, onOpenMatch, deps, density = "compact" }: Props) {
+export function ProjectSearchPanel({
+  rootPath,
+  active = true,
+  onOpenMatch,
+  deps,
+  density = "compact",
+}: Props) {
   const t = useTranslations("projectEditor")
   const search = deps?.search ?? searchWorkspaceContent
   const [query, setQuery] = useState("")
@@ -44,9 +53,35 @@ export function ProjectSearchPanel({ rootPath, onOpenMatch, deps, density = "com
   const [error, setError] = useState<string | null>(null)
   // A newer query invalidates every earlier in-flight one.
   const requestSeq = useRef(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [hostRevision, setHostRevision] = useState(0)
+  const invalidate = useCallback(() => {
+    ++requestSeq.current
+    clearTimeout(debounceTimer.current)
+  }, [])
+
+  useEffect(() => {
+    const changed = () => {
+      invalidate()
+      setHostRevision((revision) => revision + 1)
+    }
+    const stopTransport = onTransportChange(changed)
+    const stopRemote = subscribeActiveRemoteTransport(changed)
+    return () => {
+      stopTransport()
+      stopRemote()
+    }
+  }, [invalidate])
+
+  useEffect(() => {
+    if (active) inputRef.current?.focus()
+  }, [active])
 
   const run = useCallback(
     async (q: string) => {
+      clearTimeout(debounceTimer.current)
+      if (!active) return
       const trimmed = q.trim()
       const seq = ++requestSeq.current
       if (!trimmed) {
@@ -78,14 +113,25 @@ export function ProjectSearchPanel({ rootPath, onOpenMatch, deps, density = "com
         }
       }
     },
-    [rootPath, search, isRegex, caseSensitive]
+    [active, rootPath, search, isRegex, caseSensitive]
   )
 
   // Debounced live search — every edit re-arms the timer; Enter bypasses it.
   useEffect(() => {
-    const timer = setTimeout(() => void run(query), SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [query, run])
+    // Invalidate immediately, including the debounce window and hidden time.
+    invalidate()
+    if (active) debounceTimer.current = setTimeout(() => void run(query), SEARCH_DEBOUNCE_MS)
+    return invalidate
+  }, [active, query, run, hostRevision, invalidate])
+
+  useEffect(() => {
+    // Results are scoped to a host/root, even when the same query is retained.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMatches([])
+    setSearched(false)
+    setError(null)
+    setLoading(false)
+  }, [rootPath, hostRevision])
 
   const grouped = useMemo(() => {
     const byFile = new Map<string, WorkspaceContentMatch[]>()
@@ -109,7 +155,7 @@ export function ProjectSearchPanel({ rootPath, onOpenMatch, deps, density = "com
       <div className="flex items-center gap-1 border-b px-2 py-1.5">
         <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
         <Input
-          autoFocus
+          ref={inputRef}
           value={query}
           placeholder={t("searchPlaceholder")}
           aria-label={t("search")}

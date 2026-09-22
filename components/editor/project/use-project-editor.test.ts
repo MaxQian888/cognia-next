@@ -2,6 +2,9 @@
  * @jest-environment jsdom
  */
 import { renderHook, act, waitFor } from "@testing-library/react"
+import { mkdtemp, readFile, writeFile, stat, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   useProjectEditor,
   joinRootRel,
@@ -44,6 +47,19 @@ const setEditorSession = jest.fn((scopeKey: string, patch: Record<string, unknow
   sessionStore[scopeKey] = { ...(sessionStore[scopeKey] as object), ...patch }
 })
 let mockPersisted: unknown = undefined
+let mockRemoteActive = false
+let mockHostChanged: (() => void) | undefined
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => mockRemoteActive,
+  subscribeActiveRemoteTransport: (handler: () => void) => {
+    mockHostChanged = handler
+    return () => {}
+  },
+}))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  onTransportChange: () => () => {},
+  transport: { call: jest.fn() },
+}))
 jest.mock("@/stores/editor/project-editor-session-store", () => ({
   useProjectEditorSessionStore: (selector: (s: unknown) => unknown) =>
     selector({ sessions: { "team:team1": mockPersisted }, setSession: setEditorSession }),
@@ -94,6 +110,7 @@ function makeDeps(overrides: Partial<ProjectEditorDeps> = {}): Partial<ProjectEd
 }
 
 beforeEach(() => {
+  mockRemoteActive = false
   mockPersisted = undefined
   setEditorSession.mockClear()
   for (const k of Object.keys(sessionStore)) delete sessionStore[k]
@@ -318,6 +335,359 @@ describe("useProjectEditor", () => {
     expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "A\n")
     expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/b.ts", "B\n")
     expect(result.current.dirtyCount).toBe(0)
+  })
+
+  it("keeps text typed during a delayed save dirty", async () => {
+    let finish!: () => void
+    const deps = makeDeps({
+      writeFile: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      ),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "sent"))
+    let saving!: Promise<void>
+    act(() => {
+      saving = result.current.saveFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "newer draft"))
+    await act(async () => {
+      finish()
+      await saving
+    })
+    expect(result.current.activeFile).toMatchObject({
+      savedContent: "sent",
+      draftContent: "newer draft",
+    })
+    expect(result.current.dirtyCount).toBe(1)
+  })
+
+  it("acknowledges successful files when a later saveAll write fails", async () => {
+    const deps = makeDeps({
+      writeFile: jest.fn(async (_root, rel) => {
+        if (rel === "src/b.ts") throw new Error("offline")
+      }),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+      await result.current.openFile("src/b.ts")
+    })
+    act(() => {
+      result.current.setDraft("src/a.ts", "a changed")
+      result.current.setDraft("src/b.ts", "b changed")
+    })
+    await act(async () => {
+      await expect(result.current.saveAll()).rejects.toThrow("offline")
+    })
+    expect(result.current.openFiles[0].savedContent).toBe("a changed")
+    expect(result.current.openFiles[1].savedContent).not.toBe("b changed")
+    expect(result.current.dirtyCount).toBe(1)
+  })
+
+  it("serializes saves of one file so an older request cannot overwrite a newer save", async () => {
+    const finishes: (() => void)[] = []
+    const deps = makeDeps({
+      writeFile: jest.fn(() => new Promise<void>((resolve) => finishes.push(resolve))),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "first"))
+    let first!: Promise<void>
+    await act(async () => {
+      first = result.current.saveFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "second"))
+    let second!: Promise<void>
+    await act(async () => {
+      second = result.current.saveFile("src/a.ts")
+    })
+    expect(deps.writeFile).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      finishes[0]()
+      await first
+    })
+    expect(deps.writeFile).toHaveBeenNthCalledWith(2, "/repo", "src/a.ts", "second")
+    await act(async () => {
+      finishes[1]()
+      await second
+    })
+    expect(result.current.activeFile?.savedContent).toBe("second")
+  })
+
+  it("refuses to send an old host's draft to a newly selected host", async () => {
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => {
+      result.current.setDraft("src/a.ts", "private draft")
+      mockHostChanged?.()
+    })
+    await expect(result.current.saveFile("src/a.ts")).rejects.toThrow("workspace host changed")
+    expect(deps.writeFile).not.toHaveBeenCalled()
+    expect(result.current.dirtyCount).toBe(1)
+  })
+
+  it("does not authorize an old draft on a new host after a failed reload", async () => {
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => {
+      result.current.setDraft("src/a.ts", "old host draft")
+      mockHostChanged?.()
+    })
+    jest.mocked(deps.readFile!).mockRejectedValueOnce(new Error("offline"))
+    await act(async () => {
+      await expect(result.current.reloadFile("src/a.ts")).rejects.toThrow("offline")
+    })
+    await expect(result.current.saveFile("src/a.ts")).rejects.toThrow("workspace host changed")
+    expect(deps.writeFile).not.toHaveBeenCalled()
+    expect(result.current.activeFile?.draftContent).toBe("old host draft")
+  })
+
+  it("does not send queued saveAll snapshots after switching host and reloading paths", async () => {
+    let finish!: () => void
+    const write = jest
+      .fn()
+      .mockResolvedValue(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      )
+    const deps = makeDeps({ writeFile: write })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+      await result.current.openFile("src/b.ts")
+    })
+    act(() => {
+      result.current.setDraft("src/a.ts", "old a")
+      result.current.setDraft("src/b.ts", "old b")
+    })
+    let outcome!: Promise<unknown>
+    act(() => {
+      outcome = result.current.saveAll().catch((error: unknown) => error)
+    })
+    act(() => mockHostChanged?.())
+    await act(async () => {
+      await result.current.reloadFile("src/b.ts")
+    })
+    await act(async () => {
+      finish()
+      await outcome
+    })
+    expect(await outcome).toEqual(
+      expect.objectContaining({ message: expect.stringContaining("workspace host changed") })
+    )
+    expect(deps.writeFile).toHaveBeenCalledTimes(1)
+    expect(result.current.openFiles.find((file) => file.relPath === "src/b.ts")?.savedContent).toBe(
+      "export const b = 2\n"
+    )
+  })
+
+  it("ignores an old save acknowledgement after a close and reopen", async () => {
+    let finish!: () => void
+    const deps = makeDeps({
+      writeFile: jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          })
+      ),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    let saving!: Promise<void>
+    act(() => {
+      saving = result.current.saveFile("src/a.ts")
+      result.current.closeFile("src/a.ts")
+    })
+    await act(async () => {
+      await result.current.openFile("src/a.ts")
+    })
+    act(() => result.current.setDraft("src/a.ts", "reopened draft"))
+    await act(async () => {
+      finish()
+      await saving
+    })
+    expect(result.current.activeFile?.savedContent).toBe("export const a = 1\n")
+    expect(result.current.dirtyCount).toBe(1)
+  })
+
+  it("polls remote metadata without downloading or overwriting dirty text", async () => {
+    mockRemoteActive = true
+    jest.useFakeTimers()
+    try {
+      const deps = makeDeps()
+      const { result, unmount } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "local draft"))
+      jest
+        .mocked(deps.statFile!)
+        .mockResolvedValue({ exists: true, isDir: false, size: 30, mtimeMs: 9999 })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5000)
+      })
+      expect(result.current.activeFile).toMatchObject({
+        draftContent: "local draft",
+        externallyChanged: true,
+      })
+      expect(deps.readFile).toHaveBeenCalledTimes(1)
+      const calls = jest.mocked(deps.statFile!).mock.calls.length
+      unmount()
+      await jest.advanceTimersByTimeAsync(10000)
+      expect(deps.statFile).toHaveBeenCalledTimes(calls)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("pauses metadata requests while hidden and resumes without overlapping a slow request", async () => {
+    jest.useFakeTimers()
+    const visibility = jest.spyOn(document, "visibilityState", "get")
+    visibility.mockReturnValue("hidden")
+    try {
+      const deps = makeDeps()
+      const { result, unmount } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5000)
+      })
+      expect(deps.statFile).toHaveBeenCalledTimes(1)
+      let finish!: (value: Awaited<ReturnType<ProjectEditorDeps["statFile"]>>) => void
+      jest.mocked(deps.statFile!).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+      visibility.mockReturnValue("visible")
+      act(() => document.dispatchEvent(new Event("visibilitychange")))
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(20000)
+        window.dispatchEvent(new Event("online"))
+      })
+      expect(deps.statFile).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        finish({ exists: false, isDir: false, size: 0, mtimeMs: null })
+      })
+      expect(result.current.activeFile?.externallyChanged).toBe(true)
+      unmount()
+    } finally {
+      visibility.mockRestore()
+      jest.useRealTimers()
+    }
+  })
+
+  it("blocks truncated UTF-8 content when the metadata probe fails", async () => {
+    const content = "字".repeat(Math.ceil(MAX_EDITOR_BYTES / 3)) + "\n... (truncated)"
+    const deps = makeDeps({
+      statFile: jest.fn().mockRejectedValue(new Error("metadata unavailable")),
+      readFile: jest.fn().mockResolvedValue(content),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await act(async () => {
+      await result.current.openFile("notes.txt")
+    })
+    expect(result.current.activeFile).toMatchObject({ blocked: "too-large", draftContent: "" })
+    await act(async () => {
+      await result.current.saveFile("notes.txt")
+    })
+    expect(deps.writeFile).not.toHaveBeenCalled()
+  })
+
+  it("verifies saved bytes and dirty state against a real Unicode file on disk", async () => {
+    const root = await mkdtemp(join(tmpdir(), "cognia-editor-sync-"))
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await writeFile(join(root, "note.md"), "原始文本\n", "utf8")
+    const deps = makeDeps({
+      listWorktrees: async () => [],
+      readFile: async (dir, rel) => readFile(join(dir, rel), "utf8"),
+      statFile: async (dir, rel) => {
+        const value = await stat(join(dir, rel))
+        return { exists: true, isDir: false, size: value.size, mtimeMs: value.mtimeMs }
+      },
+      writeFile: async (dir, rel, content) => {
+        await gate
+        await writeFile(join(dir, rel), content, "utf8")
+      },
+    })
+    const { result, unmount } = renderHook(() =>
+      useProjectEditor({ scopeKey: "disk-evidence", workingDir: root, deps })
+    )
+    try {
+      await act(async () => {
+        await result.current.openFile("note.md")
+      })
+      await waitFor(() => expect(result.current.activeFile?.draftContent).toBe("原始文本\n"))
+      act(() => result.current.setDraft("note.md", "已发送 😀\n"))
+      let saving!: Promise<void>
+      act(() => {
+        saving = result.current.saveFile("note.md")
+      })
+      act(() => result.current.setDraft("note.md", "尚未保存的新内容\n"))
+      await act(async () => {
+        release()
+        await saving
+      })
+      expect(await readFile(join(root, "note.md"), "utf8")).toBe("已发送 😀\n")
+      expect(result.current.activeFile).toMatchObject({
+        savedContent: "已发送 😀\n",
+        draftContent: "尚未保存的新内容\n",
+      })
+      expect(result.current.dirtyCount).toBe(1)
+      await act(async () => {
+        await result.current.saveAll()
+      })
+      expect(await readFile(join(root, "note.md"), "utf8")).toBe("尚未保存的新内容\n")
+      expect(result.current.dirtyCount).toBe(0)
+    } finally {
+      unmount()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it("switching root clears open files and re-registers LSP", async () => {

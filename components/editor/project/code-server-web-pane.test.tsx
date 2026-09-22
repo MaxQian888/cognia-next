@@ -82,6 +82,13 @@ beforeEach(() => {
 })
 
 describe("CodeServerWebPane", () => {
+  it("localizes a superseded host opening", async () => {
+    ensure.mockRejectedValueOnce(new Error("CODESERVER_OPEN_SUPERSEDED"))
+    render(<CodeServerWebPane root="/repo" />)
+    expect(await screen.findByText("projectEditor.proIde.openSuperseded")).toBeInTheDocument()
+    expect(screen.queryByText("Error: CODESERVER_OPEN_SUPERSEDED")).not.toBeInTheDocument()
+  })
+
   it("starts the host's workbench for this root and hands the frame its status", async () => {
     render(<CodeServerWebPane root="/repo" />)
     expect(screen.getByTestId("code-server-web-loading")).toBeInTheDocument()

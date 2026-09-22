@@ -2,7 +2,8 @@
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
+const mockTranslate = (key: string) => key
+jest.mock("next-intl", () => ({ useTranslations: () => mockTranslate }))
 const mockToastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 const disposeOpener = jest.fn()
@@ -58,14 +59,27 @@ jest.mock("./use-project-editor", () => ({
 jest.mock("./project-editor-tabs", () => ({
   ProjectEditorTabs: () => <div data-testid="tabs" />,
 }))
+const mockTreeRender = jest.fn()
 jest.mock("./project-file-tree", () => ({
   ProjectFileTree: ({
     onOpenFile,
+    active,
+    activePath,
   }: {
     onOpenFile: (path: string, options?: { mode?: string }) => void
-  }) => (
-    <button data-testid="tree" onClick={() => onOpenFile("src/tree.ts", { mode: "preview" })} />
-  ),
+    active?: boolean
+    activePath?: string | null
+  }) => {
+    mockTreeRender()
+    return (
+      <button
+        data-testid="tree"
+        data-active={String(active)}
+        data-path={activePath}
+        onClick={() => onOpenFile("src/tree.ts", { mode: "preview" })}
+      />
+    )
+  },
 }))
 jest.mock("./project-search-panel", () => ({
   ProjectSearchPanel: ({ onOpenMatch }: { onOpenMatch: (path: string) => void }) => (
@@ -74,8 +88,9 @@ jest.mock("./project-search-panel", () => ({
 }))
 // The decoration hook otherwise hits the real transport and resolves outside
 // act(); a never-settling status keeps the suite quiet and badge-free.
+const mockGitDecorations = new Map()
 jest.mock("./use-project-git-status", () => ({
-  useProjectGitStatus: () => ({ branch: null, byPath: new Map() }),
+  useProjectGitStatus: () => ({ branch: null, byPath: mockGitDecorations }),
 }))
 const quickOpenProps = jest.fn()
 jest.mock("./project-quick-open", () => ({
@@ -197,11 +212,13 @@ function Harness({
   registerProjectOpener,
   sidebarPosition = "right",
   showContextWorkbench = true,
+  active = true,
 }: {
   beforeOpen?: () => void
   registerProjectOpener?: boolean
   sidebarPosition?: "left" | "right"
   showContextWorkbench?: boolean
+  active?: boolean
 }) {
   const workbench = useProjectEditorWorkbench({
     scopeKey: "session:s1",
@@ -214,6 +231,7 @@ function Harness({
       <button data-testid="goto" onClick={() => workbench.gotoLine("src/jump.ts", 7)} />
       <ProjectEditorFileWorkbench
         workbench={workbench}
+        active={active}
         sidebarPosition={sidebarPosition}
         showTabs
         showContextWorkbench={showContextWorkbench}
@@ -689,7 +707,7 @@ describe("activity rail", () => {
 
     fireEvent.click(screen.getByTestId("left-tab-search"))
     expect(sidebar.querySelector('[data-testid="search"]')).not.toBeNull()
-    expect(sidebar.querySelector('[data-testid="tree"]')).toBeNull()
+    expect(screen.getByTestId("tree")).not.toBeVisible()
     expect(screen.getByTestId("left-tab-search")).toHaveAttribute("aria-pressed", "true")
 
     fireEvent.click(screen.getByTestId("left-tab-files"))
@@ -730,4 +748,57 @@ describe("blocked files", () => {
     fireEvent.click(screen.getByTestId("open-anyway"))
     expect(editor.openFile).toHaveBeenCalledWith("big.log", { allowLarge: true })
   })
+})
+
+it("does not rerender the file tree for 20 editor selection changes", () => {
+  render(<Harness />)
+  mockTreeRender.mockClear()
+  for (let i = 0; i < 20; i++) fireEvent.click(screen.getByTestId("monaco-select"))
+  expect(mockTreeRender).toHaveBeenCalledTimes(0)
+  expect(projectContextWorkbenchProps).toHaveBeenLastCalledWith(
+    expect.objectContaining({ selection: { kind: "text", start: 1, end: 4 } })
+  )
+})
+
+it("retains the same file-tree and search nodes across sidebar switches", () => {
+  render(<Harness />)
+  const tree = screen.getByTestId("tree")
+  fireEvent.click(screen.getByTestId("left-tab-search"))
+  const search = screen.getByTestId("search")
+  expect(tree).toBeInTheDocument()
+  expect(tree).not.toBeVisible()
+  fireEvent.click(screen.getByTestId("left-tab-files"))
+  expect(screen.getByTestId("tree")).toBe(tree)
+  expect(search).toBeInTheDocument()
+  expect(search).not.toBeVisible()
+})
+
+it("retains the light editor while switching mobile navigation", () => {
+  render(<MobileHarness />)
+  fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+  const input = screen.getByTestId("light-editor")
+  fireEvent.click(screen.getByTestId("project-editor-mobile-files"))
+  expect(input).toBeInTheDocument()
+  expect(input).not.toBeVisible()
+  fireEvent.click(screen.getByTestId("project-editor-mobile-editor"))
+  expect(screen.getByTestId("light-editor")).toBe(input)
+  expect(input).toBeVisible()
+})
+
+it("pauses retained views when the dock selects another surface", () => {
+  const view = render(<Harness />)
+  const tree = screen.getByTestId("tree")
+  expect(tree).toHaveAttribute("data-active", "true")
+  view.rerender(<Harness active={false} />)
+  expect(screen.getByTestId("tree")).toBe(tree)
+  expect(tree).toHaveAttribute("data-active", "false")
+  view.rerender(<Harness active />)
+  expect(tree).toHaveAttribute("data-active", "true")
+})
+
+it("updates the memoized tree when the active path changes", () => {
+  const view = render(<Harness />)
+  editor.activePath = "src/b.ts"
+  view.rerender(<Harness />)
+  expect(screen.getByTestId("tree")).toHaveAttribute("data-path", "src/b.ts")
 })

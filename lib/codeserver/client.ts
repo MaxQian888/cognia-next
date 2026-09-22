@@ -10,7 +10,7 @@
  */
 import type { ElementRect } from "@/lib/browser/protocol"
 import type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
-import { ensureRemoteIdeRelay, stopRemoteIdeRelayRefresh } from "@/lib/codeserver/remote-relay"
+import { ensureRemoteIdeRelay, stopRemoteIdeRelay } from "@/lib/codeserver/remote-relay"
 import { isTauri, transport } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
@@ -230,13 +230,38 @@ export const CODESERVER_EVENTS = {
   brokerNotification: "codeserver://broker-notification",
 } as const
 
+let remoteLifecycleRevision = 0
+
+async function stopInstance<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const hadRemote = isTauri() && getActiveRemoteEndpoint() != null
+  if (hadRemote) remoteLifecycleRevision += 1
+  const remoteStop = transport.call<T>(command, args)
+  // Queue local teardown immediately, before awaiting an unreachable host.
+  // A later ensure is then ordered after this stop, rather than being torn
+  // down when an older host's slow stop eventually finishes.
+  const [hostResult, relayResult] = await Promise.allSettled([
+    remoteStop,
+    hadRemote ? stopRemoteIdeRelay() : Promise.resolve(),
+  ])
+  if (hostResult.status === "rejected") throw hostResult.reason
+  if (relayResult.status === "rejected") throw relayResult.reason
+  return hostResult.value
+}
+
 export const codeServerClient = {
   /** Whether this host has a prebuilt code-server binary (macOS/Linux). */
   supported: () => transport.call<boolean>("codeserver_supported", {}),
   /** Ensure a healthy code-server serves `root`; returns its loopback port. */
   ensure: async (root: string, profile: CodeServerProfile = "managed") => {
     const endpoint = isTauri() ? getActiveRemoteEndpoint() : null
+    const revision = remoteLifecycleRevision
     const status = await transport.call<CodeServerStatus>("codeserver_ensure", { root, profile })
+    if (
+      isTauri() &&
+      (endpoint !== getActiveRemoteEndpoint() || revision !== remoteLifecycleRevision)
+    ) {
+      throw new Error("CODESERVER_OPEN_SUPERSEDED")
+    }
     if (!endpoint) return status
     if (!status.relayPath) {
       throw new Error("remote host did not provide a managed IDE relay path")
@@ -259,15 +284,7 @@ export const codeServerClient = {
    * routing plane synchronously, so re-reading the endpoint afterwards would
    * report "local" and skip the relay teardown for the host being left.
    */
-  stop: async (root: string) => {
-    const hadRemote = isTauri() && getActiveRemoteEndpoint() != null
-    const stopped = await transport.call<boolean>("codeserver_stop", { root })
-    if (hadRemote) {
-      stopRemoteIdeRelayRefresh()
-      await transport.call<boolean>("codeserver_remote_relay_stop", {})
-    }
-    return stopped
-  },
+  stop: (root: string) => stopInstance<boolean>("codeserver_stop", { root }),
   /**
    * Stop every running code-server on the host this call routes to, and drop
    * the desktop relay if one is up.
@@ -279,14 +296,7 @@ export const codeServerClient = {
    * no idle reaper. Detaching without this leaves them running for the life of
    * the remote process. Same pre-await snapshot as {@link stop}.
    */
-  stopAll: async () => {
-    const hadRemote = isTauri() && getActiveRemoteEndpoint() != null
-    await transport.call<void>("codeserver_stop_all", {})
-    if (hadRemote) {
-      stopRemoteIdeRelayRefresh()
-      await transport.call<boolean>("codeserver_remote_relay_stop", {})
-    }
-  },
+  stopAll: () => stopInstance<void>("codeserver_stop_all", {}),
   /** Download + install code-server without spawning (pre-fetch). */
   download: () => transport.call<CodeServerInstallInfo>("codeserver_download", {}),
   /** Generate and locally sign a managed proxy from normalized manifest IR. */

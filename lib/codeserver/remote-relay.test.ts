@@ -16,6 +16,7 @@ import {
   stopRemotePortRelay,
   isRemoteIdeRelayActive,
   stopRemoteIdeRelayRefresh,
+  stopRemoteIdeRelay,
 } from "./remote-relay"
 
 const call = transport.call as jest.Mock
@@ -275,4 +276,73 @@ it("coalesces concurrent port token requests for the same pairing", async () => 
   await jest.advanceTimersByTimeAsync(0)
   expect(call).toHaveBeenCalledTimes(4)
   await Promise.all([stopRemotePortRelay("coalesced-1"), stopRemotePortRelay("coalesced-2")])
+})
+
+it("orders IDE stop after a pending refresh and never resurrects its listener", async () => {
+  await ensureRemoteIdeRelay(ENDPOINT, RELAY_PATH)
+  let finish!: (value: { Authorization: string }) => void
+  mockAuthHeaders.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  await jest.advanceTimersByTimeAsync(10_000)
+  const stopping = stopRemoteIdeRelay()
+  finish({ Authorization: "Bearer refreshed-token" })
+  await stopping
+  expect(call.mock.calls.at(-1)[0]).toBe("codeserver_remote_relay_stop")
+  expect(isRemoteIdeRelayActive()).toBe(false)
+  const count = call.mock.calls.length
+  await jest.advanceTimersByTimeAsync(60_000)
+  expect(call).toHaveBeenCalledTimes(count)
+})
+
+it("serializes IDE host replacement behind an outstanding credential refresh", async () => {
+  await ensureRemoteIdeRelay(ENDPOINT, RELAY_PATH)
+  let finish!: (value: { Authorization: string }) => void
+  mockAuthHeaders.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  await jest.advanceTimersByTimeAsync(10_000)
+  const other = { ...ENDPOINT, baseUrl: "https://other.example:27890", deviceId: "device-2" }
+  const replacing = ensureRemoteIdeRelay(other, "/ide/relay/other/")
+  await jest.advanceTimersByTimeAsync(0)
+  finish({ Authorization: "Bearer old-host-token" })
+  await replacing
+  expect(call.mock.calls.at(-1)[1].baseUrl).toBe(other.baseUrl)
+})
+
+it("does not arm a timer when an IDE opening is stopped before it binds", async () => {
+  let finish!: (value: { Authorization: string }) => void
+  mockAuthHeaders.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const opening = ensureRemoteIdeRelay(ENDPOINT, RELAY_PATH)
+  const rejected = expect(opening).rejects.toThrow("CODESERVER_OPEN_SUPERSEDED")
+  await jest.advanceTimersByTimeAsync(0)
+  const stopping = stopRemoteIdeRelay()
+  finish({ Authorization: "Bearer late-token" })
+  await Promise.all([rejected, stopping])
+  expect(isRemoteIdeRelayActive()).toBe(false)
+  expect(call.mock.calls.at(-1)[0]).toBe("codeserver_remote_relay_stop")
+})
+
+it("keeps the previous relay refreshed when replacing it fails", async () => {
+  await ensureRemoteIdeRelay(ENDPOINT, RELAY_PATH)
+  const other = { ...ENDPOINT, baseUrl: "https://other.example:27890", deviceId: "device-2" }
+  mockAuthHeaders.mockRejectedValueOnce(new Error("other host offline"))
+  await expect(ensureRemoteIdeRelay(other, "/ide/relay/other/")).rejects.toThrow(
+    "other host offline"
+  )
+  expect(isRemoteIdeRelayActive()).toBe(true)
+  mockAuthHeaders.mockResolvedValue({ Authorization: "Bearer refreshed-original-token" })
+  await jest.advanceTimersByTimeAsync(10_000)
+  expect(call.mock.calls.at(-1)[1].baseUrl).toBe(ENDPOINT.baseUrl)
 })

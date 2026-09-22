@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
@@ -25,6 +25,152 @@ function file(relPath: string, dirty = false, externallyChanged = false): OpenFi
 }
 
 describe("ProjectEditorTabs", () => {
+  const keyboardProps = () => ({
+    fixedTabs: [
+      { id: "review", label: "Review", active: false, onSelect: jest.fn() },
+      { id: "preview", label: "Preview", active: false, onSelect: jest.fn() },
+    ],
+    files: [file("src/a.ts"), file("src/b.ts")],
+    activePath: "src/a.ts",
+    dirtyCount: 0,
+    onSelect: jest.fn(),
+    onClose: jest.fn(),
+    onSaveAll: jest.fn(),
+  })
+
+  it("keeps one tab stop across fixed and file tabs, with a fallback for no active tab", () => {
+    const props = keyboardProps()
+    const { rerender } = render(<ProjectEditorTabs {...props} />)
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, -1, 0, -1])
+    rerender(<ProjectEditorTabs {...props} activePath={null} />)
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1])
+    rerender(
+      <ProjectEditorTabs
+        {...props}
+        activePath={null}
+        fixedTabs={props.fixedTabs.map((tab) => ({ ...tab, active: tab.id === "preview" }))}
+      />
+    )
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, 0, -1, -1])
+  })
+
+  it("navigates and activates across fixed and file tabs with wrapping and Home/End", () => {
+    const props = keyboardProps()
+    render(<ProjectEditorTabs {...props} />)
+    const tabs = screen.getAllByRole("tab")
+    tabs[2].focus()
+    fireEvent.keyDown(tabs[2], { key: "ArrowLeft" })
+    expect(tabs[1]).toHaveFocus()
+    expect(props.fixedTabs[1].onSelect).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(tabs[1], { key: "Home" })
+    expect(tabs[0]).toHaveFocus()
+    fireEvent.keyDown(tabs[0], { key: "ArrowLeft" })
+    expect(tabs[3]).toHaveFocus()
+    expect(props.onSelect).toHaveBeenLastCalledWith("src/b.ts")
+    fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
+    expect(tabs[0]).toHaveFocus()
+    fireEvent.keyDown(tabs[0], { key: "End" })
+    expect(tabs[3]).toHaveFocus()
+  })
+
+  it("does not intercept modified arrows or keys on close and trailing controls", () => {
+    const props = keyboardProps()
+    render(<ProjectEditorTabs {...props} trailingContent={<input aria-label="Profile" />} />)
+    const tab = screen.getByTestId("editor-tab-src/a.ts")
+    expect(fireEvent.keyDown(tab, { key: "ArrowRight", ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(tab, { key: "ArrowRight", metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(screen.getAllByLabelText("closeTab")[0], { key: "Home" })).toBe(true)
+    expect(fireEvent.keyDown(screen.getByLabelText("Profile"), { key: "End" })).toBe(true)
+    expect(props.onSelect).not.toHaveBeenCalled()
+  })
+
+  it("follows visual arrow direction in an RTL tab strip and prevents focus scrolling", () => {
+    const props = keyboardProps()
+    render(<ProjectEditorTabs {...props} />)
+    screen.getByRole("tablist").style.direction = "rtl"
+    const tabs = screen.getAllByRole("tab")
+    const focus = jest.spyOn(tabs[3], "focus")
+    fireEvent.keyDown(tabs[2], { key: "ArrowLeft" })
+    expect(tabs[3]).toHaveFocus()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
+    expect(tabs[2]).toHaveFocus()
+  })
+
+  it("keeps compact Save All named and places engine controls in a full-width narrow row", () => {
+    render(
+      <ProjectEditorTabs
+        {...keyboardProps()}
+        dirtyCount={2}
+        trailingContent={<button>Engine</button>}
+      />
+    )
+    expect(screen.getByRole("button", { name: "saveAll" })).toHaveAttribute("title", "saveAll")
+    expect(screen.getByTestId("project-editor-tabs-trailing")).toHaveClass("w-full", "min-w-0")
+    expect(screen.getByTestId("project-editor-tabs")).toHaveClass("@container/editor-tabs")
+  })
+
+  it("reveals active tabs only inside the strip, keeps editor focus, and avoids draft layout reads", () => {
+    const props = keyboardProps()
+    const { rerender } = render(
+      <ProjectEditorTabs {...props} trailingContent={<input aria-label="Editor" />} />
+    )
+    const strip = screen.getByRole("tablist")
+    const tab = screen.getByTestId("editor-tab-src/b.ts")
+    const rect = jest
+      .spyOn(tab.parentElement!, "getBoundingClientRect")
+      .mockReturnValue({ left: 250, right: 400, width: 150 } as DOMRect)
+    jest
+      .spyOn(strip, "getBoundingClientRect")
+      .mockReturnValue({ left: 20, right: 220, width: 200 } as DOMRect)
+    screen.getByLabelText("Editor").focus()
+    rerender(
+      <ProjectEditorTabs
+        {...props}
+        activePath="src/b.ts"
+        trailingContent={<input aria-label="Editor" />}
+      />
+    )
+    expect(strip.scrollLeft).toBe(180)
+    expect(screen.getByLabelText("Editor")).toHaveFocus()
+    rect.mockClear()
+    rerender(
+      <ProjectEditorTabs
+        {...props}
+        activePath="src/b.ts"
+        files={[file("src/a.ts"), file("src/b.ts", true)]}
+        trailingContent={<input aria-label="Editor" />}
+      />
+    )
+    expect(rect).not.toHaveBeenCalled()
+  })
+
+  it("reveals a selected tab when the strip shrinks and disconnects its observer", () => {
+    const OriginalObserver = global.ResizeObserver
+    let resize: ResizeObserverCallback = () => {}
+    const disconnect = jest.fn()
+    global.ResizeObserver = jest.fn().mockImplementation((callback: ResizeObserverCallback) => {
+      resize = callback
+      return { observe: jest.fn(), disconnect }
+    })
+    try {
+      const { unmount } = render(<ProjectEditorTabs {...keyboardProps()} />)
+      const strip = screen.getByRole("tablist")
+      jest
+        .spyOn(strip, "getBoundingClientRect")
+        .mockReturnValue({ left: 20, right: 220, width: 200 } as DOMRect)
+      jest
+        .spyOn(screen.getByTestId("editor-tab-src/a.ts").parentElement!, "getBoundingClientRect")
+        .mockReturnValue({ left: -40, right: 80, width: 120 } as DOMRect)
+      strip.scrollLeft = 100
+      act(() => resize([], {} as ResizeObserver))
+      expect(strip.scrollLeft).toBe(40)
+      unmount()
+      expect(disconnect).toHaveBeenCalledTimes(1)
+    } finally {
+      global.ResizeObserver = OriginalObserver
+    }
+  })
   it("renders nothing with no open files", () => {
     const { container } = render(
       <ProjectEditorTabs

@@ -2,6 +2,27 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { readdir, stat } from "node:fs/promises"
+import path from "node:path"
+
+let mockDesktop = true
+let mockRemoteActive = false
+const mockTransportListeners = new Set<() => void>()
+const mockRemoteListeners = new Set<() => void>()
+jest.mock("@/lib/platform/detect", () => ({ isTauri: () => mockDesktop }))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  onTransportChange: (listener: () => void) => {
+    mockTransportListeners.add(listener)
+    return () => mockTransportListeners.delete(listener)
+  },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => mockRemoteActive,
+  subscribeActiveRemoteTransport: (listener: () => void) => {
+    mockRemoteListeners.add(listener)
+    return () => mockRemoteListeners.delete(listener)
+  },
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -111,7 +132,566 @@ function makeDeps(): ProjectFileTreeDeps & { fs: Record<string, WorkspaceEntry[]
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+describe("listing lifecycle", () => {
+  it("bounds listing traffic for a real project directory during ten invalidations", async () => {
+    const rootPath = __dirname
+    const entries = await Promise.all(
+      (await readdir(rootPath, { withFileTypes: true })).map(async (item) => {
+        const absolutePath = path.join(rootPath, item.name)
+        const metadata = await stat(absolutePath)
+        return {
+          relPath: item.name,
+          absolutePath,
+          isDir: item.isDirectory(),
+          size: metadata.size,
+          mtimeMs: metadata.mtimeMs,
+        }
+      })
+    )
+    const deps = makeDeps()
+    const pending = deferred<void>()
+    let inFlight = 0
+    let peakInFlight = 0
+    let calls = 0
+    let listingBytes = 0
+    deps.listDir = jest.fn(async () => {
+      calls += 1
+      const first = calls === 1
+      inFlight += 1
+      peakInFlight = Math.max(peakInFlight, inFlight)
+      if (first) await pending.promise
+      listingBytes += Buffer.byteLength(JSON.stringify(entries), "utf8")
+      inFlight -= 1
+      return entries
+    })
+    const props = { rootPath, activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} refreshToken={0} />)
+    for (let token = 1; token <= 10; token++)
+      rerender(<ProjectFileTree {...props} refreshToken={token} />)
+    await act(async () => pending.resolve())
+    console.info(
+      "tree-real-directory-burst",
+      JSON.stringify({ entries: entries.length, calls, peakInFlight, listingBytes })
+    )
+    expect(calls).toBe(2)
+    expect(peakInFlight).toBe(1)
+    expect(screen.getByTestId("tree-row-project-file-tree.tsx")).toBeInTheDocument()
+  })
+
+  it("coalesces ten refresh invalidations during a pending list into one fresh trailing read", async () => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = jest
+      .fn()
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValue([entry("fresh.md", false)])
+    deps.listDir = listDir
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} refreshToken={0} />)
+    for (let token = 1; token <= 10; token++)
+      rerender(<ProjectFileTree {...props} refreshToken={token} />)
+    const callsWhilePending = listDir.mock.calls.length
+    await act(async () => pending.resolve([entry("stale.md", false)]))
+    console.info(
+      "tree-refresh-burst",
+      JSON.stringify({ callsWhilePending, totalCalls: listDir.mock.calls.length })
+    )
+    expect(callsWhilePending).toBe(1)
+    expect(listDir).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("tree-row-fresh.md")).toBeInTheDocument()
+    expect(screen.queryByTestId("tree-row-stale.md")).toBeNull()
+  })
+
+  it.each(["success", "failure"])("ignores a previous root's late %s", async (outcome) => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    deps.listDir = jest
+      .fn()
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValue([entry("new.md", false)])
+    const onFailure = jest.fn()
+    const props = { activePath: null, onOpenFile: jest.fn(), deps, onFailure }
+    const { rerender } = render(<ProjectFileTree {...props} rootPath="/old" />)
+    rerender(<ProjectFileTree {...props} rootPath="/new" />)
+    await screen.findByTestId("tree-row-new.md")
+    await act(async () => {
+      if (outcome === "success") pending.resolve([entry("old.md", false)])
+      else pending.reject(new Error("host is offline"))
+    })
+    expect(screen.getByTestId("tree-row-new.md")).toBeInTheDocument()
+    expect(screen.queryByTestId("tree-row-old.md")).toBeNull()
+    expect(onFailure).not.toHaveBeenCalled()
+  })
+
+  it("keeps expanded directories when deps and failure callbacks change identity", async () => {
+    const deps = makeDeps()
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn() }
+    const { rerender } = render(<ProjectFileTree {...props} deps={deps} onFailure={jest.fn()} />)
+    fireEvent.click(await screen.findByTestId("tree-row-src"))
+    await screen.findByTestId("tree-row-src/a.ts")
+    const before = (deps.listDir as jest.Mock).mock.calls.length
+    rerender(<ProjectFileTree {...props} deps={{ ...deps }} onFailure={jest.fn()} />)
+    await act(async () => {})
+    expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument()
+    expect(deps.listDir).toHaveBeenCalledTimes(before)
+  })
+
+  it.each(["success", "failure"])(
+    "ignores a previous root's late create %s without closing the new root's input",
+    async (outcome) => {
+      const deps = makeDeps()
+      const pending = deferred<void>()
+      deps.writeFile = jest.fn(() => pending.promise)
+      const onOpenFile = jest.fn()
+      const onFailure = jest.fn()
+      const props = { activePath: null, onOpenFile, onFailure, deps }
+      const { rerender } = render(<ProjectFileTree {...props} rootPath="/old" />)
+      await screen.findByTestId("tree-row-readme.md")
+      fireEvent.click(screen.getByLabelText("newFile"))
+      fireEvent.change(screen.getByPlaceholderText("newFile"), { target: { value: "old.txt" } })
+      fireEvent.keyDown(screen.getByPlaceholderText("newFile"), { key: "Enter" })
+      rerender(<ProjectFileTree {...props} rootPath="/new" />)
+      await screen.findByTestId("tree-row-readme.md")
+      fireEvent.click(screen.getByLabelText("newFile"))
+      fireEvent.change(screen.getByPlaceholderText("newFile"), { target: { value: "new.txt" } })
+      await act(async () => {
+        if (outcome === "success") pending.resolve()
+        else pending.reject(new Error("offline"))
+      })
+      expect(screen.getByPlaceholderText("newFile")).toHaveValue("new.txt")
+      expect(onOpenFile).not.toHaveBeenCalled()
+      expect(onFailure).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([mockTransportListeners, mockRemoteListeners])(
+    "invalidates pending reads when the transport target changes",
+    async (listeners) => {
+      const deps = makeDeps()
+      const pending = deferred<WorkspaceEntry[]>()
+      deps.listDir = jest
+        .fn()
+        .mockImplementationOnce(() => pending.promise)
+        .mockResolvedValue([entry("new-host.md", false)])
+      render(
+        <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+      )
+      await act(async () => {
+        listeners.forEach((listener) => listener())
+        pending.resolve([entry("old-host.md", false)])
+      })
+      expect(await screen.findByTestId("tree-row-new-host.md")).toBeInTheDocument()
+      expect(screen.queryByTestId("tree-row-old-host.md")).toBeNull()
+    }
+  )
+
+  it.each(["rename", "delete", "move"])(
+    "ignores old-root %s completion after switching roots",
+    async (operation) => {
+      const deps = makeDeps()
+      const pending = deferred<void>()
+      deps.renameEntry = jest.fn(() => pending.promise)
+      deps.deleteEntry = jest.fn(() => pending.promise)
+      const onRenamed = jest.fn()
+      const props = { activePath: null, onOpenFile: jest.fn(), onRenamed, deps }
+      const { rerender } = render(<ProjectFileTree {...props} rootPath="/old" />)
+      await screen.findByTestId("tree-row-readme.md")
+      if (operation === "rename") {
+        fireEvent.click(screen.getAllByText("rename")[1])
+        fireEvent.change(screen.getByLabelText("rename"), { target: { value: "renamed.md" } })
+        fireEvent.keyDown(screen.getByLabelText("rename"), { key: "Enter" })
+      } else if (operation === "delete") {
+        fireEvent.click(screen.getAllByText("delete")[1])
+        fireEvent.click(
+          within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
+        )
+      } else {
+        fireEvent.drop(screen.getByTestId("tree-row-src"), {
+          dataTransfer: { types: ["application/x-cognia-tree-row"], getData: () => "readme.md" },
+        })
+      }
+      rerender(<ProjectFileTree {...props} rootPath="/new" />)
+      await screen.findByTestId("tree-row-readme.md")
+      const calls = (deps.listDir as jest.Mock).mock.calls.length
+      await act(async () => pending.resolve())
+      expect(onRenamed).not.toHaveBeenCalled()
+      expect(deps.listDir).toHaveBeenCalledTimes(calls)
+      expect(screen.queryByTestId("tree-row-src/a.ts")).toBeNull()
+    }
+  )
+
+  it("does not report a pending failure after unmount and removes transport subscriptions", async () => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    deps.listDir = jest.fn(() => pending.promise)
+    const onFailure = jest.fn()
+    const { unmount } = render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        onFailure={onFailure}
+      />
+    )
+    unmount()
+    await act(async () => pending.reject(new Error("offline")))
+    expect(onFailure).not.toHaveBeenCalled()
+    expect(mockTransportListeners.size).toBe(0)
+    expect(mockRemoteListeners.size).toBe(0)
+  })
+})
+
+describe("remote tree freshness", () => {
+  let visibility: DocumentVisibilityState
+  beforeEach(() => {
+    jest.useFakeTimers()
+    mockDesktop = false
+    visibility = "visible"
+    jest.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility)
+  })
+  afterEach(() => {
+    mockDesktop = true
+    mockRemoteActive = false
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+
+  async function tick(ms = 5_000) {
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(ms)
+    })
+  }
+
+  it.each(["browser", "desktop-remote"])(
+    "refreshes expanded directories on %s and stops for hidden, collapsed, and unmounted trees",
+    async (mode) => {
+      mockDesktop = mode === "desktop-remote"
+      mockRemoteActive = mode === "desktop-remote"
+      const deps = makeDeps()
+      const { unmount } = render(
+        <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+      )
+      await act(async () => {})
+      fireEvent.click(screen.getByTestId("tree-row-src"))
+      await act(async () => {})
+      deps.fs.src = [entry("src/remote.ts", false)]
+      await tick()
+      expect(screen.getByTestId("tree-row-src/remote.ts")).toBeInTheDocument()
+      expect(screen.queryByTestId("tree-row-src/a.ts")).toBeNull()
+      const beforeHidden = (deps.listDir as jest.Mock).mock.calls.length
+      visibility = "hidden"
+      fireEvent(document, new Event("visibilitychange"))
+      await tick(30_000)
+      expect(deps.listDir).toHaveBeenCalledTimes(beforeHidden)
+      visibility = "visible"
+      await act(async () => {
+        fireEvent(document, new Event("visibilitychange"))
+      })
+      expect(deps.listDir).toHaveBeenCalledTimes(beforeHidden + 2)
+      fireEvent.click(screen.getByTestId("tree-row-src"))
+      await tick()
+      expect(deps.listDir).toHaveBeenCalledTimes(beforeHidden + 3)
+      unmount()
+      await tick(30_000)
+      expect(deps.listDir).toHaveBeenCalledTimes(beforeHidden + 3)
+    }
+  )
+
+  it("retains expansion without polling or token refresh while inactive and refreshes on activation", async () => {
+    const deps = makeDeps()
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} active refreshToken={0} />)
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await act(async () => {})
+    expect(deps.listDir).toHaveBeenCalledTimes(2)
+    rerender(<ProjectFileTree {...props} active={false} refreshToken={1} />)
+    await tick(30_000)
+    expect(deps.listDir).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("tree-row-src")).toHaveAttribute("aria-expanded", "true")
+    deps.fs.src = [entry("src/refreshed.ts", false)]
+    rerender(<ProjectFileTree {...props} active refreshToken={1} />)
+    await act(async () => {})
+    expect(deps.listDir).toHaveBeenCalledTimes(4)
+    expect(screen.getByTestId("tree-row-src/refreshed.ts")).toBeInTheDocument()
+  })
+
+  it("closes a portaled delete confirmation when its retained panel becomes inactive", async () => {
+    const deps = makeDeps()
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} active />)
+    await act(async () => {})
+    fireEvent.click(screen.getAllByText("delete")[1])
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    rerender(<ProjectFileTree {...props} active={false} />)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    rerender(<ProjectFileTree {...props} active />)
+    await act(async () => {})
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(deps.deleteEntry).not.toHaveBeenCalled()
+  })
+
+  it("defers the initial root read while inactive and starts with the latest root and host", async () => {
+    const deps = makeDeps()
+    const props = { activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} rootPath="/old" active={false} />)
+    rerender(<ProjectFileTree {...props} rootPath="/new" active={false} />)
+    act(() => {
+      for (const listener of mockTransportListeners) listener()
+    })
+    await tick(30_000)
+    expect(deps.listDir).not.toHaveBeenCalled()
+    rerender(<ProjectFileTree {...props} rootPath="/new" active />)
+    await act(async () => {})
+    expect(deps.listDir).toHaveBeenCalledTimes(1)
+    expect(deps.listDir).toHaveBeenCalledWith("/new", undefined)
+  })
+
+  it("does not duplicate the fresh root read when changing root and activating together", async () => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = deps.listDir as jest.Mock
+    listDir.mockImplementationOnce(() => pending.promise)
+    const props = { activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} rootPath="/old" active={false} />)
+    rerender(<ProjectFileTree {...props} rootPath="/new" active />)
+    await act(async () => {
+      pending.resolve(deps.fs[""])
+    })
+    expect(listDir).toHaveBeenCalledTimes(1)
+    expect(listDir).toHaveBeenCalledWith("/new", undefined)
+  })
+
+  it("discards an in-flight listing while inactive then refreshes on return", async () => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = deps.listDir as jest.Mock
+    listDir.mockImplementationOnce(() => pending.promise)
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} active />)
+    rerender(<ProjectFileTree {...props} active={false} />)
+    await act(async () => {
+      pending.resolve([entry("stale.ts", false)])
+    })
+    expect(screen.queryByTestId("tree-row-stale.ts")).toBeNull()
+    await tick(30_000)
+    expect(listDir).toHaveBeenCalledTimes(1)
+    rerender(<ProjectFileTree {...props} active />)
+    await act(async () => {})
+    expect(listDir).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("tree-row-src")).toBeInTheDocument()
+  })
+
+  it("coalesces repeated reactivation behind a pending directory read", async () => {
+    const pending = deferred<WorkspaceEntry[]>()
+    const deps = makeDeps()
+    const listDir = deps.listDir as jest.Mock
+    listDir.mockImplementationOnce(() => pending.promise)
+    const props = { rootPath: "/repo", activePath: null, onOpenFile: jest.fn(), deps }
+    const { rerender } = render(<ProjectFileTree {...props} active />)
+    rerender(<ProjectFileTree {...props} active={false} />)
+    rerender(<ProjectFileTree {...props} active />)
+    rerender(<ProjectFileTree {...props} active={false} />)
+    rerender(<ProjectFileTree {...props} active />)
+    expect(listDir).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pending.resolve([entry("stale.ts", false)])
+    })
+    expect(listDir).toHaveBeenCalledTimes(2)
+    expect(screen.queryByTestId("tree-row-stale.ts")).toBeNull()
+    expect(screen.getByTestId("tree-row-src")).toBeInTheDocument()
+  })
+
+  it("does not poll local desktop directories", async () => {
+    mockDesktop = true
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await tick(30_000)
+    expect(deps.listDir).toHaveBeenCalledTimes(1)
+  })
+
+  it("pauses offline polling and resumes immediately online without overlapping reads", async () => {
+    let online = false
+    jest.spyOn(navigator, "onLine", "get").mockImplementation(() => online)
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = deps.listDir as jest.Mock
+    listDir
+      .mockImplementationOnce(async () => deps.fs[""])
+      .mockImplementationOnce(() => pending.promise)
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await tick(30_000)
+    expect(listDir).toHaveBeenCalledTimes(1)
+    online = true
+    fireEvent(window, new Event("online"))
+    fireEvent(window, new Event("online"))
+    await tick(30_000)
+    expect(listDir).toHaveBeenCalledTimes(2)
+    await act(async () => pending.resolve([entry("online.md", false)]))
+    expect(screen.getByTestId("tree-row-online.md")).toBeInTheDocument()
+    online = false
+    fireEvent(window, new Event("offline"))
+    await tick(30_000)
+    expect(listDir).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not fetch collapsed descendants or directories collapsed during a slow poll", async () => {
+    const deps = makeDeps()
+    deps.fs.src = [entry("src/deep", true)]
+    deps.fs["src/deep"] = [entry("src/deep/a.ts", false)]
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("tree-row-src/deep"))
+    await act(async () => {})
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = deps.listDir as jest.Mock
+    listDir.mockImplementationOnce(() => pending.promise)
+    await tick()
+    const before = listDir.mock.calls.length
+    fireEvent.click(screen.getByTestId("tree-row-src"))
+    await act(async () => pending.resolve(deps.fs[""]))
+    expect(listDir).toHaveBeenCalledTimes(before)
+    await tick()
+    expect(listDir).toHaveBeenCalledTimes(before + 1)
+  })
+
+  it("waits for slow reads, recovers after failures, and avoids repeated failure notifications", async () => {
+    const deps = makeDeps()
+    const pending = deferred<WorkspaceEntry[]>()
+    const listDir = jest
+      .fn()
+      .mockResolvedValueOnce(deps.fs[""])
+      .mockImplementationOnce(() => pending.promise)
+      .mockRejectedValue(new Error("host is offline"))
+    deps.listDir = listDir
+    const onFailure = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        onFailure={onFailure}
+      />
+    )
+    await tick()
+    await tick(30_000)
+    expect(listDir).toHaveBeenCalledTimes(2)
+    await act(async () => pending.reject(new Error("host is offline")))
+    expect(screen.getByTestId("file-tree-failure-root")).toBeInTheDocument()
+    await tick(10_000)
+    expect(onFailure).toHaveBeenCalledTimes(1)
+    listDir.mockResolvedValue([entry("reconnected.md", false)])
+    await tick()
+    expect(screen.queryByTestId("file-tree-failure-root")).toBeNull()
+    expect(screen.getByTestId("tree-row-reconnected.md")).toBeInTheDocument()
+  })
+})
+
 describe("ProjectFileTree", () => {
+  it("refreshes expanded children through the toolbar and root menu", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    fireEvent.click(await screen.findByTestId("tree-row-src"))
+    await screen.findByTestId("tree-row-src/a.ts")
+    deps.fs.src = [entry("src/toolbar.ts", false)]
+    fireEvent.click(screen.getByLabelText("refresh"))
+    await screen.findByTestId("tree-row-src/toolbar.ts")
+    deps.fs.src = [entry("src/menu.ts", false)]
+    fireEvent.click(screen.getByText("refresh"))
+    await screen.findByTestId("tree-row-src/menu.ts")
+  })
+
+  it("copies relative and absolute paths through existing callbacks", async () => {
+    const onCopyPath = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath="readme.md"
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+        onCopyPath={onCopyPath}
+      />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(screen.getAllByText("action.copyRelativePath")[1])
+    expect(onCopyPath).toHaveBeenLastCalledWith("readme.md", false)
+    fireEvent.click(screen.getAllByText("action.copyPath")[1])
+    expect(onCopyPath).toHaveBeenLastCalledWith("readme.md", true)
+  })
+
+  it("supports root context creation and cancellation inside a directory template", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-src")
+    fireEvent.click(screen.getAllByText("newFile").at(-1)!)
+    fireEvent.keyDown(screen.getByPlaceholderText("newFile"), { key: "Escape" })
+    fireEvent.click(screen.getAllByText("newFolder").at(-1)!)
+    fireEvent.change(screen.getByPlaceholderText("newFolder"), { target: { value: "new-dir" } })
+    fireEvent.blur(screen.getByPlaceholderText("newFolder"))
+    await waitFor(() => expect(deps.createDir).toHaveBeenCalledWith("/repo", "new-dir"))
+    fireEvent.click(screen.getAllByText("templates.markdown")[0])
+    expect(screen.getByPlaceholderText("templates.markdown")).toHaveValue("README.md")
+    fireEvent.keyDown(screen.getByPlaceholderText("templates.markdown"), { key: "Escape" })
+    expect(screen.queryByPlaceholderText("templates.markdown")).toBeNull()
+    expect(deps.writeFile).not.toHaveBeenCalled()
+  })
+
+  it("highlights and clears root and directory drop targets without accepting external drags", async () => {
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+      />
+    )
+    const row = await screen.findByTestId("tree-row-src")
+    const root = screen.getByTestId("project-file-tree-scroll")
+    const dataTransfer = {
+      types: ["application/x-cognia-tree-row"],
+      dropEffect: "",
+      getData: () => "",
+    }
+    fireEvent.dragOver(root, { dataTransfer })
+    expect(root).toHaveClass("bg-accent/30")
+    fireEvent.dragLeave(root)
+    expect(root).not.toHaveClass("bg-accent/30")
+    fireEvent.dragOver(row, { dataTransfer })
+    expect(row).toHaveClass("bg-primary/15")
+    fireEvent.dragLeave(row)
+    expect(row).not.toHaveClass("bg-primary/15")
+    fireEvent.dragOver(root, { dataTransfer: { ...dataTransfer, types: ["Files"] } })
+    fireEvent.dragOver(row, { dataTransfer: { ...dataTransfer, types: ["Files"] } })
+    expect(root).not.toHaveClass("bg-accent/30")
+    expect(row).not.toHaveClass("bg-primary/15")
+    fireEvent.drop(root, { dataTransfer })
+    fireEvent.drop(row, { dataTransfer })
+  })
+
   it("uses touch-sized rows and toolbar actions in touch density", async () => {
     const deps = makeDeps()
     render(

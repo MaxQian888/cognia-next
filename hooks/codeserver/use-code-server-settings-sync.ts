@@ -18,6 +18,55 @@ import { listPluginThemes, subscribeThemeRegistry } from "@/lib/theme/theme-regi
 import type { PluginTheme } from "@/lib/theme/theme-registry"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { useSettingsStore } from "@/stores"
+import {
+  getActiveRemoteTransport,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
+import { onTransportChange, transport } from "@/lib/tauri/transport-instance"
+
+const settingsTransport = () => getActiveRemoteTransport() ?? transport
+function subscribeSettingsTransport(notify: () => void) {
+  const stopRemote = subscribeActiveRemoteTransport(notify)
+  const stopTransport = onTransportChange(notify)
+  return () => {
+    stopRemote()
+    stopTransport()
+  }
+}
+
+type SettingsWrite = (isLatest: () => boolean) => Promise<void>
+interface SettingsWriter {
+  revision: number
+  pending: { revision: number; write: SettingsWrite } | null
+}
+// settings.json is shared by every project in a host/profile. Keep this queue
+// outside React so remounts and multiple panes cannot overtake an older write.
+const settingsWriters = new WeakMap<object, Map<CodeServerProfile, SettingsWriter>>()
+function enqueueSettingsWrite(host: object, profile: CodeServerProfile, write: SettingsWrite) {
+  let profiles = settingsWriters.get(host)
+  if (!profiles) {
+    profiles = new Map()
+    settingsWriters.set(host, profiles)
+  }
+  const existing = profiles.get(profile)
+  if (existing) {
+    existing.pending = { revision: ++existing.revision, write }
+    return
+  }
+  const writer: SettingsWriter = { revision: 1, pending: { revision: 1, write } }
+  profiles.set(profile, writer)
+  void (async () => {
+    try {
+      while (writer.pending) {
+        const next = writer.pending
+        writer.pending = null
+        await next.write(() => writer.revision === next.revision).catch(() => undefined)
+      }
+    } finally {
+      profiles.delete(profile)
+    }
+  })()
+}
 
 /** Stable empty snapshot for SSR / pre-registration renders. */
 const EMPTY_PLUGIN_THEMES: PluginTheme[] = []
@@ -61,6 +110,11 @@ export function useCodeServerSettingsSync(
   enabled: boolean,
   profile: CodeServerProfile = "managed"
 ): void {
+  const host = useSyncExternalStore(
+    subscribeSettingsTransport,
+    settingsTransport,
+    settingsTransport
+  )
   const { resolvedTheme } = useTheme()
   const colorTheme = useSettingsStore((s) => s.colorTheme)
   const activeCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
@@ -81,7 +135,10 @@ export function useCodeServerSettingsSync(
   useEffect(() => {
     if (!enabled || !resolvedTheme) return
     let cancelled = false
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let retryDelay = 2_000
+    const synchronize = () => {
+      if (cancelled || host !== settingsTransport()) return
       const activePluginTheme = activePluginThemeId
         ? (pluginThemes.find((t) => t.id === activePluginThemeId) ?? null)
         : null
@@ -127,25 +184,34 @@ export function useCodeServerSettingsSync(
         motion,
         linkTheme,
       })
-      // Read-merge-write so anything the user set from inside VS Code survives.
-      const existing = await codeServerClient.readUserSettings(profile).catch(() => null)
-      if (cancelled || existing === null) return
-      await codeServerClient
-        .writeUserSettings(
-          mergeCodeServerSettings(existing, managed, {
+      enqueueSettingsWrite(host, profile, async (isLatest) => {
+        const current = () => !cancelled && host === settingsTransport() && isLatest()
+        if (!current()) return
+        try {
+          // Read immediately before the serialized write, so queued changes
+          // preserve settings edited by the user while an older write ran.
+          const existing = await codeServerClient.readUserSettings(profile)
+          if (!current()) return
+          const contents = mergeCodeServerSettings(existing, managed, {
             preserve: linkTheme ? undefined : CODESERVER_THEME_SETTING_KEYS,
-          }),
-          profile
-        )
-        // A theming failure must never take the editor down with it.
-        .catch(() => undefined)
-    })()
+          })
+          if (contents !== existing) await codeServerClient.writeUserSettings(contents, profile)
+        } catch {
+          if (!current()) return
+          timer = setTimeout(synchronize, retryDelay)
+          retryDelay = Math.min(retryDelay * 2, 30_000)
+        }
+      })
+    }
+    synchronize()
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
   }, [
     enabled,
     profile,
+    host,
     resolvedTheme,
     colorTheme,
     activeCustomThemeId,

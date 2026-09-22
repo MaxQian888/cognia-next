@@ -10,7 +10,7 @@
 // slot a tree click reuses, so browsing does not bury the user in tabs. It is
 // promoted to permanent by a double-click, by the pin button, or by editing it.
 
-import { useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, CopyIcon, PinIcon, RotateCcwIcon, SaveIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -70,6 +70,22 @@ interface Props {
 
 const DRAG_MIME = "application/x-cognia-editor-tab"
 
+function revealTab(strip: HTMLDivElement, tab: HTMLButtonElement) {
+  // Include the file's close/pin actions, and scroll this strip only: using
+  // scrollIntoView here can move the chat or steal the editor's viewport.
+  const target = tab.parentElement === strip ? tab : tab.parentElement!
+  const bounds = strip.getBoundingClientRect()
+  if (bounds.width <= 0) return
+  const rect = target.getBoundingClientRect()
+  const delta =
+    rect.left < bounds.left
+      ? rect.left - bounds.left
+      : rect.right > bounds.right
+        ? Math.min(rect.right - bounds.right, rect.left - bounds.left)
+        : 0
+  if (delta !== 0) strip.scrollLeft += delta
+}
+
 export function ProjectEditorTabs({
   fixedTabs = [],
   trailingContent,
@@ -96,6 +112,33 @@ export function ProjectEditorTabs({
   const dragRelPath = useRef<string | null>(null)
   // Overflow list state — a DropdownMenu that closes itself on pick.
   const [listOpen, setListOpen] = useState(false)
+  const stripRef = useRef<HTMLDivElement>(null)
+  const fixedActiveIndex = fixedTabs.findIndex((tab) => tab.active)
+  const fileActiveIndex = files.findIndex((file) => file.relPath === activePath)
+  const activeIndex =
+    fixedActiveIndex >= 0
+      ? fixedActiveIndex
+      : fileActiveIndex >= 0
+        ? fixedTabs.length + fileActiveIndex
+        : 0
+  // Draft updates must not trigger geometry reads on every keystroke. Only
+  // selection, tab order, and an actual strip resize need to reveal a tab.
+  const tabOrder = JSON.stringify([
+    fixedTabs.map((tab) => tab.id),
+    files.map((file) => file.relPath),
+  ])
+  useLayoutEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+    const reveal = () => {
+      const tab = strip.querySelectorAll<HTMLButtonElement>('[role="tab"]')[activeIndex]
+      if (tab) revealTab(strip, tab)
+    }
+    reveal()
+    const observer = new ResizeObserver(reveal)
+    observer.observe(strip)
+    return () => observer.disconnect()
+  }, [activeIndex, tabOrder])
 
   if (files.length === 0 && fixedTabs.length === 0 && !trailingContent) return null
 
@@ -165,17 +208,56 @@ export function ProjectEditorTabs({
   }
 
   return (
-    <div className="flex items-center border-b" data-testid="project-editor-tabs">
+    <div
+      className="@container/editor-tabs flex min-w-0 shrink-0 flex-wrap items-center border-b"
+      data-testid="project-editor-tabs"
+    >
       <div
-        className="flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        ref={stripRef}
+        className="flex min-w-[min(100%,12rem)] flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
+        aria-orientation="horizontal"
+        onKeyDown={(event) => {
+          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+          const target = event.target
+          if (!(target instanceof HTMLButtonElement) || target.getAttribute("role") !== "tab")
+            return
+          const tabs = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+          )
+          const index = tabs.indexOf(target)
+          if (index < 0) return
+          const rtl = getComputedStyle(event.currentTarget).direction === "rtl"
+          let next: number
+          switch (event.key) {
+            case "ArrowLeft":
+              next = (index + (rtl ? 1 : -1) + tabs.length) % tabs.length
+              break
+            case "ArrowRight":
+              next = (index + (rtl ? -1 : 1) + tabs.length) % tabs.length
+              break
+            case "Home":
+              next = 0
+              break
+            case "End":
+              next = tabs.length - 1
+              break
+            default:
+              return
+          }
+          event.preventDefault()
+          tabs[next].focus({ preventScroll: true })
+          revealTab(event.currentTarget, tabs[next])
+          tabs[next].click()
+        }}
       >
-        {fixedTabs.map((tab) => (
+        {fixedTabs.map((tab, index) => (
           <button
             key={tab.id}
             type="button"
             role="tab"
             aria-selected={tab.active}
+            tabIndex={activeIndex === index ? 0 : -1}
             data-testid={`editor-fixed-tab-${tab.id}`}
             className={cn(
               "relative flex shrink-0 items-center gap-1 border-r px-3 py-1.5 text-sm",
@@ -193,7 +275,7 @@ export function ProjectEditorTabs({
             <span>{tab.label}</span>
           </button>
         ))}
-        {files.map((f) => {
+        {files.map((f, index) => {
           const dirty = f.draftContent !== f.savedContent
           const name = f.relPath.split("/").pop() ?? f.relPath
           const preview = previewPath === f.relPath
@@ -244,7 +326,7 @@ export function ProjectEditorTabs({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    tabIndex={isActive ? 0 : -1}
+                    tabIndex={activeIndex === fixedTabs.length + index ? 0 : -1}
                     data-testid={`editor-tab-${f.relPath}`}
                     className={cn(
                       "flex cursor-pointer items-center gap-1.5 py-1.5 pl-3",
@@ -265,7 +347,7 @@ export function ProjectEditorTabs({
                     title={preview ? t("previewTab", { name: f.relPath }) : f.relPath}
                   >
                     <FileTypeIcon path={name} className="size-3.5 shrink-0" />
-                    <span className="max-w-[12rem] truncate">{name}</span>
+                    <span className="max-w-[min(12rem,45cqw)] truncate">{name}</span>
                     {f.externallyChanged ? (
                       <span
                         className="size-1.5 shrink-0 rounded-full bg-amber-500"
@@ -366,13 +448,20 @@ export function ProjectEditorTabs({
           className={cn("mx-1 h-7 shrink-0 gap-1", density === "touch" && "h-10")}
           onClick={onSaveAll}
           data-testid="editor-save-all"
+          aria-label={t("saveAll", { count: dirtyCount })}
+          title={t("saveAll", { count: dirtyCount })}
         >
           <SaveIcon className="size-3.5" />
-          {t("saveAll", { count: dirtyCount })}
+          <span className="hidden @[480px]/editor-tabs:inline">
+            {t("saveAll", { count: dirtyCount })}
+          </span>
         </Button>
       ) : null}
       {trailingContent ? (
-        <div className="shrink-0 px-1" data-testid="project-editor-tabs-trailing">
+        <div
+          className="min-w-0 w-full max-w-full border-t px-1 py-1 @[56rem]/editor-tabs:w-auto @[56rem]/editor-tabs:shrink-0 @[56rem]/editor-tabs:border-t-0 @[56rem]/editor-tabs:py-0"
+          data-testid="project-editor-tabs-trailing"
+        >
           {trailingContent}
         </div>
       ) : null}

@@ -8,7 +8,7 @@ import { transport } from "@/lib/tauri"
 import { __resetRoutingForTests, setActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 import { CODESERVER_EVENTS, codeServerClient } from "./client"
-import { __resetRemoteIdeRelayForTesting } from "./remote-relay"
+import { __resetRemoteIdeRelayForTesting, isRemoteIdeRelayActive } from "./remote-relay"
 
 const call = transport.call as jest.Mock
 
@@ -58,6 +58,7 @@ it("binds the pinned desktop relay and reports its loopback port", async () => {
   expect(call).toHaveBeenCalledWith("codeserver_remote_relay_ensure", {
     baseUrl: "https://remote.example:27890",
     deviceJwt: "device-access-token",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
     serverFingerprint: "ab".repeat(32),
     relayPath: "/ide/relay/session/",
   })
@@ -340,4 +341,101 @@ it("never binds or stops a native relay from a browser", async () => {
     "codeserver_stop",
     "codeserver_stop_all",
   ])
+})
+
+it.each(["stop", "stopAll"])("cleans the desktop relay when remote %s fails", async (method) => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "1",
+    serverFingerprint: "ab".repeat(32),
+  })
+  call.mockImplementation(async (name: string) => {
+    if (name === "codeserver_stop" || name === "codeserver_stop_all")
+      throw new Error("host offline")
+    return true
+  })
+  await expect(
+    method === "stop" ? codeServerClient.stop("/repo") : codeServerClient.stopAll()
+  ).rejects.toThrow("host offline")
+  expect(call).toHaveBeenCalledWith("codeserver_remote_relay_stop", {})
+  expect(isRemoteIdeRelayActive()).toBe(false)
+})
+
+it("does not bind a late ensure response after its host has been stopped", async () => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "1",
+    serverFingerprint: "ab".repeat(32),
+  })
+  let finish!: (value: unknown) => void
+  call.mockImplementation((name: string) =>
+    name === "codeserver_ensure"
+      ? new Promise((resolve) => {
+          finish = resolve
+        })
+      : Promise.resolve(true)
+  )
+  const opening = codeServerClient.ensure("/repo")
+  const rejected = expect(opening).rejects.toThrow("CODESERVER_OPEN_SUPERSEDED")
+  await codeServerClient.stop("/repo")
+  finish({ running: true, port: null, relayPath: "/ide/relay/late/" })
+  await rejected
+  expect(call.mock.calls.some(([name]) => name === "codeserver_remote_relay_ensure")).toBe(false)
+})
+
+it("does not bind an ensure response from a host that is no longer selected", async () => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "1",
+    serverFingerprint: "ab".repeat(32),
+  })
+  let finish!: (value: unknown) => void
+  call.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+  )
+  const opening = codeServerClient.ensure("/repo")
+  setActiveRemoteEndpoint(null)
+  finish({ running: true, port: null, relayPath: "/ide/relay/late/" })
+  await expect(opening).rejects.toThrow("CODESERVER_OPEN_SUPERSEDED")
+  expect(call).toHaveBeenCalledTimes(1)
+})
+
+it("cleans locally before a slow remote stop completes and preserves a later opening", async () => {
+  setActiveRemoteEndpoint({
+    baseUrl: "https://remote.example:27890",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "1",
+    serverFingerprint: "ab".repeat(32),
+  })
+  let finish!: (value: boolean) => void
+  call.mockImplementation((name: string) => {
+    if (name === "codeserver_stop")
+      return new Promise((resolve) => {
+        finish = resolve
+      })
+    if (name === "codeserver_ensure")
+      return Promise.resolve({ running: true, relayPath: "/ide/relay/new/" })
+    return Promise.resolve({ port: 12345 })
+  })
+  const stopping = codeServerClient.stop("/old")
+  await codeServerClient.ensure("/new")
+  expect(call.mock.calls.at(-1)[0]).toBe("codeserver_remote_relay_ensure")
+  finish(true)
+  await stopping
+  expect(call.mock.calls.at(-1)[0]).toBe("codeserver_remote_relay_ensure")
+  expect(isRemoteIdeRelayActive()).toBe(true)
 })

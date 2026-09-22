@@ -104,7 +104,7 @@ export function EditorEngineToggle({
   const remoteWorkbench = useRemoteHostActive() && value === "codeserver" && proIdeSupported
 
   return (
-    <div className={cn("flex items-center gap-1.5", className)}>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
       <ToggleGroup
         type="single"
         value={value}
@@ -116,7 +116,7 @@ export function EditorEngineToggle({
         variant="outline"
         size="sm"
         aria-label={t("proIde.switchLabel")}
-        className="h-7"
+        className="h-7 shrink-0"
       >
         <ToggleGroupItem
           value="monaco"
@@ -152,7 +152,11 @@ export function EditorEngineToggle({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex" data-testid="editor-mode-codeserver-disabled">
+                <span
+                  className="inline-flex"
+                  tabIndex={0}
+                  data-testid="editor-mode-codeserver-disabled"
+                >
                   <ToggleGroupItem
                     value="codeserver"
                     data-testid="editor-mode-codeserver"
@@ -183,6 +187,8 @@ export function EditorEngineToggle({
                 <span
                   className="inline-flex h-7 items-center gap-1 border border-warning/40 bg-warning/10 px-2 text-xs text-muted-foreground"
                   data-testid="pro-ide-remote-workbench"
+                  tabIndex={0}
+                  aria-label={t("proIde.remoteWorkbenchTooltip")}
                 >
                   <InfoIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
                   {t("proIde.remoteWorkbenchLabel")}
@@ -221,7 +227,7 @@ export function EditorEngineToggle({
             variant="outline"
             size="sm"
             aria-label={t("proIde.profileLabel")}
-            className="h-7"
+            className="h-7 shrink-0"
             data-testid="pro-ide-profile-toggle"
           >
             {/* The trigger hangs on a wrapping span rather than on the item
