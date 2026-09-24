@@ -316,6 +316,9 @@ const REGISTRY = [
   { script: "sdk:scaffold:test", group: "plugin-sdk" },
   { script: "sdk:python:test", group: "plugin-sdk", runtime: "python" },
   { script: "plugin:repowiki:test", group: "plugin-sdk", runtime: "python" },
+  // laya's torch stack stays out of CI: the suite stubs the engine and a fake
+  // `laya` module, so it runs without the plugin's isolated venv.
+  { script: "plugin:laya-guard:test", group: "plugin-sdk", runtime: "python" },
   { script: "sdk:rust:test", group: "plugin-sdk", runtime: "rust", resource: "cargo" },
 
   // Rust quality. The workspace had never been linted or format-checked —

@@ -1,4 +1,4 @@
-# Laya Guard — inbound IM moderation for Cognia
+# Laya (local System-1) — inbound IM moderation and typed decisions for Cognia
 
 A Python plugin that runs [laya](https://github.com/NandhaKishorM/laya), a
 non-autoregressive "System 1" decision engine, as a local moderation gate for
@@ -16,15 +16,23 @@ the checkpoint is cached.
   (allows) while the model is loading or on any error.
 - **`laya_moderate_check` tool** — the same verdict on arbitrary text, for
   inspection and tuning.
-- **`laya_status` tool** — checkpoint readiness, configured backend, counters.
-- **`laya_decide` tool** — raw passthrough: ask arbitrary typed questions
-  (`choice` / `score` / `noul`) in one forward pass.
+- **`laya_status` tool** — checkpoint readiness, configured backend, counters
+  (`blocks` = messages actually dropped, `wouldBlock` = observe-mode matches).
+  `retry: true` retries a failed load immediately instead of waiting out the
+  5-minute back-off.
+- **`laya_decide` tool** — ask arbitrary typed questions (`choice` / `score` /
+  `noul`) in one forward pass. Returns `{ok: true, answers, latencyMs,
+routing?, truncation?, stateTrimmed?}` or `{ok: false, error: {kind,
+message}}`.
 
 ## Checkpoint routing
 
 Default `checkpoint: "auto"` uses laya's `Router` — it detects script/language
 per request (<0.5 ms) and dispatches to the English or multilingual checkpoint
-as appropriate. This matters: the English checkpoint misfires badly on text it
+as appropriate. The Router is lazy by itself, so the loader **preloads both
+checkpoints on a background thread** and only reports `ready` once they are
+built (~60 s from a warm cache on Apple Silicon); nothing downloads inside a
+hook call. This matters: the English checkpoint misfires badly on text it
 cannot read (a benign Chinese prompt scored 1.0 on a jailbreak probe in
 validation). Pin `multilingual` or `english` only if your traffic is known.
 
@@ -44,6 +52,13 @@ Validated locally on the real checkpoints (Apple Silicon, MPS):
   (multilingual). Messages past `maxChars` are truncated and the verdict
   reports `truncated: true`. Chunked scanning was evaluated and rejected —
   sliding-window max-pooling false-positives on repetitive benign text.
+- **laya truncates silently, so `decide` measures first.** Each option is
+  capped at 48 tokens, instructions are cut to fit the head budget (192 tokens
+  english, 256 multilingual), and the state is cut from the _tail_ — for a
+  chat that drops the newest messages. `decide` replays that packing against
+  the routed checkpoint, trims the oldest entries of an optional `stateTrim`
+  path first, and reports `truncation` per question plus `stateTrimmed` /
+  `stateTruncated` instead of hiding the cut.
 
 ## Config
 
@@ -88,13 +103,17 @@ Useful environment variables (inherited by the host process):
 Failure modes are reported, never thrown: `laya_status.errorKind` is one of
 `deps_missing` (venv install failed — reinstall the plugin), `low_disk`,
 `download_failed` (network/HF unreachable), `load_failed` (anything else).
-While `ready: false`, inbound messages pass through unmoderated.
+While `ready: false`, inbound messages pass through unmoderated. After a
+failure, callers stop re-triggering the load for 5 minutes
+(`retryInSeconds`); saving the plugin config or `laya_status(retry: true)`
+retries at once. The disk preflight checks every checkpoint the configured
+mode needs, not just "some snapshot exists".
 
 ## Development
 
 ```bash
-# unit tests (stubbed agent, no model download)
-uv run --no-project --with pytest pytest tests/
+# unit tests (stubbed agent + fake laya module, no torch, no model download)
+pnpm plugin:laya-guard:test
 
 # plugin gates
 cognia plugin lint && cognia plugin build

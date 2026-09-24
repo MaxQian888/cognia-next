@@ -23,6 +23,8 @@ class StubEngine:
             "maxChars": 2800,
         }
         self._config.update(config or {})
+        self.recorded = []
+        self.forced_loads = 0
 
     @property
     def config(self):
@@ -36,16 +38,24 @@ class StubEngine:
             raise RuntimeError("boom")
         return self.verdict
 
-    def decide(self, state, questions):
-        return {"answers": {}, "latencyMs": 1.0}
+    def record_inbound(self, verdict, mode):
+        self.recorded.append((verdict, mode))
+
+    def decide(self, state, questions, state_trim=None):
+        return {"ok": True, "answers": {}, "latencyMs": 1.0}
 
     def status(self):
         return {"ready": True, "loading": False, "checkpoint": "auto", "error": None}
 
-    def request_load(self):
+    def request_load(self, force=False):
+        if force:
+            self.forced_loads += 1
         return True
 
     def unload(self):
+        pass
+
+    def shutdown(self):
         pass
 
 
@@ -88,13 +98,15 @@ def _inbound(text="buy my tokens"):
 
 
 def test_inbound_observe_default_allows_but_counts(monkeypatch):
-    # Observe is the install default: a flag-worthy message still passes.
-    _swap(monkeypatch, StubEngine(verdict=MOD_BLOCK_VERDICT))
+    # Observe is the install default: a flag-worthy message still passes, and
+    # the hook (not moderate()) records it as a would-be block.
+    engine = _swap(monkeypatch, StubEngine(verdict=MOD_BLOCK_VERDICT))
     assert main.moderate_inbound(_inbound()) is None
+    assert engine.recorded == [(MOD_BLOCK_VERDICT, "observe")]
 
 
 def test_inbound_enforce_blocks(monkeypatch):
-    _swap(
+    engine = _swap(
         monkeypatch,
         StubEngine(verdict=MOD_BLOCK_VERDICT, config={"inboundMode": "enforce"}),
     )
@@ -102,6 +114,7 @@ def test_inbound_enforce_blocks(monkeypatch):
     assert result["action"] == "block"
     assert "spam=0.96" in result["reason"]
     assert "laya-guard" in result["reason"]
+    assert engine.recorded == [(MOD_BLOCK_VERDICT, "enforce")]
 
 
 def test_inbound_disabled_allows(monkeypatch):
@@ -144,10 +157,17 @@ def test_inbound_reason_marks_truncation(monkeypatch):
 
 
 def test_laya_status_shape(monkeypatch):
-    _swap(monkeypatch, StubEngine())
+    engine = _swap(monkeypatch, StubEngine())
     status = main.laya_status()
     assert status["ready"] is True
     assert status["checkpoint"] == "auto"
+    assert engine.forced_loads == 0
+
+
+def test_laya_status_retry_forces_a_load(monkeypatch):
+    engine = _swap(monkeypatch, StubEngine())
+    main.laya_status(retry=True)
+    assert engine.forced_loads == 1
 
 
 def test_laya_moderate_check_not_ready(monkeypatch):
@@ -167,15 +187,16 @@ def test_laya_moderate_check_verdict(monkeypatch):
 def test_laya_decide_passthrough(monkeypatch):
     _swap(monkeypatch, StubEngine())
     out = main.laya_decide({"post": "hi"}, {"q": {"type": "noul", "instructions": "?"}})
-    assert out["ready"] is True
-    assert "answers" in out["result"]
+    assert out["ok"] is True
+    assert "answers" in out
 
 
 def test_laya_decide_not_ready(monkeypatch):
     class NotReady(StubEngine):
-        def decide(self, state, questions):
-            return None
+        def decide(self, state, questions, state_trim=None):
+            return {"ok": False, "error": {"kind": "not_ready", "message": "loading"}}
 
     _swap(monkeypatch, NotReady())
     out = main.laya_decide({"post": "hi"}, {"q": {}})
-    assert out["ready"] is False
+    assert out["ok"] is False
+    assert out["error"]["kind"] == "not_ready"

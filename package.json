@@ -127,6 +127,7 @@
     "plugin:contract:check": "node scripts/plugin/generate-contract.mjs --check && node scripts/plugin/check-selection-action-parity.mjs",
     "plugin:eval": "tsx scripts/plugin-eval/run-eval.ts",
     "plugin:repowiki:test": "uv run --project plugins/repowiki --with pytest --with pytest-asyncio python -m pytest plugins/repowiki/tests",
+    "plugin:laya-guard:test": "uv run --no-project --with pytest python -m pytest plugins/cognia-laya-guard/tests",
     "plugin-convert:bundle": "node scripts/plugin/build-convert-bundle.mjs",
     "plugin-convert:check": "node scripts/plugin/build-convert-bundle.mjs --check",
     "plugin-convert:check:test": "node --test scripts/plugin/build-convert-bundle.test.mjs",

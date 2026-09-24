@@ -1,4 +1,4 @@
-"""Laya Guard — local System-1 moderation for inbound connector (IM) messages.
+"""Laya (local System-1) — inbound IM moderation and typed decisions for Cognia.
 
 Uses the `laya` checkpoint (declared in ``pythonDependencies``) to answer typed
 questions about text in a single encoder forward pass — no LLM call, no network
@@ -10,8 +10,9 @@ Surface:
   Telegram) against spam / threat / harassment / toxic before they reach an
   agent. ``inboundMode: "observe"`` (default) scores without dropping and
   accumulates ``wouldBlock`` counters; ``"enforce"`` drops flagged messages.
-* Tools — ``laya_status`` (readiness), ``laya_moderate_check`` (same verdict
-  as the hook, on arbitrary text), ``laya_decide`` (raw typed questions).
+* Tools — ``laya_status`` (readiness, optional retry), ``laya_moderate_check``
+  (same verdict as the hook, on arbitrary text), ``laya_decide`` (raw typed
+  questions).
 
 Everything fails open: while the checkpoint is still loading (first run pulls
 ~1.3 GB from HuggingFace) or on any error, messages are allowed through rather
@@ -33,7 +34,7 @@ from cognia import get_config, hook, tool
 
 from layaguard import GuardEngine
 
-ENGINE = GuardEngine(logger=lambda msg: print(msg))
+ENGINE = GuardEngine(logger=cognia.log)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@ def on_startup() -> None:
     ENGINE.configure(get_config())
     if ENGINE.config["warmup"]:
         ENGINE.request_load()
-    print(f"cognia-laya-guard started: {ENGINE.status()}")
+    cognia.log(f"cognia-laya-guard started: {ENGINE.status()}")
 
 
 def on_config_updated(config: Dict[str, Any]) -> None:
@@ -53,8 +54,8 @@ def on_config_updated(config: Dict[str, Any]) -> None:
 
 
 def on_shutdown() -> None:
-    ENGINE.unload()
-    print("cognia-laya-guard shutting down")
+    ENGINE.shutdown()
+    cognia.log("cognia-laya-guard shutting down")
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +72,8 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
     and ``allow`` are equivalent — the bus treats errors/None as allow.
     """
     try:
-        if not ENGINE.config["inboundModeration"]:
+        config = ENGINE.config
+        if not config["inboundModeration"]:
             return None
         if not isinstance(payload, dict):
             return None
@@ -79,21 +81,23 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(text, str):
             return None
         verdict = ENGINE.moderate(text)
+        mode = config["inboundMode"]
+        ENGINE.record_inbound(verdict, mode)
         if verdict is None or not verdict["block"]:
             return None
-        if ENGINE.config["inboundMode"] != "enforce":
-            # Observe mode: score was recorded into status()["wouldBlock"], but
-            # the message passes — shadow-run on real traffic before enforcing.
-            print(f"laya-guard: observe-mode match (not dropped): {verdict['triggered']}")
+        if mode != "enforce":
+            # Observe mode: counted into status()["wouldBlock"], but the
+            # message passes — shadow-run on real traffic before enforcing.
+            cognia.log(f"laya-guard: observe-mode match (not dropped): {verdict['triggered']}")
             return None
         reason = "laya-guard inbound moderation: " + ", ".join(
             f"{name}={verdict['scores'][name]:.2f}" for name in verdict["triggered"]
-        ) + f" (threshold {ENGINE.config['inboundThreshold']}, {verdict['latencyMs']} ms)"
+        ) + f" (threshold {config['inboundThreshold']}, {verdict['latencyMs']} ms)"
         if verdict.get("truncated"):
             reason += " — message was truncated to the head window"
         return {"action": "block", "reason": reason}
     except Exception as exc:
-        print(f"laya-guard: onConnectorInbound failed open: {exc}")
+        cognia.log(f"laya-guard: onConnectorInbound failed open: {exc}")
         return None
 
 
@@ -104,9 +108,14 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
 
 @tool(
     name="laya_status",
-    description="Report whether the local laya checkpoint is loaded, which checkpoint is configured, and check/block counters.",
+    description="Report whether the local laya checkpoint is loaded, which checkpoint is configured, and check/block counters. Pass retry=true to retry a failed load immediately instead of waiting out the back-off.",
+    parameters={
+        "retry": {"type": "boolean", "required": False, "description": "Retry a failed load now"},
+    },
 )
-def laya_status() -> Dict[str, Any]:
+def laya_status(retry: bool = False) -> Dict[str, Any]:
+    if retry:
+        ENGINE.request_load(force=True)
     return ENGINE.status()
 
 
@@ -126,14 +135,11 @@ def laya_moderate_check(text: str) -> Dict[str, Any]:
 
 @tool(
     name="laya_decide",
-    description="Ask arbitrary typed questions (choice/score/noul) about a state object in one forward pass. Passthrough to the underlying laya engine — see the laya docs for the question schema.",
+    description="Ask arbitrary typed questions (choice/score/noul) about a state object in one forward pass. Returns {ok, answers, latencyMs, routing?, truncation?} or {ok: false, error: {kind, message}}.",
     parameters={
         "state": {"type": "object", "required": True, "description": "State fields the questions reference, e.g. {\"post\": \"...\"}"},
         "questions": {"type": "object", "required": True, "description": "Typed questions keyed by answer name"},
     },
 )
 def laya_decide(state: Dict[str, Any], questions: Dict[str, Any]) -> Dict[str, Any]:
-    result = ENGINE.decide(state, questions)
-    if result is None:
-        return {"ready": False, "status": ENGINE.status()}
-    return {"ready": True, "result": result}
+    return ENGINE.decide(state, questions)

@@ -1,8 +1,8 @@
 {
   "id": "cognia-laya-guard",
-  "name": "Laya Guard",
+  "name": "Laya (local System-1)",
   "version": "0.1.0",
-  "description": "Local System-1 moderation for inbound connector (IM) messages via the laya checkpoint: drops spam/threat/harassment/toxic inbound messages in one ~60 ms forward pass — no LLM call, works en+zh via the laya Router.",
+  "description": "Local System-1 decisions via the laya checkpoint: moderates inbound connector (IM) messages for spam/threat/harassment/toxic in one ~60 ms forward pass — no LLM call, en+zh via the laya Router.",
   "type": "python",
   "capabilities": ["python", "tools", "hooks"],
   "pythonMain": "main.py",
@@ -22,10 +22,15 @@
   "tools": [
     {
       "name": "laya_status",
-      "description": "Report whether the local laya checkpoint is loaded, which checkpoint is configured, and check/block counters.",
+      "description": "Report whether the local laya checkpoint is loaded, which checkpoint is configured, and check/block counters. Pass retry=true to retry a failed load immediately instead of waiting out the back-off.",
       "parametersSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "retry": {
+            "type": "boolean",
+            "description": "Retry a failed load now"
+          }
+        },
         "additionalProperties": false
       }
     },
@@ -35,7 +40,10 @@
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "text": { "type": "string", "description": "Text to moderate" }
+          "text": {
+            "type": "string",
+            "description": "Text to moderate"
+          }
         },
         "required": ["text"],
         "additionalProperties": false
@@ -43,7 +51,7 @@
     },
     {
       "name": "laya_decide",
-      "description": "Ask arbitrary typed questions (choice/score/noul) about a state object in one forward pass. Passthrough to the underlying laya engine — see the laya docs for the question schema.",
+      "description": "Ask arbitrary typed questions (choice/score/noul) about a state object in one forward pass. Returns {ok, answers, latencyMs, routing?, truncation?} or {ok: false, error: {kind, message}}.",
       "parametersSchema": {
         "type": "object",
         "properties": {
