@@ -60,6 +60,41 @@ describe("matchesDeniedGlob", () => {
     })
   })
 
+  describe("? (exactly one non-separator character)", () => {
+    it("matches exactly one character inside a segment", () => {
+      expect(matchesDeniedGlob("src/a.ts", "src/?.ts")).toBe(true)
+      expect(matchesDeniedGlob("src/ab.ts", "src/?.ts")).toBe(false)
+      expect(matchesDeniedGlob("src/.ts", "src/?.ts")).toBe(false)
+    })
+
+    it("never matches a path separator", () => {
+      expect(matchesDeniedGlob("a/b", "a?b")).toBe(false)
+      expect(matchesDeniedGlob("x/a/b", "x/a?b")).toBe(false)
+    })
+
+    it("works basename-style when the pattern has no slash", () => {
+      expect(matchesDeniedGlob("deep/dir/v1.log", "v?.log")).toBe(true)
+      expect(matchesDeniedGlob("deep/dir/v10.log", "v?.log")).toBe(false)
+    })
+
+    it("combines with * and **", () => {
+      expect(matchesDeniedGlob("pkg/test-1/spec.ts", "**/test-?/*.ts")).toBe(true)
+      expect(matchesDeniedGlob("pkg/test-12/spec.ts", "**/test-?/*.ts")).toBe(false)
+      expect(matchesDeniedGlob("file.jsx", "*.?sx")).toBe(true)
+      expect(matchesDeniedGlob("file.sx", "*.?sx")).toBe(false)
+    })
+
+    it("counts an astral character as one character", () => {
+      expect(matchesDeniedGlob("notes/😀.md", "notes/?.md")).toBe(true)
+    })
+
+    it("still escapes the other regex metacharacters literally", () => {
+      expect(matchesDeniedGlob("a+b(1).ts", "a+b(?).ts")).toBe(true)
+      expect(matchesDeniedGlob("aab(1).ts", "a+b(?).ts")).toBe(false)
+      expect(matchesDeniedGlob("x.ts", "?[.]ts")).toBe(false)
+    })
+  })
+
   describe("slash-wrapped token normalizes to a bare-token matcher", () => {
     it("treats /.git/ as a .git-anywhere directory match", () => {
       expect(matchesDeniedGlob("a/.git/b", "/.git/")).toBe(true)

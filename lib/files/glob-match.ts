@@ -14,6 +14,7 @@
  * Pattern grammar (forward-slash separated):
  *   - a literal segment matches that exact segment,
  *   - `*` matches any run of characters within a single segment (not `/`),
+ *   - `?` matches exactly one character within a single segment (not `/`),
  *   - `**` matches zero or more whole segments,
  *   - a pattern with NO `/` (e.g. `.env`, `*.pem`) is a single-segment matcher
  *     applied to *every* segment of the path (basename-style),
@@ -23,23 +24,26 @@
  * token `.git` (matches a `.git` segment anywhere).
  */
 
-/** Compile a single path segment pattern (may contain `*`) to an anchored RegExp. */
+/** Compile a single path segment pattern (may contain `*` / `?`) to an anchored RegExp. */
 function compileSegment(pattern: string): RegExp {
   let body = ""
   for (const ch of pattern) {
     if (ch === "*") {
       body += "[^/]*"
+    } else if (ch === "?") {
+      body += "[^/]"
     } else {
-      // Escape every regex metacharacter; `*` is handled above.
-      body += ch.replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+      // Escape every regex metacharacter; `*` and `?` are handled above.
+      body += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")
     }
   }
-  return new RegExp(`^${body}$`)
+  // `u` so `?` consumes one code point — an astral character is one "character".
+  return new RegExp(`^${body}$`, "u")
 }
 
 /** True when a single path segment matches a single-segment pattern. */
 function singleSegmentMatch(segment: string, pattern: string): boolean {
-  if (!pattern.includes("*")) return segment === pattern
+  if (!pattern.includes("*") && !pattern.includes("?")) return segment === pattern
   return compileSegment(pattern).test(segment)
 }
 

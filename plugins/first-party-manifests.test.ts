@@ -103,6 +103,12 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
     "field_missing:workflow",
   ],
   "cognia-builtin-characters": ["field_missing:character-pack"],
+  // `vscodeIconThemes` is the only icon-theme field the manager hands to the
+  // icons bridge (`registerPluginContributions` → `registerIconThemesForPlugin`),
+  // which is what `<FileTypeIcon>` renders from. `manifest.ide.contributions`
+  // only feeds the managed Pro IDE proxy, so moving the theme there would
+  // silently stop it rendering in the file tree / tabs / Quick Open.
+  "cognia-material-icon-theme": ["legacy_deprecated:IDE_LEGACY_MANIFEST_DEPRECATED"],
   "cognia-character-seeds": ["field_missing:character-pack"],
   "cognia-goal-insights": [],
   "cognia-python-demo": ["field_missing:tools"],

@@ -142,6 +142,18 @@ describe("plans", () => {
     expect(group(snapshot, "plans").rows).toEqual([])
   })
 
+  it("hides a rejected plan but keeps a failed one that still needs action", () => {
+    const snapshot = build({
+      plans: [
+        plan({ id: "declined", status: "rejected", updatedAt: 3 }),
+        plan({ id: "broken", status: "failed", updatedAt: 2 }),
+      ],
+    })
+    const rows = group(snapshot, "plans").rows
+    expect(rows.map((r) => r.id)).toEqual(["plan:broken"])
+    expect(rows[0]!.icon).toBe("error")
+  })
+
   it("shows progress and status in the description", () => {
     const [row] = build({ plans: [plan({ completedSteps: 2, totalSteps: 5 })] }).groups[1]!.rows
     expect(row!.description).toBe("2/5 · executing")

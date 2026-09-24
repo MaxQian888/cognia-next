@@ -390,3 +390,89 @@ describe("ProjectSearchPanel", () => {
     })
   })
 })
+
+describe("scoped search (Find in Folder)", () => {
+  it("searches under the scope root and re-prefixes result paths", async () => {
+    // The backend is scoped — it reports paths relative to the folder.
+    const search = jest.fn(async () => [
+      { relPath: "a.ts", absolutePath: "/repo/src/a.ts", line: 2, column: 1, preview: "hit" },
+    ])
+    const onOpenMatch = jest.fn()
+    render(
+      <ProjectSearchPanel
+        rootPath="/repo"
+        onOpenMatch={onOpenMatch}
+        deps={{ search }}
+        scopeRelPath="src"
+        onClearScope={jest.fn()}
+      />
+    )
+    const input = screen.getByLabelText("search")
+    fireEvent.change(input, { target: { value: "needle" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("search-hit-src/a.ts-2")).toBeInTheDocument())
+    // The query went to the folder, not the workspace root…
+    expect(search).toHaveBeenCalledWith("/repo/src", "needle", expect.objectContaining({}))
+    // …but navigation and display stay workspace-relative.
+    fireEvent.click(screen.getByTestId("search-hit-src/a.ts-2"))
+    expect(onOpenMatch).toHaveBeenCalledWith("src/a.ts", 2, 1)
+  })
+
+  it("shows the scope chip and clears it", async () => {
+    const onClearScope = jest.fn()
+    render(
+      <ProjectSearchPanel
+        rootPath="/repo"
+        onOpenMatch={jest.fn()}
+        deps={{ search: jest.fn(async () => []) }}
+        scopeRelPath="src/deep"
+        onClearScope={onClearScope}
+      />
+    )
+    expect(screen.getByText("searchScope")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("search-scope-clear"))
+    expect(onClearScope).toHaveBeenCalled()
+  })
+})
+
+describe("result context menus", () => {
+  async function runSearch(over: Partial<Parameters<typeof ProjectSearchPanel>[0]> = {}) {
+    const search = jest.fn(async () => matches)
+    render(
+      <ProjectSearchPanel rootPath="/repo" onOpenMatch={jest.fn()} deps={{ search }} {...over} />
+    )
+    const input = screen.getByLabelText("search")
+    fireEvent.change(input, { target: { value: "needle" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("search-hit-src/a.ts-2")).toBeInTheDocument())
+  }
+
+  it("a file-group menu reveals the file and copies both path forms", async () => {
+    const onRevealInExplorer = jest.fn()
+    const onCopyPath = jest.fn()
+    await runSearch({ onRevealInExplorer, onCopyPath })
+    const header = screen.getByText("src/b.ts").parentElement!
+    fireEvent.contextMenu(header)
+    const menu = await screen.findByTestId("search-file-menu-src/b.ts")
+    fireEvent.click(within(menu).getByText("action.revealInExplorer"))
+    expect(onRevealInExplorer).toHaveBeenCalledWith("src/b.ts")
+    fireEvent.contextMenu(header)
+    const menu2 = await screen.findByTestId("search-file-menu-src/b.ts")
+    fireEvent.click(within(menu2).getByText("action.copyRelativePath"))
+    expect(onCopyPath).toHaveBeenCalledWith("src/b.ts", false)
+    fireEvent.contextMenu(header)
+    const menu3 = await screen.findByTestId("search-file-menu-src/b.ts")
+    fireEvent.click(within(menu3).getByText("action.copyPath"))
+    expect(onCopyPath).toHaveBeenCalledWith("src/b.ts", true)
+  })
+
+  it("a hit menu copies the location line to the clipboard", async () => {
+    const writeText = jest.fn(async () => {})
+    Object.assign(navigator, { clipboard: { writeText } })
+    await runSearch()
+    fireEvent.contextMenu(screen.getByTestId("search-hit-src/a.ts-2"))
+    const menu = await screen.findByTestId("search-hit-menu-src/a.ts-2")
+    fireEvent.click(within(menu).getByText("action.copy"))
+    expect(writeText).toHaveBeenCalledWith("src/a.ts:2:7: const needle")
+  })
+})

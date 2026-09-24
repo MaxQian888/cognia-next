@@ -1,0 +1,36 @@
+{
+  "id": "cognia-material-icon-theme",
+  "name": "Material Icon Theme",
+  "version": "5.38.1",
+  "description": "File icons from Material Icon Theme 5.38.1 for the file tree, editor tabs, breadcrumbs, Quick Open and every other file list. Off by default: enable it to replace the built-in file glyphs, disable it to restore them.",
+  "type": "frontend",
+  "capabilities": ["themes"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-material-icon-theme/icons/folder-theme.svg",
+  "keywords": ["icons", "file icons", "icon theme", "material", "vscode"],
+  "author": {
+    "name": "Material Extensions (Philipp Kief)",
+    "url": "https://github.com/material-extensions"
+  },
+  "homepage": "https://github.com/material-extensions/vscode-material-icon-theme",
+  "repository": "https://github.com/material-extensions/vscode-material-icon-theme",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "File icons are an appearance contribution and need an interactive shell."
+    }
+  },
+  "vscodeIconThemes": [
+    {
+      "id": "material-icon-theme",
+      "label": "Material Icon Theme",
+      "path": "dist/material-icons.json"
+    }
+  ]
+}

@@ -51,6 +51,13 @@ interface Props {
    */
   onProIdeProfileChange?: (next: CodeServerProfile) => void
   className?: string
+  /**
+   * Classes for the controls' text labels. A host that runs out of row width
+   * (the chat dock's toolbar) hides them below a container width and keeps
+   * the icons; every control carries an accessible name and a tooltip, so an
+   * icon-only control still says what it is.
+   */
+  labelClassName?: string
 }
 
 export function EditorEngineToggle({
@@ -61,6 +68,7 @@ export function EditorEngineToggle({
   proIdeProfile = "managed",
   onProIdeProfileChange,
   className,
+  labelClassName,
 }: Props) {
   const t = useTranslations("projectEditor")
 
@@ -81,6 +89,10 @@ export function EditorEngineToggle({
       alive = false
     }
   }, [proIdeSupport])
+
+  // A native title only where the label can disappear: with its words on
+  // screen a control needs no tooltip repeating them.
+  const iconOnlyTitle = (label: string) => (labelClassName ? label : undefined)
 
   const proIdeSupported = proIdeSupport === "supported"
   const disabledTooltipId = useId()
@@ -122,20 +134,22 @@ export function EditorEngineToggle({
           value="monaco"
           data-testid="editor-mode-monaco"
           aria-label={t("proIde.toggleMonaco")}
+          title={iconOnlyTitle(t("proIde.toggleMonaco"))}
           className="gap-1 px-2 text-xs"
         >
           <CodeIcon className="size-3.5" />
-          {t("proIde.toggleMonaco")}
+          <span className={labelClassName}>{t("proIde.toggleMonaco")}</span>
         </ToggleGroupItem>
         {proIdeSupported ? (
           <ToggleGroupItem
             value="codeserver"
             data-testid="editor-mode-codeserver"
             aria-label={t("proIde.toggleVsCode")}
+            title={iconOnlyTitle(t("proIde.toggleVsCode"))}
             className="gap-1 px-2 text-xs"
           >
             <SquareCodeIcon className="size-3.5" />
-            {t("proIde.toggleVsCode")}
+            <span className={labelClassName}>{t("proIde.toggleVsCode")}</span>
           </ToggleGroupItem>
         ) : (
           // A `disabled` button dispatches no mouse events, so the native
@@ -166,7 +180,7 @@ export function EditorEngineToggle({
                     className="gap-1 px-2 text-xs"
                   >
                     <SquareCodeIcon className="size-3.5" />
-                    {t("proIde.toggleVsCode")}
+                    <span className={labelClassName}>{t("proIde.toggleVsCode")}</span>
                   </ToggleGroupItem>
                 </span>
               </TooltipTrigger>
@@ -191,7 +205,7 @@ export function EditorEngineToggle({
                   aria-label={t("proIde.remoteWorkbenchTooltip")}
                 >
                   <InfoIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
-                  {t("proIde.remoteWorkbenchLabel")}
+                  <span className={labelClassName}>{t("proIde.remoteWorkbenchLabel")}</span>
                 </span>
               </Surface>
             </TooltipTrigger>
@@ -246,7 +260,7 @@ export function EditorEngineToggle({
                     className="gap-1 px-2 text-xs"
                   >
                     <ShieldCheckIcon className="size-3.5" />
-                    {t("proIde.profileManaged")}
+                    <span className={labelClassName}>{t("proIde.profileManaged")}</span>
                   </ToggleGroupItem>
                 </span>
               </TooltipTrigger>
@@ -264,7 +278,7 @@ export function EditorEngineToggle({
                     className="gap-1 px-2 text-xs"
                   >
                     <PuzzleIcon className="size-3.5" />
-                    {t("proIde.profileNative")}
+                    <span className={labelClassName}>{t("proIde.profileNative")}</span>
                   </ToggleGroupItem>
                 </span>
               </TooltipTrigger>
@@ -282,10 +296,12 @@ export function EditorEngineToggle({
           variant="ghost"
           className="h-7 gap-1 px-2 text-xs"
           onClick={openLocal}
+          aria-label={t("proIde.openLocalVsCode")}
+          title={iconOnlyTitle(t("proIde.openLocalVsCode"))}
           data-testid="editor-open-local-vscode"
         >
           <ExternalLinkIcon className="size-3.5" />
-          {t("proIde.openLocalVsCode")}
+          <span className={labelClassName}>{t("proIde.openLocalVsCode")}</span>
         </Button>
       ) : null}
     </div>

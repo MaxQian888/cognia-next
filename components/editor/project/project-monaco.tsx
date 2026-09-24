@@ -22,15 +22,8 @@
 
 import { useEffect, useRef, useState } from "react"
 import Editor, { type OnMount } from "@monaco-editor/react"
-import { useTheme } from "next-themes"
-import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
-import {
-  COGNIA_ACTIVE_THEME_ID,
-  syncCogniaActiveTheme,
-} from "@/lib/canvas/themes/cognia-active-theme"
-import { useSettingsStore } from "@/stores"
+import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
-import { resolveActiveThemeColors } from "@/lib/themes"
 import {
   buildWorkbenchUri,
   mountMonacoWorkbench,
@@ -52,7 +45,11 @@ import { LspServerHint } from "@/components/editor/lsp-server-hint"
 import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
 import type { MonacoLike, EditorLike } from "@/hooks/use-monaco-markers"
 import type { OpenFile } from "./use-project-editor"
-import { PROJECT_EDITOR_GOTO_EVENT, type ProjectEditorGotoDetail } from "./editor-events"
+import {
+  consumeProjectEditorGoto,
+  PROJECT_EDITOR_GOTO_EVENT,
+  type ProjectEditorGotoDetail,
+} from "./editor-events"
 import type { TextSelectionCoordinates } from "@/types/context-workbench"
 
 interface RevealableEditor {
@@ -94,6 +91,19 @@ interface Props {
     relPath: string,
     diagnostics: { monaco: MonacoLike; editor: EditorLike } | null
   ) => void
+  /** Minimap visibility — toggled by the workbench command palette. */
+  minimap?: boolean
+  /** Word wrap for this model (⌥Z toggles per file, like VS Code). */
+  wordWrap?: boolean
+  /** Editor font size — ⌘= / ⌘- / ⌘0 zoom on the workbench. */
+  fontSize?: number
+  /**
+   * Language-mode override from the status-bar picker ("Select Language
+   * Mode"). Falls back to the extension-derived `file.monacoLanguage`.
+   * `@monaco-editor/react` applies prop changes to the live model via
+   * `setModelLanguage`, and a fresh mount honors it too.
+   */
+  language?: string
 }
 
 export function ProjectMonaco({
@@ -106,8 +116,15 @@ export function ProjectMonaco({
   onSelectionChange,
   onCursorChange,
   onDiagnosticsReady,
+  minimap = true,
+  wordWrap = false,
+  fontSize = 13,
+  language,
 }: Props) {
-  const { resolvedTheme } = useTheme()
+  // Shared theme path (DiffViewer, BlameView use the same hook): it keeps
+  // re-syncing on palette/light-dark changes *after* mount, which the old
+  // one-shot onMount sync could not do.
+  const { themeId, registerMonaco } = useMonacoActiveTheme()
   const handleRef = useRef<MonacoWorkbenchHandle | null>(null)
   const actionDisposablesRef = useRef<EditorActionDisposable[]>([])
   const editorRef = useRef<RevealableEditor | null>(null)
@@ -125,6 +142,7 @@ export function ProjectMonaco({
   const actionsRef = useRef(actions)
   const actionLabelsRef = useRef(actionLabels)
   const bindingsRef = useRef(bindings)
+  const languageRef = useRef(language)
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange
     onCursorChangeRef.current = onCursorChange
@@ -132,11 +150,14 @@ export function ProjectMonaco({
     actionsRef.current = actions
     actionLabelsRef.current = actionLabels
     bindingsRef.current = bindings
+    languageRef.current = language
   })
 
-  const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
-  const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
-  const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+  // Status-bar "Select Language Mode" wins over the extension-derived id.
+  // Render-phase uses the prop directly (live switch via `setModelLanguage`);
+  // mount-time effect reads go through `languageRef` so a late override is
+  // honored without churning the workbench-handle effect's deps.
+  const effectiveLanguage = language ?? file.monacoLanguage
 
   // The `file://` URI is both the model key handed to `<Editor path>` and the
   // identity the LSP bridge addresses — one derivation so they cannot drift.
@@ -147,13 +168,9 @@ export function ProjectMonaco({
     surface: "file",
     documentId: file.relPath,
     absolutePath: file.absolutePath,
-    language: file.monacoLanguage,
+    language: effectiveLanguage,
     initialContent: file.draftContent,
   })
-
-  useEffect(() => {
-    configureMonacoLoader()
-  }, [])
 
   // Publish the Project Editor lifecycle only to ACP sessions that explicitly
   // started NES through the manager. Full-content changes are valid ACP/LSP
@@ -169,7 +186,7 @@ export function ProjectMonaco({
     nesDocumentRef.current = document
     manager.publishDidOpenDocument({
       uri: modelUri,
-      languageId: file.monacoLanguage,
+      languageId: languageRef.current ?? file.monacoLanguage,
       version: file.draftVersion,
       text: file.draftContent,
     })
@@ -229,20 +246,32 @@ export function ProjectMonaco({
   }, [])
 
   // Reveal a line/column when the orchestrator asks for this file (search jump,
-  // terminal path-link). Ignores events targeting a different file.
+  // terminal path-link). Two delivery paths converge here: the live event
+  // reaches an already-mounted editor, while `consumeProjectEditorGoto`
+  // drains requests that were armed before Monaco finished loading — without
+  // it a cold open's goto silently dropped.
   useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<ProjectEditorGotoDetail>).detail
-      if (!detail || detail.relPath !== file.relPath) return
+    const reveal = (detail: ProjectEditorGotoDetail) => {
+      if (detail.relPath !== file.relPath) return
       const ed = editorRef.current
       if (!ed) return
       ed.revealLineInCenter(detail.line)
       ed.setPosition({ lineNumber: detail.line, column: detail.column })
       ed.focus()
     }
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectEditorGotoDetail>).detail
+      if (!detail) return
+      // The live event consumed the request — don't let its armed twin
+      // re-apply the same jump on a later mount.
+      consumeProjectEditorGoto(detail.relPath)
+      reveal(detail)
+    }
     window.addEventListener(PROJECT_EDITOR_GOTO_EVENT, handler as EventListener)
+    const pending = consumeProjectEditorGoto(file.relPath)
+    if (pending) reveal(pending)
     return () => window.removeEventListener(PROJECT_EDITOR_GOTO_EVENT, handler as EventListener)
-  }, [file.relPath])
+  }, [file.relPath, diag])
 
   // Rebind the LSP / vscode-shim document every time the open file changes.
   // `draftContent` is deliberately not a dep: it only seeds a model that does
@@ -259,7 +288,7 @@ export function ProjectMonaco({
       documentId: relPath,
       absolutePath: file.absolutePath,
       projectRoot,
-      language: file.monacoLanguage,
+      language: languageRef.current ?? file.monacoLanguage,
       initialContent: file.draftContent,
     })
     handleRef.current = handle
@@ -338,26 +367,10 @@ export function ProjectMonaco({
       editor: editor as unknown as EditorLike,
     }
     setDiag(nextDiagnostics)
-    if (resolvedTheme) {
-      const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
-      const resolved = resolveActiveThemeColors({
-        colorTheme: appearanceColorTheme,
-        resolvedTheme: variant,
-        activeCustomThemeId: appearanceActiveCustomThemeId,
-        customThemes: appearanceCustomThemes,
-      })
-      syncCogniaActiveTheme(
-        monaco as unknown as Parameters<typeof syncCogniaActiveTheme>[0],
-        resolved.colors,
-        variant
-      )
-      // @monaco-editor/react applies the `theme` prop before `onMount`. On the
-      // first project-editor mount our custom theme is not registered yet, so
-      // Monaco falls back to `vs`; defining the theme afterward does not select
-      // it. Activate it explicitly so canvas-transparent tokens (notably the
-      // minimap and overview ruler backgrounds) take effect immediately.
-      monaco.editor.setTheme(COGNIA_ACTIVE_THEME_ID)
-    }
+    // registerMonaco both applies the theme now (the `theme` prop alone can
+    // fire before the theme is defined) and stores the instance so the hook
+    // keeps it in sync on palette/light-dark changes.
+    registerMonaco(monaco as unknown as Parameters<typeof registerMonaco>[0])
 
     // Snippets / Emmet are global-per-Monaco-instance and idempotent.
     registerAllSnippets(monaco)
@@ -376,14 +389,23 @@ export function ProjectMonaco({
           path={modelUri}
           keepCurrentModel
           value={file.draftContent}
-          language={file.monacoLanguage}
-          theme={COGNIA_ACTIVE_THEME_ID}
+          language={effectiveLanguage}
+          theme={themeId}
           options={{
-            minimap: { enabled: true },
-            fontSize: 13,
+            minimap: { enabled: minimap },
+            fontSize,
+            wordWrap: wordWrap ? "on" : "off",
             scrollBeyondLastLine: false,
             renderWhitespace: "selection",
             automaticLayout: true,
+            // VS Code defaults the dock is missing: hover/find widgets must
+            // escape the narrow pane, the sticky header keeps scope visible
+            // in long files, and smooth scrolling/caret match the feel.
+            fixedOverflowWidgets: true,
+            stickyScroll: { enabled: true },
+            smoothScrolling: true,
+            cursorSmoothCaretAnimation: "on",
+            padding: { top: 8 },
           }}
           onChange={(v) => onChange(v ?? "")}
           onMount={handleMount}

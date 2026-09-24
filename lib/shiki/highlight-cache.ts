@@ -32,7 +32,12 @@ export interface HighlightHtml {
 
 // Bounded to keep memory in check across very long sessions; deterministic by
 // key, so eviction only ever costs a re-highlight, never correctness.
-const cache = new LruCache<HighlightHtml>(300)
+const cache = new LruCache<HighlightHtml>(300, {
+  // Approximate UTF-16 string payload, not a measurement of total JS heap.
+  maxWeight: 16 * 1024 * 1024,
+  weigh: ({ light, dark }, key) => 2 * (key.length + light.length + dark.length),
+})
+let cacheGeneration = 0
 
 // De-dupe concurrent highlight requests for identical (code, language): two
 // rows with the same snippet, or a remount racing the first paint, share one
@@ -55,19 +60,12 @@ const inflight = new Map<string, Promise<HighlightHtml>>()
 const highlightGate = createMutex()
 
 /**
- * Build a bounded cache key. Hashing the full body would be ideal but costs
- * more than it saves here; instead we key on length + head/tail (mirrors
- * Streamdown's own `@streamdown/code` cache keying) which collides only for
- * snippets identical in length and both ends — acceptable for syntax colors.
- *
- * The `\0` separators are written as escapes, not as raw NUL bytes: a literal
- * NUL in the source makes git classify the whole file as binary, which costs
- * every diff, blame and hunk-level stage on it. Same key, same collisions.
+ * Exact source identity is required: matching ends can hide different code in
+ * the middle. Length-prefix the language so even embedded separators remain
+ * unambiguous. The full source key counts toward the retained payload budget.
  */
 function cacheKey(code: string, language: string): string {
-  const head = code.slice(0, 100)
-  const tail = code.length > 100 ? code.slice(-100) : ""
-  return `${CHAT_CODE_THEME.light}\0${CHAT_CODE_THEME.dark}\0${language}\0${code.length}\0${head}\0${tail}`
+  return `${CHAT_CODE_THEME.light}\0${CHAT_CODE_THEME.dark}\0${language.length}:${language}${code}`
 }
 
 /**
@@ -91,13 +89,14 @@ export async function highlightCached(code: string, language: string): Promise<H
   const pending = inflight.get(key)
   if (pending) return pending
 
+  const generation = cacheGeneration
   const task = (async (): Promise<HighlightHtml> => {
     try {
       return await highlightGate.runExclusive(async () => {
         // Re-check inside the gate: while this call waited its turn, an
         // earlier queued pass for the same key may have finished and filled
         // the cache. Mirrors the mermaid render cache's re-check.
-        const queued = cache.get(key)
+        const queued = generation === cacheGeneration ? cache.get(key) : undefined
         if (queued) return queued
 
         // W5.1: a plugin-contributed TextMate grammar for a non-bundled
@@ -116,11 +115,13 @@ export async function highlightCached(code: string, language: string): Promise<H
           theme: CHAT_CODE_THEME.dark,
         })
         const result: HighlightHtml = { light, dark }
-        cache.set(key, result)
+        // Clearing invalidates active and queued writes, without interrupting
+        // the callers already awaiting their own highlight result.
+        if (generation === cacheGeneration) cache.set(key, result)
         return result
       })
     } finally {
-      inflight.delete(key)
+      if (generation === cacheGeneration) inflight.delete(key)
     }
   })()
 
@@ -172,6 +173,7 @@ export function __resetPluginGrammarLoadsForTesting(): void {
 
 /** Test/diagnostic helper — drop all cached highlights. */
 export function clearHighlightCache(): void {
+  cacheGeneration += 1
   cache.clear()
   inflight.clear()
 }

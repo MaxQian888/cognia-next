@@ -19,6 +19,9 @@ import { registerGrammar, __resetGrammarsForTesting } from "@/lib/plugin/bridge/
 describe("highlight-cache", () => {
   beforeEach(() => {
     clearHighlightCache()
+    ;(codeToHtml as jest.Mock)
+      .mockReset()
+      .mockImplementation(async (code: string) => `<pre><code>${code}</code></pre>`)
   })
 
   it("misses synchronously before anything is highlighted", () => {
@@ -57,7 +60,7 @@ describe("highlight-cache", () => {
     expect(ts).not.toBe(py)
   })
 
-  it("keys long snippets on length + head/tail without collision", async () => {
+  it("distinguishes snippets with different lengths and tails", async () => {
     // >100 chars exercises the tail slice in the cache key.
     const long = "x".repeat(120) + "_END"
     const result = await highlightCached(long, "ts")
@@ -66,6 +69,127 @@ describe("highlight-cache", () => {
     const other = "x".repeat(140) + "_OTHER"
     const otherResult = await highlightCached(other, "ts")
     expect(otherResult).not.toBe(result)
+  })
+
+  it.each([false, true])(
+    "keeps equal-length snippets with identical ends distinct (concurrent=%s)",
+    async (concurrent) => {
+      const first = "x".repeat(100) + "FIRST" + "y".repeat(100)
+      const second = "x".repeat(100) + "OTHER" + "y".repeat(100)
+      const firstTask = highlightCached(first, "ts")
+      if (!concurrent) await firstTask
+      const [a, b] = await Promise.all([firstTask, highlightCached(second, "ts")])
+      expect(a.light).toContain("FIRST")
+      expect(b.light).toContain("OTHER")
+      expect(getCachedHighlight(first, "ts")).toBe(a)
+      expect(getCachedHighlight(second, "ts")).toBe(b)
+    }
+  )
+
+  it("evicts large results by payload weight while keeping recently reused code", async () => {
+    const output = "x".repeat(1_000_000)
+    ;(codeToHtml as jest.Mock).mockResolvedValue(output)
+    const first = await highlightCached("first", "ts")
+    await highlightCached("second", "ts")
+    await highlightCached("third", "ts")
+    await highlightCached("fourth", "ts")
+    expect(getCachedHighlight("first", "ts")).toBe(first)
+    await highlightCached("fifth", "ts")
+    expect(getCachedHighlight("first", "ts")).toBe(first)
+    expect(getCachedHighlight("second", "ts") === undefined).toBe(true)
+    expect(getCachedHighlight("fifth", "ts")).toBeDefined()
+  })
+
+  it("returns oversized highlights without retaining or evicting useful cached code", async () => {
+    const small = await highlightCached("small", "ts")
+    const output = "x".repeat(5_000_000)
+    ;(codeToHtml as jest.Mock).mockResolvedValue(output)
+    const result = await highlightCached("huge", "ts")
+    expect(result).toEqual({ light: output, dark: output })
+    expect(getCachedHighlight("huge", "ts") === undefined).toBe(true)
+    expect(getCachedHighlight("small", "ts")).toBe(small)
+  })
+
+  it("includes retained source keys in the budget even when highlighted output is small", async () => {
+    const source = "x".repeat(9 * 1024 * 1024)
+    ;(codeToHtml as jest.Mock).mockResolvedValue("<pre />")
+    await highlightCached(source, "ts")
+    expect(getCachedHighlight(source, "ts") === undefined).toBe(true)
+  })
+
+  it("retains the 300-entry ceiling for small highlights", async () => {
+    for (let index = 0; index < 301; index += 1) {
+      await highlightCached(`small-${index}`, "ts")
+    }
+    expect(getCachedHighlight("small-0", "ts")).toBeUndefined()
+    expect(getCachedHighlight("small-1", "ts")).toBeDefined()
+    expect(getCachedHighlight("small-300", "ts")).toBeDefined()
+  })
+
+  it("does not repopulate a cleared cache with active or queued old work", async () => {
+    let release!: (value: string) => void
+    let started!: () => void
+    const start = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    ;(codeToHtml as jest.Mock).mockImplementationOnce(() => {
+      started()
+      return new Promise<string>((resolve) => {
+        release = resolve
+      })
+    })
+    const active = highlightCached("active", "ts")
+    const queued = highlightCached("queued", "ts")
+    await start
+    clearHighlightCache()
+    release("active light")
+    await Promise.all([active, queued])
+    expect(getCachedHighlight("active", "ts")).toBeUndefined()
+    expect(getCachedHighlight("queued", "ts")).toBeUndefined()
+  })
+
+  it("old work cannot remove a newer pending request after clearing", async () => {
+    let releaseOld!: (value: string) => void
+    let releaseNew!: (value: string) => void
+    let startOld!: () => void
+    let startNew!: () => void
+    const oldStarted = new Promise<void>((resolve) => {
+      startOld = resolve
+    })
+    const newStarted = new Promise<void>((resolve) => {
+      startNew = resolve
+    })
+    const mock = codeToHtml as jest.Mock
+    mock
+      .mockImplementationOnce(() => {
+        startOld()
+        return new Promise<string>((resolve) => {
+          releaseOld = resolve
+        })
+      })
+      .mockResolvedValueOnce("old dark")
+      .mockImplementationOnce(() => {
+        startNew()
+        return new Promise<string>((resolve) => {
+          releaseNew = resolve
+        })
+      })
+      .mockRejectedValueOnce(new Error("new highlight failed"))
+    const old = highlightCached("same", "ts")
+    await oldStarted
+    clearHighlightCache()
+    const fresh = highlightCached("same", "ts")
+    releaseOld("old light")
+    await old
+    await newStarted
+    const duplicate = highlightCached("same", "ts")
+    const results = Promise.allSettled([fresh, duplicate])
+    releaseNew("new light")
+    expect(await results).toEqual([
+      { status: "rejected", reason: new Error("new highlight failed") },
+      { status: "rejected", reason: new Error("new highlight failed") },
+    ])
+    expect(mock).toHaveBeenCalledTimes(4)
   })
 
   it("propagates highlight failure, does not cache it, and clears the in-flight entry", async () => {

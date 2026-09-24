@@ -64,15 +64,23 @@ jest.mock("@/components/ui/context-menu", () => {
   return {
     ContextMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ContextMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    ContextMenuContent: ({
+      children,
+      ...rest
+    }: {
+      children: React.ReactNode
+      [key: string]: unknown
+    }) => <div {...rest}>{children}</div>,
     ContextMenuItem: ({
       children,
       onSelect,
+      ...rest
     }: {
       children: React.ReactNode
       onSelect?: () => void
+      [key: string]: unknown
     }) => (
-      <button type="button" onClick={onSelect}>
+      <button type="button" onClick={onSelect} {...rest}>
         {children}
       </button>
     ),
@@ -799,14 +807,24 @@ describe("ProjectFileTree", () => {
 
   it("deletes an entry through the confirm dialog", async () => {
     const deps = makeDeps()
+    const onDeleted = jest.fn()
     render(
-      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        onDeleted={onDeleted}
+        deps={deps}
+      />
     )
     await waitFor(() => expect(screen.getByTestId("tree-row-readme.md")).toBeInTheDocument())
     fireEvent.click(screen.getAllByText("delete")[1])
     const dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "delete" }))
     await waitFor(() => expect(deps.deleteEntry).toHaveBeenCalledWith("/repo", "readme.md", false))
+    // The editor reconciles open tabs off this callback — a tree delete must
+    // report the path, not just refresh the listing.
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("readme.md", false))
   })
 
   it("shows the empty state only after the root listing succeeds", async () => {
@@ -1384,5 +1402,306 @@ describe("new file from template", () => {
         expect.stringContaining("export function MyWidget()")
       )
     )
+  })
+})
+
+describe("keyboard navigation", () => {
+  function treeEl() {
+    return screen.getByRole("tree")
+  }
+
+  it("moves the focus row with arrows and reports it via aria-activedescendant", async () => {
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+      />
+    )
+    const src = await screen.findByTestId("tree-row-src")
+    // No cursor yet: ↓ lands on the first visible row.
+    fireEvent.keyDown(treeEl(), { key: "ArrowDown" })
+    expect(src).toHaveClass("ring-primary/50")
+    expect(treeEl()).toHaveAttribute("aria-activedescendant", "tree-item-0")
+    fireEvent.keyDown(treeEl(), { key: "ArrowDown" })
+    const readme = screen.getByTestId("tree-row-readme.md")
+    expect(readme).toHaveClass("ring-primary/50")
+    expect(src).not.toHaveClass("ring-primary/50")
+    // ↑ walks back; Home/End clamp to the ends.
+    fireEvent.keyDown(treeEl(), { key: "ArrowUp" })
+    expect(src).toHaveClass("ring-primary/50")
+    fireEvent.keyDown(treeEl(), { key: "End" })
+    expect(readme).toHaveClass("ring-primary/50")
+    fireEvent.keyDown(treeEl(), { key: "Home" })
+    expect(src).toHaveClass("ring-primary/50")
+    fireEvent.keyDown(treeEl(), { key: "PageDown" })
+    expect(readme).toHaveClass("ring-primary/50")
+    fireEvent.keyDown(treeEl(), { key: "PageUp" })
+    expect(src).toHaveClass("ring-primary/50")
+  })
+
+  it("expands on ArrowRight, steps into children, and steps back out on ArrowLeft", async () => {
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+      />
+    )
+    const src = await screen.findByTestId("tree-row-src")
+    fireEvent.keyDown(treeEl(), { key: "ArrowDown" })
+    // Collapsed dir: → expands instead of moving.
+    fireEvent.keyDown(treeEl(), { key: "ArrowRight" })
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+    expect(src).toHaveClass("ring-primary/50")
+    // Expanded dir: → moves to the first child.
+    fireEvent.keyDown(treeEl(), { key: "ArrowRight" })
+    expect(screen.getByTestId("tree-row-src/a.ts")).toHaveClass("ring-primary/50")
+    // ← on a child steps out to its parent dir.
+    fireEvent.keyDown(treeEl(), { key: "ArrowLeft" })
+    expect(src).toHaveClass("ring-primary/50")
+    // ← on an expanded dir collapses it.
+    fireEvent.keyDown(treeEl(), { key: "ArrowLeft" })
+    await waitFor(() => expect(screen.queryByTestId("tree-row-src/a.ts")).toBeNull())
+    expect(src).toHaveClass("ring-primary/50")
+  })
+
+  it("opens a file pinned on Enter and preview on Space", async () => {
+    const onOpenFile = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={onOpenFile}
+        deps={makeDeps()}
+      />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.keyDown(treeEl(), { key: "End" }) // last row = readme.md
+    fireEvent.keyDown(treeEl(), { key: "Enter" })
+    expect(onOpenFile).toHaveBeenLastCalledWith("readme.md", { mode: "pinned" })
+    fireEvent.keyDown(treeEl(), { key: " " })
+    expect(onOpenFile).toHaveBeenLastCalledWith("readme.md", { mode: "preview" })
+    // Enter on a directory toggles instead of opening.
+    fireEvent.keyDown(treeEl(), { key: "Home" })
+    fireEvent.keyDown(treeEl(), { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/a.ts")).toBeInTheDocument())
+    expect(onOpenFile).toHaveBeenCalledTimes(2)
+  })
+
+  it("starts the keyboard cursor on the active file's row", async () => {
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath="readme.md"
+        onOpenFile={jest.fn()}
+        deps={makeDeps()}
+      />
+    )
+    const readme = await screen.findByTestId("tree-row-readme.md")
+    expect(treeEl()).toHaveAttribute("aria-activedescendant", "tree-item-1")
+    // ArrowUp from the implicit position selects the row above the active file.
+    fireEvent.keyDown(treeEl(), { key: "ArrowUp" })
+    expect(screen.getByTestId("tree-row-src")).toHaveClass("ring-primary/50")
+    expect(readme).not.toHaveClass("ring-primary/50")
+  })
+
+  it("F2 renames and Delete confirms the focused row", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.keyDown(treeEl(), { key: "End" })
+    fireEvent.keyDown(treeEl(), { key: "F2" })
+    const input = await screen.findByDisplayValue("readme.md")
+    // Keys inside the rename input belong to the input — Delete must not open
+    // the confirm dialog and Enter submits the rename.
+    fireEvent.keyDown(input, { key: "Delete" })
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    fireEvent.change(input, { target: { value: "renamed.md" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(deps.renameEntry).toHaveBeenCalledWith("/repo", "readme.md", "renamed.md")
+    )
+    // Delete on the row itself opens the confirm dialog.
+    fireEvent.keyDown(treeEl(), { key: "Delete" })
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+  })
+
+  it("type-ahead jumps to the next matching row name", async () => {
+    const deps = makeDeps()
+    deps.fs.src.push(entry("src/readme.ts", false))
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.keyDown(treeEl(), { key: "r" })
+    expect(screen.getByTestId("tree-row-readme.md")).toHaveClass("ring-primary/50")
+    // A deeper match wraps around once its parent is expanded.
+    fireEvent.keyDown(treeEl(), { key: "Home" })
+    fireEvent.keyDown(treeEl(), { key: "ArrowRight" })
+    await waitFor(() => expect(screen.getByTestId("tree-row-src/readme.ts")).toBeInTheDocument())
+    fireEvent.keyDown(treeEl(), { key: "r" })
+    expect(screen.getByTestId("tree-row-src/readme.ts")).toHaveClass("ring-primary/50")
+  })
+})
+
+describe("row context menu and clipboard", () => {
+  function depsWithRead() {
+    const deps = makeDeps()
+    deps.readFile = jest.fn(async () => "file body")
+    return deps
+  }
+
+  function menuFor(relPath: string) {
+    return within(screen.getByTestId(`tree-menu-${relPath}`))
+  }
+
+  it("a file row menu offers open/open-to-side/add-to-chat/cut/copy and fires them", async () => {
+    const onOpenFile = jest.fn()
+    const onOpenToSide = jest.fn()
+    const onAddToChat = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={onOpenFile}
+        onOpenToSide={onOpenToSide}
+        onAddToChat={onAddToChat}
+        deps={depsWithRead()}
+      />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    const menu = menuFor("readme.md")
+    fireEvent.click(menu.getByText("action.open"))
+    expect(onOpenFile).toHaveBeenCalledWith("readme.md", { mode: "pinned" })
+    fireEvent.click(menu.getByText("action.openToSide"))
+    expect(onOpenToSide).toHaveBeenCalledWith("readme.md")
+    fireEvent.click(menu.getByText("action.addToChat"))
+    expect(onAddToChat).toHaveBeenCalledWith("readme.md", false)
+    // Clipboard pair is present; paste only makes sense on a directory.
+    expect(menu.getByText("action.cut")).toBeInTheDocument()
+    expect(menu.getByText("action.copy")).toBeInTheDocument()
+    expect(menu.queryByText("action.paste")).toBeNull()
+    // Folder-only actions stay off the file menu.
+    expect(menu.queryByText("action.findInFolder")).toBeNull()
+    expect(menu.queryByText("newFile")).toBeNull()
+  })
+
+  it("a directory row menu offers create/find/paste but no file-open actions", async () => {
+    const onFindInFolder = jest.fn()
+    const onAddToChat = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        onFindInFolder={onFindInFolder}
+        onAddToChat={onAddToChat}
+        deps={depsWithRead()}
+      />
+    )
+    await screen.findByTestId("tree-row-src")
+    const menu = menuFor("src")
+    expect(menu.getByText("newFile")).toBeInTheDocument()
+    expect(menu.getByText("newFolder")).toBeInTheDocument()
+    expect(menu.queryByText("action.open")).toBeNull()
+    expect(menu.queryByText("action.openToSide")).toBeNull()
+    fireEvent.click(menu.getByText("action.findInFolder"))
+    expect(onFindInFolder).toHaveBeenCalledWith("src")
+    fireEvent.click(menu.getByText("action.addToChat"))
+    expect(onAddToChat).toHaveBeenCalledWith("src", true)
+    // Paste exists but is disabled with an empty clipboard.
+    expect(menu.getByText("action.paste")).toBeInTheDocument()
+  })
+
+  it("copy then paste writes the file's body into the folder, deduped", async () => {
+    const deps = depsWithRead()
+    deps.fs.src.push(entry("src/readme.md", false))
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(menuFor("readme.md").getByText("action.copy"))
+    fireEvent.click(menuFor("src").getByText("action.paste"))
+    await waitFor(() =>
+      expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/readme copy.md", "file body")
+    )
+    expect(deps.readFile).toHaveBeenCalledWith("/repo", "readme.md")
+  })
+
+  it("cut then paste moves via renameEntry and reports onRenamed", async () => {
+    const deps = depsWithRead()
+    const onRenamed = jest.fn()
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        onRenamed={onRenamed}
+        deps={deps}
+      />
+    )
+    const row = await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(menuFor("readme.md").getByText("action.cut"))
+    // The cut source dims until the paste lands — VS Code's affordance.
+    await waitFor(() => expect(row).toHaveClass("opacity-50"))
+    fireEvent.click(menuFor("src").getByText("action.paste"))
+    await waitFor(() =>
+      expect(deps.renameEntry).toHaveBeenCalledWith("/repo", "readme.md", "src/readme.md")
+    )
+    await waitFor(() => expect(onRenamed).toHaveBeenCalledWith("readme.md", "src/readme.md"))
+    // The clipboard clears after a move — a second paste would move nothing.
+    expect(deps.renameEntry).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses to cut-move a directory into itself or a descendant", async () => {
+    const deps = depsWithRead()
+    deps.fs.src.push(entry("src/inner", true))
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    const src = await screen.findByTestId("tree-row-src")
+    fireEvent.click(src)
+    await screen.findByTestId("tree-row-src/inner")
+    fireEvent.click(menuFor("src").getByText("action.cut"))
+    fireEvent.click(menuFor("src/inner").getByText("action.paste"))
+    // Paste is a no-op for a forbidden move — no rename, no copy either.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(deps.renameEntry).not.toHaveBeenCalled()
+    expect(deps.writeFile).not.toHaveBeenCalled()
+  })
+
+  it("⌘C/⌘X/⌘V drive the clipboard from the keyboard cursor", async () => {
+    const deps = depsWithRead()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-readme.md")
+    const treeEl = screen.getByRole("tree")
+    // Focus the file row, copy it, focus the dir row, paste into it.
+    fireEvent.keyDown(treeEl, { key: "End" })
+    fireEvent.keyDown(treeEl, { key: "c", metaKey: true })
+    fireEvent.keyDown(treeEl, { key: "Home" })
+    fireEvent.keyDown(treeEl, { key: "v", metaKey: true })
+    await waitFor(() =>
+      expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/readme.md", "file body")
+    )
+  })
+
+  it("root-level paste lands at the workspace root", async () => {
+    const deps = depsWithRead()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await screen.findByTestId("tree-row-src")
+    fireEvent.click(menuFor("src").getByText("action.copy"))
+    // Root menu keeps its own Paste entry — clipboard set, it writes to "".
+    const rootPaste = await screen.findByTestId("tree-root-paste")
+    fireEvent.click(rootPaste)
+    await waitFor(() => expect(deps.createDir).toHaveBeenCalledWith("/repo", "src copy"))
   })
 })

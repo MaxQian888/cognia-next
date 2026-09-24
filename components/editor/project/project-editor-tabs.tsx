@@ -12,7 +12,16 @@
 
 import { useLayoutEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronDownIcon, CopyIcon, PinIcon, RotateCcwIcon, SaveIcon, XIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  CopyIcon,
+  CrosshairIcon,
+  MessageSquarePlusIcon,
+  PinIcon,
+  RotateCcwIcon,
+  SaveIcon,
+  XIcon,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,25 +39,19 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import type { OpenFile } from "./use-project-editor"
-import type { ReactNode } from "react"
-
-export interface ProjectEditorFixedTab {
-  id: string
-  label: string
-  icon?: ReactNode
-  active: boolean
-  onSelect: () => void
-}
 
 interface Props {
-  fixedTabs?: ProjectEditorFixedTab[]
-  /** Controls that share the tab-strip row without participating in tab semantics. */
-  trailingContent?: ReactNode
   density?: "compact" | "touch"
   files: OpenFile[]
   activePath: string | null
   /** relPath of the single preview tab, when the host tracks one. */
   previewPath?: string | null
+  /**
+   * This strip belongs to an unfocused editor group — the active tab keeps
+   * its background (it is still the group's selection) but loses the accent
+   * bar and bright text, the way VS Code dims the unfocused group's tab.
+   */
+  inactive?: boolean
   dirtyCount: number
   onSelect: (relPath: string) => void
   onClose: (relPath: string) => void
@@ -64,11 +67,21 @@ interface Props {
   onReopenClosed?: () => void
   /** Copy `relPath` (relative) or `absolutePath` to the clipboard. */
   onCopyPath?: (relPath: string, absolute: boolean) => void
-  /** Discard the draft and reload from disk (dirty tabs only). */
+  /**
+   * Reload the tab from disk — "Revert" on a dirty tab (discards the draft,
+   * the host confirms), "Reload" on a clean one (refreshes a stale buffer).
+   */
   onRevert?: (relPath: string) => void
+  /** Move this editor into the other group — present only while split. */
+  onMoveToOtherGroup?: (relPath: string) => void
+  /** Scroll the explorer to this tab's file (VS Code's "Reveal in Explorer"). */
+  onRevealInExplorer?: (relPath: string) => void
+  /** Stage this tab's file as a chat context chip. */
+  onAddToChat?: (relPath: string) => void
 }
 
-const DRAG_MIME = "application/x-cognia-editor-tab"
+export const EDITOR_TAB_DRAG_MIME = "application/x-cognia-editor-tab"
+const DRAG_MIME = EDITOR_TAB_DRAG_MIME
 
 function revealTab(strip: HTMLDivElement, tab: HTMLButtonElement) {
   // Include the file's close/pin actions, and scroll this strip only: using
@@ -87,12 +100,11 @@ function revealTab(strip: HTMLDivElement, tab: HTMLButtonElement) {
 }
 
 export function ProjectEditorTabs({
-  fixedTabs = [],
-  trailingContent,
   density = "compact",
   files,
   activePath,
   previewPath = null,
+  inactive = false,
   dirtyCount,
   onSelect,
   onClose,
@@ -105,6 +117,9 @@ export function ProjectEditorTabs({
   onReopenClosed,
   onCopyPath,
   onRevert,
+  onMoveToOtherGroup,
+  onRevealInExplorer,
+  onAddToChat,
 }: Props) {
   const t = useTranslations("projectEditor")
   // relPath being dragged over — paints the insertion indicator on that tab.
@@ -113,20 +128,15 @@ export function ProjectEditorTabs({
   // Overflow list state — a DropdownMenu that closes itself on pick.
   const [listOpen, setListOpen] = useState(false)
   const stripRef = useRef<HTMLDivElement>(null)
-  const fixedActiveIndex = fixedTabs.findIndex((tab) => tab.active)
-  const fileActiveIndex = files.findIndex((file) => file.relPath === activePath)
-  const activeIndex =
-    fixedActiveIndex >= 0
-      ? fixedActiveIndex
-      : fileActiveIndex >= 0
-        ? fixedTabs.length + fileActiveIndex
-        : 0
+  // The roving tab stop: the active file's tab, or the first tab when the
+  // active path is not open in this strip.
+  const activeIndex = Math.max(
+    0,
+    files.findIndex((file) => file.relPath === activePath)
+  )
   // Draft updates must not trigger geometry reads on every keystroke. Only
   // selection, tab order, and an actual strip resize need to reveal a tab.
-  const tabOrder = JSON.stringify([
-    fixedTabs.map((tab) => tab.id),
-    files.map((file) => file.relPath),
-  ])
+  const tabOrder = JSON.stringify(files.map((file) => file.relPath))
   useLayoutEffect(() => {
     const strip = stripRef.current
     if (!strip) return
@@ -140,7 +150,7 @@ export function ProjectEditorTabs({
     return () => observer.disconnect()
   }, [activeIndex, tabOrder])
 
-  if (files.length === 0 && fixedTabs.length === 0 && !trailingContent) return null
+  if (files.length === 0) return null
 
   const tabActions = (f: OpenFile) => {
     const dirty = f.draftContent !== f.savedContent
@@ -175,18 +185,26 @@ export function ProjectEditorTabs({
         {onCloseAll ? (
           <ContextMenuItem onSelect={onCloseAll}>{t("tabs.closeAll")}</ContextMenuItem>
         ) : null}
+        {onMoveToOtherGroup ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => onMoveToOtherGroup(f.relPath)}>
+              {t("tabs.moveToOtherGroup")}
+            </ContextMenuItem>
+          </>
+        ) : null}
         {onReopenClosed ? (
           <ContextMenuItem onSelect={onReopenClosed}>
             <RotateCcwIcon className="size-3.5" />
             {t("tabs.reopenClosed")}
           </ContextMenuItem>
         ) : null}
-        {dirty && onRevert ? (
+        {onRevert ? (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => onRevert(f.relPath)}>
               <RotateCcwIcon className="size-3.5" />
-              {t("tabs.revert")}
+              {dirty ? t("tabs.revert") : t("tabs.reload")}
             </ContextMenuItem>
           </>
         ) : null}
@@ -203,18 +221,31 @@ export function ProjectEditorTabs({
             </ContextMenuItem>
           </>
         ) : null}
+        {onRevealInExplorer || onAddToChat ? <ContextMenuSeparator /> : null}
+        {onRevealInExplorer ? (
+          <ContextMenuItem onSelect={() => onRevealInExplorer(f.relPath)}>
+            <CrosshairIcon className="size-3.5" />
+            {t("tabs.revealInExplorer")}
+          </ContextMenuItem>
+        ) : null}
+        {onAddToChat ? (
+          <ContextMenuItem onSelect={() => onAddToChat(f.relPath)}>
+            <MessageSquarePlusIcon className="size-3.5" />
+            {t("action.addToChat")}
+          </ContextMenuItem>
+        ) : null}
       </ContextMenuContent>
     )
   }
 
   return (
     <div
-      className="@container/editor-tabs flex min-w-0 shrink-0 flex-wrap items-center border-b"
+      className="@container/editor-tabs flex min-w-0 shrink-0 items-center border-b"
       data-testid="project-editor-tabs"
     >
       <div
         ref={stripRef}
-        className="flex min-w-[min(100%,12rem)] flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role="tablist"
         aria-orientation="horizontal"
         onKeyDown={(event) => {
@@ -251,30 +282,6 @@ export function ProjectEditorTabs({
           tabs[next].click()
         }}
       >
-        {fixedTabs.map((tab, index) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={tab.active}
-            tabIndex={activeIndex === index ? 0 : -1}
-            data-testid={`editor-fixed-tab-${tab.id}`}
-            className={cn(
-              "relative flex shrink-0 items-center gap-1 border-r px-3 py-1.5 text-sm",
-              density === "touch" && "min-h-11 py-2",
-              tab.active
-                ? "bg-background text-foreground"
-                : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-            onClick={tab.onSelect}
-          >
-            {tab.active ? (
-              <span className="absolute inset-x-0 top-0 h-0.5 bg-primary" aria-hidden />
-            ) : null}
-            {tab.icon}
-            <span>{tab.label}</span>
-          </button>
-        ))}
         {files.map((f, index) => {
           const dirty = f.draftContent !== f.savedContent
           const name = f.relPath.split("/").pop() ?? f.relPath
@@ -312,27 +319,35 @@ export function ProjectEditorTabs({
                   }}
                   className={cn(
                     "group relative flex shrink-0 items-center border-r text-sm",
-                    isActive ? "bg-background" : "bg-muted/40 hover:bg-muted",
+                    isActive
+                      ? inactive
+                        ? "bg-muted/70"
+                        : "bg-background"
+                      : "bg-muted/40 hover:bg-muted",
                     dropTarget === f.relPath &&
                       "after:absolute after:inset-y-0 after:left-0 after:w-0.5 after:bg-primary"
                   )}
                 >
-                  {/* Active tab gets a top accent — the cheapest cue that reads
-                      at a glance without fighting the row's density. */}
-                  {isActive ? (
+                  {/* Active tab gets a top accent — but only in the focused
+                      group; the unfocused group's selection stays muted. */}
+                  {isActive && !inactive ? (
                     <span className="absolute inset-x-0 top-0 h-0.5 bg-primary" aria-hidden />
                   ) : null}
                   <button
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    tabIndex={activeIndex === fixedTabs.length + index ? 0 : -1}
+                    tabIndex={activeIndex === index ? 0 : -1}
                     data-testid={`editor-tab-${f.relPath}`}
                     className={cn(
                       "flex cursor-pointer items-center gap-1.5 py-1.5 pl-3",
                       density === "touch" && "min-h-11 py-2",
                       preview && "italic",
-                      isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                      isActive
+                        ? inactive
+                          ? "text-muted-foreground"
+                          : "text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
                     onClick={() => onSelect(f.relPath)}
                     onDoubleClick={() => onPin?.(f.relPath)}
@@ -344,11 +359,30 @@ export function ProjectEditorTabs({
                         onClose(f.relPath)
                       }
                     }}
-                    title={preview ? t("previewTab", { name: f.relPath }) : f.relPath}
+                    title={
+                      f.deletedOnDisk
+                        ? t("deletedTab", { name: f.relPath })
+                        : preview
+                          ? t("previewTab", { name: f.relPath })
+                          : f.relPath
+                    }
                   >
                     <FileTypeIcon path={name} className="size-3.5 shrink-0" />
-                    <span className="max-w-[min(12rem,45cqw)] truncate">{name}</span>
-                    {f.externallyChanged ? (
+                    <span
+                      className={cn(
+                        "max-w-[min(12rem,45cqw)] truncate",
+                        f.deletedOnDisk && "line-through decoration-destructive"
+                      )}
+                    >
+                      {name}
+                    </span>
+                    {f.deletedOnDisk ? (
+                      <span
+                        className="size-1.5 shrink-0 rounded-full bg-destructive"
+                        title={t("deletedOnDisk")}
+                        aria-hidden
+                      />
+                    ) : f.externallyChanged ? (
                       <span
                         className="size-1.5 shrink-0 rounded-full bg-amber-500"
                         title={t("externallyChanged")}
@@ -456,14 +490,6 @@ export function ProjectEditorTabs({
             {t("saveAll", { count: dirtyCount })}
           </span>
         </Button>
-      ) : null}
-      {trailingContent ? (
-        <div
-          className="min-w-0 w-full max-w-full border-t px-1 py-1 @[56rem]/editor-tabs:w-auto @[56rem]/editor-tabs:shrink-0 @[56rem]/editor-tabs:border-t-0 @[56rem]/editor-tabs:py-0"
-          data-testid="project-editor-tabs-trailing"
-        >
-          {trailingContent}
-        </div>
       ) : null}
     </div>
   )

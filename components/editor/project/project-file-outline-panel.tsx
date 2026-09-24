@@ -67,7 +67,11 @@ export function ProjectFileOutlinePanel({
     )
   }
   return (
-    <div role="tree" aria-label={t("outline")} className="h-full overflow-auto p-2">
+    <div
+      role="tree"
+      aria-label={t("outline")}
+      className="workbench-scroll h-full overflow-auto p-2"
+    >
       {symbols.map((symbol, index) => (
         <OutlineRow key={`${symbol.name}-${index}`} symbol={symbol} relPath={relPath} depth={0} />
       ))}

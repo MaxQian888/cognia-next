@@ -136,12 +136,20 @@ function issueRows(issues: WorkspaceIssueInput[]): CodeServerWorkspaceRow[] {
   }))
 }
 
-/** Live plans only — a finished plan is a record, not a thing to glance at. */
+/**
+ * Plans that still need attention. A finished, abandoned or rejected plan is a
+ * record, not a thing to glance at; a failed plan stays listed (with the error
+ * icon) because it is the one the user has to act on.
+ */
+const CLOSED_PLAN_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "cancelled",
+  "canceled",
+  "rejected",
+])
+
 function planRows(plans: WorkspacePlanInput[]): CodeServerWorkspaceRow[] {
-  const live = plans.filter(
-    (plan) =>
-      plan.status !== "completed" && plan.status !== "cancelled" && plan.status !== "canceled"
-  )
+  const live = plans.filter((plan) => !CLOSED_PLAN_STATUSES.has(plan.status))
   return [...live]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, WORKSPACE_GROUP_ROW_LIMIT)

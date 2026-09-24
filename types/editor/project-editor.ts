@@ -6,8 +6,23 @@ export interface ProjectEditorSession {
   openPaths: string[]
   /** Active relative file path, or null when no file is selected. */
   activePath: string | null
+  /**
+   * Split-editor layout: relPaths living in the second editor group. Absent
+   * or empty means the session had a single group.
+   */
+  splitPaths?: string[]
+  /** Remembered active relPath per editor group `[primary, secondary]`. */
+  groupActivePaths?: [string | null, string | null]
+  /** Last focused editor group — only meaningful when `splitPaths` is set. */
+  focusedGroup?: 0 | 1
   /** Optional persisted resizable layout owned by the rendering surface. */
   layout?: number[]
+  /**
+   * Whether the file context workbench (the editor's secondary sidebar) shows
+   * its panel body. Absent or false means rail only — the default, so a
+   * narrow dock opens on the editor rather than on a side panel.
+   */
+  contextWorkbenchOpen?: boolean
   /** Preferred project editor engine for surfaces that offer CodeServer. */
   editorMode?: "monaco" | "codeserver"
   /**

@@ -1,4 +1,8 @@
 import { render, screen, fireEvent } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { SourceControlWorkbenchPanel } from "./source-control-workbench-panel"
 
 // Mock next-intl
@@ -225,6 +229,38 @@ describe("SourceControlWorkbenchPanel", () => {
     const row = screen.getByTestId("change-row-src/app.ts")
     const buttons = row.querySelectorAll("button")
     fireEvent.click(buttons[0]) // stage button
+    expect(mockActions.stage).toHaveBeenCalledWith(["src/app.ts"])
+  })
+
+  it("keeps the row stage/discard actions reachable without a hover", () => {
+    mockGitState.status = {
+      branch: "main",
+      upstream: null,
+      ahead: 0,
+      behind: 0,
+      staged: [],
+      changes: [
+        { path: "src/app.ts", origPath: null, status: "modified", staged: false, group: "changes" },
+      ],
+      merge: [],
+      isRebasing: false,
+      isMerging: false,
+    }
+    render(<SourceControlWorkbenchPanel />)
+    const row = screen.getByTestId("change-row-src/app.ts")
+    const stage = row.querySelectorAll("button")[0] as HTMLButtonElement
+    const wrapper = stage.parentElement!
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    // The row is the nearest unnamed `group`, so its hover still reveals the actions.
+    expect(wrapper.closest(".group")).toBe(row)
+    stage.focus()
+    expect(stage).toHaveFocus()
+    fireEvent.click(stage)
     expect(mockActions.stage).toHaveBeenCalledWith(["src/app.ts"])
   })
 

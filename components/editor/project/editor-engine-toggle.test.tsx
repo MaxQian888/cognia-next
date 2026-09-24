@@ -34,6 +34,7 @@ const renderToggle = (
     proIdeSupport: CodeServerSupportStatus
     proIdeProfile: "managed" | "native"
     onProIdeProfileChange: ((next: "managed" | "native") => void) | null
+    labelClassName: string
   }> = {}
 ) => {
   const onChange = props.onChange ?? jest.fn()
@@ -51,6 +52,7 @@ const renderToggle = (
       projectRoot="/work/proj"
       proIdeProfile={props.proIdeProfile ?? "managed"}
       onProIdeProfileChange={onProIdeProfileChange}
+      labelClassName={props.labelClassName}
     />
   )
   return { onChange, onProIdeProfileChange }
@@ -140,6 +142,34 @@ it("leaves the tooltip off when Pro IDE is available", () => {
   expect(screen.getByTestId("editor-mode-codeserver")).not.toHaveAttribute("title")
   expect(screen.getByTestId("editor-mode-codeserver")).not.toHaveAttribute("aria-describedby")
   expect(screen.queryByTestId("editor-mode-codeserver-disabled")).not.toBeInTheDocument()
+})
+
+describe("labels a host may fold to icons", () => {
+  it("wraps every label so a narrow toolbar can hide it, keeping names and tooltips", () => {
+    renderToggle({ value: "codeserver", labelClassName: "hidden @3xl/dock-ws:inline" })
+
+    for (const testId of ["editor-mode-monaco", "editor-mode-codeserver"]) {
+      const item = screen.getByTestId(testId)
+      expect(item.querySelector("span.hidden")).not.toBeNull()
+      expect(item).toHaveAttribute("title", item.getAttribute("aria-label"))
+    }
+    for (const testId of ["pro-ide-profile-managed", "pro-ide-profile-native"]) {
+      expect(screen.getByTestId(testId).querySelector("span.hidden")).not.toBeNull()
+    }
+  })
+
+  it("titles the local VS Code fallback when its label can fold", async () => {
+    renderToggle({ proIdeSupport: "unsupported", labelClassName: "hidden" })
+
+    const open = await screen.findByTestId("editor-open-local-vscode")
+    expect(open.querySelector("span.hidden")).not.toBeNull()
+    expect(open).toHaveAttribute("title", open.getAttribute("aria-label"))
+  })
+
+  it("adds no tooltip while the labels are always on screen", () => {
+    renderToggle()
+    expect(screen.getByTestId("editor-mode-monaco")).not.toHaveAttribute("title")
+  })
 })
 
 describe("local VS Code fallback", () => {

@@ -89,8 +89,18 @@ export interface OpenFile {
    * renders a fallback pane instead of an editor for these.
    */
   blocked?: "binary" | "too-large"
-  /** Set when the file changed on disk under us while open. */
+  /**
+   * Set when the file changed on disk under us while open AND the tab still
+   * holds an unsaved draft — i.e. the two sides are in conflict. A clean tab
+   * never carries this flag: its buffer simply reloads to match the disk.
+   */
   externallyChanged?: boolean
+  /**
+   * Set when the file was deleted on disk while its tab stayed open. The
+   * buffer survives — saving restores it — but the tab has to say the file
+   * is gone. Cleared by the next external create/modify or by a reload.
+   */
+  deletedOnDisk?: boolean
 }
 
 /**
@@ -100,6 +110,15 @@ export interface OpenFile {
  * than this ceiling.
  */
 export const MAX_EDITOR_BYTES = 10 * 1024 * 1024
+
+/**
+ * The fs watcher cannot tell our own `writeFile` from an agent's. A save
+ * stamps its path here and watch events inside the grace window are the
+ * echo of that write, not an external change. Two seconds covers notify
+ * latency across platforms without meaningfully masking a real write that
+ * lands right behind ours (the remote stat-poll still catches those).
+ */
+const SELF_WRITE_GRACE_MS = 2_000
 
 /**
  * Extensions whose content can never be UTF-8 source text. Skipping the read
@@ -219,7 +238,39 @@ export interface UseProjectEditorArgs {
   followedRoot?: string | null
   /** Injectable deps for testing. */
   deps?: Partial<ProjectEditorDeps>
+  /**
+   * Host-provided confirmation for destructive gates (dirty close, overwrite
+   * external change, revert). May be sync or async — an AlertDialog host
+   * returns a promise. Falls back to `window.confirm`; when neither exists
+   * the destructive path is refused rather than waved through.
+   * Boolean answers are part of the contract — a host bridging
+   * `window.confirm` naturally resolves true/false; `askConfirm`
+   * normalizes them to confirm/cancel.
+   */
+  confirm?: (
+    request: ProjectEditorConfirmRequest
+  ) => ProjectEditorConfirmVerdict | boolean | Promise<ProjectEditorConfirmVerdict | boolean>
 }
+
+/** A destructive-gate prompt: message body plus the affirmative button label. */
+export interface ProjectEditorConfirmRequest {
+  message: string
+  confirmLabel: string
+  /**
+   * Present on the dirty-close gate only: a third "save the draft first"
+   * choice, like VS Code's Save / Don't Save / Cancel. A host that ignores it
+   * degrades to the binary confirm/cancel pair.
+   */
+  saveLabel?: string
+}
+
+/**
+ * What the user answered. `"confirm"` = the destructive action (don't save /
+ * overwrite / discard), `"save"` = keep the draft by writing it first,
+ * `"cancel"` = abort. Boolean answers normalize to confirm/cancel so a plain
+ * `window.confirm` fallback keeps working.
+ */
+export type ProjectEditorConfirmVerdict = "confirm" | "save" | "cancel"
 
 export interface ProjectEditorDeps {
   listDir: typeof listWorkspaceDir
@@ -300,6 +351,7 @@ export function useProjectEditor({
   workingDir,
   followedRoot,
   deps,
+  confirm: confirmArg,
 }: UseProjectEditorArgs) {
   const d = useMemo(() => ({ ...defaultDeps, ...deps }), [deps])
   const t = useTranslations("projectEditor")
@@ -412,7 +464,11 @@ export function useProjectEditor({
     },
     [rootPath, d]
   )
-  const pendingSaves = useRef(new Map<string, Promise<void>>())
+  const pendingSaves = useRef(new Map<string, Promise<boolean>>())
+  // Absolute paths this hook wrote itself, by write-completion time. Read by
+  // the fs-watch callback to tell our own save's echo from a real external
+  // (usually agent) write.
+  const recentSelfWrites = useRef(new Map<string, number>())
   useEffect(() => {
     const invalidate = () => {
       operationEpoch.current += 1
@@ -524,15 +580,37 @@ export function useProjectEditor({
     return () => d.unregisterLspRoot(rootPath)
   }, [d, rootPath])
 
+  // Flips once the session-restore loop below has run — every persisted path
+  // is then marked in `openPathsRef` even though its read may still be in
+  // flight. Both the persist effect and the workbench's split restore gate on
+  // it: during the restore window the record must keep the snapshot being
+  // restored from, not a half-populated live state.
+  const [sessionRestored, setSessionRestored] = useState(false)
+
   // ── Persist the session (root / open files / active file) ───────────────
+  // `openFiles` gets a new identity on every keystroke (draftContent lives in
+  // it) — serializing all sessions to localStorage per keypress is wasted
+  // work, so the write is gated on the persisted fields actually changing.
+  const lastPersistedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!rootsReady) return
-    setEditorSession(scopeKey, {
-      rootKey,
-      openPaths: openFiles.map((f) => f.relPath),
-      activePath,
-    })
-  }, [scopeKey, rootKey, openFiles, activePath, rootsReady, setEditorSession])
+    if (!rootsReady || !sessionRestored) return
+    // The open set is `openPathsRef` (paths are marked the moment `openFile`
+    // is called), not `openFiles` (a tab materializes when its read lands).
+    // Serializing `openFiles` alone would write a transient empty/partial
+    // list over the record during every in-flight open — most visibly right
+    // after session restore, when the whole set is marked but nothing has
+    // landed yet. Landed tabs keep their visual order; in-flight marks
+    // append in open order, matching where their tabs will land.
+    const landed = openFiles.map((f) => f.relPath)
+    const openPaths = [...landed]
+    for (const relPath of openPathsRef.current) {
+      if (!openPaths.includes(relPath)) openPaths.push(relPath)
+    }
+    const key = JSON.stringify([rootKey, openPaths, activePath])
+    if (key === lastPersistedRef.current) return
+    lastPersistedRef.current = key
+    setEditorSession(scopeKey, { rootKey, openPaths, activePath })
+  }, [scopeKey, rootKey, openFiles, activePath, rootsReady, sessionRestored, setEditorSession])
 
   // ── File operations ─────────────────────────────────────────────────────
 
@@ -562,7 +640,8 @@ export function useProjectEditor({
       seq: number,
       allowLarge: boolean,
       previousActivePath: string | null,
-      preserveOnError: boolean
+      preserveOnError: boolean,
+      preserveIfDirty = false
     ) => {
       const epoch = operationEpoch.current
       const stillOurs = () =>
@@ -629,12 +708,21 @@ export function useProjectEditor({
           // model swap monotonic instead of re-creating it from scratch. A
           // rejected stat keeps the metadata the earlier read recorded rather
           // than regressing it to "unknown".
+          const current = prev[idx]
+          // `preserveIfDirty` is the auto-reload path: the user typed while
+          // the read was in flight, so the buffer is now unsaved work and the
+          // disk content arriving is the *other* side of a conflict — keep
+          // the draft, advance the baseline, and flag it.
+          const dirtiedInFlight = preserveIfDirty && current.draftContent !== current.savedContent
           const next = [...prev]
           next[idx] = {
             ...entry,
-            draftVersion: prev[idx].draftVersion + 1,
-            mtime: stat?.mtimeMs ?? prev[idx].mtime,
-            sizeBytes: stat?.size ?? prev[idx].sizeBytes,
+            draftVersion: current.draftVersion + 1,
+            mtime: stat?.mtimeMs ?? current.mtime,
+            sizeBytes: stat?.size ?? current.sizeBytes,
+            ...(dirtiedInFlight
+              ? { draftContent: current.draftContent, externallyChanged: true }
+              : {}),
           }
           return next
         })
@@ -714,43 +802,117 @@ export function useProjectEditor({
   )
 
   /**
+   * Ask the host (or `window.confirm`) a yes/no question. Sync when no host
+   * dialog is wired so callers on the plain path never wait a microtask.
+   */
+  const askConfirm = useCallback(
+    (
+      request: ProjectEditorConfirmRequest
+    ): ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict> => {
+      const normalize = (v: ProjectEditorConfirmVerdict | boolean): ProjectEditorConfirmVerdict =>
+        v === true ? "confirm" : v === false ? "cancel" : v
+      if (confirmArg !== undefined) {
+        const verdict = confirmArg(request)
+        return typeof verdict === "string" || typeof verdict === "boolean"
+          ? normalize(verdict)
+          : verdict.then(normalize)
+      }
+      return typeof window.confirm === "function"
+        ? normalize(window.confirm(request.message))
+        : "cancel"
+    },
+    [confirmArg]
+  )
+
+  /**
    * Closing a dirty tab destroys the only copy of the user's work — reopening
    * re-reads the file from disk, not the draft. Any close path (⌘W, Close
    * Others/Right/All) confirms once when dirty tabs are in scope; a cancel
    * leaves the whole close a no-op.
    */
   const confirmDirtyClose = useCallback(
-    (relPaths: readonly string[]): boolean => {
+    (
+      relPaths: readonly string[]
+    ): ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict> => {
       const dirty = relPaths.filter((p) => {
         const f = openFilesRef.current.find((o) => o.relPath === p)
         return f !== undefined && f.draftContent !== f.savedContent
       })
-      if (dirty.length === 0) return true
+      if (dirty.length === 0) return "confirm"
       const message =
         dirty.length === 1
           ? t("closeDirtyConfirm", { name: dirty[0].split("/").pop() ?? dirty[0] })
           : t("closeDirtyConfirmCount", { count: dirty.length })
-      return typeof window.confirm === "function" ? window.confirm(message) : false
+      // VS Code's three-way: Don't Save / Cancel / Save. `saveLabel` tells the
+      // host dialog to offer the save-first path.
+      return askConfirm({
+        message,
+        confirmLabel: t("confirmDontSave"),
+        saveLabel: t("confirmSave"),
+      })
     },
-    [t]
+    [t, askConfirm]
   )
 
-  const closeFile = useCallback(
-    (relPath: string) => {
-      if (!confirmDirtyClose([relPath])) return
-      const idx = openFiles.findIndex((f) => f.relPath === relPath)
-      const remaining = openFiles.filter((f) => f.relPath !== relPath)
-      rememberClosed([relPath])
-      openPathsRef.current.delete(relPath)
-      documentEpochs.current.delete(relPath)
-      releaseFileModel(joinRootRel(rootPath, relPath))
-      setTabState(forgetTab(tabStateRef.current, relPath))
-      setOpenFiles(remaining)
-      const fallback = remaining[Math.min(idx, remaining.length - 1)]?.relPath ?? null
-      setActivePath((cur) => (cur !== relPath ? cur : fallback))
-      if (activePathRef.current === relPath) activePathRef.current = fallback
+  /**
+   * Overwriting a disk version the buffer never saw silently discards the
+   * external (usually agent) write — confirm once instead. Mirrors
+   * `confirmDirtyClose`: when `window.confirm` is unavailable the destructive
+   * path is refused rather than waved through.
+   */
+  const confirmOverwriteExternal = useCallback(
+    (
+      files: readonly OpenFile[]
+    ): ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict> => {
+      const conflicted = files.filter((f) => f.externallyChanged)
+      if (conflicted.length === 0) return "confirm"
+      const message =
+        conflicted.length === 1
+          ? t("overwriteExternalConfirm", {
+              name: conflicted[0].relPath.split("/").pop() ?? conflicted[0].relPath,
+            })
+          : t("overwriteExternalConfirmCount", { count: conflicted.length })
+      return askConfirm({ message, confirmLabel: t("confirmOverwrite") })
     },
-    [openFiles, rootPath, releaseFileModel, setTabState, rememberClosed, confirmDirtyClose]
+    [t, askConfirm]
+  )
+
+  /**
+   * Reverting a dirty tab destroys the draft — the reload itself is
+   * unconditional, so this gate is the only thing between a stray menu click
+   * and lost work. Clean tabs revert freely (reload is harmless there).
+   */
+  const confirmDiscardDraft = useCallback(
+    (relPath: string): ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict> => {
+      const file = openFilesRef.current.find((f) => f.relPath === relPath)
+      if (!file || file.draftContent === file.savedContent) return "confirm"
+      return askConfirm({
+        message: t("revertDirtyConfirm", { name: relPath.split("/").pop() ?? relPath }),
+        confirmLabel: t("confirmDiscard"),
+      })
+    },
+    [t, askConfirm]
+  )
+
+  /**
+   * Run `onConfirm`/`onSave` for the verdict. A string verdict executes
+   * synchronously (the plain `window.confirm` path never waits a microtask);
+   * a promise — a host dialog — defers the mutation until the user answers.
+   */
+  const whenConfirmed = useCallback(
+    (
+      verdict: ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict>,
+      onConfirm: () => void,
+      onSave?: () => void
+    ) => {
+      const run = (v: ProjectEditorConfirmVerdict) => {
+        if (v === "confirm") onConfirm()
+        else if (v === "save") onSave?.()
+      }
+      if (typeof verdict === "string") run(verdict)
+      else void verdict.then(run)
+    },
+    []
   )
 
   /** Reorder tabs by drag-and-drop: move `fromRelPath` onto `toRelPath`'s slot. */
@@ -771,14 +933,13 @@ export function useProjectEditor({
    * `closeFile`: the neighbour that slid into the closed tab's slot, or the
    * new last tab.
    */
-  const closeFiles = useCallback(
+  const performCloseMany = useCallback(
     (closing: ReadonlySet<string>) => {
-      if (closing.size === 0) return
-      if (!confirmDirtyClose([...closing])) return
-      const remaining = openFiles.filter((f) => !closing.has(f.relPath))
-      const activeIdx = openFiles.findIndex((f) => f.relPath === activePathRef.current)
-      rememberClosed(openFiles.filter((f) => closing.has(f.relPath)).map((f) => f.relPath))
-      for (const f of openFiles) {
+      const current = openFilesRef.current
+      const remaining = current.filter((f) => !closing.has(f.relPath))
+      const activeIdx = current.findIndex((f) => f.relPath === activePathRef.current)
+      rememberClosed(current.filter((f) => closing.has(f.relPath)).map((f) => f.relPath))
+      for (const f of current) {
         if (!closing.has(f.relPath)) continue
         openPathsRef.current.delete(f.relPath)
         documentEpochs.current.delete(f.relPath)
@@ -795,34 +956,16 @@ export function useProjectEditor({
         activePathRef.current = fallback
       }
     },
-    [openFiles, rootPath, releaseFileModel, setTabState, rememberClosed, confirmDirtyClose]
+    [rootPath, releaseFileModel, setTabState, rememberClosed]
   )
-
-  const closeOtherFiles = useCallback(
-    (relPath: string) => {
-      closeFiles(new Set(openFiles.map((f) => f.relPath).filter((p) => p !== relPath)))
-    },
-    [closeFiles, openFiles]
-  )
-
-  const closeFilesToRight = useCallback(
-    (relPath: string) => {
-      const idx = openFiles.findIndex((f) => f.relPath === relPath)
-      if (idx === -1) return
-      closeFiles(new Set(openFiles.slice(idx + 1).map((f) => f.relPath)))
-    },
-    [closeFiles, openFiles]
-  )
-
-  const closeAllFiles = useCallback(() => {
-    closeFiles(new Set(openFiles.map((f) => f.relPath)))
-  }, [closeFiles, openFiles])
 
   /**
    * Reopen the most recently closed tab (⌘⇧T / Ctrl+Shift+T). A no-op when the
    * history is empty; a path that no longer exists surfaces through the normal
    * failed-open path inside `openFile`.
    */
+  const isOpenPath = useCallback((relPath: string) => openPathsRef.current.has(relPath), [])
+
   const reopenClosedFile = useCallback(() => {
     const relPath = closedHistoryRef.current.pop()
     if (relPath === undefined) return
@@ -849,22 +992,29 @@ export function useProjectEditor({
     (
       file: OpenFile,
       epoch = operationEpoch.current,
-      seq = openSeqRef.current.get(file.relPath)
-    ): Promise<void> => {
+      seq = openSeqRef.current.get(file.relPath),
+      confirm?: () => ProjectEditorConfirmVerdict | Promise<ProjectEditorConfirmVerdict>
+    ): Promise<boolean> => {
       const current = () =>
         operationEpoch.current === epoch &&
         documentEpochs.current.get(file.relPath) === epoch &&
         file.absolutePath === joinRootRel(rootPath, file.relPath) &&
         openPathsRef.current.has(file.relPath) &&
         openSeqRef.current.get(file.relPath) === seq
-      const write = async () => {
+      const write = async (): Promise<boolean> => {
         // Queued writes belong to this document incarnation, never a reopened
         // tab or another root. A failed predecessor must not poison retries.
         if (!current()) throw new Error(t("saveContextChanged"))
+        // The overwrite confirmation runs at write time — after the context
+        // guard, so a draft from a dead host rejects instead of prompting,
+        // and the check reads the freshest flag state.
+        if (confirm !== undefined && (await confirm()) !== "confirm") return false
         await d.writeFile(rootPath, file.relPath, file.draftContent)
-        if (!current()) return
+        // Stamp before the watcher can possibly deliver the write's echo.
+        recentSelfWrites.current.set(file.absolutePath, Date.now())
+        if (!current()) return true
         const stat = await d.statFile(rootPath, file.relPath).catch(() => null)
-        if (!current()) return
+        if (!current()) return true
         setOpenFiles((prev) =>
           prev.map((f) =>
             f.absolutePath === file.absolutePath
@@ -872,12 +1022,16 @@ export function useProjectEditor({
                   ...f,
                   savedContent: file.draftContent,
                   externallyChanged: false,
+                  // The file provably exists again — saving a `deletedOnDisk`
+                  // buffer IS how it gets restored.
+                  deletedOnDisk: false,
                   mtime: stat?.mtimeMs ?? f.mtime,
                   sizeBytes: stat?.size ?? f.sizeBytes,
                 }
               : f
           )
         )
+        return true
       }
       const previous = pendingSaves.current.get(file.absolutePath)
       const saving = previous ? previous.catch(() => {}).then(write) : write()
@@ -893,26 +1047,125 @@ export function useProjectEditor({
   )
 
   const saveFile = useCallback(
-    async (relPath: string) => {
+    async (relPath: string, opts?: { force?: boolean }): Promise<boolean> => {
       const file = openFilesRef.current.find((f) => f.relPath === relPath)
       // Placeholders contain no file bytes and must never be saved.
-      if (!file || file.blocked) return
-      await saveSnapshot(file)
+      if (!file || file.blocked) return false
+      const confirm = opts?.force
+        ? undefined
+        : () => {
+            const fresh = openFilesRef.current.find((f) => f.relPath === relPath)
+            return fresh !== undefined ? confirmOverwriteExternal([fresh]) : "cancel"
+          }
+      return saveSnapshot(
+        file,
+        operationEpoch.current,
+        openSeqRef.current.get(file.relPath),
+        confirm
+      )
     },
-    [saveSnapshot]
+    [saveSnapshot, confirmOverwriteExternal]
   )
 
-  const saveAll = useCallback(async () => {
-    const dirty = openFilesRef.current.filter(
-      (f) => f.draftContent !== f.savedContent && !f.blocked
-    )
-    const epoch = operationEpoch.current
-    const snapshots = dirty.map((file) => ({ file, seq: openSeqRef.current.get(file.relPath) }))
-    for (const { file, seq } of snapshots) await saveSnapshot(file, epoch, seq)
-  }, [saveSnapshot])
+  const saveAll = useCallback(
+    async (opts?: { force?: boolean }) => {
+      const dirty = openFilesRef.current.filter(
+        (f) => f.draftContent !== f.savedContent && !f.blocked
+      )
+      const epoch = operationEpoch.current
+      const snapshots = dirty.map((file) => ({
+        file,
+        seq: openSeqRef.current.get(file.relPath),
+      }))
+      // One batch prompt at the first conflicted write — declined paths are
+      // skipped while clean drafts still write. The confirm sits inside
+      // saveSnapshot so stale-context drafts reject before any prompt.
+      const approved = new Set<string>()
+      let asked = false
+      const confirm =
+        opts?.force === true
+          ? undefined
+          : async (relPath: string): Promise<ProjectEditorConfirmVerdict> => {
+              const fresh = openFilesRef.current.find((f) => f.relPath === relPath)
+              if (fresh === undefined) return "cancel"
+              if (!fresh.externallyChanged) return "confirm"
+              if (!asked) {
+                asked = true
+                if ((await confirmOverwriteExternal(dirty)) === "confirm")
+                  for (const f of dirty) approved.add(f.relPath)
+              }
+              return approved.has(relPath) ? "confirm" : "cancel"
+            }
+      for (const { file, seq } of snapshots)
+        await saveSnapshot(
+          file,
+          epoch,
+          seq,
+          confirm === undefined ? undefined : () => confirm(file.relPath)
+        )
+    },
+    [saveSnapshot, confirmOverwriteExternal]
+  )
+
+  /**
+   * Save every dirty file in `closing`, then close the ones whose write
+   * actually landed. A failed, declined, or skipped save keeps its tab open —
+   * answering "Save" must never become a silent discard. The save's own
+   * boolean is the signal: `openFiles` cannot be re-read here because its ref
+   * only syncs on the next render.
+   */
+  const saveThenClose = useCallback(
+    async (closing: ReadonlySet<string>) => {
+      const saved = new Set<string>()
+      for (const relPath of closing) {
+        const file = openFilesRef.current.find((f) => f.relPath === relPath)
+        if (!file || file.blocked) continue
+        if (file.draftContent === file.savedContent) {
+          saved.add(relPath)
+          continue
+        }
+        try {
+          // `force` skips the overwrite re-prompt — the user already answered
+          // "Save" once; asking again inside the same gesture double-prompts.
+          if (await saveFile(relPath, { force: true })) saved.add(relPath)
+        } catch {
+          /* keep the tab on failure */
+        }
+      }
+      if (saved.size > 0) performCloseMany(saved)
+    },
+    [saveFile, performCloseMany]
+  )
+
+  const closeFile = useCallback(
+    (relPath: string) => {
+      whenConfirmed(
+        confirmDirtyClose([relPath]),
+        () => performCloseMany(new Set([relPath])),
+        () => void saveThenClose(new Set([relPath]))
+      )
+    },
+    [confirmDirtyClose, whenConfirmed, performCloseMany, saveThenClose]
+  )
+
+  const closeFiles = useCallback(
+    (closing: ReadonlySet<string>) => {
+      if (closing.size === 0) return
+      whenConfirmed(
+        confirmDirtyClose([...closing]),
+        () => performCloseMany(closing),
+        () => void saveThenClose(closing)
+      )
+    },
+    [confirmDirtyClose, whenConfirmed, performCloseMany, saveThenClose]
+  )
+
+  const closeAllFiles = useCallback(() => {
+    closeFiles(new Set(openFiles.map((f) => f.relPath)))
+  }, [closeFiles, openFiles])
 
   const reloadFile = useCallback(
-    async (relPath: string) => {
+    async (relPath: string, opts?: { preserveIfDirty?: boolean }) => {
       // Route through the open-time classifier: a binary or oversized file
       // must never be pulled into a draft, and a forced-open file re-checks
       // the ceiling on every reload. `preserveOnError`: the tab is live — a
@@ -920,9 +1173,57 @@ export function useProjectEditor({
       // the error.
       const seq = (openSeqRef.current.get(relPath) ?? 0) + 1
       openSeqRef.current.set(relPath, seq)
-      await readIntoTab(relPath, seq, false, null, true)
+      await readIntoTab(relPath, seq, false, null, true, opts?.preserveIfDirty === true)
     },
     [readIntoTab]
+  )
+
+  /**
+   * The tree (or a future host) deleted `deletedRelPaths` — files or
+   * directory prefixes. Clean tabs under them just close (reopening a
+   * deleted file is impossible anyway); dirty tabs stay open marked
+   * `deletedOnDisk`, because their draft may be the last surviving copy.
+   * Deletes made outside the tree arrive through the fs watcher instead and
+   * converge on the same state.
+   */
+  const reconcileDeleted = useCallback(
+    (deletedRelPaths: string[]) => {
+      const prefixes = deletedRelPaths.map((p) => p.replace(/\/+$/, ""))
+      const under = (relPath: string) =>
+        prefixes.some((p) => relPath === p || relPath.startsWith(`${p}/`))
+      const matches = openFilesRef.current.filter((f) => under(f.relPath))
+      if (matches.length === 0) return
+      const dirty = matches.filter((f) => f.draftContent !== f.savedContent)
+      const clean = matches.filter((f) => f.draftContent === f.savedContent)
+      const dirtySet = new Set(dirty.map((f) => f.relPath))
+      const cleanSet = new Set(clean.map((f) => f.relPath))
+      const activeIdx = openFilesRef.current.findIndex((f) => f.relPath === activePathRef.current)
+      for (const f of clean) {
+        openPathsRef.current.delete(f.relPath)
+        documentEpochs.current.delete(f.relPath)
+        releaseFileModel(f.absolutePath)
+      }
+      let nextTabState = tabStateRef.current
+      for (const f of clean) nextTabState = forgetTab(nextTabState, f.relPath)
+      setTabState(nextTabState)
+      // Deleted files are not reopenable — they must not enter the
+      // closed-tab history `reopenClosedFile` drains. Flag the dirty survivors
+      // and drop the clean ones in a single update so neither pass clobbers
+      // the other.
+      const remaining = openFilesRef.current
+        .map((f) =>
+          dirtySet.has(f.relPath) ? { ...f, deletedOnDisk: true, externallyChanged: false } : f
+        )
+        .filter((f) => !cleanSet.has(f.relPath))
+      setOpenFiles(remaining)
+      const fallback =
+        remaining[Math.min(Math.max(activeIdx, 0), remaining.length - 1)]?.relPath ?? null
+      setActivePath((cur) => (cur !== null && cleanSet.has(cur) ? fallback : cur))
+      if (activePathRef.current !== null && cleanSet.has(activePathRef.current)) {
+        activePathRef.current = fallback
+      }
+    },
+    [releaseFileModel, setTabState]
   )
 
   const selectRoot = useCallback(
@@ -943,37 +1244,109 @@ export function useProjectEditor({
   )
 
   // ── One-shot session restore (reopen persisted files for this root) ─────
+  // `sessionRestored` flips only after every `openFile` call has run — each
+  // marks `openPathsRef` synchronously even though its read resolves later.
+  // Consumers that restore layout on top of the open set (the workbench's
+  // split groups) gate on this, not `rootsReady`: at `rootsReady` time only
+  // the first `openFile` in the loop has marked the ref.
   useEffect(() => {
     if (!rootsReady) return
     if (restoredRef.current) return
     if (!persisted || persisted.rootKey !== rootKey) {
       restoredRef.current = true
+      /* eslint-disable react-hooks/set-state-in-effect -- one-shot readiness
+         flag for consumers gating on the completed restore. */
+      setSessionRestored(true)
+      /* eslint-enable react-hooks/set-state-in-effect */
       return
     }
     restoredRef.current = true
     const toOpen = persisted.openPaths ?? []
     void (async () => {
-      for (const relPath of toOpen) {
-        await openFile(relPath)
+      try {
+        for (const relPath of toOpen) {
+          await openFile(relPath)
+        }
+        if (persisted.activePath) setActivePath(persisted.activePath)
+      } finally {
+        // The flag must flip even if an open threw mid-loop — consumers and
+        // the persist effect above deadlock on a flag that never arrives.
+        setSessionRestored(true)
       }
-      if (persisted.activePath) setActivePath(persisted.activePath)
     })()
     // Intentionally one-shot after worktree discovery validates the persisted root.
   }, [openFile, persisted, rootKey, rootsReady])
 
   // ── External-change watch: mark open files, notify tree consumers ───────
   const [treeRefreshToken, setTreeRefreshToken] = useState(0)
+  // The watcher emits one event per changed path, un-debounced — a bulk
+  // write (`npm install`, a build) would otherwise force a tree reload per
+  // event. Coalesce into one trailing bump per window.
+  const treeBumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bumpTreeRefresh = useCallback(() => {
+    if (treeBumpTimer.current !== null) return
+    treeBumpTimer.current = setTimeout(() => {
+      treeBumpTimer.current = null
+      setTreeRefreshToken((n) => n + 1)
+    }, 250)
+  }, [])
   useEffect(() => {
     if (!rootPath) return
     const dispose = d.watch(rootPath, (change) => {
-      setTreeRefreshToken((n) => n + 1)
-      // Flag any open file that changed on disk so the UI can offer a reload.
-      setOpenFiles((prev) =>
-        prev.map((f) => (f.absolutePath === change.path ? { ...f, externallyChanged: true } : f))
-      )
+      bumpTreeRefresh()
+      const file = openFilesRef.current.find((f) => f.absolutePath === change.path)
+      if (change.kind === "delete") {
+        // A recursive watcher may emit only the removed directory's path, so
+        // match children by prefix too. Keep the buffer — a dirty draft may
+        // be the last surviving copy — but the tab must say the file is gone.
+        const under = (abs: string) => abs === change.path || abs.startsWith(`${change.path}/`)
+        if (!file && !openFilesRef.current.some((f) => under(f.absolutePath))) return
+        setOpenFiles((prev) =>
+          prev.map((f) =>
+            under(f.absolutePath) && !f.deletedOnDisk
+              ? { ...f, deletedOnDisk: true, externallyChanged: false }
+              : f
+          )
+        )
+        return
+      }
+      if (!file) return
+      // The echo of our own save — the write still in flight, or one that
+      // landed inside the grace window — is not an external change.
+      if (pendingSaves.current.has(change.path)) return
+      const stamp = recentSelfWrites.current.get(change.path)
+      if (stamp !== undefined && Date.now() - stamp < SELF_WRITE_GRACE_MS) return
+      if (file.draftContent !== file.savedContent) {
+        // A draft is unsaved work; surface the conflict rather than silently
+        // swapping whichever side the user didn't mean to drop.
+        setOpenFiles((prev) =>
+          prev.map((f) =>
+            f.absolutePath === change.path && !f.externallyChanged
+              ? { ...f, externallyChanged: true, deletedOnDisk: false }
+              : f
+          )
+        )
+      } else {
+        // A clean buffer mirrors the disk write directly — this is the
+        // dock's main purpose: watching what the agent just changed.
+        // `preserveIfDirty` covers the user typing while the read flies.
+        void reloadFile(file.relPath, { preserveIfDirty: true }).catch(() => {
+          // A failed auto-reload still owes the user the signal that the
+          // buffer went stale.
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.relPath === file.relPath ? { ...f, externallyChanged: true } : f))
+          )
+        })
+      }
     })
-    return dispose
-  }, [d, rootPath, hostRevision])
+    return () => {
+      if (treeBumpTimer.current !== null) {
+        clearTimeout(treeBumpTimer.current)
+        treeBumpTimer.current = null
+      }
+      dispose()
+    }
+  }, [d, rootPath, hostRevision, reloadFile, bumpTreeRefresh])
 
   // Remote hosts cannot use plugin_fs_watch (it is explicitly client-local).
   // Probe only metadata for open documents, with one request in flight and no
@@ -1006,12 +1379,32 @@ export function useProjectEditor({
           )
             continue
           if (seq !== openSeqRef.current.get(file.relPath)) continue
-          if (stat.exists && stat.size === file.sizeBytes && stat.mtimeMs === file.mtime) continue
-          setOpenFiles((files) =>
-            files.map((current) =>
-              current === file ? { ...current, externallyChanged: true } : current
+          if (!stat.exists) {
+            if (!file.deletedOnDisk) {
+              setOpenFiles((files) =>
+                files.map((current) =>
+                  current === file
+                    ? { ...current, deletedOnDisk: true, externallyChanged: false }
+                    : current
+                )
+              )
+            }
+            continue
+          }
+          if (stat.size === file.sizeBytes && stat.mtimeMs === file.mtime) continue
+          if (file.draftContent !== file.savedContent) {
+            setOpenFiles((files) =>
+              files.map((current) =>
+                current === file
+                  ? { ...current, externallyChanged: true, deletedOnDisk: false }
+                  : current
+              )
             )
-          )
+          } else {
+            // Same rule as the local watcher: a clean buffer mirrors the
+            // disk write instead of just flagging it.
+            void reloadFile(file.relPath, { preserveIfDirty: true }).catch(() => {})
+          }
         }
       } finally {
         running = false
@@ -1033,7 +1426,7 @@ export function useProjectEditor({
       document.removeEventListener("visibilitychange", resume)
       window.removeEventListener("online", resume)
     }
-  }, [d, rootPath])
+  }, [d, rootPath, reloadFile])
 
   const renameOpenFile = useCallback(
     async (from: string, to: string) => {
@@ -1123,6 +1516,11 @@ export function useProjectEditor({
     roots,
     rootKey,
     rootPath,
+    /** True once worktree discovery finished — session restores gate on it. */
+    rootsReady,
+    /** True once the persisted open set has been (re)marked — the moment
+        `isPathOpen` answers for every restored path, before its reads land. */
+    sessionRestored,
     /** Where this editor would follow to, or null when nothing is bound. */
     followedRoot: followedRoot?.trim() || null,
     /** True when the selection deliberately diverges from the follow target. */
@@ -1141,15 +1539,32 @@ export function useProjectEditor({
     pinFile,
     closeFile,
     moveOpenFile,
-    closeOtherFiles,
-    closeFilesToRight,
+    /**
+     * Close an explicit set of tabs behind one dirty-confirm. Group-scoped
+     * close-others / close-to-the-right are built on it by the workbench,
+     * which alone knows each editor group's tab order.
+     */
+    closeFiles,
     closeAllFiles,
     reopenClosedFile,
     setActivePath,
+    /**
+     * Live "is this path open" — reads `openPathsRef`, so it is true for a
+     * file whose read is still in flight (openFiles lags a commit behind).
+     * The workbench's group reconcile needs exactly that window covered.
+     */
+    isPathOpen: isOpenPath,
     setDraft,
     saveFile,
     saveAll,
     reloadFile,
     renameOpenFile,
+    /**
+     * The file(s) under these relPaths were deleted on disk. Clean tabs
+     * close; dirty tabs stay open flagged `deletedOnDisk`.
+     */
+    reconcileDeleted,
+    /** Confirm-before-destroy for a dirty tab's revert. */
+    confirmDiscardDraft,
   }
 }

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react"
 import {
   BotIcon,
-  EyeIcon,
   FileSearchIcon,
   GitCompareIcon,
   ListTreeIcon,
@@ -15,18 +14,15 @@ import { ContextWorkbenchMobileDrawer } from "@/components/context-workbench/con
 import type { OpenFile } from "./use-project-editor"
 import type {
   ContextPanelDefinition,
+  ContextPanelMode,
   ContextResource,
   TextSelectionCoordinates,
 } from "@/types/context-workbench"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { ProjectFileReviewPanel } from "./project-file-review-panel"
-import { ProjectGitReviewPanel } from "./project-git-review-panel"
-import { ProjectFilePreviewPanel } from "./project-file-preview-panel"
 import { ProjectResourceSessionRelinker } from "./project-resource-session-relinker"
 import { ProjectFileOutlinePanel } from "./project-file-outline-panel"
-import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
-import type { EditorLike, MonacoLike } from "@/hooks/use-monaco-markers"
 import {
   getProjectFileResourceKey,
   getProjectFileProposal,
@@ -55,20 +51,43 @@ function fileBaseToken(file: OpenFile): string {
   return `${file.draftVersion}:${file.mtime ?? "unknown"}:${file.externallyChanged ? 1 : 0}:${contentToken(file.draftContent)}`
 }
 
+/**
+ * The project editor's secondary sidebar: per-file AI (a resource-scoped chat
+ * whose replies land as reviewable proposals), comments, inspect, outline and
+ * the proposal review itself. Preview, problems and the Git diff are the
+ * editor's own surfaces (the preview overlay, the Problems panel, the dock's
+ * Review surface) and deliberately not duplicated here.
+ *
+ * The host owns open/closed and width: `railOnly` draws the activity rail
+ * alone, `onCollapse` / `onEnsureVisible` are the rail's close and open
+ * requests, and `onModeWidthHint` carries narrow/wide requests to the panel
+ * the host sizes it with — the editor lives in the chat's right dock, where a
+ * self-sized 360–960px sidebar would crowd the editor out.
+ */
 export function ProjectContextWorkbench({
   scopeKey,
   rootPath,
   file,
   onDraftChange,
   selection,
-  diagnostics,
+  railOnly,
+  onCollapse,
+  onEnsureVisible,
+  onModeWidthHint,
+  resolvedMode,
 }: {
   scopeKey: string
   rootPath: string
   file: OpenFile
   onDraftChange: (content: string) => void
   selection?: TextSelectionCoordinates
-  diagnostics?: { monaco: MonacoLike; editor: EditorLike } | null
+  railOnly: boolean
+  onCollapse: () => void
+  onEnsureVisible: () => void
+  /** Narrow/wide requests; see `ContextWorkbench`'s `onModeWidthHint`. */
+  onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+  /** The preset the host's panel actually sits at, once measured. */
+  resolvedMode?: ContextPanelMode
 }) {
   return (
     <ProjectContextWorkbenchHost
@@ -77,7 +96,7 @@ export function ProjectContextWorkbench({
       file={file}
       onDraftChange={onDraftChange}
       selection={selection}
-      diagnostics={diagnostics}
+      desktop={{ railOnly, onCollapse, onEnsureVisible, onModeWidthHint, resolvedMode }}
     />
   )
 }
@@ -90,7 +109,6 @@ export function ProjectContextWorkbenchMobile({
   onOpenChange,
   onDraftChange,
   selection,
-  diagnostics,
 }: {
   scopeKey: string
   rootPath: string
@@ -99,7 +117,6 @@ export function ProjectContextWorkbenchMobile({
   onOpenChange: (open: boolean) => void
   onDraftChange: (content: string) => void
   selection?: TextSelectionCoordinates
-  diagnostics?: { monaco: MonacoLike; editor: EditorLike } | null
 }) {
   return (
     <ProjectContextWorkbenchHost
@@ -108,7 +125,6 @@ export function ProjectContextWorkbenchMobile({
       file={file}
       onDraftChange={onDraftChange}
       selection={selection}
-      diagnostics={diagnostics}
       mobile={{ open, onOpenChange }}
     />
   )
@@ -119,17 +135,23 @@ function ProjectContextWorkbenchHost({
   rootPath,
   file,
   mobile,
+  desktop,
   onDraftChange,
   selection,
-  diagnostics,
 }: {
   scopeKey: string
   rootPath: string
   file: OpenFile
   mobile?: { open: boolean; onOpenChange: (open: boolean) => void }
+  desktop?: {
+    railOnly: boolean
+    onCollapse: () => void
+    onEnsureVisible: () => void
+    onModeWidthHint: (mode: ContextPanelMode, panelId?: string) => void
+    resolvedMode?: ContextPanelMode
+  }
   onDraftChange: (content: string) => void
   selection?: TextSelectionCoordinates
-  diagnostics?: { monaco: MonacoLike; editor: EditorLike } | null
 }) {
   const workbenchInstanceId = useContextWorkbenchInstanceId(`project:${scopeKey}`)
   const t = useTranslations("projectEditor.workbench")
@@ -177,11 +199,20 @@ function ProjectContextWorkbenchHost({
     [onDraftChange, resourceKey]
   )
 
+  // A proposal is the AI panel's answer — surface it even when the host has
+  // the workbench folded to its rail, or the reply would land out of sight.
+  // `smartReveal` only records the wide intent; the host owns the width, so
+  // it is told as well (the chat dock does the same for artifact reviews).
+  const ensureVisible = desktop?.onEnsureVisible
+  const modeWidthHint = desktop?.onModeWidthHint
   useEffect(() => {
     const appeared = !hadProposal.current && proposal !== null
     hadProposal.current = proposal !== null
-    if (appeared) smartReveal(layoutScopeKey, "proposal-review", "wide")
-  }, [layoutScopeKey, proposal, smartReveal])
+    if (!appeared) return
+    ensureVisible?.()
+    smartReveal(layoutScopeKey, "proposal-review", "wide")
+    modeWidthHint?.("wide", "proposal-review")
+  }, [ensureVisible, layoutScopeKey, modeWidthHint, proposal, smartReveal])
 
   // Parity with the artifact/canvas/workflow surfaces: activate a default panel
   // on first mount so the content pane is never empty next to the activity rail.
@@ -243,7 +274,7 @@ function ProjectContextWorkbenchHost({
         appliesTo: (resource) => resource.kind === "project-file",
         retention: "stateful",
         renderer: () => (
-          <div className="h-full overflow-auto">
+          <div className="workbench-scroll h-full overflow-auto">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 p-4 text-xs">
               <dt className="text-muted-foreground">{t("path")}</dt>
               <dd className="break-all">{file.relPath}</dd>
@@ -280,38 +311,6 @@ function ProjectContextWorkbenchHost({
         ),
       },
       {
-        id: "problems",
-        activity: "inspect",
-        labelKey: "projectEditor.workbench.problems",
-        icon: FileSearchIcon,
-        order: 32,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
-        renderer: () =>
-          diagnostics ? (
-            <MonacoDiagnosticsBar
-              monaco={diagnostics.monaco}
-              editor={diagnostics.editor}
-              className="h-full"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center p-6 text-xs text-muted-foreground">
-              {t("problemsUnavailable")}
-            </div>
-          ),
-      },
-      {
-        id: "git-review",
-        activity: "review",
-        labelKey: "projectEditor.workbench.review",
-        icon: GitCompareIcon,
-        order: 35,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
-        preferredMode: "wide",
-        renderer: () => <ProjectGitReviewPanel rootPath={rootPath} relPath={file.relPath} />,
-      },
-      {
         id: "proposal-review",
         activity: "review",
         labelKey: "contextWorkbench.proposalReview",
@@ -323,23 +322,9 @@ function ProjectContextWorkbenchHost({
         getBadge: () => (proposal ? 1 : 0),
         renderer: () => <ProjectFileReviewPanel resourceKey={resourceKey} />,
       },
-      {
-        id: "preview",
-        activity: "preview-run",
-        labelKey: "projectEditor.workbench.previewRun",
-        icon: EyeIcon,
-        order: 50,
-        appliesTo: (resource) => resource.kind === "project-file",
-        retention: "stateful",
-        preferredMode: "wide",
-        renderer: () => (
-          <ProjectFilePreviewPanel relPath={file.relPath} content={file.draftContent ?? ""} />
-        ),
-      },
     ],
     [
       dirty,
-      diagnostics,
       file,
       hash,
       proposal,
@@ -380,8 +365,15 @@ function ProjectContextWorkbenchHost({
       workbenchInstanceId={workbenchInstanceId}
       resource={resource}
       panels={panels}
-      manageOwnWidth
-      className="shrink-0"
+      manageOwnWidth={false}
+      railOnly={desktop?.railOnly}
+      onCollapse={desktop?.onCollapse}
+      onEnsureVisible={desktop?.onEnsureVisible}
+      onModeWidthHint={desktop?.onModeWidthHint}
+      resolvedMode={desktop?.resolvedMode}
+      // The host's resizable panel draws the divider; a second border beside
+      // it would read as a double rule.
+      className="w-full border-l-0"
     />
   )
 }

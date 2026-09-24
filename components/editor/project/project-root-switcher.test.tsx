@@ -66,6 +66,14 @@ describe("ProjectRootSwitcher", () => {
     expect(onSelect).toHaveBeenCalledWith("/repo-wt")
   })
 
+  it("gives way in a narrow toolbar in compact density", () => {
+    // The chat dock's toolbar row: 12rem when there is room, down to 6rem
+    // before the switches beside it would have to wrap.
+    render(<ProjectRootSwitcher roots={roots} rootKey="/repo" onSelect={jest.fn()} />)
+
+    expect(screen.getByTestId("root-trigger")).toHaveClass("h-7", "w-48", "min-w-24", "shrink")
+  })
+
   it("uses a full-width touch target in mobile density", () => {
     render(
       <ProjectRootSwitcher roots={roots} rootKey="/repo" onSelect={jest.fn()} density="touch" />

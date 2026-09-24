@@ -43,7 +43,11 @@ export function ProjectRootSwitcher({
     <Select value={rootKey} onValueChange={onSelect}>
       <SelectTrigger
         className={
-          density === "touch" ? "h-10 w-full gap-2 text-sm" : "h-7 w-[12rem] gap-1 text-xs"
+          // Compact: 12rem when the row has room, giving way down to 6rem in a
+          // narrow dock toolbar before anything else on the row has to wrap.
+          density === "touch"
+            ? "h-10 w-full gap-2 text-sm"
+            : "h-7 w-48 min-w-24 shrink gap-1 text-xs"
         }
         aria-label={t("rootLabel")}
         data-testid="project-root-switcher"

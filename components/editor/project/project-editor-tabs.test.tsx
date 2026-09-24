@@ -26,61 +26,56 @@ function file(relPath: string, dirty = false, externallyChanged = false): OpenFi
 
 describe("ProjectEditorTabs", () => {
   const keyboardProps = () => ({
-    fixedTabs: [
-      { id: "review", label: "Review", active: false, onSelect: jest.fn() },
-      { id: "preview", label: "Preview", active: false, onSelect: jest.fn() },
-    ],
-    files: [file("src/a.ts"), file("src/b.ts")],
-    activePath: "src/a.ts",
+    files: [file("src/a.ts"), file("src/b.ts"), file("src/c.ts")],
+    activePath: "src/b.ts",
     dirtyCount: 0,
     onSelect: jest.fn(),
     onClose: jest.fn(),
     onSaveAll: jest.fn(),
   })
 
-  it("keeps one tab stop across fixed and file tabs, with a fallback for no active tab", () => {
+  it("keeps one tab stop on the active file, falling back to the first tab", () => {
     const props = keyboardProps()
     const { rerender } = render(<ProjectEditorTabs {...props} />)
-    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, -1, 0, -1])
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, 0, -1])
     rerender(<ProjectEditorTabs {...props} activePath={null} />)
-    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1])
-    rerender(
-      <ProjectEditorTabs
-        {...props}
-        activePath={null}
-        fixedTabs={props.fixedTabs.map((tab) => ({ ...tab, active: tab.id === "preview" }))}
-      />
-    )
-    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, 0, -1, -1])
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([0, -1, -1])
+    // An active path that is not open in this strip (the other group's file)
+    // must not strand the strip without a tab stop.
+    rerender(<ProjectEditorTabs {...props} activePath="src/elsewhere.ts" />)
+    expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([0, -1, -1])
   })
 
-  it("navigates and activates across fixed and file tabs with wrapping and Home/End", () => {
+  it("navigates and activates file tabs with wrapping and Home/End", () => {
     const props = keyboardProps()
     render(<ProjectEditorTabs {...props} />)
     const tabs = screen.getAllByRole("tab")
-    tabs[2].focus()
-    fireEvent.keyDown(tabs[2], { key: "ArrowLeft" })
-    expect(tabs[1]).toHaveFocus()
-    expect(props.fixedTabs[1].onSelect).toHaveBeenCalledTimes(1)
-    fireEvent.keyDown(tabs[1], { key: "Home" })
+    tabs[1].focus()
+    fireEvent.keyDown(tabs[1], { key: "ArrowLeft" })
     expect(tabs[0]).toHaveFocus()
+    expect(props.onSelect).toHaveBeenLastCalledWith("src/a.ts")
     fireEvent.keyDown(tabs[0], { key: "ArrowLeft" })
-    expect(tabs[3]).toHaveFocus()
-    expect(props.onSelect).toHaveBeenLastCalledWith("src/b.ts")
-    fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
+    expect(tabs[2]).toHaveFocus()
+    expect(props.onSelect).toHaveBeenLastCalledWith("src/c.ts")
+    fireEvent.keyDown(tabs[2], { key: "ArrowRight" })
     expect(tabs[0]).toHaveFocus()
     fireEvent.keyDown(tabs[0], { key: "End" })
-    expect(tabs[3]).toHaveFocus()
+    expect(tabs[2]).toHaveFocus()
+    fireEvent.keyDown(tabs[2], { key: "Home" })
+    expect(tabs[0]).toHaveFocus()
+    expect(props.onSelect).toHaveBeenCalledTimes(5)
   })
 
-  it("does not intercept modified arrows or keys on close and trailing controls", () => {
+  it("does not intercept modified arrows, unrelated keys, or keys on close controls", () => {
     const props = keyboardProps()
-    render(<ProjectEditorTabs {...props} trailingContent={<input aria-label="Profile" />} />)
+    render(<ProjectEditorTabs {...props} />)
     const tab = screen.getByTestId("editor-tab-src/a.ts")
     expect(fireEvent.keyDown(tab, { key: "ArrowRight", ctrlKey: true })).toBe(true)
     expect(fireEvent.keyDown(tab, { key: "ArrowRight", metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(tab, { key: "ArrowRight", altKey: true })).toBe(true)
+    expect(fireEvent.keyDown(tab, { key: "ArrowRight", shiftKey: true })).toBe(true)
+    expect(fireEvent.keyDown(tab, { key: "Enter" })).toBe(true)
     expect(fireEvent.keyDown(screen.getAllByLabelText("closeTab")[0], { key: "Home" })).toBe(true)
-    expect(fireEvent.keyDown(screen.getByLabelText("Profile"), { key: "End" })).toBe(true)
     expect(props.onSelect).not.toHaveBeenCalled()
   })
 
@@ -89,31 +84,31 @@ describe("ProjectEditorTabs", () => {
     render(<ProjectEditorTabs {...props} />)
     screen.getByRole("tablist").style.direction = "rtl"
     const tabs = screen.getAllByRole("tab")
-    const focus = jest.spyOn(tabs[3], "focus")
-    fireEvent.keyDown(tabs[2], { key: "ArrowLeft" })
-    expect(tabs[3]).toHaveFocus()
-    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
-    fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
+    const focus = jest.spyOn(tabs[2], "focus")
+    fireEvent.keyDown(tabs[1], { key: "ArrowLeft" })
     expect(tabs[2]).toHaveFocus()
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    fireEvent.keyDown(tabs[2], { key: "ArrowRight" })
+    expect(tabs[1]).toHaveFocus()
   })
 
-  it("keeps compact Save All named and places engine controls in a full-width narrow row", () => {
-    render(
-      <ProjectEditorTabs
-        {...keyboardProps()}
-        dirtyCount={2}
-        trailingContent={<button>Engine</button>}
-      />
-    )
+  it("keeps compact Save All named and lays the strip out as one shrinkable row", () => {
+    render(<ProjectEditorTabs {...keyboardProps()} dirtyCount={2} />)
     expect(screen.getByRole("button", { name: "saveAll" })).toHaveAttribute("title", "saveAll")
-    expect(screen.getByTestId("project-editor-tabs-trailing")).toHaveClass("w-full", "min-w-0")
-    expect(screen.getByTestId("project-editor-tabs")).toHaveClass("@container/editor-tabs")
+    const root = screen.getByTestId("project-editor-tabs")
+    // The container query drives the Save All label; the row itself never wraps.
+    expect(root).toHaveClass("@container/editor-tabs")
+    expect(root).not.toHaveClass("flex-wrap")
+    expect(screen.getByRole("tablist")).toHaveClass("min-w-0", "flex-1")
   })
 
   it("reveals active tabs only inside the strip, keeps editor focus, and avoids draft layout reads", () => {
     const props = keyboardProps()
     const { rerender } = render(
-      <ProjectEditorTabs {...props} trailingContent={<input aria-label="Editor" />} />
+      <>
+        <ProjectEditorTabs {...props} activePath="src/a.ts" />
+        <input aria-label="Editor" />
+      </>
     )
     const strip = screen.getByRole("tablist")
     const tab = screen.getByTestId("editor-tab-src/b.ts")
@@ -125,22 +120,23 @@ describe("ProjectEditorTabs", () => {
       .mockReturnValue({ left: 20, right: 220, width: 200 } as DOMRect)
     screen.getByLabelText("Editor").focus()
     rerender(
-      <ProjectEditorTabs
-        {...props}
-        activePath="src/b.ts"
-        trailingContent={<input aria-label="Editor" />}
-      />
+      <>
+        <ProjectEditorTabs {...props} activePath="src/b.ts" />
+        <input aria-label="Editor" />
+      </>
     )
     expect(strip.scrollLeft).toBe(180)
     expect(screen.getByLabelText("Editor")).toHaveFocus()
     rect.mockClear()
     rerender(
-      <ProjectEditorTabs
-        {...props}
-        activePath="src/b.ts"
-        files={[file("src/a.ts"), file("src/b.ts", true)]}
-        trailingContent={<input aria-label="Editor" />}
-      />
+      <>
+        <ProjectEditorTabs
+          {...props}
+          activePath="src/b.ts"
+          files={[file("src/a.ts"), file("src/b.ts", true), file("src/c.ts")]}
+        />
+        <input aria-label="Editor" />
+      </>
     )
     expect(rect).not.toHaveBeenCalled()
   })
@@ -160,7 +156,7 @@ describe("ProjectEditorTabs", () => {
         .spyOn(strip, "getBoundingClientRect")
         .mockReturnValue({ left: 20, right: 220, width: 200 } as DOMRect)
       jest
-        .spyOn(screen.getByTestId("editor-tab-src/a.ts").parentElement!, "getBoundingClientRect")
+        .spyOn(screen.getByTestId("editor-tab-src/b.ts").parentElement!, "getBoundingClientRect")
         .mockReturnValue({ left: -40, right: 80, width: 120 } as DOMRect)
       strip.scrollLeft = 100
       act(() => resize([], {} as ResizeObserver))
@@ -202,45 +198,6 @@ describe("ProjectEditorTabs", () => {
     expect(strip.className).toContain("overflow-x-auto")
     expect(strip.className).toContain("[scrollbar-width:none]")
     expect(strip.className).toContain("[&::-webkit-scrollbar]:hidden")
-  })
-
-  it("renders fixed leading tabs even when no files are open", () => {
-    const onSelect = jest.fn()
-    render(
-      <ProjectEditorTabs
-        fixedTabs={[{ id: "review", label: "Review", active: true, onSelect }]}
-        files={[]}
-        activePath={null}
-        dirtyCount={0}
-        onSelect={jest.fn()}
-        onClose={jest.fn()}
-        onSaveAll={jest.fn()}
-      />
-    )
-
-    const review = screen.getByTestId("editor-fixed-tab-review")
-    expect(review).toHaveAttribute("aria-selected", "true")
-    fireEvent.click(review)
-    expect(onSelect).toHaveBeenCalledTimes(1)
-  })
-
-  it("keeps trailing editor controls on the same strip as fixed tabs", () => {
-    render(
-      <ProjectEditorTabs
-        fixedTabs={[{ id: "review", label: "Review", active: true, onSelect: jest.fn() }]}
-        trailingContent={<button data-testid="engine-toggle">Engine</button>}
-        files={[]}
-        activePath={null}
-        dirtyCount={0}
-        onSelect={jest.fn()}
-        onClose={jest.fn()}
-        onSaveAll={jest.fn()}
-      />
-    )
-
-    expect(screen.getByTestId("project-editor-tabs")).toContainElement(
-      screen.getByTestId("engine-toggle")
-    )
   })
 
   it("renders one tab per open file and marks the active one", () => {
@@ -356,7 +313,6 @@ describe("ProjectEditorTabs", () => {
     render(
       <ProjectEditorTabs
         density="touch"
-        fixedTabs={[{ id: "review", label: "Review", active: false, onSelect: jest.fn() }]}
         files={[file("src/a.ts", true)]}
         activePath="src/a.ts"
         dirtyCount={1}
@@ -367,7 +323,6 @@ describe("ProjectEditorTabs", () => {
     )
 
     expect(screen.getByTestId("editor-tab-src/a.ts")).toHaveClass("min-h-11")
-    expect(screen.getByTestId("editor-fixed-tab-review")).toHaveClass("min-h-11")
     expect(screen.getByLabelText("closeTab")).toHaveClass("size-11")
     expect(screen.getByTestId("editor-save-all")).toHaveClass("h-10")
   })
@@ -620,7 +575,7 @@ describe("ProjectEditorTabs", () => {
       expect(onCloseToRight).toHaveBeenCalledWith("src/a.ts")
     })
 
-    it("offers revert only on a dirty tab", async () => {
+    it("offers reload on a clean tab and revert on a dirty tab", async () => {
       const onRevert = jest.fn()
       render(
         <ProjectEditorTabs
@@ -633,11 +588,34 @@ describe("ProjectEditorTabs", () => {
           onRevert={onRevert}
         />
       )
+      // A clean tab gets "reload" — the only way to pull a fresh disk read.
       await openMenu("src/a.ts")
       expect(screen.queryByText("tabs.revert")).toBeNull()
+      fireEvent.click(await screen.findByText("tabs.reload"))
+      expect(onRevert).toHaveBeenCalledWith("src/a.ts")
       await openMenu("src/b.ts")
       fireEvent.click(await screen.findByText("tabs.revert"))
       expect(onRevert).toHaveBeenCalledWith("src/b.ts")
+    })
+
+    it("strikes through a deletedOnDisk tab and drops the conflict dot", async () => {
+      render(
+        <ProjectEditorTabs
+          files={[file("src/a.ts", true), { ...file("src/b.ts", true), deletedOnDisk: true }]}
+          activePath="src/b.ts"
+          dirtyCount={2}
+          onSelect={jest.fn()}
+          onClose={jest.fn()}
+          onSaveAll={jest.fn()}
+        />
+      )
+      const deletedTab = screen.getByTestId("editor-tab-src/b.ts")
+      expect(deletedTab.querySelector("span.line-through")).not.toBeNull()
+      expect(deletedTab.querySelector(".bg-destructive")).not.toBeNull()
+      expect(deletedTab.querySelector(".bg-amber-500")).toBeNull()
+      // A live dirty tab keeps the amber conflict-free dirty styling.
+      const liveTab = screen.getByTestId("editor-tab-src/a.ts")
+      expect(liveTab.querySelector("span.line-through")).toBeNull()
     })
 
     it("copies relative and absolute paths", async () => {
@@ -708,5 +686,96 @@ describe("ProjectEditorTabs", () => {
       expect(onSelect).toHaveBeenCalledWith("src/c.ts")
       expect(screen.queryByTestId("editor-tabs-list-src/c.ts")).toBeNull()
     })
+  })
+})
+
+describe("editor groups", () => {
+  it("dims the active tab's accent in an unfocused group", () => {
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+        inactive
+      />
+    )
+    const tab = screen.getByTestId("editor-tab-src/a.ts")
+    expect(tab).toHaveClass("text-muted-foreground")
+    expect(tab.parentElement!.querySelector(".bg-primary")).toBeNull()
+  })
+
+  it("offers move-to-other-group only when the host wires it", async () => {
+    const onMoveToOtherGroup = jest.fn()
+    const { unmount } = render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+        onMoveToOtherGroup={onMoveToOtherGroup}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("editor-tab-src/a.ts").parentElement!)
+    fireEvent.click(await screen.findByText("tabs.moveToOtherGroup"))
+    expect(onMoveToOtherGroup).toHaveBeenCalledWith("src/a.ts")
+    unmount()
+
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("editor-tab-src/a.ts").parentElement!)
+    expect(screen.queryByText("tabs.moveToOtherGroup")).toBeNull()
+  })
+
+  it("fires reveal-in-explorer and add-to-chat for the tab's file", async () => {
+    const onRevealInExplorer = jest.fn()
+    const onAddToChat = jest.fn()
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts"), file("src/b.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+        onRevealInExplorer={onRevealInExplorer}
+        onAddToChat={onAddToChat}
+      />
+    )
+    // The action acts on the clicked tab, not the active one — b.ts is inactive.
+    fireEvent.contextMenu(screen.getByTestId("editor-tab-src/b.ts").parentElement!)
+    fireEvent.click(await screen.findByText("tabs.revealInExplorer"))
+    expect(onRevealInExplorer).toHaveBeenCalledWith("src/b.ts")
+    fireEvent.contextMenu(screen.getByTestId("editor-tab-src/b.ts").parentElement!)
+    fireEvent.click(await screen.findByText("action.addToChat"))
+    expect(onAddToChat).toHaveBeenCalledWith("src/b.ts")
+  })
+
+  it("omits reveal/add-to-chat when the host does not wire them", async () => {
+    render(
+      <ProjectEditorTabs
+        files={[file("src/a.ts")]}
+        activePath="src/a.ts"
+        dirtyCount={0}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+        onSaveAll={jest.fn()}
+      />
+    )
+    fireEvent.contextMenu(screen.getByTestId("editor-tab-src/a.ts").parentElement!)
+    expect(screen.queryByText("tabs.revealInExplorer")).toBeNull()
+    expect(screen.queryByText("action.addToChat")).toBeNull()
   })
 })

@@ -26,15 +26,22 @@ import { useTranslations } from "next-intl"
 import {
   ChevronRightIcon,
   ChevronDownIcon,
+  ClipboardPasteIcon,
   CopyIcon,
   CrosshairIcon,
+  ExternalLinkIcon,
+  FileIcon,
   FilePlusIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  FolderSearchIcon,
   ListCollapseIcon,
   Loader2Icon,
+  MessageSquarePlusIcon,
   RefreshCwIcon,
+  ScissorsIcon,
+  SquareSplitHorizontalIcon,
   TriangleAlertIcon,
 } from "lucide-react"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
@@ -77,6 +84,7 @@ import type { GitFileStatus } from "@/types/git"
 import type {
   listWorkspaceDir,
   createWorkspaceDir,
+  readWorkspaceFile,
   writeWorkspaceFile,
   deleteWorkspaceEntry,
   renameWorkspaceEntry,
@@ -89,6 +97,12 @@ export interface ProjectFileTreeDeps {
   writeFile: typeof writeWorkspaceFile
   deleteEntry: typeof deleteWorkspaceEntry
   renameEntry: typeof renameWorkspaceEntry
+  /**
+   * Backs the copy side of cut/copy/paste. Optional so lightweight hosts
+   * (read-only trees) keep working — without it the clipboard group is
+   * simply hidden from the menus.
+   */
+  readFile?: typeof readWorkspaceFile
 }
 
 interface Props {
@@ -103,10 +117,23 @@ interface Props {
   deps: ProjectFileTreeDeps
   density?: "compact" | "touch"
   onRenamed?: (from: string, to: string) => void | Promise<void>
+  /**
+   * An entry was deleted through the tree. The host reconciles open tabs —
+   * without this a deleted file's tab lingers and a later save resurrects it.
+   */
+  onDeleted?: (relPath: string, isDir: boolean) => void
   /** Git decorations: repo-relative path → status. Absent outside a repo. */
   gitDecorations?: Map<string, GitFileStatus>
   /** Copy a row's path to the clipboard (`absolute` = full on-disk path). */
   onCopyPath?: (relPath: string, absolute: boolean) => void
+  /** VS Code's "Open to the Side" — open the file in the other editor group. */
+  onOpenToSide?: (relPath: string) => void
+  /** VS Code's "Reveal in Finder/Explorer" — the OS file manager, not the tree. */
+  onRevealInSystem?: (relPath: string) => void
+  /** Stage this entry as a chat context chip (file body / folder listing). */
+  onAddToChat?: (relPath: string, isDir: boolean) => void
+  /** Scope the workspace search panel to this directory. */
+  onFindInFolder?: (relPath: string) => void
   /** External "reveal in tree" request — `nonce` re-triggers the same path. */
   revealRequest?: { path: string; nonce: number }
   /**
@@ -119,6 +146,55 @@ interface Props {
 
 const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
 const joinRel = (parent: string, name: string) => (parent ? `${parent}/${name}` : name)
+
+/**
+ * VS Code's paste-collision naming: `a.ts` → `a copy.ts` → `a copy 2.ts`;
+ * extensionless files and folders get the bare `name copy` form.
+ */
+function dedupeDestName(taken: ReadonlySet<string>, name: string): string {
+  if (!taken.has(name)) return name
+  const dot = name.lastIndexOf(".")
+  // A leading dot (` .gitignore`) is not an extension separator.
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ""
+  for (let i = 1; ; i++) {
+    const suffix = i === 1 ? " copy" : ` copy ${i}`
+    const candidate = `${stem}${suffix}${ext}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
+/**
+ * Recursive folder copy for the paste command. `skipRel` keeps a folder being
+ * pasted into itself from swallowing its own just-created destination — the
+ * child listing is read after `createDir`, so the destination shows up as a
+ * source child and must be stepped over.
+ */
+async function copyDirRecursive(
+  deps: ProjectFileTreeDeps,
+  root: string,
+  fromRel: string,
+  toRel: string,
+  skipRel: string,
+  budget: { left: number }
+): Promise<void> {
+  const readFile = deps.readFile
+  if (!readFile) throw new Error("readFile dep is required for copy")
+  await deps.createDir(root, toRel)
+  const children = await deps.listDir(root, fromRel)
+  for (const child of children) {
+    if (child.relPath === skipRel || child.relPath.startsWith(`${skipRel}/`)) continue
+    budget.left -= 1
+    if (budget.left <= 0) throw new Error("copy exceeded the entry limit")
+    const dest = joinRel(toRel, child.relPath.split("/").pop() ?? child.relPath)
+    if (child.isDir) {
+      await copyDirRecursive(deps, root, child.relPath, dest, skipRel, budget)
+    } else {
+      const body = await readFile(root, child.relPath)
+      await deps.writeFile(root, dest, body)
+    }
+  }
+}
 
 const TREE_DRAG_MIME = "application/x-cognia-tree-row"
 const REMOTE_REFRESH_MS = 5_000
@@ -163,14 +239,25 @@ export function ProjectFileTree({
   deps,
   density = "compact",
   onRenamed,
+  onDeleted,
   gitDecorations,
   onCopyPath,
+  onOpenToSide,
+  onRevealInSystem,
+  onAddToChat,
+  onFindInFolder,
   revealRequest,
   onFailure,
 }: Props) {
   const t = useTranslations("projectEditor")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
   const [childrenByDir, setChildrenByDir] = useState<Record<string, WorkspaceEntry[]>>({})
+  // Keyboard navigation cursor — separate from `activePath` (which file is
+  // open) the way VS Code's tree focus is separate from the active editor.
+  const [focusedPath, setFocusedPath] = useState<string | null>(null)
+  // Type-ahead buffer: chars within the window accumulate into a prefix
+  // search; a stale buffer restarts.
+  const typeaheadRef = useRef({ text: "", at: 0 })
   const [pendingCreate, setPendingCreate] = useState<{
     parent: string
     kind: "file" | "folder"
@@ -438,6 +525,8 @@ export function ProjectFileTree({
         for (const a of ancestors) next.add(a)
         return next
       })
+      // A reveal is an explicit selection — the keyboard cursor follows it.
+      setFocusedPath(relPath)
       // Load ancestors the tree hasn't fetched yet — expansion without their
       // children would render nothing to scroll to.
       for (const a of ancestors) {
@@ -448,7 +537,7 @@ export function ProjectFileTree({
         requestAnimationFrame(() => {
           scrollRef.current
             ?.querySelector(`[data-tree-rel="${CSS.escape(relPath)}"]`)
-            ?.scrollIntoView({ block: "center" })
+            ?.scrollIntoView?.({ block: "center" })
         })
       })
     },
@@ -531,6 +620,9 @@ export function ProjectFileTree({
     if (!deleteTarget) return
     try {
       await deps.deleteEntry(rootPath, deleteTarget.relPath, deleteTarget.isDir)
+      // Reconcile open tabs before the listing refresh so a dirty buffer's
+      // "deleted on disk" state lands with the row's disappearance.
+      onDeleted?.(deleteTarget.relPath, deleteTarget.isDir)
       await loadDir(parentOf(deleteTarget.relPath), true)
       if (!listing.active) return
     } catch (error) {
@@ -538,7 +630,7 @@ export function ProjectFileTree({
       report(error, "delete", deleteTarget.relPath)
     }
     setDeleteTarget(null)
-  }, [deleteTarget, deps, rootPath, loadDir, report])
+  }, [deleteTarget, deps, rootPath, loadDir, onDeleted, report])
 
   /**
    * Move `fromRel` into directory `dirRel` (`""` = root). Renames through the
@@ -605,12 +697,289 @@ export function ProjectFileTree({
     [moveInto]
   )
 
+  // ---- file clipboard (VS Code cut/copy/paste) -----------------------------
+  //
+  // The clipboard holds a REFERENCE, not the bytes — paste reads the source at
+  // paste time, so an agent or terminal write between copy and paste lands in
+  // the pasted copy. Cut paste across directories goes through `renameEntry` +
+  // `onRenamed` so open tabs migrate with their file instead of going stale.
+  const [clipboard, setClipboard] = useState<{
+    relPath: string
+    isDir: boolean
+    cut: boolean
+  } | null>(null)
+  const canCopy = deps.readFile !== undefined
+
+  const copyEntry = useCallback((entry: WorkspaceEntry, cut: boolean) => {
+    setClipboard({ relPath: entry.relPath, isDir: entry.isDir, cut })
+  }, [])
+
+  const pasteInto = useCallback(
+    async (destDirRel: string) => {
+      const listing = listingRef.current
+      const clip = clipboard
+      if (!clip) return
+      const srcParent = parentOf(clip.relPath)
+      // A folder can never be MOVED into itself or a descendant — the rename
+      // would orphan the subtree. A CUT paste into a forbidden target is a
+      // no-op, not a silent copy: "cut" promises the source disappears, and
+      // keeping it while a duplicate appears under it is worse than doing
+      // nothing. Copying (⌘C) into itself stays legal — the recursive copier
+      // steps over the just-created destination.
+      const moveDenied =
+        clip.isDir && (destDirRel === clip.relPath || destDirRel.startsWith(`${clip.relPath}/`))
+      if (clip.cut && moveDenied) return
+      const isMove = clip.cut && srcParent !== destDirRel
+      try {
+        // Dedupe against a FRESH listing — `childrenByDir` can lag an
+        // agent-side write, and a silent overwrite is not an option.
+        const siblings = new Set(
+          (await deps.listDir(rootPath, destDirRel || undefined)).map(
+            (entry) => entry.relPath.split("/").pop() ?? entry.relPath
+          )
+        )
+        const to = joinRel(
+          destDirRel,
+          dedupeDestName(siblings, clip.relPath.split("/").pop() ?? clip.relPath)
+        )
+        if (isMove) {
+          await deps.renameEntry(rootPath, clip.relPath, to)
+          if (!listing.active) return
+          await onRenamed?.(clip.relPath, to)
+          setClipboard(null)
+        } else if (clip.isDir) {
+          await copyDirRecursive(deps, rootPath, clip.relPath, to, to, { left: 5_000 })
+        } else {
+          const readFile = deps.readFile
+          if (!readFile) return
+          const body = await readFile(rootPath, clip.relPath)
+          await deps.writeFile(rootPath, to, body)
+        }
+        if (!listing.active) return
+        await loadDir(destDirRel, true)
+        if (isMove) await loadDir(srcParent, true)
+        if (!listing.active) return
+        setExpanded((prev) => (destDirRel ? new Set(prev).add(destDirRel) : prev))
+      } catch (error) {
+        if (!listing.active) return
+        report(error, isMove ? "rename" : "write", clip.relPath)
+      }
+    },
+    [clipboard, deps, rootPath, loadDir, onRenamed, report]
+  )
+
+  /** Paste target for a row: a folder itself; a file's parent. */
+  const pasteTargetOf = useCallback(
+    (entry: WorkspaceEntry) => (entry.isDir ? entry.relPath : parentOf(entry.relPath)),
+    []
+  )
+
   // "Empty" is a claim about what is there, so it may only be made once the
   // listing actually succeeded — before that the tree is loading, not empty,
   // and a failed root renders its reason instead.
   const rootIsEmpty = useMemo(
     () => !failureByDir[""] && childrenByDir[""] !== undefined && childrenByDir[""].length === 0,
     [childrenByDir, failureByDir]
+  )
+
+  /**
+   * The flat row model keyboard navigation walks — the same DFS order
+   * `renderChildren` paints (a failed dir paints a FailureRow instead of its
+   * entries, so it contributes no navigable rows).
+   */
+  const { visibleEntries, indexByRel } = useMemo(() => {
+    const out: WorkspaceEntry[] = []
+    const walk = (dirRel: string) => {
+      if (failureByDir[dirRel]) return
+      for (const entry of childrenByDir[dirRel] ?? []) {
+        out.push(entry)
+        if (entry.isDir && expanded.has(entry.relPath)) walk(entry.relPath)
+      }
+    }
+    walk("")
+    return { visibleEntries: out, indexByRel: new Map(out.map((e, i) => [e.relPath, i])) }
+  }, [childrenByDir, expanded, failureByDir])
+
+  const focusIndex = focusedPath ? (indexByRel.get(focusedPath) ?? -1) : -1
+  // With no keyboard cursor (fresh mount, click-away) the tree treats the
+  // active editor's row as current — the same way VS Code's explorer
+  // selection follows the active file.
+  const effectiveFocusIndex =
+    focusIndex >= 0 ? focusIndex : activePath ? (indexByRel.get(activePath) ?? -1) : -1
+
+  const scrollRowIntoView = useCallback((relPath: string) => {
+    scrollRef.current
+      ?.querySelector(`[data-tree-rel="${CSS.escape(relPath)}"]`)
+      ?.scrollIntoView?.({ block: "nearest" })
+  }, [])
+
+  /**
+   * VS Code's tree keymap: ↑↓/Home/End/PgUp/PgDn move the focus row, → expands
+   * or steps into a folder, ← collapses or steps out to the parent, Enter opens
+   * (pinned) or toggles, Space opens a preview, F2 renames, Delete deletes,
+   * printable characters type-ahead to the next matching name.
+   */
+  const onTreeKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      // Inputs rendered inside rows (rename, create) keep their own keys.
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      )
+        return
+
+      // File clipboard chords, same as VS Code's explorer: ⌘C copy, ⌘X cut,
+      // ⌘V paste into the focused folder (or the focused file's parent).
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+        const key = event.key.toLowerCase()
+        const focused = effectiveFocusIndex >= 0 ? visibleEntries[effectiveFocusIndex] : null
+        if (key === "c" && focused && canCopy) {
+          event.preventDefault()
+          copyEntry(focused, false)
+          return
+        }
+        if (key === "x" && focused) {
+          event.preventDefault()
+          copyEntry(focused, true)
+          return
+        }
+        if (key === "v" && clipboard) {
+          event.preventDefault()
+          void pasteInto(focused ? pasteTargetOf(focused) : "")
+          return
+        }
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const entries = visibleEntries
+      if (entries.length === 0) return
+
+      const currentIndex = effectiveFocusIndex
+      const focusAt = (index: number) => {
+        const clamped = Math.max(0, Math.min(entries.length - 1, index))
+        const entry = entries[clamped]
+        setFocusedPath(entry.relPath)
+        scrollRowIntoView(entry.relPath)
+      }
+      const focusedEntry = currentIndex >= 0 ? entries[currentIndex] : null
+
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault()
+          focusAt(currentIndex < 0 ? 0 : currentIndex + 1)
+          return
+        case "ArrowUp":
+          event.preventDefault()
+          focusAt(currentIndex < 0 ? entries.length - 1 : currentIndex - 1)
+          return
+        case "Home":
+          event.preventDefault()
+          focusAt(0)
+          return
+        case "End":
+          event.preventDefault()
+          focusAt(entries.length - 1)
+          return
+        case "PageDown":
+          event.preventDefault()
+          focusAt((currentIndex < 0 ? 0 : currentIndex) + 10)
+          return
+        case "PageUp":
+          event.preventDefault()
+          focusAt((currentIndex < 0 ? entries.length - 1 : currentIndex) - 10)
+          return
+        case "ArrowRight": {
+          event.preventDefault()
+          if (!focusedEntry) {
+            focusAt(0)
+            return
+          }
+          if (focusedEntry.isDir) {
+            if (!expanded.has(focusedEntry.relPath)) toggle(focusedEntry.relPath)
+            else focusAt(currentIndex + 1)
+          }
+          return
+        }
+        case "ArrowLeft": {
+          event.preventDefault()
+          if (!focusedEntry) return
+          if (focusedEntry.isDir && expanded.has(focusedEntry.relPath)) {
+            toggle(focusedEntry.relPath)
+            return
+          }
+          const parent = parentOf(focusedEntry.relPath)
+          const parentIndex = parent ? indexByRel.get(parent) : undefined
+          if (parentIndex !== undefined) focusAt(parentIndex)
+          return
+        }
+        case "Enter": {
+          event.preventDefault()
+          if (!focusedEntry) return
+          if (focusedEntry.isDir) toggle(focusedEntry.relPath)
+          else onOpenFile(focusedEntry.relPath, { mode: "pinned" })
+          return
+        }
+        case " ": {
+          event.preventDefault()
+          if (!focusedEntry) return
+          if (focusedEntry.isDir) toggle(focusedEntry.relPath)
+          else onOpenFile(focusedEntry.relPath, { mode: "preview" })
+          return
+        }
+        case "F2": {
+          event.preventDefault()
+          if (!focusedEntry) return
+          setRenameValue(focusedEntry.relPath.split("/").pop() ?? "")
+          setRenameTarget(focusedEntry.relPath)
+          return
+        }
+        case "Delete":
+        case "Backspace": {
+          event.preventDefault()
+          if (focusedEntry) setDeleteTarget(focusedEntry)
+          return
+        }
+        default:
+          break
+      }
+
+      // Type-ahead: printable chars accumulate into a prefix match against the
+      // row names, scanning forward from the current focus with wrap-around.
+      // A run of one repeated character cycles through that letter's matches.
+      if (event.key.length === 1) {
+        const buffer = typeaheadRef.current
+        let text = Date.now() - buffer.at < 700 ? buffer.text + event.key : event.key
+        if (text.length > 1 && [...text].every((ch) => ch === text[0])) text = event.key
+        typeaheadRef.current = { text, at: Date.now() }
+        const needle = text.toLowerCase()
+        const start = currentIndex < 0 ? 0 : currentIndex + 1
+        for (let i = 0; i < entries.length; i++) {
+          const index = (start + i) % entries.length
+          const name = (
+            entries[index].relPath.split("/").pop() ?? entries[index].relPath
+          ).toLowerCase()
+          if (name.startsWith(needle)) {
+            focusAt(index)
+            break
+          }
+        }
+      }
+    },
+    [
+      canCopy,
+      clipboard,
+      copyEntry,
+      expanded,
+      effectiveFocusIndex,
+      indexByRel,
+      onOpenFile,
+      pasteInto,
+      pasteTargetOf,
+      scrollRowIntoView,
+      toggle,
+      visibleEntries,
+    ]
   )
 
   const renderChildren = (dirRel: string, depth: number) => {
@@ -637,6 +1006,8 @@ export function ProjectFileTree({
         depth={depth}
         expanded={expanded.has(entry.relPath)}
         isActive={activePath === entry.relPath}
+        isFocused={focusedPath === entry.relPath}
+        flatIndex={indexByRel.get(entry.relPath)}
         isRenaming={renameTarget === entry.relPath}
         renameValue={renameValue}
         onRenameChange={setRenameValue}
@@ -653,6 +1024,14 @@ export function ProjectFileTree({
           copyPath: t("action.copyPath"),
           copyRelativePath: t("action.copyRelativePath"),
           newFromTemplate: t("newFromTemplate"),
+          open: t("action.open"),
+          openToSide: t("action.openToSide"),
+          revealInSystem: t("action.revealInFileExplorer"),
+          addToChat: t("action.addToChat"),
+          findInFolder: t("action.findInFolder"),
+          cut: t("action.cut"),
+          copy: t("action.copy"),
+          paste: t("action.paste"),
           templateLabel: (id: string) => t(`templates.${id}`),
         }}
         onToggle={() => toggle(entry.relPath)}
@@ -667,6 +1046,16 @@ export function ProjectFileTree({
           setRenameTarget(entry.relPath)
         }}
         onCopyPath={onCopyPath ? (absolute) => onCopyPath(entry.relPath, absolute) : undefined}
+        onOpenToSide={!entry.isDir && onOpenToSide ? () => onOpenToSide(entry.relPath) : undefined}
+        onRevealInSystem={onRevealInSystem ? () => onRevealInSystem(entry.relPath) : undefined}
+        onAddToChat={onAddToChat ? () => onAddToChat(entry.relPath, entry.isDir) : undefined}
+        onFindInFolder={
+          entry.isDir && onFindInFolder ? () => onFindInFolder(entry.relPath) : undefined
+        }
+        onCut={() => copyEntry(entry, true)}
+        onCopy={canCopy ? () => copyEntry(entry, false) : undefined}
+        onPaste={clipboard ? () => void pasteInto(pasteTargetOf(entry)) : undefined}
+        isCut={clipboard?.cut === true && clipboard.relPath === entry.relPath}
         onDelete={() => setDeleteTarget(entry)}
         dragProps={dragHandlers(entry)}
         // A file row is a drop target for its *parent* directory — without
@@ -764,7 +1153,10 @@ export function ProjectFileTree({
         <ContextMenuTrigger asChild>
           <div
             ref={scrollRef}
-            className={cn("min-h-0 flex-1 overflow-auto", dropDir === "" && "bg-accent/30")}
+            className={cn(
+              "workbench-scroll min-h-0 flex-1 overflow-auto",
+              dropDir === "" && "bg-accent/30"
+            )}
             data-testid="project-file-tree-scroll"
             onDragOver={(e) => {
               // The container is the root drop target: a row dropped on empty
@@ -784,9 +1176,22 @@ export function ProjectFileTree({
             }}
           >
             <FileTree
-              className="rounded-none border-0 bg-transparent py-1 text-sm [&>div]:p-0"
+              className="rounded-none border-0 bg-transparent py-1 text-sm outline-none [&>div]:p-0"
               expanded={expanded}
               selectedPath={activePath ?? undefined}
+              tabIndex={0}
+              aria-activedescendant={
+                effectiveFocusIndex >= 0 ? `tree-item-${effectiveFocusIndex}` : undefined
+              }
+              onKeyDown={onTreeKeyDown}
+              onClick={(e) => {
+                // Clicking a row also moves the keyboard cursor so a
+                // subsequent ↑ continues from what was clicked.
+                const rel = (e.target as HTMLElement)
+                  .closest?.("[data-tree-rel]")
+                  ?.getAttribute("data-tree-rel")
+                if (rel) setFocusedPath(rel)
+              }}
             >
               {pendingCreate?.parent === "" ? (
                 <CreateInput
@@ -855,6 +1260,14 @@ export function ProjectFileTree({
             {t("newFolder")}
           </ContextMenuItem>
           <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!clipboard}
+            onSelect={() => void pasteInto("")}
+            data-testid="tree-root-paste"
+          >
+            <ClipboardPasteIcon className="size-3.5" />
+            {t("action.paste")}
+          </ContextMenuItem>
           <ContextMenuItem onSelect={refreshExpanded}>
             <RefreshCwIcon className="size-3.5" />
             {t("refresh")}
@@ -979,6 +1392,10 @@ interface TreeRowProps {
   depth: number
   expanded: boolean
   isActive: boolean
+  /** Keyboard navigation cursor — renders the focus ring and the row's id. */
+  isFocused?: boolean
+  /** Position in the flat visible-row model — backs aria-activedescendant. */
+  flatIndex?: number
   isRenaming: boolean
   renameValue: string
   onRenameChange: (v: string) => void
@@ -996,6 +1413,14 @@ interface TreeRowProps {
     copyPath: string
     copyRelativePath: string
     newFromTemplate: string
+    open: string
+    openToSide: string
+    revealInSystem: string
+    addToChat: string
+    findInFolder: string
+    cut: string
+    copy: string
+    paste: string
     templateLabel: (id: string) => string
   }
   onToggle: () => void
@@ -1005,6 +1430,15 @@ interface TreeRowProps {
   onNewFolder: () => void
   onRename: () => void
   onCopyPath?: (absolute: boolean) => void
+  onOpenToSide?: () => void
+  onRevealInSystem?: () => void
+  onAddToChat?: () => void
+  onFindInFolder?: () => void
+  onCut: () => void
+  onCopy?: () => void
+  onPaste?: () => void
+  /** This row is the cut source — VS Code dims it until the paste lands. */
+  isCut?: boolean
   onDelete: () => void
   dragProps?: {
     draggable: boolean
@@ -1024,6 +1458,8 @@ function TreeRow({
   depth,
   expanded,
   isActive,
+  isFocused,
+  flatIndex,
   isRenaming,
   renameValue,
   onRenameChange,
@@ -1040,6 +1476,14 @@ function TreeRow({
   onNewFolder,
   onRename,
   onCopyPath,
+  onOpenToSide,
+  onRevealInSystem,
+  onAddToChat,
+  onFindInFolder,
+  onCut,
+  onCopy,
+  onPaste,
+  isCut,
   onDelete,
   dragProps,
   dropProps,
@@ -1054,6 +1498,7 @@ function TreeRow({
         <ContextMenuTrigger asChild>
           <div
             role="treeitem"
+            id={flatIndex !== undefined ? `tree-item-${flatIndex}` : undefined}
             aria-selected={isActive}
             aria-expanded={entry.isDir ? expanded : undefined}
             data-tree-rel={entry.relPath}
@@ -1063,7 +1508,9 @@ function TreeRow({
               "relative flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 hover:bg-accent/50",
               density === "touch" && "min-h-11 py-2",
               isActive && "bg-accent text-foreground",
-              isDropTarget && "bg-primary/15 ring-1 ring-primary/50 ring-inset"
+              isFocused && "ring-1 ring-inset ring-primary/50",
+              isDropTarget && "bg-primary/15 ring-1 ring-primary/50 ring-inset",
+              isCut && "opacity-50"
             )}
             style={{ paddingLeft: `${depth * 12 + 6}px` }}
             data-testid={`tree-row-${entry.relPath}`}
@@ -1118,7 +1565,7 @@ function TreeRow({
             ) : null}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent>
+        <ContextMenuContent data-testid={`tree-menu-${entry.relPath}`}>
           {entry.isDir ? (
             <>
               <ContextMenuItem onSelect={onNewFile}>{labels.newFile}</ContextMenuItem>
@@ -1133,11 +1580,59 @@ function TreeRow({
                 </ContextMenuSubContent>
               </ContextMenuSub>
               <ContextMenuItem onSelect={onNewFolder}>{labels.newFolder}</ContextMenuItem>
+              {onFindInFolder || onRevealInSystem || onAddToChat ? <ContextMenuSeparator /> : null}
+              {onFindInFolder ? (
+                <ContextMenuItem onSelect={onFindInFolder}>
+                  <FolderSearchIcon className="size-3.5" />
+                  {labels.findInFolder}
+                </ContextMenuItem>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <ContextMenuItem onSelect={() => onOpen("pinned")}>
+                <FileIcon className="size-3.5" />
+                {labels.open}
+              </ContextMenuItem>
+              {onOpenToSide ? (
+                <ContextMenuItem onSelect={onOpenToSide}>
+                  <SquareSplitHorizontalIcon className="size-3.5" />
+                  {labels.openToSide}
+                </ContextMenuItem>
+              ) : null}
               <ContextMenuSeparator />
             </>
+          )}
+          {onRevealInSystem ? (
+            <ContextMenuItem onSelect={onRevealInSystem}>
+              <ExternalLinkIcon className="size-3.5" />
+              {labels.revealInSystem}
+            </ContextMenuItem>
+          ) : null}
+          {onAddToChat ? (
+            <ContextMenuItem onSelect={onAddToChat}>
+              <MessageSquarePlusIcon className="size-3.5" />
+              {labels.addToChat}
+            </ContextMenuItem>
+          ) : null}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={onCut}>
+            <ScissorsIcon className="size-3.5" />
+            {labels.cut}
+          </ContextMenuItem>
+          <ContextMenuItem disabled={!onCopy} onSelect={onCopy}>
+            <CopyIcon className="size-3.5" />
+            {labels.copy}
+          </ContextMenuItem>
+          {entry.isDir ? (
+            <ContextMenuItem disabled={!onPaste} onSelect={onPaste}>
+              <ClipboardPasteIcon className="size-3.5" />
+              {labels.paste}
+            </ContextMenuItem>
           ) : null}
           {onCopyPath ? (
             <>
+              <ContextMenuSeparator />
               <ContextMenuItem onSelect={() => onCopyPath(false)}>
                 <CopyIcon className="size-3.5" />
                 {labels.copyRelativePath}
@@ -1148,6 +1643,7 @@ function TreeRow({
               </ContextMenuItem>
             </>
           ) : null}
+          <ContextMenuSeparator />
           <ContextMenuItem onSelect={onRename}>{labels.rename}</ContextMenuItem>
           <ContextMenuItem onSelect={onDelete} className="text-destructive">
             {labels.delete}

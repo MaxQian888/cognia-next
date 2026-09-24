@@ -11,6 +11,7 @@ import {
   MAX_EDITOR_BYTES,
   type ProjectEditorDeps,
 } from "./use-project-editor"
+import type { WorkspaceFsChange } from "@/lib/files/workspace-watch"
 import {
   getModelRetainCount,
   getRetainedModelUris,
@@ -354,8 +355,10 @@ describe("useProjectEditor", () => {
       await result.current.openFile("src/a.ts")
     })
     act(() => result.current.setDraft("src/a.ts", "sent"))
-    let saving!: Promise<void>
-    act(() => {
+    let saving!: Promise<boolean>
+    // The save passes through an (awaited) confirm gate before writing, so
+    // `finish` lands a microtask in — an async act flushes that far.
+    await act(async () => {
       saving = result.current.saveFile("src/a.ts")
     })
     act(() => result.current.setDraft("src/a.ts", "newer draft"))
@@ -407,12 +410,12 @@ describe("useProjectEditor", () => {
       await result.current.openFile("src/a.ts")
     })
     act(() => result.current.setDraft("src/a.ts", "first"))
-    let first!: Promise<void>
+    let first!: Promise<boolean>
     await act(async () => {
       first = result.current.saveFile("src/a.ts")
     })
     act(() => result.current.setDraft("src/a.ts", "second"))
-    let second!: Promise<void>
+    let second!: Promise<boolean>
     await act(async () => {
       second = result.current.saveFile("src/a.ts")
     })
@@ -527,7 +530,7 @@ describe("useProjectEditor", () => {
     await act(async () => {
       await result.current.openFile("src/a.ts")
     })
-    let saving!: Promise<void>
+    let saving!: Promise<boolean>
     act(() => {
       saving = result.current.saveFile("src/a.ts")
       result.current.closeFile("src/a.ts")
@@ -609,7 +612,7 @@ describe("useProjectEditor", () => {
       await act(async () => {
         finish({ exists: false, isDir: false, size: 0, mtimeMs: null })
       })
-      expect(result.current.activeFile?.externallyChanged).toBe(true)
+      expect(result.current.activeFile?.deletedOnDisk).toBe(true)
       unmount()
     } finally {
       visibility.mockRestore()
@@ -664,7 +667,7 @@ describe("useProjectEditor", () => {
       })
       await waitFor(() => expect(result.current.activeFile?.draftContent).toBe("原始文本\n"))
       act(() => result.current.setDraft("note.md", "已发送 😀\n"))
-      let saving!: Promise<void>
+      let saving!: Promise<boolean>
       act(() => {
         saving = result.current.saveFile("note.md")
       })
@@ -728,6 +731,67 @@ describe("useProjectEditor", () => {
     await waitFor(() => expect(result.current.openFiles).toHaveLength(1))
     expect(result.current.openFiles[0]?.relPath).toBe("src/b.ts")
     expect(result.current.activePath).toBe("src/b.ts")
+    expect(result.current.sessionRestored).toBe(true)
+  })
+
+  it("flips sessionRestored once the persisted open set is marked, before reads land", async () => {
+    mockPersisted = {
+      rootKey: "/repo",
+      openPaths: ["src/a.ts", "src/b.ts"],
+      activePath: "src/b.ts",
+    }
+    const resolvers: Array<() => void> = []
+    const deps = makeDeps({
+      readFile: jest.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            resolvers.push(() => resolve("export const x = 1\n"))
+          })
+      ),
+    })
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    // The reads are still suspended — the gate means every persisted path
+    // has been marked, so `isPathOpen` answers for the whole set. Layout
+    // restorers (workbench split groups) rely on exactly this moment.
+    expect(result.current.openFiles).toHaveLength(0)
+    expect(result.current.isPathOpen("src/a.ts")).toBe(true)
+    expect(result.current.isPathOpen("src/b.ts")).toBe(true)
+    // The first post-restore write already serializes the marked set —
+    // materializing `openFiles` is not a prerequisite, and the record never
+    // carries a transient empty `openPaths` during the restore window.
+    expect(setEditorSession).toHaveBeenCalledWith(
+      "team:team1",
+      expect.objectContaining({ openPaths: ["src/a.ts", "src/b.ts"] })
+    )
+    expect(setEditorSession).not.toHaveBeenCalledWith(
+      "team:team1",
+      expect.objectContaining({ openPaths: [] })
+    )
+
+    await act(async () => {
+      resolvers.forEach((resolve) => resolve())
+    })
+    await waitFor(() => expect(result.current.openFiles).toHaveLength(2))
+    await waitFor(() =>
+      expect(setEditorSession).toHaveBeenCalledWith(
+        "team:team1",
+        expect.objectContaining({ openPaths: ["src/a.ts", "src/b.ts"] })
+      )
+    )
+  })
+
+  it("flips sessionRestored even when no persisted session matches", async () => {
+    mockPersisted = { rootKey: "/other-root", openPaths: ["src/a.ts"], activePath: "src/a.ts" }
+    const deps = makeDeps()
+    const { result } = renderHook(() =>
+      useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+    )
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(result.current.openFiles).toHaveLength(0)
   })
 
   it("swallows a read error on open (no tab added)", async () => {
@@ -857,28 +921,280 @@ describe("useProjectEditor", () => {
     expect(result.current.openFiles).toHaveLength(0)
   })
 
-  it("flags an open file when it changes on disk externally", async () => {
-    let fireChange: ((c: { kind: "modify"; path: string }) => void) | null = null
-    const deps = makeDeps({
-      watch: jest.fn((_root, cb) => {
-        fireChange = cb
+  describe("external disk changes", () => {
+    const fireableWatch = () => {
+      let fire: ((c: WorkspaceFsChange) => void) | null = null
+      const watch = jest.fn((_root: string, cb: (c: WorkspaceFsChange) => void) => {
+        fire = cb
         return () => {}
-      }),
+      })
+      return { watch, fire: (c: WorkspaceFsChange) => fire?.(c) }
+    }
+
+    it("auto-reloads a clean open file when it changes on disk", async () => {
+      const { watch, fire } = fireableWatch()
+      const files: Record<string, string> = { "src/a.ts": "v1\n" }
+      const deps = makeDeps({
+        watch,
+        readFile: jest.fn(async (_root: string, rel: string) => files[rel] ?? ""),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      expect(result.current.openFiles[0]?.savedContent).toBe("v1\n")
+
+      files["src/a.ts"] = "v2 — written by an agent\n"
+      await act(async () => {
+        fire({ kind: "modify", path: "/repo/src/a.ts" })
+        await Promise.resolve()
+      })
+      // A clean buffer mirrors the disk write — no flag, fresh content.
+      expect(result.current.openFiles[0]?.savedContent).toContain("v2")
+      expect(result.current.openFiles[0]?.externallyChanged).toBe(false)
     })
+
+    it("flags a dirty open file instead of reloading it", async () => {
+      const { watch, fire } = fireableWatch()
+      const deps = makeDeps({ watch })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "draft with unsaved work"))
+      await act(async () => {
+        fire({ kind: "modify", path: "/repo/src/a.ts" })
+      })
+      const file = result.current.openFiles[0]
+      expect(file?.externallyChanged).toBe(true)
+      expect(file?.draftContent).toBe("draft with unsaved work")
+
+      await act(async () => {
+        await result.current.reloadFile("src/a.ts")
+      })
+      expect(result.current.openFiles[0]?.externallyChanged).toBe(false)
+    })
+
+    it("ignores the echo of its own save", async () => {
+      const { watch, fire } = fireableWatch()
+      const deps = makeDeps({ watch })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "user edit"))
+      await act(async () => {
+        await result.current.saveFile("src/a.ts")
+      })
+      expect(result.current.openFiles[0]?.externallyChanged).toBeFalsy()
+
+      // The fs watcher cannot tell our write from an agent's — the event must
+      // be suppressed, not flagged.
+      act(() => fire({ kind: "modify", path: "/repo/src/a.ts" }))
+      expect(result.current.openFiles[0]?.externallyChanged).toBeFalsy()
+    })
+
+    it("marks an open file deletedOnDisk on a delete event", async () => {
+      const { watch, fire } = fireableWatch()
+      const deps = makeDeps({ watch })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => fire({ kind: "delete", path: "/repo/src/a.ts" }))
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBe(true)
+      expect(result.current.openFiles[0]?.externallyChanged).toBeFalsy()
+    })
+
+    it("clears deletedOnDisk when the file is recreated", async () => {
+      const { watch, fire } = fireableWatch()
+      const deps = makeDeps({ watch })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => fire({ kind: "delete", path: "/repo/src/a.ts" }))
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBe(true)
+      // Clean buffer + recreate → auto-reload clears the deleted flag.
+      await act(async () => {
+        fire({ kind: "create", path: "/repo/src/a.ts" })
+        await Promise.resolve()
+      })
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBeFalsy()
+    })
+
+    it("debounces the tree refresh across an event burst", async () => {
+      jest.useFakeTimers()
+      try {
+        const { watch, fire } = fireableWatch()
+        const deps = makeDeps({ watch })
+        const { result } = renderHook(() =>
+          useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+        )
+        const token = () => result.current.treeRefreshToken
+        await act(async () => {
+          await result.current.openFile("src/a.ts")
+        })
+        const before = token()
+        act(() => {
+          for (let i = 0; i < 10; i += 1) {
+            fire({ kind: "create", path: `/repo/burst/${i}.txt` })
+          }
+          jest.advanceTimersByTime(300)
+        })
+        expect(token() - before).toBe(1)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+  })
+
+  describe("save conflict guard", () => {
+    const conflicted = async (deps: Partial<ProjectEditorDeps>) => {
+      let fire: ((c: WorkspaceFsChange) => void) | null = null
+      const d = makeDeps({
+        ...deps,
+        watch: jest.fn((_root, cb) => {
+          fire = cb
+          return () => {}
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps: d })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "local draft"))
+      act(() => fire?.({ kind: "modify", path: "/repo/src/a.ts" }))
+      expect(result.current.openFiles[0]?.externallyChanged).toBe(true)
+      return { result, deps: d }
+    }
+
+    it("refuses to overwrite an external change until confirmed", async () => {
+      const { result, deps } = await conflicted({})
+      const confirm = jest.spyOn(window, "confirm").mockReturnValue(false)
+      try {
+        await act(async () => {
+          await result.current.saveFile("src/a.ts")
+        })
+        expect(confirm).toHaveBeenCalled()
+        expect(deps.writeFile).not.toHaveBeenCalledWith("/repo", "src/a.ts", "local draft")
+
+        confirm.mockReturnValue(true)
+        await act(async () => {
+          await result.current.saveFile("src/a.ts")
+        })
+        expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "local draft")
+      } finally {
+        confirm.mockRestore()
+      }
+    })
+
+    it("force saves without confirming (bridge flush / explicit overwrite)", async () => {
+      const { result, deps } = await conflicted({})
+      const confirm = jest.spyOn(window, "confirm")
+      try {
+        await act(async () => {
+          await result.current.saveFile("src/a.ts", { force: true })
+        })
+        expect(confirm).not.toHaveBeenCalled()
+        expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "local draft")
+        expect(result.current.openFiles[0]?.externallyChanged).toBe(false)
+      } finally {
+        confirm.mockRestore()
+      }
+    })
+
+    it("saving a deletedOnDisk buffer restores it", async () => {
+      let fire: ((c: WorkspaceFsChange) => void) | null = null
+      const deps = makeDeps({
+        watch: jest.fn((_root, cb) => {
+          fire = cb
+          return () => {}
+        }),
+      })
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "last surviving draft"))
+      act(() => fire?.({ kind: "delete", path: "/repo/src/a.ts" }))
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBe(true)
+
+      await act(async () => {
+        await result.current.saveFile("src/a.ts", { force: true })
+      })
+      expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "last surviving draft")
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBe(false)
+    })
+  })
+
+  describe("reconcileDeleted", () => {
+    it("closes clean tabs under a deleted path and keeps dirty ones flagged", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      act(() => result.current.setDraft("src/b.ts", "unsaved"))
+
+      act(() => result.current.reconcileDeleted(["src"]))
+      // Clean tab closed outright; dirty one stays as the last copy.
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts"])
+      expect(result.current.openFiles[0]?.deletedOnDisk).toBe(true)
+      expect(result.current.activePath).toBe("src/b.ts")
+    })
+
+    it("falls back to a neighbour when the active tab is deleted clean", async () => {
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      expect(result.current.activePath).toBe("src/b.ts")
+
+      act(() => result.current.reconcileDeleted(["src/b.ts"]))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      expect(result.current.activePath).toBe("src/a.ts")
+      expect(getModelRetainCount("file:///repo/src/b.ts")).toBe(0)
+    })
+  })
+
+  it("persists the session only when the persisted fields change", async () => {
+    const deps = makeDeps()
     const { result } = renderHook(() =>
       useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
     )
+    await waitFor(() => expect(deps.listWorktrees).toHaveBeenCalled())
     await act(async () => {
       await result.current.openFile("src/a.ts")
     })
-    act(() => fireChange?.({ kind: "modify", path: "/repo/src/a.ts" }))
-    expect(result.current.openFiles[0]?.externallyChanged).toBe(true)
-
-    await act(async () => {
-      await result.current.reloadFile("src/a.ts")
-    })
-    expect(result.current.openFiles[0]?.externallyChanged).toBe(false)
+    const callsAfterOpen = setEditorSession.mock.calls.length
+    // A keystroke changes openFiles identity but not rootKey/openPaths/activePath.
+    act(() => result.current.setDraft("src/a.ts", "draft"))
+    act(() => result.current.setDraft("src/a.ts", "draft again"))
+    expect(setEditorSession.mock.calls.length).toBe(callsAfterOpen)
   })
+
   describe("monaco model holds", () => {
     // Open documents — not editor mounts — are what keep a model and its undo
     // stack alive. These pin the retain/release pairs that make that true.
@@ -1633,38 +1949,43 @@ describe("useProjectEditor", () => {
       expect(result.current.openFiles.map((f) => f.relPath)).toEqual(before)
     })
 
-    it("closeOtherFiles keeps only the named tab", async () => {
+    it("closeFiles closes exactly the named set and moves the active marker to a survivor", async () => {
       const deps = makeDeps()
       const { result } = renderHook(() =>
         useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
       )
       await open3(result, deps)
-      act(() => result.current.closeOtherFiles("src/b.ts"))
+      // Active is c.ts; closing it (with a.ts) must hand the selection to the
+      // only survivor rather than leaving it dangling.
+      act(() => result.current.closeFiles(new Set(["src/a.ts", "src/c.ts"])))
       expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts"])
       expect(result.current.activePath).toBe("src/b.ts")
     })
 
-    it("closeOtherFiles falls back to the kept tab's position when it was active", async () => {
+    it("closeFiles keeps the active tab when it is not in the closing set", async () => {
       const deps = makeDeps()
       const { result } = renderHook(() =>
         useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
       )
       await open3(result, deps)
-      // Active is c.ts; closing everything except a.ts must move the active
-      // marker to the only survivor rather than leaving it dangling.
-      act(() => result.current.closeOtherFiles("src/a.ts"))
-      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
-      expect(result.current.activePath).toBe("src/a.ts")
+      act(() => result.current.closeFiles(new Set(["src/a.ts"])))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts", "src/c.ts"])
+      expect(result.current.activePath).toBe("src/c.ts")
     })
 
-    it("closeFilesToRight drops only the tabs after the named one", async () => {
+    it("closeFiles ignores an empty set", async () => {
       const deps = makeDeps()
       const { result } = renderHook(() =>
         useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps })
       )
       await open3(result, deps)
-      act(() => result.current.closeFilesToRight("src/a.ts"))
-      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      act(() => result.current.closeFiles(new Set()))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual([
+        "src/a.ts",
+        "src/b.ts",
+        "src/c.ts",
+      ])
+      expect(result.current.activePath).toBe("src/c.ts")
     })
 
     it("closeAllFiles empties the editor and clears the selection", async () => {
@@ -1748,6 +2069,109 @@ describe("useProjectEditor", () => {
       // even the clean tab in scope.
       act(() => result.current.closeAllFiles())
       expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts", "src/b.ts"])
+    })
+
+    it("an injected async confirm defers the close until it resolves", async () => {
+      let answer!: () => void
+      const confirm = jest.fn(
+        (request: { message: string; confirmLabel: string }) =>
+          new Promise<boolean>((resolve) => {
+            answer = () => resolve(request.confirmLabel === "Don't Save")
+          })
+      )
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps, confirm })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      act(() => result.current.closeFile("src/a.ts"))
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: "Don't Save" }))
+      // Pending verdict: the tab and its draft must still be there.
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+
+      // "Don't Save" maps to an affirmative answer → the close lands.
+      await act(async () => answer())
+      expect(result.current.openFiles).toEqual([])
+    })
+
+    it("an injected async confirm resolved false keeps the tab", async () => {
+      let answer!: (ok: boolean) => void
+      const confirm = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answer = resolve
+          })
+      )
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps, confirm })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      act(() => result.current.closeFile("src/a.ts"))
+      await act(async () => answer(false))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      expect(result.current.openFiles[0].draftContent).toBe("unsaved\n")
+    })
+
+    it("a deferred close re-reads the live open set, not the stale one", async () => {
+      let answer!: (ok: boolean) => void
+      const confirm = jest.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            answer = resolve
+          })
+      )
+      const deps = makeDeps()
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps, confirm })
+      )
+      await act(async () => {
+        await result.current.openFile("src/a.ts")
+        await result.current.openFile("src/b.ts")
+      })
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      // Start a dirty close on a.ts, then open a third tab while the dialog
+      // is up — the deferred close must not resurrect or drop it.
+      act(() => result.current.closeFile("src/a.ts"))
+      await act(async () => result.current.openFile("src/c.ts"))
+      await act(async () => answer(true))
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/b.ts", "src/c.ts"])
+    })
+
+    it("a 'save' verdict writes the draft, then closes the tab", async () => {
+      const deps = makeDeps()
+      const confirm = jest.fn(() => Promise.resolve("save" as const))
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps, confirm })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      act(() => result.current.closeFile("src/a.ts"))
+      // Let the deferred save land before asserting the close.
+      await act(async () => {})
+      expect(deps.writeFile).toHaveBeenCalledWith("/repo", "src/a.ts", "unsaved\n")
+      expect(result.current.openFiles).toEqual([])
+    })
+
+    it("a 'save' verdict keeps the tab when the write fails", async () => {
+      const deps = makeDeps({ writeFile: jest.fn().mockRejectedValue(new Error("EIO")) })
+      const confirm = jest.fn(() => Promise.resolve("save" as const))
+      const { result } = renderHook(() =>
+        useProjectEditor({ scopeKey: "team:team1", workingDir: "/repo", deps, confirm })
+      )
+      await act(async () => result.current.openFile("src/a.ts"))
+      act(() => result.current.setDraft("src/a.ts", "unsaved\n"))
+
+      act(() => result.current.closeFile("src/a.ts"))
+      await act(async () => {})
+      expect(result.current.openFiles.map((f) => f.relPath)).toEqual(["src/a.ts"])
+      expect(result.current.openFiles[0].draftContent).toBe("unsaved\n")
     })
   })
 

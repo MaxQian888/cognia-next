@@ -17,6 +17,7 @@ import Link from "next/link"
 import type { GitFileChange } from "@/types/git"
 import { useGitStore, useGitStatus } from "@/stores/git/git-store"
 import { useGitActions } from "@/hooks/git/use-git-actions"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -190,7 +191,7 @@ function CompactChangeRow({
         <span className="text-foreground">{name}</span>
         {dir && <span className="ml-1 text-muted-foreground">{dir}</span>}
       </span>
-      <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className={cn("flex shrink-0 gap-0.5", HOVER_REVEAL_GROUP_CLASS)}>
         {onStage && (
           <Button variant="ghost" size="icon" className="size-5" onClick={onStage}>
             <CheckIcon className="size-3" />
