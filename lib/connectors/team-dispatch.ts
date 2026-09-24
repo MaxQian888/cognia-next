@@ -5,7 +5,7 @@
  * the connector runtime routes the inbound message here instead of the
  * single-character `runAndCapture` path.
  *
- * The mechanics live in `lib/ai/agent/team/start-squad-run.ts`, shared with the
+ * The mechanics live in `lib/ai/agent/team/squad/start-squad-run.ts`, shared with the
  * desktop chat surface — both are "a conversation hands this turn to a Squad",
  * and the only real differences are where progress fans back to and what there
  * is to ask a human on. What stays here is exactly that: the IM `triggeredFrom`
@@ -23,7 +23,7 @@ import {
   startSquadRun,
   type StartSquadRunDeps,
   type SquadPlanApprovalRequest,
-} from "@/lib/ai/agent/team/start-squad-run"
+} from "@/lib/ai/agent/team/squad/start-squad-run"
 
 export interface StartTeamRunFromIMInput {
   teamId: string

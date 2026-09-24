@@ -8,10 +8,12 @@ import type { NotificationChannel as CenterChannel, NotificationLevel } from "@/
 import type { OutboundWebhookEvent, WebhookHeader } from "@/types/webhooks"
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
+import { COALESCE_UNTIL_ARCHIVED } from "@/lib/notifications/dedup"
 import { toast } from "sonner"
 import { loggers } from "@cognia/logging"
 import { SchedulerError } from "./errors"
 import { formatDuration } from "./format-utils"
+import { isMaintenanceTask } from "./maintenance-tasks"
 
 // Logger
 const log = loggers.scheduler
@@ -26,7 +28,33 @@ export const WEBHOOK_DELIVERY_LIMITS = {
   timeoutMs: 10_000,
 } as const
 
-type TaskEventType = "start" | "progress" | "complete" | "error" | "auto-paused"
+export type TaskEventType = "start" | "progress" | "complete" | "error" | "auto-paused"
+
+/** Events that report a run going as planned — not news for maintenance tasks. */
+export const ROUTINE_TASK_EVENTS: ReadonlySet<TaskEventType> = new Set([
+  "start",
+  "progress",
+  "complete",
+])
+
+/**
+ * The center coalescing identity of a task event.
+ *
+ * A recurring task (cron / interval / event trigger) owns ONE updating row per
+ * event type — "Task Completed: X" with a run count, and separately
+ * "Task Failed: X" with a failure count — instead of a row per execution. A
+ * one-shot task keeps the per-execution key, so a retry of the same execution
+ * still collapses while the record stays tied to its run.
+ */
+export function taskEventDedupeKey(
+  task: Pick<ScheduledTask, "id" | "trigger">,
+  executionId: string,
+  eventType: TaskEventType
+): string {
+  return task.trigger.type === "once"
+    ? `task:${task.id}:${eventType}:${executionId}`
+    : `task:${task.id}:${eventType}`
+}
 
 function centerLevelFor(eventType: TaskEventType): NotificationLevel {
   if (eventType === "error") return "error"
@@ -56,6 +84,12 @@ export async function notifyTaskEvent(
 
   const { title, body } = getNotificationContent(task, execution, eventType)
 
+  // Background maintenance (presence refresh, provider diagnostics,
+  // housekeeping) runs every few minutes; a routine start/complete of one is
+  // not something to surface. Failures and auto-pauses still are.
+  const routineMaintenance = isMaintenanceTask(task) && ROUTINE_TASK_EVENTS.has(eventType)
+  const recurring = task.trigger.type !== "once"
+
   // Desktop ("desktop" → os) + toast + im → ONE Notification Center emit.
   const wantsToast = channels.includes("toast")
   const wantsDesktop = channels.includes("desktop")
@@ -65,7 +99,7 @@ export async function notifyTaskEvent(
   // only lands a push when a conversation resolved — but an IM-only request
   // with no configured target must STILL write the center record, or the
   // event is lost silently (the missing-target diagnostic is the record).
-  if (wantsToast || wantsDesktop || wantsIm) {
+  if (!routineMaintenance && (wantsToast || wantsDesktop || wantsIm)) {
     const coreChannels: CenterChannel[] = ["center"]
     if (wantsToast) coreChannels.push("toast")
     if (wantsDesktop) coreChannels.push("os")
@@ -77,10 +111,11 @@ export async function notifyTaskEvent(
         title,
         body,
         channels: coreChannels,
-        // `execution.id` gives single-execution identity — two runs of the
-        // same task produce distinct records rather than coalescing into
-        // one, while a retry of the SAME execution still collapses.
-        dedupeKey: `task:${task.id}:${eventType}:${execution.id}`,
+        // Recurring tasks: one updating row per task + event type, however
+        // far apart the runs are (the default 45 s window added a row per
+        // run). One-shot tasks: per-execution identity.
+        dedupeKey: taskEventDedupeKey(task, execution.id, eventType),
+        ...(recurring ? { coalesceWindowMs: COALESCE_UNTIL_ARCHIVED } : {}),
         groupKey: `task:${task.id}`,
         // `im-deliver.ts` resolves its destination from a `"conversation"`
         // sourceRef and nothing else, so an IM-bound notification has to carry

@@ -19,6 +19,10 @@
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
+import {
+  ADAPTER_DISABLED_PRESENCE_TAG,
+  pauseDisabledAdapterPresence,
+} from "@/lib/scheduler/connection-task-orphans"
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
@@ -49,6 +53,12 @@ export interface PresenceRefreshResult {
   success: boolean
   output?: Record<string, unknown>
   error?: string
+  /**
+   * Set when the bound adapter row no longer exists — a permanent condition,
+   * not a transient failure. The scheduler executor uses it to retire the
+   * orphaned schedule instead of letting it fail-retry forever.
+   */
+  adapterMissing?: true
 }
 
 /** Resolve config with defaults; `undefined` ⇒ feature off. */
@@ -75,7 +85,8 @@ export async function runUsagePresenceRefresh(args: {
   const now = args.now ?? Date.now()
 
   const row = await getAdapterInstance(adapterId)
-  if (!row) return { success: false, error: `Adapter ${adapterId} not found` }
+  if (!row) return { success: false, error: `Adapter ${adapterId} not found`, adapterMissing: true }
+  if (!row.enabled) return { success: true, output: { skipped: "adapter_disabled" } }
   const config = resolvePresenceConfig(row.presence)
   if (!config) return { success: true, output: { skipped: "disabled" } }
 
@@ -248,7 +259,27 @@ async function handlePresenceRefresh(
   if (!payload || typeof payload.adapterId !== "string") {
     return { success: false, error: "Invalid connection:presence:refresh payload" }
   }
-  return runUsagePresenceRefresh({ adapterId: payload.adapterId })
+  const result = await runUsagePresenceRefresh({ adapterId: payload.adapterId })
+  if (result.adapterMissing) {
+    // The adapter row is gone — this schedule is residue, not a failure to
+    // retry. Delete it (best-effort: the boot sweep reaps it regardless) and
+    // report the tick as a skip rather than an error.
+    try {
+      const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+      await getTaskScheduler().deleteTask(task.id)
+    } catch {
+      // The next tick or the boot sweep retries the delete; either way the
+      // failure is bounded and visible.
+    }
+    return { success: true, output: { skipped: "adapter_removed" } }
+  }
+  if (result.output?.skipped === "adapter_disabled") {
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    const scheduler = getTaskScheduler()
+    const current = await scheduler.getTask(task.id)
+    if (current) await pauseDisabledAdapterPresence(current, scheduler)
+  }
+  return result
 }
 
 /**
@@ -269,11 +300,14 @@ export function presenceScheduleTag(adapterId: string): string {
  * Reconcile the recurring scheduler task with the saved presence config —
  * called by the settings form after every save. Enabled ⇒ ensure one
  * interval task exists with the configured cadence; disabled ⇒ delete it.
+ * Runtime lifecycle calls read the persisted config and resume only schedules
+ * this adapter's disable transition paused; manual pauses remain untouched.
  * Lazy scheduler import keeps the scheduler graph out of adapter bundles.
  */
 export async function syncUsagePresenceSchedule(
   adapterId: string,
-  config: UsagePresenceConfig | undefined
+  config: UsagePresenceConfig | undefined,
+  options: { adapterLifecycle?: boolean } = {}
 ): Promise<void> {
   const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
   const scheduler = getTaskScheduler()
@@ -282,19 +316,35 @@ export async function syncUsagePresenceSchedule(
   const existing = all.find(
     (t) => t.type === PRESENCE_REFRESH_TASK_TYPE && (t.tags ?? []).includes(tag)
   )
-  const resolved = resolvePresenceConfig(config)
+  const row = await getAdapterInstance(adapterId)
+  const resolved = row
+    ? resolvePresenceConfig(options.adapterLifecycle ? row.presence : config)
+    : null
 
   if (!resolved) {
     if (existing) await scheduler.deleteTask(existing.id)
     return
   }
 
+  if (!row?.enabled) {
+    if (existing) await pauseDisabledAdapterPresence(existing, scheduler)
+    return
+  }
+
   const intervalMs = resolved.intervalMinutes * 60_000
   if (existing) {
-    if (existing.trigger.intervalMs !== intervalMs || existing.status !== "active") {
+    const autoPaused = existing.tags?.includes(ADAPTER_DISABLED_PRESENCE_TAG) === true
+    if (
+      options.adapterLifecycle &&
+      existing.status !== "active" &&
+      !(existing.status === "paused" && autoPaused)
+    )
+      return
+    if (existing.trigger.intervalMs !== intervalMs || existing.status !== "active" || autoPaused) {
       await scheduler.updateTask(existing.id, {
         trigger: { type: "interval", intervalMs },
         status: "active",
+        tags: existing.tags?.filter((tag) => tag !== ADAPTER_DISABLED_PRESENCE_TAG),
       })
     }
     return

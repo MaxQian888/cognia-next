@@ -4,6 +4,7 @@
 // fan-out. This is the single public `notify()` every subsystem calls; mobile
 // push reception is installed once by the companion boot provider.
 
+import { createElement } from "react"
 import { toast } from "sonner"
 import type { NotificationInput, NotificationRecord } from "@/types/notifications"
 import {
@@ -16,6 +17,8 @@ import { notify as notifyCore, type NotifyDeps, type NotifyDbPort } from "./noti
 import { createImDeliver } from "./im-deliver"
 import { resolvePreferences } from "./preferences"
 import { dispatchNotificationCommand } from "./action-registry"
+import { FunctionalToastCard } from "./functional-toast/card"
+import { resolveFunctionalToastFactory } from "./functional-toast/registry"
 import { useNotificationStore } from "@/stores/notifications/notification-store"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveUserTimeZone } from "@/lib/profile/timezone"
@@ -144,8 +147,38 @@ export async function publishRemoteNotification(record: NotificationRecord): Pro
   })
 }
 
+/**
+ * The card tier of the toast channel gets a longer dwell than sonner's
+ * default — a timeline and two actions need more reading time than a title +
+ * description, and a swipe still dismisses early.
+ */
+const FUNCTIONAL_TOAST_DURATION_MS = 8_000
+
 /** Map a record to a sonner toast, wiring its first action button. */
 function showToast(rec: NotificationRecord): void {
+  // Functional toasts claim their producers through the registry; everything
+  // else keeps the plain title + description treatment below.
+  if (resolveFunctionalToastFactory(rec)) {
+    toast.custom(
+      (id) =>
+        createElement(FunctionalToastCard, {
+          rec,
+          onAction: (action) => {
+            if (action.notificationAction) {
+              void dispatchNotificationCommand({
+                notificationId: rec.id,
+                command: action.notificationAction.command,
+                args: action.notificationAction.args,
+              })
+            }
+            toast.dismiss(id)
+          },
+          onDismiss: () => toast.dismiss(id),
+        }),
+      { unstyled: true, duration: FUNCTIONAL_TOAST_DURATION_MS }
+    )
+    return
+  }
   const fn =
     rec.level === "success"
       ? toast.success

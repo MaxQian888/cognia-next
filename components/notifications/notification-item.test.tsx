@@ -1,6 +1,10 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { NotificationRecord } from "@/types/notifications"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, vals?: Record<string, unknown>) =>
@@ -110,6 +114,35 @@ it("keeps the row menu visible when requested by a touch surface", () => {
   expect(screen.getByRole("button", { name: "notificationCenter.center.itemActions" })).toHaveClass(
     "opacity-100"
   )
+})
+
+// At `sm`+ the menu used to reveal only on a row hover, so a tablet (no
+// hover) never saw it. The mouse path (`sm:` hover, resting 70% below `sm`)
+// is unchanged.
+it("keeps the row menu reachable without a hover", async () => {
+  const h = setup({ readState: "unseen" })
+  const trigger = screen.getByRole("button", { name: "notificationCenter.center.itemActions" })
+  for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+    expect(trigger).toHaveClass(variant)
+  }
+  expect(trigger).toHaveClass(
+    "sm:group-hover:opacity-100",
+    "max-sm:opacity-70",
+    "group-focus-within:opacity-100"
+  )
+  // No unprefixed hover path: below `sm` a mouse hover must not lift it.
+  expect(trigger).not.toHaveClass("group-hover:opacity-100")
+  for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+    expect(trigger).not.toHaveClass(forbidden)
+  }
+  expect(trigger).toBeEnabled()
+  trigger.focus()
+  expect(trigger).toHaveFocus()
+
+  // A plain click with no prior hover opens the menu.
+  fireEvent.click(trigger)
+  fireEvent.click(await screen.findByText("notificationCenter.center.markRead"))
+  expect(h.onMarkRead).toHaveBeenCalledWith("n1")
 })
 
 it("contains long unbroken content and wraps action controls within the row", () => {

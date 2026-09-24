@@ -6,6 +6,11 @@
  * installer-only options: rowFilter, log, skipHostGate).
  */
 
+jest.mock("@/lib/connectors/presence/usage-status-runner", () => ({
+  installUsagePresenceHandlers: jest.fn(),
+  syncUsagePresenceSchedule: jest.fn().mockResolvedValue(undefined),
+}))
+
 import { installConnectorRuntime } from "./install-connector-runtime"
 import { isTauri } from "@/lib/tauri"
 import { hasTaskExecutor, unregisterTaskExecutor } from "@/lib/scheduler"
@@ -1361,6 +1366,11 @@ describe("installConnectorRuntime", () => {
     it("registers + boots a newly enabled adapter without a restart", async () => {
       const rowA = makeTelegramRow("cai_A")
       const { fire } = await installWithWatch([rowA])
+      const { syncUsagePresenceSchedule } =
+        await import("@/lib/connectors/presence/usage-status-runner")
+      expect(syncUsagePresenceSchedule).toHaveBeenCalledWith("cai_A", undefined, {
+        adapterLifecycle: true,
+      })
       await waitFor(() =>
         expect(mockRegisterAdapter).toHaveBeenCalledWith(expect.objectContaining({ id: "cai_A" }))
       )
@@ -1377,6 +1387,9 @@ describe("installConnectorRuntime", () => {
       })
       // The already-running adapter is NOT re-registered (no churn).
       expect(mockRegisterAdapter).not.toHaveBeenCalledWith(expect.objectContaining({ id: "cai_A" }))
+      expect(syncUsagePresenceSchedule).toHaveBeenCalledWith("cai_B", undefined, {
+        adapterLifecycle: true,
+      })
     })
 
     it("stops + unregisters an adapter that was disabled/deleted", async () => {
@@ -1394,6 +1407,11 @@ describe("installConnectorRuntime", () => {
       await waitFor(() => {
         expect(mockUnregisterRunning).toHaveBeenCalledWith("cai_B")
         expect(mockUnregisterAdapterBus).toHaveBeenCalledWith("cai_B")
+      })
+      const { syncUsagePresenceSchedule } =
+        await import("@/lib/connectors/presence/usage-status-runner")
+      expect(syncUsagePresenceSchedule).toHaveBeenCalledWith("cai_B", undefined, {
+        adapterLifecycle: true,
       })
       // The still-enabled adapter is left untouched.
       expect(mockUnregisterRunning).not.toHaveBeenCalledWith("cai_A")
@@ -1432,6 +1450,9 @@ describe("installConnectorRuntime", () => {
       )
       mockRegisterAdapter.mockClear()
       mockBuildAdapterFromRow.mockClear()
+      const { syncUsagePresenceSchedule } =
+        await import("@/lib/connectors/presence/usage-status-runner")
+      jest.mocked(syncUsagePresenceSchedule).mockClear()
 
       // Same enabled set (e.g. a presence/capability row write re-fired it).
       fire()
@@ -1440,6 +1461,7 @@ describe("installConnectorRuntime", () => {
       expect(mockRegisterAdapter).not.toHaveBeenCalled()
       expect(mockBuildAdapterFromRow).not.toHaveBeenCalled()
       expect(mockUnregisterRunning).not.toHaveBeenCalled()
+      expect(syncUsagePresenceSchedule).not.toHaveBeenCalled()
     })
 
     it("hot-adds a webhook adapter (Rust register + inbound server), reaps it on disable", async () => {

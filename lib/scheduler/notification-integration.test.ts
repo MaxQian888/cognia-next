@@ -104,6 +104,67 @@ describe("notification-integration", () => {
   })
 
   describe("notifyTaskEvent", () => {
+    it("keeps per-execution identity for a one-shot task", async () => {
+      const onceTask = {
+        ...mockTask,
+        trigger: { type: "once", runAt: new Date() },
+      } as unknown as ScheduledTask
+
+      await notifyTaskEvent(onceTask, mockExecution, "complete")
+
+      const input = mockCenterNotify.mock.calls[0][0]
+      expect(input.dedupeKey).toBe("task:task-1:complete:exec-1")
+      expect(input.coalesceWindowMs).toBeUndefined()
+    })
+
+    it("coalesces every run of a recurring task into one row per event type", async () => {
+      await notifyTaskEvent(mockTask, mockExecution, "complete")
+      await notifyTaskEvent(mockTask, { ...mockExecution, id: "exec-2" }, "complete")
+      await notifyTaskEvent(mockTask, { ...mockExecution, id: "exec-3" }, "error")
+
+      const keys = mockCenterNotify.mock.calls.map(([input]) => input.dedupeKey)
+      expect(keys).toEqual(["task:task-1:complete", "task:task-1:complete", "task:task-1:error"])
+      for (const [input] of mockCenterNotify.mock.calls) {
+        expect(input.coalesceWindowMs).toBe(Number.POSITIVE_INFINITY)
+      }
+    })
+
+    it.each(["start", "progress", "complete"] as const)(
+      "drops a routine %s of a maintenance task",
+      async (eventType) => {
+        const presence = {
+          ...mockTask,
+          id: "presence-1",
+          type: "connection:presence:refresh",
+          tags: ["usage-presence:adapter-1"],
+          notification: { ...mockTask.notification, channels: ["toast"] as const },
+        } as unknown as ScheduledTask
+
+        await notifyTaskEvent(presence, mockExecution, eventType)
+
+        expect(mockCenterNotify).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(["error", "auto-paused"] as const)(
+      "still surfaces a maintenance task's %s",
+      async (eventType) => {
+        const housekeeping = {
+          ...mockTask,
+          type: "connection:housekeeping:clock",
+          tags: ["system:connector-housekeeping"],
+          config: { pauseAfterConsecutiveFailures: 3 },
+          notification: { ...mockTask.notification, channels: ["toast"] as const },
+        } as unknown as ScheduledTask
+
+        await notifyTaskEvent(housekeeping, mockExecution, eventType)
+
+        expect(mockCenterNotify).toHaveBeenCalledWith(
+          expect.objectContaining({ dedupeKey: `task:task-1:${eventType}` })
+        )
+      }
+    )
+
     it("should skip notification if channels contains none", async () => {
       const taskWithNone = {
         ...mockTask,
@@ -140,7 +201,8 @@ describe("notification-integration", () => {
           level: "info",
           title: "Task Started: Test Task",
           channels: ["center", "os"],
-          dedupeKey: "task:task-1:start:exec-1",
+          dedupeKey: "task:task-1:start",
+          coalesceWindowMs: Number.POSITIVE_INFINITY,
           groupKey: "task:task-1",
         })
       )

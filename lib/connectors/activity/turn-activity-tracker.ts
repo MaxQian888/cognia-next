@@ -9,7 +9,7 @@
  *
  * Owner note: it lives under `lib/connectors/activity/` for historical
  * reasons and has no connector consumer left. Its one caller today is
- * `lib/ai/agent/team/teammate-progress-coalescer.ts`. It stays here because
+ * `lib/ai/agent/team/teammate/teammate-progress-coalescer.ts`. It stays here because
  * it depends on `./diff-types` and `./diff-producer`, which have no consumer
  * outside this folder either, so moving one of the three would replace a
  * misleading path with a worse import edge. Move the cluster together, or not

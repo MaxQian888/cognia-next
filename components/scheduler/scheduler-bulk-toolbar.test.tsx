@@ -4,8 +4,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { SchedulerBulkToolbar } from "./scheduler-bulk-toolbar"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
+const translateCalls: { key: string; values?: Record<string, unknown> }[] = []
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) => {
+    translateCalls.push({ key, values })
+    return key
+  },
   // The failure list is joined with `Intl.ListFormat`, which needs a locale.
   useLocale: () => "en",
 }))
@@ -129,6 +133,27 @@ describe("SchedulerBulkToolbar", () => {
     expect(calls).toEqual([])
     fireEvent.click(screen.getByTestId("bulk-delete-confirm"))
     await waitFor(() => expect(calls).toEqual([{ action: "delete", kind: "app", sourceId: "1" }]))
+  })
+
+  it("passes the selected count to the delete confirmation message", () => {
+    translateCalls.length = 0
+    render(
+      <SchedulerBulkToolbar
+        selectedItems={[
+          makeItem({ unifiedId: "app:1", kind: "app", sourceId: "1" }),
+          makeItem({ unifiedId: "app:2", kind: "app", sourceId: "2" }),
+        ]}
+        onClearSelection={() => {}}
+        registry={fakeRegistry([])}
+      />
+    )
+    fireEvent.click(screen.getByTestId("bulk-delete"))
+    // Without the values argument the ICU `{n}` placeholder throws
+    // FORMATTING_ERROR in production and falls back to the raw string.
+    expect(translateCalls).toContainEqual({
+      key: "bulkDeleteDescription",
+      values: { n: 2 },
+    })
   })
 
   it("fires onClearSelection from the clear button", () => {

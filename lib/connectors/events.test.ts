@@ -21,7 +21,7 @@ afterEach(() => {
 })
 
 describe("connectorListen", () => {
-  it("delegates to Tauri listen by default", async () => {
+  it("delegates to Tauri listen by default and forwards disposal", async () => {
     const unlisten = jest.fn()
     mockTauriListen.mockResolvedValue(unlisten)
     const handler = jest.fn()
@@ -29,7 +29,44 @@ describe("connectorListen", () => {
     const result = await connectorListen("connectors://webhook/tg-1", handler)
 
     expect(mockTauriListen).toHaveBeenCalledWith("connectors://webhook/tg-1", handler)
-    expect(result).toBe(unlisten)
+    expect(unlisten).not.toHaveBeenCalled()
+    result()
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+
+  it("swallows the async Tauri disposer rejection (listeners[eventId].handlerId race)", async () => {
+    const rejection = new TypeError(
+      "undefined is not an object (evaluating 'listeners[eventId].handlerId')"
+    )
+    const unlisten = jest.fn().mockRejectedValue(rejection)
+    mockTauriListen.mockResolvedValue(unlisten)
+    const unhandled = jest.fn()
+    process.on("unhandledRejection", unhandled)
+    try {
+      const result = await connectorListen("connectors://webhook/tg-3", jest.fn())
+
+      expect(() => result()).not.toThrow()
+      // Let the rejected disposer promise settle and any unhandled-rejection
+      // hook fire before asserting.
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(unlisten).toHaveBeenCalledTimes(1)
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+    }
+  })
+
+  it("swallows a synchronous throw from the Tauri disposer", async () => {
+    mockTauriListen.mockResolvedValue(
+      jest.fn(() => {
+        throw new Error("already gone")
+      })
+    )
+
+    const result = await connectorListen("connectors://webhook/tg-4", jest.fn())
+
+    expect(() => result()).not.toThrow()
   })
 
   it("routes through a swapped listener instead of Tauri", async () => {

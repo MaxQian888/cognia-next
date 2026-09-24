@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 // jsdom does not implement `window.matchMedia`; the command palette + motion
 // hooks read it. Provide a permissive stub.
@@ -151,6 +151,7 @@ jest.mock("@/components/ui/sidebar", () => ({
 // ---------------------------------------------------------------------------
 
 import { InboxShell } from "./inbox-shell"
+import { useLiveQuery } from "dexie-react-hooks"
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -334,4 +335,41 @@ describe("InboxShell: page header", () => {
     render(<InboxShell view="all" />)
     expect(screen.queryByTestId("inbox-header")).not.toBeInTheDocument()
   })
+})
+
+describe("InboxShell query failure isolation", () => {
+  it.each(["desktop", "tablet", "mobile"])(
+    "keeps the shell and detail available after a DB failure on %s, with local retry",
+    (breakpoint) => {
+      mockBreakpoint.mockReturnValue(breakpoint)
+      mockWriteRoute.mockReturnValue("local")
+      const error = Object.assign(new Error("Transaction became inactive"), {
+        name: "TransactionInactiveError",
+      })
+      const queryMock = useLiveQuery as jest.Mock
+      queryMock.mockImplementation(() => {
+        throw error
+      })
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+      try {
+        render(
+          <InboxShell view="all">
+            <div data-testid="healthy-detail">Existing conversation</div>
+          </InboxShell>
+        )
+        expect(screen.getByTestId("healthy-detail")).toBeInTheDocument()
+        expect(screen.getByTestId("inbox-conversation-list-pane")).toBeInTheDocument()
+        expect(screen.getByTestId("inbox-notice-area-stub")).toBeInTheDocument()
+        expect(screen.getAllByTestId("inbox-error-boundary")).toHaveLength(2)
+        queryMock.mockReturnValue([])
+        for (const retry of screen.getAllByRole("button", { name: /retry/i }))
+          fireEvent.click(retry)
+        expect(screen.queryByTestId("inbox-error-boundary")).not.toBeInTheDocument()
+        expect(screen.getByTestId("healthy-detail")).toBeInTheDocument()
+      } finally {
+        queryMock.mockReturnValue([])
+        consoleError.mockRestore()
+      }
+    }
+  )
 })

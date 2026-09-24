@@ -37,6 +37,7 @@ import {
 } from "@/stores/inbox/inbox-layout-store"
 import { InboxSidebar, InboxSidebarContent } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
+import { InboxErrorBoundary } from "./inbox-error-boundary"
 import { InboxNoticeArea } from "./notices/notice-area"
 import { StateCard } from "./state/state-card"
 import { useInboxWriteRoute } from "@/lib/connectors/inbox-writes"
@@ -157,11 +158,13 @@ function DesktopInboxShell({
           className="flex flex-col overflow-hidden border-e"
           data-testid="inbox-sidebar-pane"
         >
-          <InboxSidebarContent
-            view={view}
-            activeAdapterId={adapterId}
-            activePlatformKind={platformKind}
-          />
+          <InboxErrorBoundary>
+            <InboxSidebarContent
+              view={view}
+              activeAdapterId={adapterId}
+              activePlatformKind={platformKind}
+            />
+          </InboxErrorBoundary>
         </ResizablePanel>
         <ResizableHandle withHandle aria-label={t("resize.sidebarHandle")} />
         <ResizablePanel
@@ -172,11 +175,13 @@ function DesktopInboxShell({
           className="flex flex-col overflow-hidden border-e"
           data-testid="inbox-conversation-list-pane"
         >
-          <ConversationList
-            adapterId={adapterId}
-            platformKind={platformKind}
-            activeConversationKey={conversationKey}
-          />
+          <InboxErrorBoundary key={`${adapterId ?? ""}:${platformKind ?? ""}`}>
+            <ConversationList
+              adapterId={adapterId}
+              platformKind={platformKind}
+              activeConversationKey={conversationKey}
+            />
+          </InboxErrorBoundary>
         </ResizablePanel>
         <ResizableHandle withHandle aria-label={t("resize.detailHandle")} />
         <ResizablePanel
@@ -187,8 +192,12 @@ function DesktopInboxShell({
           data-testid="inbox-detail-pane"
           data-bg-target="chat"
         >
-          <InboxNoticeArea conversationKey={conversationKey} />
-          <DetailContent emptyPrompt={emptyPrompt}>{children}</DetailContent>
+          <InboxErrorBoundary key={`notices:${conversationKey ?? ""}`}>
+            <InboxNoticeArea conversationKey={conversationKey} />
+          </InboxErrorBoundary>
+          <InboxErrorBoundary key={`detail:${conversationKey ?? ""}`}>
+            <DetailContent emptyPrompt={emptyPrompt}>{children}</DetailContent>
+          </InboxErrorBoundary>
         </ResizablePanel>
       </ResizablePanelGroup>
       {/* ⌘K is the unified global search (ADR-0129); platform-bound
@@ -260,7 +269,9 @@ export function InboxShell({
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
     >
       {/* Left pane — adapter sections + view-mode chips */}
-      <InboxSidebar view={view} activeAdapterId={adapterId} activePlatformKind={platformKind} />
+      <InboxErrorBoundary>
+        <InboxSidebar view={view} activeAdapterId={adapterId} activePlatformKind={platformKind} />
+      </InboxErrorBoundary>
 
       {/* Middle pane — conversation list. Full-width on mobile when no
        * conversation is selected; fixed responsive widths on md+. */}
@@ -271,11 +282,13 @@ export function InboxShell({
           !showList && "hidden md:flex"
         )}
       >
-        <ConversationList
-          adapterId={adapterId}
-          platformKind={platformKind}
-          activeConversationKey={conversationKey}
-        />
+        <InboxErrorBoundary key={`${adapterId ?? ""}:${platformKind ?? ""}`}>
+          <ConversationList
+            adapterId={adapterId}
+            platformKind={platformKind}
+            activeConversationKey={conversationKey}
+          />
+        </InboxErrorBoundary>
       </div>
 
       {/* Right pane — conversation detail / children */}
@@ -287,8 +300,12 @@ export function InboxShell({
           !showDetail && "hidden md:flex"
         )}
       >
-        <InboxNoticeArea conversationKey={conversationKey} />
-        <DetailContent emptyPrompt={t("selectPrompt")}>{children}</DetailContent>
+        <InboxErrorBoundary key={`notices:${conversationKey ?? ""}`}>
+          <InboxNoticeArea conversationKey={conversationKey} />
+        </InboxErrorBoundary>
+        <InboxErrorBoundary key={`detail:${conversationKey ?? ""}`}>
+          <DetailContent emptyPrompt={t("selectPrompt")}>{children}</DetailContent>
+        </InboxErrorBoundary>
       </SidebarInset>
     </SidebarProvider>
   )

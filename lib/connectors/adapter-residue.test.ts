@@ -211,6 +211,34 @@ describe("reapAdapterResidue", () => {
     expect(report.reaped).toEqual({})
   })
 
+  it("deletes the adapter's connection:* scheduled tasks through the live scheduler", async () => {
+    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
+    const now = new Date()
+    const task = (id: string, adapterId: string) => ({
+      id,
+      name: id,
+      type: "connection:presence:refresh" as const,
+      trigger: { type: "interval" as const, intervalMs: 60_000 },
+      payload: { adapterId },
+      config: { maxRetries: 3 } as never,
+      notification: {} as never,
+      status: "active" as const,
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    await schedulerDb.createTask(task("t-target", TARGET.id))
+    await schedulerDb.createTask(task("t-keep", KEEP))
+
+    const report = await reapAdapterResidue(TARGET)
+
+    expect(await schedulerDb.getTask("t-target")).toBeNull()
+    expect(await schedulerDb.getTask("t-keep")).not.toBeNull()
+    expect(report.reaped["scheduledTasks"]).toBe(1)
+  })
+
   it("never throws, and names a table it could not reap", async () => {
     const db = getDb() as unknown as Record<string, unknown>
     const original = db["connectorAudit"]

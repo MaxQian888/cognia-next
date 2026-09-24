@@ -155,6 +155,30 @@ describe("TaskNotificationDisplay", () => {
     expect(screen.queryByText(longUrl)).not.toBeInTheDocument()
   })
 
+  it("surfaces a muted due reminder — the unmute surface after a toast Mute", () => {
+    const notification: TaskNotificationConfig = {
+      onStart: false,
+      onComplete: true,
+      onError: true,
+      channels: ["toast"],
+      dueReminder: false,
+    }
+    render(<TaskNotificationDisplay notification={notification} />)
+    expect(screen.getByText("Remind when due")).toBeInTheDocument()
+    expect(screen.getByText("Muted")).toBeInTheDocument()
+  })
+
+  it("does not show a due-reminder row while it is on (absent = on)", () => {
+    const notification: TaskNotificationConfig = {
+      onStart: false,
+      onComplete: true,
+      onError: true,
+      channels: ["toast"],
+    }
+    render(<TaskNotificationDisplay notification={notification} />)
+    expect(screen.queryByText("Remind when due")).not.toBeInTheDocument()
+  })
+
   it("renders only the facts in the bare variant, for a host that owns the title", () => {
     render(<TaskNotificationDisplay notification={undefined} variant="bare" />)
     expect(screen.getByTestId("task-notification-facts")).toBeInTheDocument()

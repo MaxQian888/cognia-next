@@ -9,11 +9,15 @@
  * `CompanionTransport.subscribe`-backed listener. One transport
  * implementation, two event sources.
  *
- * Default: Tauri `listen` — byte-identical to the transports' previous
- * direct import.
+ * Default: Tauri `listen`, with the returned disposer routed through
+ * `safeUnlisten`. Tauri's disposer is async and can reject with
+ * `listeners[eventId].handlerId` when a transport tears down before its
+ * registration eval ran; every transport calls the disposer fire-and-forget,
+ * so the rejection would otherwise surface as an unhandled promise rejection.
  */
 
 import { listen as tauriListen } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
 /** Envelope shape shared by Tauri events and the headless adapter. */
 export interface ConnectorEvent<T> {
@@ -27,7 +31,10 @@ export type ConnectorListenFn = <T>(
   handler: (event: ConnectorEvent<T>) => void
 ) => Promise<ConnectorUnlistenFn>
 
-const defaultListen: ConnectorListenFn = (event, handler) => tauriListen(event, handler)
+const defaultListen: ConnectorListenFn = async (event, handler) => {
+  const unlisten = await tauriListen(event, handler)
+  return () => safeUnlisten(unlisten)
+}
 
 let listenImpl: ConnectorListenFn = defaultListen
 

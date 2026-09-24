@@ -142,7 +142,7 @@ export function createSquadBotExecutor(deps: SquadExecutorDeps = {}): BotExecuto
     const start =
       deps.start ??
       (async (input) => {
-        const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+        const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
         return startSquadRun(input)
       })
 

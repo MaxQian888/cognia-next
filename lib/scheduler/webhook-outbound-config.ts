@@ -80,26 +80,45 @@ async function readSigningSecret(required: boolean): Promise<string | null> {
   }
 }
 
+export interface WebhookSigningState {
+  enabled: boolean
+  loading: boolean
+  /**
+   * Signing is configured but the secret could not be read (secure storage
+   * locked or unavailable). Signed deliveries fail in this state, so the UI
+   * says so instead of claiming "not signed" or spinning on "loading".
+   */
+  unavailable: boolean
+}
+
 /**
  * React hook indicating whether outbound webhook signing is configured.
  *
  * Resolves once on mount via `getWebhookOutboundConfig()`. The signing secret
  * is stored by the shared secure-storage authority and rarely changes
- * mid-session, so mount-time resolution is sufficient.
+ * mid-session, so mount-time resolution is sufficient. A failed read (the
+ * store is locked while signing is required) resolves to `unavailable`; it
+ * must not escape as an unhandled rejection from this fire-and-forget effect.
  */
-export function useWebhookSigningState(): { enabled: boolean; loading: boolean } {
-  const [state, setState] = useState<{ enabled: boolean; loading: boolean }>({
+export function useWebhookSigningState(): WebhookSigningState {
+  const [state, setState] = useState<WebhookSigningState>({
     enabled: false,
     loading: true,
+    unavailable: false,
   })
 
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      const config = await getWebhookOutboundConfig()
-      if (cancelled) return
-      setState({ enabled: Boolean(config.signingSecret), loading: false })
-    })()
+    void getWebhookOutboundConfig().then(
+      (config) => {
+        if (cancelled) return
+        setState({ enabled: Boolean(config.signingSecret), loading: false, unavailable: false })
+      },
+      () => {
+        if (cancelled) return
+        setState({ enabled: false, loading: false, unavailable: true })
+      }
+    )
     return () => {
       cancelled = true
     }

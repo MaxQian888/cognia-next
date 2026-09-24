@@ -7,7 +7,8 @@
  * controls, so the list stays usable with a keyboard and on touch. Actions
  * live in the detail, the keyboard and the bulk toolbar. The one thing that
  * stays interactive beside the button is the multi-select checkbox, which
- * sits outside it and reveals on hover or once anything is checked.
+ * sits outside it and reveals on hover, keyboard focus or touch, or once
+ * anything is checked.
  *
  * The second line is the row's reason to exist: the item's attention signal
  * when it has one (failed last night, running now, cannot run here), else
@@ -19,6 +20,8 @@ import { useTranslations } from "next-intl"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
+import { scheduledIdentityLabel } from "@/lib/scheduler/duplicate-names"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
 import type { AttentionSignal } from "@/lib/scheduler/attention"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
@@ -42,6 +45,7 @@ export interface SchedulerListRowProps {
   onToggleCheck: (item: UnifiedScheduledItem) => void
   /** Whether any row is checked; keeps every checkbox visible during a bulk session. */
   checkMode?: boolean
+  showIdentity?: boolean
 }
 
 /** The one line an attention signal shows on a row. */
@@ -82,6 +86,7 @@ function SchedulerListRowImpl({
   onSelect,
   onToggleCheck,
   checkMode = false,
+  showIdentity = false,
 }: SchedulerListRowProps) {
   const t = useTranslations("scheduler")
   const triggerText = useTriggerText()
@@ -98,11 +103,13 @@ function SchedulerListRowImpl({
       data-selected={selected || undefined}
     >
       <span
+        data-testid="scheduler-list-row-check-slot"
         className={cn(
-          "flex w-7 shrink-0 items-center justify-center transition-opacity",
-          checkMode || checked
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          "flex w-7 shrink-0 items-center justify-center",
+          // Revealed on row hover, keyboard focus and touch (no hover there);
+          // only the opacity fades, so the checkbox is always reachable.
+          HOVER_REVEAL_GROUP_CLASS,
+          (checkMode || checked) && "opacity-100"
         )}
       >
         <Checkbox
@@ -138,6 +145,14 @@ function SchedulerListRowImpl({
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
             <AuthoredByBadge source={item.createdBySource} />
           </span>
+          {showIdentity ? (
+            <span
+              className="block truncate font-mono text-[10px] text-muted-foreground"
+              title={item.unifiedId}
+            >
+              {scheduledIdentityLabel(t(`kindFilter.${item.kind}`), item.sourceId)}
+            </span>
+          ) : null}
           <span className="mt-0.5 flex items-center gap-1.5 text-xs">
             {signal ? (
               <span

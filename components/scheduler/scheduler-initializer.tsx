@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect } from "react"
+import { useRouter } from "next/navigation"
 
 import { stopSchedulerSystem } from "@/lib/scheduler"
+import { installScheduledNotificationCommands } from "@/lib/scheduler/notification-commands"
 import { useSchedulerStore } from "@/stores/scheduler"
 import { installExecutionEventBridge } from "@/lib/execution/event-bridge"
 import { loggers } from "@cognia/logging"
@@ -20,10 +22,18 @@ let pendingStopVersion = 0
  * Should be placed in the app providers to ensure scheduler runs throughout the app lifecycle.
  */
 export function SchedulerInitializer() {
+  const router = useRouter()
   const initialize = useSchedulerStore((state) => state.initialize)
   const isInitialized = useSchedulerStore((state) => state.isInitialized)
   const setSchedulerStatus = useSchedulerStore((state) => state.setSchedulerStatus)
   const loadPermissionPolicy = useSchedulerStore((state) => state.loadPermissionPolicy)
+
+  // Notification commands (`scheduler.open-task`, `scheduled-due.mute`) need a
+  // UI navigate — registering them here keeps lib/scheduler headless-safe.
+  useEffect(
+    () => installScheduledNotificationCommands({ navigate: (path) => router.push(path) }),
+    [router]
+  )
 
   useEffect(() => {
     schedulerInitializerMounts += 1

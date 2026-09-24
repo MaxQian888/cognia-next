@@ -8,7 +8,12 @@ jest.mock("@/lib/db/notifications", () => ({
   clearNotifications: jest.fn(),
 }))
 
+jest.mock("@/lib/notifications/recurring-compaction", () => ({
+  ensureRecurringNotificationsCompacted: jest.fn(async () => ({ archived: 0, updated: 0 })),
+}))
+
 import * as dbModule from "@/lib/db/notifications"
+import { ensureRecurringNotificationsCompacted } from "@/lib/notifications/recurring-compaction"
 import { useNotificationStore, recomputeCounts } from "./notification-store"
 
 const db = dbModule as jest.Mocked<typeof dbModule>
@@ -72,6 +77,20 @@ describe("hydrate", () => {
     expect(s.hydrated).toBe(true)
     expect(s.items.map((r) => r.id)).toEqual(["a"])
     expect(s.directedUnread).toBe(1)
+  })
+
+  it("compacts the recurring backlog before reading the feed", async () => {
+    const order: string[] = []
+    ;(ensureRecurringNotificationsCompacted as jest.Mock).mockImplementationOnce(async () => {
+      order.push("compact")
+      return { archived: 3, updated: 1 }
+    })
+    db.listNotifications.mockImplementationOnce(async () => {
+      order.push("list")
+      return []
+    })
+    await useNotificationStore.getState().hydrate()
+    expect(order).toEqual(["compact", "list"])
   })
 })
 

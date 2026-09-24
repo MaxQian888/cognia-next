@@ -19,7 +19,7 @@ const runSquadLifecycleMock = jest.fn(async (_input: Record<string, unknown>) =>
   runId: "r",
   status: "completed",
 }))
-jest.mock("@/lib/ai/agent/team/squad-lifecycle-runner", () => ({
+jest.mock("@/lib/ai/agent/team/squad/squad-lifecycle-runner", () => ({
   __esModule: true,
   runSquadLifecycle: (input: Record<string, unknown>) => runSquadLifecycleMock(input),
 }))
@@ -27,7 +27,7 @@ const createSquadRunRecordsMock = jest.fn(async (seed: { runId: string }) => ({
   executionRunId: `execution:team:${seed.runId}`,
   created: true,
 }))
-jest.mock("@/lib/ai/agent/team/squad-run-records", () => ({
+jest.mock("@/lib/ai/agent/team/squad/squad-run-records", () => ({
   __esModule: true,
   createSquadRunRecords: (seed: { runId: string }) => createSquadRunRecordsMock(seed),
   findLiveSquadRun: async () => undefined,

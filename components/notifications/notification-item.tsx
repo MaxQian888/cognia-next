@@ -26,6 +26,7 @@ import {
   FolderIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { useProjectStore } from "@/stores/project/project-store"
 import { Button } from "@/components/ui/button"
 import {
@@ -195,10 +196,21 @@ export function NotificationItem({
                 size="icon"
                 variant="ghost"
                 className={cn(
-                  "size-7 shrink-0 data-[state=open]:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100",
+                  "size-7 shrink-0 group-focus-within:opacity-100",
+                  // Shared reveal policy (focus, open menu, coarse pointer) so
+                  // a tablet at `sm`+ with no hover still reaches the menu. The
+                  // hover path stays `sm:`-only and the resting 70% below `sm`
+                  // is kept, so a mouse sees exactly what it did before.
+                  // `transition-all` after the constant keeps the Button's own
+                  // hover-colour transition that `transition-opacity` would
+                  // otherwise merge away.
                   menuAlwaysVisible
                     ? "opacity-100"
-                    : "opacity-70 sm:opacity-0 sm:group-hover:opacity-100"
+                    : cn(
+                        HOVER_REVEAL_CONTROL_BASE_CLASS,
+                        "sm:group-hover:opacity-100 max-sm:opacity-70",
+                        "transition-all"
+                      )
                 )}
                 aria-label={t("center.itemActions")}
               >

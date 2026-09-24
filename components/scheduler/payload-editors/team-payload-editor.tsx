@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
+import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import type { AgentTeamDraft } from "./types"
 import { useProjectStore } from "@/stores/project/project-store"
 

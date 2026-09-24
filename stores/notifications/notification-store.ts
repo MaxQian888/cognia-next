@@ -14,6 +14,7 @@ import {
   clearNotifications,
 } from "@/lib/db/notifications"
 import { cascadeReadState } from "@/lib/notifications/read-state"
+import { ensureRecurringNotificationsCompacted } from "@/lib/notifications/recurring-compaction"
 import { snoozeUntil, isSnoozed } from "@/lib/notifications/snooze"
 
 const now = () => Date.now()
@@ -80,6 +81,9 @@ export const useNotificationStore = create<NotificationStoreState>()((set, get) 
   sourceFilter: undefined,
 
   hydrate: async () => {
+    // Once per process: fold the unread backlog recurring producers wrote
+    // before they coalesced, so the first badge the user sees is honest.
+    await ensureRecurringNotificationsCompacted()
     const items = await listNotifications({ hideSnoozedAfter: now() })
     set({ items, hydrated: true, ...recomputeCounts(items, now()) })
   },

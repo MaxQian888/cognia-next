@@ -143,3 +143,12 @@ describe("SchedulerListPane", () => {
     expect(screen.getByTestId("sidebar-chrome")).toContainElement(screen.getByTestId("bulk"))
   })
 })
+
+it("disambiguates same-name tasks without renaming persisted names", () => {
+  const first = { ...item("first"), name: "demo-heartbeat" }
+  const second = { ...item("second"), name: "demo-heartbeat" }
+  render(<SchedulerListPane {...props({ items: [first, second] })} />)
+  expect(screen.getAllByText("demo-heartbeat")).toHaveLength(2)
+  expect(screen.getByTitle("app:first")).toHaveTextContent("first")
+  expect(screen.getByTitle("app:second")).toHaveTextContent("second")
+})

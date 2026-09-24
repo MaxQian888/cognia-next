@@ -93,6 +93,24 @@ describe("useWebhookSigningState", () => {
     expect(result.current.enabled).toBe(true)
   })
 
+  it("resolves to unavailable (not an unhandled rejection) when a required secret cannot be read", async () => {
+    useWebhookStore.setState((state) => ({
+      config: { ...state.config, hasSigningSecret: true },
+    }))
+    mockedGetSecret.mockRejectedValue(new Error("SECRET_STORE_LOCKED: master key read"))
+    const unhandled = jest.fn()
+    process.on("unhandledRejection", unhandled)
+    try {
+      const { result } = renderHook(() => useWebhookSigningState())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current).toEqual({ enabled: false, loading: false, unavailable: true })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+    }
+  })
+
   it("does not update state after unmount", async () => {
     let resolveSecret: ((value: string) => void) | undefined
     mockedGetSecret.mockReturnValue(

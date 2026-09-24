@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
-import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/policy/permission-modes"
 import type { ExternalAgentInstance, ExternalAgentProtocol } from "@/types/agent/external-agent"
 import { PermissionModeSelect } from "./permission-mode-select"
 import type { ExternalAgentDraft } from "./types"

@@ -13,6 +13,14 @@ import { NOTIFICATION_LEVEL_RANK } from "@/types/notifications"
 
 export const DEFAULT_COALESCE_WINDOW_MS = 45_000
 
+/**
+ * Window for recurring producers: a repeat bumps the newest non-archived row
+ * with the same `dedupeKey` no matter how old it is. A task that fires every
+ * five minutes then owns one updating entry (with a count), not a new row per
+ * run; archiving that entry lets the next occurrence start a fresh one.
+ */
+export const COALESCE_UNTIL_ARCHIVED = Number.POSITIVE_INFINITY
+
 /** Earliest `updatedAt` a record may have to still be coalescable at `now`. */
 export function coalesceSince(now: number, windowMs = DEFAULT_COALESCE_WINDOW_MS): number {
   return now - windowMs

@@ -11,6 +11,9 @@ import { getDb } from "@/lib/db/schema"
 import { createAdapterInstance, getAdapterInstance } from "@/lib/db/adapter-instances"
 import { upsertSessionUsage } from "@/lib/db/session-usage"
 import { hasTaskExecutor } from "@/lib/scheduler/task-scheduler"
+import { ADAPTER_DISABLED_PRESENCE_TAG } from "@/lib/scheduler/connection-task-orphans"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import {
@@ -18,11 +21,53 @@ import {
   installUsagePresenceHandlers,
   resolvePresenceConfig,
   runUsagePresenceRefresh,
+  syncUsagePresenceSchedule,
 } from "./usage-status-runner"
 
 const mockGetAdapter = jest.fn()
 jest.mock("@/lib/connectors/bus", () => ({
   getBus: () => ({ getAdapter: (id: string) => mockGetAdapter(id) }),
+}))
+
+// Capture executors as they register so the suite can drive them directly —
+// `handlePresenceRefresh` is module-private. `getTaskScheduler` delegates to
+// the real `schedulerDb` (no dependency cycle with this module) so the
+// self-heal test observes the actual store deletion.
+type CapturedPresenceExecutor = (
+  task: Pick<ScheduledTask, "id" | "type" | "payload">,
+  execution: Pick<TaskExecution, "id" | "input">,
+  signal: AbortSignal
+) => unknown
+const mockCapturedExecutors = new Map<string, CapturedPresenceExecutor>()
+const mockDeletedTaskIds: string[] = []
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  registerTaskExecutor: jest.fn((type: string, fn: CapturedPresenceExecutor) => {
+    mockCapturedExecutors.set(type, fn)
+  }),
+  unregisterTaskExecutor: jest.fn((type: string) => {
+    mockCapturedExecutors.delete(type)
+  }),
+  hasTaskExecutor: (type: string) => mockCapturedExecutors.has(type),
+  getTaskScheduler: jest.fn(() => ({
+    getTask: (id: string) =>
+      jest.requireActual("@/lib/scheduler/scheduler-db").schedulerDb.getTask(id),
+    getAllTasks: () => jest.requireActual("@/lib/scheduler/scheduler-db").schedulerDb.getAllTasks(),
+    pauseTask: async (id: string) => {
+      const { schedulerDb } = jest.requireActual("@/lib/scheduler/scheduler-db")
+      const task = await schedulerDb.getTask(id)
+      await schedulerDb.updateTask({ ...task, status: "paused" })
+    },
+    updateTask: async (id: string, patch: object) => {
+      const { schedulerDb } = jest.requireActual("@/lib/scheduler/scheduler-db")
+      const task = await schedulerDb.getTask(id)
+      await schedulerDb.updateTask({ ...task, ...patch })
+    },
+    deleteTask: (id: string) => {
+      mockDeletedTaskIds.push(id)
+      const { schedulerDb } = jest.requireActual("@/lib/scheduler/scheduler-db")
+      return schedulerDb.deleteTask(id)
+    },
+  })),
 }))
 
 const NOW = new Date("2026-07-08T10:00:00Z").getTime()
@@ -86,6 +131,7 @@ beforeEach(async () => {
   mockGetAdapter.mockReset()
   const db = getDb()
   await db.adapterInstances.clear()
+  await db.scheduledTasks.clear()
   await db.sessionUsage.clear()
   await db.outboundQueue.clear()
   await upsertSessionUsage({
@@ -131,6 +177,11 @@ describe("runUsagePresenceRefresh", () => {
   it("fails when the adapter row does not exist", async () => {
     const res = await runUsagePresenceRefresh({ adapterId: "nope", now: NOW })
     expect(res.success).toBe(false)
+  })
+
+  it("flags a missing adapter row as permanent so the executor can retire the schedule", async () => {
+    const res = await runUsagePresenceRefresh({ adapterId: "nope", now: NOW })
+    expect(res.adapterMissing).toBe(true)
   })
 
   it("fails when the adapter is not running", async () => {
@@ -469,5 +520,175 @@ describe("installUsagePresenceHandlers", () => {
   it("registers the connection:presence:refresh executor", () => {
     installUsagePresenceHandlers()
     expect(hasTaskExecutor(PRESENCE_REFRESH_TASK_TYPE)).toBe(true)
+  })
+
+  it("retires its own schedule when the bound adapter row is gone", async () => {
+    installUsagePresenceHandlers()
+    const executor = mockCapturedExecutors.get(PRESENCE_REFRESH_TASK_TYPE)
+    expect(executor).toBeDefined()
+
+    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
+    const now = new Date()
+    await schedulerDb.createTask({
+      id: "t-orphan",
+      name: "Usage presence · ad-gone",
+      type: PRESENCE_REFRESH_TASK_TYPE,
+      trigger: { type: "interval", intervalMs: 300_000 },
+      payload: { adapterId: "ad-gone" },
+      config: { maxRetries: 3 } as never,
+      notification: {} as never,
+      status: "active",
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    } as never)
+
+    const result = (await executor!(
+      {
+        id: "t-orphan",
+        type: PRESENCE_REFRESH_TASK_TYPE,
+        payload: { adapterId: "ad-gone" },
+      },
+      { id: "exec-1" },
+      new AbortController().signal
+    )) as { success: boolean; output?: Record<string, unknown> }
+
+    expect(result.success).toBe(true)
+    expect(result.output?.skipped).toBe("adapter_removed")
+    expect(mockDeletedTaskIds).toContain("t-orphan")
+    expect(await schedulerDb.getTask("t-orphan")).toBeNull()
+  })
+})
+
+describe("disabled adapter presence", () => {
+  async function seedPresenceTask(
+    status: "active" | "paused" = "active",
+    tags: string[] = []
+  ): Promise<ScheduledTask> {
+    const task: ScheduledTask = {
+      id: "presence-lifecycle",
+      name: "Presence",
+      type: PRESENCE_REFRESH_TASK_TYPE,
+      payload: { adapterId: "ad-1" },
+      tags: ["usage-presence:ad-1", ...tags],
+      trigger: { type: "interval", intervalMs: 300_000 },
+      status,
+      config: { timeout: 60_000, maxRetries: 0, retryDelay: 0, runMissedOnStartup: false },
+      notification: { onStart: false, onComplete: false, onError: true },
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    await schedulerDb.createTask(task)
+    return task
+  }
+
+  const enabledPresence = {
+    enabled: true,
+    mode: "badge",
+    intervalMinutes: 5,
+    window: "today",
+  } as const
+
+  it("uses the latest persisted presence on disable instead of the boot-time config", async () => {
+    const bootRow = await seedAdapter()
+    await seedPresenceTask()
+    await getDb().adapterInstances.update(bootRow.id, { presence: enabledPresence, enabled: false })
+    await syncUsagePresenceSchedule(bootRow.id, bootRow.presence, { adapterLifecycle: true })
+    expect(await schedulerDb.getTask("presence-lifecycle")).toMatchObject({
+      status: "paused",
+      tags: expect.arrayContaining([ADAPTER_DISABLED_PRESENCE_TAG]),
+    })
+  })
+
+  it("restores an automatically paused schedule after restart and removes its ownership marker", async () => {
+    const row = await seedAdapter({ ...enabledPresence, intervalMinutes: 9 })
+    await seedPresenceTask("paused", [ADAPTER_DISABLED_PRESENCE_TAG])
+    await syncUsagePresenceSchedule(row.id, undefined, { adapterLifecycle: true })
+    expect(await schedulerDb.getTask("presence-lifecycle")).toMatchObject({
+      status: "active",
+      trigger: { intervalMs: 540_000 },
+      tags: ["usage-presence:ad-1"],
+    })
+  })
+
+  it("preserves manual pauses through disable and boot, while an explicit settings save can resume", async () => {
+    const row = await seedAdapter(enabledPresence)
+    await seedPresenceTask("paused")
+    await getDb().adapterInstances.update(row.id, { enabled: false })
+    await syncUsagePresenceSchedule(row.id, undefined, { adapterLifecycle: true })
+    await getDb().adapterInstances.update(row.id, { enabled: true })
+    await syncUsagePresenceSchedule(row.id, undefined, { adapterLifecycle: true })
+    expect(await schedulerDb.getTask("presence-lifecycle")).toMatchObject({
+      status: "paused",
+      tags: ["usage-presence:ad-1"],
+    })
+    await syncUsagePresenceSchedule(row.id, enabledPresence)
+    expect((await schedulerDb.getTask("presence-lifecycle"))?.status).toBe("active")
+  })
+
+  it("marks an executor-triggered disabled pause for lifecycle recovery", async () => {
+    const row = await seedAdapter(enabledPresence)
+    const task = await seedPresenceTask()
+    await getDb().adapterInstances.update(row.id, { enabled: false })
+    installUsagePresenceHandlers()
+    const executor = mockCapturedExecutors.get(PRESENCE_REFRESH_TASK_TYPE)!
+    await executor(task, { id: "exec-disabled" }, new AbortController().signal)
+    expect(await schedulerDb.getTask(task.id)).toMatchObject({
+      status: "paused",
+      tags: expect.arrayContaining([ADAPTER_DISABLED_PRESENCE_TAG]),
+    })
+  })
+
+  it("skips before touching the bus when the adapter is disabled", async () => {
+    const row = await seedAdapter({
+      enabled: true,
+      mode: "badge",
+      intervalMinutes: 5,
+      window: "today",
+    })
+    await getDb().adapterInstances.update(row.id, { enabled: false })
+    mockGetAdapter.mockClear()
+    expect(await runUsagePresenceRefresh({ adapterId: row.id })).toEqual({
+      success: true,
+      output: { skipped: "adapter_disabled" },
+    })
+    expect(mockGetAdapter).not.toHaveBeenCalled()
+  })
+
+  it("pauses the existing schedule on disable and restores it on enable", async () => {
+    const row = await seedAdapter({
+      enabled: true,
+      mode: "badge",
+      intervalMinutes: 5,
+      window: "today",
+    })
+    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
+    await schedulerDb.createTask({
+      id: "presence-disabled",
+      name: "Presence",
+      type: PRESENCE_REFRESH_TASK_TYPE,
+      payload: { adapterId: row.id },
+      tags: [`usage-presence:${row.id}`],
+      trigger: { type: "interval", intervalMs: 300_000 },
+      status: "active",
+      config: {},
+      notification: {},
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as never)
+    await getDb().adapterInstances.update(row.id, { enabled: false })
+    await syncUsagePresenceSchedule(row.id, row.presence)
+    expect((await schedulerDb.getTask("presence-disabled"))?.status).toBe("paused")
+    await getDb().adapterInstances.update(row.id, { enabled: true })
+    await syncUsagePresenceSchedule(row.id, row.presence)
+    expect((await schedulerDb.getTask("presence-disabled"))?.status).toBe("active")
   })
 })

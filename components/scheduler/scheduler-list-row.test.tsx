@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { SchedulerListRow } from "./scheduler-list-row"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 import type { AttentionSignal } from "@/lib/scheduler/attention"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
@@ -98,4 +99,35 @@ describe("SchedulerListRow", () => {
     expect(onToggleCheck).toHaveBeenCalledWith(expect.objectContaining({ unifiedId: "app:t1" }))
     expect(onSelect).not.toHaveBeenCalled()
   })
+
+  it("keeps the multi-select checkbox reachable without a hover", () => {
+    const onToggleCheck = jest.fn()
+    render(
+      <SchedulerListRow {...baseProps} item={item()} signal={null} onToggleCheck={onToggleCheck} />
+    )
+    const slot = screen.getByTestId("scheduler-list-row-check-slot")
+    // Focus, touch and an open popup reveal it too; it only ever fades.
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(slot).toHaveClass(variant)
+    }
+    expect(slot).toHaveClass("opacity-0")
+    expect(slot).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select row" })
+    checkbox.focus()
+    expect(checkbox).toHaveFocus()
+    fireEvent.click(checkbox)
+    expect(onToggleCheck).toHaveBeenCalledWith(expect.objectContaining({ unifiedId: "app:t1" }))
+  })
+
+  it("keeps every checkbox resident during a bulk session", () => {
+    render(<SchedulerListRow {...baseProps} item={item()} signal={null} checkMode />)
+    expect(screen.getByTestId("scheduler-list-row-check-slot")).not.toHaveClass("opacity-0")
+  })
+})
+
+it("shows the stable task identifier when its name is ambiguous", () => {
+  const task = item()
+  render(<SchedulerListRow {...baseProps} item={task} signal={null} showIdentity />)
+  expect(screen.getByTitle(task.unifiedId)).toHaveTextContent(task.sourceId)
 })

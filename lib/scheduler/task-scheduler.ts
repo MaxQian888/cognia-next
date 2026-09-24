@@ -334,6 +334,8 @@ class TaskSchedulerImpl {
   private startedAtMs = 0
   /** Guards the one-shot deprecated-type sweep per process (see `pauseDeprecatedTasks`). */
   private deprecatedTasksSwept = false
+  /** Guards the one-shot orphaned `connection:*` sweep per process. */
+  private connectionOrphansSwept = false
   /** Guards the one-shot boot reconcile so multiple authority transitions in a
    * single process don't re-cancel executions repeatedly. */
   private staleExecutionsReconciled = false
@@ -687,6 +689,28 @@ class TaskSchedulerImpl {
         if (paused > 0) log.warn(`Paused ${paused} scheduled task(s) with a deprecated type`)
       } catch (err) {
         log.error("Failed to sweep deprecated-type tasks on boot:", err)
+      }
+      if (version !== this.lifecycleVersion) return
+    }
+
+    // `connection:*` tasks bind one adapter instance in their payload, but
+    // their executors live in the `integrations` boot bundle — which is only
+    // mounted while an adapter is enabled. A task whose adapter row is gone
+    // can never execute again; left armed it fires into EXECUTOR_NOT_FOUND
+    // on every retry, forever. Reap it here so orphaned rows written before
+    // the adapter-removal cascade existed are cleaned too.
+    if (!this.connectionOrphansSwept) {
+      this.connectionOrphansSwept = true
+      try {
+        const { reapOrphanedConnectionTasks } = await import("./connection-task-orphans")
+        const reaped = await reapOrphanedConnectionTasks(this)
+        if (reaped.length > 0) {
+          log.warn(
+            `Deleted ${reaped.length} connector task(s) bound to removed adapters: ${reaped.join(", ")}`
+          )
+        }
+      } catch (err) {
+        log.error("Failed to sweep orphaned connector tasks on boot:", err)
       }
       if (version !== this.lifecycleVersion) return
     }

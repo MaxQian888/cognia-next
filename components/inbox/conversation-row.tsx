@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -245,10 +246,16 @@ export function ConversationRow({
        * Reveal-on-hover, matching `SidebarMenuAction showOnHover`: these were
        * permanently visible, competing with the conversation itself for a
        * ~200px row. `ml-auto` was dead here — the preceding sibling is
-       * `flex-1`. Touch keeps them visible since there is no hover there. */}
+       * `flex-1`. The shared reveal policy keeps them reachable without a
+       * hover (focus, an open plugin popup, a coarse pointer); the hover path
+       * stays the named `row` group, and below `md` they are always shown. */}
       <PluginExtensionSlot
         point="inbox.conversation.actions"
-        className="flex shrink-0 items-center gap-1 empty:hidden md:opacity-0 md:transition-opacity md:group-hover/row:opacity-100 md:group-focus-within/row:opacity-100"
+        className={cn(
+          "flex shrink-0 items-center gap-1 empty:hidden",
+          HOVER_REVEAL_GROUP_BASE_CLASS,
+          "group-hover/row:opacity-100 group-focus-within/row:opacity-100 max-md:opacity-100"
+        )}
         context={{
           conversationKey: ck,
           adapterId,

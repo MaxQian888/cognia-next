@@ -13,9 +13,27 @@ jest.mock("./unread-pill", () => ({
     count > 0 ? <span data-testid="unread-pill">{count}</span> : null,
 }))
 
+// Stand in for a plugin contribution so the slot wrapper actually renders (the
+// real slot returns null with no registered extensions) and forwards the
+// `className` it is given, exactly as `PluginExtensionSlot` does.
+const mockSlotAction = jest.fn()
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({ point, className }: { point: string; className?: string }) => (
+    <div data-testid="conversation-row-plugin-slot" data-point={point} className={className}>
+      <button type="button" onClick={() => mockSlotAction()}>
+        plugin action
+      </button>
+    </div>
+  ),
+}))
+
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 function makeItem(overrides: Partial<ConversationRowItem> = {}): ConversationRowItem {
   const session = {
@@ -176,5 +194,34 @@ describe("ConversationRow", () => {
     )
     expect(screen.getByText("Product team")).toHaveClass("font-medium")
     expect(screen.getByText("Hello there")).toHaveClass("text-muted-foreground")
+  })
+
+  // The plugin actions used to reveal only on a hover of the named `row` group
+  // (at md+), so a keyboard focus inside the slot, an open plugin popup, or a
+  // tablet-width touch screen never showed them.
+  it("keeps the plugin actions reachable without a hover", () => {
+    mockSlotAction.mockClear()
+    render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+    const slot = screen.getByTestId("conversation-row-plugin-slot")
+    expect(slot).toHaveAttribute("data-point", "inbox.conversation.actions")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(slot).toHaveClass(variant)
+    }
+    // Mouse path is unchanged: the named row group, plus the existing
+    // keyboard path and the always-visible narrow layout.
+    expect(slot).toHaveClass(
+      "group-hover/row:opacity-100",
+      "group-focus-within/row:opacity-100",
+      "max-md:opacity-100"
+    )
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(slot).not.toHaveClass(forbidden)
+    }
+
+    const action = screen.getByRole("button", { name: "plugin action" })
+    action.focus()
+    expect(action).toHaveFocus()
+    fireEvent.click(action)
+    expect(mockSlotAction).toHaveBeenCalledTimes(1)
   })
 })

@@ -49,7 +49,10 @@ import { createConnectorLiveSteerCoordinator } from "@/lib/connectors/live-steer
 import { steerSession } from "@/lib/claude/ipc"
 import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { installScheduledOutboundHandlers } from "@/lib/connectors/scheduled-outbound"
-import { installUsagePresenceHandlers } from "@/lib/connectors/presence/usage-status-runner"
+import {
+  installUsagePresenceHandlers,
+  syncUsagePresenceSchedule,
+} from "@/lib/connectors/presence/usage-status-runner"
 import {
   connectorsRegisterAdapter,
   connectorsResetAllWs,
@@ -351,6 +354,17 @@ export function installConnectorRuntime(
   const runtimeFingerprints = new Map<string, string>()
   const managedAdapterIds = new Set<string>()
   const supervisor = getConnectorRuntimeSupervisor()
+
+  const reconcilePresenceSchedule = async (adapterId: string): Promise<void> => {
+    try {
+      await syncUsagePresenceSchedule(adapterId, undefined, { adapterLifecycle: true })
+    } catch (err) {
+      log(
+        "warn",
+        `[connector-bus] presence schedule reconciliation failed for ${adapterId}: ${String(err)}`
+      )
+    }
+  }
 
   /** Register one built-in definition and reconcile it through the supervisor. */
   const bootAdapter = async (
@@ -673,6 +687,8 @@ export function installConnectorRuntime(
     // long-poll / gateway adapters dial out and need no local listener.
     await Promise.all(
       enabled.map(async (row) => {
+        await reconcilePresenceSchedule(row.id)
+        if (cancelled) return
         const booted = await bootAdapter(undefined, row, bus)
         if (!booted) {
           const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"
@@ -898,6 +914,9 @@ export function installConnectorRuntime(
         // same serialized lane as every other lifecycle operation.
         for (const id of Array.from(managedAdapterIds)) {
           if (enabledIds.has(id)) continue
+          if (!rows.some((row) => row.id === id)) {
+            await reconcilePresenceSchedule(id)
+          }
           runtimeRows.delete(id)
           runtimeFingerprints.delete(id)
           managedAdapterIds.delete(id)
@@ -911,6 +930,8 @@ export function installConnectorRuntime(
           try {
             const fingerprint = adapterRuntimeFingerprint(row)
             if (!managedAdapterIds.has(row.id)) {
+              await reconcilePresenceSchedule(row.id)
+              if (cancelled) return
               const booted = await bootAdapter(undefined, row, bus)
               if (!booted) {
                 const reason = supervisor.getSnapshot(row.id)?.reasonCode ?? "unknown"

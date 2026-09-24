@@ -9,7 +9,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-jest.mock("@/lib/ai/agent/external/permission-modes", () => ({
+jest.mock("@/lib/ai/agent/external/policy/permission-modes", () => ({
   supportedPermissionModes: () => ["default", "plan", "bypassPermissions"],
 }))
 

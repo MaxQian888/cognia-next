@@ -310,6 +310,11 @@ interface TaskFormState {
   notifyOnComplete: boolean
   notifyOnError: boolean
   notifyOnProgress: boolean
+  /**
+   * The pet's "task is due" reminder (`TaskNotificationConfig.dueReminder`).
+   * Only meaningful for due-time triggers; `event` tasks never become due.
+   */
+  notifyDueReminder: boolean
   notificationChannels: NotificationChannel[]
   /**
    * Conversation the `im` channel delivers to. Empty means "use the global ops
@@ -491,6 +496,7 @@ function createInitialState(
     notifyOnComplete: initialValues?.notification?.onComplete ?? true,
     notifyOnError: initialValues?.notification?.onError ?? true,
     notifyOnProgress: initialValues?.notification?.onProgress ?? false,
+    notifyDueReminder: initialValues?.notification?.dueReminder ?? true,
     notificationChannels: initialValues?.notification?.channels || ["toast"],
     notificationImConversationKey: initialValues?.notification?.imTarget?.conversationKey ?? "",
     notificationWebhookUrl: initialValues?.notification?.webhookUrl ?? "",
@@ -768,6 +774,7 @@ export function TaskForm({
       notifyOnComplete: input.notification?.onComplete ?? true,
       notifyOnError: input.notification?.onError ?? true,
       notifyOnProgress: input.notification?.onProgress ?? false,
+      notifyDueReminder: input.notification?.dueReminder ?? true,
       notificationChannels: input.notification?.channels || ["toast"],
       notificationImConversationKey: input.notification?.imTarget?.conversationKey ?? "",
       notificationWebhookUrl: input.notification?.webhookUrl ?? "",
@@ -966,6 +973,7 @@ export function TaskForm({
         // (`PluginTaskContext.reportProgress`). Types with no reporter simply
         // never raise the event; the switch is not a lie, it is unused.
         onProgress: f.notifyOnProgress,
+        dueReminder: f.notifyDueReminder,
         channels: f.notificationChannels,
         // Only persisted when the channel is actually on and a key was typed;
         // an empty key means "fall back to the global ops channel", which is
@@ -1637,6 +1645,18 @@ export function TaskForm({
                 // for every other type the switch would arm a notification that
                 // can never fire, so it is disabled and says why (Working Rule 7).
                 inert: f.taskType !== "plugin",
+                hintId: "notify-on-progress-hint",
+              },
+              {
+                key: "dueReminder",
+                label: t("notifyDueReminder"),
+                checked: f.notifyDueReminder,
+                field: "notifyDueReminder" as const,
+                // The pet's due reminder only fires when a schedule slot comes
+                // due; an `event` trigger has no due time, so the switch would
+                // promise a reminder that can never happen (Working Rule 7).
+                inert: f.triggerType === "event",
+                hintId: "notify-due-reminder-hint",
               },
             ].map((item) => (
               <div
@@ -1652,24 +1672,41 @@ export function TaskForm({
                 <Switch
                   checked={item.checked}
                   disabled={"inert" in item && item.inert}
-                  aria-describedby={
-                    "inert" in item && item.inert ? "notify-on-progress-hint" : undefined
+                  aria-describedby={"inert" in item && item.inert ? item.hintId : undefined}
+                  data-testid={
+                    item.key === "progress"
+                      ? "notify-on-progress-switch"
+                      : item.key === "dueReminder"
+                        ? "notify-due-reminder-switch"
+                        : undefined
                   }
-                  data-testid={item.key === "progress" ? "notify-on-progress-switch" : undefined}
                   onCheckedChange={(v) => updateForm({ [item.field]: v })}
                 />
               </div>
             ))}
           </div>
 
-          {(f.notifyOnProgress || f.taskType !== "plugin") && (
-            <p
-              id="notify-on-progress-hint"
-              className="text-[10px] text-muted-foreground"
-              data-testid="notify-on-progress-hint"
-            >
-              {t("notifyOnProgressHint")}
-            </p>
+          {(f.notifyOnProgress || f.taskType !== "plugin" || f.triggerType === "event") && (
+            <div className="space-y-0.5">
+              {(f.notifyOnProgress || f.taskType !== "plugin") && (
+                <p
+                  id="notify-on-progress-hint"
+                  className="text-[10px] text-muted-foreground"
+                  data-testid="notify-on-progress-hint"
+                >
+                  {t("notifyOnProgressHint")}
+                </p>
+              )}
+              {f.triggerType === "event" && (
+                <p
+                  id="notify-due-reminder-hint"
+                  className="text-[10px] text-muted-foreground"
+                  data-testid="notify-due-reminder-hint"
+                >
+                  {t("notifyDueReminderEventHint")}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="space-y-2">

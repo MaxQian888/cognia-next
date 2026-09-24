@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
-import { supportedPermissionModes } from "@/lib/ai/agent/external/permission-modes"
+import { supportedPermissionModes } from "@/lib/ai/agent/external/policy/permission-modes"
 import type { PermissionMode } from "@/lib/settings/permission-mode-escalation"
 import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 

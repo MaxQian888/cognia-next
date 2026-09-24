@@ -18,10 +18,11 @@
  *      level for the same reason as step 1.
  *   3. Residue reap (`reapAdapterResidue`) — every OTHER table this adapter
  *      wrote to: audit, dedup ledger, queued outbound, inbox telemetry, the
- *      Lark session tables, per-conversation overrides, and the identities only
- *      this bot ever saw. All of it is unreachable once the row is gone, and
- *      none of it has a sweep of its own. See that module for the two
- *      categories deliberately kept.
+ *      Lark session tables, per-conversation overrides, the identities only
+ *      this bot ever saw, and the `connection:*` scheduled tasks bound to it.
+ *      All of it is unreachable once the row is gone, and none of it has a
+ *      sweep of its own. See that module for the two categories deliberately
+ *      kept.
  *   4. Row delete — the only step that is allowed to throw.
  *
  * Order matters: secrets go first so a failure in step 4 leaves the row

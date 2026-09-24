@@ -36,7 +36,7 @@ export async function executeAgentTeamTask(
 
   // Lazy import keeps the heavy agent-team runtime chain out of the scheduler
   // executor module graph at load time (and out of test hoisting order).
-  const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+  const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
 
   const team = agentTeamManager.get(payload.teamId)
   if (!team) {

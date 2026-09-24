@@ -79,9 +79,16 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
   // 1. Coalesce decision.
   let existing: NotificationRecord | undefined
   if (input.dedupeKey) {
-    existing = await deps.db.findByDedupeKey(input.dedupeKey, coalesceSince(now))
+    existing = await deps.db.findByDedupeKey(
+      input.dedupeKey,
+      coalesceSince(now, input.coalesceWindowMs)
+    )
   }
-  const action = decideCoalesce(existing, { now, backoff: input.coalesceBackoff })
+  const action = decideCoalesce(existing, {
+    now,
+    windowMs: input.coalesceWindowMs,
+    backoff: input.coalesceBackoff,
+  })
 
   // 2. Build/merge the record (deliveredVia filled after fan-out).
   let record: NotificationRecord

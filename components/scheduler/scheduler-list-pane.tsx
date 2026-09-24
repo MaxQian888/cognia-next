@@ -29,6 +29,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from "@/compone
 import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 import type { AttentionSignal } from "@/lib/scheduler/attention"
+import { duplicateNames } from "@/lib/scheduler/duplicate-names"
 import type { SchedulerListFilterState } from "@/hooks/scheduler/use-scheduler-list-filter"
 import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 
@@ -84,6 +85,8 @@ export function SchedulerListPane({
   const t = useTranslations("scheduler")
   const tList = useTranslations("scheduler.list")
   const checked = useMemo(() => new Set(checkedIds), [checkedIds])
+  // Shared with the ⌘K palette (`lib/global-search/providers/system.ts`).
+  const sharedNames = useMemo(() => duplicateNames(items), [items])
   const checkMode = checked.size > 0
   const allVisibleChecked = items.length > 0 && items.every((item) => checked.has(item.unifiedId))
 
@@ -200,6 +203,7 @@ export function SchedulerListPane({
               <div key={item.unifiedId} role="listitem">
                 <SchedulerListRow
                   item={item}
+                  showIdentity={sharedNames.has(item.name)}
                   signal={signalByItem.get(item.unifiedId) ?? null}
                   selected={selectedId === item.unifiedId}
                   highlighted={highlightedId === item.unifiedId}

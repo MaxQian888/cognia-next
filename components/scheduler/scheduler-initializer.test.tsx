@@ -35,6 +35,17 @@ jest.mock("@/lib/execution/event-bridge", () => ({
   installExecutionEventBridge: () => installBridgeMock(),
 }))
 
+// The notification command install is a separate module under test; here we
+// only assert the initializer wires it with a UI navigate and cleans up.
+const mockUninstallCommands = jest.fn()
+const mockInstallCommands = jest.fn<() => void, [{ navigate: (path: string) => void }]>(
+  () => mockUninstallCommands
+)
+jest.mock("@/lib/scheduler/notification-commands", () => ({
+  installScheduledNotificationCommands: (deps: { navigate: (path: string) => void }) =>
+    mockInstallCommands(deps),
+}))
+
 type StoreState = {
   initialize: jest.Mock<Promise<void>, []>
   isInitialized: boolean
@@ -80,6 +91,8 @@ beforeEach(() => {
   logWarn.mockClear()
   installBridgeMock.mockClear()
   teardownBridgeMock.mockClear()
+  mockInstallCommands.mockClear()
+  mockUninstallCommands.mockClear()
 })
 
 describe("SchedulerInitializer", () => {
@@ -177,6 +190,23 @@ describe("SchedulerInitializer", () => {
     expect(installBridgeMock).toHaveBeenCalledTimes(1)
     unmount()
     expect(teardownBridgeMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
+  it("installs the scheduler notification commands with router.push, uninstalled on unmount", async () => {
+    const { unmount } = render(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mockInstallCommands).toHaveBeenCalledTimes(1)
+    const deps = mockInstallCommands.mock.calls[0][0]
+    expect(typeof deps.navigate).toBe("function")
+    // navigate delegates to the mounted router's push — it must not throw.
+    deps.navigate("/scheduler?item=app%3At1")
+    unmount()
+    expect(mockUninstallCommands).toHaveBeenCalledTimes(1)
     await act(async () => {
       await Promise.resolve()
     })

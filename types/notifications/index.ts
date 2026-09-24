@@ -140,6 +140,14 @@ export interface NotificationInput {
   ttlMs?: number
   /** Opt into BACKOFF coalescing (window extends on each new event). */
   coalesceBackoff?: boolean
+  /**
+   * Coalescing window override (ms) for `dedupeKey`; default 45 s. Recurring
+   * producers (a scheduled task's outcome, a due reminder) pass
+   * `COALESCE_UNTIL_ARCHIVED` (`lib/notifications/dedup`) so every repeat
+   * updates ONE row — bumping `count` and re-surfacing it as unseen — until
+   * the user archives it, instead of adding a row per occurrence.
+   */
+  coalesceWindowMs?: number
   meta?: Record<string, unknown>
   // ── V2 (opt-in; absent = legacy behavior) ────────────────────────────────
   /**

@@ -11,7 +11,7 @@ const getMock = jest.fn()
 const startMock = jest.fn()
 const getRunMock = jest.fn()
 
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     get: (...a: unknown[]) => getMock(...a),
     start: (...a: unknown[]) => startMock(...a),

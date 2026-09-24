@@ -228,6 +228,17 @@ class SchedulerDatabase {
   }
 
   /**
+   * Get tasks whose type starts with `prefix` (any status). Backed by the
+   * `type` index — `where("type").startsWith` is a range scan, not a table
+   * scan. The connector orphan sweeps use it to reach every `connection:*`
+   * type without enumerating them.
+   */
+  async getTasksByTypePrefix(prefix: string): Promise<ScheduledTask[]> {
+    const dbTasks = await this.tasks.where("type").startsWith(prefix).toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+  }
+
+  /**
    * Get tasks with filters
    */
   async getFilteredTasks(filter: TaskFilter): Promise<ScheduledTask[]> {

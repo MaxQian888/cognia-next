@@ -22,6 +22,15 @@
  * - **Sessions and messages** — the operator's conversation history. Removing a
  *   bot removes the bot, not the record of what people said to it.
  *
+ * Scheduled tasks need a different path than the tables above: `connection:*`
+ * rows bind the adapter inside an encrypted `payload` blob (no index to reap
+ * by), and a live scheduler holds their timers in memory. They are deleted
+ * through `deleteConnectionTasksForAdapter` + the task scheduler's own
+ * `deleteTask`, so an armed presence/outbound schedule dies with the adapter
+ * instead of firing into `EXECUTOR_NOT_FOUND` on every interval forever.
+ * The boot-time sweep in `lib/scheduler/connection-task-orphans.ts` covers
+ * rows orphaned before this cascade existed.
+ *
  * Attachments and heartbeats are absent here because they already have owners:
  * `pruneAttachmentsForAdapter` (blob-confirmed, ledgered) and
  * `deleteAdapterInstance` respectively.
@@ -152,6 +161,16 @@ export async function reapAdapterResidue(
       continue
     }
     await reap(report, name, (table) => table.where("conversationKey").startsWith(prefix).delete())
+  }
+
+  try {
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    const { deleteConnectionTasksForAdapter } =
+      await import("@/lib/scheduler/connection-task-orphans")
+    const deleted = await deleteConnectionTasksForAdapter(target.id, getTaskScheduler())
+    if (deleted.length > 0) report.reaped.scheduledTasks = deleted.length
+  } catch {
+    report.failed.push("scheduledTasks")
   }
 
   return report

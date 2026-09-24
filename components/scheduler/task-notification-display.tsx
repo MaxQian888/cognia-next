@@ -69,6 +69,12 @@ export function TaskNotificationDisplay({
     ...(notification?.onProgress
       ? [{ label: t("notifyOnProgress"), value: t("notifyOnModes.always") }]
       : []),
+    // Same rule for the pet's due reminder: absent means on, so only the muted
+    // state earns a row — it is also where a user who muted from the toast
+    // finds the switch back.
+    ...(notification?.dueReminder === false
+      ? [{ label: t("notifyDueReminder"), value: t("dueReminderMuted") }]
+      : []),
   ]
 
   const facts = (

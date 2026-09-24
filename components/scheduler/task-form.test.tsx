@@ -205,6 +205,56 @@ describe("TaskForm", () => {
     expect(screen.queryByTestId("notify-on-progress-hint")).toBeNull()
   })
 
+  it("round-trips the due-reminder switch into notification.dueReminder", async () => {
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
+    render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
+    const toggle = screen.getByTestId("notify-due-reminder-switch") as HTMLInputElement
+    // On by default — muting is a per-task choice the toast's Mute can write.
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(toggle)
+    fireEvent.change(document.querySelector("input") as HTMLInputElement, {
+      target: { value: "Reminder task" },
+    })
+    fireEvent.click(screen.getByTestId("scheduler-task-submit"))
+    await screen.findByTestId("scheduler-task-form")
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notification: expect.objectContaining({ dueReminder: false }),
+      })
+    )
+  })
+
+  it("seeds dueReminder from an existing task and stays enabled on due-time triggers", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{
+          type: "chat",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+          notification: { onStart: false, onComplete: true, onError: true, dueReminder: false },
+        }}
+      />
+    )
+    const toggle = screen.getByTestId("notify-due-reminder-switch") as HTMLInputElement
+    expect(toggle.checked).toBe(false)
+    expect(toggle).not.toBeDisabled()
+  })
+
+  it("labels the due reminder inert for event triggers — they never come due", () => {
+    render(
+      <TaskForm
+        onSubmit={jest.fn(async () => undefined)}
+        onCancel={jest.fn()}
+        initialValues={{ type: "chat", trigger: { type: "event", eventType: "x:y" } }}
+      />
+    )
+    expect(screen.getByTestId("notify-due-reminder-switch")).toBeDisabled()
+    expect(screen.getByTestId("notify-due-reminder-hint")).toBeInTheDocument()
+  })
+
   it("shows lifecycle and jitter controls for recurring triggers only", () => {
     const first = render(
       <TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />

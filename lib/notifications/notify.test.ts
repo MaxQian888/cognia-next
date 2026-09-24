@@ -1,6 +1,7 @@
 import { notify, type NotifyDeps, type NotifyDbPort } from "./notify"
 import { DEFAULT_NOTIFICATION_PREFERENCES, type NotificationRecord } from "@/types/notifications"
 import { resolvePreferences } from "./preferences"
+import { COALESCE_UNTIL_ARCHIVED } from "./dedup"
 
 /** In-memory db port over a Map. */
 function makeDb(): NotifyDbPort & { rows: Map<string, NotificationRecord>; pruneCalls: number } {
@@ -219,6 +220,49 @@ describe("notify — coalescing", () => {
     t = 10_000 + 60_000 // beyond 45s window
     await notify({ source: "connector", level: "info", title: "b", dedupeKey: "k" }, deps)
     expect(deps.db.rows.size).toBe(2)
+  })
+
+  it("COALESCE_UNTIL_ARCHIVED keeps one updating row for a recurring producer", async () => {
+    const deps = baseDeps()
+    let t = 10_000
+    deps.now = () => t
+    let n = 0
+    deps.newId = () => `id-${n++}`
+    for (let run = 1; run <= 5; run += 1) {
+      t = 10_000 + run * 5 * 60_000 // every five minutes, far past 45 s
+      await notify(
+        {
+          source: "scheduler",
+          level: "success",
+          title: `run ${run}`,
+          dedupeKey: "task:t1:complete",
+          coalesceWindowMs: COALESCE_UNTIL_ARCHIVED,
+        },
+        deps
+      )
+      // The user reads it between runs; the next run re-surfaces the SAME row.
+      await deps.db.patchNotification("id-0", { readState: "read" })
+    }
+    expect(deps.db.rows.size).toBe(1)
+    expect(deps.db.rows.get("id-0")).toMatchObject({ count: 5, title: "run 5" })
+  })
+
+  it("an archived recurring row lets the next occurrence start a fresh one", async () => {
+    const deps = baseDeps()
+    let n = 0
+    deps.newId = () => `id-${n++}`
+    const input = {
+      source: "scheduler" as const,
+      level: "error" as const,
+      title: "failed",
+      dedupeKey: "task:t1:error",
+      coalesceWindowMs: COALESCE_UNTIL_ARCHIVED,
+    }
+    await notify(input, deps)
+    await deps.db.patchNotification("id-0", { readState: "done" })
+    await notify(input, deps)
+    expect(deps.db.rows.size).toBe(2)
+    expect(deps.db.rows.get("id-1")).toMatchObject({ readState: "unseen", count: 1 })
   })
 
   it("escalates level on bump (info → error)", async () => {

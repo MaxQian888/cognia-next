@@ -164,7 +164,7 @@ export function SchedulerBulkToolbar({
             <AlertDialogTitle>{t("bulkDeleteTitle") || "Delete selected tasks?"}</AlertDialogTitle>
             <AlertDialogDescription>
               {(
-                t("bulkDeleteDescription") ||
+                t("bulkDeleteDescription", { n: deletableCount }) ||
                 "This will delete {n} selected tasks across all kinds. This action cannot be undone."
               ).replace("{n}", String(deletableCount))}
             </AlertDialogDescription>

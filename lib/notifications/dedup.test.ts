@@ -1,4 +1,10 @@
-import { coalesceSince, decideCoalesce, buildBumpPatch, DEFAULT_COALESCE_WINDOW_MS } from "./dedup"
+import {
+  coalesceSince,
+  decideCoalesce,
+  buildBumpPatch,
+  COALESCE_UNTIL_ARCHIVED,
+  DEFAULT_COALESCE_WINDOW_MS,
+} from "./dedup"
 import type { NotificationRecord } from "@/types/notifications"
 
 function rec(over: Partial<NotificationRecord> = {}): NotificationRecord {
@@ -16,6 +22,14 @@ function rec(over: Partial<NotificationRecord> = {}): NotificationRecord {
     ...over,
   }
 }
+
+describe("COALESCE_UNTIL_ARCHIVED", () => {
+  it("matches any prior row and always bumps it", () => {
+    expect(coalesceSince(100_000, COALESCE_UNTIL_ARCHIVED)).toBe(Number.NEGATIVE_INFINITY)
+    const old = { createdAt: 1 } as Parameters<typeof decideCoalesce>[0]
+    expect(decideCoalesce(old, { now: 10 ** 12, windowMs: COALESCE_UNTIL_ARCHIVED })).toBe("bump")
+  })
+})
 
 describe("coalesceSince", () => {
   it("subtracts the default window", () => {

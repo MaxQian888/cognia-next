@@ -570,6 +570,15 @@ export interface TaskNotificationConfig {
    * adding it needs no Dexie version.
    */
   imTarget?: { conversationKey: string }
+  /**
+   * The pet's "task is due" reminder (Notification Center + functional toast +
+   * OS, plus the one-shot flourish). `false` mutes it for this task — the run
+   * still happens and the `onStart`/`onComplete`/`onError` notifications are
+   * unaffected. Absent means on, so rows that predate the flag keep reminding.
+   * Only meaningful for due-time triggers (`cron`/`interval`/`once`); `event`
+   * tasks never become due.
+   */
+  dueReminder?: boolean
 }
 
 /**
