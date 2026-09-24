@@ -1,0 +1,1330 @@
+import type { UIMessage } from "ai"
+import {
+  applyReactionChange,
+  type MessageReaction,
+  type ReactionChange,
+  type StoredMessage,
+} from "@cognia/agent-config-types"
+import { markMessagesRemoved, markSessionDirty } from "@/lib/chat/search/indexer"
+import {
+  revokeClaimsForDeletedMessages,
+  revokeClaimsForDeletedSession,
+} from "@/lib/memory/lifecycle/claim-deletion-closure"
+import { normalizeMessageMedia } from "@/lib/chat/media/normalize-message-media"
+import { persistMessageSessionAssets } from "./session-assets"
+import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
+import { getDb, withDbReopenRetry } from "./schema"
+import { resolveScopeProjectId } from "./project-scope"
+import {
+  collectUnreferencedMessageMedia,
+  isMessageOwnedMediaRef,
+  messageMediaRefRows,
+} from "./message-media-refs"
+import { parseMediaRef } from "./message-media"
+import {
+  isImagePart,
+  readImageEditVersion,
+  withImageEditVersion,
+  type ImageEditVersionV1,
+} from "@/lib/chat/image-edit/version"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
+import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+
+function newId() {
+  return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+}
+
+/** Max characters kept in the denormalized {@link ChatSession.lastMessagePreview}. */
+const PREVIEW_MAX = 120
+
+/** Concatenate the text of a message's `text` parts (ignores tool/file parts). */
+function messageText(parts: StoredMessage["parts"]): string {
+  let out = ""
+  for (const p of parts ?? []) {
+    if (p && typeof p === "object" && (p as { type?: unknown }).type === "text") {
+      const t = (p as { text?: unknown }).text
+      if (typeof t === "string") out += (out ? " " : "") + t
+    }
+  }
+  return out
+}
+
+/** One-line, length-capped preview derived from a message's text parts. */
+function previewOf(parts: StoredMessage["parts"]): string {
+  // The sidebar previews what was said, not the context envelope in front of it.
+  return messageText(stripPromptPreambleFromParts(parts ?? []) as StoredMessage["parts"])
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, PREVIEW_MAX)
+}
+
+async function bumpTranscriptRevision(
+  db: ReturnType<typeof getDb>,
+  sessionId: string
+): Promise<number | null> {
+  const session = await db.sessions.get(sessionId)
+  if (!session) return null
+  const revision = (session.transcriptRevision ?? 0) + 1
+  await db.sessions.update(sessionId, { transcriptRevision: revision })
+  return revision
+}
+
+/**
+ * Per-session snapshot of the last *committed* persist: message id →
+ * `{ ref, createdAt }`. `ref` is the in-memory `UIMessage` object reference at
+ * the time it was written. The streaming adapter keeps object references stable
+ * for messages that didn't change (`lib/claude/adapter.ts`), so ref-equality
+ * against this snapshot cleanly tells `persistMessages` which rows are
+ * unchanged and can be skipped — turning a per-event O(n) full-table rewrite
+ * into O(changed rows). It also caches `createdAt` so steady-state streaming
+ * never has to `bulkGet` existing rows just to preserve ordering.
+ *
+ * Writes are serialized at this persistence boundary, including asynchronous
+ * streaming checkpoints and turn seals. Any out-of-band mutation of a session's rows
+ * (clear / truncate / delete) must call `invalidatePersistSnapshot`.
+ */
+type PersistSnapshot = Map<string, { ref: WeakRef<UIMessage>; createdAt: number }>
+const snapshotsByDatabase = new WeakMap<ReturnType<typeof getDb>, Map<string, PersistSnapshot>>()
+interface PendingStream {
+  messages: UIMessage[]
+  started: boolean
+}
+const pendingWrites = new Map<
+  string,
+  Map<string, { promise: Promise<unknown>; stream?: PendingStream }>
+>()
+
+function snapshotsFor(db: ReturnType<typeof getDb>): Map<string, PersistSnapshot> {
+  let snapshots = snapshotsByDatabase.get(db)
+  if (!snapshots) {
+    snapshots = new Map()
+    snapshotsByDatabase.set(db, snapshots)
+  }
+  return snapshots
+}
+
+function assertDatabaseScope(databaseName: string): void {
+  if (getDb().name !== databaseName) throw new Error("Message persistence database scope changed")
+}
+
+async function prepareMessage(
+  databaseName: string,
+  sessionId: string,
+  message: UIMessage
+): Promise<UIMessage> {
+  assertDatabaseScope(databaseName)
+  const withAssets = await persistMessageSessionAssets(sessionId, message)
+  assertDatabaseScope(databaseName)
+  const normalized = await normalizeMessageMedia(withAssets)
+  assertDatabaseScope(databaseName)
+  return normalized
+}
+
+/** Preserve invocation order even when media preparation or a database write stalls. */
+function enqueueTranscriptWrite<T>(
+  sessionId: string,
+  write: () => Promise<T>,
+  stream?: PendingStream
+): Promise<T> {
+  const databaseName = getDb().name
+  let sessions = pendingWrites.get(databaseName)
+  if (!sessions) {
+    sessions = new Map()
+    pendingWrites.set(databaseName, sessions)
+  }
+  const previous = sessions.get(sessionId)?.promise ?? Promise.resolve()
+  const work = previous
+    .catch(() => undefined)
+    .then(() => {
+      assertDatabaseScope(databaseName)
+      return write()
+    })
+  sessions.set(sessionId, { promise: work, stream })
+  const cleanup = () => {
+    if (sessions.get(sessionId)?.promise !== work) return
+    sessions.delete(sessionId)
+    if (sessions.size === 0) pendingWrites.delete(databaseName)
+  }
+  void work.then(cleanup, cleanup)
+  return work
+}
+
+/** Drop the cached persist snapshot for a session (see `persistSnapshots`). */
+export function invalidatePersistSnapshot(sessionId: string): void {
+  snapshotsFor(getDb()).delete(sessionId)
+}
+
+/**
+ * Metadata keys that `listMessages` synthesizes from top-level columns. They
+ * exist on the in-memory `UIMessage` purely so the UI can read them without
+ * threading props; the column is the source of truth, so `persistMessages`
+ * strips them back out rather than duplicating them into the metadata blob.
+ */
+const HOISTED_META_KEYS = [
+  "senderId",
+  "senderKind",
+  "sessionId",
+  "createdAt",
+  "turnKey",
+  "collaboration",
+] as const
+
+/**
+ * Drop the hoisted keys from a message's metadata ahead of a write. Returns
+ * `undefined` when nothing else remains, matching the "don't store an empty
+ * blob" convention.
+ */
+export function stripHoistedMeta(
+  meta: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!meta) return undefined
+  const copy = { ...meta }
+  for (const key of HOISTED_META_KEYS) delete copy[key]
+  return Object.keys(copy).length > 0 ? copy : undefined
+}
+
+/**
+ * One `UIMessage` as the row shape every writer of `messages` must produce.
+ *
+ * Exported because `replaceSessionTranscript` is not the only writer: the
+ * thread-handoff import replaces a whole transcript inside its OWN transaction,
+ * because it has to stamp the session's ownership lock atomically with the
+ * history and the write guard would refuse the locked row. Sharing the builder
+ * keeps the hoisted columns and `stripHoistedMeta` in one place, so a second
+ * writer cannot quietly store a differently shaped row.
+ */
+export function toStoredMessageRow(
+  message: UIMessage,
+  fields: {
+    id: string
+    sessionId: string
+    projectId?: string
+    parts: StoredMessage["parts"]
+    createdAt: number
+  }
+): StoredMessage {
+  const meta = (message as { metadata?: Record<string, unknown> }).metadata
+  const senderKindRaw = meta?.senderKind
+  return {
+    id: fields.id,
+    sessionId: fields.sessionId,
+    projectId: fields.projectId,
+    role: message.role,
+    parts: fields.parts,
+    turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+    senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
+    senderKind:
+      senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+        ? senderKindRaw
+        : undefined,
+    collaboration: collaborationColumnOf(meta),
+    metadata: stripHoistedMeta(meta),
+    createdAt: fields.createdAt,
+  }
+}
+
+/**
+ * The `collaboration` column from the in-memory message.
+ *
+ * `rowToUIMessage` hoists the column onto `metadata`, and `stripHoistedMeta`
+ * takes it back off before a write. Nothing used to put it back on the row,
+ * so the author a room runner stamps on a user turn written by another
+ * principal (ADR-0177) was dropped on the very first persist, and a shared
+ * session's rows lost their server author the moment the list was rewritten.
+ */
+function collaborationColumnOf(
+  meta: Record<string, unknown> | undefined
+): StoredMessage["collaboration"] {
+  const value = meta?.collaboration
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as StoredMessage["collaboration"])
+    : undefined
+}
+
+/**
+ * One stored row as the in-memory `UIMessage` the app works with.
+ *
+ * Hoist top-level senderId/senderKind into metadata so the UI layer can read
+ * them off the in-memory UIMessage. (The store itself uses ai.UIMessage which
+ * has no senderId field.) We also surface `sessionId` so per-message components
+ * like the trigger badge can read it without threading new props, and
+ * `createdAt` so the timeline minimap and the message action bar can show a
+ * real wall-clock time instead of falling back to "now".
+ *
+ * Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
+ * persist strips it back out — the column stays the source of truth.
+ */
+function rowToUIMessage(r: StoredMessage): UIMessage {
+  const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
+  if (r.senderId !== undefined) metadata.senderId = r.senderId
+  if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
+  if (r.turnKey !== undefined) metadata.turnKey = r.turnKey
+  if (r.collaboration !== undefined) metadata.collaboration = r.collaboration
+  metadata.sessionId = r.sessionId
+  metadata.createdAt = r.createdAt
+  return {
+    id: r.id,
+    role: r.role,
+    parts: r.parts,
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+  } as UIMessage
+}
+
+export async function listMessages(sessionId: string): Promise<UIMessage[]> {
+  const rows = await getDb()
+    .messages.where("[sessionId+createdAt]")
+    .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+    .toArray()
+  return rows.sort((a, b) => a.createdAt - b.createdAt).map(rowToUIMessage)
+}
+
+/**
+ * The newest `limit` messages of a session, still in ascending order.
+ *
+ * For callers that only want the tail. `listMessages` reads every row of the
+ * conversation *with its `parts`* — a single tool result can be tens of KB, so
+ * on a long session that is megabytes read to keep a few dozen messages. The
+ * `@chat:` transcript snapshot was doing exactly that: a full-session read to
+ * keep the last 40.
+ *
+ * `.reverse().limit(n)` walks the `[sessionId+createdAt]` index backwards and
+ * stops, then the slice is re-sorted ascending so callers see the same order
+ * `listMessages` gives them.
+ */
+export async function listRecentMessages(sessionId: string, limit: number): Promise<UIMessage[]> {
+  if (limit <= 0) return []
+  const rows = await getDb()
+    .messages.where("[sessionId+createdAt]")
+    .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+    .reverse()
+    .limit(limit)
+    .toArray()
+  return rows.sort((a, b) => a.createdAt - b.createdAt).map(rowToUIMessage)
+}
+
+/**
+ * Persist the current message list for a session.
+ *
+ * Streaming sends one event per token-batch, so this gets called many times
+ * per turn. We diff by id: upsert what's still here, delete what disappeared.
+ * That keeps the IO proportional to *changed* messages instead of total
+ * messages, which matters once a session grows past a few dozen turns.
+ */
+export function replaceSessionTranscript(sessionId: string, messages: UIMessage[]): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () => replaceSessionTranscriptNow(sessionId, messages))
+}
+
+async function replaceSessionTranscriptNow(
+  sessionId: string,
+  messages: UIMessage[]
+): Promise<void> {
+  const db = getDb()
+  const persistSnapshots = snapshotsFor(db)
+  const now = Date.now()
+  const normalizedMessages = await Promise.all(
+    messages.map((message) => prepareMessage(db.name, sessionId, message))
+  )
+  assertDatabaseScope(db.name)
+
+  // Owning workspace for these rows (Workspace isolation, Dexie v86). Resolved
+  // once per call from the session — messages inherit their session's project.
+  // Falls back to the active project for a session row that predates the column.
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
+  const projectId = session?.projectId ?? (await resolveScopeProjectId())
+
+  // Captured outside the transaction so we can fan-out trigger.chat.message
+  // events for newly-arrived user messages once the rows are persisted.
+  const newUserMessageIds: string[] = []
+
+  // The last message's resolved timestamp + parts, captured in the write loop
+  // so we can denormalize a preview onto the session row after commit.
+  let lastPreviewSource: { createdAt: number; parts: StoredMessage["parts"] } | null = null
+
+  const snapshot = persistSnapshots.get(sessionId)
+  // Built inside the transaction, applied to `persistSnapshots` only after the
+  // write commits — so a thrown/aborted transaction never leaves the cache
+  // ahead of disk.
+  let nextSnapshot: PersistSnapshot | null = null
+  let clearSnapshot = false
+  const orphanCandidates = new Set<string>()
+  let publishedRevision: number | null = null
+
+  await withDbReopenRetry(() => {
+    assertDatabaseScope(db.name)
+    const transactionDb = getDb()
+    newUserMessageIds.length = 0
+    lastPreviewSource = null
+    nextSnapshot = null
+    clearSnapshot = false
+    publishedRevision = null
+    return transactionDb.transaction(
+      "rw",
+      transactionDb.messages,
+      transactionDb.messageMediaRefs,
+      transactionDb.sessions,
+      async () => {
+        assertSessionWritable(await transactionDb.sessions.get(sessionId), "send-message")
+        // Existing ids for this session — used to compute deletions. `primaryKeys`
+        // reads the index only (no row/parts deserialization), so this stays cheap.
+        return transactionDb.messages
+          .where("sessionId")
+          .equals(sessionId)
+          .primaryKeys()
+          .then((existingKeys) => {
+            const existingIds = new Set(existingKeys as string[])
+
+            if (messages.length === 0) {
+              clearSnapshot = true
+              return transactionDb.messageMediaRefs
+                .where("sessionId")
+                .equals(sessionId)
+                .filter(isMessageOwnedMediaRef)
+                .toArray()
+                .then((refs) => {
+                  for (const ref of refs) orphanCandidates.add(ref.hash)
+                  return Promise.all([
+                    existingIds.size > 0
+                      ? transactionDb.messages.bulkDelete([...existingIds])
+                      : Promise.resolve(),
+                    transactionDb.messageMediaRefs
+                      .where("sessionId")
+                      .equals(sessionId)
+                      .filter(isMessageOwnedMediaRef)
+                      .delete(),
+                  ]).then(async () => {
+                    if (existingIds.size > 0) {
+                      publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
+                    }
+                  })
+                })
+            }
+
+            // createdAt source: prefer the in-memory snapshot; only fetch rows from
+            // Dexie for ids that exist on disk but aren't cached (cold start). In
+            // steady-state streaming the snapshot covers every existing id, so this
+            // read — the old per-event full-table `bulkGet` — is skipped entirely.
+            const createdAtById = new Map<string, number>()
+            if (snapshot) {
+              for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
+            }
+            const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
+
+            const persistRows = (fetched: Array<StoredMessage | undefined>): Promise<void> => {
+              for (const row of fetched) {
+                if (row) createdAtById.set(row.id, row.createdAt)
+              }
+
+              // Only changed/new rows are written; unchanged ones are skipped via
+              // ref-equality against the snapshot. `incomingIds` still covers *all*
+              // messages so deletion stays computed against the full set.
+              const rows: StoredMessage[] = []
+              const incomingIds = new Set<string>()
+              nextSnapshot = new Map()
+
+              for (let i = 0; i < messages.length; i++) {
+                const message = messages[i]
+                const normalizedMessage = normalizedMessages[i] ?? message
+                const id = message.id ?? newId()
+                incomingIds.add(id)
+
+                const createdAt = createdAtById.get(id) ?? now + i
+                nextSnapshot.set(id, { ref: new WeakRef(message), createdAt })
+                if (i === messages.length - 1) {
+                  lastPreviewSource = { createdAt, parts: message.parts }
+                }
+
+                const prevEntry = snapshot?.get(id)
+                if (prevEntry?.ref.deref() === message && existingIds.has(id)) {
+                  continue
+                }
+
+                const meta = (message as { metadata?: Record<string, unknown> }).metadata
+                rows.push(
+                  toStoredMessageRow(message, {
+                    id,
+                    sessionId,
+                    projectId,
+                    parts: normalizedMessage.parts,
+                    createdAt,
+                  })
+                )
+                // `triggerWorkflows: false` opts a message out of the
+                // `trigger.chat.message` fan-out. Live-voice turns set it: the
+                // user spoke to the assistant directly and never went through the
+                // send path, so firing chat-message workflows would surprise
+                // them. The flag must be present on FIRST persist —
+                // `updateMessageMetadata` cannot retract a dispatch that already
+                // happened.
+                if (
+                  !existingIds.has(id) &&
+                  message.role === "user" &&
+                  meta?.triggerWorkflows !== false
+                ) {
+                  newUserMessageIds.push(id)
+                }
+              }
+
+              const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
+              const changedIds = [...toDelete, ...rows.map((row) => row.id)]
+              const replacementRefs = rows.flatMap((row) =>
+                messageMediaRefRows(row.id, row.sessionId, row.parts)
+              )
+              const oldRefs =
+                changedIds.length > 0
+                  ? transactionDb.messageMediaRefs
+                      .where("messageId")
+                      .anyOf(changedIds)
+                      .filter(isMessageOwnedMediaRef)
+                      .toArray()
+                  : Promise.resolve([])
+              return oldRefs.then(async (refs) => {
+                for (const ref of refs) orphanCandidates.add(ref.hash)
+                if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
+                if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
+                if (changedIds.length > 0) {
+                  await transactionDb.messageMediaRefs
+                    .where("messageId")
+                    .anyOf(changedIds)
+                    .filter(isMessageOwnedMediaRef)
+                    .delete()
+                }
+                if (replacementRefs.length > 0) {
+                  await transactionDb.messageMediaRefs.bulkPut(replacementRefs)
+                }
+                if (changedIds.length > 0) {
+                  publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
+                }
+              })
+            }
+
+            return missingIds.length > 0
+              ? transactionDb.messages.bulkGet(missingIds).then(persistRows)
+              : persistRows([])
+          })
+      }
+    )
+  })
+
+  assertDatabaseScope(db.name)
+  if (orphanCandidates.size > 0) {
+    await collectUnreferencedMessageMedia(orphanCandidates)
+  }
+  if (publishedRevision !== null) {
+    await publishTranscriptRevision(sessionId, publishedRevision)
+  }
+
+  // Commit the cache only after the transaction resolved cleanly.
+  if (clearSnapshot) {
+    persistSnapshots.delete(sessionId)
+  } else if (nextSnapshot) {
+    // Drop dead sessions when another conversation starts. Do not evict live
+    // streams: a fixed session cap makes concurrent streams repeatedly fall
+    // back to full-history reconciliation. Weak refs never retain the bodies.
+    if (!persistSnapshots.has(sessionId)) {
+      for (const [id, saved] of persistSnapshots) {
+        let live = false
+        for (const entry of saved.values()) {
+          if (entry.ref.deref() !== undefined) {
+            live = true
+            break
+          }
+        }
+        if (!live) persistSnapshots.delete(id)
+      }
+    }
+    persistSnapshots.set(sessionId, nextSnapshot)
+  }
+
+  // Denormalize a preview of the last message onto the session row so the
+  // sidebar can render a preview line without a per-row message query. Written
+  // only on a message *boundary* (a different `lastMessageAt`) — never on
+  // in-place streaming text growth, which would rewrite the row on every token
+  // batch and churn the sidebar's `useLiveQuery`. A long streamed reply's
+  // preview may therefore show an early chunk; it refreshes on the next message.
+  // Re-widen: `lastPreviewSource` is only ever assigned inside the transaction
+  // closure, so the compiler's outer-flow type stays at its `null` initializer.
+  const previewSource = lastPreviewSource as {
+    createdAt: number
+    parts: StoredMessage["parts"]
+  } | null
+  if (previewSource && session) {
+    const boundaryChanged =
+      session.lastMessageAt !== previewSource.createdAt || session.lastMessagePreview === undefined
+    if (boundaryChanged) {
+      await withDbReopenRetry(() => {
+        assertDatabaseScope(db.name)
+        return getDb().sessions.update(sessionId, {
+          lastMessagePreview: previewOf(previewSource.parts),
+          lastMessageAt: previewSource.createdAt,
+        })
+      })
+    }
+  }
+
+  if (newUserMessageIds.length > 0) {
+    // Fire-and-forget so persistence is never blocked by the workflow
+    // subsystem. Each user-message arrival is its own trigger event so a
+    // workflow scoped to the session/character fans out once per message.
+    void dispatchChatMessageTriggers(sessionId, newUserMessageIds, session?.characterId).catch(
+      () => {
+        // Swallow — the trigger fan-out is best-effort and must not surface
+        // to the chat send pipeline.
+      }
+    )
+  }
+
+  // Derived search text trails persistence by design. Marking is O(1); the
+  // shared search hook drains and reconciles this session off the typing and
+  // streaming hot paths.
+  markSessionDirty(sessionId)
+}
+
+/**
+ * Backward-compatible name for callers that still own a complete transcript
+ * snapshot. Partial windows must use {@link commitMessageDelta}; omissions in
+ * this API are intentionally interpreted as deletions.
+ */
+export const persistMessages = replaceSessionTranscript
+
+export interface MessageDelta {
+  /** Messages to insert or replace. Omitted stored messages remain untouched. */
+  upserts?: UIMessage[]
+  /** Explicit deletions. IDs belonging to another session are ignored. */
+  deleteIds?: string[]
+}
+
+/**
+ * Persist an explicit partial transcript change without treating unloaded
+ * history as deleted. This is the safe write path for timeline/detail paging,
+ * reconnect reconciliation, and any producer that does not own a full
+ * session snapshot.
+ */
+export function commitMessageDelta(sessionId: string, delta: MessageDelta): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () => commitMessageDeltaNow(sessionId, delta))
+}
+
+async function commitMessageDeltaNow(
+  sessionId: string,
+  { upserts = [], deleteIds = [] }: MessageDelta
+): Promise<void> {
+  const db = getDb()
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
+  const projectId = session?.projectId ?? (await resolveScopeProjectId())
+  const normalized = await Promise.all(
+    upserts.map((message) => prepareMessage(db.name, sessionId, message))
+  )
+  const upsertIds = normalized.map((message) => message.id || newId())
+  if (new Set(upsertIds).size !== upsertIds.length) {
+    throw new Error("Message delta contains duplicate upsert ids")
+  }
+
+  assertDatabaseScope(db.name)
+  let newUserMessageIds: string[] = []
+  const orphanCandidates = new Set<string>()
+  let publishedRevision: number | null = null
+
+  await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+    assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+    const existingUpserts = await db.messages.bulkGet(upsertIds)
+    const existingById = new Map(
+      existingUpserts
+        .filter((row): row is StoredMessage => row !== undefined)
+        .map((row) => [row.id, row])
+    )
+    for (const row of existingById.values()) {
+      if (row.sessionId !== sessionId) {
+        throw new Error("Message delta cannot move a message between sessions")
+      }
+    }
+
+    const now = Date.now()
+    const rows = normalized.map((message, index): StoredMessage => {
+      const id = upsertIds[index]!
+      const meta = (message as { metadata?: Record<string, unknown> }).metadata
+      const senderKindRaw = meta?.senderKind
+      const senderKind =
+        senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+          ? senderKindRaw
+          : undefined
+      return {
+        id,
+        sessionId,
+        projectId,
+        role: message.role,
+        parts: message.parts,
+        turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+        senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
+        senderKind,
+        collaboration: collaborationColumnOf(meta),
+        metadata: stripHoistedMeta(meta),
+        createdAt: existingById.get(id)?.createdAt ?? now + index,
+      }
+    })
+
+    const requestedDeleteIds = [...new Set(deleteIds)].filter((id) => !upsertIds.includes(id))
+    const existingDeletes = await db.messages.bulkGet(requestedDeleteIds)
+    const effectiveDeleteIds = existingDeletes
+      .filter((row): row is StoredMessage => row?.sessionId === sessionId)
+      .map((row) => row.id)
+    const changedIds = [...effectiveDeleteIds, ...upsertIds]
+    if (changedIds.length === 0) return
+
+    newUserMessageIds = rows
+      .filter(
+        (row) =>
+          !existingById.has(row.id) &&
+          row.role === "user" &&
+          row.metadata?.triggerWorkflows !== false
+      )
+      .map((row) => row.id)
+
+    const oldRefs = await db.messageMediaRefs
+      .where("messageId")
+      .anyOf(changedIds)
+      .filter(isMessageOwnedMediaRef)
+      .toArray()
+    for (const ref of oldRefs) orphanCandidates.add(ref.hash)
+    if (effectiveDeleteIds.length > 0) await db.messages.bulkDelete(effectiveDeleteIds)
+    if (rows.length > 0) await db.messages.bulkPut(rows)
+    await db.messageMediaRefs
+      .where("messageId")
+      .anyOf(changedIds)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
+    const replacementRefs = rows.flatMap((row) =>
+      messageMediaRefRows(row.id, row.sessionId, row.parts)
+    )
+    if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+    publishedRevision = await bumpTranscriptRevision(db, sessionId)
+  })
+
+  assertDatabaseScope(db.name)
+  invalidatePersistSnapshot(sessionId)
+  if (orphanCandidates.size > 0) {
+    await collectUnreferencedMessageMedia(orphanCandidates)
+  }
+  if (publishedRevision !== null) {
+    await publishTranscriptRevision(sessionId, publishedRevision)
+  }
+  if (newUserMessageIds.length > 0) {
+    void dispatchChatMessageTriggers(sessionId, newUserMessageIds, session?.characterId).catch(
+      () => {}
+    )
+  }
+  markSessionDirty(sessionId)
+}
+
+/**
+ * Persist an append-only stream update without reconciling the full session.
+ *
+ * This is deliberately narrower than {@link persistMessages}: callers may use
+ * it only for mid-turn growth where the message set/order is unchanged and the
+ * trailing message is the sole mutation. A missing or incompatible snapshot
+ * falls back to the full reconciler, so the first chunk and every message
+ * boundary retain the normal insertion/deletion guarantees.
+ */
+export function persistStreamingMessages(sessionId: string, messages: UIMessage[]): Promise<void> {
+  const pending = pendingWrites.get(getDb().name)?.get(sessionId)
+  if (pending?.stream && !pending.stream.started) {
+    pending.stream.messages = messages
+    return pending.promise as Promise<void>
+  }
+  // At most one trailing stream snapshot waits behind a slow write. A full
+  // persist/delta replaces the queue entry and is an ordering barrier.
+  const stream: PendingStream = { messages, started: false }
+  return enqueueTranscriptWrite(
+    sessionId,
+    () => {
+      stream.started = true
+      return persistStreamingMessagesNow(sessionId, stream.messages)
+    },
+    stream
+  )
+}
+
+async function persistStreamingMessagesNow(
+  sessionId: string,
+  messages: UIMessage[]
+): Promise<void> {
+  const db = getDb()
+  const last = messages.at(-1)
+  const snapshot = snapshotsFor(db).get(sessionId)
+  const lastEntry = last?.id ? snapshot?.get(last.id) : undefined
+  const first = messages[0]
+  const previous = messages.length > 1 ? messages[messages.length - 2] : undefined
+  const snapshotMatches =
+    last !== undefined &&
+    last.id.length > 0 &&
+    snapshot !== undefined &&
+    snapshot.size === messages.length &&
+    lastEntry !== undefined &&
+    (first === undefined || snapshot.has(first.id)) &&
+    (previous === undefined || snapshot.has(previous.id))
+
+  if (!snapshotMatches) {
+    await replaceSessionTranscriptNow(sessionId, messages)
+    return
+  }
+
+  const meta = (last as { metadata?: Record<string, unknown> }).metadata
+  const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
+  const senderKindRaw = meta?.senderKind
+  const senderKind =
+    senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+      ? senderKindRaw
+      : undefined
+  const normalizedLast = await prepareMessage(db.name, sessionId, last)
+  assertDatabaseScope(db.name)
+  const replacementRefs = messageMediaRefRows(last.id, sessionId, normalizedLast.parts)
+  let orphanHashes: string[] = []
+  const updated = await db.transaction(
+    "rw",
+    db.messages,
+    db.messageMediaRefs,
+    db.sessions,
+    async () => {
+      // Read inside the transaction that it guards: this runs on every stream
+      // flush, so a separate `get` was an extra round-trip per flush — and a
+      // pre-check outside the write is one a concurrent lock can slip past.
+      assertSessionWritable(await db.sessions.get(sessionId), "continue-run")
+      const existing = await db.messages.get(last.id)
+      if (!existing) return 0
+      if (existing.sessionId !== sessionId) {
+        throw new Error("Streaming persistence cannot move a message between sessions")
+      }
+      await db.messages.put({
+        ...existing,
+        role: last.role,
+        parts: normalizedLast.parts,
+        turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+        senderId,
+        senderKind,
+        metadata: stripHoistedMeta(meta),
+      })
+      const oldRefs = await db.messageMediaRefs
+        .where("messageId")
+        .equals(last.id)
+        .filter(isMessageOwnedMediaRef)
+        .toArray()
+      const nextHashes = new Set(replacementRefs.map((ref) => ref.hash))
+      orphanHashes = oldRefs.filter((ref) => !nextHashes.has(ref.hash)).map((ref) => ref.hash)
+      // Text growth usually leaves attachments unchanged. Avoid rewriting the
+      // ledger and probing every other owner of the same media on every tick.
+      if (orphanHashes.length > 0 || oldRefs.length !== replacementRefs.length) {
+        await db.messageMediaRefs
+          .where("messageId")
+          .equals(last.id)
+          .filter(isMessageOwnedMediaRef)
+          .delete()
+        if (replacementRefs.length > 0) await db.messageMediaRefs.bulkPut(replacementRefs)
+      }
+      return 1
+    }
+  )
+
+  // An out-of-band delete can invalidate an otherwise compatible in-memory
+  // snapshot. Recover through the full path instead of silently dropping the
+  // streamed row.
+  if (updated === 0) {
+    invalidatePersistSnapshot(sessionId)
+    await replaceSessionTranscriptNow(sessionId, messages)
+    return
+  }
+
+  assertDatabaseScope(db.name)
+  snapshot.set(last.id, { ref: new WeakRef(last), createdAt: lastEntry.createdAt })
+  if (orphanHashes.length > 0) {
+    await collectUnreferencedMessageMedia(orphanHashes)
+  }
+  markSessionDirty(sessionId)
+}
+
+/**
+ * Look up workflows subscribed to `trigger.chat.message` for the session's
+ * character + session scope and invoke the orchestrator for each match.
+ *
+ * Kept here (rather than in the chat-send path) so every code path that
+ * lands a user message in Dexie — direct chat, IM bridge inbound,
+ * scheduled replay — fans out triggers consistently.
+ */
+async function dispatchChatMessageTriggers(
+  sessionId: string,
+  newUserMessageIds: string[],
+  characterId?: string
+): Promise<void> {
+  // Resolve the lightweight in-memory subscription index first. Most messages
+  // have no matching workflow, so avoid loading the orchestrator/plugin graph
+  // (and touching Dexie again) on that overwhelmingly common path.
+  const { findMatchingWorkflows } = await import("@/lib/workflow/runtime/trigger-subscriptions")
+  const matches = findMatchingWorkflows("trigger.chat.message", {
+    characterId,
+    sessionId,
+  })
+  if (matches.length === 0) return
+
+  // Lazy-load the heavy runtime only when dispatch work actually exists.
+  const [{ dispatchTrigger }, audit] = await Promise.all([
+    import("@/lib/workflow/runtime/trigger-bridge"),
+    import("@/lib/chat/trigger-audit-ring"),
+  ])
+
+  const originAt = Date.now()
+  await Promise.all(
+    newUserMessageIds.flatMap((messageId) =>
+      matches.map((match) =>
+        dispatchTrigger({
+          workflowId: match.workflowId,
+          kind: "trigger.chat.message",
+          triggerId: match.nodeId,
+          payload: { messageId, sessionId, characterId },
+          originAt,
+          binding: { sessionId, characterId },
+        })
+          .then(() => {
+            audit.recordTriggerAuditEntry({
+              sessionId,
+              messageId,
+              kind: "trigger.chat.message",
+              pluginId: null,
+              workflowId: match.workflowId,
+              status: "dispatched",
+              timestamp: originAt,
+            })
+          })
+          .catch((error: unknown) => {
+            // Per-match failures are isolated so one bad workflow can't
+            // block other subscribers from running.
+            audit.recordTriggerAuditEntry({
+              sessionId,
+              messageId,
+              kind: "trigger.chat.message",
+              pluginId: null,
+              workflowId: match.workflowId,
+              status: "error",
+              timestamp: Date.now(),
+              errorMessage: error instanceof Error ? error.message : String(error),
+            })
+          })
+      )
+    )
+  )
+}
+
+export function clearMessages(sessionId: string): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () => clearMessagesNow(sessionId))
+}
+
+async function clearMessagesNow(sessionId: string): Promise<void> {
+  const db = getDb()
+  assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+  const refs = await db.messageMediaRefs
+    .where("sessionId")
+    .equals(sessionId)
+    .filter(isMessageOwnedMediaRef)
+    .toArray()
+  let revision: number | null = null
+  await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+    assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+    const deleted = await db.messages.where("sessionId").equals(sessionId).delete()
+    await db.messageMediaRefs
+      .where("sessionId")
+      .equals(sessionId)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
+    if (deleted > 0) revision = await bumpTranscriptRevision(db, sessionId)
+  })
+  invalidatePersistSnapshot(sessionId)
+  markSessionDirty(sessionId)
+  // Every citation captured in this session now points at nothing. Session-level
+  // rather than message-level because turn citations carry a `sessionId` and no
+  // `messageId`, so an id sweep would leave them behind.
+  void revokeClaimsForDeletedSession(sessionId)
+  if (refs.length > 0) {
+    await collectUnreferencedMessageMedia(refs.map((ref) => ref.hash))
+  }
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Delete one persisted message and invalidate every derived view of that row.
+ *
+ * UI callers should use this helper instead of writing to the Dexie table
+ * directly so the persist snapshot and indexed global search cannot retain a
+ * message that no longer exists.
+ */
+export async function deleteStoredMessage(messageId: string): Promise<void> {
+  const db = getDb()
+  const row = await db.messages.get(messageId)
+  if (!row) return
+  assertDatabaseScope(db.name)
+  return enqueueTranscriptWrite(row.sessionId, () =>
+    deleteStoredMessageNow(messageId, row.sessionId)
+  )
+}
+
+async function deleteStoredMessageNow(messageId: string, sessionId: string): Promise<void> {
+  const db = getDb()
+
+  const refs = await db.messageMediaRefs
+    .where("messageId")
+    .equals(messageId)
+    .filter(isMessageOwnedMediaRef)
+    .toArray()
+  let revision: number | null = null
+  await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+    assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+    const row = await db.messages.get(messageId)
+    if (!row || row.sessionId !== sessionId) return
+    await db.messages.delete(messageId)
+    await db.messageMediaRefs
+      .where("messageId")
+      .equals(messageId)
+      .filter(isMessageOwnedMediaRef)
+      .delete()
+    revision = await bumpTranscriptRevision(db, row.sessionId)
+  })
+  invalidatePersistSnapshot(sessionId)
+  markMessagesRemoved([messageId])
+  void revokeClaimsForDeletedMessages([messageId])
+  if (refs.length > 0) {
+    await collectUnreferencedMessageMedia(refs.map((ref) => ref.hash))
+  }
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Merge a metadata patch into a single message row, touching nothing else.
+ *
+ * Unlike `persistMessages` — which diffs the *whole* session array and deletes
+ * any id not present — this updates exactly one row by id. That makes it safe to
+ * call fire-and-forget from background tasks (e.g. the timeline-label model
+ * call) that hold a stale message snapshot: it can never `bulkDelete` a turn
+ * that landed after the snapshot was captured. The routing/derived keys
+ * (`senderId`/`senderKind`/`sessionId`) are stripped so they aren't
+ * double-persisted (they live in dedicated columns / are re-derived on read).
+ */
+export function updateMessageMetadata(
+  sessionId: string,
+  messageId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () =>
+    updateMessageMetadataNow(sessionId, messageId, patch)
+  )
+}
+
+async function updateMessageMetadataNow(
+  sessionId: string,
+  messageId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const db = getDb()
+  const row = await db.messages.get(messageId)
+  if (!row || row.sessionId !== sessionId) return
+  assertSessionWritable(await db.sessions.get(sessionId), "metadata")
+  const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
+  let revision: number | null = null
+  await db.transaction("rw", db.messages, db.sessions, async () => {
+    await db.messages.update(messageId, { metadata: merged })
+    revision = await bumpTranscriptRevision(db, sessionId)
+  })
+  // The row changed out-of-band from the persist snapshot; drop it so the next
+  // `persistMessages` re-derives existence/createdAt from disk.
+  invalidatePersistSnapshot(sessionId)
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Add or remove one actor's emoji on a message (ADR-0177 batch 2).
+ *
+ * Re-reads the row inside the transaction rather than taking the caller's
+ * copy of `reactions`: an inbound IM reaction and the local picker can land
+ * on the same row within the same tick, and a merge from a snapshot would
+ * drop one of them. Returns the reactions the row now holds, or `null` when
+ * the row is not in `sessionId`. A no-op change (adding what is there,
+ * removing what is not) writes nothing and publishes nothing.
+ */
+export function setMessageReaction(
+  sessionId: string,
+  messageId: string,
+  change: ReactionChange
+): Promise<MessageReaction[] | null> {
+  return enqueueTranscriptWrite(sessionId, () =>
+    setMessageReactionNow(sessionId, messageId, change)
+  )
+}
+
+async function setMessageReactionNow(
+  sessionId: string,
+  messageId: string,
+  change: ReactionChange
+): Promise<MessageReaction[] | null> {
+  const db = getDb()
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "metadata")
+  let result: MessageReaction[] | null = null
+  let revision: number | null = null
+  let changed = false
+  await db.transaction("rw", db.messages, db.sessions, async () => {
+    const row = await db.messages.get(messageId)
+    if (!row || row.sessionId !== sessionId) return
+    const current = row.metadata?.reactions
+    const next = applyReactionChange(current, change)
+    result = next
+    // `applyReactionChange` hands back the input array itself for a no-op,
+    // and an empty list when there was nothing to start from.
+    const unchanged = current !== undefined ? next === current : next.length === 0
+    if (unchanged) return
+    const metadata = stripHoistedMeta({ ...(row.metadata ?? {}), reactions: next })
+    await db.messages.update(messageId, { metadata: metadata ?? {} })
+    revision = await bumpTranscriptRevision(db, sessionId)
+    changed = true
+  })
+  if (changed) {
+    invalidatePersistSnapshot(sessionId)
+    if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+  }
+  return result
+}
+
+/**
+ * Drop every message in `sessionId` whose `createdAt` is strictly greater than
+ * the anchor message's `createdAt`. Used by edit-and-resend / regenerate to
+ * lop off the tail before re-issuing a turn.
+ *
+ * If the anchor is unknown we delete nothing rather than wiping the session.
+ */
+export function truncateAfter(
+  sessionId: string,
+  anchorMessageId: string,
+  options: { inclusive?: boolean } = {}
+): Promise<void> {
+  return enqueueTranscriptWrite(sessionId, () =>
+    truncateAfterNow(sessionId, anchorMessageId, options)
+  )
+}
+
+async function truncateAfterNow(
+  sessionId: string,
+  anchorMessageId: string,
+  options: { inclusive?: boolean } = {}
+): Promise<void> {
+  const db = getDb()
+  const anchor = await db.messages.get(anchorMessageId)
+  if (!anchor || anchor.sessionId !== sessionId) return
+  assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+
+  const lowerBound = options.inclusive ? anchor.createdAt : anchor.createdAt + 1
+  const orphanCandidates = new Set<string>()
+  // Lifted out of the transaction closure. The ids were already computed here
+  // and then discarded, so a truncate published nothing about what it deleted —
+  // which is how a claim could go on citing a message that edit-and-resend had
+  // lopped off ten turns ago.
+  const removedIds: string[] = []
+  let revision: number | null = null
+  await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+    assertSessionWritable(await db.sessions.get(sessionId), "send-message")
+    const ids = await db.messages
+      .where("[sessionId+createdAt]")
+      .between([sessionId, lowerBound], [sessionId, Number.MAX_SAFE_INTEGER])
+      .primaryKeys()
+    if (ids.length > 0) {
+      removedIds.push(...(ids as string[]))
+      const refs = await db.messageMediaRefs
+        .where("messageId")
+        .anyOf(ids as string[])
+        .filter(isMessageOwnedMediaRef)
+        .toArray()
+      for (const ref of refs) orphanCandidates.add(ref.hash)
+      await db.messages.bulkDelete(ids as string[])
+      await db.messageMediaRefs
+        .where("messageId")
+        .anyOf(ids as string[])
+        .filter(isMessageOwnedMediaRef)
+        .delete()
+      revision = await bumpTranscriptRevision(db, sessionId)
+    }
+  })
+  // The on-disk row set changed out-of-band from `persistMessages`; drop the
+  // cache so the next persist re-derives existence/createdAt from Dexie.
+  invalidatePersistSnapshot(sessionId)
+  markSessionDirty(sessionId)
+  // `markSessionDirty` above already covers the search index for a truncate;
+  // only the memory leg needs the explicit id list.
+  if (removedIds.length > 0) void revokeClaimsForDeletedMessages(removedIds)
+  if (orphanCandidates.size > 0) {
+    await collectUnreferencedMessageMedia(orphanCandidates)
+  }
+  if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Why an image edit could not be appended.
+ *
+ * Distinguishable because this operation is also reachable over the companion
+ * RPC from a phone, and "your session moved on" has to read differently from
+ * "that image is not in that message". A single opaque failure there would
+ * leave a remote client retrying something that can never succeed.
+ */
+export type ImageEditAppendFailure =
+  "message-missing" | "session-mismatch" | "lineage-missing" | "media-missing"
+
+export class ImageEditAppendError extends Error {
+  readonly code: ImageEditAppendFailure
+
+  constructor(code: ImageEditAppendFailure, message: string) {
+    super(message)
+    this.name = "ImageEditAppendError"
+    this.code = code
+  }
+}
+
+export interface AppendImageEditVersionInput {
+  sessionId: string
+  messageId: string
+  /** The already-ingested result. Ingestion happens before the transaction. */
+  media: {
+    ref: string
+    mediaType: string
+    width: number
+    height: number
+    byteSize: number
+  }
+  version: ImageEditVersionV1
+  /** Shown in the lightbox title and used as the download name. */
+  filename?: string
+}
+
+export interface AppendImageEditVersionResult {
+  /** False when this exact `versionId` was already on the message. */
+  appended: boolean
+  /** The message's parts after the append, for an optimistic UI update. */
+  parts: StoredMessage["parts"]
+}
+
+/**
+ * Append an edited image to a message as a new `file` part, atomically.
+ *
+ * Non-destructive: nothing already on the message is rewritten. The original
+ * image part is left exactly as it was, and the result is added at the end.
+ *
+ * The message is re-read INSIDE the transaction rather than taken from the
+ * caller. An editing session is long (open the workbench, drag a crop, wait for
+ * a model), and in that time the same message can be rewritten by a streaming
+ * turn, a sync leg or another device. Writing a caller-held snapshot back would
+ * silently undo all of it, which is the classic lost-update bug and the reason
+ * this is a dedicated helper instead of a `commitMessageDelta` call.
+ *
+ * `versionId` is the idempotency key. A double-clicked save button, an RPC the
+ * transport retried, and a companion client resending after a reconnect all
+ * carry the same id, and all of them must produce one version rather than
+ * three.
+ *
+ * On any failure the newly ingested media is reclaimed, so a rejected append
+ * cannot leave an unreferenced blob behind in the content-addressed store.
+ */
+export function appendImageEditVersion(
+  input: AppendImageEditVersionInput
+): Promise<AppendImageEditVersionResult> {
+  return enqueueTranscriptWrite(input.sessionId, () => appendImageEditVersionNow(input))
+}
+
+async function appendImageEditVersionNow({
+  sessionId,
+  messageId,
+  media,
+  version,
+  filename,
+}: AppendImageEditVersionInput): Promise<AppendImageEditVersionResult> {
+  const db = getDb()
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
+
+  let appended = false
+  let resultParts: StoredMessage["parts"] = []
+  let publishedRevision: number | null = null
+
+  try {
+    await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+      const row = await db.messages.get(messageId)
+      if (!row) {
+        throw new ImageEditAppendError("message-missing", `No message ${messageId}`)
+      }
+      if (row.sessionId !== sessionId) {
+        throw new ImageEditAppendError(
+          "session-mismatch",
+          `Message ${messageId} does not belong to session ${sessionId}`
+        )
+      }
+
+      const parts = row.parts ?? []
+
+      // Idempotent replay: the same version already landed.
+      const existing = parts.find(
+        (part) => readImageEditVersion(part)?.versionId === version.versionId
+      )
+      if (existing) {
+        resultParts = parts
+        return
+      }
+
+      // The lineage must actually be in this message. Without this an edit can
+      // be attached to a message that never held the image, which produces a
+      // version rail pointing at an origin nobody can see.
+      const holdsLineage = parts.some((part) => {
+        if (!isImagePart(part)) return false
+        if ((part as { url?: unknown }).url === version.lineageId) return true
+        return readImageEditVersion(part)?.lineageId === version.lineageId
+      })
+      if (!holdsLineage) {
+        throw new ImageEditAppendError(
+          "lineage-missing",
+          `Message ${messageId} does not contain image ${version.lineageId}`
+        )
+      }
+
+      const part = withImageEditVersion(
+        {
+          type: "file" as const,
+          url: media.ref,
+          mediaType: media.mediaType,
+          width: media.width,
+          height: media.height,
+          byteSize: media.byteSize,
+          ...(filename ? { filename } : {}),
+        },
+        version
+      )
+
+      const nextParts = [...parts, part] as StoredMessage["parts"]
+      await db.messages.update(messageId, { parts: nextParts })
+      // Rebuilt from the whole part list rather than added to, so the ref table
+      // stays a pure projection of the row it describes.
+      await db.messageMediaRefs
+        .where("messageId")
+        .equals(messageId)
+        .filter(isMessageOwnedMediaRef)
+        .delete()
+      const refs = messageMediaRefRows(messageId, sessionId, nextParts)
+      if (refs.length > 0) await db.messageMediaRefs.bulkPut(refs)
+      publishedRevision = await bumpTranscriptRevision(db, sessionId)
+      resultParts = nextParts
+      appended = true
+    })
+  } catch (error) {
+    const hash = parseMediaRef(media.ref)
+    if (hash) await collectUnreferencedMessageMedia([hash]).catch(() => {})
+    throw error
+  }
+
+  if (appended) {
+    invalidatePersistSnapshot(sessionId)
+    markSessionDirty(sessionId)
+    if (publishedRevision !== null) {
+      await publishTranscriptRevision(sessionId, publishedRevision)
+    }
+  }
+  return { appended, parts: resultParts }
+}

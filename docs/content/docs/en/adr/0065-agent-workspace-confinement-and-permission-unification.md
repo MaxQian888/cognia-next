@@ -7,7 +7,7 @@ description: "Closes the gap between the mature OS-level sandbox (ADR-0028) and 
 
 **Status**: Accepted (2026-07-06)
 **Authors**: Max Qian + Claude Opus 4.8
-**Builds on**: the OS sandbox (ADR-0028, `src-tauri/src/sandbox/`), the permission model (ADR-0020 computer-use, ADR-0041 command auto-mode), the monotonic permission-ceiling cascade (`lib/ai/agent/external/permission-cascade.ts`), and the sidecar `canUseTool` gates (`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`).
+**Builds on**: the OS sandbox (ADR-0028, `src-tauri/src/sandbox/`), the permission model (ADR-0020 computer-use, ADR-0041 command auto-mode), the monotonic permission-ceiling cascade (`lib/ai/agent/external/policy/permission-cascade.ts`), and the sidecar `canUseTool` gates (`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`).
 **Inspiration**: Anthropic's [`sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) and the [Claude Code sandboxed-Bash](https://code.claude.com/docs/en/sandboxing) filesystem/network model (write=cwd, read=whole machine except credentials), and the six-step [Agent SDK permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions).
 
 ## Current state amendment (2026-08-13)
@@ -60,5 +60,5 @@ The raw fs commands take an `FsOrigin` (`Local` | `Remote`). `enforce_check_path
 
 - `sidecar/builtin-tools/confinement.mjs` (+ `safety.mjs` `assertPathInside`/`canonicalisePartial` reuse), `sidecar/dispatch/{anthropic,ai-sdk-tools,permission-resolver}.mjs`, `sidecar/builtin-tools/core/{write,edit,apply-patch,notebook-edit}.mjs`
 - `lib/claude/{build-options.ts,types.ts}`, `lib/claude/permissions/approval-rule.ts`, `hooks/chat/use-claude-chat.ts`, `components/settings/sandbox/workspace-confinement-card.tsx`
-- `lib/ai/agent/external/permission-cascade.ts`, `lib/sandbox/policy-bridge.ts`, `lib/ai/agent/team/{teammate-character,dispatch-teammate}.ts`, `types/agent/agent-team.ts`
+- `lib/ai/agent/external/policy/permission-cascade.ts`, `lib/sandbox/policy-bridge.ts`, `lib/ai/agent/team/{teammate-character,dispatch-teammate}.ts`, `types/agent/agent-team.ts`
 - `src-tauri/src/files.rs`, `src-tauri/src/companion_api/rpc.rs`

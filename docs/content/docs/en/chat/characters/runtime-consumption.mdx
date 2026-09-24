@@ -8,7 +8,7 @@ description: Every place a selected Character changes behavior — build-options
 A Character is a passive record until something *resolves* it. This page is the exhaustive list of every runtime seam that reads a selected Character and changes behavior accordingly: the `resolveSendOptions` precedence chains, the chat header surfaces, TTS voice overlay, pet species binding, and the team bridge that lets teammates ride the same pipeline. Field definitions live in [Data Model](./data-model); this page is about *consumption*.
 
 <TLDR>
-The convergence point is `lib/claude/build-options.ts:resolveSendOptions`. Character resolution at <Term>369–376</Term>; base system precedence at <Term>589–594</Term>; twin injection <Term>606–643</Term>; persona section <Term>744–753</Term>; plugin skills <Term>709–737</Term>; tool whitelist union <Term>827–836</Term>; MCP subset <Term>987–1005</Term>; computer-use gate <Term>1052–1053</Term>; plugin-tools filter <Term>1088–1089</Term>. Chat header reads it at `components/chat/chat-header.tsx:387–433`. TTS overlay at `lib/tts/speak-chat-message.ts:19–54`. Pet binding at `components/pet/console/binding-tab.tsx:14–70`. Teammates synthesize an ephemeral Character at `lib/ai/agent/team/teammate-character.ts:56`.
+The convergence point is `lib/claude/build-options.ts:resolveSendOptions`. Character resolution at <Term>369–376</Term>; base system precedence at <Term>589–594</Term>; twin injection <Term>606–643</Term>; persona section <Term>744–753</Term>; plugin skills <Term>709–737</Term>; tool whitelist union <Term>827–836</Term>; MCP subset <Term>987–1005</Term>; computer-use gate <Term>1052–1053</Term>; plugin-tools filter <Term>1088–1089</Term>. Chat header reads it at `components/chat/chat-header.tsx:387–433`. TTS overlay at `lib/tts/speak-chat-message.ts:19–54`. Pet binding at `components/pet/console/binding-tab.tsx:14–70`. Teammates synthesize an ephemeral Character at `lib/ai/agent/team/teammate/teammate-character.ts:56`.
 </TLDR>
 
 ## The build-options resolution pipeline
@@ -183,7 +183,7 @@ const bindings = useLiveQuery(() => listPetBindings())
 Teammates do not have a parallel resolution pipeline — they ride the *same* `resolveSendOptions`. `teammateToCharacter()` synthesizes an ephemeral `Character` (id pattern `__teammate__:` + the teammate id) from the teammate config plus resolved capabilities.
 
 ```typescript
-// lib/ai/agent/team/teammate-character.ts:56 (mapping summary)
+// lib/ai/agent/team/teammate/teammate-character.ts:56 (mapping summary)
 // systemPrompt   ← teammate.config.systemPrompt > team.defaultSystemPrompt > DEFAULT
 // model          ← modelHint > teammate.config.model > team.defaultModel
 // providerId     ← teammate.config.provider > team.defaultProvider

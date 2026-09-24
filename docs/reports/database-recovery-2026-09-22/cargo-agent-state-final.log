@@ -1,0 +1,66 @@
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized] target(s) in 25.63s
+     Running unittests src/lib.rs (target/debug/deps/cognia_agent_state-c9f12d31bb69202b)
+
+running 58 tests
+test agent_session_store::dispatch::tests::is_session_store_method_matches_only_the_prefix ... ok
+test agent_session_store::tests::a_key_without_ids_is_refused_before_it_reaches_sql ... ok
+test agent_session_store::dispatch::tests::an_unknown_method_is_refused_by_name ... ok
+test agent_session_store::tests::an_empty_batch_is_a_no_op_rather_than_an_error ... ok
+test agent_session_store::dispatch::tests::the_scope_beside_the_key_overrides_whatever_the_key_carried ... ok
+test agent_session_store::dispatch::tests::load_keeps_null_and_empty_apart_on_the_wire ... ok
+test agent_session_store::tests::benchmark_list_sessions ... ignored, explicit long-history and sparse-session performance measurement
+test agent_session_store::dispatch::tests::every_method_names_the_field_it_is_missing ... ok
+test agent_session_store::dispatch::tests::append_reports_what_it_inserted_versus_what_it_received ... ok
+test agent_session_store::tests::a_partly_duplicate_batch_keeps_the_sequence_dense ... ok
+test agent_session_store::dispatch::tests::a_summary_conflict_is_reported_as_data_not_as_an_error ... ok
+test agent_session_store::dispatch::tests::prune_defaults_to_the_documented_retention ... ok
+test agent_session_store::tests::acp_catalog_is_additive_scoped_and_deletable ... ok
+test agent_session_store::tests::a_replayed_batch_does_not_duplicate_rows ... ok
+test agent_session_store::dispatch::tests::list_and_subkey_calls_project_their_rows ... ok
+test agent_session_store::tests::an_empty_subpath_is_the_main_transcript_not_a_third_key ... ok
+test agent_session_store::tests::append_and_load_round_trips_in_order ... ok
+test agent_session_store::tests::load_distinguishes_never_written_from_emptied ... ok
+test agent_session_store::tests::deleting_one_subkey_leaves_the_main_transcript_alone ... ok
+test agent_session_store::tests::deleting_the_main_key_cascades_to_subagents_and_the_summary ... ok
+test agent_session_store::tests::entries_without_a_uuid_always_append ... ok
+test agent_session_store::tests::list_sessions_reports_the_last_write_and_orders_by_it ... ok
+test agent_session_store::tests::prune_keeps_a_session_whose_last_write_is_recent ... ok
+test agent_session_store::tests::prune_drops_whole_sessions_and_keeps_recent_ones ... ok
+test agent_session_store::tests::stats_counts_sessions_not_just_rows ... ok
+test provider_profiles::tests::deployment_model_contract_matches_typescript_v2_and_reads_v1 ... ok
+test agent_session_store::tests::summaries_are_stored_verbatim_and_never_interpreted ... ok
+test provider_profiles::tests::cas_conflict_is_rejected ... ok
+test provider_profiles::tests::gateway_projection_skips_disabled_and_unresolvable_builtin_endpoints ... ok
+test agent_session_store::tests::the_main_transcript_and_a_subagent_are_separate_keys ... ok
+test provider_profiles::tests::gateway_projection_maps_deployments_transports_and_versions ... ok
+test agent_session_store::tests::summary_writes_are_compare_and_set ... ok
+test provider_profiles::tests::catalog_refresh_rejects_unverified_or_secret_bearing_payloads ... ok
+test session_import::tests::candidate_db_paths_are_deduped ... ok
+test session_import::tests::candidate_db_paths_prefer_xdg_then_known_store_then_platform_fallback ... ok
+test session_import::tests::cursor_projection_finds_nested_composer_conversations ... ok
+test provider_profiles::tests::catalog_refresh_enforces_adapter_lifecycle_and_alias_invariants ... ok
+test session_import::tests::external_store_reader_rejects_unregistered_sources ... ok
+test session_import::tests::cursor_projection_traverses_encoded_json_once ... ok
+test session_import::tests::missing_db_returns_empty_not_error ... ok
+test session_import::tests::missing_tables_yield_no_sessions ... ok
+test agent_session_store::tests::tenants_and_workspaces_cannot_read_each_others_rows ... ok
+test provider_profiles::tests::subscribe_observes_version_bumps ... ok
+test session_import::tests::generic_session_store_preserves_parent_lifecycle_and_messages ... ok
+test provider_profiles::tests::catalog_refresh_search_and_last_known_good_are_atomic ... ok
+test provider_profiles::tests::secret_material_and_blocked_headers_are_refused ... ok
+test session_import::tests::builds_sessions_with_grouped_messages_and_parts ... ok
+test provider_profiles::tests::replace_load_roundtrip_bumps_version_and_rebuilds_aliases ... ok
+test provider_profiles::tests::export_import_roundtrip_and_newer_schema_refusal ... ok
+test agent_session_store::dispatch::tests::first_open_retries_failures_and_shares_one_store_across_threads ... ok
+test agent_session_store::tests::backup_rejects_a_sidecar_selected_path_outside_managed_storage ... ok
+test session_import::tests::public_copilot_reader_reads_sqlite_fixture ... ok
+test session_import::tests::public_cursor_reader_reads_sqlite_fixture ... ok
+test session_import::tests::public_readers_report_corrupt_and_changed_schema_databases ... ok
+test agent_session_store::tests::list_sessions_preserves_grouping_across_the_index_seek_boundary ... ok
+test session_import::tests::public_cline_reader_reads_sqlite_fixture ... ok
+test agent_session_store::tests::backup_produces_a_readable_database ... ok
+test agent_session_store::tests::list_sessions_survives_retries_deletions_and_reopening ... ok
+
+test result: ok. 57 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.07s
+

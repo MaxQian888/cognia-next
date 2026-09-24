@@ -63,7 +63,6 @@ interface ChatPaneProps {
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
   composerRef?: Ref<ComposerHandle>
-  mobileMentionMembers?: readonly Character[]
 }
 ```
 
@@ -360,9 +359,10 @@ The desktop shell stacks 4 global floating layers:
 
 ## Mobile-Specific: Gestures and Plus Menu
 
-- **`ComposerPlusMenu`** (`components/mobile/chat/composer-plus-menu.tsx`) — touch-screen "+" button drawer, listing attachments, voice, skills, references, and other entries; replaces desktop toolbar icons.
+- **`ComposerPlusMenu`** (`components/mobile/chat/composer-plus-menu.tsx`) — the native shell's "+" button drawer (camera, album, files, skills, references and other entries). A narrow browser window gets the phone-shaped composer too, but keeps the desktop paperclip menu: it has no native camera or album to offer.
 - **`MessageActionSheet`** (`components/mobile/chat/message-action-sheet.tsx`) — long-press on a message pops a bottom sheet: copy, edit & resend, quote, delete, share.
-- **`MentionPopover`** — mobile-only @-mention popover, because desktop popover is too cramped on small screens.
+- **One `@` panel everywhere** — a phone uses the same combined `ComposerPopover` as desktop (files, agents, skills, and a team room's members with their roles); its rows are sized for a finger. The old members-only phone sheet is gone: it took file and agent references away from team rooms on a phone.
+- **Addressed turns** — in a direct chat (or the new-chat composer), a bare `@` as the message's first token leads the panel with **Runtimes** (`@claude`, `@codex`) and **Squad members**, each row showing whether its runtime can answer here and, if not, why. Sending `@codex …` runs that one turn on a configured Codex agent (`@claude` on the builtin lane, a member as that member) — the leading pill is tinted by the lane it resolves to, a refused route keeps the draft with the reason and a "Set up" action, and the reply is labelled "via @handle". Pieces: `lib/chat/turn-route/` (parse, resolve, send-time snapshot, mixed-runtime history), `hooks/chat/use-route-targets.ts`, and `turnRoute` in `use-claude-chat-controller`.
 - **Gestures**: `<LongPress>`, `<SwipeRow>`, `<PullToRefresh>` wrap the message list / list items, unified via `test-pointer-polyfill.ts` so jsdom tests can run too.
 
 ## Theming & i18n Integration

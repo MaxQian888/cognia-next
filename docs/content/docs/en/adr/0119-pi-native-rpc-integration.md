@@ -168,7 +168,7 @@ points at it is refused at launch rather than silently running an unpinned bridg
 The Impact section states that authentication diagnostics call only
 `pi auth check --provider <id> --json --no-refresh`. That constraint was written down and never
 implemented — an unauthenticated Pi surfaced as a failed first prompt rather than as a diagnosis.
-`lib/ai/agent/external/pi-auth.ts` and a "Pi credentials" card on the agent's settings panel now
+`lib/ai/agent/external/runtimes/pi/pi-auth.ts` and a "Pi credentials" card on the agent's settings panel now
 implement it, verified against Pi 0.84.1's own `dist/cli/auth-check.d.ts` rather than inferred:
 
 - the CLI's **exit code cannot lead the classification**: `1` means `not_ready` on the happy path

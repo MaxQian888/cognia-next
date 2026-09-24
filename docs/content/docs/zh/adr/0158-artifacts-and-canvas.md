@@ -19,7 +19,7 @@ Zustand store——而且在本仓库里少见地：**大部分确实已经接�
 
 **模型无法创建 artifact。** `types/agent/tool.ts` 里声明了 11 个工具名，
 **两条**消息转换路径（`lib/claude/adapter.ts` 与
-`lib/ai/agent/external/event-to-parts.ts`，逻辑完全重复）也都已经会把这样一次调用
+`lib/ai/agent/external/session/event-to-parts.ts`，逻辑完全重复）也都已经会把这样一次调用
 变成 `ArtifactPart`。但没有任何地方定义、注册或执行其中任何一个。artifact 只能靠
 回合结束时的启发式检测器从回复里捞出来——而它在结构上就不可能知道一张图表的
 `chartType`，或作者想要的标题。

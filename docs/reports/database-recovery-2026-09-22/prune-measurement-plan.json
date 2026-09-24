@@ -1,0 +1,12 @@
+{
+  "measure": "exact extracted before/after SQL, in-memory SQLite, no-op prune transaction",
+  "fixtures": [
+    "100000 entries / 100 sessions / 100 recent summaries",
+    "100000 entries / 1000 sessions / 1000 expired summaries with recent entries",
+    "100000 entries / 100000 sessions / 100000 recent summaries"
+  ],
+  "warmup": 1,
+  "samples": 10,
+  "order": "paired alternating AB BA, rollback each measurement to restore fixture",
+  "guardrail": "flag no-op overhead larger than max(20% baseline median,1ms); correctness first, report unavoidable retained-summary probe cost separately"
+}

@@ -14,7 +14,7 @@ description: "Complete the half-built feature where the main agent dispatches su
 Two dispatch surfaces already let the main agent run a subagent on an external
 CLI agent, and both were committed but only ~90% finished:
 
-- **A1 — Agent Team teammates.** `lib/ai/agent/team/dispatch-teammate.ts` forks a
+- **A1 — Agent Team teammates.** `lib/ai/agent/team/teammate/dispatch-teammate.ts` forks a
   `TeammateChannel = "sidecar" | "text" | "external"`; a non-`claude`
   `teammate.config.runtime` (or an `externalAgentPresetIds` capability) routes to
   `runExternalBacked()` → `ExternalAgentManager.execute()`.

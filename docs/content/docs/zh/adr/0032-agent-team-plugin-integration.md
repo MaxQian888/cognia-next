@@ -34,7 +34,7 @@ store、F-path workflow synthesizer、`BudgetGuard`、`TeammatePool`、
   队员继承。
 - `TeammateConfig.capabilities: TeammateCapabilityOverlay` — 每个队员的
   override，按 key 提供 `add` / `remove` / `replace` 三态语义。
-- `lib/ai/agent/team/capability-resolver.ts:resolveTeammateCapabilities`
+- `lib/ai/agent/team/teammate/capability-resolver.ts:resolveTeammateCapabilities`
   作为唯一的纯函数把两者合并成 `ResolvedCapabilities` 给运行时消费。
 
 ### 2. Subagent 插件能力（overlay-registry 第 6 项）

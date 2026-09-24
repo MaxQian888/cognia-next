@@ -1,0 +1,13 @@
+{
+  "candidate": "recursive index seek capped at 256 sessions, grouped indexed range scan for remaining sessions",
+  "acceptance": {
+    "long_history_100000_entries_100_sessions_median_improvement_percent": 20,
+    "absolute_improvement_gt_max_mad_multiplier": 2,
+    "sparse_regression_limit": "max(10% baseline median, 0.5 ms)",
+    "warmup_runs": 1,
+    "measurement_runs": 10,
+    "order": "paired alternating AB BA"
+  },
+  "fixtures": ["100000 / 100", "100000 / 1000", "10000 / 10000", "100000 / 100000"],
+  "reason": "unconditional CTE rejected for 170%-221% sparse regression"
+}

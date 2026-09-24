@@ -37,8 +37,8 @@ Each kind runs on a different base path, so each uses a different **target**.
 | --- | --- | --- | --- | --- |
 | **Mode** | Chat context injector (system prompt + tool whitelist + output format + permission mode) | `types/agent/agent-mode.ts` (`BUILT_IN_AGENT_MODES`) | 11 | `createChatTarget` |
 | **Subagent** | The four `workflow-*` experts the dispatcher self-selects by `description` | `lib/claude/agents/subagents/` | 4 | `createChatTarget` (direct) or inside team/workflow |
-| **External preset** | ACP configs for Codex / Claude Code / Gemini CLI / Cursor CLI | `lib/ai/agent/external/presets.ts` | 4 (+custom) | two chat targets, then compare |
-| **Agent team** | Lead + teammates orchestration (task DAG, delegation, budget, HITL) | `lib/ai/agent/agent-team-runtime.ts` | templates | `createTeamTarget` |
+| **External preset** | ACP configs for Codex / Claude Code / Gemini CLI / Cursor CLI | `lib/ai/agent/external/config/presets.ts` | 4 (+custom) | two chat targets, then compare |
+| **Agent team** | Lead + teammates orchestration (task DAG, delegation, budget, HITL) | `lib/ai/agent/team/agent-team-runtime.ts` | templates | `createTeamTarget` |
 
 ### Modes — assert what tools were and weren't used
 

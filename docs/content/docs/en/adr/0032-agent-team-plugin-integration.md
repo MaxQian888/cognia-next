@@ -37,7 +37,7 @@ seven coordinated mechanisms:
   default pool every teammate inherits.
 - `TeammateConfig.capabilities: TeammateCapabilityOverlay` — per-teammate
   overlay with `add` / `remove` / `replace` semantics per key.
-- `lib/ai/agent/team/capability-resolver.ts:resolveTeammateCapabilities` is the
+- `lib/ai/agent/team/teammate/capability-resolver.ts:resolveTeammateCapabilities` is the
   single pure function that merges them into a `ResolvedCapabilities` snapshot
   consumed by the runtime.
 

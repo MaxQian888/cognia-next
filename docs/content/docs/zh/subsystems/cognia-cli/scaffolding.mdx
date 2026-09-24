@@ -134,7 +134,7 @@ manifest 钉住 host 路由所依据的契约：
           --outfile=dist/index.js --external:@/types/plugin --external:@/lib/*"
 ```
 
-Host 模块（`@/types/plugin`、`@/lib/chat/slash-command-registry`）在 `tsconfig.json` 的
+Host 模块（`@/types/plugin/index`、`@/lib/chat/slash-command-registry`）在 `tsconfig.json` 的
 `paths` 与 `jest.config.cjs` 的 `moduleNameMapper` 中都被映射到本地
 `src/__shims__/` 副本，因此脚手架能通过类型检查、其 jest 测试也能在插件真正遇到运行中的
 cognia 之前就通过。

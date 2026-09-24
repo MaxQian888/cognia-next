@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-09-22T12:27:31Z",
+  "workspaceHead": "f3d2c8332b3d3a0f9b1f56aff4c86a4e11021062",
+  "sourceState": "Uncommitted working tree; SHA-256 values below identify the tested files.",
+  "sourceSha256": {
+    "crates/cognia-observability/src/recovery_runtime/controller.rs": "79144b2da8003ebb20ba5f44fcf6b22cf712a09cb715faf839e10a871c4c38e7",
+    "crates/cognia-observability/src/recovery_store.rs": "37785762cadb17ad6093d3624581c5280b09ae0c7385a1912de581eb06fe6c82",
+    "hooks/chat/stream-coalescing.ts": "5da43a596a9a9634278acabec0cd7960ab3f9480a04661fcd74c5c05b11643c7",
+    "hooks/chat/stream-coalescing.test.ts": "38f2c0c942718396354c1d7810037888f6d550fe166bd18d8d8e7b6a1702254c"
+  },
+  "storeConcurrency": {
+    "threads": 8,
+    "saveAttempts": 320,
+    "interleavedClearAttempts": 64,
+    "baselineSaveFailures": 91,
+    "finalSaveFailures": 0,
+    "baselineError": "No such file or directory (os error 2) during fixed-temp-file rename",
+    "finalCheckpointReloadEqualsSavedState": true,
+    "baselineEvidence": "recovery-baseline-excerpt.log: selected original tool output; complete baseline stdout was not retained",
+    "finalEvidence": "recovery-tests.log: cloned_stores_serialize_concurrent_saves_and_clear",
+    "baselineCommand": "rtk env CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p cognia-observability --lib --offline concurrent_ -- --nocapture"
+  },
+  "controllerConcurrency": {
+    "threads": 8,
+    "recoveryEventAttempts": 320,
+    "intermediateRetainedTimestamps": 86,
+    "finalRetainedTimestamps": 320,
+    "finalReloadEqualsLatestMemory": true,
+    "intermediateDefinition": "Store serialization/fsync and controller save lock were already applied; transition timestamps were still captured before acquiring the state lock. The 86 count is not the original baseline.",
+    "originalBaselineControllerTest": "Passed on its observed run; no claim of observed original-controller snapshot loss.",
+    "evidence": "recovery-baseline-excerpt.log and recovery-tests.log: concurrent_transitions_persist_the_latest_recovery_budget"
+  },
+  "recoveryTests": {
+    "command": "rtk proxy env CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p cognia-observability --lib --offline",
+    "log": "recovery-tests.log",
+    "exitCode": 0,
+    "passed": 182,
+    "failed": 0,
+    "testDurationSeconds": 6.88,
+    "additionalCases": [
+      "partial temporary file preserves previous valid main and next save succeeds",
+      "failed staging write preserves previous checkpoint"
+    ]
+  },
+  "recoveryClippy": {
+    "command": "rtk proxy env CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo clippy -p cognia-observability --lib --offline -- -D warnings",
+    "log": "recovery-clippy.log",
+    "status": "passed",
+    "exitCode": 0
+  },
+  "streamCheckpoints": {
+    "command": "rtk proxy pnpm exec jest --runTestsByPath hooks/chat/stream-coalescing.test.ts --runInBand --selectProjects jsdom --roots hooks/chat --coverage --collectCoverageFrom=hooks/chat/stream-coalescing.ts --coverageReporters=text --coverageThreshold='{\"global\":{\"branches\":90,\"functions\":90,\"lines\":90,\"statements\":90}}'",
+    "log": "stream-checkpoint-tests.log",
+    "exitCode": 0,
+    "passed": 21,
+    "failed": 0,
+    "testDurationSeconds": 1.224,
+    "coveragePercent": { "statements": 100, "branches": 100, "functions": 100, "lines": 100 },
+    "coverageScope": "Only hooks/chat/stream-coalescing.ts; not repository-wide coverage.",
+    "simulatedDurationMs": 3600000,
+    "updatesPerSecond": 100,
+    "updates": 360000,
+    "checkpointCallbacks": 3600,
+    "maximumPendingIntervalMs": 1000,
+    "lastSubmittedToken": "359999"
+  },
+  "boundaries": [
+    "Rust recovery tests exercise real local temporary files and threads, not actual process kills or power loss.",
+    "Store locks coordinate clones of one RecoveryStore; independent stores and other processes are not locked together.",
+    "File sync_all precedes rename; Unix directory sync_all follows rename/removal. No hardware power-loss durability guarantee is claimed.",
+    "Controller persistence remains best-effort on I/O errors, logging the failure while retaining in-memory state.",
+    "Stream timings use Jest fake timers. Callback counts prove scheduler submission, not Dexie completion or disk durability; event-loop stalls can delay real callbacks.",
+    "The 91/320 baseline failure count is one observed concurrent run, not a deterministic failure percentage or statistical benchmark.",
+    "No production user database, whole Tauri build, authenticated UI recovery, or cross-platform filesystem was tested by these commands."
+  ]
+}

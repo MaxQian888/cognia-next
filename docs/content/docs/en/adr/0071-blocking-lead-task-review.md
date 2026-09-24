@@ -160,12 +160,12 @@ card to `review` (a human still has the last word) when it is set, and to
 
 | Piece                       | File                                                    |
 | --------------------------- | ------------------------------------------------------- |
-| Policy resolution + node id | `lib/ai/agent/team/task-review-policy.ts`               |
-| Prompt + verdict schema     | `lib/ai/agent/team/lead-review.ts`                      |
-| Diff evidence               | `lib/ai/agent/team/review-evidence.ts`                  |
+| Policy resolution + node id | `lib/ai/agent/team/gates/task-review-policy.ts`               |
+| Prompt + verdict schema     | `lib/ai/agent/team/squad/lead-review.ts`                      |
+| Diff evidence               | `lib/ai/agent/team/ledger/review-evidence.ts`                  |
 | Node emission + dep rewiring| `lib/ai/agent/team/synthesize-workflow.ts`              |
 | Executor (the loop)         | `lib/workflow/nodes/built-ins.ts`                       |
-| Reviewer wiring             | `lib/ai/agent/agent-team-runtime-deps.ts` (`runLeadReview`) |
-| Exact-worker claim          | `lib/ai/agent/team/teammate-pool.ts`                    |
+| Reviewer wiring             | `lib/ai/agent/team/agent-team-runtime-deps.ts` (`runLeadReview`) |
+| Exact-worker claim          | `lib/ai/agent/team/teammate/teammate-pool.ts`                    |
 | Config                      | `types/agent/agent-team.ts` (`AgentTeamConfig.taskReview`) |
 | Operator UI                 | `components/agent/workspace/settings/section-governance.tsx` |

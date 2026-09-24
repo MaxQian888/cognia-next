@@ -248,7 +248,7 @@ The `/agent-teams/workspace` shell owned a cluster of store state and actions th
 
 ## Adjacent Modules
 
-- `lib/ai/agent/agent-team-compat.ts` is now two pure normalizers, `normalizeAgentTeamConfig` and `normalizeAgentTeamTask`, which the store calls on every create and update. They trim strings and clamp counts, and return the original reference when nothing changed.
+- `lib/ai/agent/team/agent-team-compat.ts` is now two pure normalizers, `normalizeAgentTeamConfig` and `normalizeAgentTeamTask`, which the store calls on every create and update. They trim strings and clamp counts, and return the original reference when nothing changed.
 - `stores/agent/pending-gates-store.ts` is the HITL gate queue, shared by the ADR-0022 Squad gates and the ADR-0045 plan gates. Seven gate types: `budget`, `deadlock`, `plan`, `teammate_fix`, `replan`, `capability_audit`, `plan_step`. `gateTypeFromScope` maps approval-bus scopes onto them, and rehydration stamps every restored gate `interrupted`, because the approval-bus waiter died with the page. See [HITL Gates](./hitl-gates).
 
 ## Related

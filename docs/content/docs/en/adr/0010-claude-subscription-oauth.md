@@ -11,6 +11,14 @@ description: "cognia-next gains first-class support for Claude Pro/Max OAuth log
 
 ---
 
+## Authentication review — 2026-09-22
+
+This ADR records a historical custom OAuth integration, not an officially supported third-party sign-in contract. Current [Anthropic authentication and credential-use documentation](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) prohibits third-party applications from collecting, storing, or intermediating claude.ai credentials and distinguishes that from end users signing in through an unmodified Claude Code binary. Product integrations should use API keys or supported cloud providers unless separately approved.
+
+The isolation fixes preserve Claude Code's ownership of reused logins: Cognia never exchanges their copied refresh tokens. A changed opaque refresh token requires explicit re-import because the discovery payload does not establish account identity. Background persistence compares the previous credential under the vault lock and never upserts a missing account. This does not serialize OAuth exchanges for Cognia-owned credentials across multiple processes.
+
+The [current authentication reference](https://code.claude.com/docs/en/authentication#credential-management) specifies that `CLAUDE_CONFIG_DIR` also scopes macOS Keychain entries. Custom-directory discovery must not fall back to the default Keychain login; until the private namespace can be resolved reliably, Cognia reads only that directory's credential file. Per-account subprocesses remove inherited competing auth variables before applying the selected credential.
+
 ## Context
 
 Until this ADR, cognia-next's Anthropic integration was strictly **API-key based**:

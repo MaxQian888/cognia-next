@@ -8,7 +8,7 @@ description: 被选中角色改变行为的每一处——build-options 优先�
 在某个东西 *解析* 它之前，角色只是一条被动记录。本页穷举每一个读取被选中角色并据此改变行为的运行时接缝：`resolveSendOptions` 的优先级链、聊天头部各面、TTS 语音覆盖层、宠物物种绑定，以及让队友跑在同一条流水线上的团队桥接。字段定义见[数据模型](./data-model)；本页讲的是 *消费*。
 
 <TLDR>
-收敛点是 `lib/claude/build-options.ts:resolveSendOptions`。角色解析在 <Term>369–376</Term>；基础系统优先级在 <Term>589–594</Term>；分身注入 <Term>606–643</Term>；persona 段落 <Term>744–753</Term>；插件技能 <Term>709–737</Term>；工具白名单联合 <Term>827–836</Term>；MCP 子集 <Term>987–1005</Term>；计算机使用开关 <Term>1052–1053</Term>；插件工具过滤 <Term>1088–1089</Term>。聊天头部在 `components/chat/chat-header.tsx:387–433` 读取它。TTS 覆盖层在 `lib/tts/speak-chat-message.ts:19–54`。宠物绑定在 `components/pet/console/binding-tab.tsx:14–70`。队友在 `lib/ai/agent/team/teammate-character.ts:56` 合成临时角色。
+收敛点是 `lib/claude/build-options.ts:resolveSendOptions`。角色解析在 <Term>369–376</Term>；基础系统优先级在 <Term>589–594</Term>；分身注入 <Term>606–643</Term>；persona 段落 <Term>744–753</Term>；插件技能 <Term>709–737</Term>；工具白名单联合 <Term>827–836</Term>；MCP 子集 <Term>987–1005</Term>；计算机使用开关 <Term>1052–1053</Term>；插件工具过滤 <Term>1088–1089</Term>。聊天头部在 `components/chat/chat-header.tsx:387–433` 读取它。TTS 覆盖层在 `lib/tts/speak-chat-message.ts:19–54`。宠物绑定在 `components/pet/console/binding-tab.tsx:14–70`。队友在 `lib/ai/agent/team/teammate/teammate-character.ts:56` 合成临时角色。
 </TLDR>
 
 ## build-options 解析流水线
@@ -183,7 +183,7 @@ const bindings = useLiveQuery(() => listPetBindings())
 队友没有并行的解析流水线——它们跑在 *相同* 的 `resolveSendOptions` 上。`teammateToCharacter()` 从队友配置加上已解析的能力，合成一个临时 `Character`（id 模式为 `__teammate__:` + 队友 id）。
 
 ```typescript
-// lib/ai/agent/team/teammate-character.ts:56 (mapping summary)
+// lib/ai/agent/team/teammate/teammate-character.ts:56 (mapping summary)
 // systemPrompt   ← teammate.config.systemPrompt > team.defaultSystemPrompt > DEFAULT
 // model          ← modelHint > teammate.config.model > team.defaultModel
 // providerId     ← teammate.config.provider > team.defaultProvider

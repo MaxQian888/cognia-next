@@ -93,12 +93,12 @@ UTF-8数量限制在**64 KiB**，直接丢弃整个文件而不是拆分：一�
 
 | 作品 | 档案 |
 | --------------------------- | ------------------------------------------------------- |
-| 策略解析 + 节点ID | `lib/ai/agent/team/task-review-policy.ts` |
-| 提示 + 决策模式 | `lib/ai/agent/team/lead-review.ts` |
-| 不同的证据 | `lib/ai/agent/team/review-evidence.ts` |
+| 策略解析 + 节点ID | `lib/ai/agent/team/gates/task-review-policy.ts` |
+| 提示 + 决策模式 | `lib/ai/agent/team/squad/lead-review.ts` |
+| 不同的证据 | `lib/ai/agent/team/ledger/review-evidence.ts` |
 | 节点发射 + dep 重布线 | `lib/ai/agent/team/synthesize-workflow.ts` |
 | 执行者（环路） | `lib/workflow/nodes/built-ins.ts` |
-| 评审者接线 | `lib/ai/agent/agent-team-runtime-deps.ts`（`runLeadReview`） |
-| 精确Worker主张 | `lib/ai/agent/team/teammate-pool.ts` |
+| 评审者接线 | `lib/ai/agent/team/agent-team-runtime-deps.ts`（`runLeadReview`） |
+| 精确Worker主张 | `lib/ai/agent/team/teammate/teammate-pool.ts` |
 | 配置 | `types/agent/agent-team.ts`（`AgentTeamConfig.taskReview`） |
 | 操作员UI | `components/agent/workspace/settings/section-governance.tsx` |

@@ -344,6 +344,7 @@ gain.
 
 **Trade-offs**
 
+- Since 2026-09-22, passive Claude/Codex Keychain discovery does not open macOS authorization dialogs. It reports inaccessible credentials separately from missing credentials and keeps the existing file fallback. Cognia serializes its Keychain interaction policy so passive probes do not interfere with explicit user-authorized imports; the original policy is restored after each operation.
 - OpenCode-Zen integration is paste-key today; full OAuth waits on documented
   endpoints upstream.
 - Auto-discovery of `~/.codex/auth.json` is no longer a runtime fallback —

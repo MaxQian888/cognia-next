@@ -57,7 +57,7 @@ each its own commit with co-located tests and gates. Chat-provider support
 covers **both** auth modes (no simplification).
 
 ### Phase D — ACP execution fidelity
-`lib/ai/agent/external/acp-client.ts`: honor `plan` and `dontAsk` (auto-reject
+`lib/ai/agent/external/runtimes/acp/acp-client.ts`: honor `plan` and `dontAsk` (auto-reject
 without UI — `plan` = no execution, `dontAsk` = deny unless pre-approved);
 extend `acceptEdits` to auto-approve read/list ops (side-effecting kinds still
 prompt); add the `terminal/write` handler (delegates to the existing

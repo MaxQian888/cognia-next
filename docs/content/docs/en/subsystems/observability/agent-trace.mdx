@@ -116,8 +116,8 @@ Spans are seeded at curated boundaries (the same philosophy as the perf hotspot 
 | --- | --- | --- |
 | **Chat turn** | `invoke_agent` / `anthropic` / `chat`; traceId+spanId echoed into `SendOptions` | `hooks/chat/use-claude-chat.ts:855` (start), `:1534` (success), `:1257` (`turn_error`) |
 | **Chat tool calls** | `execute_tool` children parented under the turn | `chat-tool-spans.ts:138` via `handleSdkEventForToolSpans` (`use-claude-chat.ts:1400`) |
-| **Agent Team dispatch** | `invoke_agent` / `cognia.team` / `agent-team` | `lib/ai/agent/team/dispatch-teammate.ts:246` (start), `:290` (success w/ usage) |
-| **External agent bridge** | `invoke_agent`, provider via protocol, with `handoff` | `lib/ai/agent/external/agent-trace-bridge.ts:74` |
+| **Agent Team dispatch** | `invoke_agent` / `cognia.team` / `agent-team` | `lib/ai/agent/team/teammate/dispatch-teammate.ts:246` (start), `:290` (success w/ usage) |
+| **External agent bridge** | `invoke_agent`, provider via protocol, with `handoff` | `lib/ai/agent/external/session/agent-trace-bridge.ts:74` |
 | **Plugin hooks** | `execute_tool` / `cognia.plugin` / `plugin-hook`, self-measured | `lib/plugin/messaging/hooks-system.ts:125` (`emitFinishedSpan`) |
 | **Workflow LLM node** | `chat` / `cognia.workflow` / `workflow` | `lib/workflow/nodes/built-ins.ts:308` (`ai.classify`/`ai.extract` delegate through this) |
 

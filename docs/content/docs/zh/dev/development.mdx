@@ -144,7 +144,7 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
 
 | 别名           | 映射到           | 常见用途                            |
 | -------------- | ---------------- | ----------------------------------- |
-| `@/*`          | 仓库根           | 通配（例如 `@/types`、`@/scripts`） |
+| `@/*`          | 仓库根           | 通配（例如 `@/types/index`、`@/scripts`） |
 | `@/components` | `components/`    | UI                                  |
 | `@/lib`        | `lib/`           | 逻辑                                |
 | `@/ui`         | `components/ui/` | shadcn 原语                         |
@@ -193,7 +193,7 @@ shadcn/ui 组件遵循 shadcn 命名（kebab-case 文件名，PascalCase 导出 
 ### 样式
 
 - Tailwind utility-first；除非动态值无法用类表达，否则避免 `style={{...}}`。
-- 用 `@/lib/utils` 的 `cn()` 安全合并类：
+- 用 `@/lib/utils/index` 的 `cn()` 安全合并类：
 
   ```tsx
   cn("base-classes", condition && "conditional", className)

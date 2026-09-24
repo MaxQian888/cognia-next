@@ -32,7 +32,7 @@ Codex在这项工作之前已经**成熟于三层**，由先前ADRs确立，并�
 将这三个间隙作为**独立、风险递增的阶段（D → B → C）**实现，每个阶段都有自己的提交，并有共址的测试和门禁。聊天提供商支持涵盖**两种**认证模式（不简化）。
 
 ### D阶段——ACP执行忠实度
-`lib/ai/agent/external/acp-client.ts`：尊重`plan`和拒绝`dontAsk`（自动拒绝无UI——`plan`=不执行，`dontAsk`=除非事先批准否则拒绝）;扩展`acceptEdits`自动批准read/list操作（副作用类仍提示）;添加`terminal/write` 处理器（代理到现有`acpTerminalWrite`原生绑定）。把缺失的`#[cfg(test)]`模块加入`src-tauri/src/external_agent/{terminal,process}.rs`。
+`lib/ai/agent/external/runtimes/acp/acp-client.ts`：尊重`plan`和拒绝`dontAsk`（自动拒绝无UI——`plan`=不执行，`dontAsk`=除非事先批准否则拒绝）;扩展`acceptEdits`自动批准read/list操作（副作用类仍提示）;添加`terminal/write` 处理器（代理到现有`acpTerminalWrite`原生绑定）。把缺失的`#[cfg(test)]`模块加入`src-tauri/src/external_agent/{terminal,process}.rs`。
 
 ### B阶段——Codex usage/limits追踪（人形对等性）
 修复`lib/subscription/limits/sources/codex.ts`解析`resets_at` + `window_minutes`（保留遗留回退）。添加`probeCodexUsage`（统一`queryAccountLimits`+`recordLimitsSnapshot`的薄包装）和一个可视化感知`startCodexUsageScheduler`重用共享的踏频底。启动时通过`CodexUsageSchedulerInitializer`挂载（仅桌面，`probeEnabled`自门），这样可以访问，而不是休眠。接口 探针控制在Codex订阅标签中，双语。不改动地重用整个`providerLimits`持久化+光量渲染栈。

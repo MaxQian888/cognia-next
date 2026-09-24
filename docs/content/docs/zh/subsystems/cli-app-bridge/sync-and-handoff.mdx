@@ -29,7 +29,10 @@ config、credentials 与 history，但保留显式 MCP 选择。每项失败彼�
 
 CLI 保留结构化快照用于后续接回，并向新的 runtime 注入历史上下文。超长历史必须先成功生成摘要；
 摘要回合禁用工具和 MCP，失败时停止续聊，不写入不完整副本。后续 transcript 只追加新的用户输入，
-避免反复嵌套历史内容。无法强制禁用工具的 external CLI backend 会拒绝超长交接，并说明原因。交接不会转移桌面 SDK session ID、keyring handle、审批授权或实时 stream。
+避免反复嵌套历史内容。external CLI backend 可通过明确配置的 provider API key 与 model 生成超长历史摘要，不会自动切换
+provider；续聊仍使用选定的外部 Agent。缺少该配置时明确拒绝。摘要整体保留，无法容纳时停止交接，
+不会截掉末尾约束。内联附件在解码前检查 32 MiB 总量上限，写入私有临时目录后交给既有附件解析器；提取失败或被跳过时停止发送。
+只支持文本的外部适配器会明确提示图片经过有损 OCR。历史文件提及不会重新打开旧路径。交接不会转移桌面 SDK session ID、keyring handle、审批授权或实时 stream。
 
 ## CLI → GUI transcript
 
@@ -53,7 +56,20 @@ sequenceDiagram
 响应确认 renderer 已持久化，而非仅发送事件。Renderer 不可用或事务失败时返回错误。原生会话不会
 被冲突的 ID 覆盖；重复发送相同快照会打开同一目标，不覆盖桌面端后续工作；发生变化的快照创建独立
 副本。持久化 receipt 关联源 ID、内容摘要值和实际目标 ID。由于 CLI sidecar 无法在桌面中恢复，导入
-对话通过历史上下文继续。
+对话通过历史上下文继续。健康检查和持久化确认均有超时边界；超时会说明结果尚未确认，提示重试
+同一快照，客户端不会自动另建导入。
+首次使用内置 Agent 续聊时，从持久化消息和历史任务状态重建上下文，超限内容先摘要再发送；后续回合不会重复注入同一 seed。
+
+## 从 Codex App 接回
+
+接回操作读取最新 Codex transcript，并按内容创建关联快照。重复接回同一内容会打开同一快照，保留
+之后在 Cognia 中的续聊。Codex 内容发生变化时创建新快照，两边历史均不覆盖；子对话关联和消息引用
+随快照图一起重新映射。解析失败不会再把旧的冻结副本当成成功结果。
+
+## 跨宿主任务状态
+
+独立接收端随 transcript 保留历史 tasks、plans、goals、checkpoints 和 inter-agent messages。
+Model/provider 取自通过 preflight 的 ticket；源机器目录与审批授权不会成为目标端的执行权限。
 
 ## Live renderer-backed 操作
 

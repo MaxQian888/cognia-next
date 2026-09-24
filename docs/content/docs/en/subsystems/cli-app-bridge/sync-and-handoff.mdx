@@ -32,7 +32,14 @@ Unknown content is explicitly marked instead of silently disappearing.
 The CLI preserves that structured snapshot for a later return and injects historical context into
 a fresh runtime. Oversized history requires a successful summary before continuation. Summary
 turns have no tools or MCP access; failure stops continuation without writing a partial copy.
-External CLI backends that cannot enforce tool-free summaries reject oversized handoffs with an actionable error.
+For an external CLI backend, oversized history can be summarized through the explicitly configured
+provider API key and model. There is no provider fallback; the continuation still uses the selected
+external agent. Without such a provider, the command rejects the handoff with an actionable error.
+Summaries are kept whole: an over-budget summary fails instead of losing trailing constraints.
+Inline attachments have a 32 MiB aggregate limit before decoding, are staged privately, and pass
+through the normal attachment resolver. Failed or
+skipped extraction stops the send. Text-only external adapters explicitly report image OCR as a
+lossy conversion. Historical file mentions remain inert rather than reopening arbitrary old paths.
 Only the new user prompt is appended to the transcript, avoiding recursively duplicated history.
 This does not transfer a desktop SDK session ID, keyring handle, approvals or live stream.
 
@@ -61,7 +68,25 @@ failed transaction returns an error. Native sessions are protected from ID colli
 identical snapshot reopens the same target without overwriting subsequent desktop work; a changed
 snapshot creates a separate copy. The persisted receipt associates the source ID and payload digest
 with the actual target ID. The imported conversation continues from context because a CLI sidecar
-cannot be resumed inside the desktop.
+cannot be resumed inside the desktop. Health discovery and persistence acknowledgement have
+bounded deadlines. A timeout reports an uncertain outcome and asks for the same snapshot to be
+retried; the client does not automatically create another import.
+The first built-in continuation rebuilds context from durable messages and historical task state,
+summarizing overflow before dispatch. Later turns do not inject the same seed again.
+
+## Returning from Codex App
+
+The return action reads the current Codex transcript and creates a linked, content-addressed
+snapshot. Repeating the same return opens that snapshot, including any subsequent Cognia work.
+If Codex has advanced, the action creates a new snapshot and preserves both histories. Child
+conversation links and message references are remapped to the new snapshot graph. A parse failure
+cannot be reported as a successful return to a stale frozen copy.
+
+## Cross-host task state
+
+The standalone receiver retains historical tasks, plans, goals, checkpoints and inter-agent
+messages alongside the transcript. Model and provider come from the preflight-validated ticket;
+source machine paths and approvals do not become target execution authority.
 
 ## Live renderer-backed operations
 

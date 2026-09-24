@@ -1,0 +1,32 @@
+Evidence provenance: exact diagnostic excerpts copied from this task's tool outputs.
+This is NOT a complete raw log and was NOT rerun during evidence packaging.
+
+BASELINE: original recovery store, new concurrent regression tests, before fixes.
+Command: rtk env CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p cognia-observability --lib --offline concurrent_ -- --nocapture
+Tool completion chunk: 129689; exit code: 101.
+
+running 2 tests
+test recovery_runtime::controller::tests::concurrent_transitions_persist_the_latest_recovery_budget ... ok
+
+thread 'recovery_store::tests::cloned_stores_serialize_concurrent_saves_and_clear' (1050284) panicked at crates/cognia-observability/src/recovery_store.rs:136:9:
+
+The following full diagnostic line was truncated here after its first error.
+91 failed saves: ["recovery state i/o failed at /var/folders/h3/mypbg9ks5cj9ht4p61ffnwz40000gn/T/.tmpVNhJkk/recovery-state.json: No such file or directory (os error 2)", ...]
+
+test recovery_store::tests::cloned_stores_serialize_concurrent_saves_and_clear ... FAILED
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 179 filtered out; finished in 0.67s
+
+INTERMEDIATE: store serialization/fsync and controller lock-through-save applied;
+timestamps still captured before the state lock. This is NOT the original baseline.
+Command: rtk env CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p cognia-observability --lib --offline
+Tool output chunk: 6b27cd. Cargo reported test failure.
+
+test recovery_runtime::controller::tests::concurrent_transitions_persist_the_latest_recovery_budget ... FAILED
+test recovery_store::tests::cloned_stores_serialize_concurrent_saves_and_clear ... ok
+
+thread 'recovery_runtime::controller::tests::concurrent_transitions_persist_the_latest_recovery_budget' (1054865) panicked at crates/cognia-observability/src/recovery_runtime/controller.rs:419:9:
+assertion `left == right` failed
+  left: 86
+ right: 320
+
+test result: FAILED. 181 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.63s

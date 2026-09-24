@@ -8,9 +8,9 @@ description: 一支小队如何消费插件生态。两层能力作用域与它�
 小队是插件生态的一等消费者。它携带一个默认能力池，每名队友在其上叠加，解析器把这一对压平，运行时再把结果收紧到执行绑定真正能提供的范围，然后队友就骑上了与直聊*同一条* build-options 流水线。插件通过统一的覆盖层注册表扩展这一切，也通过 `ctx.team` 反向伸进来。
 
 <TLDR>
-- **两层加一次收紧。** `TeamCapabilityBundle` 是池，`TeammateCapabilityOverlay` 按成员调整它，`resolveTeammateCapabilities`（`lib/ai/agent/team/capability-resolver.ts:91`）合并两者，`clampCapabilitiesToRuntime`（`:170`）只会做减法。
+- **两层加一次收紧。** `TeamCapabilityBundle` 是池，`TeammateCapabilityOverlay` 按成员调整它，`resolveTeammateCapabilities`（`lib/ai/agent/team/teammate/capability-resolver.ts:91`）合并两者，`clampCapabilitiesToRuntime`（`:170`）只会做减法。
 - **7 个能力键**，只在 `CAPABILITY_KEYS`（`capability-resolver.ts:36-44`）中枚举一次。
-- **Character 桥。** `teammateToCharacter`（`lib/ai/agent/team/teammate-character.ts:62`）是纯的、从不持久化、id 稳定为 `__teammate__:{id}`，在 `dispatch-teammate.ts:236` 被消费。
+- **Character 桥。** `teammateToCharacter`（`lib/ai/agent/team/teammate/teammate-character.ts:62`）是纯的、从不持久化、id 稳定为 `__teammate__:{id}`，在 `dispatch-teammate.ts:236` 被消费。
 - **20 个覆盖层能力**，位于 `OVERLAY_REGISTRY_CAPABILITIES`（`lib/plugin/contracts/capability-bridge-map.ts:220`），由插件管理器里的一个循环统一派发。
 - **审计闸门。** `buildKnownCapabilityIds`（`capability-audit.ts:109`）与 `validateInstanceCapabilitiesWith`（`:155`）喂给一道运行前闸门，其行为取决于本次运行的闸门策略。
 - **`ctx.team`** 暴露 30 个方法，由五个权限 id 把守。
@@ -22,7 +22,7 @@ description: 一支小队如何消费插件生态。两层能力作用域与它�
 一支小队的能力分两层声明。小队级的 `TeamCapabilityBundle` 是每名队友都继承的默认池，每名队友可以通过 `TeammateCapabilityOverlay` 选择性地收窄或扩展它。这次合并是一个纯函数，产出一个没有 undefined 字段的扁平 `ResolvedCapabilities` 记录，于是下游消费者无需空值守卫即可遍历。
 
 ```typescript
-// lib/ai/agent/team/capability-resolver.ts:36-44
+// lib/ai/agent/team/teammate/capability-resolver.ts:36-44
 const CAPABILITY_KEYS = [
   "mcpServerIds",
   "skillIds",
@@ -40,7 +40,7 @@ const CAPABILITY_KEYS = [
 | `skillIds` | 插件与原生技能 | `Character.skillIds` 加 `pluginSkillIds` |
 | `nativeAnthropicToolIds` | Computer-use 工具 id | `enableComputerUse` 与 `computerUseSettings` |
 | `characterPackIds` | ADR-0030 人格包 | 运行期的人格投影 |
-| `externalAgentPresetIds` | 外部 CLI 预设 | `lib/ai/agent/external/presets.ts` |
+| `externalAgentPresetIds` | 外部 CLI 预设 | `lib/ai/agent/external/config/presets.ts` |
 | `subagentIds` | 内置或 `pluginId:id` 形式的子智能体 | `resolveAllSubagents` |
 | `a2uiTemplateIds` | A2UI 富内容模板 | A2UI 到 IM 的桥 |
 
@@ -94,7 +94,7 @@ flowchart TD
 | `mcpServerIds` | `lib/plugin/registries/mcp-server-preset-registry.ts:25` | `mcp-server-preset` / `mcpServerPresets` |
 | `nativeAnthropicToolIds` | `lib/plugin/registries/native-anthropic-tool-registry.ts:24` | `native-anthropic-tool` / `nativeAnthropicTools` |
 | `characterPackIds` | `lib/plugin/registries/character-pack-registry.ts:42` | `character-pack` / `characterPacks` |
-| `externalAgentPresetIds` | `lib/ai/agent/external/presets.ts:331` | `external-agent-preset` / `externalAgentPresets` |
+| `externalAgentPresetIds` | `lib/ai/agent/external/config/presets.ts:331` | `external-agent-preset` / `externalAgentPresets` |
 | `subagentIds` | `lib/plugin/registries/subagent-registry.ts:25` | `subagent` / `subagents` |
 | `a2uiTemplateIds` | Dexie `a2uiTemplates`，不是插件覆盖层注册表 | `a2ui` 能力，经由 A2UI 桥 |
 
@@ -114,7 +114,7 @@ flowchart TD
 
 `buildKnownCapabilityIds()`（`capability-audit.ts:109`）快照八个桶，即七个能力列表加上 `sharedMemoryAdapterIds`，方式是把 Dexie 的技能、MCP 与 A2UI 表、覆盖层注册表和内置子智能体 id 求并。`validateInstanceCapabilitiesWith(known, team, teammate?)`（`:155`）把一个实例与该快照做差，得到 `CapabilityAuditWarning[]`。`refreshAllInstanceCapabilityWarnings()`（`:250`）维护一张派生的、从不持久化的旁注表，`getInstanceCapabilityWarnings`（`:257`）和 `getTeammateCapabilityWarnings`（`:262`）喂给界面。
 
-运行前闸门在 `lib/ai/agent/agent-team-runtime.ts:495`。它的行为取决于本次运行的闸门策略，也就是无头拆分，而不是一个写死的模态框。
+运行前闸门在 `lib/ai/agent/team/agent-team-runtime.ts:495`。它的行为取决于本次运行的闸门策略，也就是无头拆分，而不是一个写死的模态框。
 
 - `capabilityAudit === "block"`（交互式）会发出一条 critical 通知，带上 `openApproval: { scope: "agent-team-capability-audit", id: runId }`，然后在审批总线上等待。approve 之外的任何结果都会取消这次运行。这条通知是关键的：没有它，这道闸门曾经在等待一个没有任何 UI 会产生的 scope，即便在桌面端也会一直挂住。
 - 否则这次运行只发出一条「正在带着失效能力继续」的警告，然后继续。
@@ -126,7 +126,7 @@ flowchart TD
 
 ## 队友编辑复用 PresetEditor
 
-队友编辑没有分叉出一个编辑器。`teammateToPresetState(teammate, team)`（`lib/ai/agent/team/teammate-preset-adapter.ts:97`）把一名队友映射成 `PresetEditorState`，并把每个能力叠加层相对小队束展平；`presetStateToTeammateConfig(state, previous, team)`（`:180`）是它的逆运算，通过 `diffListToOverlay`（`:149`）重建每个键的叠加层。`TeammateConfigDialog` 用额外区块和一个花名册区块包住 `PresetEditor`。没有预设对应物的字段，例如 specialization、runtime 和 temperature，以 metadata 的形式在往返中随行。
+队友编辑没有分叉出一个编辑器。`teammateToPresetState(teammate, team)`（`lib/ai/agent/team/teammate/teammate-preset-adapter.ts:97`）把一名队友映射成 `PresetEditorState`，并把每个能力叠加层相对小队束展平；`presetStateToTeammateConfig(state, previous, team)`（`:180`）是它的逆运算，通过 `diffListToOverlay`（`:149`）重建每个键的叠加层。`TeammateConfigDialog` 用额外区块和一个花名册区块包住 `PresetEditor`。没有预设对应物的字段，例如 specialization、runtime 和 temperature，以 metadata 的形式在往返中随行。
 
 ## 生命周期钩子
 

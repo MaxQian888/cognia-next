@@ -11,7 +11,7 @@ description: "完成半成功能，主代理派遣由外部CLI代理支持的子
 
 两个调度接口允许主代理在外部CLI代理上运行子代理，且都已提交但仅完成了 ~90% 的完成：
 
-- **A1 — Agent Team队友。** `lib/ai/agent/team/dispatch-teammate.ts`叉`TeammateChannel = "sidecar" | "text" | "external"`;non-`claude` `teammate.config.runtime`（或`externalAgentPresetIds`能力）会有`runExternalBacked()` → `ExternalAgentManager.execute()`的路由。
+- **A1 — Agent Team队友。** `lib/ai/agent/team/teammate/dispatch-teammate.ts`叉`TeammateChannel = "sidecar" | "text" | "external"`;non-`claude` `teammate.config.runtime`（或`externalAgentPresetIds`能力）会有`runExternalBacked()` → `ExternalAgentManager.execute()`的路由。
 - **A2 — 主聊天代理的任务工具子代理。** `AgentDefinition.externalPresetId` → `lib/plugin/agent-sdk/dispatch.ts:runExternalSubagent()` →同一个管理器。
 
 整个执行平面（管理器、四个协议适配器、加固的Rust进程层、presets/ecosystem 接口、权限级联）是生产级的，且被原封不动地重复使用。一次全面的链评发现了具体的空白，ADR无遗漏地弥补了这些空白。

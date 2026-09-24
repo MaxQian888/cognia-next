@@ -65,7 +65,7 @@ for a long time only the first two were counted:
 `supportsExternalAgents()` answers `isTauri() || isHeadlessHost()`, which is the
 first row alone, so every companion was refused with "the stdio transport
 requires the desktop (Tauri) runtime" about a Host that could have run it.
-`lib/ai/agent/external/process-plane.ts` is the three-state answer, and it
+`lib/ai/agent/external/capability/process-plane.ts` is the three-state answer, and it
 returns a REASON rather than a boolean because four situations produce "no" and
 each needs different advice: nothing paired, a Host still handshaking, a Host
 too old to spawn, and a Host that has not granted this device Agent Control.
@@ -98,7 +98,7 @@ caller that understands one sees an empty list from half of them:
 | A `model`-category **config option** (`session/config_options`) | ACP, and what Pi's RPC adapter projects its `get_available_models` reply into |
 | **Session model state** (`session/new`'s `models`) | Older ACP agents that populate this and no config option |
 
-`lib/ai/agent/external/session-models.ts` reads both and, more importantly,
+`lib/ai/agent/external/session/session-models.ts` reads both and, more importantly,
 resolves where a WRITE goes: a config option is the agent's own declared
 control, so it wins, and `session/set_model` is the fallback. That precedence
 already lived inside `AgentManager.applyModelToSession`, which runs when a
@@ -146,7 +146,7 @@ spec-less sends as `legacy_dispatch` telemetry.
 | Gateway (tickets, snapshot CAS, parity) | `crates/cognia-gateway/` |
 | Generic agent host | `sidecar/agent-host.mjs` (+ `claude-host.mjs` compatibility shim) |
 | Conformance suite | `tests/conformance/` (`pnpm test:conformance`) |
-| Where the process may start | `lib/ai/agent/external/process-plane.ts` |
-| Installed-runtime detection | `crates/cognia-external-agent/src/version_probe.rs`, `lib/ai/agent/external/installed-runtimes.ts` |
-| An agent's own models (read, write, cache) | `lib/ai/agent/external/session-models.ts`, `lib/ai/agent/external/model-surface-cache.ts` |
+| Where the process may start | `lib/ai/agent/external/capability/process-plane.ts` |
+| Installed-runtime detection | `crates/cognia-external-agent/src/version_probe.rs`, `lib/ai/agent/external/config/installed-runtimes.ts` |
+| An agent's own models (read, write, cache) | `lib/ai/agent/external/session/session-models.ts`, `lib/ai/agent/external/capability/model-surface-cache.ts` |
 | Credential state where the agent is chosen | `components/agent/external-agent/credential-status-badge.tsx` |

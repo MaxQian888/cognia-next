@@ -1,0 +1,13 @@
+{
+  "candidate": "read at most129 session heads by index seeks; return <=128 sorted heads, otherwise unchanged original GROUP BY query",
+  "acceptance": {
+    "primary100000_entries_100_sessions_improvement_percent": 20,
+    "absolute_improvement_gt_max_mad_multiplier": 2,
+    "sparse_regression_limit": "max(10% baseline median,0.5ms)",
+    "warmup_runs": 1,
+    "measurement_runs": 10,
+    "order": "paired alternating AB BA"
+  },
+  "reason": "drop hybrid UNION row processing after native cap128 sparse guardrail failure; simpler fixed probe fallback",
+  "measure": "production Rust method vs old SQL via bundled SQLite"
+}

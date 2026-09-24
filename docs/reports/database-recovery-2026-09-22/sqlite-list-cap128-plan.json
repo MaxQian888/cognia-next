@@ -1,0 +1,13 @@
+{
+  "candidate": "recursive index seek capped at128, grouped indexed range scan for remaining sessions",
+  "acceptance": {
+    "primary100000_entries_100_sessions_improvement_percent": 20,
+    "absolute_improvement_gt_max_mad_multiplier": 2,
+    "sparse_regression_limit": "max(10% baseline median,0.5ms)",
+    "warmup_runs": 1,
+    "measurement_runs": 10,
+    "order": "paired alternating AB BA"
+  },
+  "reason": "native bundled SQLite3.50.2 exposed cap256 sparse10k regression+15.37%; halve bounded overhead",
+  "measure": "production Rust method vs old SQL via bundled SQLite"
+}

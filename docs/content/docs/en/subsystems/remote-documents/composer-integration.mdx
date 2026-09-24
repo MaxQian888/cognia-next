@@ -34,8 +34,10 @@ function chatNamespacePrefixes(): ReadonlyArray<{ prefix: string; kind: TriggerK
 }
 ```
 
-Namespaced prefixes are mode-dependent. The team workspace (`mentionMode="agents"`) reserves `@` for members
-and gets no typed prefixes; the workflow editor gets `@node:` / `@edge:` instead.
+Namespaced prefixes are mode-dependent. Every chat composer (`files` and `combined`) gets the prefixes above;
+the workflow editor gets `@node:` / `@edge:` instead. A bare `@` at the very start of a direct-chat message also
+lists the route targets (`@claude`, `@codex`, Squad members) that decide which runtime answers the turn
+(`lib/chat/turn-route/`).
 
 ## Panel state
 

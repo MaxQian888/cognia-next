@@ -633,7 +633,7 @@ Cognia 本地账号，即使手动 provider/model 选择相同，其他本地账
 已经连通。
 
 实现入口：`lib/gateway/mint-session-ticket.ts`、
-`lib/gateway/snapshot-publisher.ts`、`lib/ai/agent/external/gateway-task.ts`、
+`lib/gateway/snapshot-publisher.ts`、`lib/ai/agent/external/config/gateway-task.ts`、
 `lib/ai/agent/external/manager.ts`、
 `crates/cognia-external-agent/src/gateway_task.rs` 和
 `cli/src/runtime/external/gateway-task.ts`。
@@ -731,7 +731,7 @@ Team 调度将映射后的公开外部会话 ID 保存到已有的 durable child
 及所属 Cognia 账号，并申请新的 lease。调度结束后移除实时控制注册，保留已有
 的中止信号和 PII 防护链路。
 
-实现入口：`lib/ai/agent/team/resolve-external-backing.ts`、
-`lib/ai/agent/team/dispatch-teammate.ts`、`lib/plugin/agent-sdk/dispatch.ts` 和
+实现入口：`lib/ai/agent/team/teammate/resolve-external-backing.ts`、
+`lib/ai/agent/team/teammate/dispatch-teammate.ts`、`lib/plugin/agent-sdk/dispatch.ts` 和
 `types/agent/external-agent.ts`。CLI/TUI 的 backend 选择尚未开放此项明确的
 Cognia 模型绑定，其原生模型选择仍是独立功能。

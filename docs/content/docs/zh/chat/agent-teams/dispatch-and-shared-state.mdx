@@ -8,7 +8,7 @@ description: 每个 Agent Team 模式都共享的那个单一派发原语、按�
 `runTeamLifecycle` 把一个团队合成为一份 `VisualWorkflow`，然后把每个节点交给一个可复用原语：`dispatchTeammate`。该原语认领一名队员、运行一轮（工具启用或纯文本）、校验输出，并喂养按运行的共享状态 —— <Term>队员池</Term>（断路器）、<Term>预算守卫</Term>（token 升级）以及<Term>通知器</Term>（按级别扇出）。重试是编排器的职责，而非派发器的。本页梳理这条派发路径及它触及的每个共享状态模块。
 
 <TLDR>
-- 一个派发原语：`dispatchTeammate`（`lib/ai/agent/team/dispatch-teammate.ts:171-344`）—— 由任务执行器与每个 ultracode 模式经由 `dispatchStructured` 共享。
+- 一个派发原语：`dispatchTeammate`（`lib/ai/agent/team/teammate/dispatch-teammate.ts:171-344`）—— 由任务执行器与每个 ultracode 模式经由 `dispatchStructured` 共享。
 - 通道分流：sidecar（Tauri 工具启用）对 文本（AI-SDK），在 `dispatch-teammate.ts:236-241` 选定；一次性契约在 `executeAgent`（`lib/ai/agent/agent-executor.ts:190-202`）中。
 - 按队员断路器 + 5 类错误分类，在 `teammate-pool.ts:81-219`；预算升级（4 种 onCritical 动作）在 `budget-guard.ts:97-158`。
 - 通知器把 info/warn/critical 路由到 事件日志/toast/OS/HITL 闸门（`team-notifier.ts:106-159`），经由 ADR-0042 `deliver()`（`agent-team-runtime-deps.ts:133-165`）。
@@ -17,7 +17,7 @@ description: 每个 Agent Team 模式都共享的那个单一派发原语、按�
 
 ## 1. `dispatchTeammate` —— 单一派发原语
 
-<Status status="stable">lib/ai/agent/team/dispatch-teammate.ts:1-345</Status>
+<Status status="stable">lib/ai/agent/team/teammate/dispatch-teammate.ts:1-345</Status>
 
 `dispatchTeammate(teamCtx, args)` 是 ultracode `agent()` 调用的抽离等价物。`action.team.task.dispatch` 节点执行器**以及**高阶模式节点都经由它路由，因此认领/运行/校验/记录恰好发生在唯一一个地方。
 
@@ -42,7 +42,7 @@ description: 每个 Agent Team 模式都共享的那个单一派发原语、按�
 按任务超时回退到 `team.config.defaultTimeout`（默认 `DEFAULT_PER_TASK_TIMEOUT_MS`，600s），随后经由 `AbortSignal.any` 与调用方的信号合并：
 
 ```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:218-225
+// lib/ai/agent/team/teammate/dispatch-teammate.ts:218-225
 const timeoutMs =
   args.timeoutMs ??
   (typeof teamCtx.team.config?.defaultTimeout === "number" &&
@@ -58,7 +58,7 @@ const combinedSignal = args.signal ? AbortSignal.any([args.signal, timeoutSignal
 两道检查把关结果。空白裁剪后为空始终是失败；`minOutputChars`（来自 args，否则团队配置，否则 0）拒绝过短的输出。两者都会记录一次断路器失败并重抛：
 
 ```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:299-321
+// lib/ai/agent/team/teammate/dispatch-teammate.ts:299-321
 if (args.validateOutput !== false) {
   if (trimmed.length === 0) {
     const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
@@ -89,7 +89,7 @@ if (args.validateOutput !== false) {
 成功时池、预算与 store 全部更新；共享的 `result_share` 消息被截断到 1200 字符：
 
 ```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:323-334
+// lib/ai/agent/team/teammate/dispatch-teammate.ts:323-334
 teamCtx.pool.recordSuccess(teammate.id)
 if (turn.usage) teamCtx.budget.add(turn.usage)
 if (args.recordToStore) {
@@ -128,7 +128,7 @@ if (config.toolsEnabled) {
 
 ## 3. `teammate-pool` —— 轮询 + 按队员断路器
 
-<Status status="stable">lib/ai/agent/team/teammate-pool.ts:1-260</Status>
+<Status status="stable">lib/ai/agent/team/teammate/teammate-pool.ts:1-260</Status>
 
 池在 `available` 队员（`!disqualified && breaker.canPass()`）上做轮询选择，并把每个条目包进各自的 `CircuitBreaker`：滑动窗口，`minEvents=2`、`failureThresholdPct=50`、`cooldownMs=60s`。
 
@@ -137,7 +137,7 @@ if (config.toolsEnabled) {
 `classifyError` 把一个抛出的错误映射为五种类别之一，由其决定失败动作：
 
 ```typescript
-// lib/ai/agent/team/teammate-pool.ts:81-90
+// lib/ai/agent/team/teammate/teammate-pool.ts:81-90
 export function classifyError(err: unknown): TeammateFailureKind {
   const msg = err instanceof Error ? err.message : String(err)
   if (/EMPTY_OUTPUT/.test(msg)) return "empty_output"
@@ -155,7 +155,7 @@ export function classifyError(err: unknown): TeammateFailureKind {
 `catastrophic`（401/403/404/认证）永久取消资格并通知取消资格监听器。`rate_limited`（429）通过记录 100 次失败来强制打开断路器。其余一切走普通的滑动窗口路径：
 
 ```typescript
-// lib/ai/agent/team/teammate-pool.ts:191-219
+// lib/ai/agent/team/teammate/teammate-pool.ts:191-219
 recordFailure: (teammateId, error) => {
   const e = entries.get(teammateId)
   if (!e) return
@@ -207,7 +207,7 @@ stateDiagram-v2
 
 ## 4. `budget-guard` —— token 预算升级
 
-<Status status="stable">lib/ai/agent/team/budget-guard.ts:1-172</Status>
+<Status status="stable">lib/ai/agent/team/gates/budget-guard.ts:1-172</Status>
 
 `createBudgetGuard(opts)` 累计 token 用量并触发一次性阈值事件：在 `warnAt`（默认 0.80）触发 `warning_crossed`，在 `critAt`（默认 0.95）触发 `critical_crossed`。`add(usage)` 独立检查这两个阈值，因此从 0 一跃到 96% 会同时触发两者。
 
@@ -216,7 +216,7 @@ stateDiagram-v2
 在跨越严重阈值时，恰好运行一个 `onCritical` 动作：
 
 ```typescript
-// lib/ai/agent/team/budget-guard.ts:97-131
+// lib/ai/agent/team/gates/budget-guard.ts:97-131
 const handleCritical = (): void => {
   opts.notifier.notify({
     level: "critical",
@@ -301,12 +301,12 @@ if (deps.deliver) {
 
 ## 6. `structured-dispatch` —— StructuredOutput 镜像
 
-<Status status="stable">lib/ai/agent/team/structured-dispatch.ts:1-83</Status>
+<Status status="stable">lib/ai/agent/team/teammate/structured-dispatch.ts:1-83</Status>
 
 sidecar 上没有强制 JSON 工具，因此 `dispatchStructured<T>` 镜像了 Claude Code 的 StructuredOutput：它附加一段围栏式 JSON 指令、用 `parseProposedPlan` 解析、用 Zod 校验，并把校验错误反馈回去后**重试一次**。两次尝试均失败后抛错。
 
 ```typescript
-// lib/ai/agent/team/structured-dispatch.ts:50-81
+// lib/ai/agent/team/teammate/structured-dispatch.ts:50-81
 for (let attempt = 0; attempt < 2; attempt += 1) {
   const retryNote =
     attempt === 0

@@ -11,7 +11,7 @@ description: "通过并发预设调度、一个精简团队合成器产生Visual
 
 ## 背景
 
-代理团队子系统（`lib/ai/agent/agent-team-runtime.ts:runTeamLifecycle`）自称是多代理编排器，但实际上只实现了其宣称能力的 ~30%。对项目的“生产可靠性”标准进行读取后，发现了以下空白：
+代理团队子系统（`lib/ai/agent/team/agent-team-runtime.ts:runTeamLifecycle`）自称是多代理编排器，但实际上只实现了其宣称能力的 ~30%。对项目的“生产可靠性”标准进行读取后，发现了以下空白：
 
 **发动机间隙**——配置字段存在，但没有引擎驱动它们：
 
@@ -145,12 +145,12 @@ description: "通过并发预设调度、一个精简团队合成器产生Visual
 | `types/workflow/visual.ts` | 在设置中添加`maxConcurrency?: number`;扩展`TriggerEvent.kind`与`"team"`变体的并集 | +10 |
 | `lib/workflow/nodes/built-ins.ts` | 注册 `team.task.dispatch`;修复`action.team.run`黑客 | +60 −20 / +80 测试 |
 | `lib/ai/agent/team/team-run-context.ts` | 新（WeakMap注册） | ~40 / ~80 |
-| `lib/ai/agent/team/teammate-pool.ts` | 新（电路断路器） | ~120 / ~180 |
-| `lib/ai/agent/team/budget-guard.ts` | 新（四动作onCritical） | ~110 / ~160 |
+| `lib/ai/agent/team/teammate/teammate-pool.ts` | 新（电路断路器） | ~120 / ~180 |
+| `lib/ai/agent/team/gates/budget-guard.ts` | 新（四动作onCritical） | ~110 / ~160 |
 | `lib/ai/agent/team/team-notifier.ts` | 新（3通道路由+去重+挂起） | ~80 / ~140 |
 | `lib/ai/agent/team/synthesize-workflow.ts` | 新成员（→ VisualWorkflow队） | ~80 / ~140 |
-| `lib/ai/agent/agent-team-runtime.ts` | 重写为薄合成器 | 280→ ~120 |
-| `lib/ai/agent/agent-team-runtime-deps.ts` | 简化;删除`runTeammateTask` | −150 |
+| `lib/ai/agent/team/agent-team-runtime.ts` | 重写为薄合成器 | 280→ ~120 |
+| `lib/ai/agent/team/agent-team-runtime-deps.ts` | 简化;删除`runTeammateTask` | −150 |
 | `components/agent/approval-gate-dialog.tsx` | 新的共享模态 | ~100 / ~120 |
 | 团队UI：工作区页面 | 将数据源迁移到`workflowRuns` | 各异 |
 
@@ -202,7 +202,7 @@ export interface TeamStoreWriter {
 }
 ```
 
-### TeammatePool（`lib/ai/agent/team/teammate-pool.ts`）
+### TeammatePool（`lib/ai/agent/team/teammate/teammate-pool.ts`）
 
 ```ts
 export type TeammateFailureKind =
@@ -242,7 +242,7 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool
 - `forceUnquarantine`重置断路器;`rejoin`清除失格——它们是不同的操作
 - 队友名单**冻结在泳池建设** — 中跑additions/deletions到球队商店时不会变异泳池
 
-### BudgetGuard（`lib/ai/agent/team/budget-guard.ts`）
+### BudgetGuard（`lib/ai/agent/team/gates/budget-guard.ts`）
 
 ```ts
 export type BudgetEventName =
@@ -429,7 +429,7 @@ interface TeamTaskDispatchOutput {
 6. 成功：`pool.recordSuccess` + `budget.add(usage)` + `storeWriter.addMessage(result_share)` + `storeWriter.setTaskStatus(completed, text)`
 7. 失败：`pool.recordFailure(teammate, error)`（内部分类）+ `storeWriter.setTaskStatus(failed, undefined, errorMessage)` + 重投
 
-### runTeamLifecycle（`lib/ai/agent/agent-team-runtime.ts`年重写）
+### runTeamLifecycle（`lib/ai/agent/team/agent-team-runtime.ts`年重写）
 
 ```ts
 export interface RunTeamLifecycleDeps {
@@ -620,7 +620,7 @@ rtk grep -r "runTeamLifecycle\|agentTeamManager.start" --include='*.ts' --includ
 
 预计迁移的命中点：
 
-- `lib/ai/agent/agent-team.ts:99`（`agentTeamManager.start`）
+- `lib/ai/agent/team/agent-team.ts:99`（`agentTeamManager.start`）
 - `lib/workflow/nodes/built-ins.ts:1199`（`action.team.run`体）
 - 团队工作区组件（开始按钮处理器）
 - 针对`runTeamLifecycle`和朋友的现有`*.test.ts`
@@ -708,7 +708,7 @@ rtk grep -r "runTeamLifecycle\|agentTeamManager.start" --include='*.ts' --includ
 
 将Claude Code的**ultracode**模式（以努力驱动的多代理工作流创作+质量模式）移植到该子系统上。Ultracode是平面任务DAG之外的第二条综合路径——它重用了整个Path-F引擎（编排器、`ConcurrencyController`、`BudgetGuard`、`TeammatePool`、事件日志、IM扇出、HITL 门禁），并增加了三项内容。
 
-**1.工具支持的队友。** 平坦路径的`action.team.task.dispatch`让队友通过`executeAgent`（AI SDK `streamText`，仅文本）。调度核心被提取成可重用的原始`lib/ai/agent/team/dispatch-teammate.ts:dispatchTeammate`（声称→运行→验证→记录pool/budget/hooks）。在桌面端，它将回合路由到Tauri sidecar（`runAndCaptureAssistantReply` + `resolveSendOptions`），使队友获得真正的Bash/Read/Edit/MCP/skills/native-tools;在 web/mobile 上，它会退回到 `executeAgent`。桥接器`teammate-character.ts:teammateToCharacter`从`AgentTeammate` + 其`ResolvedCapabilities`合成内存内`Character`，因此完整的构建选项流水线适用（子代理来自 `session.kind === "team"`）。结构化输出使用`structured-dispatch.ts:dispatchStructured`（JSON-fenced指令→ `parseProposedPlan` → Zod 验证一次→一次），在两个通道上保持一致。平面派遣执行器被重写为委派给 `dispatchTeammate`，因此标准运行保持不变，但桌面上启用了工具。
+**1.工具支持的队友。** 平坦路径的`action.team.task.dispatch`让队友通过`executeAgent`（AI SDK `streamText`，仅文本）。调度核心被提取成可重用的原始`lib/ai/agent/team/teammate/dispatch-teammate.ts:dispatchTeammate`（声称→运行→验证→记录pool/budget/hooks）。在桌面端，它将回合路由到Tauri sidecar（`runAndCaptureAssistantReply` + `resolveSendOptions`），使队友获得真正的Bash/Read/Edit/MCP/skills/native-tools;在 web/mobile 上，它会退回到 `executeAgent`。桥接器`teammate-character.ts:teammateToCharacter`从`AgentTeammate` + 其`ResolvedCapabilities`合成内存内`Character`，因此完整的构建选项流水线适用（子代理来自 `session.kind === "team"`）。结构化输出使用`structured-dispatch.ts:dispatchStructured`（JSON-fenced指令→ `parseProposedPlan` → Zod 验证一次→一次），在两个通道上保持一致。平面派遣执行器被重写为委派给 `dispatchTeammate`，因此标准运行保持不变，但桌面上启用了工具。
 
 **2.高阶节点的质量模式。** 六个`pattern.*`节点执行者（`lib/ai/agent/team/patterns/`）每个在内部扇出`dispatchTeammate`/`dispatchStructured`——受运行`ConcurrencyController`界，发出`run_log`子事件——运行时因此未知的扇出（循环至干，评审团）存在于一个工作流节点内，外部DAG保持有效：`multi-modal-sweep`、`loop-until-dry`、`adversarial-verify`（多数反驳杀戮;视角多样）、`judge-panel`、`completeness-critic`、`synthesize`。验证器运行时启用了工具。
 

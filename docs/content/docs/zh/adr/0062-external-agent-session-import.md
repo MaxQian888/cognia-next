@@ -37,7 +37,7 @@ interface AgentSessionSourceAdapter {
 }
 ```
 
-- **目标重用**：适配器会发出`ImportedConversation { session: ChatSession; messages: StoredMessage[] }`——由现有`applyImported`（一个Dexie txn，`sessions` + `messages`）持续存在。部分只使用聊天`MessageRenderer`已经处理的形状（文本/推理/`tool-<name>`/文件），并与`lib/ai/agent/external/event-to-parts.ts`交叉核对。稳定的ID `import:<source>:<originalId>`让重扫描变成upsert而不是重复。每个会话都会有一个`branchSeed:{kind:"transcript"}`，所以是**可延续**的。
+- **目标重用**：适配器会发出`ImportedConversation { session: ChatSession; messages: StoredMessage[] }`——由现有`applyImported`（一个Dexie txn，`sessions` + `messages`）持续存在。部分只使用聊天`MessageRenderer`已经处理的形状（文本/推理/`tool-<name>`/文件），并与`lib/ai/agent/external/session/event-to-parts.ts`交叉核对。稳定的ID `import:<source>:<originalId>`让重扫描变成upsert而不是重复。每个会话都会有一个`branchSeed:{kind:"transcript"}`，所以是**可延续**的。
 - **注册表 + 插件叠加层**（`registry.ts`）：静态`[claude-code, codex, opencode]`加上一个运行时叠加层（`registerSessionSource` / `unregisterSessionSourcesByPlugin`），由`pluginId`追踪，命名空间`${pluginId}:${id}`，静态胜利——完全ADR-0051形状。
 - **FS**：`SessionFs`（超集 的 `ExternalFs` 41，加`readTextFile`）对 `lib/file/file-operations.ts`;递归`walkFiles`用于日期嵌套的Codex树。仅限桌面扫描;file/folder拣选器回退在线上运行。
 - **OpenCode SQLite**：只读Rust 命令 `opencode_sessions_read`（`src-tauri/src/session_import.rs`、`rusqlite`、模式容忍）返回归一化会话;TS适配器会映射它们（同时解析拣选路径中的共享导出JSON）。

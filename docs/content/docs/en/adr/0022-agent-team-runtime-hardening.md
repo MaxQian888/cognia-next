@@ -11,7 +11,7 @@ description: Converge the agent-team runtime onto the workflow orchestrator via 
 
 ## Context
 
-The agent-team subsystem (`lib/ai/agent/agent-team-runtime.ts:runTeamLifecycle`) advertises itself as a multi-agent orchestrator but only delivers ~30% of its declared capabilities. A read-through against the project's "production reliable" bar surfaced these gaps:
+The agent-team subsystem (`lib/ai/agent/team/agent-team-runtime.ts:runTeamLifecycle`) advertises itself as a multi-agent orchestrator but only delivers ~30% of its declared capabilities. A read-through against the project's "production reliable" bar surfaced these gaps:
 
 **Engine gaps** — config fields exist, no engine drives them:
 
@@ -155,12 +155,12 @@ Path F was selected because: it eliminates the duplicate orchestrator, fixes the
 | `types/workflow/visual.ts`                            | Add `maxConcurrency?: number` to settings; extend `TriggerEvent.kind` union with `"team"` variant | +10                 |
 | `lib/workflow/nodes/built-ins.ts`                     | Register `team.task.dispatch`; fix `action.team.run` hack                                         | +60 −20 / +80 test  |
 | `lib/ai/agent/team/team-run-context.ts`               | New (WeakMap registry)                                                                            | ~40 / ~80           |
-| `lib/ai/agent/team/teammate-pool.ts`                  | New (composes circuit-breaker)                                                                    | ~120 / ~180         |
-| `lib/ai/agent/team/budget-guard.ts`                   | New (4-action onCritical)                                                                         | ~110 / ~160         |
+| `lib/ai/agent/team/teammate/teammate-pool.ts`                  | New (composes circuit-breaker)                                                                    | ~120 / ~180         |
+| `lib/ai/agent/team/gates/budget-guard.ts`                   | New (4-action onCritical)                                                                         | ~110 / ~160         |
 | `lib/ai/agent/team/team-notifier.ts`                  | New (3-channel routing + dedupe + suspend)                                                        | ~80 / ~140          |
 | `lib/ai/agent/team/synthesize-workflow.ts`            | New (team → VisualWorkflow)                                                                       | ~80 / ~140          |
-| `lib/ai/agent/agent-team-runtime.ts`                  | Rewrite as thin synthesizer                                                                       | 280 → ~120          |
-| `lib/ai/agent/agent-team-runtime-deps.ts`             | Simplify; remove `runTeammateTask`                                                                | −150                |
+| `lib/ai/agent/team/agent-team-runtime.ts`                  | Rewrite as thin synthesizer                                                                       | 280 → ~120          |
+| `lib/ai/agent/team/agent-team-runtime-deps.ts`             | Simplify; remove `runTeammateTask`                                                                | −150                |
 | `components/agent/approval-gate-dialog.tsx`           | New shared modal                                                                                  | ~100 / ~120         |
 | Team UI: workspace pages                              | Migrate data source to `workflowRuns`                                                             | varies              |
 
@@ -212,7 +212,7 @@ export interface TeamStoreWriter {
 }
 ```
 
-### TeammatePool (`lib/ai/agent/team/teammate-pool.ts`)
+### TeammatePool (`lib/ai/agent/team/teammate/teammate-pool.ts`)
 
 ```ts
 export type TeammateFailureKind =
@@ -252,7 +252,7 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool
 - `forceUnquarantine` resets breaker; `rejoin` clears disqualified — they are distinct operations
 - Teammate roster is **frozen at pool construction** — mid-run additions/deletions to the team store do not mutate the pool
 
-### BudgetGuard (`lib/ai/agent/team/budget-guard.ts`)
+### BudgetGuard (`lib/ai/agent/team/gates/budget-guard.ts`)
 
 ```ts
 export type BudgetEventName =
@@ -439,7 +439,7 @@ Executor body contract:
 6. Success: `pool.recordSuccess` + `budget.add(usage)` + `storeWriter.addMessage(result_share)` + `storeWriter.setTaskStatus(completed, text)`
 7. Failure: `pool.recordFailure(teammate, error)` (which internally classifies) + `storeWriter.setTaskStatus(failed, undefined, errorMessage)` + rethrow
 
-### runTeamLifecycle (rewritten in `lib/ai/agent/agent-team-runtime.ts`)
+### runTeamLifecycle (rewritten in `lib/ai/agent/team/agent-team-runtime.ts`)
 
 ```ts
 export interface RunTeamLifecycleDeps {
@@ -630,7 +630,7 @@ rtk grep -r "runTeamLifecycle\|agentTeamManager.start" --include='*.ts' --includ
 
 Expected hits to migrate:
 
-- `lib/ai/agent/agent-team.ts:99` (`agentTeamManager.start`)
+- `lib/ai/agent/team/agent-team.ts:99` (`agentTeamManager.start`)
 - `lib/workflow/nodes/built-ins.ts:1199` (the `action.team.run` body)
 - Team workspace components (Start button handlers)
 - Existing `*.test.ts` against `runTeamLifecycle` and friends
@@ -718,7 +718,7 @@ Multiple Rust diagnostics surfaced in adjacent files during this design conversa
 
 Ports Claude Code's **ultracode** mode (effort-driven multi-agent workflow authoring + quality patterns) onto this subsystem. Ultracode is a second synthesis path alongside the flat task DAG — it reuses the entire Path-F engine (orchestrator, `ConcurrencyController`, `BudgetGuard`, `TeammatePool`, event log, IM fan-out, HITL gates) and adds three things.
 
-**1. Tool-enabled teammates.** The flat path's `action.team.task.dispatch` ran teammates through `executeAgent` (AI SDK `streamText`, text-only). The dispatch core is extracted into a reusable primitive `lib/ai/agent/team/dispatch-teammate.ts:dispatchTeammate` (claim → run → validate → record pool/budget/hooks). On desktop it routes the turn through the Tauri sidecar (`runAndCaptureAssistantReply` + `resolveSendOptions`) so teammates get real Bash/Read/Edit/MCP/skills/native-tools; on web/mobile it falls back to `executeAgent`. The bridge `teammate-character.ts:teammateToCharacter` synthesizes an in-memory `Character` from `AgentTeammate` + its `ResolvedCapabilities`, so the full build-options pipeline applies (subagents come from `session.kind === "team"`). Structured output uses `structured-dispatch.ts:dispatchStructured` (JSON-fenced instruction → `parseProposedPlan` → Zod validate → one retry), uniform across both channels. The flat dispatch executor was rewritten to delegate to `dispatchTeammate`, so standard runs are unchanged but now tool-enabled on desktop.
+**1. Tool-enabled teammates.** The flat path's `action.team.task.dispatch` ran teammates through `executeAgent` (AI SDK `streamText`, text-only). The dispatch core is extracted into a reusable primitive `lib/ai/agent/team/teammate/dispatch-teammate.ts:dispatchTeammate` (claim → run → validate → record pool/budget/hooks). On desktop it routes the turn through the Tauri sidecar (`runAndCaptureAssistantReply` + `resolveSendOptions`) so teammates get real Bash/Read/Edit/MCP/skills/native-tools; on web/mobile it falls back to `executeAgent`. The bridge `teammate-character.ts:teammateToCharacter` synthesizes an in-memory `Character` from `AgentTeammate` + its `ResolvedCapabilities`, so the full build-options pipeline applies (subagents come from `session.kind === "team"`). Structured output uses `structured-dispatch.ts:dispatchStructured` (JSON-fenced instruction → `parseProposedPlan` → Zod validate → one retry), uniform across both channels. The flat dispatch executor was rewritten to delegate to `dispatchTeammate`, so standard runs are unchanged but now tool-enabled on desktop.
 
 **2. Quality patterns as higher-order nodes.** Six `pattern.*` node executors (`lib/ai/agent/team/patterns/`) each fan out `dispatchTeammate`/`dispatchStructured` internally — bounded by the run's `ConcurrencyController`, emitting `run_log` sub-events — so runtime-unknown fan-out (loop-until-dry, judge panel) lives *inside* one workflow node and the outer DAG stays valid: `multi-modal-sweep`, `loop-until-dry`, `adversarial-verify` (majority-refute kill; perspective-diverse lenses), `judge-panel`, `completeness-critic`, `synthesize`. Verifiers run tool-enabled.
 

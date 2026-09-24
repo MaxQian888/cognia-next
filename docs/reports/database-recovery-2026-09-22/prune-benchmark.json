@@ -1,0 +1,114 @@
+{
+  "sqliteVersion": "3.53.4",
+  "sql": {
+    "baseline": [
+      "DELETE FROM entries WHERE (tenant, workspace, project_key, session_id) IN (\n                     SELECT tenant, workspace, project_key, session_id FROM entries\n                     GROUP BY tenant, workspace, project_key, session_id\n                     HAVING MAX(written_at) < ?1\n                 )",
+      "DELETE FROM summaries WHERE mtime < ?1"
+    ],
+    "current": [
+      "DELETE FROM entries WHERE (tenant, workspace, project_key, session_id) IN (\n                     SELECT tenant, workspace, project_key, session_id FROM entries AS candidate\n                     GROUP BY tenant, workspace, project_key, session_id\n                     HAVING MAX(written_at) < ?1\n                        AND NOT EXISTS (\n                            SELECT 1 FROM summaries\n                            WHERE summaries.tenant = candidate.tenant\n                              AND summaries.workspace = candidate.workspace\n                              AND summaries.project_key = candidate.project_key\n                              AND summaries.session_id = candidate.session_id\n                              AND summaries.mtime >= ?1\n                        )\n                 )",
+      "DELETE FROM summaries WHERE mtime < ?1 AND NOT EXISTS (\n                 SELECT 1 FROM entries\n                 WHERE entries.tenant = summaries.tenant\n                   AND entries.workspace = summaries.workspace\n                   AND entries.project_key = summaries.project_key\n                   AND entries.session_id = summaries.session_id\n             )"
+    ]
+  },
+  "method": "exact production SQL, in-memory SQLite, 1 warmup +10 paired AB/BA samples, rollback after each full prune transaction",
+  "fixtures": [
+    {
+      "entries": 100000,
+      "sessions": 100,
+      "expiredSummaries": false,
+      "baseline": {
+        "medianMs": 6.8927084999999995,
+        "madMs": 0.14916699999999938,
+        "samplesMs": [
+          7.166, 6.865875, 6.747, 6.753125, 6.740083, 6.834583, 6.919542, 7.163375, 7.046625,
+          7.089708
+        ]
+      },
+      "current": {
+        "medianMs": 6.879417,
+        "madMs": 0.14518750000000047,
+        "samplesMs": [
+          7.121541, 6.913625, 6.935917, 6.5035, 6.513, 6.697334, 6.771125, 6.845209, 7.192417,
+          6.941708
+        ]
+      },
+      "overheadPercent": -0.19283421023824446,
+      "withinGuardrail": true
+    },
+    {
+      "entries": 100000,
+      "sessions": 1000,
+      "expiredSummaries": true,
+      "baseline": {
+        "medianMs": 7.196708,
+        "madMs": 0.09912499999999991,
+        "samplesMs": [
+          7.797083, 7.671708, 7.296208, 7.116291, 7.106, 6.971291, 7.258583, 7.134833, 7.097958,
+          7.385209
+        ]
+      },
+      "current": {
+        "medianMs": 7.6516255,
+        "madMs": 0.04066649999999994,
+        "samplesMs": [
+          7.945084, 7.652792, 7.66975, 7.671708, 7.650459, 7.736583, 7.286459, 7.590375, 7.646458,
+          7.277125
+        ]
+      },
+      "overheadPercent": 6.321188799100917,
+      "withinGuardrail": true
+    },
+    {
+      "entries": 100000,
+      "sessions": 100000,
+      "expiredSummaries": false,
+      "baseline": {
+        "medianMs": 16.616374999999998,
+        "madMs": 0.20825050000000012,
+        "samplesMs": [
+          16.530791, 16.511542, 16.416791, 16.833292, 16.912334, 16.358208, 16.701959, 16.845,
+          16.8435, 16.457042
+        ]
+      },
+      "current": {
+        "medianMs": 16.5425835,
+        "madMs": 0.16693700000000078,
+        "samplesMs": [
+          16.504375, 16.108875, 16.827958, 16.319125, 16.422667, 16.730458, 17.156709, 16.471791,
+          16.580792, 16.688583
+        ]
+      },
+      "overheadPercent": -0.44408903867419147,
+      "withinGuardrail": true
+    }
+  ],
+  "plans": [
+    [
+      [
+        3,
+        0,
+        99,
+        "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id=?)"
+      ],
+      [7, 0, 0, "LIST SUBQUERY 3"],
+      [13, 7, 214, "SCAN candidate USING COVERING INDEX entries_session"],
+      [44, 7, 0, "CORRELATED SCALAR SUBQUERY 1"],
+      [
+        49,
+        44,
+        47,
+        "SEARCH summaries USING INDEX sqlite_autoindex_summaries_1 (tenant=? AND workspace=? AND project_key=? AND session_id=?)"
+      ]
+    ],
+    [
+      [3, 0, 216, "SCAN summaries"],
+      [8, 0, 0, "CORRELATED SCALAR SUBQUERY 1"],
+      [
+        12,
+        8,
+        53,
+        "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id=?)"
+      ]
+    ]
+  ]
+}

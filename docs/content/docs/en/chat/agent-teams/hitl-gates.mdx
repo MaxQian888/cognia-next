@@ -9,7 +9,7 @@ A Squad run is autonomous until something needs a person. Since ADR-0169 every s
 
 <TLDR>
   The runtime calls `openSquadReview({ runId, teamId, kind, instance, subject })`
-  (`lib/ai/agent/team/squad-review-gate.ts`). That writes a run-level checkpoint, projects an
+  (`lib/ai/agent/team/gates/squad-review-gate.ts`). That writes a run-level checkpoint, projects an
   `ActionReviewRequest` onto the run as an `ExecutionRunInterrupt` with a deterministic id
   (`action-review:squad-review:<runId>:<kind>:<instance>`), and waits on the row through a Dexie
   live query plus a poll backstop. Any surface answers it with `executeRunControlCommand({ action:
@@ -44,7 +44,7 @@ A Squad run is autonomous until something needs a person. Since ADR-0169 every s
 
 ## Recovery
 
-A resume that cannot prove a safe replay (a child with no checkpoint, a `needs_input` checkpoint, an unknown or unsafe pending side effect) parks the run as `needs_input` with a reason code and raises `team_recovery` (`lib/ai/agent/team/team-recovery.ts`). The subject carries `reason`, `uncertainChildIds`, the common `hostRef` when there is one, and `choices`:
+A resume that cannot prove a safe replay (a child with no checkpoint, a `needs_input` checkpoint, an unknown or unsafe pending side effect) parks the run as `needs_input` with a reason code and raises `team_recovery` (`lib/ai/agent/team/durable/team-recovery.ts`). The subject carries `reason`, `uncertainChildIds`, the common `hostRef` when there is one, and `choices`:
 
 - `retry_same_host` re-queues the uncertain children where they ran and resumes.
 - `retry_host` re-queues them on a named host. The coordinator refuses a cross-host move without a safe checkpoint, and the run stays parked.
@@ -142,7 +142,7 @@ The synthesizer wires gate subscriptions onto the per-run shared state right aft
 When `TeammatePool.onAllUnavailable` fires, the run cannot make progress. The handler notifies critical with an `openApproval`, freezes scheduling via `concurrency.reduceTo(0)`, then awaits the decision: approve calls `pool.forceUnquarantine` (defaulting to `{ resetAll: true }`), reject aborts the run. A `deadlockResolverActive` latch prevents re-entry while a decision is pending.
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:269-302
+// lib/ai/agent/team/agent-team-runtime.ts:269-302
 subs.push(
   pool.onAllUnavailable(() => {
     if (ac.signal.aborted || deadlockResolverActive) return
@@ -184,7 +184,7 @@ subs.push(
 When a single teammate is disqualified (a catastrophic failure — auth / 404 / persistent refusal), the run does **not** pause: it continues on the remaining workers. The gate lets the operator fix the teammate's config and rejoin it, or skip it permanently. The key is `runId:teammateId`, so concurrent disqualifications open independent modals. There is no `reduceTo(0)` and no abort-on-reject here.
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:307-338
+// lib/ai/agent/team/agent-team-runtime.ts:307-338
 subs.push(
   pool.onTeammateDisqualified((teammateId, reason) => {
     if (ac.signal.aborted) return
@@ -224,7 +224,7 @@ subs.push(
 `BudgetGuard` is configured with `onCritical: governancePolicy.budget.onCritical` (`agent-team-runtime.ts:259`). When that action is `pause_for_review`, the guard emits a `pause_for_review` event; the synthesizer's listener freezes scheduling and awaits the decision. Approve with `{ extraTokens }` calls `budget.extendLimit(extra)` so the run can continue under a raised cap; reject aborts. The `warning_crossed` and `critical_crossed` events are forwarded to the plugin hook pipeline (`dispatchOnTeamBudgetWarn`) but never block.
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:370-391
+// lib/ai/agent/team/agent-team-runtime.ts:370-391
 subs.push(
   budget.on("pause_for_review", () => {
     if (ac.signal.aborted || budgetResolverActive) return
@@ -254,7 +254,7 @@ subs.push(
 If `team.config.requirePlanApproval` is set, the synthesizer runs a revision loop **before** any per-run state exists — which is why the plan gate keys on `teamId`, not `runId`. Up to `maxPlanRevisions` rounds: each round calls `deps.runLeadPlanning` (threading the previous round's `feedback`), then awaits the decision. Approve breaks the loop and fires `dispatchOnTeamPlanReady`; reject feeds `decision.feedback` into the next round. If no round approves, the run ends `failed` (or `cancelled` if the signal aborted).
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:217-239
+// lib/ai/agent/team/agent-team-runtime.ts:217-239
 for (let i = 0; i < maxRev; i++) {
   if (ac.signal.aborted) break
   const planResult = await deps.runLeadPlanning({
@@ -287,7 +287,7 @@ The lead's raw planning text is parsed by `parseProposedPlan` (`agent-team-runti
 Before spending a single token, the synthesizer validates that every capability id referenced by the team and its teammates still resolves. If a contributing plugin was disabled, those ids are stale; the gate surfaces them and asks the operator to confirm a degraded run. Reject (or an aborted wait) ends the run `cancelled`. See [Capabilities & Plugins](./capabilities-and-plugins) for how the bundle is resolved.
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:178-198
+// lib/ai/agent/team/agent-team-runtime.ts:178-198
 const known = await buildKnownCapabilityIds()
 const auditWarnings = [
   ...validateInstanceCapabilitiesWith(known, team),
@@ -443,7 +443,7 @@ sequenceDiagram
 When the run ends — success, failure, or abort — the synthesizer's `finally` block tears down subscriptions and **resolves any still-pending waiters** so a leftover gate promise can never leak past the run:
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:507-522
+// lib/ai/agent/team/agent-team-runtime.ts:507-522
 for (const u of subs) {
   try {
     u()

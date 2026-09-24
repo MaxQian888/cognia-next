@@ -1,0 +1,47 @@
+{
+  "variant": "baseline",
+  "date": "2026-09-22T12:14:48.750Z",
+  "browser": "151.0.7922.34",
+  "platform": "darwin",
+  "arch": "arm64",
+  "samples": 10,
+  "warmup": 2,
+  "criterion": "improvement >=20% and absolute median difference >2*max(MAD before,MAD after), all correctness guards pass",
+  "scope": "Real Chromium IndexedDB, Dexie 4.4.5, unchanged production message-sync middleware, production messages/media normalization/session assets/ref ledger. Reduced schema with identical message/session/ref indexes. No encryption, full app UI, Tauri, workflow/indexer/publication/claim side effects, original blob ingestion or schema migrations.",
+  "sourceSha256": "db1089db59c33c482b964a2eaab0ee5e2f9acf0c89f893ea5e9ac60fcc339ab4",
+  "workloads": [],
+  "unchangedMediaLedgerMutations": {
+    "creating": 1,
+    "updating": 0,
+    "deleting": 1
+  },
+  "rollback": {
+    "aborted": true,
+    "rowRestored": true,
+    "clockRestored": true,
+    "refRestored": true,
+    "sessionRestored": true
+  },
+  "rendererCrashRecovery": {
+    "count": 1000,
+    "refs": 1000,
+    "clock": 1001
+  },
+  "continuousStreamCrash": {
+    "targetEventsPerSecond": 100,
+    "persistDelayMs": 300,
+    "observationDurationMs": 3151.89999999851,
+    "producedBeforeCrash": 315,
+    "checkpointRequests": [],
+    "checkpointCommits": [],
+    "errors": [],
+    "count": 1000,
+    "refs": 1000,
+    "recoveredToken": 0,
+    "recoveredTokenElapsedMs": 0,
+    "clock": 1001,
+    "observedTokenLoss": 315,
+    "observedLagMs": 3151.89999999851
+  },
+  "coalescerSha256": "236e10efe2d792dff429d01ffe227630e4d9b2dc3119c4fe3a9af6ec0ea0a744"
+}

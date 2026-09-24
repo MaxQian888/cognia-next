@@ -1,0 +1,70 @@
+$ cross-env NODE_OPTIONS=--max-old-space-size=16384 tsc --noEmit
+cli/src/agent/configured-plugin-tool-handle.test.ts(33,54): error TS2345: Argument of type 'Omit<ResolvedConfig, "cwd">' is not assignable to parameter of type 'ResolvedConfig'.
+  Property 'cwd' is missing in type 'Omit<ResolvedConfig, "cwd">' but required in type 'ResolvedConfig'.
+cli/src/cli/handoff-cmd.ts(156,46): error TS2554: Expected 2 arguments, but got 1.
+components/agent-runs/run-detail-pane.tsx(250,11): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+components/agent/plan/plan-panel.test.tsx(42,9): error TS2352: Conversion of type '{ id: string; sessionId: string; projectId: string; title: string; source: "exit_plan_mode"; status: PlanStatus; executionMode: "in_session"; refinementCount: number; config: { errorPolicy: "stop"; maxConcurrency: number; }; ... 6 more ...; updatedAt: number; }' to type 'AgentPlan' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'steps' are incompatible.
+    Type '{ id: string; planId: string; order: number; title: string; kind: "agent_turn"; status: "completed" | "pending"; dependencies: never[]; attempts: number; }[]' is not comparable to type 'PlanStep[]'.
+      Object literal may only specify known properties, and 'planId' does not exist in type 'PlanStep'.
+components/chat/markdown/chat-link.test.tsx(166,13): error TS2322: Type '(value: { default: never; } | PromiseLike<{ default: never; }>) => void' is not assignable to type '(value: { default: ComponentType<LinkMatcherProps>; }) => void'.
+  Types of parameters 'value' and 'value' are incompatible.
+    Type '{ default: ComponentType<LinkMatcherProps>; }' is not assignable to type '{ default: never; } | PromiseLike<{ default: never; }>'.
+      Type '{ default: ComponentType<LinkMatcherProps>; }' is not assignable to type '{ default: never; }'.
+        Types of property 'default' are incompatible.
+          Type 'ComponentType<LinkMatcherProps>' is not assignable to type 'never'.
+            Type 'ComponentClass<LinkMatcherProps, any>' is not assignable to type 'never'.
+components/router-fusion/delegate-acceptance-profiles.tsx(273,67): error TS2345: Argument of type '{ message: string; }' is not assignable to parameter of type 'undefined'.
+components/router-fusion/delegate-review-model.ts(572,3): error TS2741: Property 'readArtifact' is missing in type '{ run: { runId: string; mode: "delegate"; status: "running" | "failed" | "cancelled" | "queued" | "succeeded" | "expired" | "waiting_for_input" | "waiting_for_approval" | "reconciling" | "cancelling"; resultRecordArtifactId: string | null; workspaceRoot: string | null; projectId: string | null; }; ... 4 more ...; co...' but required in type 'DelegateReviewSources'.
+components/settings/project-environment-runtime.test.tsx(30,7): error TS2322: Type '{ setDraft: jest.Mock<void, [next: ProjectRuntimeSelection | undefined], any>; save: () => Promise<void>; approve: jest.Mock<any, any, any>; ... 18 more ...; portsAvailable: boolean; }' is not assignable to type 'ProjectRuntimeEnvironmentState & ProjectRuntimeEnvironmentActions'.
+  Type '{ setDraft: Mock<void, [next: ProjectRuntimeSelection | undefined], any>; save: () => Promise<void>; approve: Mock<any, any, any>; revoke: Mock<...>; ... 17 more ...; portsAvailable: boolean; }' is missing the following properties from type 'ProjectRuntimeEnvironmentActions': buildEnvironment, cancelBuild, openPort, closePort
+components/settings/project-environment-runtime.test.tsx(110,3): error TS2322: Type '{ loading: boolean; poolEnabled: boolean; catalog: EnvironmentCatalogView; driver: DriverStatus; saved: ProjectRuntimeSelection | undefined; draft: ProjectRuntimeSelection; ... 9 more ...; portsAvailable?: boolean | undefined; }' is not assignable to type 'ProjectRuntimeEnvironmentState'.
+  Types of property 'portsAvailable' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+hooks/chat/use-stick-to-bottom.test.ts(264,41): error TS2352: Conversion of type '{ target: HTMLButtonElement; }' to type 'MouseEvent<HTMLElement, MouseEvent>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ target: HTMLButtonElement; }' is missing the following properties from type 'MouseEvent<HTMLElement, MouseEvent>': altKey, button, buttons, clientX, and 28 more.
+hooks/chat/use-stick-to-bottom.test.ts(274,41): error TS2352: Conversion of type '{ target: HTMLButtonElement; }' to type 'MouseEvent<HTMLElement, MouseEvent>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ target: HTMLButtonElement; }' is missing the following properties from type 'MouseEvent<HTMLElement, MouseEvent>': altKey, button, buttons, clientX, and 28 more.
+lib/ai/agent/team/durable/durable-runtime.test.ts(324,37): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '"updating"' is not assignable to parameter of type '"deleting"'.
+lib/ai/agent/team/squad/start-squad-run.test.ts(440,10): error TS2339: Property 'config' does not exist on type '{}'.
+lib/ai/agent/team/squad/start-squad-run.test.ts(441,15): error TS2339: Property 'config' does not exist on type '{}'.
+lib/ai/agent/team/squad/start-squad-run.test.ts(457,10): error TS2339: Property 'config' does not exist on type '{}'.
+lib/ai/agent/team/teammate/dispatch-teammate.test.ts(1596,44): error TS2540: Cannot assign to 'parentPermissionCeiling' because it is a read-only property.
+lib/ai/agent/team/teammate/dispatch-teammate.test.ts(1598,13): error TS2540: Cannot assign to 'parentPermissionCeiling' because it is a read-only property.
+lib/ai/agent/team/teammate/dispatch-teammate.test.ts(1611,9): error TS2540: Cannot assign to 'parentPermissionCeiling' because it is a read-only property.
+lib/chat/message-share.ts(75,70): error TS2345: Argument of type 'readonly UIMessagePart<UIDataTypes, UITools>[]' is not assignable to parameter of type 'UIMessagePart<UIDataTypes, UITools>[]'.
+  The type 'readonly UIMessagePart<UIDataTypes, UITools>[]' is 'readonly' and cannot be assigned to the mutable type 'UIMessagePart<UIDataTypes, UITools>[]'.
+lib/db/agent-team-runtime.test.ts(331,7): error TS2345: Argument of type '{ runId: string; kind: "model_turn_completed"; createdAt: number; }' is not assignable to parameter of type 'AppendTrajectoryInput'.
+  Property 'correlationId' is missing in type '{ runId: string; kind: "model_turn_completed"; createdAt: number; }' but required in type 'AppendTrajectoryInput'.
+lib/project-environment/environment-spec-digest.test.ts(69,49): error TS2345: Argument of type '{ remoteEnv: { IMAGE_SETTING: null; PATH?: undefined; }; workspaceFolder?: string | undefined; lifecycleTimeoutMs?: number | undefined; version: 1; specDigest: string; projectId: string; ... 13 more ...; explain?: EnvironmentSpecExplain | undefined; } | { ...; } | { ...; } | { ...; }' is not assignable to parameter of type 'EnvironmentSpec | EnvironmentSpecBody'.
+  Type '{ remoteEnv: { IMAGE_SETTING: null; PATH?: undefined; }; workspaceFolder?: string; lifecycleTimeoutMs?: number; version: 1; specDigest: string; projectId: string; source: EnvironmentSource; ... 12 more ...; explain?: EnvironmentSpecExplain; }' is not assignable to type 'EnvironmentSpec | EnvironmentSpecBody'.
+    Type '{ remoteEnv: { IMAGE_SETTING: null; PATH?: undefined; }; workspaceFolder?: string; lifecycleTimeoutMs?: number; version: 1; specDigest: string; projectId: string; source: EnvironmentSource; ... 12 more ...; explain?: EnvironmentSpecExplain; }' is not assignable to type 'EnvironmentSpec'.
+      Types of property 'remoteEnv' are incompatible.
+        Type '{ IMAGE_SETTING: null; PATH?: undefined; }' is not assignable to type 'Record<string, string | null>'.
+          Property 'PATH' is incompatible with index signature.
+            Type 'undefined' is not assignable to type 'string | null'.
+lib/project-environment/environment-spec-digest.test.ts(70,51): error TS2345: Argument of type '{ remoteEnv: { IMAGE_SETTING: null; PATH?: undefined; }; workspaceFolder?: string | undefined; lifecycleTimeoutMs?: number | undefined; version: 1; specDigest: string; projectId: string; ... 13 more ...; explain?: EnvironmentSpecExplain | undefined; } | { ...; } | { ...; } | { ...; }' is not assignable to parameter of type 'Pick<EnvironmentSpec, "user" | "containerEnv" | "remoteEnv" | "workspaceFolder" | "lifecycleTimeoutMs" | "lifecycleCommands" | "forwardPorts">'.
+  Type '{ remoteEnv: { IMAGE_SETTING: null; PATH?: undefined; }; workspaceFolder?: string; lifecycleTimeoutMs?: number; version: 1; specDigest: string; projectId: string; source: EnvironmentSource; ... 12 more ...; explain?: EnvironmentSpecExplain; }' is not assignable to type 'Pick<EnvironmentSpec, "user" | "containerEnv" | "remoteEnv" | "workspaceFolder" | "lifecycleTimeoutMs" | "lifecycleCommands" | "forwardPorts">'.
+    Types of property 'remoteEnv' are incompatible.
+      Type '{ IMAGE_SETTING: null; PATH?: undefined; }' is not assignable to type 'Record<string, string | null>'.
+        Property 'PATH' is incompatible with index signature.
+          Type 'undefined' is not assignable to type 'string | null'.
+lib/project-environment/environment-spec-digest.test.ts(88,31): error TS2322: Type '{ repository: string; kind?: undefined; catalogEntryId?: string | undefined; buildKey?: string | undefined; registry: string; digest: string; } | { repository: string; kind: "build"; buildKey: string; imageId: string; }' is not assignable to type 'SpecImage'.
+  Object literal may only specify known properties, and 'repository' does not exist in type 'BuiltSpecImage'.
+lib/router-fusion/api/run-api-host.test.ts(129,3): error TS2322: Type '{ kind: "selected"; config: CompiledFusionConfig; decision: RouteDecision; actionId: string; ruleId: RuleId | null; ... 10 more ...; acceptanceProfileId?: string | ... 1 more ... | undefined; }' is not assignable to type 'RunRoute'.
+  Type '{ kind: "selected"; config: CompiledFusionConfig; decision: RouteDecision; actionId: string; ruleId: RuleId | null; ... 10 more ...; acceptanceProfileId?: string | ... 1 more ... | undefined; }' is not assignable to type '{ kind: "selected"; config: CompiledFusionConfig; decision: { schema_version: "1.0.0"; decision_id: string; run_id: string; selected_action_id: string | null; mode_selected: "direct" | ... 3 more ... | null; ... 7 more ...; created_at: string; }; ... 12 more ...; acceptanceProfileId: string | null; }'.
+    Types of property 'projectId' are incompatible.
+      Type 'string | null | undefined' is not assignable to type 'string | null'.
+        Type 'undefined' is not assignable to type 'string | null'.
+lib/router-fusion/api/run-api-host.test.ts(403,37): error TS2339: Property 'trackedBudgetEnabled' does not exist on type 'RunRequestPolicy | Promise<RunRequestPolicy>'.
+  Property 'trackedBudgetEnabled' does not exist on type 'Promise<RunRequestPolicy>'.
+lib/router-fusion/runtime/delegate-host-ports.test.ts(235,11): error TS2769: No overload matches this call.
+  Overload 3 of 8, '(file: string, args?: readonly string[] | undefined, options?: ExecFileSyncOptions | undefined): string | NonSharedBuffer', gave the following error.
+    Property 'NODE_ENV' is missing in type 'Record<string, string>' but required in type 'ProcessEnv'.
+lib/router-fusion/runtime/orchestrator-delegate.test.ts(173,58): error TS2345: Argument of type 'ArtifactStore' is not assignable to parameter of type 'MemoryArtifactStore'.
+  Type 'ArtifactStore' is missing the following properties from type 'MemoryArtifactStore': items, seq
+[ELIFECYCLE] Command failed with exit code 2.

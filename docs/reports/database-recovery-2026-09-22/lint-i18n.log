@@ -1,0 +1,4 @@
+$ ts-node --project scripts/tsconfig.audit.json scripts/gates/lint-i18n.ts
+[lint:i18n] OK — key parity (tolerated drift: 0/0)
+[lint:i18n] OK — JSX hardcoded strings: 83 (≤ baseline 370)
+[lint:i18n] OK — referenced keys exist in both locales (27689 literal refs, 2345 dynamic skipped, 274 tolerated)

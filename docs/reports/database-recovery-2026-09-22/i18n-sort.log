@@ -1,0 +1,3 @@
+$ node scripts/sync/sort-i18n.mjs --check
+ok   /Users/bytedance/Project/cognia-next/i18n/messages/en.json
+ok   /Users/bytedance/Project/cognia-next/i18n/messages/zh-CN.json

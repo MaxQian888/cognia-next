@@ -47,7 +47,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 11. **交互产品入口。** 新建聊天提供显式的 `Local | Worktree` 选择器，附带 base 与 environment 选择；交互任务推荐默认 Worktree。Chat Header 持续显示 path · branch · base chip，popover 提供 Open in IDE、Open in Terminal、Handoff to Local、Handoff to Worktree、Review、Apply、Create branch here、Push、Create draft PR、Archive、Restore。统一的 Managed Workspaces 页展示所有 Registry 行的 owner、state、base、branch、path、WIP、ahead/behind、size、lock、last-used 与 PR 状态；受保护删除拒绝任何绕行。
 
-12. **执行链路迁移。** `lib/scheduler/executors/index.ts` 强制所有 scheduled 触发经 Registry Bundle；原先落在 live tree 的 `location === "local"` 分支删除。`lib/ai/agent/agent-team-runtime.ts` 与 `lib/ai/agent/team/dispatch-teammate.ts` 每次 dispatch 通过 Registry Bundle 获取 lease；`lib/ai/agent/team/workspace/{allocator.ts, reconciler.ts}` 本次直接删除，如果没有其他消费者 `WorktreeGitOps` seam 一并清理。
+12. **执行链路迁移。** `lib/scheduler/executors/index.ts` 强制所有 scheduled 触发经 Registry Bundle；原先落在 live tree 的 `location === "local"` 分支删除。`lib/ai/agent/team/agent-team-runtime.ts` 与 `lib/ai/agent/team/teammate/dispatch-teammate.ts` 每次 dispatch 通过 Registry Bundle 获取 lease；`lib/ai/agent/team/workspace/{allocator.ts, reconciler.ts}` 本次直接删除，如果没有其他消费者 `WorktreeGitOps` seam 一并清理。
 
 13. **发布路径继续走 `PullRequestProvider`。** Registry 的 Push / Create draft PR 按仓库调用 `types/review.ts::PullRequestProvider` 的 `.push` / `.create`。`lib/ai/agent/team/pr-feedback/*` 保持现状（仍直接依赖 Octokit），不在本次工作范围。
 

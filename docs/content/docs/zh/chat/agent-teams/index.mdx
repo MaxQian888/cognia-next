@@ -7,10 +7,10 @@ description: 由首席协调员 + 队友 + 任务组成，通过合成一个 Vis
 
 一个**智能体团队**由一名首席协调员、一组队友和一组任务构成。每个队友都可以由不同的运行时支撑 —— 应用内置的 Claude 智能体，或外部 CLI（Codex / Claude Code / Gemini CLI / Cursor CLI）。[内置智能体](./built-in-agent) 是一个长期存活的会话，而团队则是一种 *扇出（fan-out）*：首席协调员负责规划，队友在并发上限约束下并行执行任务，整体作为一次运行向上汇报。
 
-自 [ADR-0022](../adr/0022-agent-team-runtime-hardening) 起，团队**不再**拥有自己的编排器。`runTeamLifecycle`（`lib/ai/agent/agent-team-runtime.ts:122-527`）是一个约 400 行的*合成器*：它把团队 + 任务转化为一个 `VisualWorkflow`，再把它交给其他所有功能早已在用的那个唯一的工作流编排器。没有第二个引擎需要保持同步，团队运行的持久化方式与任何其他工作流运行完全一致 —— 作为 `triggerKind: "team"` 的 `workflowRuns` 行。
+自 [ADR-0022](../adr/0022-agent-team-runtime-hardening) 起，团队**不再**拥有自己的编排器。`runTeamLifecycle`（`lib/ai/agent/team/agent-team-runtime.ts:122-527`）是一个约 400 行的*合成器*：它把团队 + 任务转化为一个 `VisualWorkflow`，再把它交给其他所有功能早已在用的那个唯一的工作流编排器。没有第二个引擎需要保持同步，团队运行的持久化方式与任何其他工作流运行完全一致 —— 作为 `triggerKind: "team"` 的 `workflowRuns` 行。
 
 <TLDR>
-  点击 Run 会调用 `agentTeamManager.start`（`lib/ai/agent/agent-team.ts:91`），后者再调用
+  点击 Run 会调用 `agentTeamManager.start`（`lib/ai/agent/team/agent-team.ts:91`），后者再调用
   `runTeamLifecycle`（`agent-team-runtime.ts:122`）。该合成器从 Zustand store 解析出团队/队友/任务，
   运行能力审计与计划审批关卡，构建每次运行的共享状态
   （TeammatePool + BudgetGuard + TeamNotifier + ConcurrencyController，第 251-263 行），注册一个

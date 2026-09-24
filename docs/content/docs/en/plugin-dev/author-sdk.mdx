@@ -21,7 +21,7 @@ Use the packed `@cognia/plugin-sdk` package as the only Cognia dependency in a t
 | `@cognia/plugin-sdk/extensions` | extension-point constants and contribution types |
 | `@cognia/plugin-sdk/api/tool`, `/api/native-anthropic-tool` | explicitly supported compatibility subpaths |
 
-Never import `@/lib`, `@/types`, `@cognia/plugin-sdk/host`, or an app-private `@cognia/*` package. The `host` entry exists only for one repository migration window and is deliberately absent from npm exports and tarballs.
+Never import `@/lib`, `@/types/index`, `@cognia/plugin-sdk/host`, or an app-private `@cognia/*` package. The `host` entry exists only for one repository migration window and is deliberately absent from npm exports and tarballs.
 
 ## Contract-driven authoring
 
@@ -113,7 +113,7 @@ export default definePlugin({
 
 | Previous author code | Supported replacement |
 | --- | --- |
-| `@/types/plugin` | types from package root, `/manifest`, or `/context` |
+| `@/types/plugin/index` | types from package root, `/manifest`, or `/context` |
 | direct slash-command registry | declare `commands` and return `hooks.onCommand` from `activate` |
 | host registry/executor imports | manifest contribution plus the corresponding `ctx.*` callable API |
 | `create*API` factory | use the API already mounted on `ctx` |

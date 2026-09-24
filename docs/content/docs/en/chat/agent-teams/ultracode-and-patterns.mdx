@@ -10,7 +10,7 @@ A normal team run synthesizes a flat task DAG: one workflow node per `AgentTeamT
 The six pattern nodes live in `lib/ai/agent/team/patterns/`. The planner (`ultracode-planner.ts`) decides which patterns to compose and how wide; the synthesizer (`synthesize-ultracode.ts`) wires them into a forward-only DAG; the trigger (`ultracode-trigger.ts`) decides whether a run is ultracode at all; the type + Zod surface lives in `types/agent/ultracode.ts`.
 
 <TLDR>
-  `isUltracodeActive` (`lib/ai/agent/team/ultracode-trigger.ts:15-31`) gates the run: override `force`/`off`
+  `isUltracodeActive` (`lib/ai/agent/team/ultracode/ultracode-trigger.ts:15-31`) gates the run: override `force`/`off`
   &gt; `config.ultracode.enabled` &gt; `autoMode` always/never/auto (auto = `taskComplexity === "complex"`).
   `planUltracodeWorkflow` (`ultracode-planner.ts:34-62`) dispatches a structured plan with
   `preferToolEnabled: false`. `synthesizeUltracodeWorkflow` (`synthesize-ultracode.ts:89-172`) wires
@@ -25,7 +25,7 @@ The six pattern nodes live in `lib/ai/agent/team/patterns/`. The planner (`ultra
 `isUltracodeActive` mirrors Claude Code's effort toggle. An explicit operator override always wins; otherwise the team must have ultracode enabled, and `autoMode` decides. The `auto` default only orchestrates when the routing assessment judged the task complex.
 
 ```typescript
-// lib/ai/agent/team/ultracode-trigger.ts:15-31
+// lib/ai/agent/team/ultracode/ultracode-trigger.ts:15-31
 export function isUltracodeActive(
   team: Pick<AgentTeam, "config" | "routingAssessment">,
   override?: UltracodeOverride
@@ -52,7 +52,7 @@ export function isUltracodeActive(
 Before a run fans out, a planner teammate decides WHICH patterns to compose and how wide to fan each one. `planUltracodeWorkflow` dispatches a single structured call with `taskId: "ultracode-plan"` and `preferToolEnabled: false` — planning is pure reasoning over the objective, no repo tools needed. Team knobs (`skepticsPerFinding`, `judgesPerAttempt`, `maxFinderRounds`) are appended to the prompt as defaults. The result is validated by `ultracodePlanSchema`.
 
 ```typescript
-// lib/ai/agent/team/ultracode-planner.ts:34-62
+// lib/ai/agent/team/ultracode/ultracode-planner.ts:34-62
 export async function planUltracodeWorkflow(
   teamCtx: TeamRunContext,
   opts: PlanUltracodeOptions = {}
@@ -88,7 +88,7 @@ export async function planUltracodeWorkflow(
 `synthesizeUltracodeWorkflow` turns the plan's stage list into a `VisualWorkflow` of `pattern.*` nodes. The wiring is **forward-only** and stage-kind-driven. Each stage becomes a node with id `p${i}_${stage.pattern}` and type `pattern.${stage.pattern}`; a terminal `synthesize` stage is appended if the plan did not end with one.
 
 ```typescript
-// lib/ai/agent/team/synthesize-ultracode.ts:122-145
+// lib/ai/agent/team/ultracode/synthesize-ultracode.ts:122-145
     switch (stage.pattern) {
       case "multi-modal-sweep":
       case "loop-until-dry":
@@ -298,7 +298,7 @@ Companion Zod schemas — `findingsResultSchema`, `verdictSchema`, `attemptSchem
 The runtime branches on `ultracodeActive`: a side-effect import registers the `pattern.*` executors, the planner produces a plan, the synthesizer wires the DAG, and `runWorkflow` executes it. On success the terminal report is persisted via `storeWriter.setFinalResult`.
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:413-429
+// lib/ai/agent/team/agent-team-runtime.ts:413-429
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
     let workflow: VisualWorkflow
     if (ultracodeActive) {
@@ -320,7 +320,7 @@ The runtime branches on `ultracodeActive`: a side-effect import registers the `p
 ```
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:485-487 (ultracode only, on completion)
+// lib/ai/agent/team/agent-team-runtime.ts:485-487 (ultracode only, on completion)
         const report = (result.output as { report?: string } | undefined)?.report
         if (report && deps.storeWriter.setFinalResult) {
           deps.storeWriter.setFinalResult(teamId, report)

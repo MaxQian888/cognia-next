@@ -117666,6 +117666,7 @@ components:
             - CONFLICT
             - TIMEOUT
             - INCOMPATIBLE_SDK
+            - UNAVAILABLE
             - INTERNAL
         message:
           type: string

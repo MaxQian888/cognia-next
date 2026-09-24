@@ -50,7 +50,6 @@ interface ChatPaneProps {
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
   composerRef?: Ref<ComposerHandle>
-  mobileMentionMembers?: readonly Character[]
 }
 ```
 
@@ -347,9 +346,10 @@ composer 外层声明了 `@container/composer`。低于 `@sm` 时文本域独占
 
 ## 移动专有：手势与 plus 菜单
 
-- **`ComposerPlusMenu`**（`components/mobile/chat/composer-plus-menu.tsx`）—— 触屏上的"+"按钮抽屉，列附件、语音、技能、引用等入口；替代桌面的工具栏图标。
+- **`ComposerPlusMenu`**（`components/mobile/chat/composer-plus-menu.tsx`）—— 原生壳上的"+"按钮抽屉（相机、相册、文件、技能、引用等入口）。窄浏览器窗口同样使用手机形态的输入框，但保留桌面的回形针菜单：浏览器里没有原生相机和相册可用。
 - **`MessageActionSheet`**（`components/mobile/chat/message-action-sheet.tsx`）—— 长按消息弹底部 sheet：复制、编辑重发、引用、删除、分享。
-- **`MentionPopover`** —— 移动专属 @-mention popover，因为桌面 popover 在小屏上太挤。
+- **全平台同一个 `@` 面板** —— 手机与桌面共用组合式 `ComposerPopover`（文件、智能体、技能，以及团队房间成员及其角色），行高按手指触控设计。旧的"仅成员"手机底部弹层已移除：它让手机上的团队房间无法引用文件和智能体。
+- **指定运行时的一轮** —— 在直接对话（或新对话输入框）里，位于消息第一个词的裸 `@` 会在面板顶部列出 **运行时**（`@claude`、`@codex`）和 **Squad 成员**，每一行都标明它的运行时此处能否接手、不能的话原因是什么。发送 `@codex …` 会把这一轮交给已配置的 Codex 智能体（`@claude` 走内置通道，成员则以该成员身份回答）——开头的标签按解析出的通道着色；被拒绝的路由会保留草稿，并给出原因和"去设置"操作；回复会标注"经由 @handle"。组成部分：`lib/chat/turn-route/`（解析、解析通道、发送时快照、混合运行时历史）、`hooks/chat/use-route-targets.ts`，以及 `use-claude-chat-controller` 中的 `turnRoute`。
 - **手势**：`<LongPress>`、`<SwipeRow>`、`<PullToRefresh>` 包消息列表 / 列表项，统一 `test-pointer-polyfill.ts` 让 jsdom 测试也能跑。
 
 ## 主题与 i18n 集成

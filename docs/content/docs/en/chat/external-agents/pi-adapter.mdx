@@ -86,7 +86,7 @@ Pi's built-in `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` execut
 process and never reach Cognia's tool-host broker. A first-party extension intercepts them via
 `pi.on("tool_call")`.
 
-It **owns no policy**. The matrix is computed in `lib/ai/agent/external/pi-permission.ts`, where it
+It **owns no policy**. The matrix is computed in `lib/ai/agent/external/runtimes/pi/pi-permission.ts`, where it
 is typechecked and tested, and handed to the extension as data — `sidecar/` sits outside both the
 root tsconfig and Jest, so decision logic living there would be permanently unverified.
 

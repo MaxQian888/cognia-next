@@ -116,8 +116,8 @@ Span 在精心挑选的边界处被植入（与 perf 热点注册表同一哲学
 | --- | --- | --- |
 | **聊天回合** | `invoke_agent` / `anthropic` / `chat`；traceId+spanId 回写进 `SendOptions` | `hooks/chat/use-claude-chat.ts:855`（start）、`:1534`（success）、`:1257`（`turn_error`） |
 | **聊天工具调用** | `execute_tool` 子 span，父挂在该回合下 | `chat-tool-spans.ts:138`，经 `handleSdkEventForToolSpans`（`use-claude-chat.ts:1400`） |
-| **Agent Team 派发** | `invoke_agent` / `cognia.team` / `agent-team` | `lib/ai/agent/team/dispatch-teammate.ts:246`（start）、`:290`（带 usage 的 success） |
-| **外部 agent 桥接** | `invoke_agent`，provider 由协议决定，带 `handoff` | `lib/ai/agent/external/agent-trace-bridge.ts:74` |
+| **Agent Team 派发** | `invoke_agent` / `cognia.team` / `agent-team` | `lib/ai/agent/team/teammate/dispatch-teammate.ts:246`（start）、`:290`（带 usage 的 success） |
+| **外部 agent 桥接** | `invoke_agent`，provider 由协议决定，带 `handoff` | `lib/ai/agent/external/session/agent-trace-bridge.ts:74` |
 | **插件钩子** | `execute_tool` / `cognia.plugin` / `plugin-hook`，自测量 | `lib/plugin/messaging/hooks-system.ts:125`（`emitFinishedSpan`） |
 | **工作流 LLM 节点** | `chat` / `cognia.workflow` / `workflow` | `lib/workflow/nodes/built-ins.ts:308`（`ai.classify`/`ai.extract` 经此委派） |
 

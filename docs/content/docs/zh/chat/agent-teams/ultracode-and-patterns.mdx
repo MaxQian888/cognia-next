@@ -10,7 +10,7 @@ description: Ultracode 编排（ADR-0022 补遗）—— 由一名规划者队�
 这六个 pattern 节点位于 `lib/ai/agent/team/patterns/`。规划者（`ultracode-planner.ts`）决定组合哪些 pattern 以及扇出多宽；综合者（`synthesize-ultracode.ts`）把它们连成一张只向前推进的 DAG；触发器（`ultracode-trigger.ts`）决定一次运行是否启用 ultracode；类型与 Zod 面则位于 `types/agent/ultracode.ts`。
 
 <TLDR>
-  `isUltracodeActive`（`lib/ai/agent/team/ultracode-trigger.ts:15-31`）对运行进行门控：覆盖项 `force`/`off`
+  `isUltracodeActive`（`lib/ai/agent/team/ultracode/ultracode-trigger.ts:15-31`）对运行进行门控：覆盖项 `force`/`off`
   &gt; `config.ultracode.enabled` &gt; `autoMode` always/never/auto（auto = `taskComplexity === "complex"`）。
   `planUltracodeWorkflow`（`ultracode-planner.ts:34-62`）以 `preferToolEnabled: false`
   分派一份结构化规划。`synthesizeUltracodeWorkflow`（`synthesize-ultracode.ts:89-172`）以只向前推进的方式连接
@@ -25,7 +25,7 @@ description: Ultracode 编排（ADR-0022 补遗）—— 由一名规划者队�
 `isUltracodeActive` 镜像了 Claude Code 的强度开关。显式的操作者覆盖项总是优先；否则团队必须启用了 ultracode，再由 `autoMode` 决定。`auto` 默认值仅在路由评估判定任务为复杂时才进行编排。
 
 ```typescript
-// lib/ai/agent/team/ultracode-trigger.ts:15-31
+// lib/ai/agent/team/ultracode/ultracode-trigger.ts:15-31
 export function isUltracodeActive(
   team: Pick<AgentTeam, "config" | "routingAssessment">,
   override?: UltracodeOverride
@@ -52,7 +52,7 @@ export function isUltracodeActive(
 在一次运行扇出之前，先由一名规划者队友决定组合哪些 pattern 以及每个 pattern 扇出多宽。`planUltracodeWorkflow` 以 `taskId: "ultracode-plan"` 和 `preferToolEnabled: false` 分派一次结构化调用——规划是针对目标的纯推理，不需要任何仓库工具。团队旋钮（`skepticsPerFinding`、`judgesPerAttempt`、`maxFinderRounds`）作为默认值追加到提示中。结果由 `ultracodePlanSchema` 校验。
 
 ```typescript
-// lib/ai/agent/team/ultracode-planner.ts:34-62
+// lib/ai/agent/team/ultracode/ultracode-planner.ts:34-62
 export async function planUltracodeWorkflow(
   teamCtx: TeamRunContext,
   opts: PlanUltracodeOptions = {}
@@ -88,7 +88,7 @@ export async function planUltracodeWorkflow(
 `synthesizeUltracodeWorkflow` 把规划的阶段列表转化为一张由 `pattern.*` 节点构成的 `VisualWorkflow`。连线是**只向前推进**的，且由阶段类型驱动。每个阶段成为一个 id 为 `p${i}_${stage.pattern}`、类型为 `pattern.${stage.pattern}` 的节点；如果规划未以 `synthesize` 阶段结尾，则会追加一个终端 `synthesize` 阶段。
 
 ```typescript
-// lib/ai/agent/team/synthesize-ultracode.ts:122-145
+// lib/ai/agent/team/ultracode/synthesize-ultracode.ts:122-145
     switch (stage.pattern) {
       case "multi-modal-sweep":
       case "loop-until-dry":
@@ -298,7 +298,7 @@ export interface UltracodePlan { summary: string; stages: UltracodeStage[] }    
 运行时根据 `ultracodeActive` 分支：副作用导入注册 `pattern.*` 执行器，规划者产出一份规划，综合者连接 DAG，`runWorkflow` 执行它。成功时终端报告经由 `storeWriter.setFinalResult` 持久化。
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:413-429
+// lib/ai/agent/team/agent-team-runtime.ts:413-429
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
     let workflow: VisualWorkflow
     if (ultracodeActive) {
@@ -320,7 +320,7 @@ export interface UltracodePlan { summary: string; stages: UltracodeStage[] }    
 ```
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:485-487 (ultracode only, on completion)
+// lib/ai/agent/team/agent-team-runtime.ts:485-487 (ultracode only, on completion)
         const report = (result.output as { report?: string } | undefined)?.report
         if (report && deps.storeWriter.setFinalResult) {
           deps.storeWriter.setFinalResult(teamId, report)

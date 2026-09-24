@@ -759,7 +759,7 @@ files. Those guarantees depend on the selected existing workspace and sandbox
 policy. Remote gateway transport is not inferred from a loopback URL.
 
 Implementation: `lib/gateway/mint-session-ticket.ts`,
-`lib/gateway/snapshot-publisher.ts`, `lib/ai/agent/external/gateway-task.ts`,
+`lib/gateway/snapshot-publisher.ts`, `lib/ai/agent/external/config/gateway-task.ts`,
 `lib/ai/agent/external/manager.ts`,
 `crates/cognia-external-agent/src/gateway_task.rs`, and
 `cli/src/runtime/external/gateway-task.ts`.
@@ -877,7 +877,7 @@ enforces the original account/model/owner binding and mints a fresh lease.
 Control registration is released after the dispatch, while the existing abort
 signal and PII gates remain in force.
 
-Implementation: `lib/ai/agent/team/resolve-external-backing.ts`,
-`lib/ai/agent/team/dispatch-teammate.ts`, `lib/plugin/agent-sdk/dispatch.ts`, and
+Implementation: `lib/ai/agent/team/teammate/resolve-external-backing.ts`,
+`lib/ai/agent/team/teammate/dispatch-teammate.ts`, `lib/plugin/agent-sdk/dispatch.ts`, and
 `types/agent/external-agent.ts`. CLI/TUI backend selection does not yet expose
 this explicit Cognia model binding; its native model selection remains separate.

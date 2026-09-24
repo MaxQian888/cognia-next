@@ -248,7 +248,7 @@ barrel 重新导出其中十六个。`OPERATOR_READER_ID`、`isEntryReadableBy`�
 
 ## 相邻模块
 
-- `lib/ai/agent/agent-team-compat.ts` 如今只剩两个纯函数 `normalizeAgentTeamConfig` 和 `normalizeAgentTeamTask`，store 在每次创建和更新时都会调用它们。它们裁剪字符串、夹紧计数，并在什么都没变时返回原引用。
+- `lib/ai/agent/team/agent-team-compat.ts` 如今只剩两个纯函数 `normalizeAgentTeamConfig` 和 `normalizeAgentTeamTask`，store 在每次创建和更新时都会调用它们。它们裁剪字符串、夹紧计数，并在什么都没变时返回原引用。
 - `stores/agent/pending-gates-store.ts` 是 HITL 闸门队列，由 ADR-0022 的小队闸门和 ADR-0045 的计划闸门共用。七种闸门类型：`budget`、`deadlock`、`plan`、`teammate_fix`、`replan`、`capability_audit`、`plan_step`。`gateTypeFromScope` 把审批总线的 scope 映射到它们上，而 rehydrate 会把每个恢复出来的闸门盖成 `interrupted`，因为等待审批总线的那一方随页面一起死了。参见 [HITL 闸门](./hitl-gates)。
 
 ## 相关

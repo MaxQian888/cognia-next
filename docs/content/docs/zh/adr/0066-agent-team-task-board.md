@@ -5,7 +5,7 @@ description: "赋予Agent-Team任务模型看板接口并在应用中拆除孤�
 
 # ADR-0066 — Agent 团队任务看板与跨界面集成（CQRS）
 
-**状态**：已接受（2026-07-08）**作者**：Max Qian + Claude Fable 5 **基于**团队运行时（ADR-0022）、插件集成（ADR-0032）、移动同步编排器（ADR-0027）、Companion 控制面（ADR-0061）以及双子 运行时 胶水（`lib/ai/agent/team/twin-context.ts`、ADR-0003）。
+**状态**：已接受（2026-07-08）**作者**：Max Qian + Claude Fable 5 **基于**团队运行时（ADR-0022）、插件集成（ADR-0032）、移动同步编排器（ADR-0027）、Companion 控制面（ADR-0061）以及双子 运行时 胶水（`lib/ai/agent/team/teammate/twin-context.ts`、ADR-0003）。
 
 ## 背景
 
@@ -15,7 +15,7 @@ description: "赋予Agent-Team任务模型看板接口并在应用中拆除孤�
 
 ### 1. 每接口一名警卫
 
-`lib/ai/agent/team/task-move-guard.ts:canMoveTask(task, from, to, teamStatus)` 是人类拥有的过渡的唯一唯一事实来源，包含桌面拖板、移动操作表、配套RPCs和插件API：
+`lib/ai/agent/team/gates/task-move-guard.ts:canMoveTask(task, from, to, teamStatus)` 是人类拥有的过渡的唯一唯一事实来源，包含桌面拖板、移动操作表、配套RPCs和插件API：
 
 - 同列重序：始终允许（`order`通过`reorderColumn`重新编号）;
 - `pending → cancelled`，`review → completed | failed`（人工裁决），`failed → pending`（**手动重试**——关闭ADR-0022推迟）;

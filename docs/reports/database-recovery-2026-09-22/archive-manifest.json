@@ -1,0 +1,30 @@
+[
+  {
+    "path": "baseline/lib/db/message-sync-revision.ts.txt",
+    "sha256": "300dae09ae21e5e63092957e533b2d9de98c7a8273efdd6aec40bd3590e9d1d2"
+  },
+  {
+    "path": "baseline/lib/db/session-assets.ts.txt",
+    "sha256": "37a8cd220f6c5526934545365b48d14ae5a2cbcd28a4476289fb424de35811ea"
+  },
+  {
+    "path": "baseline/lib/db/messages.ts.txt",
+    "sha256": "db1089db59c33c482b964a2eaab0ee5e2f9acf0c89f893ea5e9ac60fcc339ab4"
+  },
+  {
+    "path": "baseline/lib/db/message-media-refs.ts.txt",
+    "sha256": "89ee799125c4a516bfd257a23f169be338bc52ae58979d0a389294c98c6129dc"
+  },
+  {
+    "path": "baseline/lib/db/message-media.ts.txt",
+    "sha256": "5d944ad48a93ae1c3454c6a7d5b82639497c3ce4c90cc67db57da6b86f0c06a6"
+  },
+  {
+    "path": "baseline/lib/chat/media/normalize-message-media.ts.txt",
+    "sha256": "347bae6f2848b30427cb241b628784d15267e10a086901f3fd71ac6459c7797b"
+  },
+  {
+    "path": "baseline/hooks/chat/stream-coalescing.ts.txt",
+    "sha256": "236e10efe2d792dff429d01ffe227630e4d9b2dc3119c4fe3a9af6ec0ea0a744"
+  }
+]

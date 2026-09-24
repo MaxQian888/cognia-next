@@ -10,7 +10,7 @@ Three small orchestrators in `lib/ai/agent/team/` layer behavior over the raw st
 <TLDR>
 - **Consensus** — `lib/ai/agent/team/consensus-orchestrator.ts` (283 lines): vote tally, five quorum rules, auto-resolve on threshold, lead override. Drives the workspace `ConsensusPanel`.
 - **Delegation** — `lib/ai/agent/team/delegation-orchestrator.ts` (271 lines): bridges team tasks into the background-agent and external-agent runtimes; quiet-hours gated; full status machine.
-- **Shared memory** — `lib/ai/agent/team/shared-memory-orchestrator.ts` (207 lines): deep PII gate on every write, version-counter writes, fire-and-forget plugin-adapter mirror, local-version-wins reverse sync.
+- **Shared memory** — `lib/ai/agent/team/memory/shared-memory-orchestrator.ts` (207 lines): deep PII gate on every write, version-counter writes, fire-and-forget plugin-adapter mirror, local-version-wins reverse sync.
 - Store CRUD they wrap: `upsertConsensus` / `upsertDelegation` / `writeSharedMemory` etc. in `stores/agent/agent-team-store/slices/actions.slice.ts`; ACL selectors in `stores/agent/agent-team-store/selectors.ts:234`.
 </TLDR>
 
@@ -141,7 +141,7 @@ A team knowledge store with a deep PII gate on writes, a monotonic version count
 Every published value passes the deep PII scan before it can reach the store — the same gate shared across Twin, Goal, and Connectors:
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:70-79
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:70-79
 export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
   // ...
   // Deep PII gate: scans every string leaf of strings, arrays, and plain objects
@@ -161,7 +161,7 @@ export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
 When the team config names a `sharedMemoryAdapterId`, writes are mirrored to the external adapter as a fire-and-forget microtask. The mirror is skipped for synthetic reverse-sync writes — those carry a writerName ending in ":sync" — so a pulled remote entry is never re-pushed:
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:108-119
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:108-119
 const adapterId = team.config.sharedMemoryAdapterId
 if (adapterId && !writerName.endsWith(":sync")) {
   const adapter = getSharedMemoryAdapter(adapterId)
@@ -180,7 +180,7 @@ if (adapterId && !writerName.endsWith(":sync")) {
 `syncSharedMemoryFromAdapter` reads the persisted per-(teamId, adapterId) cursor `lastAdapterSyncVersion`, asks the adapter for changes since that cursor, and applies each remote entry only when it strictly out-versions the local copy. The applied write is tagged with the ":sync" writer suffix so the mirror guard above does not bounce it back:
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:194-204
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:194-204
 for (const remote of entries) {
   const local = useAgentTeamStore.getState().sharedMemory[teamId]?.[remote.key]
   if (local && local.version >= remote.version) continue // local wins

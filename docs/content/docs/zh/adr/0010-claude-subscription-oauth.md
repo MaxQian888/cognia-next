@@ -9,6 +9,14 @@ description: "Cognia-NEXT 获得了一流的Claude Pro/Max OAuth登录支持、s
 
 ---
 
+## 认证复核 — 2026-09-22
+
+本 ADR 记录的是历史自建 OAuth 实现，不代表官方支持的第三方登录契约。当前 [Anthropic 认证与凭据使用文档](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)禁止第三方应用收集、存储或中转 claude.ai 凭据，并明确区分用户通过未经修改的 Claude Code 程序自行登录的情况。产品集成应使用 API key 或支持的云服务商，除非另获批准。
+
+隔离修复保留 Claude Code 对复用登录的所有权：Cognia 不交换其复制的 refresh token。发现结果不能验证账号身份，因此 opaque refresh token 变化时要求显式重新导入。后台持久化在 vault 锁内比较原凭据，且不会重建已删除账号。这不等于对 Cognia 自有凭据实现了跨进程 OAuth 交换串行化。
+
+[当前认证文档](https://code.claude.com/docs/en/authentication#credential-management)明确 `CLAUDE_CONFIG_DIR` 也隔离 macOS Keychain 条目。自定义目录发现不能回退读取默认 Keychain 登录；在可靠解析私有命名规则之前，Cognia 只读取该目录的凭据文件。按账号启动的子进程会先移除继承的冲突认证变量，再应用所选凭据。
+
 ## 背景
 
 直到本ADR，cognia-next 的 Anthropic 集成严格基于**API-key：渲染器写入`apiKey`给IndexedDB，Rust壳在生成sidecar时将其转发为`ANTHROPIC_API_KEY`，这就是整个认证故事。Pro/Max 订阅者——Anthropic 最有价值的个人用户——无法（a）用订阅令牌登录，（b）查看他们距离 [Anthropic 于 2025-07-28](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/) 激活的 5 小时滚动窗口或 7 天每周上限有多近。

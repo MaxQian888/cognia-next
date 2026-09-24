@@ -37,8 +37,8 @@ Cognia 自带一套 TS 原生、进程内的 **eval 引擎**（`lib/ai/eval/*`�
 | --- | --- | --- | --- | --- |
 | **Mode** | 聊天上下文注入器（system prompt + 工具白名单 + 输出格式 + 权限模式） | `types/agent/agent-mode.ts`（`BUILT_IN_AGENT_MODES`） | 11 | `createChatTarget` |
 | **Subagent** | 4 个 `workflow-*` 专家，靠 `description` 被派发器自选 | `lib/claude/agents/subagents/` | 4 | `createChatTarget`（直驱）或在 team/workflow 内 |
-| **External preset** | Codex / Claude Code / Gemini CLI / Cursor CLI 的 ACP 配置 | `lib/ai/agent/external/presets.ts` | 4（+custom） | 建两个 chat target 后对比 |
-| **Agent team** | lead + teammates 编排（任务 DAG、委派、预算、HITL） | `lib/ai/agent/agent-team-runtime.ts` | 模板 | `createTeamTarget` |
+| **External preset** | Codex / Claude Code / Gemini CLI / Cursor CLI 的 ACP 配置 | `lib/ai/agent/external/config/presets.ts` | 4（+custom） | 建两个 chat target 后对比 |
+| **Agent team** | lead + teammates 编排（任务 DAG、委派、预算、HITL） | `lib/ai/agent/team/agent-team-runtime.ts` | 模板 | `createTeamTarget` |
 
 ### Mode —— 断言"该用的工具用了、不该用的没用"
 

@@ -56,7 +56,7 @@ stdio 外部 agent 需要一张进程表。能提供进程表的运行时有三�
 | 配对到某台 Host 的伴侣端（浏览器标签页、手机） | 由 Host spawn。`agentInvoke` 会把 `spawn_external_agent` 及其同伴命令走伴侣 RPC 面发过去。 |
 | 什么都没配对的浏览器 | 没有地方可起。只有这一种情况是真的被挡住。 |
 
-`supportsExternalAgents()` 的答案是 `isTauri() || isHeadlessHost()`，也就是只算第一行，于是每一个伴侣端都会被以「stdio 传输需要桌面（Tauri）运行时」拒绝，而它说的那台 Host 本来完全跑得动。`lib/ai/agent/external/process-plane.ts` 给出的是三态答案，并且返回的是**原因**而不是布尔值：有四种情况都会得到「不行」，而每一种要给的建议都不一样。什么都没配对、Host 还在握手、Host 太旧起不了进程、Host 没给这台设备 Agent Control 授权。
+`supportsExternalAgents()` 的答案是 `isTauri() || isHeadlessHost()`，也就是只算第一行，于是每一个伴侣端都会被以「stdio 传输需要桌面（Tauri）运行时」拒绝，而它说的那台 Host 本来完全跑得动。`lib/ai/agent/external/capability/process-plane.ts` 给出的是三态答案，并且返回的是**原因**而不是布尔值：有四种情况都会得到「不行」，而每一种要给的建议都不一样。什么都没配对、Host 还在握手、Host 太旧起不了进程、Host 没给这台设备 Agent Control 授权。
 
 最后这一条不是可选项。`spawn_external_agent` 声明的是 `capability: "process.spawn"`，已配对设备只能通过单独的 Agent Control 授权（`GrantKind::AgentControl`）持有它；只查能力特性、不查授权的客户端，会给出一个 Host 只会回 403 的「运行」按钮。Host 通过 `external-agent.process-plane` 这个 feature 逐个操作地声明这个面，因此「先上了 spawn、还没上探测」的构建也能被准确描述。
 
@@ -73,7 +73,7 @@ stdio 外部 agent 需要一张进程表。能提供进程表的运行时有三�
 | category 为 `model` 的**配置项**（`session/config_options`） | ACP，以及 Pi 的 RPC adapter 把 `get_available_models` 投影成的形态 |
 | **会话模型状态**（`session/new` 的 `models`） | 只填这一处、没有配置项的较早 ACP agent |
 
-`lib/ai/agent/external/session-models.ts` 两种都读，而更关键的是它决定**写**往哪里去：配置项是 agent 自己声明的控件，所以它优先，`session/set_model` 是兜底。这个优先级本来就存在于 `AgentManager.applyModelToSession`（创建会话时带模型参数走的那条路）。两个写入方对「哪一次调用真的到达 agent」意见不一致，正是选择器点了没反应的成因。
+`lib/ai/agent/external/session/session-models.ts` 两种都读，而更关键的是它决定**写**往哪里去：配置项是 agent 自己声明的控件，所以它优先，`session/set_model` 是兜底。这个优先级本来就存在于 `AgentManager.applyModelToSession`（创建会话时带模型参数走的那条路）。两个写入方对「哪一次调用真的到达 agent」意见不一致，正是选择器点了没反应的成因。
 
 以前没有任何人去问。唯一能填上列表的路径是 agent 主动推的 `config_options_update`，所以 ACP agent 碰巧能用，而 Pi 根本没有模型那一行。`AgentManager.fetchSessionModelSurface` 就是那两个同步能力做不到的异步孪生（它们都把返回 promise 的 adapter 判为 `unsupported`，对它们自己而言这是对的），`model-surface-cache` 则让同时挂载的组合器芯片和会话面板共用同一次拉取。
 
@@ -99,7 +99,7 @@ flatten 透传,sidecar dispatch（`sidecar/dispatch/index.mjs`）按
 | Gateway（ticket、snapshot CAS、parity） | `crates/cognia-gateway/` |
 | 通用 Agent 宿主 | `sidecar/agent-host.mjs`（+ `claude-host.mjs` 兼容 shim） |
 | Conformance 套件 | `tests/conformance/`（`pnpm test:conformance`） |
-| 进程可以在哪里启动 | `lib/ai/agent/external/process-plane.ts` |
-| 已装运行时探测 | `crates/cognia-external-agent/src/version_probe.rs`、`lib/ai/agent/external/installed-runtimes.ts` |
-| agent 自己的模型（读 / 写 / 缓存） | `lib/ai/agent/external/session-models.ts`、`lib/ai/agent/external/model-surface-cache.ts` |
+| 进程可以在哪里启动 | `lib/ai/agent/external/capability/process-plane.ts` |
+| 已装运行时探测 | `crates/cognia-external-agent/src/version_probe.rs`、`lib/ai/agent/external/config/installed-runtimes.ts` |
+| agent 自己的模型（读 / 写 / 缓存） | `lib/ai/agent/external/session/session-models.ts`、`lib/ai/agent/external/capability/model-surface-cache.ts` |
 | 选 agent 处的凭据状态 | `components/agent/external-agent/credential-status-badge.tsx` |

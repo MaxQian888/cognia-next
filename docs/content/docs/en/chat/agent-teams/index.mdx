@@ -7,10 +7,10 @@ description: Lead + teammates + tasks executed by synthesizing a VisualWorkflow 
 
 An **Agent Team** is a lead coordinator, a set of teammates, and a set of tasks. Each teammate can be backed by a different runtime — the in-app Claude agent or an external CLI (Codex / Claude Code / Gemini CLI / Cursor CLI). Where the [built-in agent](./built-in-agent) is one long-lived session, a team is a *fan-out*: the lead plans, teammates execute tasks in parallel under a concurrency cap, and the whole thing reports back as one run.
 
-Since [ADR-0022](../adr/0022-agent-team-runtime-hardening), a team does **not** have its own orchestrator. `runTeamLifecycle` (`lib/ai/agent/agent-team-runtime.ts:122-527`) is a ~400-line *synthesizer*: it turns the team + tasks into a `VisualWorkflow` and hands that to the one workflow orchestrator everything else already uses. There is no second engine to keep in sync, and team runs persist exactly like any other workflow run — as `workflowRuns` rows with `triggerKind: "team"`.
+Since [ADR-0022](../adr/0022-agent-team-runtime-hardening), a team does **not** have its own orchestrator. `runTeamLifecycle` (`lib/ai/agent/team/agent-team-runtime.ts:122-527`) is a ~400-line *synthesizer*: it turns the team + tasks into a `VisualWorkflow` and hands that to the one workflow orchestrator everything else already uses. There is no second engine to keep in sync, and team runs persist exactly like any other workflow run — as `workflowRuns` rows with `triggerKind: "team"`.
 
 <TLDR>
-  Clicking Run calls `agentTeamManager.start` (`lib/ai/agent/agent-team.ts:91`), which invokes
+  Clicking Run calls `agentTeamManager.start` (`lib/ai/agent/team/agent-team.ts:91`), which invokes
   `runTeamLifecycle` (`agent-team-runtime.ts:122`). The synthesizer resolves team/teammates/tasks from
   the Zustand store, runs the capability-audit and plan-approval gates, builds per-run shared state
   (TeammatePool + BudgetGuard + TeamNotifier + ConcurrencyController, lines 251-263), registers a

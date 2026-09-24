@@ -74,7 +74,7 @@ UUID、cwd 与 Pi 版本——任何 session 文件的绝对路径都不会跨�
 Pi 内建的 `read` / `grep` / `find` / `ls` / `edit` / `write` / `bash` 在 Pi 进程内执行，永远到不了 Cognia
 的 tool-host broker。一个第一方扩展经 `pi.on("tool_call")` 拦截它们。
 
-它**不持有任何策略**。矩阵在 `lib/ai/agent/external/pi-permission.ts` 中计算，那里可被类型检查与测试，
+它**不持有任何策略**。矩阵在 `lib/ai/agent/external/runtimes/pi/pi-permission.ts` 中计算，那里可被类型检查与测试，
 再以数据形式交给扩展——`sidecar/` 位于根 tsconfig 与 Jest 之外，任何住在那里的决策逻辑都将永久无法验证。
 
 | 模式 | 原生工具行为 |

@@ -134,7 +134,7 @@ smoke 暴露出两个问题，二者都是在工具真正被投射之后才可�
 - **Codex 忽略了挂载的 MCP server。** Codex 没有 per-session 的 `mcpServers` 参数——它从
   配置读取——因此 adapter 静默丢弃了调用方挂载的全部 server。现在它们随
   `thread/start` 的 per-thread `config` 覆盖下发
-  （`lib/ai/agent/external/codex-mcp-config.ts`）。在此之前，桥报告一切健康，而 Codex
+  （`lib/ai/agent/external/runtimes/codex/codex-mcp-config.ts`）。在此之前，桥报告一切健康，而 Codex
   回答 `mcp__cognia-tools__*` 不可用。
 - **`git` 工具类别在严格 launcher 沙箱下经桥调用不可用。** git 子进程确实执行了，但对一个
   在非沙箱下 `git` 能正常读取的工作区报「not a git repository」。这是 launcher 沙箱与 git

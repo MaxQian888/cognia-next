@@ -1,0 +1,45 @@
+Excerpt of repository-wide lint run. Complete output is preserved in lint-full.log.gz.
+
+$ eslint . --max-warnings=0 --cache --cache-location .cache/eslint
+
+/Users/bytedance/Project/cognia-next/.cache/artifact-layout-2026-09-22/build-harness.cjs
+  1:10   error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  1:35   error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  1:73   error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  1:105  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  5:100  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/bytedance/Project/cognia-next/.cache/artifact-layout-2026-09-22/harness.js
+     62:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+     91:20  warning  'e5' is defined but never used. Allowed unused caught errors must match /^_/u                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+    138:17  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    147:26  warning  'x2' is defined but never used. Allowed unused caught errors must match /^_/u                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+    159:20  warning  'x2' is defined but never used. Allowed unused caught errors must match /^_/u                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+    179:13  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    192:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    207:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    236:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    248:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    252:11  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    275:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    278:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    321:13  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    336:15  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    347:15  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    381:13  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    390:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    391:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    399:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    400:19  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+    408:15  warning  Expected an assignment or function call and instead saw an expression                                                                                                                                                                                           @typescript-eslint/no-unused-expressions
+
+[unrelated diagnostics omitted from this excerpt]
+
+
+/Users/bytedance/Project/cognia-next/web/components/product/workflow-graph-reconstruction.test.tsx
+  14:3  warning  'GRAPH_REJECT_PHASE' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 9810 problems (698 errors, 9112 warnings)
+  0 errors and 123 warnings potentially fixable with the `--fix` option.
+
+[ELIFECYCLE] Command failed with exit code 1.

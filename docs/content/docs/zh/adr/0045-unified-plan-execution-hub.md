@@ -17,7 +17,7 @@ description: "将内置代理的计划模式从SDK直通提升为一类结构化
 
 整个**结构化计划模型是死代码**：`types/agent/agent.ts`（`AgentPlan`、`PlanStep`、`PlanRefinementRequest/Result`、`CreatePlanInput`、`AgentExecutionContext`、`PLAN_REFINEMENT_PROMPTS`）仓库范围内**零导入者**。其配套插件hook `onAgentPlanCreate` / `onAgentPlanStepComplete` 被降级为 `DEPRECATED_HOOK_POINTS`（ADR-0016）。这是一种“计划→、批准→完善→执行”的理想设计，但从未建成。
 
-与此同时，**编曲成熟但脱节**。Agent Team 运行时（`lib/ai/agent/agent-team-runtime.ts:runTeamLifecycle`）会门禁能力+计划审批，然后**将任务DAG编译成`VisualWorkflow`**（`lib/ai/agent/team/synthesize-workflow.ts`），并委派给`runWorkflow`——继承幂等性、崩溃恢复、并发和事件日志。但**内置的聊天代理无法直接访问编排**：唯一的聊天→团队路径是`action.team.run`工作流节点。而**Goal**子系统（`lib/goal/*`）是一个*第三*自驱动循环（turn-driver + judge + subgoal 分解），与两者都不共享。
+与此同时，**编曲成熟但脱节**。Agent Team 运行时（`lib/ai/agent/team/agent-team-runtime.ts:runTeamLifecycle`）会门禁能力+计划审批，然后**将任务DAG编译成`VisualWorkflow`**（`lib/ai/agent/team/synthesize-workflow.ts`），并委派给`runWorkflow`——继承幂等性、崩溃恢复、并发和事件日志。但**内置的聊天代理无法直接访问编排**：唯一的聊天→团队路径是`action.team.run`工作流节点。而**Goal**子系统（`lib/goal/*`）是一个*第三*自驱动循环（turn-driver + judge + subgoal 分解），与两者都不共享。
 
 结果是**三个并行的分解-驱动机制**，且没有统一表示：
 

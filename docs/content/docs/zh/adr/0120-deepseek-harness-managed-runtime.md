@@ -44,7 +44,7 @@ Cognia 将 DSH 的 **host 平面**作为一等源码纳入 `runtime/deepseek-har
 
 **`DSH_HOME` 固定在运行时目录内。** launcher 在其无法规范化到该目录内时拒绝启动；`doctor` 在只读 profile 上将任何游离 patch 层视为致命错误（在已授予写权限的 profile 上降级为警告）。路径规范化可挫败符号链接与同名前缀逃逸。
 
-**策略在 TypeScript，宿主只采集事实。** `doctorDshRuntime()` 与 `buildDshChannelManifest()` 位于 `lib/ai/agent/external/dsh-runtime-install.ts`。Rust 与 Node 宿主只返回**事实**——摘要、Node 版本、平台、游离 patch 层——由渲染端给出判定。按宿主各写一套规则，正是桌面端与 headless 端答案发生漂移的成因。安装采用两阶段同理：宿主暂存并回报摘要，渲染端构建 manifest（profile 与能力词汇表归它所有），宿主写入并原子切换。
+**策略在 TypeScript，宿主只采集事实。** `doctorDshRuntime()` 与 `buildDshChannelManifest()` 位于 `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts`。Rust 与 Node 宿主只返回**事实**——摘要、Node 版本、平台、游离 patch 层——由渲染端给出判定。按宿主各写一套规则，正是桌面端与 headless 端答案发生漂移的成因。安装采用两阶段同理：宿主暂存并回报摘要，渲染端构建 manifest（profile 与能力词汇表归它所有），宿主写入并原子切换。
 
 **能力事实是数据而非文字描述。** `DSH_SDK_CAPABILITIES` 与 `DSH_ACP_CAPABILITIES` 会与静态表 `RUNTIME_CAPABILITIES.external` 求交——后者授予 `session.resume`、`steer`、`set-model`、`permissions.interrupt-resume`，而 DSH 在两种传输层上都不支持。缺少这一交集，兼容性门禁会认证运行时并不具备的能力，UI 也会渲染出无效控件。
 
@@ -73,8 +73,8 @@ Windows 暂不在范围内：`koffi` 是 `dsh-fs-local` 的硬依赖且需要编
 ## 参考
 
 - `runtime/deepseek-harness/` — 组合、launcher、锁定依赖
-- `lib/ai/agent/external/dsh-runtime-install.ts` — 共享判定与 manifest 策略
-- `lib/ai/agent/external/dsh-session-event-codec.ts` — wire → canonical 事件
+- `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts` — 共享判定与 manifest 策略
+- `lib/ai/agent/external/runtimes/dsh/dsh-session-event-codec.ts` — wire → canonical 事件
 - `crates/cognia-external-agent/src/dsh_runtime.rs` — 桌面端生命周期
 - `tests/fixtures/dsh/` — 录制的 wire trace（上游与 Cognia 自采）
 - [ADR-0090](./0090-unified-agent-execution-and-gateway-compatibility) — 本接入所遵循的执行规格

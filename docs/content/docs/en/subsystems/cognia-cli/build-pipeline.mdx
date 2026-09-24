@@ -150,7 +150,7 @@ Two deliberate choices:
   version in the plugin's own `package.json` wins. Failure text points the right way:
   `esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
   <crate_root> first.` (`build_ts.rs:134-138`)
-- **`--external` for host modules** — `@/types/plugin`, `@/lib/*`, `react`, `react-dom` are
+- **`--external` for host modules** — `@/types/plugin/index`, `@/lib/*`, `react`, `react-dom` are
   provided by the host at load time; bundling them would duplicate React and break the shims.
 
 ## Build-free runtime path

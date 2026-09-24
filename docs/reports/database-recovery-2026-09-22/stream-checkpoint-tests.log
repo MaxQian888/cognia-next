@@ -1,0 +1,40 @@
+  Using tsconfig file: tsconfig.build.json
+Running one project: jsdom
+PASS jsdom hooks/chat/stream-coalescing.test.ts
+  createRafThrottle
+    ✓ coalesces multiple calls in a frame to the latest args (2 ms)
+    ✓ flush() invokes immediately with latest args and cancels the frame (1 ms)
+    ✓ flush() with nothing pending is a no-op
+    ✓ cancel() discards pending args
+    ✓ degrades to synchronous when rAF is unavailable
+  createDebouncedCallback
+    ✓ fires once after the window with the latest args (2 ms)
+    ✓ delay <= 0 degrades to synchronous
+    ✓ flush() fires immediately and cancel() discards
+    ✓ bounds continuous calls while ordinary debounce remains trailing-only (2 ms)
+    ✓ flush and cancel clear both timers, allowing a fresh checkpoint window (2 ms)
+    ✓ zero delay stays synchronous with max wait and leaves no timers (1 ms)
+    ✓ honors a maximum wait shorter than the trailing window
+    ✓ retains a new call scheduled from inside the callback
+  SessionCoalescingRegistry
+    ✓ creates one stable pair per session and routes by id (1 ms)
+    ✓ release(id) cancels pending work and forgets the session
+    ✓ flushAllPersist flushes every session; clear cancels everything
+    ✓ release on an unknown id is a no-op
+  ADR-0127 streaming budget (100 tok/s)
+    ✓ commits at most once per frame and persists at most once per 250 ms window (1 ms)
+    ✓ checkpoints a simulated hour at 100 tok/s with at most 1000 ms of pending updates (446 ms)
+    ✓ keeps independently offset checkpoint deadlines and cancels released sessions (1 ms)
+    ✓ keeps sessions independent: N concurrent streams ⇒ N commits per frame, not N×tokens
+
+----------------------|---------|----------|---------|---------|-------------------
+File                  | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+----------------------|---------|----------|---------|---------|-------------------
+All files             |     100 |      100 |     100 |     100 |                   
+ stream-coalescing.ts |     100 |      100 |     100 |     100 |                   
+----------------------|---------|----------|---------|---------|-------------------
+Test Suites: 1 passed, 1 total
+Tests:       21 passed, 21 total
+Snapshots:   0 total
+Time:        1.224 s
+Ran all test suites within paths "hooks/chat/stream-coalescing.test.ts".

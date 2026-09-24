@@ -98,7 +98,7 @@ flowchart TB
   class SEND,PICK,TTS,PET,DISCOVER surf
 ```
 
-队友桥接是第四个、临时性的生产者：`teammateToCharacter`（`lib/ai/agent/team/teammate-character.ts:56`）合成一个临时角色（id 为 `__teammate__:<id>`），使每个智能体团队成员都跑在与聊天发送**相同**的 `resolveSendOptions` 路径上——从不持久化，从不出现在 `listCharacters` 中。
+队友桥接是第四个、临时性的生产者：`teammateToCharacter`（`lib/ai/agent/team/teammate/teammate-character.ts:56`）合成一个临时角色（id 为 `__teammate__:<id>`），使每个智能体团队成员都跑在与聊天发送**相同**的 `resolveSendOptions` 路径上——从不持久化，从不出现在 `listCharacters` 中。
 
 ## 本章节如何组织
 

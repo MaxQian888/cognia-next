@@ -136,7 +136,7 @@ The build script in `package.json` mirrors what `cognia plugin build` runs:
           --outfile=dist/index.js --external:@/types/plugin --external:@/lib/*"
 ```
 
-Host modules (`@/types/plugin`, `@/lib/chat/slash-command-registry`) are mapped to local
+Host modules (`@/types/plugin/index`, `@/lib/chat/slash-command-registry`) are mapped to local
 `src/__shims__/` copies in both `tsconfig.json` `paths` and `jest.config.cjs`
 `moduleNameMapper`, so the scaffold type-checks and its jest tests pass before the plugin ever
 meets a running cognia.

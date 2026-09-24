@@ -1,0 +1,16 @@
+{
+  "acceptance": {
+    "long_history_median_improvement_percent": 20,
+    "absolute_improvement_gt_max_mad_multiplier": 2,
+    "warmup_runs": 1,
+    "measurement_runs": 10,
+    "sparse_guardrail": "report all sparse regressions and do not ship candidate with unbounded material regressions; equality required for every fixture"
+  },
+  "fixtures": [
+    "100000 rows / 100 sessions",
+    "100000 rows / 1000 sessions",
+    "10000 rows / 10000 sessions",
+    "100000 rows / 100000 sessions"
+  ],
+  "storage": "in-memory SQLite; not Rust host or disk latency"
+}

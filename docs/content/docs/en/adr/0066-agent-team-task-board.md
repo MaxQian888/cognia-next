@@ -7,7 +7,7 @@ description: "Gives the Agent-Team task model its kanban surface and de-silos it
 
 **Status**: Accepted (2026-07-08)
 **Authors**: Max Qian + Claude Fable 5
-**Builds on**: the team runtime (ADR-0022), the plugin integration (ADR-0032), the mobile sync orchestrator (ADR-0027), the Companion control plane (ADR-0061), and the twin runtime glue (`lib/ai/agent/team/twin-context.ts`, ADR-0003).
+**Builds on**: the team runtime (ADR-0022), the plugin integration (ADR-0032), the mobile sync orchestrator (ADR-0027), the Companion control plane (ADR-0061), and the twin runtime glue (`lib/ai/agent/team/teammate/twin-context.ts`, ADR-0003).
 
 ## Context
 
@@ -25,7 +25,7 @@ ADR-0022 had also deferred manual retry and pause/resume ("v2"), and declared
 
 ### 1. One guard, every surface
 
-`lib/ai/agent/team/task-move-guard.ts:canMoveTask(task, from, to, teamStatus)` is the
+`lib/ai/agent/team/gates/task-move-guard.ts:canMoveTask(task, from, to, teamStatus)` is the
 single source of truth for human-owned transitions, consumed by the desktop drag
 board, the mobile action sheet, the companion RPCs, and the plugin API:
 

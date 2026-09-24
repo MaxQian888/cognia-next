@@ -20,7 +20,7 @@ The gaps were narrower and less visible than "a dead module".
 
 **The model could not create an artifact.** Eleven tool names were declared in
 `types/agent/tool.ts`, and *both* message-conversion paths (`lib/claude/adapter.ts`
-and `lib/ai/agent/external/event-to-parts.ts`, with duplicate logic) already knew
+and `lib/ai/agent/external/session/event-to-parts.ts`, with duplicate logic) already knew
 how to turn such a call into an `ArtifactPart`. Nothing defined, registered or
 executed any of them. Artifacts could only be lifted out of a reply by the
 end-of-turn heuristic detector, which by construction cannot know a chart's

@@ -1,0 +1,20 @@
+  Using tsconfig file: tsconfig.build.json
+Running one project: node
+PASS node lib/db/messages.test.ts
+PASS node lib/db/message-media-refs.test.ts
+PASS node lib/db/messages-chat-trigger.test.ts
+PASS node lib/db/chat-transcript-index.test.ts
+PASS node lib/db/message-sync-revision.test.ts
+--------------------------|---------|----------|---------|---------|---------------------------
+File                      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s         
+--------------------------|---------|----------|---------|---------|---------------------------
+All files                 |   99.01 |    94.14 |     100 |   99.01 |                           
+ chat-transcript-index.ts |     100 |       92 |     100 |     100 | 46-50                     
+ messages.ts              |   98.94 |     94.3 |     100 |   98.94 | 886-895,992-993,1158-1159 
+--------------------------|---------|----------|---------|---------|---------------------------
+
+Test Suites: 5 passed, 5 total
+Tests:       119 passed, 119 total
+Snapshots:   0 total
+Time:        8.978 s, estimated 13 s
+Ran all test suites within paths "lib/db/messages.test.ts", "lib/db/chat-transcript-index.test.ts", "lib/db/messages-chat-trigger.test.ts", "lib/db/message-sync-revision.test.ts", "lib/db/message-media-refs.test.ts".

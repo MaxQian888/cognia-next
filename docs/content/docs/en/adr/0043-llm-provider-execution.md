@@ -179,7 +179,7 @@ Phase 10 gave Auto a richer difficulty signal, but the router still ignored
 most of what the caller and the settings already knew. Every `planRoute`
 caller now propagates task hints — `lib/claude/build-options.ts` (chat) sends
 attachment kinds, message count, tool count, requested effort, and a hasCode
-probe; `lib/ai/agent/agent-executor.ts`, `lib/ai/agent/team/dispatch-teammate.ts`,
+probe; `lib/ai/agent/agent-executor.ts`, `lib/ai/agent/team/teammate/dispatch-teammate.ts`,
 and the workflow surface send what each has, plus the caller's category — so a
 screenshot, a long thread, or a tool-heavy turn is classified as what it is
 rather than as cold text.

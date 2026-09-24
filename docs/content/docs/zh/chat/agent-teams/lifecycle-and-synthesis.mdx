@@ -8,7 +8,7 @@ description: ADR-0022 的 F 路径主干 —— agentTeamManager.start、runTeam
 依据 ADR-0022（“Agent Team 运行时加固”），一次团队运行**不是**第二套编排器 —— 它只是一个轻量的合成器，把 `(team, tasks)` 翻译成一份 `VisualWorkflow`，再交给那唯一的工作流运行时。本页端到端地梳理 F 路径主干：`agentTeamManager` 门面、`runTeamLifecycle` 的十项有序职责、纯函数式工作流合成、按运行注册的 `TeamRunContext` 注册表、编排器的并发就绪集调度，以及把工作流桥接回队员派发的两个节点执行器（`action.team.run`、`action.team.task.dispatch`）。
 
 <TLDR>
-  UI 调用 `agentTeamManager.start`（`lib/ai/agent/agent-team.ts:91-115`），它把团队
+  UI 调用 `agentTeamManager.start`（`lib/ai/agent/team/agent-team.ts:91-115`），它把团队
   状态设为 `executing` 并调用 `runTeamLifecycle`（`agent-team-runtime.ts:122-527`）。该函数
   执行十个有序步骤 —— 在途守卫、store 解析、能力审计闸门、计划审批
   循环、按运行构造模块、HITL 闸门订阅、`registerTeamRunContext`
@@ -55,12 +55,12 @@ sequenceDiagram
   L->>ST: setTeamStatus(id, status)
 ```
 
-## 管理器门面 —— `lib/ai/agent/agent-team.ts`
+## 管理器门面 —— `lib/ai/agent/team/agent-team.ts`
 
 `agentTeamManager` 是一个单例对象（`:78-124`），它把 CRUD 代理到 Zustand 的 `agent-team-store`，并通过 `runTeamLifecycle` + `abortTeam` 驱动运行时。运行时依赖项经由 `configureAgentTeamRuntime` 一次性注入；在配置之前调用 `start` 会抛错。
 
 ```typescript
-// lib/ai/agent/agent-team.ts:48-52
+// lib/ai/agent/team/agent-team.ts:48-52
 export function configureAgentTeamRuntime(
   deps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
 ): void {
@@ -71,7 +71,7 @@ export function configureAgentTeamRuntime(
 `start` 把可选的 `opts.ultracode` 布尔值映射到运行时的 `ultracodeOverride` 枚举（`force` / `off` / 缺省），并把生命周期结果回写到 store：
 
 ```typescript
-// lib/ai/agent/agent-team.ts:91-115
+// lib/ai/agent/team/agent-team.ts:91-115
 start: async (id, opts) => {
   if (!configuredDeps) {
     throw new Error(
@@ -132,7 +132,7 @@ ready           每个 startSquadRun 调用等待的信号
 第 5 步构造经由运行上下文传给执行器的共享状态对象：
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:251-263 (per-run module construction)
+// lib/ai/agent/team/agent-team-runtime.ts:251-263 (per-run module construction)
 const concurrency = createConcurrencyController(team.config?.maxConcurrentTeammates ?? 5)
 const modelPref = createModelPreferenceController()
 const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
@@ -152,7 +152,7 @@ const budget = createBudgetGuard({
 `inflightControllers`（`agent-team-runtime.ts:99`）是一个模块作用域的 `Map<teamId, AbortController>`。`abortTeam` 按 team 查找并中止；该信号级联进入 `runWorkflow`，从而解开就绪集循环：
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:530-535
+// lib/ai/agent/team/agent-team-runtime.ts:530-535
 export function abortTeam(teamId: string, reason?: string): boolean {
   const ac = inflightControllers.get(teamId)
   if (!ac) return false
@@ -396,8 +396,8 @@ registerNodeExecutor({
     const [{ getTeamRunContext }, { buildTeammatePrompt }, { dispatchTeammate }] =
       await Promise.all([
         import("@/lib/ai/agent/team/team-run-context"),
-        import("@/lib/ai/agent/agent-team-runtime-deps"),
-        import("@/lib/ai/agent/team/dispatch-teammate"),
+        import("@/lib/ai/agent/team/agent-team-runtime-deps"),
+        import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
       ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
@@ -436,12 +436,12 @@ registerNodeExecutor({
 | `action.team.run` | `built-ins.ts:1444-1525` | 否 | 工作流 -> 团队桥；绑定 store，透传 IM 来源，返回 `teamRunId` |
 | `action.team.task.dispatch` | `built-ins.ts:1537-1590` | 是 | 按任务的叶子节点；恢复上下文、派发，重试时重新认领以轮换队员 |
 
-## 运行时依赖接线 —— `lib/ai/agent/agent-team-runtime-deps.ts`
+## 运行时依赖接线 —— `lib/ai/agent/team/agent-team-runtime-deps.ts`
 
 `buildAgentTeamRuntimeDeps`（`:102-171`）提供两项注入关注点：提示词构造器与生产环境的通知器依赖。`buildTeammatePrompt` 和 `buildLeadPlanningPrompt` 塑造具备人设感知的提示词；`runLeadPlanning` 通过 `executeAgent` 运行 lead：
 
 ```typescript
-// lib/ai/agent/agent-team-runtime-deps.ts:107-125 (lead planning, trimmed)
+// lib/ai/agent/team/agent-team-runtime-deps.ts:107-125 (lead planning, trimmed)
 const runLeadPlanning = async ({ team, lead, feedback, signal }): Promise<LeadPlanResult> => {
   const workers = useAgentTeamStore
     .getState()
@@ -460,7 +460,7 @@ const runLeadPlanning = async ({ team, lead, feedback, signal }): Promise<LeadPl
 `defaultNotifierDeps` 把 `deliver` 路由进 ADR-0042 统一通知中心，把 `openGate` 路由进渲染 HITL 模态框的待处理闸门 store：
 
 ```typescript
-// lib/ai/agent/agent-team-runtime-deps.ts:133-165 (notifier deps, trimmed)
+// lib/ai/agent/team/agent-team-runtime-deps.ts:133-165 (notifier deps, trimmed)
 const defaultNotifierDeps: TeamNotifierDeps = {
   deliver: (p) => {
     void import("@/lib/notifications/runtime").then(({ notify }) =>

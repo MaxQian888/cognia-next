@@ -10,7 +10,7 @@ description: 三个薄编排器覆盖在 Agent Team Zustand store 的 CRUD 之�
 <TLDR>
 - **共识** — `lib/ai/agent/team/consensus-orchestrator.ts`（283 行）：投票统计、五种法定人数规则、达到阈值时自动解析、lead 覆盖。驱动工作区的 `ConsensusPanel`。
 - **委派** — `lib/ai/agent/team/delegation-orchestrator.ts`（271 行）：把团队任务桥接进后台 agent 运行时和外部 agent 运行时；受静默时段门控；完整状态机。
-- **共享记忆** — `lib/ai/agent/team/shared-memory-orchestrator.ts`（207 行）：每次写入都做深度 PII 门控、版本计数器写入、即发即忘的插件适配器镜像、本地版本优先的反向同步。
+- **共享记忆** — `lib/ai/agent/team/memory/shared-memory-orchestrator.ts`（207 行）：每次写入都做深度 PII 门控、版本计数器写入、即发即忘的插件适配器镜像、本地版本优先的反向同步。
 - 它们包装的 store CRUD：`stores/agent/agent-team-store/slices/actions.slice.ts` 中的 `upsertConsensus` / `upsertDelegation` / `writeSharedMemory` 等；`stores/agent/agent-team-store/selectors.ts:234` 中的 ACL 选择器。
 </TLDR>
 
@@ -141,7 +141,7 @@ function isDelegationQuietGated(sourceTeamId: string, nowMs: number = Date.now()
 每个发布的值在能抵达 store 之前都要通过深度 PII 扫描——与 Twin、Goal 和 Connectors 共享的同一道门：
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:70-79
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:70-79
 export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
   // ...
   // Deep PII gate: scans every string leaf of strings, arrays, and plain objects
@@ -161,7 +161,7 @@ export function publishEntry(input: PublishEntryInput): SharedMemoryEntry {
 当团队配置指定了一个 `sharedMemoryAdapterId` 时，写入会以即发即忘的微任务镜像到外部适配器。对于合成的反向同步写入会跳过镜像——那些写入携带一个以 ":sync" 结尾的 writerName——这样一个拉取来的远程条目绝不会被再次推送：
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:108-119
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:108-119
 const adapterId = team.config.sharedMemoryAdapterId
 if (adapterId && !writerName.endsWith(":sync")) {
   const adapter = getSharedMemoryAdapter(adapterId)
@@ -180,7 +180,7 @@ if (adapterId && !writerName.endsWith(":sync")) {
 `syncSharedMemoryFromAdapter` 读取持久化的逐 (teamId, adapterId) 游标 `lastAdapterSyncVersion`，向适配器请求自该游标以来的变更，并仅当某个远程条目严格高于本地副本的版本时才应用它。被应用的写入带上 ":sync" writer 后缀，使上面的镜像守卫不会把它弹回去：
 
 ```typescript
-// lib/ai/agent/team/shared-memory-orchestrator.ts:194-204
+// lib/ai/agent/team/memory/shared-memory-orchestrator.ts:194-204
 for (const remote of entries) {
   const local = useAgentTeamStore.getState().sharedMemory[teamId]?.[remote.key]
   if (local && local.version >= remote.version) continue // local wins

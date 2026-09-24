@@ -9,7 +9,7 @@ description: 骑在 Action Review 契约上的小队审批（ADR-0169）。Execu
 
 <TLDR>
   运行时调用 `openSquadReview({ runId, teamId, kind, instance, subject })`
-  （`lib/ai/agent/team/squad-review-gate.ts`）。它先写一个运行级检查点，再把一份
+  （`lib/ai/agent/team/gates/squad-review-gate.ts`）。它先写一个运行级检查点，再把一份
   `ActionReviewRequest` 以确定性 id（`action-review:squad-review:<runId>:<kind>:<instance>`）投影成
   该运行的 `ExecutionRunInterrupt`，然后通过 Dexie live query 加轮询兜底等待这一行。任何界面用
   `executeRunControlCommand({ action: "approve" | "deny", interruptId, reviewDecision })` 回答它。
@@ -42,7 +42,7 @@ description: 骑在 Action Review 契约上的小队审批（ADR-0169）。Execu
 
 ## 恢复
 
-无法证明可以安全重放的 resume（某个子运行没有检查点、检查点为 `needs_input`、存在未知或不安全的待定副作用）会把运行停在 `needs_input` 并带上原因码，同时提出 `team_recovery`（`lib/ai/agent/team/team-recovery.ts`）。subject 带 `reason`、`uncertainChildIds`、公共的 `hostRef`（若有）以及 `choices`：
+无法证明可以安全重放的 resume（某个子运行没有检查点、检查点为 `needs_input`、存在未知或不安全的待定副作用）会把运行停在 `needs_input` 并带上原因码，同时提出 `team_recovery`（`lib/ai/agent/team/durable/team-recovery.ts`）。subject 带 `reason`、`uncertainChildIds`、公共的 `hostRef`（若有）以及 `choices`：
 
 - `retry_same_host` 把不确定的子运行在原主机重新排队并恢复。
 - `retry_host` 把它们排到指定主机。协调器拒绝没有安全检查点的跨主机迁移，运行保持停驻。
@@ -140,7 +140,7 @@ worker 上继续推进，由操作员决定。
 当 `TeammatePool.onAllUnavailable` 触发时，运行无法取得进展。处理器以一个 `openApproval` 通知 critical 级别，通过 `concurrency.reduceTo(0)` 冻结调度，然后等待决策：批准会调用 `pool.forceUnquarantine`（默认 `{ resetAll: true }`），拒绝则中止运行。一个 `deadlockResolverActive` 闩锁防止在决策待定期间重入。
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:269-302
+// lib/ai/agent/team/agent-team-runtime.ts:269-302
 subs.push(
   pool.onAllUnavailable(() => {
     if (ac.signal.aborted || deadlockResolverActive) return
@@ -182,7 +182,7 @@ subs.push(
 当单个队友被取消资格时（一次灾难性失败——auth / 404 / 持续拒绝），运行**不会**暂停：它在剩余的 worker 上继续。该门让操作员修复该队友的配置并让它重新加入，或永久跳过它。键是 `runId:teammateId`，因此并发的取消资格会打开各自独立的模态框。这里没有 `reduceTo(0)`，也没有拒绝即中止。
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:307-338
+// lib/ai/agent/team/agent-team-runtime.ts:307-338
 subs.push(
   pool.onTeammateDisqualified((teammateId, reason) => {
     if (ac.signal.aborted) return
@@ -222,7 +222,7 @@ subs.push(
 `BudgetGuard` 配置了 `onCritical: governancePolicy.budget.onCritical`（`agent-team-runtime.ts:259`）。当该动作为 `pause_for_review` 时，守卫发出一个 `pause_for_review` 事件；合成器的监听器冻结调度并等待决策。以 `{ extraTokens }` 批准会调用 `budget.extendLimit(extra)`，使运行能在提高的上限下继续；拒绝则中止。`warning_crossed` 与 `critical_crossed` 事件被转发到插件钩子流水线（`dispatchOnTeamBudgetWarn`），但从不阻塞。
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:370-391
+// lib/ai/agent/team/agent-team-runtime.ts:370-391
 subs.push(
   budget.on("pause_for_review", () => {
     if (ac.signal.aborted || budgetResolverActive) return
@@ -252,7 +252,7 @@ subs.push(
 如果设置了 `team.config.requirePlanApproval`，合成器会在任何逐运行状态存在**之前**运行一个修订循环——这就是为什么计划门以 `teamId` 而非 `runId` 为键。最多 `maxPlanRevisions` 轮：每一轮调用 `deps.runLeadPlanning`（把上一轮的 `feedback` 穿线传入），然后等待决策。批准会跳出循环并触发 `dispatchOnTeamPlanReady`；拒绝则把 `decision.feedback` 喂入下一轮。如果没有任何一轮获批，运行以 `failed` 结束（如果信号中止则为 `cancelled`）。
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:217-239
+// lib/ai/agent/team/agent-team-runtime.ts:217-239
 for (let i = 0; i < maxRev; i++) {
   if (ac.signal.aborted) break
   const planResult = await deps.runLeadPlanning({
@@ -285,7 +285,7 @@ Lead 的原始计划文本由 `parseProposedPlan`（`agent-team-runtime.ts:106-1
 在花费一个 token 之前，合成器会验证团队及其队友引用的每一个能力 id 仍然能解析。如果某个贡献插件被禁用，那些 id 就过期了；该门把它们暴露出来，并询问操作员是否确认一次降级运行。拒绝（或中止的等待）会以 `cancelled` 结束运行。关于 bundle 如何被解析，参见 [能力与插件](./capabilities-and-plugins)。
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:178-198
+// lib/ai/agent/team/agent-team-runtime.ts:178-198
 const known = await buildKnownCapabilityIds()
 const auditWarnings = [
   ...validateInstanceCapabilitiesWith(known, team),
@@ -441,7 +441,7 @@ sequenceDiagram
 当运行结束时——无论成功、失败还是中止——合成器的 `finally` 块拆除订阅并**解析任何仍然待定的等待者**，使得遗留的门 promise 绝不会泄漏到运行之后：
 
 ```ts
-// lib/ai/agent/agent-team-runtime.ts:507-522
+// lib/ai/agent/team/agent-team-runtime.ts:507-522
 for (const u of subs) {
   try {
     u()

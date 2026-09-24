@@ -119,6 +119,7 @@ throw new PluginGatewayError({ code: error.code })
 | `NOT_FOUND` | 目标 / 资源缺失 | 否 |
 | `CONFLICT` | 状态冲突 | 否 |
 | `TIMEOUT` | 网关超时 | 是 |
+| `UNAVAILABLE` | 宿主依赖未就绪（加密密钥存储初始化中或已锁定；见 `details.reason`） | 否 |
 | `INTERNAL` | 未知网关错误 | 是 |
 
 批量路径 `invokePluginApiBatch` 调用 `plugin_api_batch_invoke`（`:142`）。

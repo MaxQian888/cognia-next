@@ -33,8 +33,9 @@ function chatNamespacePrefixes(): ReadonlyArray<{ prefix: string; kind: TriggerK
 }
 ```
 
-命名空间前缀是按模式区分的。团队工作区（`mentionMode="agents"`）把 `@` 保留给成员，因而没有任何类型化
-前缀；工作流编辑器拿到的是 `@node:` / `@edge:`。
+命名空间前缀是按模式区分的。所有聊天输入框（`files` 与 `combined`）都拿到上面这组前缀；工作流编辑器拿到的
+是 `@node:` / `@edge:`。在直接对话里，位于消息最开头的裸 `@` 还会列出路由目标（`@claude`、`@codex`、Squad
+成员），它们决定由哪个运行时来回答这一轮（`lib/chat/turn-route/`）。
 
 ## 面板状态
 

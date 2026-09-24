@@ -285,7 +285,7 @@ export interface ConcurrencyController { get(): number; reduceTo(n: number): voi
 
 `createConcurrencyController(initial)` (`concurrency-controller.ts:21-53`) is **monotone non-increasing** — `reduceTo(n)` is a no-op when `n >= current` (`:35`). Producers: `BudgetGuard` `reduce_concurrency` and the team synthesizer HITL gate. Two distinct knobs: `concurrency` (concurrent **runs**) vs `maxConcurrency` (in-run **nodes**); there is no global concurrency ceiling in the runtime.
 
-Secrets: `SecretResolver` (`secret-resolver.ts:13-15`); `NoopSecretResolver` (`:22-24`) is the web / Phase-4 default and returns `undefined`; `createInMemoryResolver` (`:30-34`). The keyring resolver `createKeyringSecretResolver()` (`secret-resolver-keyring.ts:17-26`) reads from `@/lib/keyring`; `parseRef` (`:33-49`) accepts `keyring:ns:key` and `ns/key` shorthand, returning `null` (→ `undefined`) on non-match.
+Secrets: `SecretResolver` (`secret-resolver.ts:13-15`); `NoopSecretResolver` (`:22-24`) is the web / Phase-4 default and returns `undefined`; `createInMemoryResolver` (`:30-34`). The keyring resolver `createKeyringSecretResolver()` (`secret-resolver-keyring.ts:17-26`) reads from `@/lib/keyring/index`; `parseRef` (`:33-49`) accepts `keyring:ns:key` and `ns/key` shorthand, returning `null` (→ `undefined`) on non-match.
 
 Model preference: `createModelPreferenceController` (`model-preference-controller.ts:26-54`) holds `{preferCheap, modelHint?}` and only `downshift()`s (no upshift, `:34-46`); it is run-scoped and read directly by AI node executors.
 

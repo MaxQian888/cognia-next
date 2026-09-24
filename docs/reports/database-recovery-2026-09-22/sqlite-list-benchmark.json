@@ -1,0 +1,127 @@
+{
+  "sqlite_version": "3.53.4",
+  "baseline_sha256": "fc50ed5e5f13ded632bc4fd11b17b88dfeb50eeac6863f1d4df133814a88dbff",
+  "candidate_sha256": "4929ed7c6493da880ec388e45123a2422175443aaedc67fa1c4b176b1fd4482e",
+  "fixtures": [
+    {
+      "entries": 100000,
+      "sessions": 100,
+      "equality": true,
+      "baseline": {
+        "median_ms": 5.4913125,
+        "mad_ms": 0.10583300000000051,
+        "samples_ms": [
+          5.453916, 5.528709, 5.559209, 5.216208, 5.365042, 5.405917, 5.721208, 5.741792, 5.538542,
+          5.316667
+        ]
+      },
+      "candidate": {
+        "median_ms": 0.155229,
+        "mad_ms": 0.0049999999999999906,
+        "samples_ms": [
+          0.160625, 0.164833, 0.1555, 0.148125, 0.153708, 0.150625, 0.162708, 0.145875, 0.155083,
+          0.155375
+        ]
+      },
+      "improvement_percent": 97.17318946973059,
+      "greater_than_2_max_mad": true
+    },
+    {
+      "entries": 100000,
+      "sessions": 1000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 5.69575,
+        "mad_ms": 0.06879149999999967,
+        "samples_ms": [
+          5.577041, 5.800625, 5.7865, 5.680042, 5.710375, 5.742583, 5.714125, 5.681125, 5.516583,
+          5.340208
+        ]
+      },
+      "candidate": {
+        "median_ms": 1.478,
+        "mad_ms": 0.03212550000000003,
+        "samples_ms": [
+          1.618, 1.508292, 1.364459, 1.449083, 1.468042, 1.368333, 1.487958, 1.493958, 1.444041,
+          1.64975
+        ]
+      },
+      "improvement_percent": 74.0508273712856,
+      "greater_than_2_max_mad": true
+    },
+    {
+      "entries": 10000,
+      "sessions": 10000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 3.7806875,
+        "mad_ms": 0.09502100000000002,
+        "samples_ms": [
+          3.844, 4.87625, 3.692875, 3.829916, 3.633625, 4.042458, 3.678458, 3.7335, 3.827875,
+          3.603583
+        ]
+      },
+      "candidate": {
+        "median_ms": 12.140646,
+        "mad_ms": 0.08216749999999973,
+        "samples_ms": [
+          11.822084, 12.115042, 12.093875, 12.16625, 12.177042, 12.766916, 12.050791, 12.964042,
+          12.475125, 12.066166
+        ]
+      },
+      "improvement_percent": -221.1227058570697,
+      "greater_than_2_max_mad": false
+    },
+    {
+      "entries": 100000,
+      "sessions": 100000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 58.105166499999996,
+        "mad_ms": 1.1746455000000005,
+        "samples_ms": [
+          59.819291, 57.47, 55.769084, 57.582, 58.314417, 54.843042, 58.341, 57.895916, 64.615875,
+          62.21375
+        ]
+      },
+      "candidate": {
+        "median_ms": 157.0181665,
+        "mad_ms": 1.9506665000000112,
+        "samples_ms": [
+          158.229791, 150.81725, 185.911, 154.910958, 160.082083, 155.224042, 156.8735, 157.831333,
+          157.162833, 153.677208
+        ]
+      },
+      "improvement_percent": -170.23098970037375,
+      "greater_than_2_max_mad": false
+    }
+  ],
+  "query_plan": [
+    [2, 0, 0, "CO-ROUTINE session_ids"],
+    [5, 2, 0, "SETUP"],
+    [
+      8,
+      5,
+      54,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=?)"
+    ],
+    [34, 2, 0, "RECURSIVE STEP"],
+    [35, 34, 216, "SCAN session_ids"],
+    [39, 34, 0, "CORRELATED SCALAR SUBQUERY 2"],
+    [
+      44,
+      39,
+      46,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id>?)"
+    ],
+    [72, 0, 215, "SCAN session_ids"],
+    [79, 0, 0, "CORRELATED SCALAR SUBQUERY 4"],
+    [
+      84,
+      79,
+      53,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id=?)"
+    ],
+    [104, 0, 0, "USE TEMP B-TREE FOR ORDER BY"]
+  ]
+}

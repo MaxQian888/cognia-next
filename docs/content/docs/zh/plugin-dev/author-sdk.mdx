@@ -21,7 +21,7 @@ description: 面向可分发 Cognia 插件的受支持导入、运行时组合�
 | `@cognia/plugin-sdk/extensions` | 扩展点常量与 contribution 类型 |
 | `@cognia/plugin-sdk/api/tool`、`/api/native-anthropic-tool` | 明确支持的兼容子路径 |
 
-不要导入 `@/lib`、`@/types`、`@cognia/plugin-sdk/host` 或应用私有的 `@cognia/*` 包。`host` 入口只服务一次仓库内迁移，不在 npm exports 或 tarball 中。
+不要导入 `@/lib`、`@/types/index`、`@cognia/plugin-sdk/host` 或应用私有的 `@cognia/*` 包。`host` 入口只服务一次仓库内迁移，不在 npm exports 或 tarball 中。
 
 ## 契约驱动的插件开发
 
@@ -113,7 +113,7 @@ export default definePlugin({
 
 | 旧作者代码 | 受支持替代方案 |
 | --- | --- |
-| `@/types/plugin` | 从包根、`/manifest` 或 `/context` 导入类型 |
+| `@/types/plugin/index` | 从包根、`/manifest` 或 `/context` 导入类型 |
 | 直接访问 slash-command registry | 声明 `commands`，并由 `activate` 返回 `hooks.onCommand` |
 | 导入宿主 registry/executor | 使用 manifest contribution 与对应的 `ctx.*` 可调用 API |
 | `create*API` 工厂 | 使用已经挂载在 `ctx` 上的 API |

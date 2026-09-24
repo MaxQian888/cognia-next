@@ -8,7 +8,7 @@ description: The ADR-0022 F-path spine — agentTeamManager.start, runTeamLifecy
 Per ADR-0022 ("Agent Team runtime hardening"), a team run is **not** a second orchestrator — it is a thin synthesizer that translates `(team, tasks)` into a `VisualWorkflow` and hands it to the one workflow runtime. This page traces the F-path spine end to end: the `agentTeamManager` facade, the ten ordered responsibilities of `runTeamLifecycle`, pure workflow synthesis, the per-run `TeamRunContext` registry, the orchestrator's concurrent ready-set scheduler, and the two node executors (`action.team.run`, `action.team.task.dispatch`) that bridge workflows back into teammate dispatch.
 
 <TLDR>
-  The UI calls `agentTeamManager.start` (`lib/ai/agent/agent-team.ts:91-115`), which sets the team
+  The UI calls `agentTeamManager.start` (`lib/ai/agent/team/agent-team.ts:91-115`), which sets the team
   status to `executing` and calls `runTeamLifecycle` (`agent-team-runtime.ts:122-527`). That function
   runs ten ordered steps — in-flight guard, store resolution, capability-audit gate, plan-approval
   loop, per-run module construction, HITL gate subscriptions, `registerTeamRunContext`
@@ -56,12 +56,12 @@ sequenceDiagram
   L->>ST: setTeamStatus(id, status)
 ```
 
-## The manager facade — `lib/ai/agent/agent-team.ts`
+## The manager facade — `lib/ai/agent/team/agent-team.ts`
 
 `agentTeamManager` is a singleton object (`:78-124`) that proxies CRUD onto the Zustand `agent-team-store` and drives the runtime through `runTeamLifecycle` + `abortTeam`. Runtime dependencies are injected once via `configureAgentTeamRuntime`; calling `start` before configuration throws.
 
 ```typescript
-// lib/ai/agent/agent-team.ts:48-52
+// lib/ai/agent/team/agent-team.ts:48-52
 export function configureAgentTeamRuntime(
   deps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
 ): void {
@@ -72,7 +72,7 @@ export function configureAgentTeamRuntime(
 `start` maps the optional `opts.ultracode` boolean onto the runtime's `ultracodeOverride` enum (`force` / `off` / absent) and mirrors the lifecycle result back to the store:
 
 ```typescript
-// lib/ai/agent/agent-team.ts:91-115
+// lib/ai/agent/team/agent-team.ts:91-115
 start: async (id, opts) => {
   if (!configuredDeps) {
     throw new Error(
@@ -133,7 +133,7 @@ ready           the signal every startSquadRun call awaits
 Step 5 constructs the shared state objects passed to the executor through the run context:
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:251-263 (per-run module construction)
+// lib/ai/agent/team/agent-team-runtime.ts:251-263 (per-run module construction)
 const concurrency = createConcurrencyController(team.config?.maxConcurrentTeammates ?? 5)
 const modelPref = createModelPreferenceController()
 const notifier = createTeamNotifier({ runId, teamId }, deps.notifierDeps)
@@ -153,7 +153,7 @@ const budget = createBudgetGuard({
 `inflightControllers` (`agent-team-runtime.ts:99`) is a module-scope `Map<teamId, AbortController>`. `abortTeam` looks the team up and aborts; the signal cascades into `runWorkflow`, which unwinds the ready-set loop:
 
 ```typescript
-// lib/ai/agent/agent-team-runtime.ts:530-535
+// lib/ai/agent/team/agent-team-runtime.ts:530-535
 export function abortTeam(teamId: string, reason?: string): boolean {
   const ac = inflightControllers.get(teamId)
   if (!ac) return false
@@ -401,8 +401,8 @@ registerNodeExecutor({
     const [{ getTeamRunContext }, { buildTeammatePrompt }, { dispatchTeammate }] =
       await Promise.all([
         import("@/lib/ai/agent/team/team-run-context"),
-        import("@/lib/ai/agent/agent-team-runtime-deps"),
-        import("@/lib/ai/agent/team/dispatch-teammate"),
+        import("@/lib/ai/agent/team/agent-team-runtime-deps"),
+        import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
       ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
@@ -441,12 +441,12 @@ registerNodeExecutor({
 | `action.team.run` | `built-ins.ts:1444-1525` | No | Workflow -> team bridge; binds store, threads IM origin, returns `teamRunId` |
 | `action.team.task.dispatch` | `built-ins.ts:1537-1590` | Yes | Per-task leaf; recovers context, dispatches, retry re-claims rotate teammates |
 
-## Runtime deps wiring — `lib/ai/agent/agent-team-runtime-deps.ts`
+## Runtime deps wiring — `lib/ai/agent/team/agent-team-runtime-deps.ts`
 
 `buildAgentTeamRuntimeDeps` (`:102-171`) supplies the two injected concerns: prompt builders and the production notifier deps. `buildTeammatePrompt` and `buildLeadPlanningPrompt` shape persona-aware prompts; `runLeadPlanning` runs the lead through `executeAgent`:
 
 ```typescript
-// lib/ai/agent/agent-team-runtime-deps.ts:107-125 (lead planning, trimmed)
+// lib/ai/agent/team/agent-team-runtime-deps.ts:107-125 (lead planning, trimmed)
 const runLeadPlanning = async ({ team, lead, feedback, signal }): Promise<LeadPlanResult> => {
   const workers = useAgentTeamStore
     .getState()
@@ -465,7 +465,7 @@ const runLeadPlanning = async ({ team, lead, feedback, signal }): Promise<LeadPl
 `defaultNotifierDeps` routes `deliver` into the ADR-0042 Unified Notification Center and `openGate` into the pending-gates store that renders HITL modals:
 
 ```typescript
-// lib/ai/agent/agent-team-runtime-deps.ts:133-165 (notifier deps, trimmed)
+// lib/ai/agent/team/agent-team-runtime-deps.ts:133-165 (notifier deps, trimmed)
 const defaultNotifierDeps: TeamNotifierDeps = {
   deliver: (p) => {
     void import("@/lib/notifications/runtime").then(({ notify }) =>

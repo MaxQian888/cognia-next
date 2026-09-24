@@ -5,7 +5,7 @@ description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运�
 
 # ADR-0065 — Agent 工作空间约束与权限模型统一
 
-**状态**：已接受（2026-07-06） **作者**：Max Qian + Claude Opus 4.8 **基于**构建**：OS沙盒（ADR-0028、`src-tauri/src/sandbox/`）、权限模型（ADR-0020计算机使用、ADR-0041 命令自动模式）、单调权限上限级联（`lib/ai/agent/external/permission-cascade.ts`）和sidecar `canUseTool` 门禁（`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`）。**灵感**：Anthropic的[`sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)和[Claude Code sandboxed-Bash](https://code.claude.com/docs/en/sandboxing) filesystem/network模型（write=cwd，read=除凭证外整台机器），以及六步[Agent SDK权限evaluation](https://code.claude.com/docs/en/agent-sdk/permissions)。
+**状态**：已接受（2026-07-06） **作者**：Max Qian + Claude Opus 4.8 **基于**构建**：OS沙盒（ADR-0028、`src-tauri/src/sandbox/`）、权限模型（ADR-0020计算机使用、ADR-0041 命令自动模式）、单调权限上限级联（`lib/ai/agent/external/policy/permission-cascade.ts`）和sidecar `canUseTool` 门禁（`sidecar/dispatch/{anthropic,ai-sdk-tools}.mjs`）。**灵感**：Anthropic的[`sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)和[Claude Code sandboxed-Bash](https://code.claude.com/docs/en/sandboxing) filesystem/network模型（write=cwd，read=除凭证外整台机器），以及六步[Agent SDK权限evaluation](https://code.claude.com/docs/en/agent-sdk/permissions)。
 
 ## 当前状态修订（2026-08-13）
 
@@ -57,5 +57,5 @@ description: "它弥合了成熟OS-level沙盒（ADR-0028）与代理实际运�
 
 - `sidecar/builtin-tools/confinement.mjs`（+ `safety.mjs` `assertPathInside`/`canonicalisePartial`重复使用）、`sidecar/dispatch/{anthropic,ai-sdk-tools,permission-resolver}.mjs`、`sidecar/builtin-tools/core/{write,edit,apply-patch,notebook-edit}.mjs`
 - `lib/claude/{build-options.ts,types.ts}`，`lib/claude/permissions/approval-rule.ts`，`hooks/chat/use-claude-chat.ts`，`components/settings/sandbox/workspace-confinement-card.tsx`
-- `lib/ai/agent/external/permission-cascade.ts`，`lib/sandbox/policy-bridge.ts`，`lib/ai/agent/team/{teammate-character,dispatch-teammate}.ts`，`types/agent/agent-team.ts`
+- `lib/ai/agent/external/policy/permission-cascade.ts`，`lib/sandbox/policy-bridge.ts`，`lib/ai/agent/team/{teammate-character,dispatch-teammate}.ts`，`types/agent/agent-team.ts`
 - `src-tauri/src/files.rs`，`src-tauri/src/companion_api/rpc.rs`

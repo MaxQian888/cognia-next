@@ -87,3 +87,38 @@ attachment/PDF modules. None of these results establishes a passing global gate.
 
 At the user's request on 2026-09-21, coverage checks were stopped and skipped
 for final verification. No passing coverage threshold is claimed.
+
+## Follow-up: read failures and concurrent preparation (2026-09-22)
+
+Run preparation now propagates declaration transport failures instead of
+treating them as an empty checkout and selecting the deployment default.
+A disabled pool skips declaration reads entirely and keeps its existing
+optional-fallback or mandatory-refusal behavior.
+
+Each pending `placeAgentRun` owns a per-agent generation. A newer preparation
+or an explicit forget invalidates that ownership. Late success and late failure
+both reject with `AbortError`, without overwriting or clearing the newer
+placement. A current preparation failure clears its previous placement and
+outcome, and the existing readiness caller stops the connect on rejection.
+This coordinates publication locally; it does not cancel an outstanding Host
+request or change the Host's admission authority.
+
+Settings reloads replace optional catalog, driver and file data, including
+clearing them when unavailable. Declaration and workspace-resolution failures
+finish loading with an error and clear the preview. A successful reload
+restores the preview. Save errors remain independent of read errors.
+
+Complete pagination now preserves an empty opaque token. It is passed back
+unchanged, counts as continuation at an item limit, and participates in cycle
+detection. Declaration limits now count UTF-8 bytes, including Chinese text
+and supplementary-plane characters, rather than UTF-16 code units.
+
+Validation: the new behavior tests failed before implementation; the final
+related run passed **15 suites, 322 tests** with coverage disabled. Scoped
+ESLint passed. Initial settings checks hit disk exhaustion while Jest wrote
+its repository index; after space became available, discovery was limited to
+the affected directories and the checks completed. A scoped TypeScript
+program completed with no diagnostics in the changed files, but failed on
+`lib/chat/message-share.ts:75` because a readonly message-part array is passed
+to a mutable-array parameter. This is not a passing global type check.
+Live Host/provider and rendered UI acceptance remain unverified.

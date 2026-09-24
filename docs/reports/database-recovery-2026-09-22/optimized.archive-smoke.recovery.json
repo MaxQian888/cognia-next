@@ -1,0 +1,88 @@
+{
+  "variant": "optimized",
+  "date": "2026-09-22T12:31:37.793Z",
+  "browser": "151.0.7922.34",
+  "platform": "darwin",
+  "arch": "arm64",
+  "samples": 10,
+  "warmup": 2,
+  "criterion": "improvement >=20% and absolute median difference >2*max(MAD before,MAD after), all correctness guards pass",
+  "scope": "Real Chromium IndexedDB, Dexie 4.4.5, unchanged production message-sync middleware, production messages/media normalization/session assets/ref ledger. Reduced schema with identical message/session/ref indexes. No encryption, full app UI, Tauri, workflow/indexer/publication/claim side effects, original blob ingestion or schema migrations.",
+  "sourceSha256": "f0cfc8e81c670ea9e3827c380bbbc781284b78829a9e88817237ce09af3d8888",
+  "workloads": [],
+  "nineActiveSessions": {
+    "sessions": 9,
+    "messagesPerSession": 1000,
+    "warmup": 2,
+    "samples": 10,
+    "operation": "Promise.all of nine trailing-row streaming writes",
+    "fullSessionQueries": 0,
+    "count": 9000,
+    "medianMs": 3.2499999990686774,
+    "madMs": 0.39999999944120646,
+    "rawMs": [
+      3.199999999254942, 3.299999998882413, 3.400000000372529, 4.400000000372529,
+      28.199999999254942, 3.5, 3, 2.599999999627471, 2.700000001117587, 2.599999999627471
+    ]
+  },
+  "unchangedMediaLedgerMutations": {
+    "creating": 0,
+    "updating": 0,
+    "deleting": 0
+  },
+  "rollback": {
+    "aborted": true,
+    "rowRestored": true,
+    "clockRestored": true,
+    "refRestored": true,
+    "sessionRestored": true
+  },
+  "rendererCrashRecovery": {
+    "count": 1000,
+    "refs": 1000,
+    "clock": 1001
+  },
+  "continuousStreamCrash": {
+    "targetEventsPerSecond": 100,
+    "persistDelayMs": 300,
+    "observationDurationMs": 3151.2999999988824,
+    "producedBeforeCrash": 314,
+    "checkpointRequests": [
+      {
+        "token": 101,
+        "elapsedMs": 1011.7999999988824
+      },
+      {
+        "token": 202,
+        "elapsedMs": 2022.2999999988824
+      },
+      {
+        "token": 303,
+        "elapsedMs": 3032
+      }
+    ],
+    "checkpointCommits": [
+      {
+        "token": 101,
+        "elapsedMs": 1013
+      },
+      {
+        "token": 202,
+        "elapsedMs": 2023.4000000003725
+      },
+      {
+        "token": 303,
+        "elapsedMs": 3033
+      }
+    ],
+    "errors": [],
+    "count": 1000,
+    "refs": 1000,
+    "recoveredToken": 303,
+    "recoveredTokenElapsedMs": 3032,
+    "clock": 1004,
+    "observedTokenLoss": 11,
+    "observedLagMs": 119.29999999888241
+  },
+  "coalescerSha256": "5da43a596a9a9634278acabec0cd7960ab3f9480a04661fcd74c5c05b11643c7"
+}

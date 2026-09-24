@@ -36,7 +36,7 @@ flowchart LR
 
 | 层 | 实现 | CLI 处理方式 |
 | --- | --- | --- |
-| preset 与可执行选择 | `lib/ai/agent/external/presets.ts` | 原样复用 |
+| preset 与可执行选择 | `lib/ai/agent/external/config/presets.ts` | 原样复用 |
 | ACP 与 Codex 协议 client | `acp-client.ts`、`codex-app-server-client.ts` | 原样复用 |
 | 生命周期与执行 | `ExternalAgentManager` | 复用；短生命周期 CLI 关闭 health interval |
 | 凭据覆盖 | `env-builder.ts` | 复用；CLI 凭据作为显式 base environment |

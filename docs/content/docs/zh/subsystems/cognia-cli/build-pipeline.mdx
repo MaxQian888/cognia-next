@@ -148,7 +148,7 @@ cmd.current_dir(crate_root)
   里的版本为准。失败提示会指明正确方向：
   `esbuild failed for <entry>. If npx says "could not determine executable", run pnpm install in
   <crate_root> first.`（`build_ts.rs:134-138`）
-- **host 模块用 `--external`** —— `@/types/plugin`、`@/lib/*`、`react`、`react-dom` 由
+- **host 模块用 `--external`** —— `@/types/plugin/index`、`@/lib/*`、`react`、`react-dom` 由
   host 在加载时提供；把它们打进去会重复打包 React 并破坏 shim。
 
 ## Build-free 运行时路径

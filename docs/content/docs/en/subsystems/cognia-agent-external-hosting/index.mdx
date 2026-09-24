@@ -38,7 +38,7 @@ flowchart LR
 
 | Layer | Implementation | CLI treatment |
 | --- | --- | --- |
-| Presets and executable selection | `lib/ai/agent/external/presets.ts` | reused unchanged |
+| Presets and executable selection | `lib/ai/agent/external/config/presets.ts` | reused unchanged |
 | ACP and Codex protocol clients | `acp-client.ts`, `codex-app-server-client.ts` | reused unchanged |
 | Lifecycle and execution | `ExternalAgentManager` | reused with its health interval disabled for short-lived CLI processes |
 | Credential overlay | `env-builder.ts` | reused; CLI credentials are supplied as the explicit base environment |

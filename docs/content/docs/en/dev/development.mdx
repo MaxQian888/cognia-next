@@ -145,7 +145,7 @@ pnpm monaco:copy      # Copy Monaco assets into public/
 
 | Alias          | Maps to          | Common use                               |
 | -------------- | ---------------- | ---------------------------------------- |
-| `@/*`          | repo root        | catch-all (e.g., `@/types`, `@/scripts`) |
+| `@/*`          | repo root        | catch-all (e.g., `@/types/index`, `@/scripts`) |
 | `@/components` | `components/`    | UI                                       |
 | `@/lib`        | `lib/`           | logic                                    |
 | `@/ui`         | `components/ui/` | shadcn primitives                        |
@@ -194,7 +194,7 @@ shadcn/ui components follow shadcn's naming (kebab-case files, PascalCase export
 ### Styling
 
 - Tailwind utility-first; avoid `style={{...}}` except for dynamic values that can't be expressed in classes.
-- Use the `cn()` helper from `@/lib/utils` to merge classes safely:
+- Use the `cn()` helper from `@/lib/utils/index` to merge classes safely:
 
   ```tsx
   cn("base-classes", condition && "conditional", className)

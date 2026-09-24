@@ -285,7 +285,7 @@ export interface ConcurrencyController { get(): number; reduceTo(n: number): voi
 
 `createConcurrencyController(initial)`（`concurrency-controller.ts:21-53`）是**单调非递增**的——当 `n >= current` 时 `reduceTo(n)` 为 no-op（`:35`）。生产者：`BudgetGuard` 的 `reduce_concurrency` 与 team 合成器的 HITL gate。两个不同旋钮：`concurrency`（并发**运行**）与 `maxConcurrency`（run 内**节点**）；运行时没有全局并发上限。
 
-密钥：`SecretResolver`（`secret-resolver.ts:13-15`）；`NoopSecretResolver`（`:22-24`）是 web / Phase-4 默认，返回 `undefined`；`createInMemoryResolver`（`:30-34`）。keyring resolver `createKeyringSecretResolver()`（`secret-resolver-keyring.ts:17-26`）从 `@/lib/keyring` 读取；`parseRef`（`:33-49`）接受 `keyring:ns:key` 与 `ns/key` 简写，不匹配时返回 `null`（→ `undefined`）。
+密钥：`SecretResolver`（`secret-resolver.ts:13-15`）；`NoopSecretResolver`（`:22-24`）是 web / Phase-4 默认，返回 `undefined`；`createInMemoryResolver`（`:30-34`）。keyring resolver `createKeyringSecretResolver()`（`secret-resolver-keyring.ts:17-26`）从 `@/lib/keyring/index` 读取；`parseRef`（`:33-49`）接受 `keyring:ns:key` 与 `ns/key` 简写，不匹配时返回 `null`（→ `undefined`）。
 
 模型偏好：`createModelPreferenceController`（`model-preference-controller.ts:26-54`）持有 `{preferCheap, modelHint?}` 且只 `downshift()`（无升档，`:34-46`）；它是 run 作用域，由 AI 节点 executor 直接读取。
 

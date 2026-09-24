@@ -1,0 +1,70 @@
+$ node scripts/test/run-coverage.mjs --jobs 1 --workers 1 --out .cache/db-recovery-coverage-01a0c8ff
+[coverage] starting shard 1/8
+  Using tsconfig file: tsconfig.build.json
+FAIL node lib/ai/agent/external/protocol-adapter-contract.test.ts
+  ● dsh-sdk adapter contract › claims no capabilities before it has spoken to the agent
+
+    expect(received).toBeUndefined()
+
+    Received: {"mcpTools": true}
+
+      131 |       // agent nobody has handshaked with, and the belief would survive a
+      132 |       // connect that failed.
+    > 133 |       expect(adapter.capabilities).toBeUndefined()
+          |                                    ^
+      134 |       expect(adapter.tools).toBeUndefined()
+      135 |     })
+      136 |
+
+      at Object.toBeUndefined (lib/ai/agent/external/protocol-adapter-contract.test.ts:133:36)
+
+FAIL node lib/ai/agent/team/agent-team.durable.test.ts
+  ● durable AgentTeam manager › re-enters a safely recoverable run over its remaining work
+
+    TypeError: restoreSquadRunInput is not a function
+
+      105 |         return
+      106 |       }
+    > 107 |       const restored = await restoreSquadRunInput(team.id, outcome.runId)
+          |                              ^
+      108 |       if (!restored) {
+      109 |         outcome.status = "needs_input"
+      110 |         return
+
+      at restoreSquadRunInput (lib/ai/agent/team/agent-team.ts:107:30)
+          at async Promise.all (index 0)
+      at recoverDurableAgentTeams (lib/ai/agent/team/agent-team.ts:82:3)
+      at Object.<anonymous> (lib/ai/agent/team/agent-team.durable.test.ts:85:5)
+
+  ● durable AgentTeam manager › retries one child through the durable coordinator and re-enters only that task
+
+    expect(received).toMatchObject(expected)
+
+    Matcher error: received value must be a non-null object
+
+    Received has value: undefined
+
+      129 |       taskFilter: (task: { id: string }) => boolean
+      130 |     }
+    > 131 |     expect(input).toMatchObject({ teamId: "team-1", runId: "run-1" })
+          |                   ^
+      132 |     expect(input.taskFilter({ id: "task-1" })).toBe(true)
+      133 |     expect(input.taskFilter({ id: "task-2" })).toBe(false)
+      134 |   })
+
+      at Object.toMatchObject (lib/ai/agent/team/agent-team.durable.test.ts:131:19)
+
+PASS node lib/scheduler/task-scheduler.test.ts
+PASS node stores/settings/settings-store.test.ts
+PASS jsdom components/context-workbench/context-workbench.test.tsx (16.366 s)
+PASS node stores/chat/chat-store.test.ts
+PASS jsdom components/browser/browser-preview-pane.test.tsx
+PASS node stores/a2ui/a2ui-store.test.ts
+PASS jsdom components/artifacts/artifact-workspace-dock.test.tsx
+PASS jsdom hooks/agent/use-external-agent.test.ts
+PASS node lib/signaling/mobile-controller.test.ts
+PASS jsdom components/chat/session-settings-sheet.test.tsx
+PASS node lib/companion/desktop-message-source.test.ts
+PASS node lib/memory/lifecycle/job-worker.test.ts
+[ELIFECYCLE] Command failed.
+[rtk] pnpm: process terminated by signal 15

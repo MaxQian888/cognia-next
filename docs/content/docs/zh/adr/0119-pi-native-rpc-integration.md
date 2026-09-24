@@ -124,7 +124,7 @@ frozen lock、传递依赖树与 CVE 响应 —— 并且会拿我们本就想�
 
 「影响」一节写明认证诊断只调用 `pi auth check --provider <id> --json --no-refresh`。这条约束被写下来后
 从未实现 —— 未认证的 Pi 只会表现为第一次提示词失败，而不是一条诊断。现在
-`lib/ai/agent/external/pi-auth.ts` 与 agent 设置面板上的「Pi 凭证」卡片实现了它，且是对照 Pi 0.84.1 自带的
+`lib/ai/agent/external/runtimes/pi/pi-auth.ts` 与 agent 设置面板上的「Pi 凭证」卡片实现了它，且是对照 Pi 0.84.1 自带的
 `dist/cli/auth-check.d.ts` 实测确认，而非推断：
 
 - CLI 的 **exit code 不能主导分类**：`1` 在正常路径上是 `not_ready`，但同时也表示「参数解析失败」；

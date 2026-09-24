@@ -1,0 +1,46 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling cognia-agent-state v0.1.0 (/Users/bytedance/Project/cognia-next/crates/cognia-agent-state)
+    Finished `test` profile [unoptimized] target(s) in 9.92s
+     Running unittests src/lib.rs (target/debug/deps/cognia_agent_state-c9f12d31bb69202b)
+
+running 6 tests
+test agent_session_store::dispatch::tests::prune_defaults_to_the_documented_retention ... ok
+test agent_session_store::tests::prune_keeps_a_session_whose_last_write_is_recent ... ok
+test agent_session_store::tests::prune_preserves_history_when_only_the_summary_is_recent ... FAILED
+test agent_session_store::tests::prune_preserves_the_summary_when_only_a_subagent_is_recent ... FAILED
+test agent_session_store::tests::prune_expiry_is_scoped_and_removes_both_old_tables ... FAILED
+test agent_session_store::tests::prune_drops_whole_sessions_and_keeps_recent_ones ... ok
+
+failures:
+
+---- agent_session_store::tests::prune_preserves_history_when_only_the_summary_is_recent stdout ----
+
+thread 'agent_session_store::tests::prune_preserves_history_when_only_the_summary_is_recent' (1080979) panicked at crates/cognia-agent-state/src/agent_session_store/mod.rs:1534:9:
+assertion `left == right` failed
+  left: 2
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- agent_session_store::tests::prune_preserves_the_summary_when_only_a_subagent_is_recent stdout ----
+
+thread 'agent_session_store::tests::prune_preserves_the_summary_when_only_a_subagent_is_recent' (1080980) panicked at crates/cognia-agent-state/src/agent_session_store/mod.rs:1582:14:
+retained summary
+
+---- agent_session_store::tests::prune_expiry_is_scoped_and_removes_both_old_tables stdout ----
+
+thread 'agent_session_store::tests::prune_expiry_is_scoped_and_removes_both_old_tables' (1080977) panicked at crates/cognia-agent-state/src/agent_session_store/mod.rs:1620:9:
+assertion `left == right` failed
+  left: 6
+ right: 2
+
+
+failures:
+    agent_session_store::tests::prune_expiry_is_scoped_and_removes_both_old_tables
+    agent_session_store::tests::prune_preserves_history_when_only_the_summary_is_recent
+    agent_session_store::tests::prune_preserves_the_summary_when_only_a_subagent_is_recent
+
+test result: FAILED. 3 passed; 3 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p cognia-agent-state --lib`

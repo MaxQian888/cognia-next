@@ -1,0 +1,139 @@
+{
+  "sqlite_version": "3.53.4",
+  "baseline_sha256": "fc50ed5e5f13ded632bc4fd11b17b88dfeb50eeac6863f1d4df133814a88dbff",
+  "candidate_sha256": "f6454c0b561fbb51465216dcac081dc79394608e0d85210ace01506b6f663898",
+  "fixtures": [
+    {
+      "entries": 100000,
+      "sessions": 100,
+      "equality": true,
+      "baseline": {
+        "median_ms": 5.3326665,
+        "mad_ms": 0.07510400000000006,
+        "samples_ms": [
+          5.304958, 5.360375, 5.189958, 5.298542, 5.395833, 5.40425, 5.142375, 5.547833, 5.474167,
+          5.254042
+        ]
+      },
+      "candidate": {
+        "median_ms": 0.15600000000000003,
+        "mad_ms": 0.0004165000000000002,
+        "samples_ms": [
+          0.158416, 0.155458, 0.156333, 0.154917, 0.157125, 0.156209, 0.1555, 0.156125, 0.155792,
+          0.155875
+        ]
+      },
+      "improvement_percent": 97.07463423786206,
+      "greater_than_2_max_mad": true
+    },
+    {
+      "entries": 100000,
+      "sessions": 1000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 6.057271,
+        "mad_ms": 0.18393700000000024,
+        "samples_ms": [
+          6.40125, 6.132792, 6.140375, 6.250416, 5.77175, 6.334875, 5.98175, 5.944167, 5.767458,
+          5.882542
+        ]
+      },
+      "candidate": {
+        "median_ms": 5.197354,
+        "mad_ms": 0.20958350000000037,
+        "samples_ms": [
+          4.850375, 4.860417, 5.2365, 5.231291, 4.6775, 5.163417, 5.267375, 5.4095, 5.404375,
+          4.864958
+        ]
+      },
+      "improvement_percent": 14.196442589410317,
+      "greater_than_2_max_mad": true
+    },
+    {
+      "entries": 10000,
+      "sessions": 10000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 3.9987085,
+        "mad_ms": 0.1731870000000002,
+        "samples_ms": [
+          3.754291, 4.798167, 3.795709, 4.064916, 3.958375, 3.672584, 4.211375, 4.039042, 3.886792,
+          4.142083
+        ]
+      },
+      "candidate": {
+        "median_ms": 4.2964585,
+        "mad_ms": 0.11031250000000004,
+        "samples_ms": [
+          4.336083, 4.285042, 4.919792, 4.059708, 4.697959, 4.307875, 4.467958, 4.262375, 4.247333,
+          4.08175
+        ]
+      },
+      "improvement_percent": -7.446154177029902,
+      "greater_than_2_max_mad": false
+    },
+    {
+      "entries": 100000,
+      "sessions": 100000,
+      "equality": true,
+      "baseline": {
+        "median_ms": 80.5849375,
+        "mad_ms": 8.578125,
+        "samples_ms": [
+          69.407708, 81.0065, 92.258541, 87.462875, 90.86325, 97.963875, 80.163375, 79.028125,
+          76.642458, 54.886125
+        ]
+      },
+      "candidate": {
+        "median_ms": 49.9077495,
+        "mad_ms": 1.5994585000000008,
+        "samples_ms": [
+          64.693208, 55.419209, 49.621791, 53.345458, 49.074125, 51.5645, 50.193708, 49.589167,
+          48.014042, 48.365583
+        ]
+      },
+      "improvement_percent": 38.06814145633605,
+      "greater_than_2_max_mad": true
+    }
+  ],
+  "query_plan": [
+    [1, 0, 0, "MERGE (UNION ALL)"],
+    [3, 1, 0, "LEFT"],
+    [6, 3, 0, "MATERIALIZE session_ids"],
+    [10, 6, 0, "SETUP"],
+    [
+      13,
+      10,
+      54,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=?)"
+    ],
+    [43, 6, 0, "RECURSIVE STEP"],
+    [44, 43, 216, "SCAN session_ids"],
+    [50, 43, 0, "CORRELATED SCALAR SUBQUERY 2"],
+    [
+      55,
+      50,
+      46,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id>?)"
+    ],
+    [87, 3, 214, "SCAN session_ids"],
+    [93, 3, 0, "CORRELATED SCALAR SUBQUERY 4"],
+    [
+      98,
+      93,
+      53,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id=?)"
+    ],
+    [118, 3, 0, "USE TEMP B-TREE FOR ORDER BY"],
+    [128, 1, 0, "RIGHT"],
+    [
+      135,
+      128,
+      46,
+      "SEARCH entries USING COVERING INDEX entries_session (tenant=? AND workspace=? AND project_key=? AND session_id>?)"
+    ],
+    [144, 128, 0, "SCALAR SUBQUERY 6"],
+    [150, 144, 216, "SEARCH session_ids"],
+    [194, 128, 0, "USE TEMP B-TREE FOR ORDER BY"]
+  ]
+}

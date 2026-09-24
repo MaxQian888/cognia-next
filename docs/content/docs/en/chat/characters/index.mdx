@@ -101,7 +101,7 @@ flowchart TB
   class SEND,PICK,TTS,PET,DISCOVER surf
 ```
 
-The teammate bridge is a fourth, ephemeral producer: `teammateToCharacter` (`lib/ai/agent/team/teammate-character.ts:56`) synthesizes a transient Character (id `__teammate__:<id>`) so each Agent Team member rides the **same** `resolveSendOptions` path as a chat send — never persisted, never in `listCharacters`.
+The teammate bridge is a fourth, ephemeral producer: `teammateToCharacter` (`lib/ai/agent/team/teammate/teammate-character.ts:56`) synthesizes a transient Character (id `__teammate__:<id>`) so each Agent Team member rides the **same** `resolveSendOptions` path as a chat send — never persisted, never in `listCharacters`.
 
 ## How This Section Is Organized
 

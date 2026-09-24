@@ -119,6 +119,7 @@ Error codes (`transport.ts:3`):
 | `NOT_FOUND` | Target / resource missing | no |
 | `CONFLICT` | State conflict | no |
 | `TIMEOUT` | Gateway timed out | yes |
+| `UNAVAILABLE` | Host dependency not ready (encrypted secret store initializing or locked; `details.reason`) | no |
 | `INTERNAL` | Unknown gateway error | yes |
 
 The batch path `invokePluginApiBatch` calls `plugin_api_batch_invoke` (`:142`).
