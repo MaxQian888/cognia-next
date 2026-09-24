@@ -15,7 +15,14 @@ import { PermissionError } from "@/lib/plugin/security/permission-guard"
 // can forward args without tripping TS2556 (parity with the Proxy mock used in
 // automation-api.test.ts — the forward target must accept a rest parameter).
 const call = jest.fn(async (..._a: unknown[]) => undefined)
-jest.mock("@/lib/tauri", () => ({ transport: { call: (...a: unknown[]) => call(...a) } }))
+jest.mock("@/lib/tauri", () => ({
+  localTransport: { call: (...a: unknown[]) => call(...a) },
+  transport: {
+    call: () => {
+      throw new Error("Local device records must not mutate a remote host")
+    },
+  },
+}))
 
 const listPairedDevices = jest.fn(async (..._a: unknown[]) => [{ deviceId: "d1" }])
 const getPairedDevice = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({ deviceId: "d1" }))

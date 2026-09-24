@@ -31,6 +31,12 @@ import {
   getSecretsBackendKind,
   __resetSecretListenersForTesting,
 } from "./secrets-api"
+import {
+  SecretStoreUnavailableError,
+  __resetSecretStoreReadinessForTesting,
+  getSecretStoreReadiness,
+  setSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 const mockInvoke = invokePluginApi as jest.MockedFunction<typeof invokePluginApi>
@@ -43,6 +49,7 @@ beforeEach(() => {
   mockGatewayAvailable.mockImplementation(() => mockIsTauri())
   localStorage.clear()
   __resetSecretListenersForTesting()
+  __resetSecretStoreReadinessForTesting()
 })
 
 describe("createSecretsAPI — Tauri path", () => {
@@ -184,5 +191,59 @@ describe("clearPluginSecrets", () => {
     await clearPluginSecrets("p")
     expect(mockClearSecret).toHaveBeenCalledWith({ namespace: "plugin:p", key: "a" })
     expect(await api.keys()).toEqual([])
+  })
+})
+
+describe("locked secret store", () => {
+  beforeEach(() => mockIsTauri.mockReturnValue(true))
+
+  function gatewayUnavailable(reason: string) {
+    return Object.assign(new Error(`secrets:get: ${reason}: denied`), {
+      name: "PluginGatewayError",
+      code: "UNAVAILABLE",
+      details: { reason },
+    })
+  }
+
+  it("surfaces a typed store-locked error instead of a raw gateway error", async () => {
+    mockInvoke.mockRejectedValueOnce(gatewayUnavailable("SECRET_STORE_LOCKED"))
+    const api = createSecretsAPI("cognia-e2b-sandbox")
+    const error = await api.get("apiKey").catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(SecretStoreUnavailableError)
+    expect((error as SecretStoreUnavailableError).reason).toBe("locked")
+    expect(getSecretStoreReadiness()).toBe("locked")
+  })
+
+  it("replays onDidChange for the deferred key once the store unlocks", async () => {
+    mockInvoke.mockRejectedValueOnce(gatewayUnavailable("SECRET_STORE_LOCKED"))
+    const api = createSecretsAPI("cognia-e2b-sandbox")
+    const changed = jest.fn()
+    api.onDidChange(changed)
+    await expect(api.get("apiKey")).rejects.toBeInstanceOf(SecretStoreUnavailableError)
+    expect(changed).not.toHaveBeenCalled()
+
+    setSecretStoreReadiness("ready")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(changed).toHaveBeenCalledWith({ key: "apiKey" })
+
+    // One replay per failure, not per later unlock.
+    setSecretStoreReadiness("locked")
+    setSecretStoreReadiness("ready")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not record the key in the index when a store is refused", async () => {
+    mockInvoke.mockRejectedValueOnce(gatewayUnavailable("SECRET_STORE_INITIALIZING"))
+    const api = createSecretsAPI("p1")
+    await expect(api.store("k", "v")).rejects.toMatchObject({ reason: "initializing" })
+    await expect(api.keys()).resolves.toEqual([])
+  })
+
+  it("passes other gateway errors through unchanged", async () => {
+    const denied = Object.assign(new Error("no"), { code: "PERMISSION_DENIED" })
+    mockInvoke.mockRejectedValueOnce(denied)
+    await expect(createSecretsAPI("p1").get("k")).rejects.toBe(denied)
+    expect(getSecretStoreReadiness()).toBe("uninitialized")
   })
 })

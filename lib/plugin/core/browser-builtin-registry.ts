@@ -27,6 +27,7 @@ import genshinThemeManifest from "@/plugins/cognia-genshin-theme/plugin.json"
 import gameWorldsThemeManifest from "@/plugins/cognia-game-worlds-theme/plugin.json"
 import honkaiStarRailThemeManifest from "@/plugins/cognia-honkai-star-rail-theme/plugin.json"
 import zenlessZoneZeroThemeManifest from "@/plugins/cognia-zenless-zone-zero-theme/plugin.json"
+import materialIconThemeManifest from "@/plugins/cognia-material-icon-theme/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
 import schedulerToolsManifest from "@/plugins/cognia-scheduler-tools/plugin.json"
 import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
@@ -75,6 +76,7 @@ import genshinThemeModule from "@/plugins/cognia-genshin-theme/src/index"
 import gameWorldsThemeModule from "@/plugins/cognia-game-worlds-theme/src/index"
 import honkaiStarRailThemeModule from "@/plugins/cognia-honkai-star-rail-theme/src/index"
 import zenlessZoneZeroThemeModule from "@/plugins/cognia-zenless-zone-zero-theme/src/index"
+import materialIconThemeModule from "@/plugins/cognia-material-icon-theme/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
 // Namespace import, not default: the manifest declares `bots[]`, and the
 // bots bridge takes `scheduleDigestBot` by NAME off these exports. A default
@@ -351,6 +353,17 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-zenless-zone-zero-theme",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(zenlessZoneZeroThemeModule),
+  },
+  {
+    // Vendored Material Icon Theme (MIT). Declarative only: the manager
+    // registers `manifest.vscodeIconThemes` through the icons bridge on enable,
+    // reading the theme JSON and SVGs from the `/plugins/<id>/` public mirror.
+    // No `activationEvents`, so it is discovered on every shell but stays off
+    // until the user enables it on the Plugins page.
+    manifest: builtinManifest(materialIconThemeManifest, materialIconThemeModule),
+    path: "builtin://cognia-material-icon-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(materialIconThemeModule),
   },
   {
     manifest: builtinManifest(schedulingDemoManifest, schedulingDemoModule),

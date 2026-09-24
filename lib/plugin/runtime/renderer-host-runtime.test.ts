@@ -2,6 +2,13 @@ import { streamText } from "ai"
 import { generateEmbeddings } from "@cognia/vector/embedding"
 import { createFeatureProviderModel, resolveFeatureProvider } from "@/lib/ai/provider-consumption"
 
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
+
 import { createRendererHostRuntime } from "./renderer-host-runtime"
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -132,6 +139,57 @@ describe("chat", () => {
         }
       })()
     ).rejects.toMatchObject({ code: "NO_PROVIDER_AVAILABLE" })
+  })
+
+  // The REAL `streamText` on the webview runtime `ctx.ai.chat` serves plugins
+  // from. A failed or stopped stream must not leak the SDK's tracing
+  // `completion` promise as an unhandled rejection (see
+  // `webview-safe-telemetry.ts`).
+  describe("with the real AI SDK stream (webview runtime)", () => {
+    const actualAi = jest.requireActual<typeof import("ai")>("ai")
+    let restoreRuntime: () => void
+    beforeEach(() => {
+      restoreRuntime = simulateWebviewRuntime()
+      mockStreamText.mockImplementation(actualAi.streamText)
+    })
+    afterEach(() => {
+      mockStreamText.mockReset()
+      restoreRuntime()
+    })
+
+    it("ends a stream cut off mid-response without leaking an unhandled rejection", async () => {
+      // The SDK's default `onError` logs the stream error.
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+      mockModel.mockReturnValue(truncatedStreamModel())
+      const runtime = createRendererHostRuntime({ pluginId: "p" })
+
+      const chunks = []
+      for await (const chunk of runtime.chat([{ role: "user", content: "hi" }])) chunks.push(chunk)
+      await drainRejectionReports()
+
+      // No usage was reported, so no trailing usage chunk either.
+      expect(chunks).toEqual([])
+      expect(consoleError).toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it("stops on a mid-stream abort without leaking an unhandled rejection", async () => {
+      mockModel.mockReturnValue(abortableStreamModel())
+      const runtime = createRendererHostRuntime({ pluginId: "p" })
+      const abort = new AbortController()
+
+      const chunks = []
+      for await (const chunk of runtime.chat([{ role: "user", content: "hi" }], {
+        signal: abort.signal,
+      })) {
+        chunks.push(chunk)
+        abort.abort()
+      }
+      await drainRejectionReports()
+
+      expect(abort.signal.aborted).toBe(true)
+      expect(chunks).toEqual([{ content: "partial answer" }])
+    })
   })
 })
 

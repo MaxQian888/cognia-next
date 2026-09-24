@@ -17,6 +17,7 @@
 import { streamText, type ModelMessage } from "ai"
 
 import { partitionPrompt } from "@/lib/ai/prompt-partition"
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import {
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
@@ -132,6 +133,9 @@ async function* streamBuiltInChat(
   const streamOptions: Record<string, unknown> = {
     model,
     ...partitionPrompt(messages as ModelMessage[]),
+    // A failed or stopped plugin chat must not leak the SDK's tracing promise
+    // in the webview (see webview-safe-telemetry).
+    telemetry: webviewSafeTelemetry(),
   }
   if (options?.temperature !== undefined) {
     streamOptions.temperature = options.temperature

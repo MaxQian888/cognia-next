@@ -51,7 +51,7 @@ for two reasons:
    only when we decide to change the plugin contract. Divergence is the point.
 
 When you _do_ want to pull an upstream change across, copy the file and swap
-`@/lib/utils` → `./cn`. Nothing else in these files references the app.
+`@/lib/utils/index` → `./cn`. Nothing else in these files references the app.
 
 ## What is not here
 

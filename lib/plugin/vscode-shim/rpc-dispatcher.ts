@@ -22,6 +22,7 @@
  * it converts to a JSON-RPC error.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { loggers } from "@cognia/logging"
 
 const dispatcherLogger = loggers.plugin.child("vscode-rpc-dispatcher")
@@ -177,14 +178,7 @@ export async function subscribeToVscodeEvents(
   const disposer = () => {
     if (disposed) return
     disposed = true
-    try {
-      unlisten()
-    } catch (err) {
-      dispatcherLogger.warn("unlisten threw", {
-        pluginId,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+    safeUnlisten(unlisten)
     if (subscriptions.get(pluginId)?.dispose === disposer) {
       subscriptions.delete(pluginId)
     }

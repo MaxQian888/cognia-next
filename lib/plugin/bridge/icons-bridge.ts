@@ -49,6 +49,24 @@ export interface VsCodeIconFont {
   size?: string
 }
 
+/**
+ * The per-colour-scheme association overrides a theme may carry under
+ * `light` / `highContrast`. Each map overrides the base map key by key; a key
+ * the override does not mention keeps its base icon.
+ */
+export interface VsCodeIconThemeAssociations {
+  file?: string
+  folder?: string
+  folderExpanded?: string
+  folderNames?: Record<string, string>
+  folderNamesExpanded?: Record<string, string>
+  fileExtensions?: Record<string, string>
+  fileNames?: Record<string, string>
+  languageIds?: Record<string, string>
+  rootFolder?: string
+  rootFolderExpanded?: string
+}
+
 export interface VsCodeIconThemeData {
   fonts?: VsCodeIconFont[]
   iconDefinitions?: Record<string, VsCodeIconDefinition>
@@ -63,7 +81,14 @@ export interface VsCodeIconThemeData {
   rootFolder?: string
   rootFolderExpanded?: string
   hidesExplorerArrows?: boolean
+  /** Associations VS Code applies instead of the base ones under a light theme. */
+  light?: VsCodeIconThemeAssociations
+  /** Associations VS Code applies instead of the base ones under high contrast. */
+  highContrast?: VsCodeIconThemeAssociations
 }
+
+/** Which association set a lookup honours, as VS Code picks it per workbench theme. */
+export type IconThemeColorScheme = "dark" | "light" | "highContrast"
 
 export interface IconThemeContribution {
   /**
@@ -171,46 +196,88 @@ export function getIconTheme(id: string): IconThemeContribution | undefined {
 }
 
 /**
+ * Theme key lookup the way VS Code resolves it: the exact spelling first, then
+ * the lower-cased one. VS Code lower-cases the resource name before matching
+ * (`getIconClasses`), and real themes key on lower case accordingly — Material
+ * Icon Theme maps `readme.md`, `dockerfile`, `license`, never `README.md` — so
+ * an exact-only lookup gives the most visible files in any tree a generic icon.
+ */
+function lookupThemeKey(map: Record<string, string>, key: string): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(map, key)) return map[key]
+  const lower = key.toLowerCase()
+  return lower !== key && Object.prototype.hasOwnProperty.call(map, lower) ? map[lower] : undefined
+}
+
+/**
+ * One association map as VS Code sees it under `scheme`: the scheme's
+ * override entry for a key wins, the base entry answers every key the
+ * override does not mention (Material's light set re-colours 179 filenames,
+ * it does not repeat the other thousand).
+ */
+function lookupAssociation(
+  data: VsCodeIconThemeData,
+  scheme: IconThemeColorScheme,
+  map: "fileNames" | "fileExtensions",
+  key: string
+): string | undefined {
+  const override = scheme === "dark" ? undefined : data[scheme]?.[map]
+  const fromOverride = override ? lookupThemeKey(override, key) : undefined
+  if (fromOverride) return fromOverride
+  const base = data[map]
+  return base ? lookupThemeKey(base, key) : undefined
+}
+
+/**
  * Look up the icon definition for a file. Walks the standard VS Code
  * priority order:
- *   fileNames (exact) → fileExtensions (suffix) → languageIds (when known) → default file
+ *   fileNames → fileExtensions (longest suffix) → languageIds (when known) → default file
+ * Name and extension keys match case-insensitively, exact spelling first. Under
+ * a `light` / `highContrast` scheme each step consults that section's
+ * overrides before the base associations, exactly as VS Code layers them.
  *
  * Returns the `iconDefinitions` entry, or `undefined` when nothing matches.
  */
 export function resolveFileIcon(
   themeId: string,
   filename: string,
-  languageId?: string
+  languageId?: string,
+  scheme: IconThemeColorScheme = "dark"
 ): VsCodeIconDefinition | undefined {
   const theme = themes.get(themeId)
   if (!theme) return undefined
   const data = theme.data
   const defs = data.iconDefinitions ?? {}
-  // 1. Exact filename match (case-sensitive — VS Code matches both ways, we pick exact).
-  if (data.fileNames && data.fileNames[filename]) {
-    return defs[data.fileNames[filename]]
+  const override = scheme === "dark" ? undefined : data[scheme]
+  // 1. Filename match.
+  const byName = lookupAssociation(data, scheme, "fileNames", filename)
+  if (byName) {
+    return defs[byName]
   }
   // 2. Extension suffix match — longest match wins.
-  if (data.fileExtensions) {
-    const dotIdx = filename.indexOf(".")
-    if (dotIdx >= 0) {
-      // VS Code tries from the longest dotted suffix to the shortest.
-      let suffix = filename.slice(dotIdx + 1)
-      while (suffix.length > 0) {
-        const key = data.fileExtensions[suffix]
-        if (key && defs[key]) return defs[key]
-        const next = suffix.indexOf(".")
-        if (next < 0) break
-        suffix = suffix.slice(next + 1)
-      }
+  const dotIdx = filename.indexOf(".")
+  if (dotIdx >= 0 && (data.fileExtensions || override?.fileExtensions)) {
+    // VS Code tries from the longest dotted suffix to the shortest.
+    let suffix = filename.slice(dotIdx + 1)
+    while (suffix.length > 0) {
+      const key = lookupAssociation(data, scheme, "fileExtensions", suffix)
+      if (key && defs[key]) return defs[key]
+      const next = suffix.indexOf(".")
+      if (next < 0) break
+      suffix = suffix.slice(next + 1)
     }
   }
   // 3. Language id match.
-  if (languageId && data.languageIds?.[languageId]) {
-    return defs[data.languageIds[languageId]]
+  if (languageId) {
+    // Own-property reads, like the name/extension maps: a language id must
+    // never resolve through `Object.prototype`.
+    const byLanguage =
+      (override?.languageIds ? lookupThemeKey(override.languageIds, languageId) : undefined) ??
+      (data.languageIds ? lookupThemeKey(data.languageIds, languageId) : undefined)
+    if (byLanguage) return defs[byLanguage]
   }
   // 4. Default file icon.
-  if (data.file) return defs[data.file]
+  const fallback = override?.file ?? data.file
+  if (fallback) return defs[fallback]
   return undefined
 }
 

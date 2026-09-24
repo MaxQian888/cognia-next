@@ -11,7 +11,7 @@ import { isTauri } from "@/lib/native/utils"
 import { getPermissionGuard, resetPermissionGuard, PermissionError } from "@/lib/plugin/security"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
-import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import {
   protocolAdapterRegistry,
   unregisterPluginProtocolAdaptersByPlugin,
@@ -220,7 +220,7 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: jest.fn(),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   registerPreset: jest.fn(),
   createAgentFromPreset: jest.fn(),
 }))

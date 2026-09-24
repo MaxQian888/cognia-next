@@ -55,7 +55,7 @@ jest.mock("@/lib/db/bot-run-steps", () => ({
   }),
 }))
 jest.mock("@/lib/ai/agent/external/manager", () => ({ getExternalAgentManager: () => mockManager }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   createAgentFromPreset: (id: string) =>
     id === "missing"
       ? undefined

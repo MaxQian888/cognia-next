@@ -14,7 +14,7 @@
  *   - Theme registry   — `lib/theme/theme-registry.ts`
  *   - MCP server presets / Skills / Native Anthropic tools —
  *     `lib/plugin/registries/*-registry.ts`
- *   - External agent presets — `lib/ai/agent/external/presets.ts`
+ *   - External agent presets — `lib/ai/agent/external/config/presets.ts`
  *   - External agent adapters — `lib/ai/agent/external/protocol-adapter.ts`
  *   - Connector adapters — `lib/plugin/connectors-bridge.ts`
  *   - Workflow nodes + triggers — `lib/workflow/nodes/catalog.ts`
@@ -38,7 +38,7 @@ import { listMcpServerPresetEntries } from "@/lib/plugin/registries/mcp-server-p
 import { listSkillEntries } from "@/lib/plugin/registries/skill-registry"
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
-import { listDynamicPresetEntries } from "@/lib/ai/agent/external/presets"
+import { listDynamicPresetEntries } from "@/lib/ai/agent/external/config/presets"
 import { listPluginProtocolAdapters } from "@/lib/ai/agent/external/protocol-adapter"
 import { getPluginConnectorKinds } from "@/lib/plugin/bridge/connectors-bridge"
 import {

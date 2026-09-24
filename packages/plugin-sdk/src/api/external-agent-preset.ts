@@ -20,11 +20,11 @@ export {
   resolvePreferredCodexExecutablePresetId,
   unregisterPreset as unregisterExternalAgentPreset,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 
 export type {
   ExternalAgentPresetConfig,
   ExternalAgentPresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 
 export type { PluginExternalAgentPresetDef } from "@/types/plugin"

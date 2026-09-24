@@ -73,7 +73,7 @@ import {
 import {
   registerPreset as registerExternalAgentPresetOverlay,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 import {
   registerSubagent,
   unregisterSubagentsByPlugin,

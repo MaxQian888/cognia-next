@@ -8,7 +8,7 @@
  * On disable the manager calls `unregisterSharedMemoryAdaptersByPlugin(pluginId)`.
  *
  * Consumers:
- *   - `lib/ai/agent/team/shared-memory-orchestrator.ts` — mirror writes +
+ *   - `lib/ai/agent/team/memory/shared-memory-orchestrator.ts` — mirror writes +
  *     `syncSharedMemoryFromAdapter` reverse pull.
  *   - the workspace Memory section adapter strip (picker + "Sync now").
  */

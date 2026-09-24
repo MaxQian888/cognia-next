@@ -2,7 +2,7 @@
  * Generic dynamic-overlay registry factory.
  *
  * Extracted from the §A-3 dynamic-overlay pattern originally landed in
- * `lib/ai/agent/external/presets.ts` (the runtime preset overlay). The
+ * `lib/ai/agent/external/config/presets.ts` (the runtime preset overlay). The
  * pattern lets plugins contribute entries into an in-memory Map at runtime
  * without mutating any closed/static union or breaking existing consumers.
  *

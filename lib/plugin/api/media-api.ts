@@ -8,6 +8,7 @@
  * - Media export utilities
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { transport } from "@/lib/tauri"
 import { callMediaBinary } from "@/lib/media/transport"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
@@ -1124,7 +1125,7 @@ async function withTimelineProgress<T>(
     return result
   } finally {
     for (const unlisten of unlistenFns) {
-      unlisten()
+      safeUnlisten(unlisten)
     }
   }
 }

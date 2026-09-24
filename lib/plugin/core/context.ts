@@ -89,7 +89,7 @@ import {
   type PluginInvocationOptions,
 } from "@/types/plugin/plugin-host-tools"
 import { resolvePluginHostRuntime } from "@/lib/plugin/runtime/host-runtime"
-import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
+import type { AgentTeamConfig } from "@/lib/ai/agent/team/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
@@ -101,7 +101,7 @@ import {
   unregisterGuardrailById,
   listGuardrailIds,
 } from "@/lib/plugin/registries/guardrail-registry"
-import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/presets"
+import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/config/presets"
 import {
   registerPluginProtocolAdapter,
   type ProtocolAdapterFactory,

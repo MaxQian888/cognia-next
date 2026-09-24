@@ -209,7 +209,7 @@ export interface PluginDispatchSubagentOptions {
    * fail-closed and monotonic across nesting depth. Populated by the host's
    * `dispatch_agent` tool from the caller's recorded ceiling.
    */
-  _permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
+  _permissionCeiling?: import("@/lib/ai/agent/external/policy/permission-cascade").ExternalSessionPermissionSpec
   /** Explicit run id (defaults to a generated one) — also the background key. */
   _runId?: string
   /**
@@ -337,7 +337,7 @@ export interface PluginRunTeamOptions {
   /** Force ("force") or disable ("off") ultracode orchestration for this run. */
   ultracode?: boolean
   /**
-   * Trigger origin for HITL gate policy (see lib/ai/agent/team/gate-policy).
+   * Trigger origin for HITL gate policy (see lib/ai/agent/team/gates/gate-policy).
    * Defaults to "plugin"; the external bridge passes "external".
    */
   origin?: import("@/types/agent/agent-team").TeamRunOrigin

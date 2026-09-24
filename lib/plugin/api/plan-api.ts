@@ -56,7 +56,12 @@ export interface PluginPlanAPI {
   updateDraft(planId: string, patch: UpdatePlanInput): Promise<AgentPlan | null>
   /** Approve a plan for execution. */
   approve(planId: string): Promise<AgentPlan | null>
-  /** Reject a pending plan, recording optional feedback. */
+  /**
+   * Reject a plan that has not started (draft / awaiting approval / approved)
+   * → terminal `rejected` status, with a `rejected` trail event carrying the
+   * optional reason. Returns the unchanged row for a plan already executing or
+   * paused — stop those with {@link cancel}.
+   */
   reject(planId: string, feedback?: string): Promise<AgentPlan | null>
   /**
    * Start an approved plan. In-session plans return the turn the host should
@@ -69,7 +74,11 @@ export interface PluginPlanAPI {
   run(planId: string): Promise<{ status: PlanStatus; output?: unknown } | null>
   /** Pause a running plan. */
   pause(planId: string): Promise<AgentPlan | null>
-  /** Resume a paused plan. */
+  /**
+   * Resume a paused plan. An in-session plan restarts its interrupted step,
+   * which only a chat surface can send; unsent, it halts `not_started` for the
+   * user to retry from the conversation's plan card.
+   */
   resume(planId: string): Promise<AgentPlan | null>
   /** Cancel any non-terminal plan. */
   cancel(planId: string): Promise<AgentPlan | null>

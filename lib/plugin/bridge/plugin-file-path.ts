@@ -25,13 +25,35 @@ export function joinPluginPath(baseDir: string, relative: string): string {
  * keeps the returned URL loadable without relaxing the traversal guard.
  */
 export function publicBuiltinAssetUrl(pluginId: string, relative: string): string {
+  // `.` segments are dropped rather than encoded: VS Code manifests write
+  // paths as `./dist/theme.json`, and the mirror URL must name the file itself.
   const encodedPath = relative
     .replace(/\\/g, "/")
     .split("/")
-    .filter(Boolean)
+    .filter((segment) => segment.length > 0 && segment !== ".")
     .map(encodeURIComponent)
     .join("/")
   return `/plugins/${encodeURIComponent(pluginId)}/${encodedPath}`
+}
+
+/**
+ * Read a text asset of a browser built-in from its public mirror.
+ *
+ * `builtin://<id>` is a synthetic install root with nothing behind it: the
+ * browser `fetch` rejects the scheme outright, and on the desktop
+ * `@tauri-apps/plugin-fs` has no file at that path either. The mirror under
+ * `/plugins/<id>/` is part of the static export (`out/`), so the same
+ * same-origin read works in the browser, in the Tauri webview (frontendDist)
+ * and in the Capacitor webview (webDir) alike. The URL is always scoped to the
+ * caller's own plugin id, so a built-in cannot read another plugin's mirror.
+ */
+async function readPublicBuiltinText(pluginId: string, relative: string): Promise<string> {
+  const url = publicBuiltinAssetUrl(pluginId, relative)
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} reading built-in plugin asset ${url}`)
+  }
+  return response.text()
 }
 
 /** Read a plugin-owned asset through the native no-follow boundary when available. */
@@ -43,7 +65,11 @@ export async function readContainedPluginFile(
   if (isUnsafeRelativePath(relative)) {
     throw new Error(`unsafe plugin path "${relative}"`)
   }
-  if (isTauri() && !baseDir.startsWith("builtin://")) {
+  if (baseDir.startsWith("builtin://")) {
+    return readPublicBuiltinText(pluginId, relative)
+  }
+  // No `builtin://` re-check: the early return above already took that branch.
+  if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")
     return invoke<string>("plugin_read_entry", {
       pluginId,

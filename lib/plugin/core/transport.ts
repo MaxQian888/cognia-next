@@ -33,6 +33,13 @@ export type PluginApiErrorCode =
   | "CONFLICT"
   | "TIMEOUT"
   | "INCOMPATIBLE_SDK"
+  /**
+   * A host dependency cannot serve the call right now — today the encrypted
+   * secret store, still initializing or locked until the user unlocks it.
+   * `details.reason` carries the stable cause (`SECRET_STORE_LOCKED`,
+   * `SECRET_STORE_INITIALIZING`). Not retried by the transport.
+   */
+  | "UNAVAILABLE"
   | "INTERNAL"
 
 export interface PluginApiError {
@@ -269,6 +276,15 @@ export async function invokePluginApi<T = unknown>(
       continue
     }
 
+    // Host messages/details may contain secret material. Record only routing
+    // identity and the typed cause; keep the original error available to callers.
+    loggers.ipc.warn("Plugin gateway request failed", {
+      pluginId,
+      api,
+      code: error.code,
+      requestId,
+      attempt,
+    })
     throw new PluginGatewayError({
       code: error.code,
       message: error.message,

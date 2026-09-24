@@ -761,7 +761,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     manifestFields: ["externalAgentPresets"],
     runtimeBinding: "context.agent.registerExternalAgentPreset + presets.registerPreset overlay",
     hostBindings: [
-      "lib/ai/agent/external/presets.ts",
+      "lib/ai/agent/external/config/presets.ts",
       "components/agent/external-agent/manager.tsx",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/index.ts", "packages/plugin-sdk/src/context/index.ts"],
@@ -773,7 +773,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
     builtinContributionPaths: ["plugins/external-agent-preset-example/src/index.ts"],
     docs: "docs/content/docs/en/chat/external-agents/index.mdx",
-    requiredTests: ["lib/ai/agent/external/presets.test.ts"],
+    requiredTests: ["lib/ai/agent/external/config/presets.test.ts"],
   },
   {
     // cognia-next-specific extension. Plugins declaring this capability
@@ -1055,7 +1055,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "registerSharedMemoryAdapter + shared-memory-adapter-registry overlay + syncSharedMemoryFromAdapter",
     hostBindings: [
       "lib/plugin/registries/shared-memory-adapter-registry.ts",
-      "lib/ai/agent/team/shared-memory-orchestrator.ts",
+      "lib/ai/agent/team/memory/shared-memory-orchestrator.ts",
     ],
     typescriptSdk: ["packages/plugin-sdk/src/define/define-shared-memory-adapter.ts"],
     pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],

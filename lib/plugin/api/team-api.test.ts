@@ -42,14 +42,14 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
 }))
 
 const startSquadRun = jest.fn(async () => ({ started: true, runId: "run_team_1" }))
-jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => startSquadRun(...(args as [])),
 }))
 
 const managerPause = jest.fn(async () => {})
 const managerResume = jest.fn(async () => {})
 const managerShutdown = jest.fn(async () => {})
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     pause: (...a: unknown[]) => managerPause(...(a as [])),
     resume: (...a: unknown[]) => managerResume(...(a as [])),

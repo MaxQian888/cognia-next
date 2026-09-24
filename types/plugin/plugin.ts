@@ -15,7 +15,7 @@ import type {
 import type { AgentModeConfig } from "../agent/agent-mode"
 import type { CanonicalPluginPermission } from "@/packages/plugin-sdk/src/contracts/generated"
 import type { LspServerConfig } from "../lsp/config"
-import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
+import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
 import type {
   Skill as _Skill,
@@ -1508,7 +1508,7 @@ export type PluginWebhookVerification =
  * One external-agent preset definition inside `PluginManifest.externalAgentPresets`.
  *
  * Adds a registry `id` on top of `ExternalAgentPresetConfig` (the shape used
- * inside `lib/ai/agent/external/presets.ts`, which keys presets by id rather
+ * inside `lib/ai/agent/external/config/presets.ts`, which keys presets by id rather
  * than carrying the id inline). The plugin manager passes `(id, config)` into
  * `presets.registerPreset` on enable and removes them on disable.
  */

@@ -9,6 +9,11 @@ import {
   PLUGIN_SDK_VERSION,
 } from "@cognia/plugin-sdk/contracts"
 
+const mockGatewayWarn = jest.fn()
+jest.mock("@/lib/plugin/core/logger", () => ({
+  loggers: { ipc: { warn: (...args: unknown[]) => mockGatewayWarn(...args) } },
+}))
+
 const mockDirectInvoke = jest.fn()
 const mockTransportCall = jest.fn()
 
@@ -471,5 +476,46 @@ describe("transportApiToMethodId", () => {
     expect(transportApiToMethodId("fs:readText")).toBe("fs.readText")
     expect(transportApiToMethodId("ns:a:b")).toBe("ns.a:b")
     expect(transportApiToMethodId("bare")).toBe("bare")
+  })
+})
+
+describe("gateway failure diagnostics", () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it("identifies the plugin, operation and cause code without logging secret material", async () => {
+    mockTransportCall.mockResolvedValue({
+      success: false,
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Sensitive host detail",
+        details: { value: "secret-result" },
+      },
+    })
+    await expect(
+      invokePluginApi("failing-plugin", "secrets:get", { key: "private-key-name" })
+    ).rejects.toMatchObject({ code: "PERMISSION_DENIED", pluginId: "failing-plugin" })
+    expect(mockGatewayWarn).toHaveBeenCalledWith("Plugin gateway request failed", {
+      pluginId: "failing-plugin",
+      api: "secrets:get",
+      code: "PERMISSION_DENIED",
+      requestId: expect.any(String),
+      attempt: 1,
+    })
+    expect(JSON.stringify(mockGatewayWarn.mock.calls)).not.toMatch(
+      /Sensitive|secret-result|private-key-name/
+    )
+  })
+
+  it("only reports final failure after exhausting safe retries", async () => {
+    mockTransportCall.mockResolvedValue({
+      success: false,
+      error: { code: "INTERNAL", message: "locked" },
+    })
+    await expect(invokePluginApi("p", "secrets:get", {}, { retryDelayMs: 0 })).rejects.toThrow()
+    expect(mockGatewayWarn).toHaveBeenCalledTimes(1)
+    expect(mockGatewayWarn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ attempt: 2 })
+    )
   })
 })

@@ -25,7 +25,7 @@ import { listMcpServerPresetIds } from "./mcp-server-preset-registry"
 import { listNativeAnthropicToolIds } from "./native-anthropic-tool-registry"
 import { listCharacterPackIds } from "./character-pack-registry"
 import { listSubagentEntries } from "./subagent-registry"
-import { getAvailablePresets } from "@/lib/ai/agent/external/presets"
+import { getAvailablePresets } from "@/lib/ai/agent/external/config/presets"
 
 /**
  * Built-in subagent dispatcher names always available in the team runtime.

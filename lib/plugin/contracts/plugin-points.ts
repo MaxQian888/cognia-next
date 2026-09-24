@@ -1448,7 +1448,7 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
     "lib/plugin/registries/mcp-server-preset-registry.ts:registerMcpServerPreset",
   "agent.native-anthropic-tool":
     "lib/plugin/registries/native-anthropic-tool-registry.ts:registerNativeAnthropicTool",
-  "agent.external-agent-preset": "lib/ai/agent/external/presets.ts:registerPreset",
+  "agent.external-agent-preset": "lib/ai/agent/external/config/presets.ts:registerPreset",
   "character.pack": "lib/plugin/registries/character-pack-registry.ts:registerCharacterPack",
   "agent.subagent": "lib/plugin/registries/subagent-registry.ts:registerSubagent",
   "agent.team-template":

@@ -100,7 +100,7 @@ async function dispatchPluginExternalAgent(
   assertNoLeakingPii(pluginId, "ctx.agent.runExternalAgent", [prompt])
   const [{ getExternalAgentManager }, { createAgentFromPreset }] = await Promise.all([
     import("@/lib/ai/agent/external/manager"),
-    import("@/lib/ai/agent/external/presets"),
+    import("@/lib/ai/agent/external/config/presets"),
   ])
   const manager = getExternalAgentManager()
   if (!options.runId) {

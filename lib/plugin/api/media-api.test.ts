@@ -559,6 +559,35 @@ describe("Media Registry", () => {
       }
     })
 
+    it("contains native unregister rejections after export completion", async () => {
+      const failures: Promise<void>[] = []
+      const spies: jest.SpyInstance[] = []
+      const unlisten = jest.fn(() => {
+        const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+        failures.push(failure)
+        spies.push(jest.spyOn(failure, "catch"))
+        return failure
+      })
+      const listen = jest.requireMock("@tauri-apps/api/event").listen as jest.Mock
+      listen.mockResolvedValue(unlisten)
+      try {
+        const api = createMediaAPI(testPluginId, {} as never)
+        const clip = await api.video.loadClip("/tmp/source.mp4")
+        await api.video.export([clip.id], {
+          format: "mp4",
+          resolution: "1080p",
+          fps: 30,
+          quality: "high",
+          onProgress: jest.fn(),
+        })
+        const attached = spies.map((spy) => spy.mock.calls.length)
+        await Promise.all(failures.map((failure) => failure.catch(() => {})))
+        expect(attached).toEqual([1, 1, 1, 1])
+      } finally {
+        listen.mockResolvedValue(() => {})
+      }
+    })
+
     it("publishes remote exports on the host and reports completion", async () => {
       jest.mocked(isTauri).mockReturnValueOnce(false).mockReturnValueOnce(false)
       const api = createMediaAPI(testPluginId, {} as never)

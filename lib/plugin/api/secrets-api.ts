@@ -20,6 +20,11 @@ import { invokePluginApi, isPluginGatewayAvailable } from "../core/transport"
 import { getSecret, setSecret, clearSecret, setWebKeyringPassphrase } from "@/lib/keyring"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { loggers } from "../core/logger"
+import {
+  onSecretStoreRecovered,
+  reportSecretStoreFailure,
+  toSecretStoreUnavailableError,
+} from "@/lib/credentials/secret-store-readiness"
 import type { PluginSecretsAPI, PluginSecretsBackend } from "@/types/plugin/plugin"
 
 const namespaceFor = (pluginId: string) => `plugin:${pluginId}`
@@ -81,6 +86,60 @@ function emitChange(pluginId: string, key: string): void {
 /** Test-only: clear all secrets listeners. */
 export function __resetSecretListenersForTesting(): void {
   listeners.clear()
+  deferredReads.clear()
+  stopReplayOnUnlock?.()
+  stopReplayOnUnlock = null
+}
+
+// ── Locked secret store: typed failure + replay after unlock ─────────────────
+
+/**
+ * `(pluginId, key)` pairs whose host call failed because the encrypted secret
+ * store was not ready. After the user unlocks it, each gets an `onDidChange`
+ * so a plugin that fell back at activation (e.g. e2b reading its API key)
+ * re-reads — its value became readable, which is a change from its view.
+ */
+const deferredReads = new Map<string, Set<string>>()
+let stopReplayOnUnlock: (() => void) | null = null
+
+function replayDeferredReads(): void {
+  const pending = [...deferredReads.entries()]
+  deferredReads.clear()
+  for (const [pluginId, keys] of pending) {
+    for (const key of keys) emitChange(pluginId, key)
+  }
+}
+
+/**
+ * Convert a gateway `UNAVAILABLE` (secret store locked / initializing) into a
+ * typed {@link SecretStoreUnavailableError}, report it once centrally, and
+ * queue the key for replay. Other errors pass through unchanged.
+ */
+function typedSecretsError(pluginId: string, key: string, error: unknown): unknown {
+  const typed = toSecretStoreUnavailableError(error)
+  if (!typed) return error
+  reportSecretStoreFailure(typed, `plugin:${pluginId}`)
+  let keys = deferredReads.get(pluginId)
+  if (!keys) {
+    keys = new Set()
+    deferredReads.set(pluginId, keys)
+  }
+  keys.add(key)
+  stopReplayOnUnlock ??= onSecretStoreRecovered(replayDeferredReads)
+  return typed
+}
+
+async function viaGateway<T>(
+  pluginId: string,
+  api: string,
+  key: string,
+  payload: Record<string, unknown>
+): Promise<T> {
+  try {
+    return await invokePluginApi<T>(pluginId, api, payload)
+  } catch (error) {
+    throw typedSecretsError(pluginId, key, error)
+  }
 }
 
 // ── Web passphrase provisioning (browser only, once) ─────────────────────────
@@ -104,7 +163,7 @@ export function getSecretsBackendKind(): PluginSecretsBackend {
 
 async function readSecret(pluginId: string, key: string): Promise<string | null> {
   if (isPluginGatewayAvailable())
-    return invokePluginApi<string | null>(pluginId, "secrets:get", { key })
+    return viaGateway<string | null>(pluginId, "secrets:get", key, { key })
   await ensureWebPassphrase()
   return getSecret({ namespace: namespaceFor(pluginId), key })
 }
@@ -113,7 +172,7 @@ export function createSecretsAPI(pluginId: string): PluginSecretsAPI {
   return {
     store: async (key: string, value: string): Promise<void> => {
       if (isPluginGatewayAvailable()) {
-        await invokePluginApi<void>(pluginId, "secrets:set", { key, value })
+        await viaGateway<void>(pluginId, "secrets:set", key, { key, value })
       } else {
         await ensureWebPassphrase()
         await setSecret({ namespace: namespaceFor(pluginId), key }, value)
@@ -126,7 +185,7 @@ export function createSecretsAPI(pluginId: string): PluginSecretsAPI {
 
     delete: async (key: string): Promise<void> => {
       if (isPluginGatewayAvailable()) {
-        await invokePluginApi<void>(pluginId, "secrets:delete", { key })
+        await viaGateway<void>(pluginId, "secrets:delete", key, { key })
       } else {
         await ensureWebPassphrase()
         await clearSecret({ namespace: namespaceFor(pluginId), key })

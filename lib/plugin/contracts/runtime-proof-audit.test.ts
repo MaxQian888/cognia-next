@@ -208,7 +208,7 @@ describe("plugin runtime proof audit", () => {
       // 2026-06-10 — allowlist shrunk against real call sites. The chat / tool /
       // stream dispatchers now resolve through `lib/claude/adapter-hooks.ts`
       // (chat pump via `hooks/use-claude-chat.ts`), `lib/plugin/core/manager.ts`
-      // (onCommand), and `lib/ai/agent/team/dispatch-teammate.ts` (agent hooks),
+      // (onCommand), and `lib/ai/agent/team/teammate/dispatch-teammate.ts` (agent hooks),
       // so they are no longer allowlisted — the build-time grep verifies them
       // directly. The entries below are the residue: dispatcher methods that
       // still have no host call site but are NOT yet demoted (kept canonical as

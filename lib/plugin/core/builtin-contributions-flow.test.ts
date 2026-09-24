@@ -36,8 +36,15 @@ import { getPluginCatalogSnapshot } from "@/lib/workflow/nodes/catalog"
 import { listCharacterPackIds } from "@/lib/plugin/registries/character-pack-registry"
 import { listSkillIds } from "@/lib/plugin/registries/skill-registry"
 import { listMcpServerPresetIds } from "@/lib/plugin/registries/mcp-server-preset-registry"
+import {
+  __resetIconThemesForTesting,
+  getActiveIconTheme,
+  resolveFileIcon,
+} from "@/lib/plugin/bridge/icons-bridge"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import zhihuPluginJson from "@/plugins/zhihu-content-pipeline/plugin.json"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -218,5 +225,113 @@ describe("builtin plugin contribution flow", () => {
 
     expect(discovered.some((p) => p.manifest.id === PLUGIN_ID)).toBe(true)
     expect(store.plugins[PLUGIN_ID]).toBeDefined()
+  })
+})
+
+/**
+ * The bundled Material Icon Theme is a declarative built-in that must be
+ * discovered everywhere but stay OFF until the user enables it, and whose only
+ * contribution — `manifest.vscodeIconThemes` — must reach the icons bridge from
+ * the `/plugins/<id>/` public mirror (the synthetic `builtin://` root has no
+ * files behind it). Driven through the real registry entry and the real
+ * manager enable/disable path.
+ */
+describe("bundled Material Icon Theme lifecycle", () => {
+  const MATERIAL_ID = "cognia-material-icon-theme"
+  const PUBLIC_ROOT = join(process.cwd(), "public")
+  const mockGetState = usePluginStore.getState as unknown as jest.Mock
+  let fetchSpy: jest.SpiedFunction<typeof fetch>
+
+  function makeLifecycleStore() {
+    const store = makeStore()
+    return Object.assign(store, {
+      disablePlugin: jest.fn(async (pluginId: string) => {
+        store.plugins[pluginId] = { ...store.plugins[pluginId], status: "disabled" } as Plugin
+      }),
+      setPluginStatus: jest.fn((pluginId: string, status: Plugin["status"]) => {
+        store.plugins[pluginId] = { ...store.plugins[pluginId], status } as Plugin
+      }),
+    })
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    __resetIconThemesForTesting()
+    ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue({
+      verify: jest.fn().mockResolvedValue({ verified: true }),
+      getConfig: jest.fn().mockReturnValue({ requireSignatures: false, allowUntrusted: true }),
+    })
+    ;(getPermissionGuard as jest.Mock).mockReturnValue({
+      registerPlugin: jest.fn(),
+      unregisterPlugin: jest.fn(),
+      revokeAll: jest.fn(),
+      grant: jest.fn(),
+      revoke: jest.fn(),
+      getPluginPermissions: jest.fn(() => [] as string[]),
+    })
+    ;(canUseTauriInvoke as jest.Mock).mockReturnValue(false)
+    // Serve the static export the way every shell does: `/plugins/<id>/…` is a
+    // file under `public/`, copied verbatim into `out/`.
+    fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      const file = join(PUBLIC_ROOT, decodeURIComponent(url))
+      if (!url.startsWith("/plugins/") || !existsSync(file)) {
+        return new Response("not found", { status: 404 })
+      }
+      return new Response(readFileSync(file, "utf8"), { status: 200 })
+    })
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+    __resetIconThemesForTesting()
+  })
+
+  it("is discovered on the browser profile but not enabled by the boot restore pass", async () => {
+    const store = makeLifecycleStore()
+    mockGetState.mockReturnValue(store)
+    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    await manager.scanPlugins()
+
+    expect(store.plugins[MATERIAL_ID]).toMatchObject({
+      status: "installed",
+      path: `builtin://${MATERIAL_ID}`,
+    })
+
+    const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+    await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+    const restored = enableSpy.mock.calls.map(([id]) => id)
+    // Sanity: the pass did run and enabled the startup built-ins…
+    expect(restored).toContain("cognia-genshin-theme")
+    // …but the icon theme has no activation event and no recorded intent.
+    expect(restored).not.toContain(MATERIAL_ID)
+
+    await manager.handleActivationEvent("startup")
+    expect(enableSpy.mock.calls.map(([id]) => id)).not.toContain(MATERIAL_ID)
+    expect(getActiveIconTheme()).toBeUndefined()
+  })
+
+  it("registers the mirrored theme on enable and removes it on disable", async () => {
+    const store = makeLifecycleStore()
+    mockGetState.mockReturnValue(store)
+    const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+    await manager.scanPlugins()
+
+    await manager.enablePlugin(MATERIAL_ID)
+
+    expect((store.setPluginError as jest.Mock).mock.calls.filter((c) => c[1] != null)).toEqual([])
+    expect(fetchSpy).toHaveBeenCalledWith(`/plugins/${MATERIAL_ID}/dist/material-icons.json`)
+    const active = getActiveIconTheme()
+    expect(active).toMatchObject({
+      id: `${MATERIAL_ID}.material-icon-theme`,
+      pluginId: MATERIAL_ID,
+      baseDir: `builtin://${MATERIAL_ID}`,
+      jsonPath: "dist/material-icons.json",
+    })
+    expect(resolveFileIcon(active!.id, "app.tsx")?.iconPath).toBe("./../icons/react_ts.svg")
+
+    await manager.disablePlugin(MATERIAL_ID)
+
+    expect(getActiveIconTheme()).toBeUndefined()
   })
 })

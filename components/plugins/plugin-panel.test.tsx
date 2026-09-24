@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -132,7 +133,10 @@ jest.mock("@/lib/db/schema", () => {
 
 // FeaturePageShell already has its own tests — stub it to a transparent
 // composition wrapper so this test focuses on PluginPanel's wiring (which
-// section / which detail content is mounted).
+// section / which detail content is mounted). The right pane's overlay-Sheet
+// contract (`open` / `onOpenChange`, used below `lg`) is surfaced as a data
+// attribute plus the two ways the real Sheet reports a change: its trigger and
+// its dismiss.
 jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   FeaturePageShell: ({
     header,
@@ -142,20 +146,46 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   }: {
     header?: React.ReactNode
     leftPane?: { content: React.ReactNode }
-    rightPane?: { content: React.ReactNode }
+    rightPane?: {
+      content: React.ReactNode
+      open?: boolean
+      onOpenChange?: (open: boolean) => void
+    }
     children: React.ReactNode
   }) => (
     <div data-testid="feature-page-shell">
       <div data-testid="shell-header">{header}</div>
       <div data-testid="shell-left">{leftPane?.content}</div>
       <div data-testid="shell-center">{children}</div>
-      <div data-testid="shell-right">{rightPane?.content}</div>
+      <div
+        data-testid="shell-right"
+        data-sheet-open={rightPane?.open === undefined ? "uncontrolled" : String(rightPane.open)}
+      >
+        {rightPane?.content}
+      </div>
+      <button type="button" onClick={() => rightPane?.onOpenChange?.(true)}>
+        stub-open-right-sheet
+      </button>
+      <button type="button" onClick={() => rightPane?.onOpenChange?.(false)}>
+        stub-dismiss-right-sheet
+      </button>
     </div>
   ),
 }))
 
 jest.mock("./devtools/plugin-devtools-pane", () => ({
   PluginDevtoolsPane: () => <div data-testid="plugin-devtools-pane" />,
+}))
+
+// The detail pane has its own suite. Here it only has to say which plugin it
+// is showing, so the sheet tests can tell "opened on the right plugin" apart
+// from "opened on the empty state".
+jest.mock("./detail/plugin-detail-pane", () => ({
+  PluginDetailPane: () => {
+    const { usePluginsStore: store } = jest.requireActual("@/stores/plugins")
+    const id = store((s: { detailPluginId: string | null }) => s.detailPluginId)
+    return <div data-testid="plugin-detail-pane-stub">{id ?? "empty"}</div>
+  },
 }))
 
 import { PluginPanel } from "./plugin-panel"
@@ -448,5 +478,70 @@ describe("PluginPanel (3-pane shell)", () => {
     await waitFor(() => expect(jest.mocked(deletePlugin)).toHaveBeenCalledWith("plugin_x"))
     expect(deletePermissionsMock).not.toHaveBeenCalled()
     expect(deleteAnalyticsMock).not.toHaveBeenCalled()
+  })
+})
+
+// Below `lg` the shell renders the detail pane as an overlay Sheet. It used to
+// be uncontrolled, so a click on a plugin's name only wrote the store and the
+// row "did nothing". These pin that the selection drives the sheet.
+describe("PluginPanel detail sheet (overlay tier)", () => {
+  const sheet = () => screen.getByTestId("shell-right")
+
+  it("controls the right pane's sheet instead of leaving it uncontrolled", () => {
+    render(<PluginPanel />)
+    expect(sheet()).toHaveAttribute("data-sheet-open", "false")
+  })
+
+  it("opens the detail when the plugin name is clicked", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
+    expect(usePluginsStore.getState().detailPluginId).toBe("plugin_x")
+    expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+    expect(screen.getByTestId("plugin-detail-pane-stub")).toHaveTextContent("plugin_x")
+  })
+
+  it("opens the detail from the keyboard (Enter on the focused name)", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    screen.getByTestId("plugin-library-row-plugin_x").focus()
+    await user.keyboard("{Enter}")
+    expect(usePluginsStore.getState().detailPluginId).toBe("plugin_x")
+    expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+  })
+
+  it("opens the same detail surface from the row menu's Open details", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    render(<PluginPanel />)
+    await user.click(screen.getByRole("button", { name: "actionsMenuAria:Test Plugin" }))
+    await user.click(await screen.findByRole("menuitem", { name: "openDetails" }))
+    expect(usePluginsStore.getState().detailPluginId).toBe("plugin_x")
+    expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+  })
+
+  it("dismissing the sheet clears the selection so the same name reopens it", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
+    await user.click(screen.getByRole("button", { name: "stub-dismiss-right-sheet" }))
+    expect(sheet()).toHaveAttribute("data-sheet-open", "false")
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
+
+    await user.click(screen.getByTestId("plugin-library-row-plugin_x"))
+    expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+  })
+
+  it("does not pop the sheet for a selection that survived navigation", () => {
+    usePluginsStore.setState({ detailPluginId: "plugin_x" })
+    render(<PluginPanel />)
+    expect(sheet()).toHaveAttribute("data-sheet-open", "false")
+  })
+
+  it("lets the pane's own trigger open the sheet with no selection", async () => {
+    const user = userEvent.setup()
+    render(<PluginPanel />)
+    await user.click(screen.getByRole("button", { name: "stub-open-right-sheet" }))
+    expect(sheet()).toHaveAttribute("data-sheet-open", "true")
+    expect(usePluginsStore.getState().detailPluginId).toBeNull()
   })
 })

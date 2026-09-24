@@ -27,7 +27,7 @@
  * Tauri host. Reads return empties on web; control calls reject via transport.
  */
 
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 import {
   listPairedDevices,
   getPairedDevice,

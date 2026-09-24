@@ -41,7 +41,7 @@ import { loggers } from "@cognia/logging"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
-import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
+import type { TaskMoveError } from "@/lib/ai/agent/team/gates/task-move-guard"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
 import type {
   AgentTaskComment,
@@ -322,7 +322,7 @@ async function runControl(
     return { ok: false, reason: "squad_not_found" }
   }
   try {
-    const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+    const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
     await agentTeamManager[verb](teamId)
     return { ok: true }
   } catch (error) {
@@ -625,7 +625,7 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
       // run gets the run id convention, the execution row and the workspace
       // stamp. No `session`: a plugin is not a conversation, so the run is
       // uncarded and says so on its row.
-      const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+      const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
       const result = await startSquadRun({
         squadId: teamId,
         goal: options?.goal ?? "",

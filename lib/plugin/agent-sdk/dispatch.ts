@@ -15,7 +15,7 @@
  * load and unit-testable.
  */
 
-import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
+import type { AgentTeamConfig } from "@/lib/ai/agent/team/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 import type {
@@ -364,7 +364,7 @@ async function runExternalSubagent(
     { supportsExternalAgents },
   ] = await Promise.all([
     import("@/lib/ai/agent/external/manager"),
-    import("@/lib/ai/agent/external/presets"),
+    import("@/lib/ai/agent/external/config/presets"),
     import("@/lib/ai/agent/external/agent-transport"),
   ])
 
@@ -399,7 +399,7 @@ async function runExternalSubagent(
   // Clamp the child's tool surface against the dispatching agent's permission
   // ceiling (fail-closed) and derive the external permission mode from it.
   const { deriveExternalSessionPermission } =
-    await import("@/lib/ai/agent/external/permission-cascade")
+    await import("@/lib/ai/agent/external/policy/permission-cascade")
   const merged = deriveExternalSessionPermission(
     options._permissionCeiling ?? {},
     def.tools !== undefined ? { allowedTools: def.tools } : {}
@@ -411,7 +411,8 @@ async function runExternalSubagent(
   // the explicitly-listed enabled servers are forwarded — never "all".
   let mcpServers: import("@/types/agent/external-agent").AcpMcpServerConfig[] = []
   if (def.mcpServerIds && def.mcpServerIds.length > 0) {
-    const { resolveAcpMcpServers } = await import("@/lib/ai/agent/external/resolve-acp-mcp-servers")
+    const { resolveAcpMcpServers } =
+      await import("@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers")
     mcpServers = await resolveAcpMcpServers(def.mcpServerIds)
   }
 
@@ -419,7 +420,7 @@ async function runExternalSubagent(
   // CaptureStreamEvent shape the subagent runtime store already renders, so an
   // external subagent lights up `SubagentPart`'s live progress like a built-in.
   const { pipeExternalEventsToCapture } =
-    await import("@/lib/ai/agent/external/external-event-progress")
+    await import("@/lib/ai/agent/external/session/external-event-progress")
   const onEvent = options._onEvent ? pipeExternalEventsToCapture(options._onEvent) : undefined
 
   const result = await manager.execute(agentId, prompt, {
@@ -496,7 +497,7 @@ export async function runTeam(
   teamOrConfig: string | AgentTeamConfig,
   options: PluginRunTeamOptions = {}
 ): Promise<PluginRunTeamResult> {
-  const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+  const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
 
   let teamId: string
   if (typeof teamOrConfig === "string") {

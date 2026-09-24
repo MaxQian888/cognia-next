@@ -51,7 +51,7 @@ jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
 }))
 
 const mockListDynamicPresetEntries = jest.fn<unknown[], []>()
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   listDynamicPresetEntries: () => mockListDynamicPresetEntries(),
 }))
 

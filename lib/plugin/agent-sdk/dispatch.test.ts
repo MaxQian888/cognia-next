@@ -1,7 +1,7 @@
 import { dispatchSubagent, runTeam } from "./dispatch"
 import { runCompletionRail } from "@/lib/ai/agent/agent-executor"
 import { getSubagent } from "@/lib/plugin/registries/subagent-registry"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
+import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { PluginPiiError } from "@/lib/plugin/api/plugin-pii-gate"
 
@@ -36,7 +36,7 @@ jest.mock("@/lib/ai/agent/external/agent-hooks", () => ({
   __esModule: true,
   fireAgentHook: (...a: unknown[]) => mockFireAgentHook(...(a as [])),
 }))
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   __esModule: true,
   agentTeamManager: {
     get: jest.fn(),
@@ -58,7 +58,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 }))
 const externalCreatePreset = jest.fn()
 const externalIsFromPreset = jest.fn<string | null, unknown[]>(() => null)
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   __esModule: true,
   createAgentFromPreset: (...a: unknown[]) => externalCreatePreset(...a),
   isFromPreset: (...a: unknown[]) => externalIsFromPreset(...a),
@@ -69,7 +69,7 @@ jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
   supportsExternalAgents: (...a: unknown[]) => externalSupported(...a),
 }))
 const externalResolveMcp = jest.fn(async (..._a: unknown[]) => [] as unknown[])
-jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers", () => ({
   __esModule: true,
   resolveAcpMcpServers: (...a: unknown[]) => externalResolveMcp(...a),
 }))

@@ -305,3 +305,17 @@ describe("rpc-dispatcher", () => {
     })
   })
 })
+
+it("contains asynchronous native unsubscribe races", async () => {
+  resetRegistry()
+  const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+  const catchSpy = jest.spyOn(failure, "catch")
+  configureRpcDispatcher({ sendResponse: async () => {}, listen: async () => () => failure })
+  const stop = await subscribeToVscodeEvents("teardown-test")
+  stop()
+  const attached = catchSpy.mock.calls.length
+  await failure.catch(() => {})
+  configureRpcDispatcher(null)
+  resetRegistry()
+  expect(attached).toBe(1)
+})

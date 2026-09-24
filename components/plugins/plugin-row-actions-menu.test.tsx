@@ -47,6 +47,35 @@ describe("PluginRowActionsMenu", () => {
     expect(screen.getByLabelText("actionsMenuAria:Test Plugin")).toBeInTheDocument()
   })
 
+  // The audit drove this menu with a bare `click` (the agent-debug bridge's
+  // `act … click`, which is also how assistive technology "presses" a button)
+  // and it never opened: Radix's trigger answers only pointerdown / keydown.
+  // The shared DropdownMenuTrigger now answers a click-only activation too.
+  it("opens from a bare click with no hover or pointer gesture first", async () => {
+    const cb = callbacks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    render(<PluginRowActionsMenu plugin={baseRow} {...cb} />)
+    const trigger = screen.getByLabelText("actionsMenuAria:Test Plugin")
+
+    // Reachable in the first place: a focusable button, never hidden or
+    // pointer-gated until something hovers the row.
+    expect(trigger.tagName).toBe("BUTTON")
+    expect(trigger).not.toHaveClass("pointer-events-none", "invisible", "opacity-0")
+
+    trigger.click()
+    await user.click(await screen.findByRole("menuitem", { name: "openDetails" }))
+    expect(cb.onOpen).toHaveBeenCalledWith("p1")
+  })
+
+  it("opens from the keyboard", async () => {
+    const cb = callbacks()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    render(<PluginRowActionsMenu plugin={baseRow} {...cb} />)
+    screen.getByLabelText("actionsMenuAria:Test Plugin").focus()
+    await user.keyboard("{Enter}")
+    expect(await screen.findByRole("menuitem", { name: "openDetails" })).toBeInTheDocument()
+  })
+
   it("invokes onOpen / onConfigure / onReviewPermissions / onUninstall after open", async () => {
     const cb = callbacks()
     const user = userEvent.setup({ pointerEventsCheck: 0 })

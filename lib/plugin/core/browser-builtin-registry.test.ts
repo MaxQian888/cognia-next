@@ -36,6 +36,7 @@ describe("browser-builtin-registry", () => {
       "cognia-genshin-theme",
       "cognia-goal-insights",
       "cognia-honkai-star-rail-theme",
+      "cognia-material-icon-theme",
       "cognia-ocr",
       "cognia-office",
       "cognia-pdf",

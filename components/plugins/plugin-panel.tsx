@@ -9,8 +9,9 @@
 //               Governance / Devtools panes
 //   - **Right** Persistent `PluginDetailPane` showing the selected plugin's
 //               5-tab detail (Overview / Capabilities / Configure /
-//               Permissions / Data). On narrow viewports the right pane
-//               collapses into FeaturePageShellMobile's Sheet trigger.
+//               Permissions / Data). Below `lg` the right pane becomes the
+//               shell's overlay Sheet, which the plugin selection opens (a
+//               name click or "Open details" must never dead-end).
 //
 // Dialog hosts (delete, permission review, import, conflict, update,
 // rollback) are mounted once at the root.
@@ -265,6 +266,31 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   // mirrored so the badge and the selected nav row share one glyph.
   const SectionIcon = pluginNavItem(visibleSection).icon
 
+  // Below `lg` the shell moves the detail pane into a Sheet, and an
+  // uncontrolled Sheet only opens from its own 16px panel icon. Clicking a
+  // plugin's name (or "Open details" in its row menu) only writes
+  // `detailPluginId` to the store, so on a tablet-width window — a normal size
+  // for the desktop app — both paths ticked the row and showed nothing. The
+  // sheet is therefore driven by the selection, with the same rule the phone
+  // body uses: it opens on a CHANGE of selection, not on selection itself.
+  // `detailPluginId` survives navigation (it is what the full-width pane
+  // reopens on), so deriving `open` from it directly would pop the sheet every
+  // time the user comes back. Dismissing the sheet clears the selection, so
+  // clicking the same plugin again counts as a change once more. At `lg` and
+  // up the pane is inline and the shell ignores `open` / `onOpenChange`.
+  const detailPluginId = usePluginsStore((s) => s.detailPluginId)
+  const closeDetail = usePluginsStore((s) => s.closeDetail)
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false)
+  const [seenDetailId, setSeenDetailId] = useState(detailPluginId)
+  if (detailPluginId !== seenDetailId) {
+    setSeenDetailId(detailPluginId)
+    if (detailPluginId) setDetailSheetOpen(true)
+  }
+  const handleDetailSheetOpenChange = (next: boolean) => {
+    setDetailSheetOpen(next)
+    if (!next && detailPluginId) closeDetail()
+  }
+
   // Second header tier — one control vocabulary for every section. Each
   // section supplies its own segments/tools through `PluginSectionToolbar`
   // rather than inventing a picker of its own (see that component's note).
@@ -342,6 +368,8 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
               // leaving the center above that gate; the user can still drag to
               // 52% when they want to read.
               content: <PluginDetailPane />,
+              open: detailSheetOpen,
+              onOpenChange: handleDetailSheetOpenChange,
               defaultSize: 34,
               minSize: 28,
               maxSize: 52,
