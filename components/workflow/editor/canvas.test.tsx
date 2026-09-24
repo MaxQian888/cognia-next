@@ -492,6 +492,73 @@ describe("WorkflowEditorCanvas — run gate", () => {
   })
 })
 
+describe("WorkflowEditorCanvas — save toast", () => {
+  beforeEach(() => {
+    ;(toast.success as jest.Mock).mockClear()
+    ;(toast.warning as jest.Mock).mockClear()
+  })
+
+  it("reports a clean save once the required param is filled, despite a stale validation cache", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "toast clean" })
+    // n_b (ai.prompt) starts with no userPrompt → one param issue.
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => {
+      // Cache the "userPrompt required" error, then fill the field the way the
+      // inspector does: data write now, revalidation queued behind the debounce.
+      store.getState().revalidateNode("n_b")
+      store.getState().updateNodeData("n_b", { params: { userPrompt: "Summarize the thread" } })
+      store.getState().scheduleRevalidateNode("n_b")
+    })
+    expect(store.getState().validationByStepId.n_b).toBeDefined()
+
+    fireEvent.click(screen.getByTestId("workflow-save"))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Workflow saved"))
+    expect(toast.warning).not.toHaveBeenCalled()
+    // The cache converged with the saved data too — no badge left on "1".
+    expect(store.getState().validationByStepId.n_b).toBeUndefined()
+  })
+
+  it("counts a missing required param the validation cache has not caught up with", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "toast issue" })
+    const sample: VisualWorkflow = {
+      ...buildSample(),
+      id: wf.id,
+      nodes: [
+        buildSample().nodes[0],
+        {
+          ...buildSample().nodes[1],
+          data: { label: "Prompt", params: { userPrompt: "hello" } },
+        },
+      ],
+    }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => {
+      // Clearing the field without the revalidation ever running: the cache
+      // still says the node is clean.
+      store.getState().updateNodeData("n_b", { params: { userPrompt: "" } })
+    })
+    expect(store.getState().validationByStepId.n_b).toBeUndefined()
+
+    fireEvent.click(screen.getByTestId("workflow-save"))
+
+    // The jest next-intl stub has no CLDR plural rules (it always takes the
+    // `other` branch), so match the count rather than the inflection.
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/^Workflow saved with 1 unresolved issue/)
+      )
+    )
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(store.getState().validationByStepId.n_b?.hasErrors).toBe(true)
+  })
+})
+
 describe("WorkflowEditorCanvas — keyboard create+connect (C3)", () => {
   it("Tab with one node selected stages a pendingConnectFrom from its output handle", async () => {
     const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")

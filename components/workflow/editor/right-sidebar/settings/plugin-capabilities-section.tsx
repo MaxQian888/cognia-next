@@ -75,14 +75,14 @@ export function PluginCapabilitiesSection() {
         <CapabilityGroup
           label={t("sections.nodes")}
           entries={nodes}
-          contributedBy={t("contributedBy")}
+          formatContributedBy={(pluginId) => t("contributedBy", { plugin: pluginId })}
         />
       ) : null}
       {triggers.length > 0 ? (
         <CapabilityGroup
           label={t("sections.triggers")}
           entries={triggers}
-          contributedBy={t("contributedBy")}
+          formatContributedBy={(pluginId) => t("contributedBy", { plugin: pluginId })}
         />
       ) : null}
       {templates.length > 0 ? (
@@ -107,7 +107,7 @@ export function PluginCapabilitiesSection() {
                     <p className="truncate text-sm font-medium">{entry.name}</p>
                     {pluginId ? (
                       <p className="truncate text-[11px] text-muted-foreground">
-                        {t("contributedBy").replace("{plugin}", pluginId)}
+                        {t("contributedBy", { plugin: pluginId })}
                       </p>
                     ) : null}
                   </div>
@@ -128,7 +128,7 @@ export function PluginCapabilitiesSection() {
                         key={`${w.code}:${w.missingId}`}
                         className="rounded bg-amber-500/15 px-1.5 py-px text-[10px] text-amber-700 dark:text-amber-300"
                       >
-                        {t("missingDep").replace("{id}", w.missingId)}
+                        {t("missingDep", { id: w.missingId })}
                       </span>
                     ))}
                   </div>
@@ -145,11 +145,11 @@ export function PluginCapabilitiesSection() {
 function CapabilityGroup({
   label,
   entries,
-  contributedBy,
+  formatContributedBy,
 }: {
   label: string
   entries: readonly NodeCatalogEntry[]
-  contributedBy: string
+  formatContributedBy: (pluginId: string) => string
 }) {
   return (
     <div className="space-y-1.5">
@@ -167,7 +167,7 @@ function CapabilityGroup({
             <p className="truncate text-sm font-medium">{entry.label}</p>
             {entry.pluginId ? (
               <p className="truncate text-[11px] text-muted-foreground">
-                {contributedBy.replace("{plugin}", entry.pluginId)}
+                {formatContributedBy(entry.pluginId)}
               </p>
             ) : null}
           </div>

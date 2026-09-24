@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import {
   groupedCatalog,
   searchCatalog,
@@ -395,8 +396,13 @@ const NodeChip = memo(function NodeChip({
         aria-pressed={isFavorite}
         data-testid={`wf-sidebar-fav-${entry.kind}`}
         className={cn(
-          "absolute right-1.5 rounded p-1 text-muted-foreground/60 transition hover:text-amber-500 focus-visible:opacity-100",
-          isFavorite ? "opacity-100 text-amber-500" : "opacity-0 group-hover/chip:opacity-100"
+          "absolute right-1.5 rounded p-1 text-muted-foreground/60 hover:text-amber-500",
+          isFavorite
+            ? "opacity-100 text-amber-500"
+            : cn(HOVER_REVEAL_CONTROL_BASE_CLASS, "group-hover/chip:opacity-100"),
+          // After the reveal constant so tailwind-merge keeps this all-property
+          // transition (the amber hover colour) over its `transition-opacity`.
+          "transition"
         )}
       >
         <StarIcon className={cn("size-3.5", isFavorite && "fill-current")} aria-hidden="true" />

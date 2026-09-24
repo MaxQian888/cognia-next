@@ -85,6 +85,24 @@ describe("NODE_CATALOG", () => {
 })
 
 describe("nodeCatalogEntry", () => {
+  it("describes plan rejection as its own terminal verdict, not a cancellation", () => {
+    const entry = nodeCatalogEntry("action.plan.reject")
+    expect(entry.description).toMatch(/reject/i)
+    expect(entry.description).not.toMatch(/cancel/i)
+    expect(entry.keywords).not.toContain("cancel")
+    // The localized catalog strings say the same in both locales.
+    const en = enMessages as { workflows: { nodes: Record<string, Record<string, unknown>> } }
+    const zh = zhMessages as { workflows: { nodes: Record<string, Record<string, unknown>> } }
+    const enReject = (
+      en.workflows.nodes.action as Record<string, Record<string, Record<string, string>>>
+    ).plan.reject
+    const zhReject = (
+      zh.workflows.nodes.action as Record<string, Record<string, Record<string, string>>>
+    ).plan.reject
+    expect(enReject.description).toBe(entry.description)
+    expect(zhReject.description).not.toMatch(/取消/)
+  })
+
   it("returns a known entry for a known kind", () => {
     const e = nodeCatalogEntry("trigger.cron")
     expect(e.label).toBe("On schedule")

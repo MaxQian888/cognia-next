@@ -2849,8 +2849,8 @@ describe("action.team.task.dispatch", () => {
   }) => {
     const { registerTeamRunContext, __resetTeamRunContextForTesting } =
       await import("@/lib/ai/agent/team/team-run-context")
-    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
-    const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate/teammate-pool")
+    const { createBudgetGuard } = await import("@/lib/ai/agent/team/gates/budget-guard")
     const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
     const { createConcurrencyController } =
       await import("@/lib/workflow/runtime/concurrency-controller")
@@ -3052,7 +3052,8 @@ describe("action.team.task.dispatch", () => {
   it("injects upstream dependency results into the teammate prompt (blackboard read)", async () => {
     const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
     useAgentTeamStore.getState().reset()
-    const { autoPublishTaskResult } = await import("@/lib/ai/agent/team/shared-memory-orchestrator")
+    const { autoPublishTaskResult } =
+      await import("@/lib/ai/agent/team/memory/shared-memory-orchestrator")
     autoPublishTaskResult({ id: "team-1" }, { id: "dep1", title: "Recon" }, "Recon found X.", {
       id: "w0",
       name: "Scout",
@@ -3093,8 +3094,8 @@ describe("action.team.task.review", () => {
   }) => {
     const { registerTeamRunContext, __resetTeamRunContextForTesting } =
       await import("@/lib/ai/agent/team/team-run-context")
-    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
-    const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate/teammate-pool")
+    const { createBudgetGuard } = await import("@/lib/ai/agent/team/gates/budget-guard")
     const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
     const { createConcurrencyController } =
       await import("@/lib/workflow/runtime/concurrency-controller")
@@ -3419,8 +3420,8 @@ describe("action.team.task.dispatch output validation", () => {
       const { registerTeamRunContext, __resetTeamRunContextForTesting } =
         await import("@/lib/ai/agent/team/team-run-context")
       __resetTeamRunContextForTesting()
-      const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
-      const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+      const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate/teammate-pool")
+      const { createBudgetGuard } = await import("@/lib/ai/agent/team/gates/budget-guard")
       const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
       const { createConcurrencyController } =
         await import("@/lib/workflow/runtime/concurrency-controller")

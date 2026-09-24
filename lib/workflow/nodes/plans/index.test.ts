@@ -96,3 +96,53 @@ describe("action.plan.step.dispatch outside the plan runtime", () => {
     await expect(run({ planId: "plan_1" })).rejects.toThrow(/'planId' and 'stepId'/)
   })
 })
+
+describe("action.plan.reject", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    getDb()
+    await whenSeeded()
+  })
+
+  function reject(params: Record<string, unknown>) {
+    const executor = getExecutor("action.plan.reject" as never, 1)!
+    return executor.execute({ runId: "r", params, signal: undefined } as never) as Promise<{
+      output: { planId: string; changed: boolean; rejected: boolean; plan: { status: string } }
+    }>
+  }
+
+  async function seed(status: string) {
+    await getDb().agentPlans.put({
+      id: "plan_r",
+      sessionId: "ses_1",
+      title: "T",
+      source: "manual",
+      executionMode: "auto",
+      status,
+      steps: [],
+      totalSteps: 0,
+      completedSteps: 0,
+      config: {},
+      refinementCount: 0,
+      generationId: "g",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+  }
+
+  it("lands the terminal rejected status and says so", async () => {
+    await seed("awaiting_approval")
+    const { output } = await reject({ planId: "plan_r", feedback: "not now" })
+    expect(output.rejected).toBe(true)
+    expect(output.plan.status).toBe("rejected")
+    expect((await getDb().agentPlans.get("plan_r"))?.status).toBe("rejected")
+  })
+
+  it("reports rejected=false for a plan that already started", async () => {
+    await seed("executing")
+    const { output } = await reject({ planId: "plan_r" })
+    expect(output.rejected).toBe(false)
+    expect(output.plan.status).toBe("executing")
+  })
+})

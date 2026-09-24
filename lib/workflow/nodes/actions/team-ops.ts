@@ -114,7 +114,7 @@ export async function runTeamCompose(ctx: StepExecutionContext): Promise<StepExe
   let finalStatus: string | undefined
   let finalResult: string | undefined
   if (params.autoStart) {
-    const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+    const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
     await agentTeamManager
       .start(result.teamId, {
         ...(params.ultracode !== undefined ? { ultracode: params.ultracode } : {}),

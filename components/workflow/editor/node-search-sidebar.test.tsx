@@ -8,6 +8,10 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { usePalettePreferencesStore } from "@/stores/workflow"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { NodeSearchSidebar } from "./node-search-sidebar"
 
 function mount() {
@@ -54,6 +58,33 @@ describe("NodeSearchSidebar", () => {
     expect(usePalettePreferencesStore.getState().favoriteNodeKinds).toContain("trigger.manual")
     // Now it appears twice: once in Favorites, once in its category.
     expect(screen.getAllByTestId("wf-sidebar-trigger.manual")).toHaveLength(2)
+  })
+
+  it("keeps the favorite star reachable without a hover", () => {
+    mount()
+    const star = screen.getByTestId("wf-sidebar-fav-trigger.manual")
+    expect(star).toHaveAttribute("aria-pressed", "false")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+      expect(star).toHaveClass(variant)
+    }
+    // Mouse path stays the named chip group; the all-property transition
+    // (amber hover colour) survives the merge with `transition-opacity`.
+    expect(star).toHaveClass("group-hover/chip:opacity-100", "transition")
+    expect(star).not.toHaveClass("transition-opacity")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(star).not.toHaveClass(forbidden)
+    }
+    star.focus()
+    expect(star).toHaveFocus()
+    act(() => {
+      fireEvent.click(star)
+    })
+    expect(usePalettePreferencesStore.getState().favoriteNodeKinds).toContain("trigger.manual")
+
+    // A favorite is always shown, amber.
+    const [favStar] = screen.getAllByTestId("wf-sidebar-fav-trigger.manual")
+    expect(favStar).toHaveClass("opacity-100", "text-amber-500", "transition")
+    expect(favStar).not.toHaveClass("opacity-0")
   })
 
   it("surfaces recently-used kinds in the Recent group", () => {

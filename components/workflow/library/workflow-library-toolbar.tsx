@@ -4,6 +4,9 @@
 // toggle, plus the "New folder" and import actions. The search box keeps
 // a local controlled value for responsiveness and writes through to the store
 // query on a 200ms trailing debounce so filtering doesn't run every keystroke.
+// It is keyed on the store's `searchResetKey`, so "Clear search and filters"
+// remounts it: the text empties and a keystroke still waiting out the
+// debounce is cancelled rather than re-applying the query after the clear.
 
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -20,31 +23,42 @@ export interface WorkflowLibraryToolbarProps {
   onImportFiles: (files: FileList) => void
 }
 
+/** Debounce between the last keystroke and the store query write. */
+const SEARCH_DEBOUNCE_MS = 200
+
+function WorkflowLibrarySearchInput() {
+  const t = useTranslations("workflows.library")
+  const setQuery = useWorkflowLibraryStore((s) => s.setQuery)
+  const storeQuery = useWorkflowLibraryStore((s) => s.query)
+  const [text, setText] = useState(storeQuery)
+  const { call } = useDebouncedCallback((value: string) => setQuery(value), SEARCH_DEBOUNCE_MS)
+  return (
+    <Input
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        call(e.target.value)
+      }}
+      placeholder={t("searchPlaceholder")}
+      className="h-8 bg-background/80 pl-9 shadow-xs"
+      aria-label={t("searchPlaceholder")}
+      data-testid="workflow-library-search"
+    />
+  )
+}
+
 export function WorkflowLibraryToolbar({ onImportFiles }: WorkflowLibraryToolbarProps) {
   const t = useTranslations("workflows.library")
   const currentFolderId = useWorkflowLibraryStore((s) => s.currentFolderId)
   const openCreateFolder = useWorkflowLibraryStore((s) => s.openCreateFolder)
-  const setQuery = useWorkflowLibraryStore((s) => s.setQuery)
-  const storeQuery = useWorkflowLibraryStore((s) => s.query)
-  const [text, setText] = useState(storeQuery)
-  const { call } = useDebouncedCallback((value: string) => setQuery(value), 200)
+  const searchResetKey = useWorkflowLibraryStore((s) => s.searchResetKey)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
     <div className="flex min-w-[min(100%,28rem)] flex-1 flex-wrap items-center justify-end gap-2">
       <div className="relative min-w-56 flex-[1_1_18rem] 2xl:max-w-md">
         <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            call(e.target.value)
-          }}
-          placeholder={t("searchPlaceholder")}
-          className="h-8 bg-background/80 pl-9 shadow-xs"
-          aria-label={t("searchPlaceholder")}
-          data-testid="workflow-library-search"
-        />
+        <WorkflowLibrarySearchInput key={searchResetKey} />
       </div>
       <WorkflowFilterBar />
       <WorkflowSortMenu />

@@ -172,6 +172,9 @@ registerNodeExecutor({
   },
 })
 
+// A rejection is terminal (`rejected`) and only applies to a plan that has not
+// started; the runtime hands back the unchanged row otherwise. `rejected` tells
+// a downstream branch which of the two happened without re-reading the plan.
 registerNodeExecutor({
   kind: "action.plan.reject",
   typeVersion: 1,
@@ -179,7 +182,14 @@ registerNodeExecutor({
     const params = ctx.params as { feedback?: string }
     const planId = requirePlanId(ctx, "action.plan.reject")
     const plan = await getPlanRuntime().rejectPlan(planId, params.feedback)
-    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+    return {
+      output: {
+        planId,
+        changed: plan !== null,
+        rejected: plan?.status === "rejected",
+        plan: toWorkflowPlan(plan),
+      },
+    }
   },
 })
 

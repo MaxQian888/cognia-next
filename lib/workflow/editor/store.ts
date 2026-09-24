@@ -106,6 +106,24 @@ export interface ConnectionState {
   pointer: { x: number; y: number } | null
 }
 
+/**
+ * A pending "take me to this field" request — raised by a Problems-panel row
+ * (or any other jump-to-error gesture) and consumed by the Inspector once the
+ * field has mounted and been focused.
+ */
+export interface FieldFocusRequest {
+  /** Node whose inspector form holds the field. */
+  nodeId: string
+  /**
+   * Top-level param name (`Diagnostic.field`). `null` — or a field the form
+   * does not render, such as the object-level `_root` — falls back to the
+   * first invalid field in the form.
+   */
+  field: string | null
+  /** Monotonic per store; lets consumers tell a repeat click from a stale one. */
+  seq: number
+}
+
 export interface EditorState extends EditorStateSnapshot {
   /** The persisted workflow envelope; `nodes`/`edges`/`viewport` live above. */
   baseWorkflow: VisualWorkflow
@@ -351,6 +369,19 @@ export interface EditorState extends EditorStateSnapshot {
   requestedCopilotPrompt: string | null
   requestCopilot: (prompt?: string) => void
   clearRequestedCopilot: () => void
+  /**
+   * Signal → Inspector to focus one field of one node. `requestFieldFocus`
+   * selects the node and brings its validation up to date synchronously, so
+   * the form it reveals already carries the `data-invalid` markers the focus
+   * step looks for. The right sidebar reveals the Inspector (over a pinned
+   * panel, and out of a collapsed dock — the row click is an explicit
+   * gesture), and the Inspector clears the request once the field's control
+   * has mounted and taken focus. `clearRequestedFieldFocus(seq)` only clears
+   * the request it was handed, so a newer click is never swallowed.
+   */
+  requestedFieldFocus: FieldFocusRequest | null
+  requestFieldFocus: (target: { nodeId: string; field?: string | null }) => void
+  clearRequestedFieldFocus: (seq: number) => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -532,7 +563,21 @@ export interface EditorState extends EditorStateSnapshot {
   clearLastRun: () => void
   /** Run zod validation for one node and write the result to the store. */
   revalidateNode: (id: string) => NodeValidationResult
-  /** Run zod validation for every node and replace `validationByStepId`. */
+  /**
+   * Queue a trailing-edge `revalidateNode(id)` ~{@link REVALIDATE_DEBOUNCE_MS}
+   * after the last call, so a keystroke storm reparses the schema once. The
+   * pending set and its timer live in the store — not in the component that
+   * scheduled them — so an Inspector that unmounts, is hidden by the Context
+   * Workbench's keep-alive `<Activity>`, or loses a selection race can never
+   * drop a validation on the floor. A selection change flushes the queue.
+   */
+  scheduleRevalidateNode: (id: string) => void
+  /** Run every queued `revalidateNode` now and cancel the timer. */
+  flushPendingRevalidation: () => void
+  /**
+   * Run zod validation for every node and replace `validationByStepId`.
+   * Supersedes (and cancels) anything queued by `scheduleRevalidateNode`.
+   */
   revalidateAll: () => Record<string, NodeValidationResult>
   /**
    * Recompute the full diagnostics result NOW (synchronous) and write it to
@@ -620,6 +665,13 @@ export const EDITOR_HISTORY_LIMIT = 100
 export const DIAGNOSTICS_DEBOUNCE_MS = 300
 
 /**
+ * Debounce window for `scheduleRevalidateNode` — the Inspector's per-field
+ * zod feedback. Matches the perceived "instant feedback" budget on a typing
+ * cadence (~6 chars/sec) while keeping the schema parse off every keystroke.
+ */
+export const REVALIDATE_DEBOUNCE_MS = 150
+
+/**
  * Cheap signature for a `DiagnosticsResult` so `recomputeDiagnostics` can skip
  * a no-op `set()`. Counts + the ordered id list capture every add/remove and
  * cycle-membership change (cycle ids are per-node) without hashing messages.
@@ -656,6 +708,12 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
   // Debounce timer for the diagnostics recompute driver — closure-local so it
   // never re-renders and is isolated per editor instance.
   let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
+  // Queued param revalidations (see `scheduleRevalidateNode`). Closure-local
+  // for the same reason as the diagnostics timer: per editor, never rendered.
+  const pendingRevalidateIds = new Set<string>()
+  let revalidateTimer: ReturnType<typeof setTimeout> | null = null
+  // Seq source for `requestFieldFocus`.
+  let fieldFocusSeq = 0
   const useStore = create<EditorState>()(
     temporal(
       (set, get) => ({
@@ -692,6 +750,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedRunsPanelStepId: null,
         requestedCopilotPrompt: null,
         requestedInspectorPanel: false,
+        requestedFieldFocus: null,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -767,6 +826,21 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedCopilot: () => set({ requestedCopilotPrompt: null }),
         requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
         clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
+        requestFieldFocus: ({ nodeId, field }) => {
+          if (!get().nodes.some((n) => n.id === nodeId)) return
+          get().setSelectedNodes([nodeId])
+          // The form's `data-invalid` markers come from `validationByStepId`,
+          // which a freshly-loaded workflow has not populated (only the
+          // diagnostics are seeded on open). Validate the target now so the
+          // field the Problems row names is marked by the time it mounts.
+          get().revalidateNode(nodeId)
+          fieldFocusSeq += 1
+          set({ requestedFieldFocus: { nodeId, field: field ?? null, seq: fieldFocusSeq } })
+        },
+        clearRequestedFieldFocus: (seq) => {
+          if (get().requestedFieldFocus?.seq !== seq) return
+          set({ requestedFieldFocus: null })
+        },
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -1665,7 +1739,36 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({ validationByStepId: { ...current, [id]: result } })
           return result
         },
+        scheduleRevalidateNode: (id) => {
+          pendingRevalidateIds.add(id)
+          if (revalidateTimer) clearTimeout(revalidateTimer)
+          revalidateTimer = setTimeout(() => {
+            revalidateTimer = null
+            get().flushPendingRevalidation()
+          }, REVALIDATE_DEBOUNCE_MS)
+        },
+        flushPendingRevalidation: () => {
+          if (revalidateTimer) {
+            clearTimeout(revalidateTimer)
+            revalidateTimer = null
+          }
+          if (pendingRevalidateIds.size === 0) return
+          // Snapshot + clear before running: `revalidateNode` writes the store,
+          // which re-enters the selection subscription below, and that must
+          // see an empty queue rather than flush the same ids twice.
+          const ids = [...pendingRevalidateIds]
+          pendingRevalidateIds.clear()
+          for (const id of ids) get().revalidateNode(id)
+        },
         revalidateAll: () => {
+          // Everything is about to be validated from current data, so any
+          // queued per-node pass is redundant — drop it rather than let it
+          // fire a moment later and re-set the same result.
+          if (revalidateTimer) {
+            clearTimeout(revalidateTimer)
+            revalidateTimer = null
+          }
+          pendingRevalidateIds.clear()
           const errs = validateAllNodes(
             get().nodes.map((n) => ({
               id: n.id,
@@ -1741,11 +1844,22 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
   // `diagnostics` itself doesn't touch nodes/edges, so there is no feedback loop.
   let lastNodes = useStore.getState().nodes
   let lastEdges = useStore.getState().edges
+  let lastSelectedNodeIds = useStore.getState().selectedNodeIds
   useStore.subscribe((state) => {
     if (state.nodes !== lastNodes || state.edges !== lastEdges) {
       lastNodes = state.nodes
       lastEdges = state.edges
       state.scheduleDiagnostics()
+    }
+    // A selection change settles any validation still queued for the node the
+    // user is leaving. Done here — at the one choke point every selection path
+    // (canvas click, Problems row, palette, API) goes through — rather than in
+    // the Inspector, whose effects do not run while the Context Workbench
+    // keeps it mounted-but-hidden, which is exactly when a click elsewhere
+    // changes the selection.
+    if (state.selectedNodeIds !== lastSelectedNodeIds) {
+      lastSelectedNodeIds = state.selectedNodeIds
+      state.flushPendingRevalidation()
     }
   })
   // Seed the initial result so the Problems panel / badges are correct on open.

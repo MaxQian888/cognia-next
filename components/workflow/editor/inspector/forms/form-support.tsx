@@ -38,6 +38,7 @@ import { ModelPicker } from "./shared/entity-picker"
 import { ConditionBuilder } from "./shared/condition-builder"
 import type { WorkflowConditionGroup } from "@/types/workflow/conditions"
 import { useInspectorExpressionCtx } from "./shared/inspector-context"
+import { PLAN_STATUS_VALUES } from "@/lib/workflow/nodes/params-schemas"
 import { useShallow } from "zustand/react/shallow"
 import type { EditorState as WfEditorState } from "@/lib/workflow/editor/store"
 import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
@@ -171,16 +172,12 @@ export const PLAN_REFINEMENT_TYPES = [
 
 export const PLAN_REFINEMENT_TRIGGERS = ["manual", "step_failure", "judge_deviation"] as const
 
-export const PLAN_STATUSES = [
-  "draft",
-  "awaiting_approval",
-  "approved",
-  "executing",
-  "paused",
-  "completed",
-  "failed",
-  "cancelled",
-] as const
+/**
+ * Status filter options for the plan list form — the same derived list the
+ * param schema validates against, so a status added to the plan machine
+ * (`rejected` was the last) shows up here without a second edit.
+ */
+export const PLAN_STATUSES = PLAN_STATUS_VALUES
 
 export const PLAN_STEP_STATUSES = [
   "pending",

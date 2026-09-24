@@ -23,6 +23,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_CLASS, HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import type { RunStatus, WorkflowRow } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
@@ -77,9 +78,12 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
             )}
           >
             <div
+              data-testid={`workflow-select-slot-${workflow.id}`}
               className={cn(
                 "absolute left-3 top-3 z-10 transition-opacity",
-                !showCheckbox && "opacity-0 group-hover:opacity-100"
+                // Card hover, keyboard focus and touch all reveal it; it only
+                // fades, so the checkbox stays focusable and clickable.
+                !showCheckbox && HOVER_REVEAL_GROUP_CLASS
               )}
             >
               <Checkbox
@@ -131,7 +135,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
                     e.stopPropagation()
                     setRunOpen(true)
                   }}
-                  className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  className={cn("size-8", HOVER_REVEAL_CONTROL_CLASS)}
                   aria-label={t("run")}
                   data-testid={`workflow-card-run-${workflow.id}`}
                 >
@@ -143,7 +147,7 @@ function WorkflowCardImpl({ workflow, runCount, lastStatus }: WorkflowCardProps)
                       variant="ghost"
                       size="icon"
                       onClick={(e) => e.stopPropagation()}
-                      className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      className={cn("size-8", HOVER_REVEAL_CONTROL_CLASS)}
                       aria-label={t("moreActions")}
                       data-testid={`workflow-card-menu-${workflow.id}`}
                     >

@@ -31,7 +31,7 @@ jest.mock("@/lib/ai/agent/team/auto/materialize", () => ({
   materializeProposal: jest.fn(),
 }))
 
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: { start: jest.fn() },
 }))
 
@@ -52,7 +52,7 @@ import {
   AutoOrchestrationPiiError,
 } from "@/lib/ai/agent/team/auto/auto-orchestrate"
 import { materializeProposal } from "@/lib/ai/agent/team/auto/materialize"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
+import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import {
   delegateToTwin,

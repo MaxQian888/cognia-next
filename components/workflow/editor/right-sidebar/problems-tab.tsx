@@ -6,6 +6,8 @@
  * Reads the editor store's `diagnostics` slice (recomputed debounced by the
  * store driver), groups by severity, and reveals the offending node/edge on
  * the canvas when a row is clicked — mirroring `runs-tab.tsx`'s reveal pattern.
+ * A row that names a field (param validation, expression references) also
+ * opens the Inspector on that field via `requestFieldFocus`.
  */
 
 import { useMemo, useState } from "react"
@@ -80,7 +82,14 @@ export function ProblemsTab({ useStore, reactFlowInstance }: ProblemsTabProps) {
           duration: 240,
         })
       }
-      state.setSelectedNodes([d.nodeId])
+      if (d.field) {
+        // A field-level problem is fixed in the Inspector, not on the canvas:
+        // select the node, bring the Inspector forward and focus the exact
+        // field. The store validates the node first so the form marks it.
+        state.requestFieldFocus({ nodeId: d.nodeId, field: d.field })
+      } else {
+        state.setSelectedNodes([d.nodeId])
+      }
       state.pulseNode(d.nodeId, 3000)
     } else if (d.edgeId) {
       state.setSelectedEdges([d.edgeId])

@@ -67,6 +67,50 @@ describe("persistEditorWorkflow", () => {
     expect(replaceWorkflow).toHaveBeenCalledTimes(1)
   })
 
+  it("counts issues from the node data being saved, not a stale validation cache", async () => {
+    const store = createEditorStore(buildWorkflow("ai.prompt"))
+    // Cache the "userPrompt required" error, then fix the param without the
+    // revalidation having run yet (still inside the inspector's debounce).
+    store.getState().revalidateNode("n1")
+    store.getState().updateNodeData("n1", { params: { userPrompt: "hello" } })
+    store.getState().scheduleRevalidateNode("n1")
+    expect(store.getState().validationByStepId.n1?.hasErrors).toBe(true)
+
+    const result = await persistEditorWorkflow(store)
+
+    expect(result.issueCount).toBe(0)
+    expect(store.getState().validationByStepId).toEqual({})
+    expect(store.getState().diagnostics.byNodeId.n1 ?? []).not.toContainEqual(
+      expect.objectContaining({ code: "nodeParam" })
+    )
+  })
+
+  it("counts an issue the validation cache has not seen yet", async () => {
+    const store = createEditorStore(buildWorkflow("ai.prompt"))
+    expect(store.getState().validationByStepId).toEqual({})
+
+    const result = await persistEditorWorkflow(store)
+
+    expect(result.issueCount).toBe(1)
+    expect(store.getState().validationByStepId.n1?.fields.userPrompt).toEqual({ key: "required" })
+  })
+
+  it("reports the issues of the snapshot it wrote even if params change during the write", async () => {
+    const store = createEditorStore(buildWorkflow("ai.prompt"))
+    replaceWorkflow.mockImplementationOnce(async (workflow: VisualWorkflow) => {
+      // The user fills the field while the write is in flight.
+      store.getState().updateNodeData("n1", { params: { userPrompt: "typed later" } })
+      return { workflow: { ...workflow, updatedAt: 99 }, publicationInvalidated: false }
+    })
+
+    const result = await persistEditorWorkflow(store)
+
+    // The toast describes what was written (still missing the prompt)…
+    expect(result.issueCount).toBe(1)
+    // …while the live cache reflects what is on screen now.
+    expect(store.getState().validationByStepId).toEqual({})
+  })
+
   it("syncs an invalidated publication without resetting graph or selection state", async () => {
     const workflow = {
       ...buildWorkflow("trigger.manual"),

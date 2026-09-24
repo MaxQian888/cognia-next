@@ -25,6 +25,7 @@ import {
   useWorkflowLibraryStore,
   type WorkflowTypeFilter,
 } from "@/stores/workflow"
+import { countActiveFacetFilters } from "@/lib/workflow/library-filter"
 
 const TYPE_OPTIONS: WorkflowTypeFilter[] = ["all", "user", "template", "builtin"]
 
@@ -41,10 +42,7 @@ export function WorkflowFilterBar() {
   const setFilters = useWorkflowLibraryStore((s) => s.setFilters)
   const resetFilters = useWorkflowLibraryStore((s) => s.resetFilters)
 
-  const activeCount =
-    (filters.type !== "all" ? 1 : 0) +
-    (filters.hasTrigger ? 1 : 0) +
-    (filters.recentlyFailed ? 1 : 0)
+  const activeCount = countActiveFacetFilters(filters)
 
   return (
     <DropdownMenu>

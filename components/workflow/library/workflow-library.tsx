@@ -30,6 +30,7 @@ import {
 import { parseWorkflowsImport } from "@/lib/workflow/editor/workflow-json"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import {
+  countActiveFacetFilters,
   filterWorkflows,
   isFilterActive,
   resolveDragMoveIds,
@@ -66,7 +67,7 @@ export function WorkflowLibrary() {
   const filters = useWorkflowLibraryStore((s) => s.filters)
   const query = useWorkflowLibraryStore((s) => s.query)
   const goToRoot = useWorkflowLibraryStore((s) => s.goToRoot)
-  const resetFilters = useWorkflowLibraryStore((s) => s.resetFilters)
+  const clearSearchAndFilters = useWorkflowLibraryStore((s) => s.clearSearchAndFilters)
 
   const childFolders = useLiveQuery(() => listChildFolders(currentFolderId), [currentFolderId])
   const folderPath = useLiveQuery(() => getFolderPath(currentFolderId), [currentFolderId])
@@ -246,7 +247,11 @@ export function WorkflowLibrary() {
             <WorkflowLibraryEmpty
               variant={emptyVariant}
               onCreate={() => setLocalCreateOpen(true)}
-              onClearFilters={resetFilters}
+              // Search text and facets together: clearing only the facets
+              // left a stale query hiding every row.
+              onClearFilters={clearSearchAndFilters}
+              query={query}
+              activeFilterCount={countActiveFacetFilters(filters)}
             />
           ) : viewMode === "grid" ? (
             <WorkflowLibraryGrid

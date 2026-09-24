@@ -6,6 +6,7 @@ import "@testing-library/jest-dom"
 import { fireEvent, render, waitFor } from "@testing-library/react"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
+import { EXPRESSION_FIELD_ATTR, findFieldControl } from "@/lib/workflow/editor/field-focus"
 import { ExpressionField } from "./expression-field"
 
 const runOutputs = {
@@ -109,5 +110,20 @@ describe("ExpressionField", () => {
       },
       { timeout: 1_000 }
     )
+  })
+
+  it("marks its root so jump-to-field resolves the CodeMirror surface, not the picker", () => {
+    const store = createEditorStore(workflow())
+    const { container } = render(
+      <div data-field="userPrompt">
+        <ExpressionField value="hi" onChange={() => {}} store={store} currentNodeId="current" />
+      </div>
+    )
+    const root = container.querySelector<HTMLElement>(`[${EXPRESSION_FIELD_ATTR}]`)
+    expect(root).not.toBeNull()
+    const row = container.querySelector<HTMLElement>('[data-field="userPrompt"]')!
+    const control = findFieldControl(row)
+    expect(control).not.toBeNull()
+    expect(control!.classList.contains("cm-content")).toBe(true)
   })
 })

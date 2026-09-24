@@ -113,6 +113,7 @@ interface FakeState {
   clearRequestedProblemsPanel?: () => void
   requestedInspectorPanel?: boolean
   clearRequestedInspectorPanel?: () => void
+  requestedFieldFocus?: { nodeId: string; field: string | null; seq: number } | null
 }
 
 function makeFakeStore(
@@ -493,6 +494,88 @@ describe("RightSidebar", () => {
       })
       expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
       expect(clearRequestedInspectorPanel).toHaveBeenCalled()
+    })
+  })
+
+  describe("field-focus signal", () => {
+    function renderWithEnsureVisible(store: EditorStore, onEnsureVisible: () => void) {
+      return render(
+        <NextIntlClientProvider locale="en" messages={MESSAGES as never} timeZone="UTC">
+          <RightSidebar useStore={store} onEnsureVisible={onEnsureVisible} />
+        </NextIntlClientProvider>
+      )
+    }
+
+    // Navigation goes through the workbench store rather than the rail/tab
+    // buttons, so these cases hold whichever navigation style is active.
+    function onlyScopeKey(): string {
+      const keys = Object.keys(useContextWorkbenchStore.getState().layouts)
+      expect(keys).toHaveLength(1)
+      return keys[0]!
+    }
+
+    it("reopens the dock and brings the Inspector over a pinned panel, leaving the request for the Inspector", async () => {
+      const onEnsureVisible = jest.fn()
+      const store = makeFakeStore({
+        selectedNodeIds: [],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_focus", name: "Focus" },
+        requestedFieldFocus: null,
+      })
+      renderWithEnsureVisible(store, onEnsureVisible)
+
+      const scopeKey = onlyScopeKey()
+      act(() => {
+        useContextWorkbenchStore.getState().navigatePanel(scopeKey, "problems", "wide")
+      })
+      expect(await screen.findByTestId("mock-problems-tab")).toBeInTheDocument()
+      // Pin the Problems panel: a plain selection-driven reveal now queues
+      // behind the pin, but a jump-to-field is an explicit gesture.
+      act(() => useContextWorkbenchStore.getState().setUserPinned(scopeKey, true))
+      onEnsureVisible.mockClear()
+
+      act(() => {
+        ;(store as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
+          selectedNodeIds: ["n1"],
+          requestedFieldFocus: { nodeId: "n1", field: "prompt", seq: 1 },
+        })
+      })
+
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+      expect(useContextWorkbenchStore.getState().layouts[scopeKey]?.activePanelId).toBe("inspector")
+      expect(onEnsureVisible).toHaveBeenCalledTimes(1)
+      // The Inspector clears the request once the field has focus — not the sidebar.
+      expect((store.getState() as unknown as FakeState).requestedFieldFocus).toEqual({
+        nodeId: "n1",
+        field: "prompt",
+        seq: 1,
+      })
+    })
+
+    it("reveals again for a repeat click (new seq) after the user moved elsewhere", async () => {
+      const onEnsureVisible = jest.fn()
+      const store = makeFakeStore({
+        selectedNodeIds: ["n1"],
+        selectedEdgeIds: [],
+        baseWorkflow: { id: "wf_focus_repeat", name: "Focus" },
+        requestedFieldFocus: { nodeId: "n1", field: "prompt", seq: 1 },
+      })
+      renderWithEnsureVisible(store, onEnsureVisible)
+      expect(screen.getByTestId("mock-inspector-panel")).toBeInTheDocument()
+
+      const scopeKey = onlyScopeKey()
+      act(() => {
+        useContextWorkbenchStore.getState().navigatePanel(scopeKey, "runs", "wide")
+      })
+      expect(await screen.findByTestId("mock-runs-tab")).toBeInTheDocument()
+
+      act(() => {
+        ;(store as unknown as { setState: (s: Partial<FakeState>) => void }).setState({
+          requestedFieldFocus: { nodeId: "n1", field: "prompt", seq: 2 },
+        })
+      })
+      expect(useContextWorkbenchStore.getState().layouts[scopeKey]?.activePanelId).toBe("inspector")
+      expect(onEnsureVisible).toHaveBeenCalledTimes(2)
     })
   })
 

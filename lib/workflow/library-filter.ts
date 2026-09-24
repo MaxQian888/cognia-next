@@ -87,12 +87,20 @@ export function resolveDragMoveIds(draggedId: string, selection: Set<string>): s
   return selection.has(draggedId) ? Array.from(selection) : [draggedId]
 }
 
+/**
+ * How many facet filters (type / has-trigger / recently-failed) differ from
+ * their defaults. The search query is not a facet and is not counted — the
+ * filter trigger's badge and the empty state report the two separately.
+ */
+export function countActiveFacetFilters(filters: WorkflowLibraryFilters): number {
+  return (
+    (filters.type !== "all" ? 1 : 0) +
+    (filters.hasTrigger ? 1 : 0) +
+    (filters.recentlyFailed ? 1 : 0)
+  )
+}
+
 /** Whether any non-default filter or a non-empty query is active. */
 export function isFilterActive(query: string, filters: WorkflowLibraryFilters): boolean {
-  return (
-    query.trim().length > 0 ||
-    filters.type !== "all" ||
-    filters.hasTrigger ||
-    filters.recentlyFailed
-  )
+  return query.trim().length > 0 || countActiveFacetFilters(filters) > 0
 }

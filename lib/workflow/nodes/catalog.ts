@@ -658,9 +658,10 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
   },
   "action.plan.reject": {
     label: "Reject plan",
-    description: "Cancel a pending plan and record rejection feedback.",
+    description:
+      "Reject a plan that has not started (terminal rejected status) and record the optional reason.",
     iconName: "CircleX",
-    keywords: ["plan", "reject", "cancel", "feedback", "approval"],
+    keywords: ["plan", "reject", "decline", "feedback", "approval"],
   },
   "action.plan.refine": {
     label: "Refine plan",

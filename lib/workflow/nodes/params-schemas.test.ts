@@ -1,5 +1,69 @@
-import { KNOWN_KINDS, PARAMS_SCHEMAS, paramsSchemaFor } from "./params-schemas"
+import {
+  KNOWN_KINDS,
+  PARAMS_SCHEMAS,
+  PLAN_STATUS_VALUES,
+  PLAN_TRIGGER_KINDS,
+  paramsSchemaFor,
+} from "./params-schemas"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { PlanEventKind, PlanStatus } from "@/types/agent/plan"
+
+// Exhaustive at compile time: a status or trail kind added to the plan types
+// fails type-checking here until it is listed — and the runtime assertions
+// below then prove the workflow lists picked it up.
+const EVERY_PLAN_STATUS: Record<PlanStatus, true> = {
+  draft: true,
+  awaiting_approval: true,
+  approved: true,
+  executing: true,
+  paused: true,
+  completed: true,
+  failed: true,
+  cancelled: true,
+  rejected: true,
+}
+const EVERY_PLAN_EVENT_KIND: Record<PlanEventKind, true> = {
+  plan_created: true,
+  plan_updated: true,
+  approved: true,
+  rejected: true,
+  deferred: true,
+  refined: true,
+  step_started: true,
+  step_completed: true,
+  step_failed: true,
+  step_skipped: true,
+  replanned: true,
+  paused: true,
+  resumed: true,
+  cancelled: true,
+  exit: true,
+}
+
+describe("plan status / trail kind lists stay in step with the plan types", () => {
+  it("PLAN_STATUS_VALUES lists every plan status exactly once", () => {
+    expect(new Set(PLAN_STATUS_VALUES).size).toBe(PLAN_STATUS_VALUES.length)
+    expect([...PLAN_STATUS_VALUES].sort()).toEqual(Object.keys(EVERY_PLAN_STATUS).sort())
+  })
+
+  it("action.plan.list accepts the terminal rejected status and still refuses unknown ones", () => {
+    const schema = paramsSchemaFor("action.plan.list" as WorkflowNodeKind)
+    expect(schema.safeParse({ status: "rejected" }).success).toBe(true)
+    expect(schema.safeParse({ status: "" }).success).toBe(true)
+    expect(schema.safeParse({ status: "archived" }).success).toBe(false)
+  })
+
+  it("PLAN_TRIGGER_KINDS lists every plan trail kind exactly once", () => {
+    expect(new Set(PLAN_TRIGGER_KINDS).size).toBe(PLAN_TRIGGER_KINDS.length)
+    expect([...PLAN_TRIGGER_KINDS].sort()).toEqual(Object.keys(EVERY_PLAN_EVENT_KIND).sort())
+  })
+
+  it("trigger.plan.event can filter on rejected and step_skipped", () => {
+    const schema = paramsSchemaFor("trigger.plan.event" as WorkflowNodeKind)
+    expect(schema.safeParse({ kinds: ["rejected", "step_skipped"] }).success).toBe(true)
+    expect(schema.safeParse({ kinds: ["not_a_kind"] }).success).toBe(false)
+  })
+})
 
 describe("PARAMS_SCHEMAS coverage", () => {
   it("registers a schema for every known kind", () => {

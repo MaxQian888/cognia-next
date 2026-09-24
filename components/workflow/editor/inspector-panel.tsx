@@ -32,7 +32,12 @@ import { tNodeField } from "@/lib/workflow/i18n/node-translate"
 import { getNodeIndex } from "@/lib/workflow/editor/node-index"
 import { supportsErrorHandling } from "@/lib/workflow/editor/node-handles"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
-import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import {
+  findFieldControl,
+  focusFieldControl,
+  focusFieldWhenReady,
+  listInvalidFieldContainers,
+} from "@/lib/workflow/editor/field-focus"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { ErrorHandlingSection } from "./inspector/forms/shared/error-handling-section"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
@@ -71,15 +76,6 @@ const NodeConfigFormSection = memo(function NodeConfigFormSection({
     <Component params={params} onChange={onChange} typeVersion={typeVersion} />
   )
 })
-
-/**
- * How long to wait after the last keystroke before re-running the zod
- * schema validation for the inspector form. Matches the perceived
- * "instant feedback" budget on a typing cadence (~6 chars/sec) and is
- * always force-flushed when the user switches to another node so no
- * pending validation is left dangling.
- */
-const REVALIDATE_DEBOUNCE_MS = 150
 
 /**
  * Shared empty-params reference so nodes with no `data.params` set don't
@@ -140,14 +136,24 @@ function InspectorPanelInner({
     }))
   )
 
-  const { updateNodeData, removeNodes, clearSelection, revalidateNode } = useStore(
+  const {
+    updateNodeData,
+    removeNodes,
+    clearSelection,
+    scheduleRevalidateNode,
+    flushPendingRevalidation,
+    clearRequestedFieldFocus,
+  } = useStore(
     useShallow((s: EditorState) => ({
       updateNodeData: s.updateNodeData,
       removeNodes: s.removeNodes,
       clearSelection: s.clearSelection,
-      revalidateNode: s.revalidateNode,
+      scheduleRevalidateNode: s.scheduleRevalidateNode,
+      flushPendingRevalidation: s.flushPendingRevalidation,
+      clearRequestedFieldFocus: s.clearRequestedFieldFocus,
     }))
   )
+  const fieldFocusRequest = useStore((s: EditorState) => s.requestedFieldFocus)
 
   const entry = useMemo(
     () => (node ? nodeCatalogEntry(node.data.kind as WorkflowNodeKind) : null),
@@ -155,34 +161,23 @@ function InspectorPanelInner({
   )
   const capabilityInfo = useMissingNodeCapabilities(entry ?? {})
 
-  // Debounce the zod re-validation so keystroke storms don't reparse the
-  // whole schema on every character. `shallowEqualValidation` in the
-  // store already swallows no-op writes, but the parse work itself is the
-  // dominant cost on complex node configs. The trailing edge fires
-  // ~150 ms after the user pauses; selection changes flush the pending
-  // call so we never lose a validation for the node the user just left.
-  const debouncedRevalidate = useDebouncedCallback<[string]>(
-    (id: string) => revalidateNode(id),
-    REVALIDATE_DEBOUNCE_MS
-  )
-  const prevSelectedIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (prevSelectedIdRef.current && prevSelectedIdRef.current !== selectedId) {
-      // Flush any in-flight validation for the *previous* selected node
-      // before the form unmounts that node's context — otherwise an error
-      // from the schema would land too late to be surfaced anywhere.
-      debouncedRevalidate.flush()
-    }
-    prevSelectedIdRef.current = selectedId
-  }, [selectedId, debouncedRevalidate])
+  // The zod re-validation is debounced by the store so keystroke storms
+  // don't reparse the whole schema on every character. The queue lives in
+  // the store, not here: this panel is hidden (effects torn down) whenever
+  // another workbench panel is in front and unmounts with its host, and a
+  // component-owned timer died with it — leaving the node's issue badge
+  // stuck on a count the params no longer have. The store flushes the queue
+  // on every selection change; unmount / hide flushes it here so the badge
+  // is settled by the time anything else is on screen.
+  useEffect(() => () => flushPendingRevalidation(), [flushPendingRevalidation])
 
   const handleParamsChange = useCallback(
     (next: Record<string, unknown>) => {
       if (!node) return
       updateNodeData(node.id, { params: next })
-      debouncedRevalidate.call(node.id)
+      scheduleRevalidateNode(node.id)
     },
-    [node, updateNodeData, debouncedRevalidate]
+    [node, updateNodeData, scheduleRevalidateNode]
   )
 
   // Stabilise the params reference so the memoized NodeConfigFormSection
@@ -195,26 +190,60 @@ function InspectorPanelInner({
   )
 
   // Cycle focus through the invalid fields when the error badge is clicked.
-  // `Field` stamps `data-invalid="true"` on each field with an error.
+  // `Field` stamps `data-invalid="true"` on each field with an error; the
+  // lookup is scoped to THIS panel's form so the workbench's hidden
+  // keep-alive copies can never be the target.
   const formScrollRef = useRef<HTMLDivElement | null>(null)
   const jumpIndexRef = useRef(0)
   const jumpToNextError = useCallback(() => {
     const root = formScrollRef.current
     if (!root) return
-    const invalids = Array.from(root.querySelectorAll<HTMLElement>('[data-invalid="true"]'))
+    const invalids = listInvalidFieldContainers(root)
     if (invalids.length === 0) {
       // Only object-level (`_root`) errors with no field target — scroll to top.
-      root.scrollIntoView({ block: "start", behavior: "smooth" })
+      root.scrollIntoView?.({ block: "start", behavior: "smooth" })
       return
     }
     const idx = jumpIndexRef.current % invalids.length
     jumpIndexRef.current = idx + 1
     const target = invalids[idx]
-    target.scrollIntoView({ block: "center", behavior: "smooth" })
-    target
-      .querySelector<HTMLElement>("input, textarea, select, [contenteditable], [tabindex]")
-      ?.focus()
+    const control = findFieldControl(target)
+    if (control) focusFieldControl(target, control)
+    else target.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }, [])
+
+  // Consume a jump-to-field request (Problems row click). Effects only run
+  // while this panel is actually on screen — `<Activity mode="hidden">`
+  // tears them down — so a request raised while another panel was in front
+  // is picked up the moment the sidebar brings the Inspector forward. The
+  // field may still be mounting (CodeMirror builds its view in an effect),
+  // so the focus retries per frame until the control exists.
+  const pendingFocusSeq =
+    fieldFocusRequest && fieldFocusRequest.nodeId === selectedId && !isMultiSelect
+      ? fieldFocusRequest.seq
+      : null
+  const staleFocusSeq =
+    fieldFocusRequest && (fieldFocusRequest.nodeId !== selectedId || isMultiSelect)
+      ? fieldFocusRequest.seq
+      : null
+  const pendingFocusField = pendingFocusSeq !== null ? (fieldFocusRequest?.field ?? null) : null
+  useEffect(() => {
+    // The user moved on (picked another node, multi-selected) before the
+    // field could be shown — the request no longer describes this panel.
+    if (staleFocusSeq !== null) clearRequestedFieldFocus(staleFocusSeq)
+  }, [staleFocusSeq, clearRequestedFieldFocus])
+  useEffect(() => {
+    if (pendingFocusSeq === null) return
+    return focusFieldWhenReady({
+      getRoot: () => formScrollRef.current,
+      field: pendingFocusField,
+      onSettled: (outcome) => {
+        // A cancelled attempt (panel hidden or unmounted mid-wait) keeps the
+        // request so the next time the panel is on screen it tries again.
+        if (outcome !== "cancelled") clearRequestedFieldFocus(pendingFocusSeq)
+      },
+    })
+  }, [pendingFocusSeq, pendingFocusField, clearRequestedFieldFocus])
 
   if (isMultiSelect) {
     return <BulkNodeInspector useStore={useStore} className={className} embedded={embedded} />

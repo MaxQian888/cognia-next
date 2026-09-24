@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
+import { createEditorStore, EDITOR_HISTORY_LIMIT, REVALIDATE_DEBOUNCE_MS } from "./store"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
 import { workflowEditorRevision } from "./editor-revision"
@@ -1454,6 +1454,144 @@ describe("editor store — diagnostics", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("editor store — queued revalidation", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  function storeWithCron() {
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.cron", { x: 0, y: 0 })
+    // Cache the "cron required" error, then fix the param.
+    useStore.getState().revalidateNode(id)
+    useStore.getState().updateNodeData(id, { params: { cron: "0 9 * * 1-5" } })
+    return { useStore, id }
+  }
+
+  it("coalesces a burst of schedules into one trailing revalidation", () => {
+    const { useStore, id } = storeWithCron()
+    const spy = jest.spyOn(useStore.getState(), "revalidateNode")
+    useStore.getState().scheduleRevalidateNode(id)
+    useStore.getState().scheduleRevalidateNode(id)
+    useStore.getState().scheduleRevalidateNode(id)
+    jest.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS - 1)
+    expect(spy).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1)
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().validationByStepId[id]).toBeUndefined()
+  })
+
+  it("flushes the queue synchronously on a selection change", () => {
+    const { useStore, id } = storeWithCron()
+    const other = useStore.getState().addNode("trigger.manual", { x: 200, y: 0 })
+    useStore.getState().setSelectedNodes([id])
+    useStore.getState().scheduleRevalidateNode(id)
+    expect(useStore.getState().validationByStepId[id]).toBeDefined()
+
+    // The user picks another node before the debounce closes: the node they
+    // left must not keep its stale error.
+    useStore.getState().setSelectedNodes([other])
+    expect(useStore.getState().validationByStepId[id]).toBeUndefined()
+  })
+
+  it("flushes the queue when the selection is cleared", () => {
+    const { useStore, id } = storeWithCron()
+    useStore.getState().setSelectedNodes([id])
+    useStore.getState().scheduleRevalidateNode(id)
+    useStore.getState().clearSelection()
+    expect(useStore.getState().validationByStepId[id]).toBeUndefined()
+  })
+
+  it("flushPendingRevalidation runs every queued node once and cancels the timer", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.cron", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("trigger.cron", { x: 200, y: 0 })
+    const spy = jest.spyOn(useStore.getState(), "revalidateNode")
+    useStore.getState().scheduleRevalidateNode(a)
+    useStore.getState().scheduleRevalidateNode(b)
+    useStore.getState().flushPendingRevalidation()
+    expect(spy.mock.calls.map(([id]) => id).sort()).toEqual([a, b].sort())
+    expect(useStore.getState().validationByStepId[a]).toBeDefined()
+    expect(useStore.getState().validationByStepId[b]).toBeDefined()
+
+    jest.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  it("flushPendingRevalidation with an empty queue writes nothing", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.getState().validationByStepId
+    useStore.getState().flushPendingRevalidation()
+    expect(useStore.getState().validationByStepId).toBe(before)
+  })
+
+  it("revalidateAll supersedes the queue", () => {
+    const { useStore, id } = storeWithCron()
+    const spy = jest.spyOn(useStore.getState(), "revalidateNode")
+    useStore.getState().scheduleRevalidateNode(id)
+    useStore.getState().revalidateAll()
+    expect(useStore.getState().validationByStepId[id]).toBeUndefined()
+    jest.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("ignores a queued id whose node was deleted before the flush", () => {
+    const { useStore, id } = storeWithCron()
+    useStore.getState().scheduleRevalidateNode(id)
+    useStore.getState().removeNodes([id])
+    expect(() => jest.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS)).not.toThrow()
+    expect(useStore.getState().nodes.find((n) => n.id === id)).toBeUndefined()
+  })
+})
+
+describe("editor store — field-focus signal", () => {
+  it("selects the node, validates it, and records the field", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.cron", { x: 0, y: 0 })
+    expect(useStore.getState().validationByStepId[id]).toBeUndefined()
+
+    useStore.getState().requestFieldFocus({ nodeId: id, field: "cron" })
+
+    expect(useStore.getState().selectedNodeIds).toEqual([id])
+    // Validated up front so the form can mark the field it is asked to show.
+    expect(useStore.getState().validationByStepId[id]?.fields.cron).toEqual({ key: "required" })
+    expect(useStore.getState().requestedFieldFocus).toEqual({
+      nodeId: id,
+      field: "cron",
+      seq: expect.any(Number),
+    })
+  })
+
+  it("defaults a missing field to null and bumps the seq on every request", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.cron", { x: 0, y: 0 })
+    useStore.getState().requestFieldFocus({ nodeId: id })
+    const first = useStore.getState().requestedFieldFocus!
+    expect(first.field).toBeNull()
+    useStore.getState().requestFieldFocus({ nodeId: id, field: "cron" })
+    expect(useStore.getState().requestedFieldFocus!.seq).toBeGreaterThan(first.seq)
+  })
+
+  it("ignores a request for a node that does not exist", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().requestFieldFocus({ nodeId: "ghost", field: "cron" })
+    expect(useStore.getState().requestedFieldFocus).toBeNull()
+    expect(useStore.getState().selectedNodeIds).toEqual([])
+  })
+
+  it("clears only the request whose seq it is handed", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.cron", { x: 0, y: 0 })
+    useStore.getState().requestFieldFocus({ nodeId: id, field: "cron" })
+    const stale = useStore.getState().requestedFieldFocus!.seq
+    useStore.getState().requestFieldFocus({ nodeId: id, field: "cron" })
+    // A late clear from the first attempt must not swallow the second click.
+    useStore.getState().clearRequestedFieldFocus(stale)
+    expect(useStore.getState().requestedFieldFocus).not.toBeNull()
+    useStore.getState().clearRequestedFieldFocus(useStore.getState().requestedFieldFocus!.seq)
+    expect(useStore.getState().requestedFieldFocus).toBeNull()
   })
 })
 

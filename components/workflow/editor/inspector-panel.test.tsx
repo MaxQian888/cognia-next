@@ -3,6 +3,7 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
+import { Activity, useEffect, useState } from "react"
 import { act, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { createEditorStore } from "@/lib/workflow/editor/store"
@@ -11,6 +12,11 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 // The dedicated per-kind config form would mount heavy UI (Monaco for the
 // raw-JSON editor, scheme-form etc.); stub it with a button that just
 // forwards `onChange` so we can drive the debounce path deterministically.
+// The button also fills `userPrompt` — the one required ai.prompt param — so
+// a click turns an invalid node valid. Two real `Field` rows give the
+// jump-to-field path something to find: a plain input, and a stand-in for
+// `ExpressionField` whose editable surface mounts one tick late, the way
+// CodeMirror builds `.cm-content` in an effect.
 const mockConfigChanges = jest.fn()
 jest.mock("./inspector/node-config-registry", () => ({
   getNodeConfigComponentForEntry: () =>
@@ -22,18 +28,56 @@ jest.mock("./inspector/node-config-registry", () => ({
       onChange: (next: Record<string, unknown>) => void
     }) {
       mockConfigChanges(params)
+      const { Field } = jest.requireActual("./inspector/forms/shared") as {
+        Field: typeof import("./inspector/forms/shared").Field
+      }
       return (
-        <button
-          type="button"
-          data-testid="mock-node-config-trigger"
-          onClick={() => onChange({ ...params, hit: (Number(params.hit) || 0) + 1 })}
-        >
-          edit-config
-        </button>
+        <>
+          <button
+            type="button"
+            data-testid="mock-node-config-trigger"
+            onClick={() =>
+              onChange({ ...params, userPrompt: "filled", hit: (Number(params.hit) || 0) + 1 })
+            }
+          >
+            edit-config
+          </button>
+          <Field label="System prompt" htmlFor="mock-system" name="systemPrompt">
+            <input id="mock-system" data-testid="mock-system-input" />
+          </Field>
+          <Field label="User prompt" htmlFor="mock-user-prompt" name="userPrompt" required>
+            <MockLateExpressionField />
+          </Field>
+        </>
       )
     },
   hasDedicatedConfigForEntry: () => true,
 }))
+
+/** Mimics ExpressionField: marker root now, editable surface after a delay. */
+function MockLateExpressionField() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setMounted(true), 50)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div data-expression-field="true">
+      <button type="button" data-testid="mock-variable-picker">
+        vars
+      </button>
+      {mounted ? (
+        <div
+          className="cm-content"
+          contentEditable="true"
+          suppressContentEditableWarning
+          tabIndex={0}
+          data-testid="mock-cm-content"
+        />
+      ) : null}
+    </div>
+  )
+}
 
 // Imported after the mock so the InspectorPanel resolves to the stubbed
 // registry above.
@@ -108,6 +152,27 @@ function mountInspector(store: ReturnType<typeof createEditorStore>) {
       <InspectorPanel useStore={store} />
     </NextIntlClientProvider>
   )
+}
+
+/**
+ * Mount the panel the way the Context Workbench does: behind `<Activity>`,
+ * which keeps the DOM + state of a panel that is not in front but tears its
+ * effects down (and back up when it returns).
+ */
+function mountInWorkbench(store: ReturnType<typeof createEditorStore>, visible: boolean) {
+  const ui = (mode: "visible" | "hidden") => (
+    <NextIntlClientProvider locale="en" messages={MESSAGES as never} timeZone="UTC">
+      <Activity mode={mode}>
+        <InspectorPanel useStore={store} />
+      </Activity>
+    </NextIntlClientProvider>
+  )
+  const view = render(ui(visible ? "visible" : "hidden"))
+  return {
+    ...view,
+    show: () => view.rerender(ui("visible")),
+    hide: () => view.rerender(ui("hidden")),
+  }
 }
 
 describe("InspectorPanel", () => {
@@ -210,6 +275,205 @@ describe("InspectorPanel", () => {
     })
     expect(revalidateSpy).toHaveBeenCalledTimes(1)
     expect(revalidateSpy).toHaveBeenCalledWith("n_a")
+  })
+
+  describe("validation convergence races", () => {
+    function invalidSelectedStore() {
+      const store = createEditorStore(buildWorkflow())
+      act(() => {
+        store.getState().setSelectedNodes(["n_a"])
+        // Cached error: ai.prompt with no userPrompt.
+        store.getState().revalidateNode("n_a")
+      })
+      expect(store.getState().validationByStepId.n_a).toBeDefined()
+      return store
+    }
+
+    it("settles the queued revalidation when the inspector unmounts mid-debounce", () => {
+      const store = invalidSelectedStore()
+      const view = mountInspector(store)
+      act(() => {
+        screen.getByTestId("mock-node-config-trigger").click()
+      })
+      // Still inside the 150ms window — nothing written yet.
+      expect(store.getState().validationByStepId.n_a).toBeDefined()
+
+      view.unmount()
+
+      // A component-owned debounce used to die here and leave the cached
+      // error behind; the node badge then read "1" until a reload.
+      expect(store.getState().validationByStepId.n_a).toBeUndefined()
+    })
+
+    it("settles it when the workbench hides the inspector behind another panel", () => {
+      const store = invalidSelectedStore()
+      const view = mountInWorkbench(store, true)
+      act(() => {
+        screen.getByTestId("mock-node-config-trigger").click()
+      })
+      act(() => view.hide())
+      expect(store.getState().validationByStepId.n_a).toBeUndefined()
+    })
+
+    it("settles it after a remount without a double revalidation", () => {
+      const store = invalidSelectedStore()
+      const revalidateSpy = jest.spyOn(store.getState(), "revalidateNode")
+      const first = mountInspector(store)
+      act(() => {
+        screen.getByTestId("mock-node-config-trigger").click()
+      })
+      first.unmount()
+      mountInspector(store)
+      act(() => {
+        jest.advanceTimersByTime(500)
+      })
+      expect(revalidateSpy).toHaveBeenCalledTimes(1)
+      expect(store.getState().validationByStepId.n_a).toBeUndefined()
+    })
+
+    it("settles it when the selection changes while the inspector is hidden", () => {
+      const store = invalidSelectedStore()
+      const revalidateSpy = jest.spyOn(store.getState(), "revalidateNode")
+      const view = mountInWorkbench(store, true)
+      act(() => {
+        // Edit, then another panel comes to the front before the window closes…
+        screen.getByTestId("mock-node-config-trigger").click()
+      })
+      act(() => view.hide())
+      act(() => {
+        // …and the user picks another node there. Nothing may be pending or
+        // re-run for the node they left.
+        store.getState().setSelectedNodes(["n_b"])
+        jest.advanceTimersByTime(500)
+      })
+      expect(revalidateSpy).toHaveBeenCalledTimes(1)
+      expect(revalidateSpy).toHaveBeenCalledWith("n_a")
+      expect(store.getState().validationByStepId.n_a).toBeUndefined()
+    })
+
+    it("keeps the error when the edit did not fix it", () => {
+      const store = createEditorStore(buildWorkflow())
+      act(() => {
+        store.getState().setSelectedNodes(["n_a"])
+      })
+      const view = mountInspector(store)
+      act(() => {
+        store.getState().updateNodeData("n_a", { params: { userPrompt: "" } })
+        store.getState().scheduleRevalidateNode("n_a")
+      })
+      view.unmount()
+      expect(store.getState().validationByStepId.n_a?.fields.userPrompt).toMatchObject({
+        key: "required",
+      })
+    })
+  })
+
+  describe("jump to field", () => {
+    it("focuses the requested field once its expression editor has mounted", () => {
+      const store = createEditorStore(buildWorkflow())
+      mountInspector(store)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "userPrompt" })
+      })
+      // The editable surface is not there yet — the variable picker above it
+      // must not be taken as the target.
+      expect(document.activeElement).not.toBe(screen.getByTestId("mock-variable-picker"))
+      expect(store.getState().requestedFieldFocus).not.toBeNull()
+
+      // The editor surface mounts at 50ms; the per-frame retry picks it up on
+      // the next frame after React commits it.
+      act(() => {
+        jest.advanceTimersByTime(60)
+      })
+      act(() => {
+        jest.advanceTimersByTime(50)
+      })
+      expect(document.activeElement).toBe(screen.getByTestId("mock-cm-content"))
+      expect(store.getState().requestedFieldFocus).toBeNull()
+    })
+
+    it("marks the requested field invalid even on a node that was never validated", () => {
+      const store = createEditorStore(buildWorkflow())
+      mountInspector(store)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "userPrompt" })
+      })
+      // Diagnostics are seeded on open but the per-field cache is not; the
+      // request validates the node so the row it names carries the marker.
+      const row = document.querySelector('[data-field="userPrompt"]')
+      expect(row).toHaveAttribute("data-invalid", "true")
+      expect(screen.getByTestId("field-error-userPrompt")).toBeInTheDocument()
+    })
+
+    it("cycles the header error badge onto the invalid field's editor", () => {
+      const store = createEditorStore(buildWorkflow())
+      act(() => {
+        store.getState().setSelectedNodes(["n_a"])
+        store.getState().revalidateNode("n_a")
+      })
+      mountInspector(store)
+      act(() => {
+        jest.advanceTimersByTime(100)
+      })
+      act(() => {
+        screen.getByTestId("inspector-error-badge").click()
+      })
+      expect(document.activeElement).toBe(screen.getByTestId("mock-cm-content"))
+    })
+
+    it("focuses a plain input field immediately", () => {
+      const store = createEditorStore(buildWorkflow())
+      mountInspector(store)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "systemPrompt" })
+      })
+      expect(document.activeElement).toBe(screen.getByTestId("mock-system-input"))
+      expect(store.getState().requestedFieldFocus).toBeNull()
+    })
+
+    it("waits while the inspector is hidden and focuses once it is brought forward", () => {
+      const store = createEditorStore(buildWorkflow())
+      const view = mountInWorkbench(store, false)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "systemPrompt" })
+        jest.advanceTimersByTime(5_000)
+      })
+      // Hidden panels run no effects — the request survives untouched.
+      expect(store.getState().requestedFieldFocus).not.toBeNull()
+      expect(document.activeElement).toBe(document.body)
+
+      act(() => view.show())
+      expect(document.activeElement).toBe(screen.getByTestId("mock-system-input"))
+      expect(store.getState().requestedFieldFocus).toBeNull()
+    })
+
+    it("drops a request once the user has selected a different node", () => {
+      const store = createEditorStore(buildWorkflow())
+      const view = mountInWorkbench(store, false)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "systemPrompt" })
+        store.getState().setSelectedNodes(["n_b"])
+      })
+      act(() => view.show())
+      expect(store.getState().requestedFieldFocus).toBeNull()
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it("falls back to the first invalid field for an object-level problem", () => {
+      const store = createEditorStore(buildWorkflow())
+      mountInspector(store)
+      act(() => {
+        store.getState().requestFieldFocus({ nodeId: "n_a", field: "_root" })
+      })
+      act(() => {
+        jest.advanceTimersByTime(60)
+      })
+      act(() => {
+        jest.advanceTimersByTime(50)
+      })
+      // `_root` names no row; the invalid `userPrompt` row is the target.
+      expect(document.activeElement).toBe(screen.getByTestId("mock-cm-content"))
+    })
   })
 
   it("does not re-render the memoized config form when an unrelated node is mutated", () => {

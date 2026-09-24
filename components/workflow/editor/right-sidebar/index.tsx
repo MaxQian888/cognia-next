@@ -277,6 +277,7 @@ function WorkflowContextWorkbench({
     requestedInspectorPanel,
     requestedRunsPanelStepId,
     requestedCopilotPrompt,
+    requestedFieldFocusSeq,
   } = useStore(
     useShallow((state: EditorState) => ({
       selectedNodeIds: state.selectedNodeIds,
@@ -290,6 +291,7 @@ function WorkflowContextWorkbench({
       requestedInspectorPanel: state.requestedInspectorPanel ?? false,
       requestedRunsPanelStepId: state.requestedRunsPanelStepId ?? null,
       requestedCopilotPrompt: state.requestedCopilotPrompt ?? null,
+      requestedFieldFocusSeq: state.requestedFieldFocus?.seq ?? null,
     }))
   )
   const scopeKey = `${workbenchInstanceId}::workflow:${workflowId}`
@@ -321,6 +323,17 @@ function WorkflowContextWorkbench({
     smartReveal(scopeKey, "inspector", "narrow")
     useStore.getState().clearRequestedInspectorPanel()
   }, [requestedInspectorPanel, scopeKey, smartReveal, useStore])
+
+  // Jump-to-field (a Problems row click): an explicit gesture, so it opens the
+  // dock if the host collapsed it and brings the Inspector forward even over a
+  // pinned panel. The request itself stays in the store — the Inspector clears
+  // it once the field has mounted and taken focus, which is only possible
+  // after this reveal has put it on screen.
+  useEffect(() => {
+    if (requestedFieldFocusSeq === null) return
+    onEnsureVisible?.()
+    navigatePanel(scopeKey, "inspector", "narrow")
+  }, [requestedFieldFocusSeq, navigatePanel, onEnsureVisible, scopeKey])
 
   // The canvas node's last-run footer asks for this: the node now shows the
   // step's tokens and cost, so the obvious next question is what that run did.

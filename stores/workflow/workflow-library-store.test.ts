@@ -11,6 +11,7 @@ beforeEach(() => {
     sort: "updated",
     filters: { ...DEFAULT_WORKFLOW_FILTERS },
     query: "",
+    searchResetKey: 0,
     currentFolderId: ROOT_FOLDER_ID,
     selection: new Set<string>(),
     selectionMode: false,
@@ -61,6 +62,30 @@ describe("preference setters", () => {
     const { result } = renderHook(() => useWorkflowLibraryStore())
     act(() => result.current.setQuery("digest"))
     expect(result.current.query).toBe("digest")
+  })
+
+  it("resetFilters clears the facets but leaves the search text alone", () => {
+    const { result } = renderHook(() => useWorkflowLibraryStore())
+    act(() => {
+      result.current.setQuery("digest")
+      result.current.setFilters({ hasTrigger: true })
+    })
+    act(() => result.current.resetFilters())
+    expect(result.current.filters).toEqual(DEFAULT_WORKFLOW_FILTERS)
+    expect(result.current.query).toBe("digest")
+  })
+
+  it("clearSearchAndFilters resets the query, the facets, and bumps the search reset key", () => {
+    const { result } = renderHook(() => useWorkflowLibraryStore())
+    const before = result.current.searchResetKey
+    act(() => {
+      result.current.setQuery("digest")
+      result.current.setFilters({ type: "template", recentlyFailed: true })
+    })
+    act(() => result.current.clearSearchAndFilters())
+    expect(result.current.query).toBe("")
+    expect(result.current.filters).toEqual(DEFAULT_WORKFLOW_FILTERS)
+    expect(result.current.searchResetKey).toBe(before + 1)
   })
 })
 
@@ -167,6 +192,7 @@ describe("persistence", () => {
     expect(persisted.state.sort).toBe("runCount")
     expect(persisted.state.filters.type).toBe("user")
     expect(persisted.state).not.toHaveProperty("query")
+    expect(persisted.state).not.toHaveProperty("searchResetKey")
     expect(persisted.state).not.toHaveProperty("selection")
   })
 })

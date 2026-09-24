@@ -1,6 +1,7 @@
 import {
   filterWorkflows,
   hasTriggerNode,
+  countActiveFacetFilters,
   isFilterActive,
   matchesQuery,
   resolveDragMoveIds,
@@ -183,5 +184,18 @@ describe("isFilterActive", () => {
     expect(isFilterActive("", { ...DEFAULT_WORKFLOW_FILTERS, type: "user" })).toBe(true)
     expect(isFilterActive("", { ...DEFAULT_WORKFLOW_FILTERS, hasTrigger: true })).toBe(true)
     expect(isFilterActive("", { ...DEFAULT_WORKFLOW_FILTERS, recentlyFailed: true })).toBe(true)
+  })
+})
+
+describe("countActiveFacetFilters", () => {
+  it("is zero for the default facets", () => {
+    expect(countActiveFacetFilters(DEFAULT_WORKFLOW_FILTERS)).toBe(0)
+  })
+
+  it("counts each non-default facet once", () => {
+    expect(countActiveFacetFilters({ ...DEFAULT_WORKFLOW_FILTERS, type: "builtin" })).toBe(1)
+    expect(
+      countActiveFacetFilters({ type: "template", hasTrigger: true, recentlyFailed: true })
+    ).toBe(3)
   })
 })

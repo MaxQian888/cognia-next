@@ -10,6 +10,7 @@ import { DEFAULT_WORKFLOW_FILTERS, useWorkflowLibraryStore } from "@/stores/work
 beforeEach(() => {
   useWorkflowLibraryStore.setState({
     query: "",
+    searchResetKey: 0,
     currentFolderId: ROOT_FOLDER_ID,
     createFolderParentId: null,
     filters: { ...DEFAULT_WORKFLOW_FILTERS },
@@ -47,6 +48,49 @@ describe("WorkflowLibraryToolbar", () => {
         jest.advanceTimersByTime(250)
       })
       expect(useWorkflowLibraryStore.getState().query).toBe("digest")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("empties the search box when the search and filters are cleared", () => {
+    jest.useFakeTimers()
+    try {
+      render(<WorkflowLibraryToolbar onImportFiles={jest.fn()} />)
+      const search = () => screen.getByTestId<HTMLInputElement>("workflow-library-search")
+      fireEvent.change(search(), { target: { value: "digest" } })
+      act(() => {
+        jest.advanceTimersByTime(250)
+      })
+      expect(useWorkflowLibraryStore.getState().query).toBe("digest")
+
+      act(() => {
+        useWorkflowLibraryStore.getState().clearSearchAndFilters()
+      })
+      expect(search().value).toBe("")
+      expect(useWorkflowLibraryStore.getState().query).toBe("")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("drops a keystroke still inside the debounce window when the search is cleared", () => {
+    jest.useFakeTimers()
+    try {
+      render(<WorkflowLibraryToolbar onImportFiles={jest.fn()} />)
+      fireEvent.change(screen.getByTestId("workflow-library-search"), {
+        target: { value: "digest" },
+      })
+      // Cleared before the 200ms write lands.
+      act(() => {
+        useWorkflowLibraryStore.getState().clearSearchAndFilters()
+      })
+      act(() => {
+        jest.advanceTimersByTime(500)
+      })
+      // The pending write must not resurrect the query the user just cleared.
+      expect(useWorkflowLibraryStore.getState().query).toBe("")
+      expect(screen.getByTestId<HTMLInputElement>("workflow-library-search").value).toBe("")
     } finally {
       jest.useRealTimers()
     }

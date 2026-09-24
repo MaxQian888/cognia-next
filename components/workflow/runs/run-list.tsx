@@ -111,7 +111,7 @@ export function RunList({ workflowId }: { workflowId: string }) {
 
   const [filters, setFilters] = useState<RunListFilters>(DEFAULT_RUN_FILTERS)
   const [searchText, setSearchText] = useState("")
-  const { call: debouncedSearch } = useDebouncedCallback(
+  const { call: debouncedSearch, cancel: cancelDebouncedSearch } = useDebouncedCallback(
     (value: string) => setFilters((f) => ({ ...f, query: value })),
     200
   )
@@ -153,9 +153,16 @@ export function RunList({ workflowId }: { workflowId: string }) {
     })
   }
   const clearFilters = () => {
+    // Drop a keystroke still inside the search debounce first: left pending,
+    // it would land after this reset and re-apply the query the box no longer
+    // shows — an empty list with an empty search box.
+    cancelDebouncedSearch()
     setFilters(DEFAULT_RUN_FILTERS)
     setSearchText("")
   }
+  // The filtered-empty state names the search when it is part of what hides
+  // every run, so an over-specific query does not read as "no history".
+  const activeQuery = filters.query.trim()
 
   const handleReRun = async (run: WorkflowRunRow) => {
     if (busy) return
@@ -408,10 +415,22 @@ export function RunList({ workflowId }: { workflowId: string }) {
                 <FilterXIcon className="size-8" aria-hidden="true" />
               </EmptyMedia>
             </EmptyHeader>
-            <EmptyTitle>{t("filteredEmpty.title")}</EmptyTitle>
-            <EmptyDescription>{t("filteredEmpty.description")}</EmptyDescription>
-            <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
-              {t("clearFilters")}
+            <EmptyTitle className="break-words" data-testid="runs-filtered-empty-title">
+              {activeQuery
+                ? t("filteredEmpty.queryTitle", { query: activeQuery })
+                : t("filteredEmpty.title")}
+            </EmptyTitle>
+            <EmptyDescription>
+              {activeQuery ? t("filteredEmpty.queryDescription") : t("filteredEmpty.description")}
+            </EmptyDescription>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={clearFilters}
+              data-testid="runs-filtered-empty-clear"
+            >
+              {activeQuery ? t("clearSearchAndFilters") : t("clearFilters")}
             </Button>
           </Empty>
         ) : (

@@ -153,6 +153,38 @@ describe("ProblemsTab", () => {
     expect(row.textContent).toMatch(/cron expression|field is required/i)
     fireEvent.click(row)
     expect(store.getState().selectedNodeIds).toEqual(["cron"])
+    // A field-level problem asks the Inspector to focus that exact field, and
+    // the node is validated up front so the form marks it.
+    expect(store.getState().requestedFieldFocus).toEqual({
+      nodeId: "cron",
+      field: "cron",
+      seq: expect.any(Number),
+    })
+    expect(store.getState().validationByStepId.cron?.fields.cron).toBeDefined()
+  })
+
+  it("raises a fresh focus request on every click of the same row", () => {
+    const store = renderTab()
+    const errorRow = screen
+      .getAllByTestId("problems-row")
+      .find((r) => r.getAttribute("data-severity") === "error")!
+    fireEvent.click(errorRow)
+    const first = store.getState().requestedFieldFocus!
+    // exprUnknownNode on `p` names the param holding the reference.
+    expect(first).toMatchObject({ nodeId: "p", field: "userPrompt" })
+    store.getState().clearRequestedFieldFocus(first.seq)
+    fireEvent.click(errorRow)
+    expect(store.getState().requestedFieldFocus!.seq).toBeGreaterThan(first.seq)
+  })
+
+  it("keeps the canvas-only reveal for a node problem that names no field", () => {
+    const store = renderTab()
+    const orphanRow = screen
+      .getAllByTestId("problems-row")
+      .find((r) => r.textContent?.match(/not reachable/i))!
+    fireEvent.click(orphanRow)
+    expect(store.getState().selectedNodeIds).toEqual(["island"])
+    expect(store.getState().requestedFieldFocus).toBeNull()
   })
 
   it("selects the edge when an edge-targeted diagnostic row is clicked", () => {

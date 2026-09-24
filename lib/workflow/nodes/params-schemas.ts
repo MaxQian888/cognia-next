@@ -13,6 +13,12 @@
 import { z } from "zod"
 import { FUSION_ACTION_CHOICES } from "@/lib/router-fusion/gate/explicit-run"
 import { TEAM_EXECUTION_PATTERNS } from "@/types/agent/agent-team"
+import {
+  OPEN_PLAN_STATUSES,
+  TERMINAL_PLAN_STATUSES,
+  type PlanEventKind,
+  type PlanStatus as PlanStatusValue,
+} from "@/types/agent/plan"
 import { VERIFIER_LENSES } from "@/types/agent/ultracode"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -496,16 +502,17 @@ const PlanSource = z.enum([
 const PlanExecutionMode = z.enum(["in_session", "orchestrated", "auto"])
 const PlanRefinementType = z.enum(["optimize", "simplify", "expand", "reorder", "repair"])
 const PlanRefinementTrigger = z.enum(["manual", "step_failure", "judge_deviation"])
-const PlanStatus = z.enum([
-  "draft",
-  "awaiting_approval",
-  "approved",
-  "executing",
-  "paused",
-  "completed",
-  "failed",
-  "cancelled",
-])
+/**
+ * Every plan status, derived from the plan type's own open / terminal
+ * partition (`types/agent/plan.ts`) rather than restated here. A hand-kept
+ * copy of this list silently missed the terminal `rejected` status when the
+ * plan machine gained it, so `action.plan.list` rejected a valid filter.
+ */
+export const PLAN_STATUS_VALUES: readonly PlanStatusValue[] = [
+  ...OPEN_PLAN_STATUSES,
+  ...TERMINAL_PLAN_STATUSES,
+]
+const PlanStatus = z.enum(PLAN_STATUS_VALUES as [PlanStatusValue, ...PlanStatusValue[]])
 
 // ── Issue tracker (spec 2026-09-06 D9) ───────────────────────────────────
 const IssueStatusParam = z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
@@ -1995,23 +2002,35 @@ const ImageOutputParams = {
   quality: numberRange(0, 100).int().optional(),
 }
 
-/** Plan trail kinds a `trigger.plan.event` node may filter on. */
-export const PLAN_TRIGGER_KINDS = [
-  "plan_created",
-  "plan_updated",
-  "approved",
-  "rejected",
-  "deferred",
-  "refined",
-  "step_started",
-  "step_completed",
-  "step_failed",
-  "replanned",
-  "paused",
-  "resumed",
-  "cancelled",
-  "exit",
-] as const
+/**
+ * One flag per `PlanEventKind`. `satisfies Record<PlanEventKind, true>` makes
+ * the build fail when the plan trail gains a kind this map does not name (or
+ * loses one it still names) — the hand-kept tuple it replaces went stale when
+ * `step_skipped` was added, so a trigger filtering on it failed validation.
+ */
+const PLAN_TRIGGER_KIND_FLAGS = {
+  plan_created: true,
+  plan_updated: true,
+  approved: true,
+  rejected: true,
+  deferred: true,
+  refined: true,
+  step_started: true,
+  step_completed: true,
+  step_failed: true,
+  step_skipped: true,
+  replanned: true,
+  paused: true,
+  resumed: true,
+  cancelled: true,
+  exit: true,
+} as const satisfies Record<PlanEventKind, true>
+
+/** Plan trail kinds a `trigger.plan.event` node may filter on — every `PlanEventKind`. */
+export const PLAN_TRIGGER_KINDS = Object.keys(PLAN_TRIGGER_KIND_FLAGS) as [
+  PlanEventKind,
+  ...PlanEventKind[],
+]
 
 /** Captured-item kinds a `trigger.capture.item` node may filter on. */
 export const CAPTURE_TRIGGER_KINDS = ["text", "url", "image"] as const

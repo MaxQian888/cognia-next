@@ -66,6 +66,7 @@ interface RenderArgs {
   params?: Record<string, unknown>
   locked?: boolean
   lastRun?: LastRunSummary
+  notes?: string
 }
 
 function renderNode({
@@ -79,6 +80,7 @@ function renderNode({
   params = {},
   locked = false,
   lastRun,
+  notes,
 }: RenderArgs = {}) {
   const ui = (
     <TooltipProvider>
@@ -93,6 +95,7 @@ function renderNode({
           typeVersion,
           ...(locked ? { locked: true } : {}),
           ...(lastRun ? { lastRun } : {}),
+          ...(notes ? { notes } : {}),
         }}
         positionAbsoluteX={0}
         positionAbsoluteY={0}
@@ -506,6 +509,38 @@ describe("WorkflowNodeComponent", () => {
       expect(screen.queryByTestId("wf-node-error-badge")).toBeNull()
     })
 
+    it("follows the live diagnostics, not a stale per-field validation cache", () => {
+      const store = storeWith(
+        [
+          {
+            id: "t",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "T", params: {} },
+          },
+          {
+            id: "p",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 200, y: 0 },
+            data: { label: "P", params: { userPrompt: "hi" } },
+          },
+        ],
+        [{ id: "e1", source: "t", target: "p" }]
+      )
+      // A cached error the params no longer have — what a dropped debounced
+      // revalidation used to leave behind.
+      store.getState().setValidation("p", {
+        fields: { userPrompt: { key: "required" } },
+        summary: ["userPrompt: required"],
+        hasErrors: true,
+      })
+      renderNode({ store, id: "p", kind: "ai.prompt", params: { userPrompt: "hi" } })
+      expect(screen.queryByTestId("wf-node-error-badge")).toBeNull()
+      expect(screen.queryByTestId("wf-node-missing-required")).toBeNull()
+    })
+
     it("shows a red error badge for a node with an error diagnostic (unknown ref)", () => {
       const store = storeWith(
         [
@@ -549,6 +584,116 @@ describe("locked nodes", () => {
     const { store } = withStore()
     renderNode({ store })
     expect(screen.queryByTestId("wf-node-lock-badge")).toBeNull()
+  })
+
+  describe("configuration body", () => {
+    function agentStore(params: Record<string, unknown>) {
+      const wf = makeWorkflow()
+      wf.nodes = [
+        {
+          id: "t",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "T", params: {} },
+        },
+        {
+          id: "agent",
+          type: "action.agent.turn",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "Agent", params },
+        },
+      ]
+      wf.edges = [{ id: "e1", source: "t", target: "agent" }]
+      return createEditorStore(wf)
+    }
+
+    it("names the missing required field instead of letting notes pass for configuration", () => {
+      const store = agentStore({})
+      renderNode({
+        store,
+        id: "agent",
+        kind: "action.agent.turn",
+        params: {},
+        notes: "Draft the weekly digest",
+      })
+      const missing = screen.getByTestId("wf-node-missing-required")
+      expect(missing).toHaveTextContent("Prompt required")
+      expect(missing).toHaveAttribute("data-fields", "prompt")
+      // Notes still show — but as an annotation, not as the node's content.
+      expect(screen.queryByTestId("wf-node-preview")).toBeNull()
+      const notes = screen.getByTestId("wf-node-notes")
+      expect(notes).toHaveTextContent("Draft the weekly digest")
+      expect(notes).toHaveAttribute("title", "Author note — not part of the node's configuration")
+    })
+
+    it("leads with the configured prompt and keeps notes secondary", () => {
+      const store = agentStore({ prompt: "Summarize the thread" })
+      renderNode({
+        store,
+        id: "agent",
+        kind: "action.agent.turn",
+        params: { prompt: "Summarize the thread" },
+        notes: "Owner: ops",
+      })
+      expect(screen.queryByTestId("wf-node-missing-required")).toBeNull()
+      const preview = screen.getByTestId("wf-node-preview")
+      expect(preview).toHaveTextContent("Summarize the thread")
+      expect(preview).toHaveAttribute("data-field", "prompt")
+      // Preview precedes the note in the card body.
+      const notes = screen.getByTestId("wf-node-notes")
+      expect(preview.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it("lists every missing required field by its label", () => {
+      const wf = makeWorkflow()
+      wf.nodes = [
+        {
+          id: "run",
+          type: "action.team.run",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "Run team", params: {} },
+        },
+      ]
+      const store = createEditorStore(wf)
+      renderNode({ store, id: "run", kind: "action.team.run", params: {} })
+      expect(screen.getByTestId("wf-node-missing-required")).toHaveTextContent(
+        "Team, Goal required"
+      )
+    })
+
+    it("falls back to the per-node validation result without a store", () => {
+      render(
+        <TooltipProvider>
+          <WorkflowNodeComponent
+            id="n_x"
+            type="workflowNode"
+            selected={false}
+            data={{
+              label: "Agent",
+              params: {},
+              kind: "action.agent.turn",
+              typeVersion: 1,
+              validationErrorCount: 1,
+              validationErrors: ["prompt: required"],
+            }}
+            positionAbsoluteX={0}
+            positionAbsoluteY={0}
+            dragging={false}
+            zIndex={0}
+            isConnectable={true}
+            deletable={true}
+            selectable={true}
+            draggable={true}
+          />
+        </TooltipProvider>
+      )
+      // Headless renders keep the count badge; there is no field map to name.
+      expect(screen.getByTestId("wf-node-error-badge")).toHaveTextContent("1")
+      expect(screen.queryByTestId("wf-node-missing-required")).toBeNull()
+    })
   })
 
   it("summarises an agent node's model and tool count on the card", () => {

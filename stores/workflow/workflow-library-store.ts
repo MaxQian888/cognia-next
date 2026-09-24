@@ -40,6 +40,13 @@ interface WorkflowLibraryState {
   // ── Ephemeral session state ──────────────────────────────────────────────
   /** Debounced search text (matched on name/description/tags). */
   query: string
+  /**
+   * Bumped by {@link WorkflowLibraryState.clearSearchAndFilters}. The toolbar
+   * keys its search box on it, so a clear remounts the box: the typed text
+   * resets and any keystroke still inside the box's debounce window is
+   * cancelled instead of landing after the clear and re-hiding every row.
+   */
+  searchResetKey: number
   /** Folder currently being browsed; `ROOT_FOLDER_ID` is the library root. */
   currentFolderId: string
   /** Selected workflow ids for batch operations. */
@@ -60,7 +67,14 @@ interface WorkflowLibraryState {
   setViewMode: (mode: WorkflowViewMode) => void
   setSort: (sort: WorkflowSortMode) => void
   setFilters: (patch: Partial<WorkflowLibraryFilters>) => void
+  /** Reset the facet filters (type / has-trigger / recently-failed) only. */
   resetFilters: () => void
+  /**
+   * Reset the search text AND the facet filters — the empty-state "Clear"
+   * action. Clearing only the facets left a stale search hiding every row,
+   * which reads as an empty library.
+   */
+  clearSearchAndFilters: () => void
   setQuery: (query: string) => void
 
   enterFolder: (id: string) => void
@@ -98,6 +112,7 @@ export const useWorkflowLibraryStore = create<WorkflowLibraryState>()(
       filters: DEFAULT_WORKFLOW_FILTERS,
 
       query: "",
+      searchResetKey: 0,
       currentFolderId: ROOT_FOLDER_ID,
       selection: new Set<string>(),
       selectionMode: false,
@@ -111,6 +126,12 @@ export const useWorkflowLibraryStore = create<WorkflowLibraryState>()(
       setSort: (sort) => set({ sort }),
       setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
       resetFilters: () => set({ filters: DEFAULT_WORKFLOW_FILTERS }),
+      clearSearchAndFilters: () =>
+        set((s) => ({
+          filters: DEFAULT_WORKFLOW_FILTERS,
+          query: "",
+          searchResetKey: s.searchResetKey + 1,
+        })),
       setQuery: (query) => set({ query }),
 
       // Changing folder swaps the visible item set, so any active selection

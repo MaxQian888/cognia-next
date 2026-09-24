@@ -4,6 +4,10 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { NodeFloatingToolbar } from "./node-floating-toolbar"
 
 jest.mock("@xyflow/react", () => ({
@@ -104,6 +108,26 @@ describe("NodeFloatingToolbar", () => {
     expect(root.getAttribute("data-always-visible")).toBe("false")
     expect(root.className).toContain("opacity-0")
   })
+
+  it.each([true, false])(
+    "keeps the toolbar reachable without a hover (motionEnabled=%s)",
+    (motionEnabled) => {
+      const { onCopy } = renderToolbar({ alwaysVisible: false, motionEnabled })
+      const root = screen.getByTestId("wf-node-toolbar-n_a")
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+        expect(root).toHaveClass(variant)
+      }
+      for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+        expect(root).not.toHaveClass(forbidden)
+      }
+      expect(root).toHaveClass(motionEnabled ? "duration-150" : "transition-none")
+      const copy = screen.getByTestId("wf-node-toolbar-copy")
+      copy.focus()
+      expect(copy).toHaveFocus()
+      fireEvent.click(copy)
+      expect(onCopy).toHaveBeenCalledTimes(1)
+    }
+  )
 
   it("clicking a button does not bubble up to the parent (stopPropagation)", () => {
     const parentClick = jest.fn()

@@ -25,6 +25,7 @@ beforeEach(async () => {
     sort: "updated",
     filters: { ...DEFAULT_WORKFLOW_FILTERS },
     query: "",
+    searchResetKey: 0,
     currentFolderId: ROOT_FOLDER_ID,
     selection: new Set<string>(),
     selectionMode: false,
@@ -68,6 +69,41 @@ describe("WorkflowLibrary", () => {
     useWorkflowLibraryStore.setState({ query: "zzzznomatch" })
     render(<WorkflowLibrary />)
     expect(await screen.findByTestId("workflow-empty-filtered")).toBeInTheDocument()
+  })
+
+  it("says the search is hiding rows, and its clear action resets the search box too", async () => {
+    const wf = await createWorkflow({ name: "Alpha" })
+    useWorkflowLibraryStore.setState({
+      query: "zzzznomatch",
+      filters: { ...DEFAULT_WORKFLOW_FILTERS, hasTrigger: true },
+    })
+    render(<WorkflowLibrary />)
+    const empty = await screen.findByTestId("workflow-empty-filtered")
+    expect(empty).toHaveAttribute("data-search-active", "true")
+    expect(within(empty).getByText("No workflows match “zzzznomatch”")).toBeInTheDocument()
+    expect(screen.getByTestId<HTMLInputElement>("workflow-library-search").value).toBe(
+      "zzzznomatch"
+    )
+
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear search and filters" }))
+
+    // The workflow the stale query was hiding is back, and nothing is left
+    // behind to hide it again: box, store query and facets are all reset.
+    expect(await screen.findByTestId(`workflow-card-${wf.id}`)).toBeInTheDocument()
+    expect(screen.getByTestId<HTMLInputElement>("workflow-library-search").value).toBe("")
+    expect(useWorkflowLibraryStore.getState().query).toBe("")
+    expect(useWorkflowLibraryStore.getState().filters).toEqual(DEFAULT_WORKFLOW_FILTERS)
+  })
+
+  it("keeps the facet-only copy when no search text is set", async () => {
+    await createWorkflow({ name: "Alpha" })
+    useWorkflowLibraryStore.setState({
+      filters: { ...DEFAULT_WORKFLOW_FILTERS, type: "builtin" },
+    })
+    render(<WorkflowLibrary />)
+    const empty = await screen.findByTestId("workflow-empty-filtered")
+    expect(empty).not.toHaveAttribute("data-search-active")
+    expect(within(empty).getByRole("button", { name: "Clear filters" })).toBeInTheDocument()
   })
 
   it("shows the empty-folder state inside an empty folder", async () => {

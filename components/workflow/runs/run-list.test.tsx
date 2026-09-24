@@ -7,7 +7,7 @@
  * deletes round-trip; the execution authority + export side-effects are mocked.
  */
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
@@ -267,6 +267,40 @@ describe("RunList", () => {
     await screen.findByTestId("runs-actions-r1")
     await user().selectOptions(screen.getByTestId("runs-filter-status"), "failed")
     expect(await screen.findByText("No runs match")).toBeInTheDocument()
+  })
+
+  it("names the search query in the filtered-empty state and clears it with the filters", async () => {
+    await seedRun("r1", { triggerKind: "trigger.manual" })
+    wrap()
+    await screen.findByTestId("runs-actions-r1")
+    await user().type(screen.getByTestId("runs-search"), "zzz")
+    expect(await screen.findByText("No runs match “zzz”")).toBeInTheDocument()
+
+    await user().click(screen.getByTestId("runs-filtered-empty-clear"))
+    expect(await screen.findByTestId("runs-actions-r1")).toBeInTheDocument()
+    expect(screen.getByTestId<HTMLInputElement>("runs-search").value).toBe("")
+  })
+
+  it("drops a search keystroke still inside the debounce window when filters are cleared", async () => {
+    await seedRun("alpha", { status: "succeeded", triggerKind: "trigger.manual" })
+    await seedRun("beta", { status: "failed", triggerKind: "trigger.cron" })
+    wrap()
+    await screen.findByTestId("runs-actions-alpha")
+    await user().selectOptions(screen.getByTestId("runs-filter-status"), "failed")
+    await waitFor(() => expect(screen.queryByTestId("runs-actions-alpha")).not.toBeInTheDocument())
+
+    // Type and clear inside the same 200ms window.
+    fireEvent.change(screen.getByTestId("runs-search"), { target: { value: "cron" } })
+    fireEvent.click(screen.getByTestId("runs-clear-filters"))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350))
+    })
+
+    // Had the pending write landed after the clear, "cron" would hide alpha
+    // again behind an empty search box.
+    expect(screen.getByTestId("runs-actions-alpha")).toBeInTheDocument()
+    expect(screen.getByTestId("runs-actions-beta")).toBeInTheDocument()
+    expect(screen.getByTestId<HTMLInputElement>("runs-search").value).toBe("")
   })
 
   it("selects an individual run via its row checkbox", async () => {

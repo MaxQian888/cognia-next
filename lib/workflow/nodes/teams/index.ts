@@ -224,8 +224,8 @@ registerNodeExecutor({
     const [{ useAgentTeamStore }, { runTeamLifecycle }, { buildAgentTeamRuntimeDeps }] =
       await Promise.all([
         import("@/stores/agent/agent-team-store"),
-        import("@/lib/ai/agent/agent-team-runtime"),
-        import("@/lib/ai/agent/agent-team-runtime-deps"),
+        import("@/lib/ai/agent/team/agent-team-runtime"),
+        import("@/lib/ai/agent/team/agent-team-runtime-deps"),
       ])
 
     const store = useAgentTeamStore.getState()
@@ -360,9 +360,9 @@ registerNodeExecutor({
       { readDependencyResults, autoPublishTaskResult },
     ] = await Promise.all([
       import("@/lib/ai/agent/team/team-run-context"),
-      import("@/lib/ai/agent/agent-team-runtime-deps"),
-      import("@/lib/ai/agent/team/dispatch-teammate"),
-      import("@/lib/ai/agent/team/shared-memory-orchestrator"),
+      import("@/lib/ai/agent/team/agent-team-runtime-deps"),
+      import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
+      import("@/lib/ai/agent/team/memory/shared-memory-orchestrator"),
     ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
@@ -493,9 +493,9 @@ registerNodeExecutor({
       { DEFAULT_TASK_REVIEW_MAX_REVISIONS },
     ] = await Promise.all([
       import("@/lib/ai/agent/team/team-run-context"),
-      import("@/lib/ai/agent/team/dispatch-teammate"),
-      import("@/lib/ai/agent/team/review-evidence"),
-      import("@/lib/ai/agent/team/task-review-policy"),
+      import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
+      import("@/lib/ai/agent/team/ledger/review-evidence"),
+      import("@/lib/ai/agent/team/gates/task-review-policy"),
     ])
 
     const teamCtx = getTeamRunContext(ctx.runId)

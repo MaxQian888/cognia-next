@@ -7,6 +7,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import type { WorkflowNode, WorkflowRow } from "@/types/workflow/visual"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 function node(id: string, type: string): WorkflowNode {
   return {
@@ -181,5 +182,35 @@ describe("WorkflowCard", () => {
     await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
     fireEvent.click(await screen.findByTestId("workflow-action-run-wf_a"))
     expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
+  })
+
+  it("keeps the card's quiet controls reachable without a hover", async () => {
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    const run = screen.getByTestId("workflow-card-run-wf_a")
+    const menu = screen.getByTestId("workflow-card-menu-wf_a")
+    // Focus, an open menu and touch reveal them too; they only ever fade.
+    for (const control of [run, menu]) {
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+        expect(control).toHaveClass(variant)
+      }
+      expect(control).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+      control.focus()
+      expect(control).toHaveFocus()
+    }
+    const slot = screen.getByTestId("workflow-select-slot-wf_a")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(slot).toHaveClass(variant)
+    }
+    expect(slot).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+
+    // A bare click, with no pointerover or pointerdown first, still acts.
+    fireEvent.click(menu)
+    expect(await screen.findByTestId("workflow-action-run-wf_a")).toBeInTheDocument()
+  })
+
+  it("keeps the selection checkbox resident while selecting", () => {
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    expect(screen.getByTestId("workflow-select-slot-wf_a")).not.toHaveClass("opacity-0")
   })
 })

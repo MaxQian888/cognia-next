@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { Surface } from "@/components/surface/surface"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import { workflowNodeCategory } from "@/types/workflow/visual"
@@ -70,11 +71,16 @@ export function NodeFloatingToolbar({
         data-motion={motionEnabled ? "on" : "off"}
         className={cn(
           "flex items-center gap-0.5 border px-1 py-0.5",
+          // Shared reveal policy: focus inside the toolbar, an open popup from
+          // it, and a coarse pointer reveal it too, not only a hover. Pointer
+          // hover over the node reaches it through `alwaysVisible` (the node's
+          // JS hover state): NodeToolbar portals into `.react-flow__renderer`,
+          // so the node card's `group` is not an ancestor of this element.
           // Motion: when on, opacity transitions for a soft fade. When off,
-          // bare CSS visibility toggle via group-hover (no JS animation).
+          // the toggle is instant (no transition, no JS animation).
           motionEnabled
-            ? "opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100"
-            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+            ? cn(HOVER_REVEAL_GROUP_CLASS, "duration-150")
+            : cn(HOVER_REVEAL_GROUP_CLASS, "transition-none"),
           alwaysVisible && "!opacity-100"
         )}
       >

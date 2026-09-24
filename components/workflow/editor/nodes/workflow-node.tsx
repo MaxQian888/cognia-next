@@ -11,10 +11,16 @@ import {
   Timer as TimerIcon,
   Pin as PinIcon,
   Lock as LockIcon,
+  StickyNote as NoteIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
 import { formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 import { agentNodeSummary, type AgentNodeSummary } from "@/lib/workflow/editor/agent-node-summary"
+import {
+  missingRequiredFromDiagnostics,
+  missingRequiredFromValidation,
+  nodeBodyPreview,
+} from "@/lib/workflow/editor/node-body-summary"
 import { useFormatter, useNow, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
@@ -300,12 +306,21 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // they're the superset (param errors PLUS expression-ref / orphan /
   // credential / desktop-only issues) and carry severity. Without a store
   // (headless renders) we fall back to the legacy `data.*` validation fields.
+  //
+  // "Store mounted" — not "this node has diagnostics" — is the switch. The
+  // diagnostics are recomputed from the live params by the store's own
+  // driver, so an empty list means the node is clean. Falling back to the
+  // per-field validation cache whenever the list was empty let a stale cache
+  // entry (a revalidation still queued, or dropped by an unmounted
+  // inspector) keep the badge on "1" after the params had been fixed.
   const tDiag = useTranslations() as unknown as (
     key: string,
     values?: Record<string, string | number>
   ) => string
   const nodeDiagnostics = useNodeDiagnostics(id)
-  const usingDiagnostics = nodeDiagnostics.length > 0
+  // Pull whatever store context we can — `null` in headless tests is fine.
+  const store = useEditorStoreOrNull()
+  const usingDiagnostics = store !== null || nodeDiagnostics.length > 0
   const diagErrorCount = usingDiagnostics
     ? nodeDiagnostics.filter((d) => d.severity === "error").length
     : errorCount
@@ -326,8 +341,6 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         .join("\n")
     : (errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`)
 
-  // Pull whatever store context we can — `null` in headless tests is fine.
-  const store = useEditorStoreOrNull()
   // (A3/A5) Narrow selector — drops `nodes` and `edges` arrays from the
   // subscription so node identity changes (the most frequent mutations
   // during editing) no longer re-render every node. Per-render reads of
@@ -455,6 +468,34 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
     () => agentNodeSummary(data.kind, data.params as Record<string, unknown> | undefined),
     [data.kind, data.params]
   )
+  // The node's primary configured content (an agent turn's prompt, a send's
+  // message, a cron expression) leads the body; free-text notes follow as a
+  // secondary annotation so a note can never pass for configuration.
+  const bodyPreview = useMemo(
+    () => nodeBodyPreview(data.params as Record<string, unknown> | undefined),
+    [data.params]
+  )
+  // Required params that are still empty, named — a bare count badge did not
+  // say that the one issue was the Prompt.
+  const missingRequired = useMemo(
+    () =>
+      usingDiagnostics
+        ? missingRequiredFromDiagnostics(nodeDiagnostics)
+        : missingRequiredFromValidation(validationFields),
+    [usingDiagnostics, nodeDiagnostics, validationFields]
+  )
+  const format = useFormatter()
+  const missingRequiredText =
+    missingRequired.length > 0
+      ? tNode("missingRequired", {
+          fields: format.list(
+            missingRequired.map((field) =>
+              tNode.has(`paramLabels.${field}`) ? tNode(`paramLabels.${field}`) : field
+            ),
+            { type: "conjunction" }
+          ),
+        })
+      : null
   // Sticky note nodes use the user-picked color instead of the default
   // annotation palette — see `NoteConfig` in inspector/forms/index.tsx.
   const stickyColor =
@@ -628,8 +669,43 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           </div>
           <div className="text-[10px] uppercase tracking-wide opacity-70">{data.kind}</div>
           {agentSummary ? <AgentSummaryRow summary={agentSummary} /> : null}
+          {missingRequiredText ? (
+            <div
+              className="mt-1.5 flex items-start gap-1 text-[11px] font-medium not-italic text-destructive"
+              title={missingRequiredText}
+              data-testid="wf-node-missing-required"
+              data-fields={missingRequired.join(",")}
+            >
+              <WarnIcon className="mt-px size-3 shrink-0" aria-hidden="true" />
+              <span className="line-clamp-2 break-words">{missingRequiredText}</span>
+            </div>
+          ) : null}
+          {bodyPreview ? (
+            <div
+              className={cn(
+                "mt-1.5 break-words text-xs text-foreground/85",
+                // A sticky note's text IS the node; everything else previews.
+                data.kind === "annotation.note"
+                  ? "line-clamp-6 whitespace-pre-wrap"
+                  : "line-clamp-2"
+              )}
+              title={bodyPreview.text}
+              data-testid="wf-node-preview"
+              data-field={bodyPreview.field}
+            >
+              {bodyPreview.text}
+            </div>
+          ) : null}
           {data.notes ? (
-            <div className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{data.notes}</div>
+            <div
+              className="mt-1 flex items-start gap-1 border-l-2 border-current/20 pl-1.5 text-[10px] italic text-muted-foreground"
+              title={tNode("notesTitle")}
+              data-testid="wf-node-notes"
+            >
+              <NoteIcon className="mt-px size-2.5 shrink-0 opacity-70" aria-hidden="true" />
+              <span className="sr-only">{tNode("notesLabel")} </span>
+              <span className="line-clamp-1 break-words">{data.notes}</span>
+            </div>
           ) : null}
         </div>
       </div>

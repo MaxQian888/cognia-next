@@ -431,6 +431,10 @@ export function ExpressionField({
     <div
       className={cn("rounded-md border bg-background", className)}
       data-multiline={multiline ? "true" : "false"}
+      // `EXPRESSION_FIELD_ATTR` (lib/workflow/editor/field-focus.ts): jump-to-
+      // field waits for `.cm-content` under this marker instead of settling on
+      // the variable-picker button above the editor.
+      data-expression-field="true"
     >
       {store && currentNodeId ? (
         <div className="flex justify-end border-b px-1 py-0.5">
