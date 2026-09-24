@@ -38,7 +38,10 @@ hex = "0.4"
 dirs = "6"
 log = "0.4"
 keyring = { version = "4", default-features = false }
-tokio = { version = "1", features = ["sync"] }
+# `rt` + `rt-multi-thread`: readiness waits use `block_in_place` on runtime
+# workers so an async command waiting for initialization never starves the
+# executor (see `secret_store::wait_blocking`).
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
 
 # Real OS credential store backends — same platform matrix as src-tauri.
 # Without these features keyring silently uses its mock store.
@@ -47,6 +50,7 @@ keyring = { version = "4", features = ["windows-native-keyring-store"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
+security-framework-sys = "2.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # `crypto-rust` encrypts the D-Bus session transfer with RustCrypto so no
@@ -55,4 +59,4 @@ keyring = { version = "4", features = ["apple-native-keyring-store"] }
 keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }

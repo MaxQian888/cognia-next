@@ -91,8 +91,26 @@ pub async fn subscription_init(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn subscription_list_provider_ids(local_account_id: String) -> Result<Vec<ProviderId>, String> {
-    vault::list_provider_ids(&local_account_id)
+pub async fn subscription_list_provider_ids(
+    local_account_id: String,
+    allow_interaction: Option<bool>,
+) -> Result<Vec<ProviderId>, String> {
+    // Only an explicit Settings Retry opts in to OS authorization. Background
+    // discovery must not open a dialog while the screen is locked.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tauri::async_runtime::spawn_blocking(move || {
+            if allow_interaction.unwrap_or(false) {
+                cognia_secrets::secret_store::retry_failed_initialization()?;
+            }
+            vault::list_provider_ids(&local_account_id)
+        }),
+    )
+    .await
+    .map_err(|_| {
+        "subscription provider lookup timed out; unlock the device before retrying".to_string()
+    })?
+    .map_err(|_| "subscription provider lookup worker failed".to_string())?
 }
 
 #[tauri::command]
@@ -190,6 +208,8 @@ pub async fn subscription_replace_account_credential(
     local_account_id: String,
     account_id: String,
     credential: ProviderCredential,
+    expected_credential: Option<ProviderCredential>,
+    background_refresh: Option<bool>,
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
     sidecar_state: State<'_, SidecarState>,
@@ -218,12 +238,71 @@ pub async fn subscription_replace_account_credential(
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut provider_vault = vault::load_for_account(&local_account_id, id.clone())?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
+    let background_refresh = background_refresh.unwrap_or(false);
+    let detail = replace_account_credential_in_vault(
+        &mut provider_vault,
+        &account_id,
+        credential,
+        expected_credential.as_ref(),
+        background_refresh,
+        current_unix_ms(),
+    )?;
+    let refreshes_active = !background_refresh
+        && provider_vault.active_account_id.as_deref() == Some(account_id.as_str());
+    let restarts_sidecar = refreshes_active
+        && for_provider(id.clone(), |value| {
+            value.requires_sidecar_restart_on_active_switch()
+        });
+    // Persist BEFORE tearing the sidecar down. A failed keyring write must
+    // leave the running host and its original credential intact.
+    vault::save_for_account(&local_account_id, id.clone(), &provider_vault)?;
+    if restarts_sidecar {
+        shutdown_sidecar(sidecar_state.inner().clone()).await?;
+    }
+    if refreshes_active {
+        apply_active_projection(id.clone(), &provider_vault, &active_state, &api_key_state).await;
+    }
+    Ok(detail)
+}
+
+/// Called only while holding VAULT_MUTATION_LOCK. Refreshes must compare the
+/// complete original credential so deletion, reauthentication, or a competing
+/// rotation cannot be overwritten by an older asynchronous refresh.
+fn replace_account_credential_in_vault(
+    provider_vault: &mut ProviderVault,
+    account_id: &str,
+    credential: ProviderCredential,
+    expected_credential: Option<&ProviderCredential>,
+    background_refresh: bool,
+    now_ms: i64,
+) -> Result<AccountDetail, String> {
     let account = provider_vault
         .accounts
         .iter_mut()
         .find(|account| account.id == account_id)
-        .ok_or_else(|| format!("no account {account_id:?} in {provider} vault"))?;
-    let now_ms = current_unix_ms();
+        .ok_or_else(|| format!("no account {account_id:?} in provider vault"))?;
+    if expected_credential.is_some_and(|expected| expected != &account.credential) {
+        return Err("credential changed while refresh was in flight".into());
+    }
+    if background_refresh {
+        if expected_credential.is_none() {
+            return Err("background refresh requires the expected credential".into());
+        }
+        let (ProviderCredential::Anthropic(current), ProviderCredential::Anthropic(next)) =
+            (&account.credential, &credential)
+        else {
+            return Err("background refresh is only supported for Anthropic credentials".into());
+        };
+        if current.original_source != next.original_source || current.mode != next.mode {
+            return Err("background refresh cannot change credential ownership or mode".into());
+        }
+        // External refresh tokens are opaque: a different one may belong to
+        // another Claude login, so adopting it requires explicit reimport.
+        if current.original_source.is_some() && current.refresh_token != next.refresh_token {
+            return Err("linked Claude credential changed; explicitly reimport the login".into());
+        }
+    }
+    let id = credential.provider();
     account.credential = credential;
     account.last_used_at_ms = now_ms;
     if id == ProviderId::Codex {
@@ -246,24 +325,7 @@ pub async fn subscription_replace_account_credential(
         .auth_metadata
         .get_or_insert_with(AccountAuthMetadata::default)
         .last_credential_rotation_at_ms = Some(now_ms);
-    let refreshes_active = provider_vault.active_account_id.as_deref() == Some(account_id.as_str());
-    let restarts_sidecar = refreshes_active
-        && for_provider(id.clone(), |value| {
-            value.requires_sidecar_restart_on_active_switch()
-        });
-    let detail = AccountDetail::from_account(account);
-    // Persist BEFORE tearing the sidecar down. A keyring write can still fail
-    // here (locked keychain, a denied prompt), and shutting down first left the
-    // user with no agent host and the OLD credential still on disk, with
-    // nothing on the error path to bring it back.
-    vault::save_for_account(&local_account_id, id.clone(), &provider_vault)?;
-    if restarts_sidecar {
-        shutdown_sidecar(sidecar_state.inner().clone()).await?;
-    }
-    if refreshes_active {
-        apply_active_projection(id.clone(), &provider_vault, &active_state, &api_key_state).await;
-    }
-    Ok(detail)
+    Ok(AccountDetail::from_account(account))
 }
 
 #[tauri::command]
@@ -313,6 +375,9 @@ pub async fn subscription_delete_account(
     if clears_runtime {
         apply_active_projection(id.clone(), &vault, &active_state, &api_key_state).await;
     }
+    // Dropping a watcher joins its callback, which may be waiting for this
+    // same mutation lock. The deletion is already persisted and projected.
+    drop(_mutation_guard);
     // ADR-0028 Phase 14 — stop the credential watcher so the deleted
     // account's file watch doesn't leak forever.
     if id == ProviderId::Anthropic {
@@ -970,6 +1035,25 @@ mod tests {
 
     const LOCAL_ACCOUNT_ID: &str = "local-test";
 
+    #[tokio::test]
+    async fn provider_listing_runs_as_an_async_command_and_propagates_validation() {
+        let providers = subscription_list_provider_ids("provider-list-command-test".into(), None)
+            .await
+            .unwrap();
+        for builtin in ProviderId::builtin_ids() {
+            assert!(providers.contains(&builtin));
+        }
+        assert!(subscription_list_provider_ids(String::new(), None)
+            .await
+            .is_err());
+        assert_eq!(
+            providers,
+            subscription_list_provider_ids("provider-list-command-test".into(), Some(true))
+                .await
+                .unwrap()
+        );
+    }
+
     fn keyring_available() -> bool {
         std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
     }
@@ -1056,6 +1140,206 @@ mod tests {
         let mut provider_vault = ProviderVault::empty();
         provider_vault.upsert_account(account);
         vault::save_for_account(LOCAL_ACCOUNT_ID, ProviderId::Anthropic, &provider_vault).unwrap();
+    }
+
+    #[test]
+    fn background_refresh_preserves_account_metadata_and_active_pointer() {
+        let mut account = sample_anthropic_account();
+        account.preset_id = Some("preset-fixture".into());
+        let expected = account.credential.clone();
+        let mut credential = expected.clone();
+        if let ProviderCredential::Anthropic(value) = &mut credential {
+            value.access_token = "rotated-fixture-token".into();
+        }
+        let mut provider_vault = ProviderVault::empty();
+        provider_vault.active_account_id = Some(account.id.clone());
+        provider_vault.accounts.push(account.clone());
+        replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            credential.clone(),
+            Some(&expected),
+            true,
+            42,
+        )
+        .unwrap();
+        let updated = &provider_vault.accounts[0];
+        assert_eq!(updated.credential, credential);
+        assert_eq!(updated.id, account.id);
+        assert_eq!(updated.label, account.label);
+        assert_eq!(updated.preset_id, account.preset_id);
+        assert_eq!(updated.created_at_ms, account.created_at_ms);
+        assert_eq!(
+            provider_vault.active_account_id.as_deref(),
+            Some(account.id.as_str())
+        );
+        assert_eq!(
+            updated
+                .auth_metadata
+                .as_ref()
+                .unwrap()
+                .last_credential_rotation_at_ms,
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn background_refresh_rejects_missing_and_stale_accounts_without_mutation() {
+        let account = sample_anthropic_account();
+        let expected = account.credential.clone();
+        let mut provider_vault = ProviderVault::empty();
+        assert!(replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            expected.clone(),
+            Some(&expected),
+            true,
+            42,
+        )
+        .is_err());
+        assert!(provider_vault.accounts.is_empty());
+        let mut changed = account.clone();
+        if let ProviderCredential::Anthropic(value) = &mut changed.credential {
+            value.access_token = "new-login-fixture".into();
+        }
+        provider_vault.accounts.push(changed.clone());
+        assert!(replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            expected.clone(),
+            Some(&expected),
+            true,
+            42,
+        )
+        .unwrap_err()
+        .contains("credential changed"));
+        assert_eq!(provider_vault.accounts, vec![changed]);
+    }
+
+    #[test]
+    fn background_refresh_requires_expected_credential_and_preserves_ownership() {
+        let account = sample_anthropic_account();
+        let expected = account.credential.clone();
+        let mut provider_vault = ProviderVault::empty();
+        provider_vault.accounts.push(account.clone());
+        assert!(replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            expected.clone(),
+            None,
+            true,
+            42,
+        )
+        .unwrap_err()
+        .contains("expected credential"));
+        for field in ["source", "mode"] {
+            let mut changed = expected.clone();
+            if let ProviderCredential::Anthropic(value) = &mut changed {
+                if field == "source" {
+                    value.original_source = Some("file".into());
+                } else {
+                    value.mode = "console".into();
+                }
+            }
+            assert!(replace_account_credential_in_vault(
+                &mut provider_vault,
+                &account.id,
+                changed,
+                Some(&expected),
+                true,
+                42,
+            )
+            .unwrap_err()
+            .contains("ownership or mode"));
+            assert_eq!(provider_vault.accounts, vec![account.clone()]);
+        }
+        let other = ProviderCredential::Codex(Default::default());
+        assert!(replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            other,
+            Some(&expected),
+            true,
+            42,
+        )
+        .unwrap_err()
+        .contains("only supported for Anthropic"));
+        assert_eq!(provider_vault.accounts, vec![account]);
+    }
+
+    #[test]
+    fn linked_background_refresh_rejects_changed_opaque_identity() {
+        for source in ["file", "keyring", "unknown-external-source"] {
+            let mut account = sample_anthropic_account();
+            if let ProviderCredential::Anthropic(value) = &mut account.credential {
+                value.original_source = Some(source.into());
+            }
+            let expected = account.credential.clone();
+            let mut rotated = expected.clone();
+            if let ProviderCredential::Anthropic(value) = &mut rotated {
+                value.refresh_token = "different-login-fixture".into();
+            }
+            let mut provider_vault = ProviderVault::empty();
+            provider_vault.accounts.push(account.clone());
+            assert!(replace_account_credential_in_vault(
+                &mut provider_vault,
+                &account.id,
+                rotated,
+                Some(&expected),
+                true,
+                42,
+            )
+            .unwrap_err()
+            .contains("explicitly reimport"));
+            assert_eq!(provider_vault.accounts, vec![account.clone()]);
+            assert!(replace_account_credential_in_vault(
+                &mut provider_vault,
+                &account.id,
+                expected.clone(),
+                Some(&expected),
+                true,
+                42,
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn managed_background_refresh_accepts_rotated_refresh_token() {
+        let account = sample_anthropic_account();
+        let expected = account.credential.clone();
+        let mut rotated = expected.clone();
+        if let ProviderCredential::Anthropic(value) = &mut rotated {
+            value.refresh_token = "rotated-managed-fixture".into();
+        }
+        let mut provider_vault = ProviderVault::empty();
+        provider_vault.accounts.push(account.clone());
+        replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            rotated.clone(),
+            Some(&expected),
+            true,
+            42,
+        )
+        .unwrap();
+        assert_eq!(provider_vault.accounts[0].credential, rotated);
+    }
+
+    #[test]
+    fn explicit_credential_replacement_does_not_require_expected_credential() {
+        let account = sample_anthropic_account();
+        let mut provider_vault = ProviderVault::empty();
+        provider_vault.accounts.push(account.clone());
+        assert!(replace_account_credential_in_vault(
+            &mut provider_vault,
+            &account.id,
+            account.credential.clone(),
+            None,
+            false,
+            42,
+        )
+        .is_ok());
     }
 
     #[test]

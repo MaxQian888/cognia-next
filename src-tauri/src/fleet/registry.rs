@@ -35,6 +35,11 @@ pub enum FleetAgent {
     Codex,
     Opencode,
     Cognia,
+    /// Renderer-managed ACP sessions projected by the main window
+    /// (`lib/fleet/acp-fleet-projection.ts`), never hook-observed. `Acp` is the
+    /// generic identity for ACP agents without a dedicated variant.
+    Devin,
+    Acp,
 }
 
 impl FleetAgent {
@@ -44,6 +49,8 @@ impl FleetAgent {
             "codex" => Some(Self::Codex),
             "opencode" => Some(Self::Opencode),
             "cognia" => Some(Self::Cognia),
+            "devin" => Some(Self::Devin),
+            "acp" => Some(Self::Acp),
             _ => None,
         }
     }

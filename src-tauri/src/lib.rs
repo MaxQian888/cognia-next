@@ -447,6 +447,16 @@ pub fn run() {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
+    // WKWebView reports a killed/crashed web content process directly. This
+    // replaces Tauri's built-in reload, so the handler records the renderer
+    // generation (agent-debug rebinds on it) and performs the reload itself.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        builder = builder.on_web_content_process_terminate(|webview| {
+            webview_watchdog::handle_web_content_process_terminate(webview)
+        });
+    }
+
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -487,6 +497,9 @@ pub fn run() {
         // the renderer heartbeat command, read by the polling loop spawned in
         // setup() once the main window exists.
         .manage(webview_watchdog::WebviewWatchdog::new())
+        // Per-webview renderer generations: bumped when the web content
+        // process terminates, settled when the replacement document loads.
+        .manage(webview_watchdog::RendererLifecycle::new())
         .manage(browser::embedded::EmbeddedBrowserLease::default())
         .manage(browser::cdp::NativeCdpGrants::default())
         // Arm the boot-time force-show safety net only after the initial main
@@ -494,6 +507,12 @@ pub fn run() {
         // first request and can legitimately take longer than the 8s grace;
         // measuring from process boot exposed the still-unpainted black webview.
         .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                webview
+                    .state::<webview_watchdog::RendererLifecycle>()
+                    .record_page_load(webview.label());
+            }
+
             #[cfg(all(feature = "agent-debug", desktop))]
             if matches!(
                 payload.event(),
@@ -2180,8 +2199,10 @@ pub fn run() {
                 // boundaries can't fire — the JS realm is dead — so this loop
                 // reloads the page back to its last-known-good route. This is
                 // the runtime counterpart to the boot-time force-show above and
-                // window_recovery's off-screen recenter.
-                {
+                // window_recovery's off-screen recenter. Off in debug builds,
+                // where a dev-server compile trips it (see
+                // `webview_watchdog::heartbeat_recovery_enabled_for`).
+                if webview_watchdog::heartbeat_recovery_enabled() {
                     let handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move {
                         loop {
@@ -2248,6 +2269,11 @@ pub fn run() {
                             }
                         }
                     });
+                } else {
+                    log::info!(
+                        "webview-watchdog: heartbeat recovery is off in this debug build; set {}=1 to enable it",
+                        webview_watchdog::HEARTBEAT_RECOVERY_ENV
+                    );
                 }
 
                 let handle = app.handle().clone();

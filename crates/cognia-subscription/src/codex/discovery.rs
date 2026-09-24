@@ -26,7 +26,7 @@
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 #[cfg(not(test))]
-use keyring::Entry;
+use cognia_secrets::keychain_access::{read_password, read_password_without_prompt};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -125,6 +125,12 @@ pub fn codex_auth_file_path() -> Option<PathBuf> {
 /// anywhere; `Err` is reserved for genuine parse failures (so the UI can show
 /// "credential corrupted" rather than silently appearing logged-out).
 pub fn discover_codex_auth() -> Result<Option<DiscoveredCodexAuth>, String> {
+    discover_codex_auth_with_prompt(false)
+}
+
+pub fn discover_codex_auth_with_prompt(
+    allow_keychain_prompt: bool,
+) -> Result<Option<DiscoveredCodexAuth>, String> {
     let path = match codex_auth_file_path() {
         Some(p) => p,
         None => return Ok(None),
@@ -138,7 +144,7 @@ pub fn discover_codex_auth() -> Result<Option<DiscoveredCodexAuth>, String> {
             from_file,
         )));
     }
-    if let Some(from_keyring) = load_keyring()? {
+    if let Some(from_keyring) = load_keyring(allow_keychain_prompt)? {
         return Ok(Some(materialise(
             DiscoverySource::Keyring,
             path_str,
@@ -162,7 +168,9 @@ fn load_file(path: &std::path::Path) -> Result<Option<AuthDotJson>, String> {
     Ok(Some(parsed))
 }
 
-fn load_keyring() -> Result<Option<AuthDotJson>, String> {
+fn load_keyring(allow_keychain_prompt: bool) -> Result<Option<AuthDotJson>, String> {
+    #[cfg(test)]
+    let _ = allow_keychain_prompt;
     // In test builds, an injected seam lets unit tests model the keyring
     // contents deterministically instead of reading the developer's / CI
     // host's real OS keyring (which may legitimately hold a live codex-cli
@@ -170,16 +178,20 @@ fn load_keyring() -> Result<Option<AuthDotJson>, String> {
     #[cfg(test)]
     {
         match test_support::keyring_override() {
-            Some(blob) => parse_keyring_blob(blob.as_deref()),
+            Some(Ok(blob)) => parse_keyring_blob(blob.as_deref()),
+            Some(Err(error)) => Err(error),
             None => Err("subscription simulation blocked an unmocked OS keyring read".into()),
         }
     }
 
     #[cfg(not(test))]
     {
-        let entry = Entry::new(CODEX_KEYRING_SERVICE, CODEX_KEYRING_ACCOUNT)
-            .map_err(|e| format!("keyring init failed: {e}"))?;
-        match entry.get_password() {
+        let read = if allow_keychain_prompt {
+            read_password
+        } else {
+            read_password_without_prompt
+        };
+        match read(CODEX_KEYRING_SERVICE, CODEX_KEYRING_ACCOUNT) {
             Ok(blob) => parse_keyring_blob(Some(&blob)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(format!("keyring read failed: {e}")),
@@ -352,7 +364,7 @@ pub(crate) mod test_support {
     /// - `None`               → no override active; real keyring is consulted.
     /// - `Some(None)`         → override active, keyring reports *no entry*.
     /// - `Some(Some(blob))`   → override active, keyring returns `blob`.
-    static KEYRING_OVERRIDE: Mutex<Option<Option<String>>> = Mutex::new(None);
+    static KEYRING_OVERRIDE: Mutex<Option<Result<Option<String>, String>>> = Mutex::new(None);
 
     /// Serialises every test that mutates `CODEX_HOME` / the keyring override
     /// so cargo's parallel runner can't interleave them. Exposed `pub(crate)`
@@ -369,7 +381,7 @@ pub(crate) mod test_support {
 
     /// Read the injected keyring override (consumed by `super::load_keyring`).
     /// Returns the inner `Option<String>` only when an override is active.
-    pub(crate) fn keyring_override() -> Option<Option<String>> {
+    pub(crate) fn keyring_override() -> Option<Result<Option<String>, String>> {
         KEYRING_OVERRIDE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -393,7 +405,7 @@ pub(crate) mod test_support {
             let tmp = tempfile::tempdir().unwrap();
             std::env::set_var("CODEX_HOME", tmp.path());
             // Default: keyring is empty unless a test overrides it explicitly.
-            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Ok(None));
             Self {
                 _guard: guard,
                 tmp,
@@ -409,7 +421,12 @@ pub(crate) mod test_support {
         /// Make the keyring seam return `blob` on the next discovery probe.
         pub(crate) fn set_keyring(&self, blob: &str) {
             *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) =
-                Some(Some(blob.to_string()));
+                Some(Ok(Some(blob.to_string())));
+        }
+
+        pub(crate) fn set_keyring_error(&self, error: &str) {
+            *KEYRING_OVERRIDE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Err(error.to_string()));
         }
     }
 
@@ -428,6 +445,15 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{env_lock, TestEnv};
     use super::*;
+
+    #[test]
+    fn denied_background_keychain_read_is_not_reported_as_a_missing_login() {
+        let env = TestEnv::new();
+        env.set_keyring_error("keyring access requires user interaction");
+        assert!(discover_codex_auth()
+            .unwrap_err()
+            .contains("requires user interaction"));
+    }
 
     #[test]
     fn codex_home_honours_env_var() {

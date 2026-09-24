@@ -78,7 +78,7 @@ Each capability ships through a different host bridge. Refer to:
 
 ## Testing
 
-Tests use **jest + jsdom** and import types only from `@cognia/plugin-sdk`. Mirror the mock-`PluginContext` pattern shown in `src/index.test.ts` when you add your own tests. Do not import `@/lib`, `@/types`, or `@cognia/plugin-sdk/host`; those are host internals and are unavailable to distributed plugins.
+Tests use **jest + jsdom** and import types only from `@cognia/plugin-sdk`. Mirror the mock-`PluginContext` pattern shown in `src/index.test.ts` when you add your own tests. Do not import `@/lib`, `@/types/index`, or `@cognia/plugin-sdk/host`; those are host internals and are unavailable to distributed plugins.
 
 ## Packaging
 

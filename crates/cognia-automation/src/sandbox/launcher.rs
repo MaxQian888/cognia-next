@@ -18,7 +18,7 @@
 // any OS even though the launchers themselves only exist on Linux / macOS.
 #![allow(dead_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::sandbox::protected::{protected_entries_under, ProtKind};
 use crate::sandbox::sbpl;
@@ -267,6 +267,21 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     // name home left `~/.ssh` and cognia's own vault readable to the launched
     // agent, which is the same hole the one-shot backend had.
     sbpl::push_baseline_secret_read_denies(&mut out);
+    // Managed executions are placed inside the denied app store
+    // (`<data>/cognia/task-workspaces/…`) and declared writable — but the
+    // baseline deny lands later and wins, so the agent's own cwd was
+    // unreadable and `getcwd()` killed the process before main() ran.
+    // Re-open exactly the declared roots that nest there; every other child
+    // of the store stays denied.
+    {
+        let declared: Vec<PathBuf> = scope
+            .readable
+            .iter()
+            .chain(writable.iter())
+            .map(PathBuf::from)
+            .collect();
+        sbpl::push_app_store_carveouts(&mut out, &declared);
+    }
     if scope.network {
         out.push_str("(allow network*)\n");
     } else {
@@ -481,6 +496,44 @@ mod tests {
         let profile = render_sbpl(&scope());
         assert!(profile.contains("(allow file-write-data (literal \"/dev/null\"))"));
         assert!(!profile.contains("(allow file-write-data (subpath \"/dev\"))"));
+    }
+
+    /// A managed execution cwd sits under `<data>/cognia/task-workspaces` —
+    /// inside the store the baseline deny seals. Without the carve-out the
+    /// profile hides the agent's own cwd and `getcwd()` fails before main().
+    /// The declared root must be re-allowed AFTER the deny (last-match-wins)
+    /// while the store's other children stay denied.
+    #[test]
+    fn a_workspace_inside_the_denied_app_store_stays_reachable() {
+        let Some(store) = dirs::data_dir().map(|d| d.join("cognia")) else {
+            return; // no per-user data dir on this host — nothing to assert
+        };
+        let ws = store.join("task-workspaces").join("executions").join("probe");
+        let profile = render_sbpl(&LaunchScope {
+            cwd: ws.to_string_lossy().into_owned(),
+            writable: vec![ws.to_string_lossy().into_owned()],
+            readable: vec![],
+            denied_readable: vec![],
+            network: true,
+        });
+        let deny = format!("(deny file-read* (literal \"{}\"))", store.display());
+        // Emitted rules carry the canonical spelling (`Cognia` on disk), not
+        // the deny's lowercase `cognia` — rebuild it the way the renderer does.
+        let canon_store = std::fs::canonicalize(&store).unwrap_or_else(|_| store.clone());
+        let emitted_ws = canon_store.join(ws.strip_prefix(&store).expect("ws under store"));
+        let allow = format!("(subpath \"{}\")", emitted_ws.display());
+        let deny_at = profile.find(&deny).unwrap_or_else(|| panic!("store deny missing\n{profile}"));
+        let allow_at = profile
+            .find(&allow)
+            .unwrap_or_else(|| panic!("workspace carve-out missing\n{profile}"));
+        assert!(allow_at > deny_at, "carve-out must follow the deny\n{profile}");
+        // The store itself is re-opened for traversal only, never as a subpath.
+        for spelling in [store.display().to_string(), canon_store.display().to_string()] {
+            assert!(
+                !profile.contains(&format!("(allow file-read* (subpath \"{spelling}\"))")),
+                "{profile}"
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]

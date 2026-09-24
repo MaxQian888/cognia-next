@@ -142,10 +142,7 @@ fn entry_is_eligible(
 ) -> bool {
     let provider_ok = snapshot
         .provider(&entry.provider_id)
-        .is_some_and(|provider| {
-            crate::execute::is_executable_protocol(&provider.protocol)
-                && !provider.base_url.trim().is_empty()
-        });
+        .is_some_and(crate::execute::is_executable_provider);
     if !provider_ok || entry.available == Some(false) {
         return false;
     }

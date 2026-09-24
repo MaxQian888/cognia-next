@@ -23,8 +23,21 @@
 //!
 //! The decision logic ([`decide`]) is a pure function so the truth table is unit
 //! tested without a live window; [`recover`] is the thin Tauri-IO seam around it.
+//!
+//! On macOS/iOS WKWebView *does* report one crash class directly:
+//! `webViewWebContentProcessDidTerminate:` (Tauri's
+//! `Builder::on_web_content_process_terminate`). Registering that hook replaces
+//! Tauri's built-in reload, so [`handle_web_content_process_terminate`] owns the
+//! recovery: it records the termination in [`RendererLifecycle`] (a per-webview
+//! renderer generation that the agent-debug bridge uses to fail in-flight
+//! evaluations with "renderer restarted" and to wait for the replacement
+//! renderer before re-injecting its helper), then reloads the webview right
+//! away instead of waiting for the heartbeat timeout — and does so even while
+//! the window is hidden, because a terminated process is certainly dead,
+//! unlike a hidden window's throttled heartbeat.
 
-use std::sync::Mutex;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long the renderer may go silent before we treat the page as dead. Set
@@ -51,6 +64,33 @@ pub const RECOVERY_COUNTER_RESET: Duration = Duration::from_secs(120);
 /// Grace period after the initial document has finished loading for React to
 /// reveal the hidden main window itself.
 pub const BOOT_REVEAL_GRACE: Duration = Duration::from_secs(8);
+
+/// Environment switch that re-arms heartbeat recovery in a debug build.
+pub const HEARTBEAT_RECOVERY_ENV: &str = "COGNIA_WEBVIEW_WATCHDOG";
+
+/// Pure decision: should the heartbeat-timeout reload loop run at all?
+///
+/// Not in a debug build. `pnpm tauri dev` serves the page from `next dev`, and
+/// Turbopack compiling a route on first visit routinely blocks the renderer
+/// longer than [`HEARTBEAT_TIMEOUT`], so the loop "recovered" a healthy page
+/// by reloading it, sometimes twice in a row right after launch. That is a
+/// shipped-build safety net misfiring against a dev server. `1`/`true` in
+/// [`HEARTBEAT_RECOVERY_ENV`] turns it back on to exercise it in dev; `0`/`false`
+/// turns it off in a release build for diagnosis. The content-process
+/// termination reload and the boot-reveal safety net are separate and stay on.
+pub fn heartbeat_recovery_enabled_for(debug_build: bool, env_override: Option<&str>) -> bool {
+    match env_override.map(str::trim) {
+        Some("1") | Some("true") => true,
+        Some("0") | Some("false") => false,
+        _ => !debug_build,
+    }
+}
+
+/// [`heartbeat_recovery_enabled_for`] for this process.
+pub fn heartbeat_recovery_enabled() -> bool {
+    let env_override = std::env::var(HEARTBEAT_RECOVERY_ENV).ok();
+    heartbeat_recovery_enabled_for(cfg!(debug_assertions), env_override.as_deref())
+}
 
 /// What the boot-time reveal safety net should do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,12 +347,260 @@ pub fn webview_take_recovery_notice(state: tauri::State<'_, WebviewWatchdog>) ->
     state.take_recovery_notice()
 }
 
+// ---------------------------------------------------------------------------
+// Renderer (web content process) lifecycle
+// ---------------------------------------------------------------------------
+
+/// Renderer lifecycle of one webview, as observed from the native side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererState {
+    /// Web content process terminations observed for this webview. A change
+    /// between two observations means the renderer was replaced in between, so
+    /// any script evaluation issued to the old one will never be answered.
+    pub generation: u64,
+    /// True from a termination until the replacement renderer commits its
+    /// first document; evaluations sent before that have no realm to run in.
+    pub awaiting_load: bool,
+}
+
+/// Whether a terminated renderer should be reloaded or left alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminationRecovery {
+    /// Reload the webview so a fresh renderer takes over.
+    Reload,
+    /// The renderer died [`MAX_RECOVERIES`] times inside
+    /// [`RECOVERY_COUNTER_RESET`]; reloading again would only flash the window.
+    GaveUp,
+}
+
+/// Pure budget decision: reload unless `recent` terminations (already
+/// including the one being handled) exceed `max` within the reset window.
+pub fn decide_termination_recovery(recent: usize, max: u32) -> TerminationRecovery {
+    if recent > max as usize {
+        TerminationRecovery::GaveUp
+    } else {
+        TerminationRecovery::Reload
+    }
+}
+
+#[derive(Debug, Default)]
+struct RendererRecord {
+    state: RendererState,
+    /// Termination instants inside the [`RECOVERY_COUNTER_RESET`] window.
+    recent_terminations: Vec<Instant>,
+}
+
+struct RendererLifecycleInner {
+    records: Mutex<HashMap<String, RendererRecord>>,
+    /// Bumped on every lifecycle change so async waiters can re-check state.
+    epoch: tokio::sync::watch::Sender<u64>,
+}
+
+/// Per-webview renderer generations, shared by the termination hook (writer),
+/// `on_page_load` (writer), and the agent-debug bridge (reader/waiter).
+/// Cheap to clone; every clone observes the same state.
+#[derive(Clone)]
+pub struct RendererLifecycle {
+    inner: Arc<RendererLifecycleInner>,
+}
+
+impl Default for RendererLifecycle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RendererLifecycle {
+    pub fn new() -> Self {
+        let (epoch, _) = tokio::sync::watch::channel(0);
+        Self {
+            inner: Arc::new(RendererLifecycleInner {
+                records: Mutex::new(HashMap::new()),
+                epoch,
+            }),
+        }
+    }
+
+    fn bump(&self) {
+        self.inner
+            .epoch
+            .send_modify(|epoch| *epoch = epoch.wrapping_add(1));
+    }
+
+    /// Current state for `label` (default for a webview never seen).
+    pub fn state(&self, label: &str) -> RendererState {
+        self.inner
+            .records
+            .lock()
+            .unwrap()
+            .get(label)
+            .map(|record| record.state)
+            .unwrap_or_default()
+    }
+
+    /// Every webview that has a lifecycle record, ordered by label.
+    pub fn snapshot(&self) -> BTreeMap<String, RendererState> {
+        self.inner
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(label, record)| (label.clone(), record.state))
+            .collect()
+    }
+
+    /// Record a web content process termination. Returns the new state and the
+    /// recovery decision under the per-webview reload budget.
+    pub fn record_termination(
+        &self,
+        label: &str,
+        now: Instant,
+    ) -> (RendererState, TerminationRecovery) {
+        let result = {
+            let mut records = self.inner.records.lock().unwrap();
+            let record = records.entry(label.to_string()).or_default();
+            record.state.generation += 1;
+            record.state.awaiting_load = true;
+            record
+                .recent_terminations
+                .retain(|at| now.saturating_duration_since(*at) <= RECOVERY_COUNTER_RESET);
+            record.recent_terminations.push(now);
+            (
+                record.state,
+                decide_termination_recovery(record.recent_terminations.len(), MAX_RECOVERIES),
+            )
+        };
+        self.bump();
+        result
+    }
+
+    /// A document started loading in `label`: a live renderer exists again.
+    pub fn record_page_load(&self, label: &str) {
+        let changed = {
+            let mut records = self.inner.records.lock().unwrap();
+            match records.get_mut(label) {
+                Some(record) if record.state.awaiting_load => {
+                    record.state.awaiting_load = false;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.bump();
+        }
+    }
+
+    /// Resolve once `label`'s renderer has terminated past `generation`.
+    /// Never resolves while the renderer stays alive; callers race it.
+    pub async fn wait_for_termination(&self, label: &str, generation: u64) {
+        let mut epoch = self.inner.epoch.subscribe();
+        loop {
+            if self.state(label).generation > generation {
+                return;
+            }
+            if epoch.changed().await.is_err() {
+                // The sender lives as long as `self`; unreachable in practice.
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
+    /// Wait up to `timeout` for a replacement renderer after a termination.
+    /// Returns the state observed last; `awaiting_load` is still true on timeout.
+    pub async fn wait_until_loaded(&self, label: &str, timeout: Duration) -> RendererState {
+        let mut epoch = self.inner.epoch.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let state = self.state(label);
+            if !state.awaiting_load {
+                return state;
+            }
+            match tokio::time::timeout_at(deadline, epoch.changed()).await {
+                Ok(Ok(())) => continue,
+                Ok(Err(_)) | Err(_) => return self.state(label),
+            }
+        }
+    }
+}
+
+/// `Builder::on_web_content_process_terminate` handler (macOS/iOS). Replaces
+/// Tauri's built-in reload, so it must reload itself.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub fn handle_web_content_process_terminate<R: tauri::Runtime>(webview: &tauri::Webview<R>) {
+    use tauri::Manager;
+
+    let label = webview.label().to_string();
+    let now = Instant::now();
+    let (state, decision) = match webview.try_state::<RendererLifecycle>() {
+        Some(lifecycle) => lifecycle.record_termination(&label, now),
+        None => (RendererState::default(), TerminationRecovery::Reload),
+    };
+    log::warn!(
+        "webview-watchdog: web content process terminated for {label} (renderer generation {})",
+        state.generation
+    );
+
+    if decision == TerminationRecovery::GaveUp {
+        log::error!(
+            "webview-watchdog: {label} renderer terminated more than {MAX_RECOVERIES} times within {}s; not reloading again",
+            RECOVERY_COUNTER_RESET.as_secs()
+        );
+        return;
+    }
+
+    // The main window additionally goes through the heartbeat watchdog: it
+    // reloads to the last-known-good route, graces the heartbeat clock so the
+    // reload is not double-counted, and arms the "recovered" toast.
+    if label == "main" {
+        if let (Some(watchdog), Some(window)) = (
+            webview.try_state::<WebviewWatchdog>(),
+            webview.app_handle().get_webview_window(&label),
+        ) {
+            watchdog.note_recovery(now);
+            if recover(&window, watchdog.last_url().as_deref()) {
+                return;
+            }
+        }
+    }
+    match webview.reload() {
+        Ok(()) => log::warn!("webview-watchdog: reloaded {label} after renderer termination"),
+        Err(error) => {
+            log::error!(
+                "webview-watchdog: failed to reload {label} after renderer termination: {error}"
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const TIMEOUT: Duration = Duration::from_secs(15);
     const MAX: u32 = 3;
+
+    #[test]
+    fn heartbeat_recovery_is_off_in_debug_and_on_in_release_by_default() {
+        assert!(!heartbeat_recovery_enabled_for(true, None));
+        assert!(heartbeat_recovery_enabled_for(false, None));
+    }
+
+    #[test]
+    fn heartbeat_recovery_env_override_wins_either_way() {
+        assert!(heartbeat_recovery_enabled_for(true, Some("1")));
+        assert!(heartbeat_recovery_enabled_for(true, Some(" true ")));
+        assert!(!heartbeat_recovery_enabled_for(false, Some("0")));
+        assert!(!heartbeat_recovery_enabled_for(false, Some("false")));
+    }
+
+    #[test]
+    fn heartbeat_recovery_ignores_unrecognised_override_values() {
+        assert!(!heartbeat_recovery_enabled_for(true, Some("")));
+        assert!(!heartbeat_recovery_enabled_for(true, Some("yes")));
+        assert!(heartbeat_recovery_enabled_for(false, Some("maybe")));
+    }
 
     #[test]
     fn slow_initial_page_load_stays_hidden() {
@@ -534,6 +822,165 @@ mod tests {
         let wd = WebviewWatchdog::new();
         assert!(wd.mark_gave_up_logged());
         assert!(!wd.mark_gave_up_logged());
+    }
+
+    #[test]
+    fn termination_budget_truth_table() {
+        assert_eq!(
+            decide_termination_recovery(1, MAX),
+            TerminationRecovery::Reload
+        );
+        assert_eq!(
+            decide_termination_recovery(3, MAX),
+            TerminationRecovery::Reload
+        );
+        assert_eq!(
+            decide_termination_recovery(4, MAX),
+            TerminationRecovery::GaveUp
+        );
+    }
+
+    #[test]
+    fn termination_bumps_generation_and_awaits_reload() {
+        let lifecycle = RendererLifecycle::new();
+        assert_eq!(lifecycle.state("main"), RendererState::default());
+
+        let (state, decision) = lifecycle.record_termination("main", Instant::now());
+        assert_eq!(
+            state,
+            RendererState {
+                generation: 1,
+                awaiting_load: true
+            }
+        );
+        assert_eq!(decision, TerminationRecovery::Reload);
+
+        lifecycle.record_page_load("main");
+        assert_eq!(
+            lifecycle.state("main"),
+            RendererState {
+                generation: 1,
+                awaiting_load: false
+            }
+        );
+        // Other webviews are tracked independently.
+        assert_eq!(lifecycle.state("pet"), RendererState::default());
+    }
+
+    #[test]
+    fn page_load_without_termination_is_a_no_op() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_page_load("main");
+        assert!(lifecycle.snapshot().is_empty());
+    }
+
+    #[test]
+    fn repeated_terminations_exhaust_then_reset_the_reload_budget() {
+        let lifecycle = RendererLifecycle::new();
+        let start = Instant::now();
+        for offset in 0..MAX {
+            let (_, decision) =
+                lifecycle.record_termination("main", start + Duration::from_secs(offset as u64));
+            assert_eq!(decision, TerminationRecovery::Reload);
+        }
+        let (state, decision) =
+            lifecycle.record_termination("main", start + Duration::from_secs(5));
+        assert_eq!(decision, TerminationRecovery::GaveUp);
+        assert_eq!(state.generation, 4);
+
+        let later = start + RECOVERY_COUNTER_RESET + Duration::from_secs(10);
+        let (_, decision) = lifecycle.record_termination("main", later);
+        assert_eq!(decision, TerminationRecovery::Reload);
+    }
+
+    #[test]
+    fn snapshot_lists_known_webviews_in_label_order() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_termination("pet", Instant::now());
+        lifecycle.record_termination("main", Instant::now());
+        let labels: Vec<_> = lifecycle.snapshot().into_keys().collect();
+        assert_eq!(labels, vec!["main".to_string(), "pet".to_string()]);
+    }
+
+    #[test]
+    fn renderer_state_serializes_camel_case() {
+        let json = serde_json::to_value(RendererState {
+            generation: 2,
+            awaiting_load: true,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "generation": 2, "awaitingLoad": true })
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_termination_resolves_only_after_a_newer_generation() {
+        let lifecycle = RendererLifecycle::new();
+        let waiter = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move { lifecycle.wait_for_termination("main", 0).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+
+        lifecycle.record_termination("pet", Instant::now());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !waiter.is_finished(),
+            "another webview's crash must not wake main"
+        );
+
+        lifecycle.record_termination("main", Instant::now());
+        tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("waiter resolves after termination")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_until_loaded_returns_when_the_replacement_renderer_loads() {
+        let lifecycle = RendererLifecycle::new();
+        assert!(
+            !lifecycle
+                .wait_until_loaded("main", Duration::from_millis(10))
+                .await
+                .awaiting_load
+        );
+
+        lifecycle.record_termination("main", Instant::now());
+        let waiter = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move {
+                lifecycle
+                    .wait_until_loaded("main", Duration::from_secs(5))
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        lifecycle.record_page_load("main");
+        let state = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("waiter resolves after page load")
+            .unwrap();
+        assert_eq!(
+            state,
+            RendererState {
+                generation: 1,
+                awaiting_load: false
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_until_loaded_times_out_while_still_awaiting() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_termination("main", Instant::now());
+        let state = lifecycle
+            .wait_until_loaded("main", Duration::from_millis(30))
+            .await;
+        assert!(state.awaiting_load);
     }
 
     #[test]

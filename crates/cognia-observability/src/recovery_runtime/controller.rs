@@ -53,9 +53,8 @@ impl RecoveryBoot {
     }
 }
 
-/// Tauri-managed state. Lock scope is deliberately tiny and fully synchronous —
-/// no `.await` ever happens while the guard is alive, so this cannot deadlock
-/// the async runtime.
+/// Tauri-managed state. Checkpoint writes hold the state lock synchronously so
+/// an older snapshot cannot overwrite a newer one. No `.await` holds the guard.
 pub struct RecoveryController {
     state: Mutex<RecoveryStateV1>,
     store: Option<RecoveryStore>,
@@ -155,10 +154,11 @@ impl RecoveryController {
         let Some(store) = &self.store else {
             return;
         };
-        let snapshot = self.snapshot();
-        if let Err(error) = store.save(&snapshot) {
-            log::warn!("recovery: persisting state failed: {error}");
-        }
+        self.with_state(|state| {
+            if let Err(error) = store.save(state) {
+                log::warn!("recovery: persisting state failed: {error}");
+            }
+        });
     }
 
     /// Emit one V1 lifecycle event describing a transition.
@@ -184,15 +184,15 @@ impl RecoveryController {
     /// caller — the sentinel is the owner of "did the last run crash?", and
     /// duplicating that judgement here would let the two disagree.
     pub fn record_start(&self, previous_session_unhealthy: bool) -> RecoveryBoot {
-        let at = now_ms();
-        let mode = if previous_session_unhealthy {
-            self.with_state(|state| state.record_unhealthy_start(at))
-        } else {
-            self.with_state(|state| {
+        let mode = self.with_state(|state| {
+            let at = now_ms();
+            if previous_session_unhealthy {
+                state.record_unhealthy_start(at)
+            } else {
                 state.record_clean_start(at);
                 state.mode
-            })
-        };
+            }
+        });
         self.persist();
 
         let mut details = Map::new();
@@ -228,18 +228,18 @@ impl RecoveryController {
     }
 
     pub fn record_renderer_heartbeat(&self) -> RecoveryStateV1 {
-        let at = now_ms();
-        self.with_state(|state| state.record_renderer_heartbeat(at));
-        // A heartbeat may be the event that starts the healthy timer, and a
-        // healthy tick may be the one that clears the budgets.
-        self.with_state(|state| state.record_healthy_tick(at));
+        self.with_state(|state| {
+            let at = now_ms();
+            state.record_renderer_heartbeat(at);
+            // A heartbeat may start the healthy timer; a tick may clear budgets.
+            state.record_healthy_tick(at);
+        });
         self.persist();
         self.snapshot()
     }
 
     pub fn record_renderer_failure(&self) -> RendererAction {
-        let at = now_ms();
-        let action = self.with_state(|state| state.record_renderer_failure(at));
+        let action = self.with_state(|state| state.record_renderer_failure(now_ms()));
         self.persist();
 
         let mut details = Map::new();
@@ -260,8 +260,7 @@ impl RecoveryController {
     }
 
     pub fn record_child_failure(&self, subsystem: RecoverySubsystem) -> ChildAction {
-        let at = now_ms();
-        let action = self.with_state(|state| state.record_child_failure(subsystem, at));
+        let action = self.with_state(|state| state.record_child_failure(subsystem, now_ms()));
         self.persist();
 
         let mut details = Map::new();
@@ -290,11 +289,11 @@ impl RecoveryController {
         success: bool,
         reason_code: Option<String>,
     ) -> RecoveryStateV1 {
-        let at = now_ms();
         self.with_state(|state| {
-            state.record_checkpoint(subsystem, success, reason_code.clone(), at)
+            let at = now_ms();
+            state.record_checkpoint(subsystem, success, reason_code.clone(), at);
+            state.record_healthy_tick(at);
         });
-        self.with_state(|state| state.record_healthy_tick(at));
         self.persist();
 
         let mut details = Map::new();
@@ -321,8 +320,7 @@ impl RecoveryController {
     }
 
     pub fn retry(&self, subsystem: RecoverySubsystem) -> RecoveryStateV1 {
-        let at = now_ms();
-        self.with_state(|state| state.record_retry(subsystem, at));
+        self.with_state(|state| state.record_retry(subsystem, now_ms()));
         self.persist();
 
         let mut details = Map::new();
@@ -337,8 +335,7 @@ impl RecoveryController {
     }
 
     pub fn keep_disabled(&self, subsystem: RecoverySubsystem) -> RecoveryStateV1 {
-        let at = now_ms();
-        self.with_state(|state| state.record_keep_disabled(subsystem, at));
+        self.with_state(|state| state.record_keep_disabled(subsystem, now_ms()));
         self.persist();
 
         let mut details = Map::new();
@@ -388,6 +385,42 @@ mod tests {
 
     fn controller(dir: &TempDir, build: &str) -> RecoveryController {
         RecoveryController::open(dir.path(), build, "0.1.0")
+    }
+
+    #[test]
+    fn concurrent_transitions_persist_the_latest_recovery_budget() {
+        let dir = TempDir::new().expect("tempdir");
+        let controller = std::sync::Arc::new(RecoveryController {
+            state: Mutex::new(RecoveryStateV1::new("build-1")),
+            store: Some(RecoveryStore::new(dir.path())),
+            writer: None,
+            build_id: "build-1".into(),
+        });
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let controller = controller.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..40 {
+                        controller.record_start(true);
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().expect("worker");
+        }
+        let latest = controller.snapshot();
+        assert_eq!(latest.unhealthy_starts.len(), 320);
+        assert_eq!(latest.mode, RecoveryMode::Safe);
+        let recovered = controller
+            .store
+            .as_ref()
+            .expect("store")
+            .load("build-1", now_ms());
+        assert_eq!(recovered, latest);
     }
 
     #[test]

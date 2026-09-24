@@ -727,6 +727,16 @@ pub fn derive_codex_identity(
         .ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let auth = claims.get("https://api.openai.com/auth");
+    let claimed_workspace = auth
+        .and_then(|value| value.get("chatgpt_account_id"))
+        .and_then(|value| value.as_str());
+    // Consumers route requests with account_id. An unchanged ID token must
+    // not authorize a different explicit workspace from the CLI credential.
+    if let (Some(claimed), Some(routed)) = (claimed_workspace, credential.account_id.as_deref()) {
+        if claimed != routed {
+            return None;
+        }
+    }
     let identity = CodexIdentityFingerprint {
         issuer: claims
             .get("iss")
@@ -736,9 +746,7 @@ pub fn derive_codex_identity(
             .get("sub")
             .and_then(|value| value.as_str())
             .map(str::to_owned),
-        workspace_id: auth
-            .and_then(|value| value.get("chatgpt_account_id"))
-            .and_then(|value| value.as_str())
+        workspace_id: claimed_workspace
             .map(str::to_owned)
             .or_else(|| credential.account_id.clone()),
         email: claims
@@ -1312,6 +1320,7 @@ mod tests {
         let mut account = codex_account();
         if let ProviderCredential::Codex(credential) = &mut account.credential {
             credential.id_token_raw = format!("header.{payload}.signature");
+            credential.account_id = Some("workspace-1".into());
         }
         let mut vault = ProviderVault::empty();
         vault.schema_version = 3;
@@ -1343,6 +1352,7 @@ mod tests {
         let mut account = codex_account();
         if let ProviderCredential::Codex(credential) = &mut account.credential {
             credential.id_token_raw = format!("header.{payload}.signature");
+            credential.account_id = Some("workspace-1".into());
         }
         let mut vault = ProviderVault::empty();
         vault.schema_version = SCHEMA_VERSION;
@@ -1359,6 +1369,56 @@ mod tests {
         );
         // Idempotent: a second pass has nothing left to normalize.
         assert!(!vault.migrate_to_current());
+    }
+
+    #[test]
+    fn codex_identity_rejects_a_conflicting_routed_workspace() {
+        let claims = serde_json::json!({
+            "sub": "subject-1",
+            "https://api.openai.com/auth": { "chatgpt_account_id": "workspace-1" }
+        });
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).unwrap());
+        let credential = CodexCredentialData {
+            id_token_raw: format!("header.{payload}.signature"),
+            account_id: Some("workspace-2".into()),
+            ..CodexCredentialData::default()
+        };
+        // The native reauthentication command always derives the candidate,
+        // even when the existing account already has this cached fingerprint.
+        let stored_identity = CodexIdentityFingerprint {
+            workspace_id: Some("workspace-1".into()),
+            subject: Some("subject-1".into()),
+            ..CodexIdentityFingerprint::default()
+        };
+        let candidate = derive_codex_identity(&credential.id_token_raw, &credential);
+        assert!(candidate.is_none());
+        assert!(!candidate.is_some_and(|identity| stored_identity.matches(&identity)));
+    }
+
+    #[test]
+    fn codex_identity_accepts_consistent_and_legacy_workspace_sources() {
+        for (claimed_workspace, routed_workspace) in [
+            (Some("workspace-1"), Some("workspace-1")),
+            (Some("workspace-1"), None),
+            (None, Some("workspace-1")),
+        ] {
+            let claims = serde_json::json!({
+                "sub": "subject-1",
+                "https://api.openai.com/auth": { "chatgpt_account_id": claimed_workspace }
+            });
+            let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&claims).unwrap());
+            let credential = CodexCredentialData {
+                id_token_raw: format!("header.{payload}.signature"),
+                account_id: routed_workspace.map(str::to_owned),
+                ..CodexCredentialData::default()
+            };
+            let identity = derive_codex_identity(&credential.id_token_raw, &credential)
+                .expect("consistent or legacy workspace should remain usable");
+            assert_eq!(identity.workspace_id.as_deref(), Some("workspace-1"));
+            assert_eq!(identity.subject.as_deref(), Some("subject-1"));
+        }
     }
 
     #[test]
@@ -1414,7 +1474,7 @@ mod tests {
 pub fn list_provider_ids(local_account_id: &str) -> Result<Vec<ProviderId>, String> {
     let service = service_name_for_account(local_account_id)?;
     let mut ids = ProviderId::builtin_ids();
-    for key in cognia_secrets::secret_store::list_accounts(&service) {
+    for key in cognia_secrets::secret_store::list_accounts(&service)? {
         let id = ProviderId::parse(&key)?;
         if id.as_str() != key { return Err("noncanonical stored provider id".into()); }
         if !ids.contains(&id) { ids.push(id); }

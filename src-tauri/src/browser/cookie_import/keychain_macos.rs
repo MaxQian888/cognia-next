@@ -4,8 +4,7 @@ pub(super) struct MacKeychain;
 
 impl Keychain for MacKeychain {
     fn read(&self, service: &str, account: &str) -> Result<String, ImportError> {
-        keyring::Entry::new(service, account)
-            .and_then(|entry| entry.get_password())
+        cognia_secrets::keychain_access::read_password(service, account)
             .map_err(classify_keyring_error)
     }
 }

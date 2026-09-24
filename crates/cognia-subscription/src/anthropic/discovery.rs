@@ -24,7 +24,7 @@
 // remains the owner of refresh-token rotation.
 
 #[cfg(not(test))]
-use keyring::Entry;
+use cognia_secrets::keychain_access::{read_password, read_password_without_prompt};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -102,17 +102,40 @@ pub fn claude_credentials_file_path() -> Option<PathBuf> {
 /// is found anywhere; `Err` is reserved for genuine parse failures (so the UI
 /// can show "credential corrupted" rather than silently appearing logged-out).
 pub fn discover_anthropic_auth() -> Result<Option<DiscoveredAnthropicAuth>, String> {
+    discover_anthropic_auth_with_prompt(false)
+}
+
+pub fn discover_anthropic_auth_with_prompt(
+    allow_keychain_prompt: bool,
+) -> Result<Option<DiscoveredAnthropicAuth>, String> {
     let path = match claude_credentials_file_path() {
         Some(p) => p,
         None => return Ok(None),
     };
+    // Claude Code namespaces its Keychain service by CLAUDE_CONFIG_DIR. The
+    // custom service encoding is not a public API; never fall back to another
+    // directory's default login when an explicit config directory is set.
+    let use_default_keyring = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .is_none_or(|value| value.to_string_lossy().trim().is_empty());
+    discover_at_path(&path, use_default_keyring, allow_keychain_prompt)
+}
+
+fn discover_at_path(
+    path: &std::path::Path,
+    use_default_keyring: bool,
+    allow_keychain_prompt: bool,
+) -> Result<Option<DiscoveredAnthropicAuth>, String> {
     let path_str = path.to_string_lossy().into_owned();
+    if !use_default_keyring {
+        return Ok(load_file(path)?
+            .and_then(|record| materialise(DiscoverySource::File, path_str, record)));
+    }
 
     // Claude Code uses the macOS Keychain as its authoritative store. A stale
     // credentials file can remain after upgrades/manual restores; CCSwitch and
     // Claude Code both read the Keychain first on macOS, so mirror that order.
     #[cfg(target_os = "macos")]
-    let keyring_error = match load_keyring() {
+    let keyring_error = match load_keyring(allow_keychain_prompt) {
         Ok(Some(from_keyring)) => {
             if let Some(found) =
                 materialise(DiscoverySource::Keyring, path_str.clone(), from_keyring)
@@ -151,7 +174,7 @@ pub fn discover_anthropic_auth() -> Result<Option<DiscoveredAnthropicAuth>, Stri
     // Linux/Windows primarily use the credentials file, with the keyring kept
     // as a supported fallback. Avoid reading the macOS Keychain twice.
     #[cfg(not(target_os = "macos"))]
-    if let Some(from_keyring) = load_keyring()? {
+    if let Some(from_keyring) = load_keyring(allow_keychain_prompt)? {
         if let Some(found) = materialise(DiscoverySource::Keyring, path_str, from_keyring) {
             return Ok(Some(found));
         }
@@ -173,7 +196,9 @@ fn load_file(path: &std::path::Path) -> Result<Option<CredentialsDotJson>, Strin
     Ok(Some(parsed))
 }
 
-fn load_keyring() -> Result<Option<CredentialsDotJson>, String> {
+fn load_keyring(allow_keychain_prompt: bool) -> Result<Option<CredentialsDotJson>, String> {
+    #[cfg(test)]
+    let _ = allow_keychain_prompt;
     // Test builds route the read through an injected seam so unit tests never
     // touch the developer's / CI host's real keychain (which on a machine with
     // Claude Code installed holds a live credential).
@@ -189,9 +214,14 @@ fn load_keyring() -> Result<Option<CredentialsDotJson>, String> {
     #[cfg(not(test))]
     {
         let account = os_username();
-        let entry = Entry::new(CLAUDE_KEYRING_SERVICE, &account)
-            .map_err(|e| format!("keyring init failed: {e}"))?;
-        match entry.get_password() {
+        // Discovery also runs in the background when a linked CLI refreshes.
+        // An inaccessible credential is an error, never an OS password dialog.
+        let read = if allow_keychain_prompt {
+            read_password
+        } else {
+            read_password_without_prompt
+        };
+        match read(CLAUDE_KEYRING_SERVICE, &account) {
             Ok(blob) => parse_keyring_blob(Some(&blob)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(format!("keyring read failed: {e}")),
@@ -255,7 +285,7 @@ pub(crate) mod test_support {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     /// Injected keyring contents for the current test:
-    /// - `None`               → no override active; real keyring is consulted.
+    /// - `None`               → no override active; the read fails closed.
     /// - `Some(None)`         → override active, keyring reports *no entry*.
     /// - `Some(Some(blob))`   → override active, keyring returns `blob`.
     static KEYRING_OVERRIDE: Mutex<Option<Result<Option<String>, String>>> = Mutex::new(None);
@@ -387,7 +417,9 @@ mod tests {
     fn discovers_from_keyring_when_no_file() {
         let env = TestEnv::new();
         env.set_keyring(SAMPLE);
-        let got = discover_anthropic_auth().unwrap().unwrap();
+        let got = discover_at_path(&env.path().join(".credentials.json"), true, false)
+            .unwrap()
+            .unwrap();
         assert_eq!(got.source, DiscoverySource::Keyring);
         assert_eq!(got.access_token, "sk-ant-oat01-test");
     }
@@ -403,7 +435,9 @@ mod tests {
         .unwrap();
         env.set_keyring(SAMPLE);
 
-        let got = discover_anthropic_auth().unwrap().unwrap();
+        let got = discover_at_path(&env.path().join(".credentials.json"), true, false)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(got.source, DiscoverySource::Keyring);
         assert_eq!(got.access_token, "sk-ant-oat01-test");
@@ -416,7 +450,9 @@ mod tests {
         std::fs::write(env.path().join(".credentials.json"), SAMPLE).unwrap();
         env.set_keyring_error("keyring locked");
 
-        let got = discover_anthropic_auth().unwrap().unwrap();
+        let got = discover_at_path(&env.path().join(".credentials.json"), true, false)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(got.source, DiscoverySource::File);
         assert_eq!(got.access_token, "sk-ant-oat01-test");
@@ -426,6 +462,17 @@ mod tests {
     fn discovery_returns_none_when_nothing_exists() {
         let _env = TestEnv::new();
         assert!(discover_anthropic_auth().unwrap().is_none());
+    }
+
+    #[test]
+    fn denied_background_keychain_read_is_not_reported_as_a_missing_login() {
+        let env = TestEnv::new();
+        env.set_keyring_error("keyring access requires user interaction");
+        assert!(
+            discover_at_path(&env.path().join(".credentials.json"), true, false)
+                .unwrap_err()
+                .contains("requires user interaction")
+        );
     }
 
     #[test]
@@ -452,7 +499,9 @@ mod tests {
         )
         .unwrap();
         env.set_keyring(SAMPLE);
-        let got = discover_anthropic_auth().unwrap().unwrap();
+        let got = discover_at_path(&env.path().join(".credentials.json"), true, false)
+            .unwrap()
+            .unwrap();
         assert_eq!(got.source, DiscoverySource::Keyring);
     }
 
@@ -467,7 +516,30 @@ mod tests {
     fn malformed_keyring_payload_surfaces_parse_error() {
         let env = TestEnv::new();
         env.set_keyring("{not json");
-        assert!(discover_anthropic_auth().is_err());
+        assert!(discover_at_path(&env.path().join(".credentials.json"), true, false).is_err());
+    }
+
+    #[test]
+    fn explicit_config_dir_never_adopts_default_keyring_login() {
+        let env = TestEnv::new();
+        env.set_keyring(SAMPLE);
+        assert!(discover_anthropic_auth().unwrap().is_none());
+
+        std::fs::write(
+            env.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"custom-token","refreshToken":"custom-refresh"}}"#,
+        )
+        .unwrap();
+        let found = discover_anthropic_auth().unwrap().unwrap();
+        assert_eq!(found.source, DiscoverySource::File);
+        assert_eq!(found.access_token, "custom-token");
+    }
+
+    #[test]
+    fn custom_config_dir_does_not_probe_locked_default_keyring() {
+        let env = TestEnv::new();
+        env.set_keyring_error("must not read default keyring");
+        assert!(discover_anthropic_auth().unwrap().is_none());
     }
 
     #[test]

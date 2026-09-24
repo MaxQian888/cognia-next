@@ -217,19 +217,30 @@ pub fn is_executable_protocol(protocol: &str) -> bool {
     matches!(protocol, "openai" | "anthropic" | "responses")
 }
 
+/// A provider the gateway can actually dial: an executable protocol AND a
+/// base URL. `upstream_url` with an empty base yields a bare path
+/// (`/chat/completions`), so such a provider is never a usable candidate.
+/// Snapshot validation no longer rejects unavailable aliases (availability is
+/// a request-time concern), so every candidate/listing path applies this
+/// predicate instead of trusting the snapshot to have filtered it.
+pub fn is_executable_provider(provider: &ProviderSnapshot) -> bool {
+    is_executable_protocol(&provider.protocol) && !provider.base_url.trim().is_empty()
+}
+
 /// Resolve the inbound `model` field into an ordered candidate list:
 ///   1. an alias from the snapshot → its pre-ordered entries,
 ///   2. `provider:model` literal,
 ///   3. a model id owned by exactly one enabled provider.
 ///
-/// Disabled providers and non-executable protocols are skipped.
+/// Disabled providers, non-executable protocols and providers without a base
+/// URL are skipped.
 pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candidate> {
     let mut out = Vec::new();
 
     if let Some(alias) = snapshot.find_alias(model) {
         for entry in &alias.entries {
             if let Some(provider) = snapshot.provider(&entry.provider_id) {
-                if is_executable_protocol(&provider.protocol) {
+                if is_executable_provider(provider) {
                     out.push(Candidate::new(provider, &entry.model_id));
                 }
             }
@@ -239,7 +250,7 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
 
     if let Some((provider_id, model_id)) = model.split_once(':') {
         if let Some(provider) = snapshot.provider(provider_id) {
-            if is_executable_protocol(&provider.protocol) && !model_id.is_empty() {
+            if is_executable_provider(provider) && !model_id.is_empty() {
                 out.push(Candidate::new(provider, model_id));
                 return out;
             }
@@ -248,7 +259,7 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
 
     for provider in &snapshot.providers {
         if provider.enabled
-            && is_executable_protocol(&provider.protocol)
+            && is_executable_provider(provider)
             && provider.models.iter().any(|m| m == model)
         {
             out.push(Candidate::new(provider, model));
@@ -259,8 +270,8 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
 
 /// Map an explicit, pre-ordered entry list (from the renderer's live routing
 /// decision) onto executable candidates, resolving each against the
-/// snapshot's providers. Disabled providers / non-executable protocols are
-/// skipped, preserving order.
+/// snapshot's providers. Disabled providers / non-executable protocols /
+/// providers without a base URL are skipped, preserving order.
 pub fn candidates_from_entries(
     snapshot: &RoutingSnapshot,
     entries: &[SnapshotEntry],
@@ -268,7 +279,7 @@ pub fn candidates_from_entries(
     let mut out = Vec::new();
     for entry in entries {
         if let Some(provider) = snapshot.provider(&entry.provider_id) {
-            if is_executable_protocol(&provider.protocol) {
+            if is_executable_provider(provider) {
                 out.push(Candidate::new(provider, &entry.model_id));
             }
         }
@@ -640,6 +651,49 @@ mod tests {
             "generatedAtMs": 1
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn providers_without_a_base_url_are_never_candidates() {
+        // Snapshot validation no longer rejects an alias whose only providers
+        // are unusable, so every resolution path must skip a blank base URL
+        // itself instead of dialing a bare `/chat/completions` path.
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "aliases": [{ "alias": "fast", "entries": [
+                { "providerId": "blank", "modelId": "m1" },
+                { "providerId": "groq", "modelId": "llama-3.3-70b" }
+            ]}, { "alias": "only-blank", "entries": [
+                { "providerId": "blank", "modelId": "m1" }
+            ]}],
+            "providers": [
+                { "id": "blank", "protocol": "openai", "baseUrl": "   ",
+                  "apiKey": "sk-b", "enabled": true, "models": ["m1"] },
+                { "id": "groq", "protocol": "openai", "baseUrl": "https://api.groq.com/openai/v1",
+                  "apiKey": "sk-g", "enabled": true, "models": ["llama-3.3-70b"] }
+            ],
+            "generatedAtMs": 1
+        }))
+        .unwrap();
+        assert!(snapshot.validate().is_ok());
+
+        let alias = resolve_candidates(&snapshot, "fast");
+        assert_eq!(alias.len(), 1);
+        assert_eq!(alias[0].provider.id, "groq");
+        assert!(resolve_candidates(&snapshot, "only-blank").is_empty());
+        assert!(resolve_candidates(&snapshot, "blank:m1").is_empty());
+        assert!(resolve_candidates(&snapshot, "m1").is_empty());
+
+        let entries: Vec<SnapshotEntry> = serde_json::from_value(serde_json::json!([
+            { "providerId": "blank", "modelId": "m1" },
+            { "providerId": "groq", "modelId": "llama-3.3-70b" }
+        ]))
+        .unwrap();
+        let from_entries = candidates_from_entries(&snapshot, &entries);
+        assert_eq!(from_entries.len(), 1);
+        assert_eq!(from_entries[0].provider.id, "groq");
+
+        assert!(!is_executable_provider(&snapshot.providers[0]));
+        assert!(is_executable_provider(&snapshot.providers[1]));
     }
 
     #[test]

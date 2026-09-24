@@ -54,7 +54,7 @@ use super::cooldown::{self, KeyCooldownMap};
 use super::count_tokens::estimate_input_tokens;
 use super::execute::{
     candidates_from_entries, count_tokens_url, embeddings_url, expand_for_ticket, expand_key_pools,
-    is_executable_protocol, record_key_success, resolve_candidates, rewrite_model,
+    is_executable_provider, record_key_success, resolve_candidates, rewrite_model,
     strip_request_fields, upstream_headers, upstream_url, Candidate, KeyRotationMap, SseDeframer,
 };
 use super::keyed_rate_limit::KeyedRateLimiter;
@@ -1400,8 +1400,8 @@ async fn list_models(
     // use it AND the gateway can actually execute it. That last clause is why
     // `resolve_candidates` is consulted for aliases below: without it a provider
     // on a non-executable protocol (anything but openai / anthropic — see
-    // `is_executable_protocol`) was advertised here and then 404'd on the very
-    // next /v1/chat/completions call.
+    // `is_executable_provider`), or with no base URL, was advertised here and
+    // then failed on the very next /v1/chat/completions call.
     let visible = |model: &str| -> bool { cfg.model_is_exposed(model) && ctx_allows(&ctx, model) };
 
     let data = if let Some(ticket) = &ctx.ticket {
@@ -1646,14 +1646,14 @@ fn listable_models(
     visible: &dyn Fn(&str) -> bool,
 ) -> Vec<Value> {
     // An alias is executable if ANY of its entries points at an enabled provider
-    // on a protocol the gateway can drive. Deliberately not `resolve_candidates`:
+    // the gateway can drive (executable protocol and a base URL). Deliberately not `resolve_candidates`:
     // that clones every matching `ProviderSnapshot` — credentials included —
     // onto the heap just to answer a yes/no, once per alias per request.
     let alias_is_executable = |alias: &AliasSnapshot| -> bool {
         alias.entries.iter().any(|entry| {
             snapshot
                 .provider(&entry.provider_id)
-                .is_some_and(|p| is_executable_protocol(&p.protocol))
+                .is_some_and(is_executable_provider)
         })
     };
 
@@ -1669,7 +1669,7 @@ fn listable_models(
     }
     if !hide_raw_provider_models {
         for provider in &snapshot.providers {
-            if !provider.enabled || !is_executable_protocol(&provider.protocol) {
+            if !provider.enabled || !is_executable_provider(provider) {
                 continue;
             }
             for model in &provider.models {
@@ -4899,6 +4899,31 @@ mod tests {
         assert!(!ids.contains(&"vision".to_string()));
         // Disabled providers stay hidden as before.
         assert!(!ids.contains(&"hidden-model".to_string()));
+    }
+
+    #[test]
+    fn list_models_hides_providers_without_a_base_url() {
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "aliases": [
+                { "alias": "blank-only", "entries": [
+                    { "providerId": "blank", "modelId": "m1" }
+                ]}
+            ],
+            "providers": [
+                { "id": "blank", "protocol": "openai", "baseUrl": "",
+                  "apiKey": "sk-b", "enabled": true, "models": ["m1"] },
+                { "id": "groq", "protocol": "openai", "baseUrl": "https://api.groq.com/openai/v1",
+                  "apiKey": "sk-g", "enabled": true, "models": ["llama-3.3-70b"] }
+            ],
+            "generatedAtMs": 1
+        }))
+        .unwrap();
+        let ids = listed_ids(&listable_models(&snapshot, false, &|_| true));
+        // A blank base URL cannot be dialed, so neither the raw model nor an
+        // alias that only points at it may be advertised.
+        assert!(!ids.contains(&"m1".to_string()));
+        assert!(!ids.contains(&"blank-only".to_string()));
+        assert!(ids.contains(&"llama-3.3-70b".to_string()));
     }
 
     #[test]

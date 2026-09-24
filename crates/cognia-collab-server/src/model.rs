@@ -225,6 +225,9 @@ pub enum PlanStatus {
     Completed,
     Failed,
     Cancelled,
+    /// Declined at the approval gate before it ran. Terminal, and distinct
+    /// from `Cancelled` (which abandons an approved or running plan).
+    Rejected,
 }
 
 /// How one step executes. Mirrors `PlanStepKind`.
@@ -305,6 +308,7 @@ string_enum!(
     Completed => "completed",
     Failed => "failed",
     Cancelled => "cancelled",
+    Rejected => "rejected",
 );
 
 string_enum!(

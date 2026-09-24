@@ -340,17 +340,9 @@ impl RoutingSnapshot {
                     return Err(format!("alias {}: invalid routing metric", alias.alias));
                 }
             }
-            let executable = alias.entries.iter().any(|entry| {
-                self.providers.iter().any(|provider| {
-                    provider.id == entry.provider_id
-                        && provider.enabled
-                        && crate::execute::is_executable_protocol(&provider.protocol)
-                        && !provider.base_url.trim().is_empty()
-                })
-            });
-            if !executable {
-                return Err(format!("alias {}: no executable candidates", alias.alias));
-            }
+            // Availability belongs to request-time candidate resolution. A
+            // disabled provider or locked credential vault must not prevent a
+            // valid snapshot from replacing stale routing/credential state.
             if alias.distribution == "weighted"
                 && alias
                     .entries
@@ -581,6 +573,17 @@ mod tests {
         assert!(s.provider("groq").is_some());
         assert!(s.provider("openai").is_none()); // disabled
         assert!(s.provider("ghost").is_none());
+    }
+
+    #[test]
+    fn unavailable_alias_does_not_reject_other_routes_or_credential_revocation() {
+        let mut s = snapshot();
+        s.providers[0].enabled = false;
+        assert!(s.validate().is_ok());
+        assert!(crate::execute::resolve_candidates(&s, "fast").is_empty());
+        s.providers[1].enabled = true;
+        assert!(s.validate().is_ok());
+        assert!(!crate::execute::resolve_candidates(&s, "openai:gpt-4o").is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! Client Protocol (agentclientprotocol.com) the cognia ACP *server* speaks.
 //!
 //! The shapes deliberately mirror what cognia's own ACP *client*
-//! (`lib/ai/agent/external/acp-client.ts`) sends and consumes, so both sides
+//! (`lib/ai/agent/external/runtimes/acp/acp-client.ts`) sends and consumes, so both sides
 //! of the codebase agree on one dialect of the spec (protocol version 1).
 //! Field names are camelCase on the wire.
 

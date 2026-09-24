@@ -355,12 +355,38 @@ impl SamplerHandle {
             );
         }
         let mut inner = self.inner.lock();
+        // Dead holders are reclaimed here by their heartbeat TTL: a renderer
+        // that went away without closing stops renewing, and its lease is gone
+        // by the time anyone else asks.
         Self::expire_locked(&mut inner, now_ms);
-        if inner.leases.len() >= MAX_HOST_LEASES {
+        // A client re-opening a purpose it already holds has lost track of that
+        // lease — its open raced a teardown, or its own realm was rebuilt (Fast
+        // Refresh, a remounted consumer) while the host kept the lease alive.
+        // Refusing it with `device-purpose-limit` blamed a conflict on the very
+        // client that owns both leases, and the refusal outlived the problem by
+        // the full TTL. Such a lease is reclaimed in place instead. It is only
+        // ever the caller's own: device AND client must match, and a remote
+        // caller's device id is the authenticated one the dispatcher stamps.
+        let superseded: Vec<String> = inner
+            .leases
+            .iter()
+            .filter(|(_, entry)| {
+                entry.lease.device_id == request.device_id
+                    && entry.lease.purpose == request.purpose
+                    && entry.lease.client_id == request.client_id
+            })
+            .map(|(lease_id, _)| lease_id.clone())
+            .collect();
+        let others = inner.leases.len() - superseded.len();
+        if others >= MAX_HOST_LEASES {
             return PerfOpenLeaseResult::rejected("host-lease-limit", "host lease limit reached");
         }
-        if inner.leases.values().any(|entry| {
-            entry.lease.device_id == request.device_id && entry.lease.purpose == request.purpose
+        // A different client on the same device is a real conflict (two windows
+        // of one paired device, say), and stays one.
+        if inner.leases.iter().any(|(lease_id, entry)| {
+            !superseded.contains(lease_id)
+                && entry.lease.device_id == request.device_id
+                && entry.lease.purpose == request.purpose
         }) {
             return PerfOpenLeaseResult::rejected(
                 "device-purpose-limit",
@@ -378,11 +404,18 @@ impl SamplerHandle {
         inner
             .last_open_by_device
             .insert(request.device_id.clone(), now_ms);
-        if inner.leases.is_empty() {
-            inner.sampling_session_id = uuid::Uuid::new_v4().to_string();
-            inner.target_id = request.target_id.clone();
-            inner.routing_generation = request.routing_generation;
-            self.sequence.store(0, Ordering::SeqCst);
+        if others == 0 {
+            // Reclaiming the only lease on the same scope keeps the sampling
+            // session, so the client's history stays one continuous series.
+            let continues_session = !superseded.is_empty()
+                && inner.target_id == request.target_id
+                && inner.routing_generation == request.routing_generation;
+            if !continues_session {
+                inner.sampling_session_id = uuid::Uuid::new_v4().to_string();
+                inner.target_id = request.target_id.clone();
+                inner.routing_generation = request.routing_generation;
+                self.sequence.store(0, Ordering::SeqCst);
+            }
         } else if inner.target_id != request.target_id {
             return PerfOpenLeaseResult::rejected(
                 "target-mismatch",
@@ -393,6 +426,12 @@ impl SamplerHandle {
                 "routing-generation-mismatch",
                 "active leases bind another routing generation",
             );
+        }
+        // Only now, with every refusal behind us: a refused re-open must leave
+        // the client holding the lease it already had.
+        for lease_id in &superseded {
+            inner.leases.remove(lease_id);
+            inner.legacy_leases.retain(|legacy| legacy != lease_id);
         }
         let lease = PerfLease {
             wire_version: PERF_WIRE_VERSION,
@@ -827,12 +866,76 @@ mod tests {
         assert!(live.accepted);
         assert!(capture.accepted);
         assert_eq!(handle.interval(), 500);
-        let duplicate = handle.open(
-            request("device-a", PerfLeasePurpose::Live, 1000),
-            true,
-            1400,
-        );
+        // A second client on the same device is a genuine conflict.
+        let mut other_window = request("device-a", PerfLeasePurpose::Live, 1000);
+        other_window.client_id = "client-other-window".to_string();
+        let duplicate = handle.open(other_window, true, 1400);
         assert_eq!(duplicate.code.as_deref(), Some("device-purpose-limit"));
+        assert_eq!(handle.leases(), 2);
+    }
+
+    #[test]
+    fn the_same_client_reopening_its_purpose_reclaims_its_own_lease() {
+        let handle = SamplerHandle::default();
+        let first = handle
+            .open(request("device-a", PerfLeasePurpose::Live, 1000), false, 1000)
+            .lease
+            .unwrap();
+        let reopened = handle.open(request("device-a", PerfLeasePurpose::Live, 500), false, 1400);
+        assert!(reopened.accepted, "{:?}", reopened.code);
+        let second = reopened.lease.unwrap();
+        assert_ne!(second.lease_id, first.lease_id);
+        // One lease per device and purpose still holds — the old one is gone.
+        assert_eq!(handle.leases(), 1);
+        assert_eq!(
+            handle.renew(&first.lease_id, Some("device-a"), 2000),
+            Err("lease-expired".to_string())
+        );
+        // Same scope: the series continues instead of restarting.
+        assert_eq!(second.sampling_session_id, first.sampling_session_id);
+        assert_eq!(handle.interval(), 500);
+    }
+
+    #[test]
+    fn a_refused_reopen_leaves_the_existing_lease_in_place() {
+        let handle = SamplerHandle::default();
+        let own = handle
+            .open(request("device-a", PerfLeasePurpose::Live, 1000), true, 1000)
+            .lease
+            .unwrap();
+        assert!(
+            handle
+                .open(request("device-b", PerfLeasePurpose::Live, 1000), true, 1000)
+                .accepted
+        );
+        let mut elsewhere = request("device-a", PerfLeasePurpose::Live, 1000);
+        elsewhere.target_id = "target-b".to_string();
+        let refused = handle.open(elsewhere, true, 1400);
+        assert_eq!(refused.code.as_deref(), Some("target-mismatch"));
+        assert!(handle.renew(&own.lease_id, Some("device-a"), 1600).is_ok());
+        assert_eq!(handle.leases(), 2);
+    }
+
+    #[test]
+    fn a_dead_holder_is_reclaimed_by_its_heartbeat_ttl() {
+        let handle = SamplerHandle::default();
+        assert!(
+            handle
+                .open(request("device-a", PerfLeasePurpose::Live, 1000), true, 1000)
+                .accepted
+        );
+        let mut next_window = request("device-a", PerfLeasePurpose::Live, 1000);
+        next_window.client_id = "client-next-window".to_string();
+        assert_eq!(
+            handle
+                .open(next_window.clone(), true, 1000 + LEASE_TTL_MS - 1)
+                .code
+                .as_deref(),
+            Some("device-purpose-limit")
+        );
+        // The holder stopped renewing; its lease expires and the device is free.
+        assert!(handle.open(next_window, true, 1000 + LEASE_TTL_MS).accepted);
+        assert_eq!(handle.leases(), 1);
     }
 
     #[test]

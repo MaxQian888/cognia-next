@@ -563,24 +563,87 @@ impl SessionStore {
         project_key: &str,
     ) -> Result<Vec<SessionListRow>, String> {
         let guard = self.conn.lock();
-        let mut stmt = guard
-            .prepare(
+        let query = |sql: &str| -> Result<Vec<SessionListRow>, String> {
+            let mut stmt = guard
+                .prepare(sql)
+                .map_err(|e| format!("sessionStore: prepare: {e}"))?;
+            let rows = stmt
+                .query_map(params![scope.tenant, scope.workspace, project_key], |row| {
+                    Ok(SessionListRow {
+                        session_id: row.get(0)?,
+                        mtime: row.get(1)?,
+                    })
+                })
+                .map_err(|e| format!("sessionStore: query: {e}"))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("sessionStore: row: {e}"))
+        };
+        // Seek between session ids in the existing covering index instead of
+        // visiting every transcript entry in projects with <=128 sessions.
+        // The ids are enumerated first, without their mtimes: a 129th id
+        // signals a larger catalog, which falls back to the original grouped
+        // scan having paid only the bounded seeks — never 129 per-session
+        // mtime lookups that would then be thrown away.
+        // Reading the existing index avoids maintaining a second catalog that
+        // could become stale after deletion, retention, or a crash.
+        const SMALL_CATALOG: usize = 128;
+        let ids = {
+            let mut stmt = guard
+                .prepare(
+                    "WITH RECURSIVE session_ids(session_id, position) AS (
+                         SELECT MIN(session_id), 1 FROM entries
+                         WHERE tenant = ?1 AND workspace = ?2 AND project_key = ?3
+                         UNION ALL
+                         SELECT (SELECT MIN(session_id) FROM entries
+                                 WHERE tenant = ?1 AND workspace = ?2 AND project_key = ?3
+                                   AND session_id > session_ids.session_id), position + 1
+                         FROM session_ids WHERE session_id IS NOT NULL AND position < ?4
+                     )
+                     SELECT session_id FROM session_ids WHERE session_id IS NOT NULL",
+                )
+                .map_err(|e| format!("sessionStore: prepare: {e}"))?;
+            let rows = stmt
+                .query_map(
+                    params![
+                        scope.tenant,
+                        scope.workspace,
+                        project_key,
+                        (SMALL_CATALOG + 1) as i64
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|e| format!("sessionStore: query: {e}"))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("sessionStore: row: {e}"))?
+        };
+        if ids.len() > SMALL_CATALOG {
+            return query(
                 "SELECT session_id, MAX(written_at) AS mtime FROM entries
                  WHERE tenant = ?1 AND workspace = ?2 AND project_key = ?3
-                 GROUP BY session_id
-                 ORDER BY mtime DESC",
+                 GROUP BY session_id ORDER BY mtime DESC",
+            );
+        }
+        let mut latest = guard
+            .prepare(
+                "SELECT written_at FROM entries
+                 WHERE tenant = ?1 AND workspace = ?2 AND project_key = ?3 AND session_id = ?4
+                 ORDER BY written_at DESC LIMIT 1",
             )
             .map_err(|e| format!("sessionStore: prepare: {e}"))?;
-        let rows = stmt
-            .query_map(params![scope.tenant, scope.workspace, project_key], |row| {
-                Ok(SessionListRow {
-                    session_id: row.get(0)?,
-                    mtime: row.get(1)?,
-                })
+        let mut heads = ids
+            .into_iter()
+            .map(|session_id| {
+                let mtime = latest
+                    .query_row(
+                        params![scope.tenant, scope.workspace, project_key, session_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(|e| format!("sessionStore: row: {e}"))?;
+                Ok(SessionListRow { session_id, mtime })
             })
-            .map_err(|e| format!("sessionStore: query: {e}"))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("sessionStore: row: {e}"))
+            .collect::<Result<Vec<_>, String>>()?;
+        heads.sort_by_key(|row| std::cmp::Reverse(row.mtime));
+        Ok(heads)
     }
 
     /// Every `subpath` under a session — the subagent transcripts resume needs.
@@ -820,20 +883,38 @@ impl SessionStore {
             .transaction()
             .map_err(|e| format!("sessionStore: begin: {e}"))?;
 
-        // The subquery groups by session so a session whose LAST write is
-        // recent survives even if its first entries predate the cutoff.
+        // Activity in either the transcript (including subagents) or its
+        // summary keeps the whole session. Their writes need not happen at
+        // the same time, so neither table may expire independently.
         let removed = tx
             .execute(
                 "DELETE FROM entries WHERE (tenant, workspace, project_key, session_id) IN (
-                     SELECT tenant, workspace, project_key, session_id FROM entries
+                     SELECT tenant, workspace, project_key, session_id FROM entries AS candidate
                      GROUP BY tenant, workspace, project_key, session_id
                      HAVING MAX(written_at) < ?1
+                        AND NOT EXISTS (
+                            SELECT 1 FROM summaries
+                            WHERE summaries.tenant = candidate.tenant
+                              AND summaries.workspace = candidate.workspace
+                              AND summaries.project_key = candidate.project_key
+                              AND summaries.session_id = candidate.session_id
+                              AND summaries.mtime >= ?1
+                        )
                  )",
                 params![cutoff],
             )
             .map_err(|e| format!("sessionStore: prune: {e}"))?;
-        tx.execute("DELETE FROM summaries WHERE mtime < ?1", params![cutoff])
-            .map_err(|e| format!("sessionStore: prune summaries: {e}"))?;
+        tx.execute(
+            "DELETE FROM summaries WHERE mtime < ?1 AND NOT EXISTS (
+                 SELECT 1 FROM entries
+                 WHERE entries.tenant = summaries.tenant
+                   AND entries.workspace = summaries.workspace
+                   AND entries.project_key = summaries.project_key
+                   AND entries.session_id = summaries.session_id
+             )",
+            params![cutoff],
+        )
+        .map_err(|e| format!("sessionStore: prune summaries: {e}"))?;
 
         tx.commit()
             .map_err(|e| format!("sessionStore: commit: {e}"))?;
@@ -1216,6 +1297,216 @@ mod tests {
     }
 
     #[test]
+    fn list_sessions_preserves_grouping_across_the_index_seek_boundary() {
+        for count in [0, 1, 127, 128, 129, 257, 513] {
+            let store = SessionStore::in_memory().expect("store");
+            let scope = StoreScope::default();
+            let mut expected = std::collections::BTreeMap::new();
+            {
+                let mut guard = store.conn.lock();
+                let tx = guard.transaction().expect("transaction");
+                for i in 0..count {
+                    let session_id = format!("session-{i:04}");
+                    // Include tied and negative timestamps; subagents can hold
+                    // the newest entry and must contribute to the session mtime.
+                    let latest = i64::from(i / 2) - 100;
+                    for (subpath, written_at) in [("", latest - 1), ("subagents/a", latest)] {
+                        tx.execute(
+                            "INSERT INTO entries VALUES (?1, ?2, 'proj', ?3, ?4, 0, 'uuid', 'user', '{}', ?5)",
+                            params![scope.tenant, scope.workspace, session_id, subpath, written_at],
+                        )
+                        .expect("fixture");
+                    }
+                    expected.insert(session_id, latest);
+                }
+                for (tenant, workspace, project) in [
+                    ("other", "default", "proj"),
+                    ("default", "other", "proj"),
+                    ("default", "default", "other"),
+                ] {
+                    tx.execute(
+                        "INSERT INTO entries VALUES (?1, ?2, ?3, 'isolated', '', 0, 'uuid', 'user', '{}', 999999)",
+                        params![tenant, workspace, project],
+                    )
+                    .expect("isolated fixture");
+                }
+                tx.commit().expect("commit");
+            }
+
+            let rows = store.list_sessions(&scope, "proj").expect("list");
+            assert_eq!(rows.len(), count as usize);
+            assert!(rows.windows(2).all(|pair| pair[0].mtime >= pair[1].mtime));
+            let actual: std::collections::BTreeMap<_, _> = rows
+                .into_iter()
+                .map(|row| (row.session_id, row.mtime))
+                .collect();
+            assert_eq!(actual, expected, "session count {count}");
+        }
+    }
+
+    #[test]
+    fn list_sessions_survives_retries_deletions_and_reopening() {
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-store-list-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let path = dir.join("db.sqlite");
+        let main = key("main");
+        let sub = SessionKey {
+            subpath: Some("subagents/a".into()),
+            ..main.clone()
+        };
+        let other = key("other");
+        let list = |store: &SessionStore| {
+            store
+                .list_sessions(&main.scope, "proj")
+                .expect("list")
+                .into_iter()
+                .map(|row| (row.session_id, row.mtime))
+                .collect::<Vec<_>>()
+        };
+        {
+            let store = SessionStore::open(&path).expect("open");
+            for (key, timestamp) in [(&main, 100), (&other, 200), (&sub, 300)] {
+                store
+                    .append(key, &[entry(Some("uuid"), "message")])
+                    .expect("append");
+                store
+                    .conn
+                    .lock()
+                    .execute(
+                        "UPDATE entries SET written_at = ?1 WHERE session_id = ?2 AND subpath = ?3",
+                        params![timestamp, key.session_id, key.subpath_column()],
+                    )
+                    .expect("backdate");
+            }
+            assert_eq!(
+                store
+                    .append(&sub, &[entry(Some("uuid"), "message")])
+                    .expect("retry"),
+                0
+            );
+            assert_eq!(
+                list(&store),
+                vec![("main".into(), 300), ("other".into(), 200)]
+            );
+            store.delete(&sub).expect("delete subagent");
+            assert_eq!(
+                list(&store),
+                vec![("other".into(), 200), ("main".into(), 100)]
+            );
+        }
+        {
+            let store = SessionStore::open(&path).expect("reopen");
+            assert_eq!(
+                list(&store),
+                vec![("other".into(), 200), ("main".into(), 100)]
+            );
+            store.delete(&main).expect("delete main");
+            assert_eq!(list(&store), vec![("other".into(), 200)]);
+        }
+        {
+            let store = SessionStore::open(&path).expect("reopen after delete");
+            assert_eq!(list(&store), vec![("other".into(), 200)]);
+        }
+        std::fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// Run explicitly with `cargo test -p cognia-agent-state
+    /// benchmark_list_sessions -- --ignored --nocapture --test-threads=1`.
+    /// Uses the production method and bundled SQLite; timings are observations,
+    /// not assertions that would make CI depend on host load.
+    #[test]
+    #[ignore = "explicit long-history and sparse-session performance measurement"]
+    fn benchmark_list_sessions() {
+        for (entries, sessions) in [
+            (100_000, 100),
+            (100_000, 1_000),
+            (10_000, 10_000),
+            (100_000, 100_000),
+        ] {
+            let store = SessionStore::in_memory().expect("store");
+            let scope = StoreScope::default();
+            {
+                let mut guard = store.conn.lock();
+                let tx = guard.transaction().expect("transaction");
+                {
+                    let mut insert = tx.prepare(
+                        "INSERT INTO entries VALUES ('default', 'default', 'proj', ?1, '', ?2, ?3, 'user', '{}', ?4)",
+                    ).expect("prepare fixture");
+                    for i in 0..entries {
+                        insert
+                            .execute(params![
+                                format!("s{:08}", i % sessions),
+                                i / sessions,
+                                format!("u{i}"),
+                                i
+                            ])
+                            .expect("fixture");
+                    }
+                }
+                tx.commit().expect("commit");
+            }
+            let baseline = || {
+                let guard = store.conn.lock();
+                let mut statement = guard
+                    .prepare(
+                        "SELECT session_id, MAX(written_at) AS mtime FROM entries
+                     WHERE tenant = ?1 AND workspace = ?2 AND project_key = ?3
+                     GROUP BY session_id ORDER BY mtime DESC",
+                    )
+                    .expect("baseline");
+                let rows = statement
+                    .query_map(params![scope.tenant, scope.workspace, "proj"], |row| {
+                        Ok(SessionListRow {
+                            session_id: row.get(0)?,
+                            mtime: row.get(1)?,
+                        })
+                    })
+                    .expect("baseline query");
+                rows.collect::<Result<Vec<_>, _>>().expect("baseline rows")
+            };
+            let expected = baseline();
+            let actual = store.list_sessions(&scope, "proj").expect("warmup");
+            assert_eq!(
+                serde_json::to_value(&actual).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            let mut samples = [Vec::new(), Vec::new()];
+            for pair in 0..10 {
+                // Alternate AB/BA to reduce systematic warm-cache/order bias.
+                for method in if pair % 2 == 0 { [0, 1] } else { [1, 0] } {
+                    let started = std::time::Instant::now();
+                    let rows = if method == 0 {
+                        baseline()
+                    } else {
+                        store.list_sessions(&scope, "proj").expect("list")
+                    };
+                    samples[method].push(started.elapsed().as_secs_f64() * 1_000.0);
+                    assert_eq!(rows.len(), sessions as usize);
+                }
+            }
+            let stats = |values: &[f64]| {
+                let mut sorted = values.to_vec();
+                sorted.sort_by(f64::total_cmp);
+                let median = (sorted[4] + sorted[5]) / 2.0;
+                let mut deviations: Vec<_> =
+                    values.iter().map(|value| (value - median).abs()).collect();
+                deviations.sort_by(f64::total_cmp);
+                json!({ "medianMs": median, "madMs": (deviations[4] + deviations[5]) / 2.0, "samplesMs": values })
+            };
+            println!(
+                "{}",
+                json!({
+                    "sqliteVersion": rusqlite::version(), "entries": entries, "sessions": sessions,
+                    "baseline": stats(&samples[0]), "current": stats(&samples[1]),
+                })
+            );
+        }
+    }
+
+    #[test]
     fn prune_drops_whole_sessions_and_keeps_recent_ones() {
         let store = SessionStore::in_memory().expect("store");
         let scope = StoreScope::default();
@@ -1263,6 +1554,221 @@ mod tests {
 
         assert_eq!(store.prune(1).expect("prune"), 0);
         assert_eq!(store.load(&k).expect("load").expect("some").len(), 2);
+    }
+
+    #[test]
+    fn prune_preserves_history_when_only_the_summary_is_recent() {
+        let store = SessionStore::in_memory().expect("store");
+        let main = key("s1");
+        let sub = SessionKey {
+            subpath: Some("subagents/a".into()),
+            ..main.clone()
+        };
+        for key in [&main, &sub] {
+            store
+                .append(key, &[entry(Some("uuid"), "old history")])
+                .expect("append");
+        }
+        store
+            .conn
+            .lock()
+            .execute("UPDATE entries SET written_at = 0", [])
+            .expect("backdate");
+        store
+            .write_summary(
+                &main.scope,
+                "proj",
+                "s1",
+                &json!({ "title": "recent activity" }),
+                None,
+            )
+            .expect("summary");
+
+        assert_eq!(store.prune(1).expect("prune"), 0);
+        assert_eq!(store.load(&main).expect("load").expect("main").len(), 1);
+        assert_eq!(store.load(&sub).expect("load").expect("subagent").len(), 1);
+        assert!(store
+            .read_summary(&main.scope, "proj", "s1")
+            .expect("summary")
+            .is_some());
+    }
+
+    #[test]
+    fn prune_preserves_the_summary_when_only_a_subagent_is_recent() {
+        let store = SessionStore::in_memory().expect("store");
+        let main = key("s1");
+        store
+            .append(&main, &[entry(Some("main"), "old main")])
+            .expect("append");
+        store
+            .write_summary(
+                &main.scope,
+                "proj",
+                "s1",
+                &json!({ "title": "old summary" }),
+                None,
+            )
+            .expect("summary");
+        {
+            let guard = store.conn.lock();
+            guard
+                .execute("UPDATE entries SET written_at = 0", [])
+                .expect("backdate entries");
+            guard
+                .execute("UPDATE summaries SET mtime = 0", [])
+                .expect("backdate summary");
+        }
+        let sub = SessionKey {
+            subpath: Some("subagents/a".into()),
+            ..main.clone()
+        };
+        store
+            .append(&sub, &[entry(Some("subagent"), "recent subagent")])
+            .expect("append");
+
+        assert_eq!(store.prune(1).expect("prune"), 0);
+        assert_eq!(store.load(&main).expect("load").expect("main").len(), 1);
+        assert_eq!(store.load(&sub).expect("load").expect("subagent").len(), 1);
+        let summary = store
+            .read_summary(&main.scope, "proj", "s1")
+            .expect("summary")
+            .expect("retained summary");
+        assert_eq!(summary.data["title"], "old summary");
+        assert_eq!(summary.version, 1);
+    }
+
+    #[test]
+    fn prune_expiry_is_scoped_and_removes_both_old_tables() {
+        let store = SessionStore::in_memory().expect("store");
+        let recent = now_ms();
+        // All rows deliberately reuse the same session id. Activity in any
+        // other tenant, workspace, or project must not preserve an expired one.
+        let fixtures = [
+            ("default", "default", "proj", 0, 0, false),
+            ("other", "default", "proj", 0, recent, true),
+            ("default", "other", "proj", recent, 0, true),
+            ("default", "default", "other", 0, recent, true),
+        ];
+        {
+            let guard = store.conn.lock();
+            for (tenant, workspace, project, written_at, mtime, _) in fixtures {
+                for subpath in ["", "subagents/a"] {
+                    guard.execute(
+                        "INSERT INTO entries VALUES (?1, ?2, ?3, 's1', ?4, 0, 'uuid', 'user', '{}', ?5)",
+                        params![tenant, workspace, project, subpath, written_at],
+                    ).expect("entry fixture");
+                }
+                guard
+                    .execute(
+                        "INSERT INTO summaries VALUES (?1, ?2, ?3, 's1', ?4, '{}', 1)",
+                        params![tenant, workspace, project, mtime],
+                    )
+                    .expect("summary fixture");
+            }
+        }
+        // Disabling retention must preserve even completely expired sessions.
+        assert_eq!(store.prune(0).expect("disabled prune"), 0);
+        assert_eq!(store.stats().expect("stats")["entries"], 8);
+        assert_eq!(store.stats().expect("stats")["summaries"], 4);
+        assert_eq!(store.prune(1).expect("prune"), 2);
+        for (tenant, workspace, project, _, _, keep) in fixtures {
+            let scope = StoreScope {
+                tenant: tenant.into(),
+                workspace: workspace.into(),
+            };
+            let main = SessionKey {
+                scope: scope.clone(),
+                project_key: project.into(),
+                session_id: "s1".into(),
+                subpath: None,
+            };
+            let sub = SessionKey {
+                subpath: Some("subagents/a".into()),
+                ..main.clone()
+            };
+            for key in [&main, &sub] {
+                let rows = store.load(key).expect("load");
+                if keep {
+                    assert_eq!(rows.expect("retained history").len(), 1);
+                } else {
+                    assert!(
+                        rows.is_none(),
+                        "expired history and summary must be removed"
+                    );
+                }
+            }
+            assert_eq!(
+                store
+                    .read_summary(&scope, project, "s1")
+                    .expect("summary")
+                    .is_some(),
+                keep
+            );
+        }
+    }
+
+    #[test]
+    fn prune_expires_old_summary_only_sessions_but_keeps_recent_ones() {
+        let store = SessionStore::in_memory().expect("store");
+        let scope = StoreScope::default();
+        store
+            .write_summary(&scope, "proj", "old", &json!({}), None)
+            .expect("old summary");
+        store
+            .conn
+            .lock()
+            .execute("UPDATE summaries SET mtime = 0", [])
+            .expect("backdate");
+        store
+            .write_summary(&scope, "proj", "recent", &json!({}), None)
+            .expect("recent summary");
+        assert_eq!(store.prune(1).expect("prune"), 0);
+        assert!(store
+            .read_summary(&scope, "proj", "old")
+            .expect("old summary")
+            .is_none());
+        assert!(store
+            .read_summary(&scope, "proj", "recent")
+            .expect("recent summary")
+            .is_some());
+    }
+
+    #[test]
+    fn prune_rolls_back_history_deletion_if_summary_deletion_fails() {
+        let store = SessionStore::in_memory().expect("store");
+        let main = key("s1");
+        store
+            .append(&main, &[entry(Some("uuid"), "history")])
+            .expect("append");
+        store
+            .write_summary(&main.scope, "proj", "s1", &json!({}), None)
+            .expect("summary");
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "UPDATE entries SET written_at = 0;
+             UPDATE summaries SET mtime = 0;
+             CREATE TRIGGER reject_summary_delete BEFORE DELETE ON summaries
+             BEGIN SELECT RAISE(ABORT, 'injected summary delete failure'); END;",
+            )
+            .expect("inject failure");
+        assert!(store
+            .prune(1)
+            .expect_err("failed cleanup")
+            .contains("injected summary delete failure"));
+        assert_eq!(
+            store
+                .load(&main)
+                .expect("load")
+                .expect("retained history")
+                .len(),
+            1
+        );
+        assert!(store
+            .read_summary(&main.scope, "proj", "s1")
+            .expect("retained summary")
+            .is_some());
     }
 
     #[test]

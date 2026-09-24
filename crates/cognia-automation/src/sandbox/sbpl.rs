@@ -104,6 +104,11 @@ pub(crate) fn baseline_secret_roots() -> Vec<PathBuf> {
     roots
 }
 
+/// `data_dir()/cognia`, the app-data store the baseline denies seal off.
+fn app_store_root() -> Option<PathBuf> {
+    dirs::data_dir().map(|data| data.join("cognia"))
+}
+
 /// Emit the unconditional credential / control-plane denies. Every caller
 /// emits this LAST, so the rules win over every allow above them.
 pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
@@ -112,8 +117,8 @@ pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
     // dispatcher's forbidden-root floor. With reads open it has to be refused as
     // a read target too, and it is not covered by the `PROTECTED` list because
     // that one is relative to a root rather than absolute.
-    if let Some(data) = dirs::data_dir() {
-        push_read_deny(out, &escape(&data.join("cognia").to_string_lossy()));
+    if let Some(store) = app_store_root() {
+        push_read_deny(out, &escape(&store.to_string_lossy()));
     }
 
     // System keychain material lives OUTSIDE the user's home, so the
@@ -153,6 +158,121 @@ pub(crate) fn push_baseline_secret_read_denies(out: &mut String) {
         out.push_str(&format!(
             "(deny file-read* file-write* (literal \"{p}\"))\n"
         ));
+    }
+}
+
+/// Re-open declared roots that land inside the denied app store.
+///
+/// The host deliberately places managed executions under the app data
+/// directory (`<data>/cognia/task-workspaces/…`) and declares them writable —
+/// but the baseline deny above is emitted later and wins, so the agent's own
+/// cwd was unreadable and `getcwd()` failed before `main()` ran ("EPERM:
+/// process.cwd failed"). For each declared root beneath the store, allow the
+/// ancestor chain back to the store (a `..` walk opens every one) and the
+/// subtree itself. On a case-insensitive filesystem the deny on `cognia`
+/// also matches the real `Cognia` dir, so paths are canonicalized before the
+/// nesting test. The store root itself and its other children —
+/// `secret-store.enc`, the vault, the vector store — stay denied.
+///
+/// Emit AFTER [`push_baseline_secret_read_denies`]: SBPL is last-match-wins,
+/// so these rules must follow the deny they carve out of.
+pub(crate) fn push_app_store_carveouts(out: &mut String, declared: &[impl AsRef<Path>]) {
+    let Some(store) = app_store_root() else {
+        return;
+    };
+    push_store_carveouts_at(out, &store, declared);
+}
+
+/// Canonicalize as much of `p` as exists, keeping the caller's spelling for
+/// the not-yet-created tail. A plain `canonicalize` fails wholesale when any
+/// component is missing — but the ancestor that does exist is enough to fix
+/// `/var`→`/private/var` and `cognia`→`Cognia` so the prefix compare and the
+/// emitted literals come out in real, resolvable case.
+fn canon_or_nearest(p: &Path) -> PathBuf {
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut cur: &Path = p;
+    while std::fs::canonicalize(cur).is_err() {
+        match cur.file_name() {
+            Some(name) => {
+                tail.push(name);
+                match cur.parent() {
+                    Some(parent) => cur = parent,
+                    None => return p.to_path_buf(),
+                }
+            }
+            None => return p.to_path_buf(),
+        }
+        if tail.len() > 64 {
+            return p.to_path_buf();
+        }
+    }
+    let mut out = std::fs::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf());
+    for name in tail.iter().rev() {
+        out.push(name);
+    }
+    out
+}
+
+/// Is `path` nested beneath `root`, tolerating a case-insensitive filesystem?
+///
+/// `canon_or_nearest` resolves `cognia`/`Cognia` spelling differences wherever
+/// the directories exist. The lowercase prefix fallback remains for a
+/// declared root whose misspelled segment itself does not exist yet — on a
+/// case-sensitive filesystem that spelling is exactly what the deny matched,
+/// so re-opening it is still correct.
+fn nests_under(path: &Path, root: &Path) -> bool {
+    let path = canon_or_nearest(path);
+    let root = canon_or_nearest(root);
+    if path == root {
+        return false;
+    }
+    if path.starts_with(&root) {
+        return true;
+    }
+    let root = root.to_string_lossy().to_lowercase();
+    let path = path.to_string_lossy().to_lowercase();
+    path.starts_with(&format!("{root}/"))
+}
+
+/// The emit core, split from [`push_app_store_carveouts`] so tests can point
+/// the store at a tempdir instead of the host's real app-data directory.
+fn push_store_carveouts_at(out: &mut String, store: &Path, declared: &[impl AsRef<Path>]) {
+    let store = canon_or_nearest(store);
+    let mut emitted: Vec<PathBuf> = Vec::new();
+    for declared in declared {
+        let declared = declared.as_ref();
+        let canon = canon_or_nearest(declared);
+        if !nests_under(&canon, &store) {
+            continue; // never re-open the store root itself
+        }
+        if emitted.iter().any(|done| canon.starts_with(done)) {
+            continue; // an emitted ancestor's subpath already covers this root
+        }
+        // Metadata-allow the store and every intermediate directory so a
+        // getcwd `..` walk can stat them; `file-read*` would also reopen
+        // directory LISTING at the store root (exposing `secret-store.enc`
+        // and sibling names), which the deny exists to hide. Then
+        // subpath-allow the root itself. The chain is rebuilt component-wise
+        // rather than by ancestor walking: a declared path that failed
+        // canonicalization can spell `cognia` differently than the on-disk
+        // `Cognia`, and a strict `!= store` walk would then overrun to `/`.
+        let mut chain = vec![store.clone()];
+        let mut dir = store.clone();
+        for component in canon.components().skip(store.components().count()) {
+            dir.push(component.as_os_str());
+            chain.push(dir.clone());
+        }
+        for dir in chain {
+            out.push_str(&format!(
+                "(allow file-read-metadata (literal \"{}\"))\n",
+                escape(&dir.to_string_lossy())
+            ));
+        }
+        out.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            escape(&canon.to_string_lossy())
+        ));
+        emitted.push(canon);
     }
 }
 
@@ -283,6 +403,114 @@ mod tests {
                 "{denied} must come after the read allow"
             );
         }
+    }
+
+    /// The regression this exists for: a managed workspace under the denied
+    /// app store must stay traversable — the deny hid the agent's own cwd and
+    /// `getcwd()` killed the process before `main()`.
+    #[test]
+    fn carveouts_reopen_a_declared_root_inside_the_store() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = std::fs::canonicalize(tmp.path().join("cognia")).unwrap_or_else(|_| {
+            std::fs::create_dir_all(tmp.path().join("cognia")).expect("mkdir store");
+            std::fs::canonicalize(tmp.path().join("cognia")).expect("canon store")
+        });
+        let ws = store.join("task-workspaces").join("executions").join("b1");
+        std::fs::create_dir_all(&ws).expect("mkdir ws");
+
+        let mut out = String::new();
+        push_read_deny(&mut out, &escape(&store.to_string_lossy()));
+        push_store_carveouts_at(&mut out, &store, &[ws.clone()]);
+
+        let deny = out.find("file-read* (subpath").unwrap();
+        let lit = |p: &Path| format!("(allow file-read-metadata (literal \"{}\"))", p.display());
+        let sub = |p: &Path| format!("(allow file-read* (subpath \"{}\"))", p.display());
+        for dir in [
+            store.clone(),
+            store.join("task-workspaces"),
+            store.join("task-workspaces").join("executions"),
+            ws.clone(),
+        ] {
+            let needle = lit(&dir);
+            let at = out.find(&needle).unwrap_or_else(|| panic!("missing {needle}\n{out}"));
+            assert!(at > deny, "{needle} must follow the deny\n{out}");
+        }
+        assert!(out.contains(&sub(&ws)), "{out}");
+        // The store root gets traversal only — its other children stay denied.
+        assert!(!out.contains(&sub(&store)), "{out}");
+        // Ancestors must not regain read access — a `file-read*` literal on a
+        // directory also reopens its listing, which is exactly what the deny
+        // exists to hide (`secret-store.enc` and siblings must stay invisible).
+        for dir in [&store, &store.join("task-workspaces")] {
+            assert!(
+                !out.contains(&format!(
+                    "(allow file-read* (literal \"{}\"))",
+                    dir.display()
+                )),
+                "{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn carveouts_never_reopen_the_store_root_or_outsiders() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = tmp.path().join("cognia");
+        std::fs::create_dir_all(&store).expect("mkdir");
+        let outside = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+
+        let mut out = String::new();
+        push_store_carveouts_at(&mut out, &store, &[store.clone(), outside]);
+        assert_eq!(out, "", "{out}");
+    }
+
+    #[test]
+    fn carveouts_dedupe_roots_covered_by_an_emitted_ancestor() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = tmp.path().join("cognia");
+        let parent = store.join("task-workspaces");
+        let child = parent.join("executions").join("b1");
+        std::fs::create_dir_all(&child).expect("mkdir");
+
+        let mut out = String::new();
+        let store = std::fs::canonicalize(&store).unwrap_or(store);
+        let child = std::fs::canonicalize(&child).unwrap_or(child);
+        let parent = std::fs::canonicalize(&parent).unwrap_or(parent);
+        push_store_carveouts_at(&mut out, &store, &[parent.clone(), child.clone()]);
+        assert_eq!(out.matches("(allow file-read* (subpath").count(), 1, "{out}");
+        assert!(out.contains(&format!("(subpath \"{}\")", parent.display())), "{out}");
+        assert!(!out.contains(&format!("(subpath \"{}\")", child.display())), "{out}");
+    }
+
+    #[test]
+    fn carveouts_match_a_not_yet_created_root_case_insensitively() {
+        // The bundle dir can be spelled `cognia` (the deny's spelling) while
+        // the on-disk dir is `Cognia`; the workspace may not exist yet either.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = tmp.path().join("Cognia");
+        std::fs::create_dir_all(&store).expect("mkdir");
+        let pending = tmp
+            .path()
+            .join("cognia")
+            .join("task-workspaces")
+            .join("executions")
+            .join("pending");
+
+        let mut out = String::new();
+        push_store_carveouts_at(&mut out, &store, &[pending.clone()]);
+        // Either spelling nests under the deny — case-insensitive FS resolves
+        // `cognia` to `Cognia`, and on a case-sensitive FS the lowercase
+        // spelling is the one the deny itself matched.
+        assert!(
+            out.contains("(subpath \"") && out.contains("pending\"))"),
+            "{out}"
+        );
+        let canon_store = std::fs::canonicalize(&store).unwrap_or(store);
+        assert!(
+            out.contains(&format!("(literal \"{}\")", canon_store.display())),
+            "{out}"
+        );
     }
 
     #[test]

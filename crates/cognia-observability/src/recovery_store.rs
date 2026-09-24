@@ -10,7 +10,9 @@
 //! business-data backup along with the rest of that tree.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::recovery::RecoveryStateV1;
 
@@ -38,12 +40,15 @@ fn io_error(path: &Path, source: std::io::Error) -> RecoveryStoreError {
 #[derive(Debug, Clone)]
 pub struct RecoveryStore {
     dir: PathBuf,
+    // Clones share the fixed staging filename and must never write it together.
+    writes: Arc<Mutex<()>>,
 }
 
 impl RecoveryStore {
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
             dir: dir.as_ref().to_path_buf(),
+            writes: Arc::new(Mutex::new(())),
         }
     }
 
@@ -72,26 +77,48 @@ impl RecoveryStore {
         state
     }
 
-    /// Persist atomically: write a temp file, then rename over the real one.
+    /// Sync a complete temp file before replacing the previous checkpoint.
     pub fn save(&self, state: &RecoveryStateV1) -> Result<(), RecoveryStoreError> {
+        let _guard = self
+            .writes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         fs::create_dir_all(&self.dir).map_err(|error| io_error(&self.dir, error))?;
         let temp = self.dir.join(TEMP_FILE);
         let final_path = self.path();
         let encoded = serde_json::to_string_pretty(state).unwrap_or_else(|_| "{}".to_string());
-        fs::write(&temp, encoded).map_err(|error| io_error(&temp, error))?;
+        let mut file = fs::File::create(&temp).map_err(|error| io_error(&temp, error))?;
+        file.write_all(encoded.as_bytes())
+            .map_err(|error| io_error(&temp, error))?;
+        file.sync_all().map_err(|error| io_error(&temp, error))?;
+        drop(file);
         fs::rename(&temp, &final_path).map_err(|error| io_error(&final_path, error))?;
+        self.sync_directory()?;
         Ok(())
     }
 
     /// Remove the persisted state. Used by "reset diagnostics" in the safe
     /// shell, never automatically.
     pub fn clear(&self) -> Result<(), RecoveryStoreError> {
+        let _guard = self
+            .writes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = self.path();
         match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
+            Ok(()) => self.sync_directory(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(io_error(&path, error)),
         }
+    }
+
+    fn sync_directory(&self) -> Result<(), RecoveryStoreError> {
+        // Sync the rename/removal metadata where opening directories is supported.
+        #[cfg(unix)]
+        fs::File::open(&self.dir)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|error| io_error(&self.dir, error))?;
+        Ok(())
     }
 }
 
@@ -102,6 +129,50 @@ mod tests {
     use tempfile::TempDir;
 
     const T0: i64 = 1_785_000_000_000;
+
+    #[test]
+    fn cloned_stores_serialize_concurrent_saves_and_clear() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = RecoveryStore::new(dir.path());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|worker| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let mut failures = Vec::new();
+                    for iteration in 0..40 {
+                        let mut state = RecoveryStateV1::new("build-1");
+                        state.record_unhealthy_start(T0 + worker * 100 + iteration);
+                        if let Err(error) = store.save(&state) {
+                            failures.push(error.to_string());
+                        }
+                        if iteration % 5 == 0 {
+                            store.clear().expect("concurrent clear");
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        let failures: Vec<_> = workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("worker"))
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} failed saves; first: {:?}",
+            failures.len(),
+            failures.first()
+        );
+        let mut final_state = RecoveryStateV1::new("build-1");
+        final_state.record_unhealthy_start(T0);
+        final_state.record_unhealthy_start(T0 + 1);
+        store.save(&final_state).expect("final checkpoint");
+        assert_eq!(store.load("build-1", T0 + 2), final_state);
+        assert!(!dir.path().join(TEMP_FILE).exists());
+    }
 
     #[test]
     fn loading_a_missing_file_yields_a_fresh_state() {
@@ -208,6 +279,26 @@ mod tests {
 
         let loaded = store.load("build-1", T0 + 1);
         assert_eq!(loaded.unhealthy_starts, vec![T0]);
+        state.record_unhealthy_start(T0 + 1);
+        store
+            .save(&state)
+            .expect("replace abandoned temporary file");
+        assert_eq!(store.load("build-1", T0 + 2), state);
+        assert!(!dir.path().join(TEMP_FILE).exists());
+    }
+
+    #[test]
+    fn a_failed_staging_write_preserves_the_previous_checkpoint() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = RecoveryStore::new(dir.path());
+        let mut state = RecoveryStateV1::new("build-1");
+        state.record_unhealthy_start(T0);
+        store.save(&state).expect("initial checkpoint");
+        fs::create_dir(dir.path().join(TEMP_FILE)).expect("block staging file");
+        let mut next = state.clone();
+        next.record_unhealthy_start(T0 + 1);
+        assert!(store.save(&next).is_err());
+        assert_eq!(store.load("build-1", T0 + 2), state);
     }
 
     #[test]

@@ -19,6 +19,9 @@ use crate::host::{ClientIdentity, TerminalHost, TerminalHostConfig};
 use crate::host_wire::serve_host_stream;
 use crate::session::{PathInjection, SessionOrigin, SpawnRequest};
 use base64::Engine;
+use cognia_secrets::keychain_access::{
+    read_password_without_prompt, write_password_without_prompt,
+};
 use ed25519_dalek::{Signer, SigningKey};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -380,22 +383,39 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn load_or_create_bootstrap_secret() -> Result<String, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|error| format!("terminal host keyring init failed: {error}"))?;
-    match entry.get_password() {
-        Ok(secret) if valid_bootstrap_secret(&secret) => Ok(secret),
-        Ok(_) | Err(keyring::Error::NoEntry) => {
+// Keep these credentials in the OS store shared with the separately launched
+// terminal daemon. Cognia's process-local encrypted-store cache is not a
+// cross-process authority. Background reconnects must never display OS dialogs.
+fn load_or_create_credential(account: &str) -> Result<String, String> {
+    load_or_create_credential_with(
+        || read_password_without_prompt(KEYRING_SERVICE, account),
+        |secret| write_password_without_prompt(KEYRING_SERVICE, account, secret),
+    )
+}
+
+fn load_or_create_credential_with(
+    read: impl FnOnce() -> keyring::Result<String>,
+    write: impl FnOnce(&str) -> keyring::Result<()>,
+) -> Result<String, String> {
+    match read() {
+        Ok(secret) => Ok(secret),
+        Err(keyring::Error::NoEntry) => {
             let mut bytes = [0u8; 32];
             rand::fill(&mut bytes);
             let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-            entry
-                .set_password(&secret)
-                .map_err(|error| format!("terminal host keyring write failed: {error}"))?;
+            write(&secret).map_err(|error| format!("terminal credential write failed: {error}"))?;
             Ok(secret)
         }
-        Err(error) => Err(format!("terminal host keyring read failed: {error}")),
+        Err(error) => Err(format!("terminal credential read failed: {error}")),
     }
+}
+
+fn load_or_create_bootstrap_secret() -> Result<String, String> {
+    let secret = load_or_create_credential(KEYRING_ACCOUNT)?;
+    if !valid_bootstrap_secret(&secret) {
+        return Err("terminal host bootstrap secret is invalid".into());
+    }
+    Ok(secret)
 }
 
 fn bootstrap_secret() -> Result<String, String> {
@@ -408,21 +428,7 @@ fn bootstrap_secret() -> Result<String, String> {
 }
 
 fn descriptor_signing_key() -> Result<SigningKey, String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, SIGNING_KEY_ACCOUNT)
-        .map_err(|error| format!("terminal descriptor keyring init failed: {error}"))?;
-    match entry.get_password() {
-        Ok(encoded) => decode_signing_key(&encoded),
-        Err(keyring::Error::NoEntry) => {
-            let mut bytes = [0u8; 32];
-            rand::fill(&mut bytes);
-            let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-            entry
-                .set_password(&encoded)
-                .map_err(|error| format!("terminal descriptor keyring write failed: {error}"))?;
-            Ok(SigningKey::from_bytes(&bytes))
-        }
-        Err(error) => Err(format!("terminal descriptor keyring read failed: {error}")),
-    }
+    decode_signing_key(&load_or_create_credential(SIGNING_KEY_ACCOUNT)?)
 }
 
 fn decode_signing_key(encoded: &str) -> Result<SigningKey, String> {
@@ -919,6 +925,49 @@ fn set_owner_only_dir(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_reads_never_rotate_existing_or_inaccessible_keys() {
+        for existing in ["existing", "invalid"] {
+            assert_eq!(
+                load_or_create_credential_with(
+                    || Ok(existing.into()),
+                    |_| panic!("must not replace an existing credential"),
+                )
+                .unwrap(),
+                existing
+            );
+        }
+        let denied = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("denied")));
+        assert!(load_or_create_credential_with(
+            || Err(denied),
+            |_| panic!("denial is not absence"),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn missing_credentials_are_persisted_before_they_are_returned() {
+        let written = std::cell::RefCell::new(None);
+        let secret = load_or_create_credential_with(
+            || Err(keyring::Error::NoEntry),
+            |value| {
+                *written.borrow_mut() = Some(value.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(valid_bootstrap_secret(&secret));
+        assert!(decode_signing_key(&secret).is_ok());
+        assert_eq!(written.into_inner(), Some(secret));
+        assert!(load_or_create_credential_with(
+            || Err(keyring::Error::NoEntry),
+            |_| Err(keyring::Error::NoStorageAccess(Box::new(
+                std::io::Error::other("denied")
+            ))),
+        )
+        .is_err());
+    }
 
     /// The baseline is what a start-at-login host applies before any desktop
     /// client has said hello — a phone spawning against a machine whose app has

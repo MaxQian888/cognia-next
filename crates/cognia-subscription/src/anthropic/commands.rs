@@ -16,10 +16,14 @@ use crate::vault::{Account, AnthropicCredentialData, ProviderCredential};
 /// entry). Used by the "Reuse" mode of the Anthropic login dialog and the
 /// providers-tab one-click reuse card.
 #[tauri::command]
-pub async fn anthropic_oauth_discover() -> Result<Option<DiscoveredAnthropicAuth>, String> {
-    tauri::async_runtime::spawn_blocking(discovery::discover_anthropic_auth)
-        .await
-        .map_err(|error| format!("Claude credential discovery task failed: {error}"))?
+pub async fn anthropic_oauth_discover(
+    allow_keychain_prompt: Option<bool>,
+) -> Result<Option<DiscoveredAnthropicAuth>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        discovery::discover_anthropic_auth_with_prompt(allow_keychain_prompt.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| format!("Claude credential discovery task failed: {error}"))?
 }
 
 /// Validate and construct the result of a successful TS-side PKCE exchange.
@@ -81,7 +85,7 @@ mod tests {
         // Shared hermetic seam: isolated CLAUDE_CONFIG_DIR + forced-empty
         // keyring, so this never reads the developer's real login.
         let _env = super::discovery::test_support::TestEnv::new();
-        let got = anthropic_oauth_discover().await.unwrap();
+        let got = anthropic_oauth_discover(None).await.unwrap();
         assert!(got.is_none());
     }
 

@@ -521,7 +521,7 @@ pub fn is_terminal_step(status: PlanStepStatus) -> bool {
 pub fn is_terminal_plan(status: PlanStatus) -> bool {
     matches!(
         status,
-        PlanStatus::Completed | PlanStatus::Failed | PlanStatus::Cancelled
+        PlanStatus::Completed | PlanStatus::Failed | PlanStatus::Cancelled | PlanStatus::Rejected
     )
 }
 
@@ -4540,6 +4540,22 @@ impl Store for PgStore {
 mod tests {
     use super::*;
     use cognia_tenant_auth::UserId;
+
+    #[test]
+    fn terminal_plan_statuses_mirror_the_client_set() {
+        // `TERMINAL_PLAN_STATUSES` in types/agent/plan.ts: a rejected plan is
+        // closed (it gets an `ended_at`), everything pre-execution or live is not.
+        for status in PlanStatus::ALL {
+            let expected = matches!(
+                status,
+                PlanStatus::Completed
+                    | PlanStatus::Failed
+                    | PlanStatus::Cancelled
+                    | PlanStatus::Rejected
+            );
+            assert_eq!(is_terminal_plan(*status), expected, "{}", status.as_str());
+        }
+    }
 
     #[test]
     fn postgres_store_installs_a_rustls_crypto_provider() {

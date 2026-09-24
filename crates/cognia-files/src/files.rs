@@ -681,11 +681,22 @@ pub fn fs_search_workspace(
         return Err(format!("root is not a directory: {}", root));
     }
     let cap = limit.unwrap_or(50).min(SEARCH_HARD_LIMIT);
+    if cap == 0 {
+        return Ok(Vec::new());
+    }
     let needle = query.to_lowercase();
     let mut out: Vec<WorkspaceEntry> = Vec::new();
 
     let walker = WalkBuilder::new(&root_path)
         .hidden(false)
+        // Visit visible siblings first so generated dot-directories cannot
+        // exhaust the bounded candidate budget before project files appear.
+        .sort_by_file_name(|a, b| {
+            a.to_string_lossy()
+                .starts_with('.')
+                .cmp(&b.to_string_lossy().starts_with('.'))
+                .then_with(|| a.cmp(b))
+        })
         .git_ignore(true)
         .git_exclude(true)
         .git_global(true)
@@ -733,7 +744,8 @@ pub fn fs_search_workspace(
 }
 
 /// Sort `entries` so the most relevant rows come first.
-/// Order: prefix-match-name > prefix-match-path > directories > shorter path.
+/// Visible paths first unless a dot-path was explicitly queried, then:
+/// prefix-match-name > prefix-match-path > directories > shorter path.
 fn rank_search_results(entries: &mut [WorkspaceEntry], needle_lower: &str) {
     entries.sort_by(|a, b| {
         let score = |e: &WorkspaceEntry| -> u32 {
@@ -755,8 +767,13 @@ fn rank_search_results(entries: &mut [WorkspaceEntry], needle_lower: &str) {
             s = s.saturating_sub(e.rel_path.matches('/').count() as u32);
             s
         };
-        score(b)
-            .cmp(&score(a))
+        let internal = |entry: &WorkspaceEntry| {
+            !needle_lower.split('/').any(|part| part.starts_with('.'))
+                && entry.rel_path.split('/').any(|part| part.starts_with('.'))
+        };
+        internal(a)
+            .cmp(&internal(b))
+            .then_with(|| score(b).cmp(&score(a)))
             .then_with(|| a.rel_path.len().cmp(&b.rel_path.len()))
             .then_with(|| a.rel_path.cmp(&b.rel_path))
     });
@@ -1943,6 +1960,31 @@ mod tests {
         .unwrap();
         assert!(!results.is_empty(), "should find Button.tsx");
         assert!(results[0].rel_path.to_lowercase().contains("button"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_ranks_visible_files_before_internal_dotfiles() {
+        let root = make_sandbox("search-internal-ranking");
+        std::fs::create_dir_all(root.join(".pi/tasks")).unwrap();
+        std::fs::create_dir_all(root.join(".latexwb")).unwrap();
+        std::fs::write(root.join(".latexwb/workspace.db-shm"), "x").unwrap();
+        for index in 0..20 {
+            std::fs::write(root.join(format!(".pi/tasks/task-{index}.json")), "x").unwrap();
+        }
+        std::fs::write(root.join("README.md"), "x").unwrap();
+        let results =
+            fs_search_workspace(root.to_string_lossy().into(), "".into(), Some(1)).unwrap();
+        assert_eq!(results[0].rel_path, "README.md");
+        let explicit = fs_search_workspace(
+            root.to_string_lossy().into(),
+            ".pi/tasks/task-1".into(),
+            Some(10),
+        )
+        .unwrap();
+        assert!(explicit
+            .iter()
+            .any(|entry| entry.rel_path == ".pi/tasks/task-1.json"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -61,14 +61,21 @@ fn default_proxy_websockets() -> bool {
 /// stale or direct configuration.
 #[tauri::command]
 pub async fn proxy_apply(input: ProxyApplyInput) -> Result<(), ProxyError> {
+    // Preserve apply order while credential lookup yields to the worker pool.
+    static APPLY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _apply_guard = APPLY_LOCK.lock().await;
     let password = if !matches!(input.mode, ProxyMode::Off)
         && input
             .username
             .as_deref()
             .is_some_and(|username| !username.is_empty())
     {
-        match cognia_secrets::keyring_secrets::get(PROXY_CREDENTIAL_NAMESPACE, PROXY_CREDENTIAL_KEY)
-        {
+        let credential = tauri::async_runtime::spawn_blocking(|| {
+            cognia_secrets::keyring_secrets::get(PROXY_CREDENTIAL_NAMESPACE, PROXY_CREDENTIAL_KEY)
+        })
+        .await
+        .unwrap_or_else(|_| Err("proxy credential worker failed".into()));
+        match credential {
             Ok(Some(password)) if !password.is_empty() => Some(password),
             Ok(_) => {
                 let error = ProxyError::new(
@@ -432,6 +439,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(proxy_get_active().await.unwrap().state, "ready");
+    }
+
+    #[tokio::test]
+    async fn authenticated_proxy_rejects_missing_credentials_after_worker_lookup() {
+        let error = proxy_apply(ProxyApplyInput {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "proxy.example".into(),
+            port: 8080,
+            username: Some("requires-password".into()),
+            bypass: vec![],
+            proxy_websockets: true,
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, ProxyErrorCode::ProxyCredentialUnavailable);
     }
 
     #[tokio::test]

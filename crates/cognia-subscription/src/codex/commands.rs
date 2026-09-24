@@ -27,8 +27,14 @@ use crate::vault::{
 use tauri::State;
 
 #[tauri::command]
-pub async fn codex_oauth_discover() -> Result<Option<DiscoveredCodexAuth>, String> {
-    discovery::discover_codex_auth()
+pub async fn codex_oauth_discover(
+    allow_keychain_prompt: Option<bool>,
+) -> Result<Option<DiscoveredCodexAuth>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        discovery::discover_codex_auth_with_prompt(allow_keychain_prompt.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| format!("Codex credential discovery task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -297,7 +303,7 @@ mod tests {
         // reads the developer's real keyring nor races the discovery tests
         // over the process-global `CODEX_HOME`.
         let _env = super::discovery::test_support::TestEnv::new();
-        let got = codex_oauth_discover().await.unwrap();
+        let got = codex_oauth_discover(None).await.unwrap();
         assert!(got.is_none());
     }
 

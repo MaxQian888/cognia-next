@@ -2762,6 +2762,7 @@ dependencies = [
  "log",
  "parking_lot",
  "rand 0.10.2",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "tokio",

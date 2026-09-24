@@ -374,6 +374,9 @@ pub fn expected_process_names(agent: super::registry::FleetAgent) -> &'static [&
         // for completeness so a future reverse-channel abort has a home.
         FleetAgent::Opencode => &["opencode"],
         FleetAgent::Cognia => &[],
+        // Renderer-managed ACP sessions: interrupts ride the manager's
+        // `cancel`, never a signal to a pid this process cannot see.
+        FleetAgent::Devin | FleetAgent::Acp => &[],
     }
 }
 
@@ -766,6 +769,8 @@ mod tests {
         assert_eq!(expected_process_names(FleetAgent::Codex), &["codex"]);
         assert_eq!(expected_process_names(FleetAgent::Opencode), &["opencode"]);
         assert!(expected_process_names(FleetAgent::Cognia).is_empty());
+        assert!(expected_process_names(FleetAgent::Devin).is_empty());
+        assert!(expected_process_names(FleetAgent::Acp).is_empty());
     }
 
     #[test]

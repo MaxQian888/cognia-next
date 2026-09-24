@@ -70,14 +70,33 @@ pub async fn tts_keyring_delete(provider: String) -> Result<(), String> {
 /// per-provider round-trip.
 #[tauri::command]
 pub async fn tts_keyring_list_providers() -> Result<Vec<String>, String> {
+    list_configured_providers(KNOWN_PROVIDERS, |provider| {
+        secret_store::get(SERVICE, provider)
+    })
+}
+
+/// Enumerate providers with a stored key.
+///
+/// A single broken entry must not kill enumeration, so per-entry failures are
+/// logged and skipped. A store that is not *ready* is different: every entry
+/// would fail identically, and reporting an empty list would tell the Speech
+/// UI "no keys configured" and cache that answer. That case returns the typed
+/// store error once instead of one WARN per provider, so the renderer keeps its
+/// "not loaded" state and reloads after the store unlocks.
+fn list_configured_providers(
+    providers: &[&str],
+    read: impl Fn(&str) -> Result<Option<String>, String>,
+) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
-    for p in KNOWN_PROVIDERS {
-        match secret_store::get(SERVICE, p) {
-            Ok(Some(_)) => out.push((*p).to_string()),
+    for provider in providers {
+        match read(provider) {
+            Ok(Some(_)) => out.push((*provider).to_string()),
             Ok(None) => {}
-            Err(e) => {
-                // A single broken entry shouldn't kill enumeration; log and continue.
-                log::warn!("secret-store read failed for {p}: {e}");
+            Err(error) if secret_store::unavailable_reason(&error).is_some() => {
+                return Err(error);
+            }
+            Err(error) => {
+                log::warn!("secret-store read failed for {provider}: {error}");
             }
         }
     }
@@ -118,6 +137,37 @@ mod tests {
         );
         tts_keyring_delete(provider.into()).await.unwrap();
         assert_eq!(tts_keyring_get(provider.into()).await.unwrap(), None);
+    }
+
+    #[test]
+    fn a_locked_store_fails_enumeration_once_instead_of_reporting_no_keys() {
+        let calls = std::cell::Cell::new(0);
+        let error = list_configured_providers(&["openai", "google", "xai"], |_| {
+            calls.set(calls.get() + 1);
+            Err("SECRET_STORE_LOCKED: master key read: denied".into())
+        })
+        .unwrap_err();
+        assert!(error.starts_with(secret_store::LOCKED_CODE));
+        assert_eq!(calls.get(), 1, "stop at the first store-level failure");
+
+        let initializing = list_configured_providers(&["openai"], |_| {
+            Err(format!("{}: in progress", secret_store::INITIALIZING_CODE))
+        })
+        .unwrap_err();
+        assert!(initializing.starts_with(secret_store::INITIALIZING_CODE));
+    }
+
+    #[test]
+    fn a_broken_entry_is_skipped_while_the_rest_enumerate() {
+        let listed = list_configured_providers(&["openai", "google", "xai"], |provider| {
+            match provider {
+                "openai" => Ok(Some("key".into())),
+                "google" => Err("legacy keyring read: denied".into()),
+                _ => Ok(None),
+            }
+        })
+        .unwrap();
+        assert_eq!(listed, vec!["openai".to_string()]);
     }
 
     #[test]

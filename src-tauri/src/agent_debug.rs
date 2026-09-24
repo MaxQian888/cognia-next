@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, Webview, WebviewWindow};
 
 use crate::cli_bridge::SharedState;
+use crate::webview_watchdog::RendererLifecycle;
 
 const INJECTED_SCRIPT: &str = include_str!("agent_debug/injected.js");
 const AUTOMATION_CORE_SCRIPT: &str = include_str!("../../lib/browser/automation-core.injected.js");
@@ -26,6 +27,46 @@ const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_WINDOW: &str = "main";
 const DEFAULT_LOG_LINES: usize = 400;
 const MAX_LOG_LINES: usize = 5_000;
+const EVAL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an evaluation waits for a terminated renderer's replacement to
+/// commit a document before failing with `webview_renderer_restarting`.
+const RENDERER_RELOAD_WAIT: Duration = Duration::from_secs(10);
+
+/// Why a webview evaluation failed. Renderer lifecycle failures are typed so
+/// the HTTP payload can carry the window and renderer generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EvalError {
+    /// A bridge/evaluation failure, classified by message in [`eval_error`].
+    Failed(String),
+    /// The renderer this evaluation was sent to terminated (WKWebView web
+    /// content process died) before answering. Its realm, helper state, and
+    /// element refs are gone; the webview is reloading into a new renderer.
+    RendererRestarted { window: String, generation: u64 },
+    /// A terminated renderer's replacement has not committed a document yet.
+    RendererRestarting { window: String, generation: u64 },
+}
+
+impl From<String> for EvalError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl std::fmt::Display for EvalError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(message) => formatter.write_str(message),
+            Self::RendererRestarted { window, generation } => write!(
+                formatter,
+                "webview renderer restarted: the {window} web content process terminated before answering (renderer generation {generation}); the page reloaded, so element refs and in-page state are gone — re-run the command"
+            ),
+            Self::RendererRestarting { window, generation } => write!(
+                formatter,
+                "webview renderer is restarting: the {window} web content process terminated (renderer generation {generation}) and its replacement has not loaded a document yet"
+            ),
+        }
+    }
+}
 
 type ApiResult = Result<Json<Value>, (StatusCode, Json<Value>)>;
 
@@ -179,14 +220,18 @@ pub fn install(webview: &Webview) {
 
 async fn health(State(state): State<SharedState>) -> ApiResult {
     let app = &state.app_handle;
+    let lifecycle = renderer_lifecycle(app);
+    // Health must stay fast while a renderer is being replaced: report the
+    // restart through `renderers` instead of blocking on the reload.
     let helper = match app.get_webview(DEFAULT_WINDOW) {
-        Some(webview) => eval_json(
+        Some(webview) if !lifecycle.state(DEFAULT_WINDOW).awaiting_load => eval_json(
             &webview,
+            &lifecycle,
             "JSON.stringify(window.__cogniaAgentDebug.health())",
         )
         .await
         .ok(),
-        None => None,
+        _ => None,
     };
     Ok(Json(json!({
         "ok": true,
@@ -195,6 +240,7 @@ async fn health(State(state): State<SharedState>) -> ApiResult {
         "version": app.package_info().version.to_string(),
         "platform": std::env::consts::OS,
         "helper": helper,
+        "renderers": lifecycle.snapshot(),
         "logDir": crate::logging::native_bootstrap::log_dir(),
     })))
 }
@@ -230,7 +276,10 @@ async fn snapshot(
     }))
     .map_err(internal_error)?;
     let script = format!("JSON.stringify(window.__cogniaAgentDebug.snapshot({options}))");
-    let value = eval_json(&webview, &script).await.map_err(eval_error)?;
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let value = eval_json(&webview, &lifecycle, &script)
+        .await
+        .map_err(eval_error)?;
     Ok(Json(
         json!({ "ok": true, "window": request.window, "snapshot": value }),
     ))
@@ -249,7 +298,8 @@ async fn inspect(
     let script = format!(
         "(async()=>JSON.stringify(await window.__cogniaAgentDebug.inspect({reference},{operation},{args})))()"
     );
-    let value = eval_json_async(&webview, &script)
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let value = eval_json_async(&webview, &lifecycle, &script)
         .await
         .map_err(eval_error)?;
     Ok(Json(json!({
@@ -293,7 +343,8 @@ async fn locator(
     .map_err(internal_error)?;
     let script =
         format!("(async()=>JSON.stringify(await window.__cogniaAgentDebug.locator({payload})))()");
-    let value = eval_json_async_with_timeout(&webview, &script, timeout)
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let value = eval_json_async_with_timeout(&webview, &lifecycle, &script, timeout)
         .await
         .map_err(eval_error)?;
     Ok(Json(json!({
@@ -313,7 +364,8 @@ async fn act(State(state): State<SharedState>, Json(request): Json<ActRequest>) 
     let script = format!(
         "(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args});const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false}});return JSON.stringify({{result,snapshot}});}})()"
     );
-    let value = eval_json_async(&webview, &script)
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let value = eval_json_async(&webview, &lifecycle, &script)
         .await
         .map_err(eval_error)?;
     Ok(Json(
@@ -342,7 +394,8 @@ async fn evaluate(
     let script = format!(
         "(async()=>{{const value=await (0,eval)({expression});return JSON.stringify(window.__cogniaAgentDebug.serialize(value));}})()"
     );
-    let value = eval_json_async(&webview, &script)
+    let lifecycle = renderer_lifecycle(&state.app_handle);
+    let value = eval_json_async(&webview, &lifecycle, &script)
         .await
         .map_err(eval_error)?;
     Ok(Json(
@@ -376,7 +429,10 @@ async fn read_diagnostics(
         "JSON.stringify(window.__cogniaAgentDebug.{method}({}, {limit}))",
         query.after
     );
-    let value = eval_json(&webview, &script).await.map_err(eval_error)?;
+    let lifecycle = renderer_lifecycle(app);
+    let value = eval_json(&webview, &lifecycle, &script)
+        .await
+        .map_err(eval_error)?;
     Ok(Json(
         json!({ "ok": true, "window": query.window, (key): value }),
     ))
@@ -516,7 +572,43 @@ fn resolve_webview(app: &AppHandle, label: &str) -> Result<Webview, (StatusCode,
         .ok_or_else(|| not_found("window_not_found", format!("webview not found: {label}")))
 }
 
-async fn eval_json(webview: &Webview, script: &str) -> Result<Value, String> {
+/// Managed renderer lifecycle; an untracked fallback keeps the bridge usable
+/// (without restart detection) if the state was never registered.
+fn renderer_lifecycle(app: &AppHandle) -> RendererLifecycle {
+    app.try_state::<RendererLifecycle>()
+        .map(|state| state.inner().clone())
+        .unwrap_or_default()
+}
+
+async fn eval_json(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    script: &str,
+) -> Result<Value, EvalError> {
+    eval_json_on_renderer(webview, lifecycle, script)
+        .await
+        .map(|(value, _)| value)
+}
+
+/// Evaluate `script` and return its JSON result together with the renderer
+/// generation that produced it.
+///
+/// Rebinding after a web content process termination: the evaluation first
+/// waits for the replacement renderer to commit a document, re-injects the
+/// helper (idempotent), and then races the completion callback against a
+/// further termination. A renderer that dies mid-evaluation never invokes the
+/// callback (or invokes it with no value), which previously surfaced only as a
+/// 10 s `webview_eval_timeout` on every call.
+async fn eval_json_on_renderer(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    script: &str,
+) -> Result<(Value, u64), EvalError> {
+    let label = webview.label().to_string();
+    let renderer = bind_renderer(lifecycle, &label, RENDERER_RELOAD_WAIT).await?;
+
+    // Re-inject the helper on every call: after a renderer restart the new
+    // realm starts without it (installation is idempotent otherwise).
     install(webview);
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
     let slot = Arc::new(Mutex::new(Some(tx)));
@@ -529,17 +621,105 @@ async fn eval_json(webview: &Webview, script: &str) -> Result<Value, String> {
                 }
             }
         })
-        .map_err(|error| error.to_string())?;
-    let raw = match tokio::time::timeout(Duration::from_secs(10), rx).await {
-        Ok(Ok(value)) => value,
-        Ok(Err(_)) => return Err("webview evaluation channel closed".to_string()),
-        Err(_) => return Err("webview evaluation timed out".to_string()),
-    };
+        .map_err(|error| EvalError::Failed(error.to_string()))?;
+
+    let raw = await_eval_answer(rx, lifecycle, &label, renderer.generation, EVAL_TIMEOUT).await?;
     let unwrapped = unwrap_js_string(raw);
     if unwrapped.len() > MAX_RESULT_BYTES {
-        return Err("webview evaluation result exceeds the 2 MiB limit".to_string());
+        return Err("webview evaluation result exceeds the 2 MiB limit"
+            .to_string()
+            .into());
     }
-    serde_json::from_str(&unwrapped).map_err(|error| format!("invalid JSON from webview: {error}"))
+    let value = serde_json::from_str(&unwrapped)
+        .map_err(|error| EvalError::Failed(format!("invalid JSON from webview: {error}")))?;
+    Ok((value, renderer.generation))
+}
+
+/// Resolve the renderer an evaluation will run on. While a terminated
+/// renderer is being replaced, wait (bounded) for the replacement to commit a
+/// document — the rebind — instead of sending the script into the void.
+async fn bind_renderer(
+    lifecycle: &RendererLifecycle,
+    label: &str,
+    wait: Duration,
+) -> Result<crate::webview_watchdog::RendererState, EvalError> {
+    let mut renderer = lifecycle.state(label);
+    if renderer.awaiting_load {
+        renderer = lifecycle.wait_until_loaded(label, wait).await;
+        if renderer.awaiting_load {
+            return Err(EvalError::RendererRestarting {
+                window: label.to_string(),
+                generation: renderer.generation,
+            });
+        }
+    }
+    Ok(renderer)
+}
+
+/// Outcome of waiting on an evaluation's completion callback.
+type EvalAnswer = Option<
+    Result<Result<String, tokio::sync::oneshot::error::RecvError>, tokio::time::error::Elapsed>,
+>;
+
+/// Race the completion callback against a termination of the renderer the
+/// script was sent to (`generation`). A renderer that dies mid-evaluation never
+/// invokes the callback — that used to surface only as a 10 s timeout, on every
+/// call, with no hint that the page had been replaced.
+async fn await_eval_answer(
+    answer: tokio::sync::oneshot::Receiver<String>,
+    lifecycle: &RendererLifecycle,
+    label: &str,
+    generation: u64,
+    timeout: Duration,
+) -> Result<String, EvalError> {
+    let outcome: EvalAnswer = tokio::select! {
+        result = tokio::time::timeout(timeout, answer) => Some(result),
+        () = lifecycle.wait_for_termination(label, generation) => None,
+    };
+    classify_eval_answer(
+        outcome,
+        label,
+        generation,
+        lifecycle.state(label).generation,
+    )
+}
+
+/// Pure classification of an evaluation answer given the renderer generation
+/// it was sent to (`sent_on`) and the generation observed afterwards (`now`).
+fn classify_eval_answer(
+    outcome: EvalAnswer,
+    label: &str,
+    sent_on: u64,
+    now: u64,
+) -> Result<String, EvalError> {
+    let restarted = || EvalError::RendererRestarted {
+        window: label.to_string(),
+        generation: now,
+    };
+    match outcome {
+        None => Err(restarted()),
+        Some(Ok(Ok(value))) if !value.is_empty() => Ok(value),
+        // An empty completion (wry's shape for an errored evaluation), a
+        // dropped callback, or silence around a termination is the dead
+        // renderer's non-answer, not a page result.
+        Some(_) if now != sent_on => Err(restarted()),
+        Some(Ok(Ok(value))) => Ok(value),
+        Some(Ok(Err(_))) => Err("webview evaluation channel closed".to_string().into()),
+        Some(Err(_)) => Err("webview evaluation timed out".to_string().into()),
+    }
+}
+
+/// An async-evaluation poll answered by a different renderer than the one
+/// holding the pending promise means the promise (and its result) is gone.
+fn check_poll_renderer(label: &str, started_on: u64, polled_on: u64) -> Result<(), EvalError> {
+    if polled_on == started_on {
+        Ok(())
+    } else {
+        Err(EvalError::RendererRestarted {
+            window: label.to_string(),
+            generation: polled_on,
+        })
+    }
 }
 
 fn unwrap_js_string(raw: String) -> String {
@@ -567,60 +747,92 @@ fn async_eval_cleanup_script(request_id: &str) -> String {
     )
 }
 
-async fn cleanup_async_eval(webview: &Webview, request_id: &str) {
-    let _ = eval_json(webview, &async_eval_cleanup_script(request_id)).await;
+async fn cleanup_async_eval(webview: &Webview, lifecycle: &RendererLifecycle, request_id: &str) {
+    let _ = eval_json(webview, lifecycle, &async_eval_cleanup_script(request_id)).await;
 }
 
-async fn eval_json_async(webview: &Webview, expression: &str) -> Result<Value, String> {
-    eval_json_async_with_timeout(webview, expression, Duration::from_secs(10)).await
+async fn eval_json_async(
+    webview: &Webview,
+    lifecycle: &RendererLifecycle,
+    expression: &str,
+) -> Result<Value, EvalError> {
+    eval_json_async_with_timeout(webview, lifecycle, expression, EVAL_TIMEOUT).await
 }
 
 async fn eval_json_async_with_timeout(
     webview: &Webview,
+    lifecycle: &RendererLifecycle,
     expression: &str,
     timeout: Duration,
-) -> Result<Value, String> {
+) -> Result<Value, EvalError> {
+    let label = webview.label().to_string();
     let request_id = uuid::Uuid::new_v4().simple().to_string();
-    let start = eval_json(webview, &async_eval_start_script(&request_id, expression)).await?;
+    let (start, started_on) = eval_json_on_renderer(
+        webview,
+        lifecycle,
+        &async_eval_start_script(&request_id, expression),
+    )
+    .await?;
     if start["status"] != "started" {
-        return Err("webview async evaluation did not start".to_string());
+        return Err("webview async evaluation did not start".to_string().into());
     }
+    // The pending promise lives in the realm of generation `started_on`; any
+    // later renderer cannot hold its result.
 
     let deadline = std::time::Instant::now() + timeout;
     loop {
         if std::time::Instant::now() >= deadline {
-            cleanup_async_eval(webview, &request_id).await;
-            return Err("webview async evaluation timed out".to_string());
+            cleanup_async_eval(webview, lifecycle, &request_id).await;
+            return Err("webview async evaluation timed out".to_string().into());
         }
-        let result = match eval_json(webview, &async_eval_poll_script(&request_id)).await {
-            Ok(result) => result,
-            Err(error) => {
-                cleanup_async_eval(webview, &request_id).await;
-                return Err(error);
-            }
-        };
+        let result =
+            match eval_json_on_renderer(webview, lifecycle, &async_eval_poll_script(&request_id))
+                .await
+            {
+                Ok((result, generation)) => {
+                    check_poll_renderer(&label, started_on, generation)?;
+                    result
+                }
+                Err(error @ EvalError::RendererRestarted { .. })
+                | Err(error @ EvalError::RendererRestarting { .. }) => return Err(error),
+                Err(error) => {
+                    cleanup_async_eval(webview, lifecycle, &request_id).await;
+                    return Err(error);
+                }
+            };
         match result["status"].as_str() {
             Some("pending") => tokio::time::sleep(Duration::from_millis(25)).await,
             Some("fulfilled") => {
                 let raw = result["value"].as_str().ok_or_else(|| {
-                    "webview async evaluation returned a non-string result".to_string()
+                    EvalError::Failed(
+                        "webview async evaluation returned a non-string result".to_string(),
+                    )
                 })?;
                 return serde_json::from_str(raw).map_err(|error| {
-                    format!("invalid JSON from async webview evaluation: {error}")
+                    EvalError::Failed(format!(
+                        "invalid JSON from async webview evaluation: {error}"
+                    ))
                 });
             }
             Some("rejected") => {
-                return Err(format!(
+                return Err(EvalError::Failed(format!(
                     "webview async evaluation rejected: {}",
                     result["error"]
                         .as_str()
                         .unwrap_or("webview async evaluation failed")
-                ));
+                )));
             }
             Some("missing") => {
-                return Err("webview async evaluation result disappeared".to_string());
+                check_poll_renderer(&label, started_on, lifecycle.state(&label).generation)?;
+                return Err("webview async evaluation result disappeared"
+                    .to_string()
+                    .into());
             }
-            _ => return Err("webview async evaluation returned an invalid state".to_string()),
+            _ => {
+                return Err("webview async evaluation returned an invalid state"
+                    .to_string()
+                    .into())
+            }
         }
     }
 }
@@ -767,10 +979,38 @@ fn internal_error(error: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
     )
 }
 
-fn eval_error(error: String) -> (StatusCode, Json<Value>) {
-    let code = if error == "webview async evaluation timed out"
-        || error == "webview evaluation timed out"
-    {
+fn eval_error(error: EvalError) -> (StatusCode, Json<Value>) {
+    let message = error.to_string();
+    let (code, window, generation) = match &error {
+        EvalError::RendererRestarted { window, generation } => {
+            ("webview_renderer_restarted", window, *generation)
+        }
+        EvalError::RendererRestarting { window, generation } => {
+            ("webview_renderer_restarting", window, *generation)
+        }
+        EvalError::Failed(error) => {
+            return api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                classify_eval_failure(error),
+                message,
+            )
+        }
+    };
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "ok": false,
+            "code": code,
+            "error": message,
+            "window": window,
+            "rendererGeneration": generation,
+            "retryable": true,
+        })),
+    )
+}
+
+fn classify_eval_failure(error: &str) -> &'static str {
+    if error == "webview async evaluation timed out" || error == "webview evaluation timed out" {
         "webview_eval_timeout"
     } else if error.starts_with("webview async evaluation rejected:") {
         "webview_eval_rejected"
@@ -786,8 +1026,7 @@ fn eval_error(error: String) -> (StatusCode, Json<Value>) {
         "webview_eval_malformed"
     } else {
         "webview_eval_failed"
-    };
-    api_error(StatusCode::UNPROCESSABLE_ENTITY, code, error)
+    }
 }
 
 fn api_error(
@@ -937,13 +1176,209 @@ mod tests {
 
     #[test]
     fn classifies_evaluation_failures_with_stable_codes() {
-        let (_, Json(timeout)) = eval_error("webview async evaluation timed out".to_string());
+        let (status, Json(timeout)) =
+            eval_error("webview async evaluation timed out".to_string().into());
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(timeout["code"], "webview_eval_timeout");
-        let (_, Json(rejected)) = eval_error("webview async evaluation rejected: boom".to_string());
+        let (_, Json(rejected)) =
+            eval_error("webview async evaluation rejected: boom".to_string().into());
         assert_eq!(rejected["code"], "webview_eval_rejected");
-        let (_, Json(missing)) =
-            eval_error("webview async evaluation result disappeared".to_string());
+        let (_, Json(missing)) = eval_error(
+            "webview async evaluation result disappeared"
+                .to_string()
+                .into(),
+        );
         assert_eq!(missing["code"], "webview_eval_missing");
+        let (_, Json(cancelled)) =
+            eval_error("webview evaluation channel closed".to_string().into());
+        assert_eq!(cancelled["code"], "webview_eval_cancelled");
+        let (_, Json(malformed)) = eval_error("invalid JSON from webview: EOF".to_string().into());
+        assert_eq!(malformed["code"], "webview_eval_malformed");
+    }
+
+    #[test]
+    fn renderer_restarts_report_window_generation_and_retryability() {
+        let (status, Json(restarted)) = eval_error(EvalError::RendererRestarted {
+            window: "main".into(),
+            generation: 2,
+        });
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(restarted["code"], "webview_renderer_restarted");
+        assert_eq!(restarted["window"], "main");
+        assert_eq!(restarted["rendererGeneration"], 2);
+        assert_eq!(restarted["retryable"], true);
+        assert!(restarted["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("webview renderer restarted"));
+
+        let (status, Json(restarting)) = eval_error(EvalError::RendererRestarting {
+            window: "main".into(),
+            generation: 3,
+        });
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(restarting["code"], "webview_renderer_restarting");
+        assert_eq!(restarting["rendererGeneration"], 3);
+    }
+
+    fn sent(value: &str) -> EvalAnswer {
+        Some(Ok(Ok(value.to_string())))
+    }
+
+    #[test]
+    fn classifies_answers_from_a_live_renderer() {
+        assert_eq!(
+            classify_eval_answer(sent("\"{}\""), "main", 0, 0),
+            Ok("\"{}\"".to_string())
+        );
+        // An empty completion from a live renderer keeps its old meaning (the
+        // caller reports it as malformed JSON), not a restart.
+        assert_eq!(
+            classify_eval_answer(sent(""), "main", 1, 1),
+            Ok(String::new())
+        );
+    }
+
+    #[test]
+    fn a_real_answer_wins_even_if_the_renderer_died_right_after() {
+        assert_eq!(
+            classify_eval_answer(sent("true"), "main", 0, 1),
+            Ok("true".to_string())
+        );
+    }
+
+    #[test]
+    fn non_answers_around_a_termination_report_a_restart() {
+        let restarted = Err(EvalError::RendererRestarted {
+            window: "main".into(),
+            generation: 1,
+        });
+        assert_eq!(classify_eval_answer(None, "main", 0, 1), restarted);
+        assert_eq!(classify_eval_answer(sent(""), "main", 0, 1), restarted);
+    }
+
+    #[tokio::test]
+    async fn timeouts_and_dropped_callbacks_without_a_termination_keep_their_codes() {
+        let lifecycle = RendererLifecycle::new();
+        let (_keep_sender_alive, rx) = tokio::sync::oneshot::channel::<String>();
+        let timed_out =
+            await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_millis(20)).await;
+        assert_eq!(
+            timed_out,
+            Err(EvalError::Failed("webview evaluation timed out".into()))
+        );
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        drop(tx);
+        let closed = await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(5)).await;
+        assert_eq!(
+            closed,
+            Err(EvalError::Failed(
+                "webview evaluation channel closed".into()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_termination_mid_evaluation_fails_fast_as_restarted() {
+        let lifecycle = RendererLifecycle::new();
+        // The dead renderer never answers: keep the sender alive and silent.
+        let (_silent_sender, rx) = tokio::sync::oneshot::channel::<String>();
+        let pending = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move {
+                await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(30)).await
+            })
+        };
+        tokio::task::yield_now().await;
+        lifecycle.record_termination("main", std::time::Instant::now());
+
+        let result = tokio::time::timeout(Duration::from_secs(2), pending)
+            .await
+            .expect("must not wait for the 30 s evaluation timeout")
+            .unwrap();
+        assert_eq!(
+            result,
+            Err(EvalError::RendererRestarted {
+                window: "main".into(),
+                generation: 1
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn another_webviews_termination_does_not_interrupt_an_evaluation() {
+        let lifecycle = RendererLifecycle::new();
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        let pending = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(async move {
+                await_eval_answer(rx, &lifecycle, "main", 0, Duration::from_secs(5)).await
+            })
+        };
+        tokio::task::yield_now().await;
+        lifecycle.record_termination("pet", std::time::Instant::now());
+        tx.send("1".into()).unwrap();
+        assert_eq!(pending.await.unwrap(), Ok("1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn rebinds_to_the_replacement_renderer_once_it_loads() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_termination("main", std::time::Instant::now());
+        let binding = {
+            let lifecycle = lifecycle.clone();
+            tokio::spawn(
+                async move { bind_renderer(&lifecycle, "main", Duration::from_secs(5)).await },
+            )
+        };
+        tokio::task::yield_now().await;
+        lifecycle.record_page_load("main");
+
+        let renderer = binding.await.unwrap().expect("rebinds after reload");
+        assert_eq!(renderer.generation, 1);
+        assert!(!renderer.awaiting_load);
+
+        // The next evaluation is tied to the new generation: its answer is
+        // accepted, and only a further termination interrupts it.
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        tx.send("\"ok\"".into()).unwrap();
+        assert_eq!(
+            await_eval_answer(rx, &lifecycle, "main", renderer.generation, EVAL_TIMEOUT).await,
+            Ok("\"ok\"".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_restarting_while_the_replacement_never_loads() {
+        let lifecycle = RendererLifecycle::new();
+        lifecycle.record_termination("main", std::time::Instant::now());
+        assert_eq!(
+            bind_renderer(&lifecycle, "main", Duration::from_millis(20)).await,
+            Err(EvalError::RendererRestarting {
+                window: "main".into(),
+                generation: 1
+            })
+        );
+    }
+
+    #[test]
+    fn async_polls_answered_by_a_new_renderer_report_a_restart() {
+        assert_eq!(check_poll_renderer("main", 2, 2), Ok(()));
+        assert_eq!(
+            check_poll_renderer("main", 2, 3),
+            Err(EvalError::RendererRestarted {
+                window: "main".into(),
+                generation: 3
+            })
+        );
+    }
+
+    #[test]
+    fn untracked_lifecycle_fallback_reports_no_restarts() {
+        let lifecycle = RendererLifecycle::default();
+        assert_eq!(lifecycle.state(DEFAULT_WINDOW).generation, 0);
+        assert!(!lifecycle.state(DEFAULT_WINDOW).awaiting_load);
     }
 
     #[test]

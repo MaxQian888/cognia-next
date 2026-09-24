@@ -14,5 +14,6 @@
 //! `[dev-dependencies]` — see the note in `Cargo.toml`.
 
 pub mod api_key;
+pub mod keychain_access;
 pub mod keyring_secrets;
 pub mod secret_store;

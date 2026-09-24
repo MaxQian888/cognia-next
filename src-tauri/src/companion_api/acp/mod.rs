@@ -3,7 +3,7 @@
 //! Exposes `GET /ws/acp` (JSON-RPC 2.0, one message per WS text frame) so
 //! ACP clients — Zed, Neovim, JetBrains, or the `cognia acp` stdio bridge —
 //! can drive cognia's Claude sessions. Inverse of the TypeScript ACP *client*
-//! in `lib/ai/agent/external/acp-client.ts`, and deliberately speaks the same
+//! in `lib/ai/agent/external/runtimes/acp/acp-client.ts`, and deliberately speaks the same
 //! protocol dialect (version 1).
 //!
 //! Module layout:

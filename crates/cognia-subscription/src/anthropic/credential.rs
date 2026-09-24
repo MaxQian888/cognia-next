@@ -1,8 +1,9 @@
 // ADR-0028 / Phase 14 — Anthropic credential watcher.
 //
-// Per-account `CLAUDE_CONFIG_DIR` directories eliminate the cross-process
-// OAuth refresh race (each account owns its own `.credentials.json`),
-// but the CLI subprocess rotates the refresh token IN-FILE without
+// Cognia-owned per-account `CLAUDE_CONFIG_DIR` directories keep the CLI
+// credential file separate from the external login. Linked external logins
+// must never be updated from a copied credential. The CLI subprocess can
+// rotate an owned refresh token IN-FILE without
 // surfacing the new value back to our keyring vault. Result: long-lived
 // multi-account sessions would silently drift toward forced re-login as
 // the vault's refresh_token goes stale.
@@ -44,7 +45,12 @@ pub struct ClaudeConfigCredentials {
     refresh_token: String,
     #[serde(rename = "accessToken", alias = "access_token", default)]
     access_token: String,
-    #[serde(rename = "expiresAtMs", alias = "expires_at_ms", default)]
+    #[serde(
+        rename = "expiresAt",
+        alias = "expiresAtMs",
+        alias = "expires_at_ms",
+        default
+    )]
     expires_at_ms: i64,
 }
 
@@ -84,35 +90,55 @@ impl CredentialSink for VaultSink {
         account_id: &str,
         fresh: &ClaudeConfigCredentials,
     ) -> Result<(), String> {
+        // notify invokes this sink on its filesystem worker, outside Tokio.
+        // Serialize the entire read-modify-write with account CRUD; a deleted
+        // account must not be resurrected by a stale whole-vault snapshot.
+        let _mutation_guard = vault::VAULT_MUTATION_LOCK.blocking_lock();
         let mut vault_value =
             match vault::load_for_account(local_account_id, ProviderId::Anthropic)? {
                 Some(v) => v,
                 None => return Ok(()),
             };
-        let mut changed = false;
-        for account in &mut vault_value.accounts {
-            if account.id != account_id {
-                continue;
-            }
-            if let ProviderCredential::Anthropic(data) = &mut account.credential {
-                if !fresh.refresh_token.is_empty() && data.refresh_token != fresh.refresh_token {
-                    data.refresh_token = fresh.refresh_token.clone();
-                    if !fresh.access_token.is_empty() {
-                        data.access_token = fresh.access_token.clone();
-                    }
-                    if fresh.expires_at_ms > 0 {
-                        data.expires_at_ms = fresh.expires_at_ms;
-                    }
-                    data.stored_at_ms = chrono::Utc::now().timestamp_millis();
-                    changed = true;
-                }
-            }
-        }
+        let changed = apply_owned_rotation(&mut vault_value, account_id, fresh);
         if changed {
             vault::save_for_account(local_account_id, ProviderId::Anthropic, &vault_value)?;
         }
         Ok(())
     }
+}
+
+/// Apply only complete rotations for credentials owned by Cognia. A reused
+/// Claude Code credential remains owned by its original file / Keychain.
+fn apply_owned_rotation(
+    vault_value: &mut vault::ProviderVault,
+    account_id: &str,
+    fresh: &ClaudeConfigCredentials,
+) -> bool {
+    let Some(account) = vault_value
+        .accounts
+        .iter_mut()
+        .find(|account| account.id == account_id)
+    else {
+        return false;
+    };
+    let ProviderCredential::Anthropic(data) = &mut account.credential else {
+        return false;
+    };
+    if data.original_source.is_some()
+        || fresh.refresh_token.trim().is_empty()
+        || fresh.access_token.trim().is_empty()
+        || fresh.expires_at_ms <= 0
+        || (data.refresh_token == fresh.refresh_token
+            && data.access_token == fresh.access_token
+            && data.expires_at_ms == fresh.expires_at_ms)
+    {
+        return false;
+    }
+    data.refresh_token = fresh.refresh_token.clone();
+    data.access_token = fresh.access_token.clone();
+    data.expires_at_ms = fresh.expires_at_ms;
+    data.stored_at_ms = chrono::Utc::now().timestamp_millis();
+    true
 }
 
 /// Build a watcher with the production `VaultSink`.
@@ -223,7 +249,17 @@ pub fn watch_configdir_with<S: CredentialSink + 'static>(
 
 fn read_credentials(path: &Path) -> Result<ClaudeConfigCredentials, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {path:?} failed: {e}"))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("parse {path:?} failed: {e}"))
+    #[derive(Deserialize)]
+    struct CredentialFile {
+        #[serde(rename = "claudeAiOauth")]
+        claude_ai_oauth: Option<ClaudeConfigCredentials>,
+        // Keep support for Cognia's older flat fixture / credential shape.
+        #[serde(flatten)]
+        legacy: ClaudeConfigCredentials,
+    }
+    let parsed: CredentialFile =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse {path:?} failed: {e}"))?;
+    Ok(parsed.claude_ai_oauth.unwrap_or(parsed.legacy))
 }
 
 /// Idempotent per-account watcher registry. The Tauri layer holds one
@@ -439,6 +475,108 @@ mod tests {
     }
 
     #[test]
+    fn read_credentials_parses_claude_code_oauth_envelope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".credentials.json");
+        std::fs::write(
+            &path,
+            r#"{"claudeAiOauth":{"refreshToken":"rt-nested","accessToken":"at-nested","expiresAt":42}}"#,
+        )
+        .unwrap();
+        let got = read_credentials(&path).unwrap();
+        assert_eq!(got.refresh_token, "rt-nested");
+        assert_eq!(got.access_token, "at-nested");
+        assert_eq!(got.expires_at_ms, 42);
+    }
+
+    fn sample_vault(original_source: Option<&str>) -> vault::ProviderVault {
+        let mut provider_vault = vault::ProviderVault::empty();
+        provider_vault.accounts.push(vault::Account {
+            id: "owned-account".into(),
+            label: Some("keep label".into()),
+            credential: ProviderCredential::Anthropic(AnthropicCredentialData {
+                access_token: "old-access".into(),
+                refresh_token: "old-refresh".into(),
+                expires_at_ms: 10,
+                mode: "subscription".into(),
+                original_source: original_source.map(str::to_owned),
+                ..Default::default()
+            }),
+            created_at_ms: 1,
+            last_used_at_ms: 2,
+            preset_id: None,
+            auth_metadata: None,
+        });
+        provider_vault
+    }
+
+    fn fresh_rotation() -> ClaudeConfigCredentials {
+        ClaudeConfigCredentials {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            expires_at_ms: 100,
+        }
+    }
+
+    #[test]
+    fn rotation_never_replaces_cli_owned_or_unknown_source_credentials() {
+        for source in ["file", "keyring", "unknown"] {
+            let mut provider_vault = sample_vault(Some(source));
+            let before = provider_vault.accounts[0].credential.clone();
+            assert!(!apply_owned_rotation(
+                &mut provider_vault,
+                "owned-account",
+                &fresh_rotation()
+            ));
+            assert_eq!(provider_vault.accounts[0].credential, before);
+        }
+    }
+
+    #[test]
+    fn rotation_does_not_recreate_a_deleted_account() {
+        let mut provider_vault = sample_vault(None);
+        provider_vault.accounts.clear();
+        assert!(!apply_owned_rotation(
+            &mut provider_vault,
+            "owned-account",
+            &fresh_rotation()
+        ));
+        assert!(provider_vault.accounts.is_empty());
+    }
+
+    #[test]
+    fn rotation_requires_a_complete_pair_and_updates_access_only_changes() {
+        let mut provider_vault = sample_vault(None);
+        let mut fresh = fresh_rotation();
+        fresh.access_token.clear();
+        assert!(!apply_owned_rotation(
+            &mut provider_vault,
+            "owned-account",
+            &fresh
+        ));
+        fresh = fresh_rotation();
+        fresh.refresh_token = "old-refresh".into();
+        assert!(apply_owned_rotation(
+            &mut provider_vault,
+            "owned-account",
+            &fresh
+        ));
+        let ProviderCredential::Anthropic(data) = &provider_vault.accounts[0].credential else {
+            panic!()
+        };
+        assert_eq!(data.access_token, "new-access");
+        assert_eq!(
+            provider_vault.accounts[0].label.as_deref(),
+            Some("keep label")
+        );
+        assert!(!apply_owned_rotation(
+            &mut provider_vault,
+            "owned-account",
+            &fresh
+        ));
+    }
+
+    #[test]
     fn stop_all_for_local_account_preserves_other_local_accounts() {
         let local_a_one = tempfile::tempdir().unwrap();
         let local_a_two = tempfile::tempdir().unwrap();
@@ -465,8 +603,8 @@ mod tests {
     #[test]
     fn watcher_skips_unrelated_files() {
         let dir = tempfile::tempdir().unwrap();
-        let cred_path = dir.path().join(".credentials.json");
-        write_credentials(&cred_path, "rt-init");
+        // No credential write precedes registration: macOS can deliver that
+        // startup event after the unrelated write and make this assertion race.
         let sink = Arc::new(RecordingSink::default());
         let handle = watch_configdir_with(
             "local-a".into(),

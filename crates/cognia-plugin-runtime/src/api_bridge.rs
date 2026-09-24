@@ -135,6 +135,30 @@ impl PluginApiError {
     fn permission_denied(message: impl Into<String>) -> Self {
         Self::new("PERMISSION_DENIED", message)
     }
+    /// The encrypted secret store cannot serve this call yet: it is still
+    /// initializing past its wait budget, or locked until the user retries.
+    /// Distinct from `INTERNAL` so the renderer can surface "store locked"
+    /// (and replay the read after an unlock) instead of an opaque failure;
+    /// `details.reason` carries the store's stable code.
+    fn secret_store_unavailable(
+        reason: cognia_secrets::secret_store::Unavailable,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: "UNAVAILABLE".to_string(),
+            message: message.into(),
+            details: Some(json!({ "reason": reason.code() })),
+        }
+    }
+    /// Type a secret-store failure: readiness errors become `UNAVAILABLE`,
+    /// everything else stays `INTERNAL`.
+    fn from_secret_store(context: &str, error: String) -> Self {
+        let message = format!("{context}: {error}");
+        match cognia_secrets::secret_store::unavailable_reason(&error) {
+            Some(reason) => Self::secret_store_unavailable(reason, message),
+            None => Self::internal(message),
+        }
+    }
     fn incompatible_sdk(sdk_version: &str) -> Self {
         Self::new(
             "INCOMPATIBLE_SDK",
@@ -686,7 +710,7 @@ fn handle_secrets(
         "get" => {
             let key = payload_str(payload, "key")?;
             let value = cognia_secrets::keyring_secrets::get(&ns, &key)
-                .map_err(|e| PluginApiError::internal(format!("secrets:get: {e}")))?;
+                .map_err(|e| PluginApiError::from_secret_store("secrets:get", e))?;
             Ok(match value {
                 Some(v) => Value::String(v),
                 None => Value::Null,
@@ -696,13 +720,13 @@ fn handle_secrets(
             let key = payload_str(payload, "key")?;
             let value = payload_str(payload, "value")?;
             cognia_secrets::keyring_secrets::set(&ns, &key, &value)
-                .map_err(|e| PluginApiError::internal(format!("secrets:set: {e}")))?;
+                .map_err(|e| PluginApiError::from_secret_store("secrets:set", e))?;
             Ok(Value::Null)
         }
         "delete" => {
             let key = payload_str(payload, "key")?;
             cognia_secrets::keyring_secrets::clear(&ns, &key)
-                .map_err(|e| PluginApiError::internal(format!("secrets:delete: {e}")))?;
+                .map_err(|e| PluginApiError::from_secret_store("secrets:delete", e))?;
             Ok(Value::Null)
         }
         _ => Err(PluginApiError::not_supported(&format!("secrets:{op}"))),
@@ -933,15 +957,13 @@ fn handle_managed_ide_secrets(
             let key = managed_ide_key(payload)?;
             cognia_secrets::keyring_secrets::get(&namespace, &key)
                 .map(|value| value.map_or(Value::Null, Value::String))
-                .map_err(|error| {
-                    PluginApiError::internal(format!("managed IDE secrets get: {error}"))
-                })
+                .map_err(|error| PluginApiError::from_secret_store("managed IDE secrets get", error))
         }
         "set" => {
             let key = managed_ide_key(payload)?;
             let value = payload_str(payload, "value")?;
             cognia_secrets::keyring_secrets::set(&namespace, &key, &value).map_err(|error| {
-                PluginApiError::internal(format!("managed IDE secrets set: {error}"))
+                PluginApiError::from_secret_store("managed IDE secrets set", error)
             })?;
             if let Err(error) = connection.execute(
                 "INSERT OR IGNORE INTO managed_ide_secret_keys (partition, key) VALUES (?1, ?2)",
@@ -957,7 +979,7 @@ fn handle_managed_ide_secrets(
         "delete" => {
             let key = managed_ide_key(payload)?;
             cognia_secrets::keyring_secrets::clear(&namespace, &key).map_err(|error| {
-                PluginApiError::internal(format!("managed IDE secrets delete: {error}"))
+                PluginApiError::from_secret_store("managed IDE secrets delete", error)
             })?;
             connection
                 .execute(
@@ -1005,9 +1027,10 @@ fn handle_managed_ide_secrets(
                             })?;
                     }
                     Err(error) => {
-                        return Err(PluginApiError::internal(format!(
-                            "managed IDE secrets enumerate: {error}"
-                        )));
+                        return Err(PluginApiError::from_secret_store(
+                            "managed IDE secrets enumerate",
+                            error,
+                        ));
                     }
                 }
             }
@@ -1967,6 +1990,41 @@ mod tests {
                 "area": area,
             }
         })
+    }
+
+    #[test]
+    fn secret_store_readiness_failures_are_typed_unavailable_not_internal() {
+        let locked = PluginApiError::from_secret_store(
+            "secrets:get",
+            "SECRET_STORE_LOCKED: master key read: denied".into(),
+        );
+        assert_eq!(locked.code, "UNAVAILABLE");
+        assert_eq!(
+            locked.details,
+            Some(json!({ "reason": "SECRET_STORE_LOCKED" }))
+        );
+        assert!(locked.message.starts_with("secrets:get: SECRET_STORE_LOCKED"));
+
+        let initializing = PluginApiError::from_secret_store(
+            "secrets:set",
+            format!(
+                "{}: in progress",
+                cognia_secrets::secret_store::INITIALIZING_CODE
+            ),
+        );
+        assert_eq!(initializing.code, "UNAVAILABLE");
+        assert_eq!(
+            initializing.details,
+            Some(json!({ "reason": "SECRET_STORE_INITIALIZING" }))
+        );
+
+        // Real per-entry failures keep their existing classification.
+        let other = PluginApiError::from_secret_store("secrets:get", "persist failed".into());
+        assert_eq!(other.code, "INTERNAL");
+        assert_eq!(other.details, None);
+        let wire = serde_json::to_value(&locked).unwrap();
+        assert_eq!(wire["code"], "UNAVAILABLE");
+        assert_eq!(wire["details"]["reason"], "SECRET_STORE_LOCKED");
     }
 
     #[test]

@@ -22,7 +22,7 @@
 
 #![allow(dead_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -401,6 +401,36 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
     // Last matching rules in the profile, so they win over every allow above,
     // including the global `(allow file-read*)` the base policy needs.
     push_baseline_secret_read_denies(&mut out);
+
+    // Managed executions live inside the denied app store
+    // (`<data>/cognia/task-workspaces/…`) — the baseline deny just hid the
+    // command's own cwd, and getcwd() failed before the target ran. Re-open
+    // exactly the declared roots that nest there; the store's other children
+    // stay denied. For a Bash policy the cwd is writable[0] by construction.
+    {
+        let declared: Vec<PathBuf> = match policy {
+            SandboxPolicy::Bash {
+                writable, readable, ..
+            } => readable.iter().chain(writable.iter()).cloned().collect(),
+            SandboxPolicy::Edit {
+                target_files,
+                readable,
+            }
+            | SandboxPolicy::Write {
+                target_files,
+                readable,
+            }
+            | SandboxPolicy::TextEditor {
+                target_files,
+                readable,
+            } => readable
+                .iter()
+                .chain(target_files.iter())
+                .cloned()
+                .collect(),
+        };
+        sbpl::push_app_store_carveouts(&mut out, &declared);
+    }
 
     Ok(out)
 }
