@@ -11,7 +11,7 @@ import {
   runtimeHomeFor,
 } from "../runtime/external/dsh-installer"
 import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
-import { getPresetConfig } from "@/lib/ai/agent/external/presets"
+import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 
 /**
  * `cognia-agent backend <install|doctor|remove> <backend>` — manage runtimes

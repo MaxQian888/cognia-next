@@ -7,7 +7,7 @@ import type {
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
 
-import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/pi-rpc-events"
+import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-events"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { createInitialState } from "../../tui/state/initial"

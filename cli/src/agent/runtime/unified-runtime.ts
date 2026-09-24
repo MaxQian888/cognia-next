@@ -124,6 +124,7 @@ export interface UnifiedTurnParams {
    */
   resolveOptions?: AgentSessionParams["resolveOptions"]
   /** Injected transcript effects for the legacy flat transcript the session writes. */
+  onAttachments?: (summary: import("../session-context").AttachmentSummary) => void
   transcriptFs?: AgentSessionParams["transcriptFs"]
   /** Override the in-process plugin-tool relay (RPC uses it for durable elicitations). */
   subscribePluginTools?: AgentSessionParams["subscribePluginTools"]
@@ -413,6 +414,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
       }
       try {
         const captured = await session.send(params.prompt, {
+          ...(params.onAttachments ? { onAttachments: params.onAttachments } : {}),
           gate: params.gate,
           signal: cancellation.signal,
           ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),

@@ -5,7 +5,7 @@ import path from "node:path"
 import { PassThrough, Writable } from "node:stream"
 
 import type { AgentWorkerManifestV1 } from "@cognia/agent"
-import { WorkerRpcPool } from "@/lib/ai/agent/team/worker-rpc-pool"
+import { WorkerRpcPool } from "@/lib/ai/agent/team/workers/worker-rpc-pool"
 
 import type { UnifiedTurnParams, UnifiedTurnResult } from "../agent/runtime/unified-runtime"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"

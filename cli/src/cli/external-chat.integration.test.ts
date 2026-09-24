@@ -12,8 +12,8 @@ jest.mock("@/lib/utils", () => ({
   ...jest.requireActual("@/lib/utils"),
   isTauri: jest.fn(() => true),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
-  ...jest.requireActual("@/lib/ai/agent/external/presets"),
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
+  ...jest.requireActual("@/lib/ai/agent/external/config/presets"),
   resolvePreferredCodexExecutablePresetId: jest.fn(async () => "codex"),
 }))
 

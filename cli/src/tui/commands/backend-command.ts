@@ -14,7 +14,10 @@
  *
  * Pure handler; the App owns the drop/connect.
  */
-import { BUILTIN_EXECUTABLE_PRESET_IDS, getPresetConfig } from "@/lib/ai/agent/external/presets"
+import {
+  BUILTIN_EXECUTABLE_PRESET_IDS,
+  getPresetConfig,
+} from "@/lib/ai/agent/external/config/presets"
 
 import type { CommandContext, CommandDescriptor, CommandEffect } from "./types"
 

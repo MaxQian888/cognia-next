@@ -13,7 +13,7 @@
  * for it, so the model is simply omitted.
  */
 import { getModelContextWindow } from "@/lib/claude/usage"
-import { providerIdForPreset } from "@/lib/ai/agent/external/preset-provider"
+import { providerIdForPreset } from "@/lib/ai/agent/external/config/preset-provider"
 
 import { resolveBackendModel } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"

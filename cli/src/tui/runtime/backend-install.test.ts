@@ -2,7 +2,10 @@
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
-import { EXTERNAL_AGENT_RUNTIMES, findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
+import {
+  EXTERNAL_AGENT_RUNTIMES,
+  findRuntimeById,
+} from "@/lib/ai/agent/external/config/install-catalog"
 
 import {
   INSTALL_PLANS,

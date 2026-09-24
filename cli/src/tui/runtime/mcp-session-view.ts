@@ -1,6 +1,6 @@
 /** Combine desired configuration and runtime evidence without promoting local probes. */
 import type { McpServer } from "@cognia/agent-config-types"
-import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/resolve-acp-mcp-servers"
+import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers"
 import {
   mcpConfigVersion,
   type SessionMcpSnapshot,

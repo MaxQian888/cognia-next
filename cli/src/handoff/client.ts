@@ -38,6 +38,9 @@ export interface HandoffClientDeps {
   platform?: NodeJS.Platform
   env?: Record<string, string | undefined>
   homedir?: string
+  healthTimeoutMs?: number
+  /** Longer than the desktop renderer's 30-second persistence deadline. */
+  requestTimeoutMs?: number
 }
 
 function defaultReadFile(p: string): string | null {
@@ -69,6 +72,7 @@ export async function detectDesktop(deps: HandoffClientDeps = {}): Promise<Bridg
   try {
     const res = await doFetch(`${endpoint.baseUrl}${HEALTH_PATH}`, {
       headers: { [DEV_TOKEN_HEADER]: endpoint.devToken },
+      signal: AbortSignal.timeout(deps.healthTimeoutMs ?? 3_000),
     })
     if (!res.ok) return null
     return endpoint
@@ -89,23 +93,47 @@ export async function pushHandoff(
   deps: HandoffClientDeps = {}
 ): Promise<HandoffResult> {
   const doFetch = deps.fetch ?? fetch
-  const res = await doFetch(`${endpoint.baseUrl}${HANDOFF_PATH}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      [DEV_TOKEN_HEADER]: endpoint.devToken,
-    },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) {
-    throw new Error(`handoff failed: HTTP ${res.status}`)
+  const signal = AbortSignal.timeout(deps.requestTimeoutMs ?? 35_000)
+  try {
+    const res = await doFetch(`${endpoint.baseUrl}${HANDOFF_PATH}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [DEV_TOKEN_HEADER]: endpoint.devToken,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    })
+    let body: {
+      ok?: boolean
+      error?: unknown
+      result?: { sessionId?: unknown; persisted?: boolean }
+    } | null = null
+    try {
+      body = await res.json()
+    } catch {
+      // HTTP failures can be plain text (for example, an oversized body).
+      if (signal.aborted) throw signal.reason
+    }
+    if (!res.ok) {
+      const detail = typeof body?.error === "string" ? `: ${body.error}` : ""
+      throw new Error(`handoff failed: HTTP ${res.status}${detail}`)
+    }
+    if (
+      body?.ok !== true ||
+      body.result?.persisted !== true ||
+      typeof body.result.sessionId !== "string" ||
+      !body.result.sessionId.trim()
+    ) {
+      throw new Error("handoff failed: desktop did not confirm persisted import")
+    }
+    return { ok: true, sessionId: body.result.sessionId }
+  } catch (error) {
+    if (signal.aborted) {
+      throw new Error(
+        "handoff timed out before persistence was confirmed. Retry the same snapshot to recover the existing import without overwriting later work."
+      )
+    }
+    throw error
   }
-  const body = (await res.json()) as {
-    ok?: boolean
-    result?: { sessionId?: string; persisted?: boolean }
-  }
-  if (body.ok !== true || body.result?.persisted !== true || !body.result.sessionId) {
-    throw new Error("handoff failed: desktop did not confirm persisted import")
-  }
-  return { ok: true, sessionId: body.result.sessionId }
 }

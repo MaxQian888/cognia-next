@@ -23,7 +23,7 @@ import {
   SANDBOX_SUPPORTED_PLATFORMS,
   agentStateWritableRoots as policyAgentStateWritableRoots,
   isAgentStateFileRoot,
-} from "@/lib/ai/agent/external/security-policy"
+} from "@/lib/ai/agent/external/policy/security-policy"
 
 /** Base name of the launcher binary built from `crates/cognia-automation`. */
 const LAUNCHER_BASE_NAME = "cognia-external-agent-launcher"

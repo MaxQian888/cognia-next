@@ -18,7 +18,7 @@ import { PROVIDER_OPERATION_MANIFEST } from "@/lib/ai/operations/manifest"
 import {
   getPresetConfig,
   resolvePreferredCodexExecutablePresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 
 import { listCredentialProviders } from "../../config/credentials"
 import { providerAuthMode } from "../commands/builtins"

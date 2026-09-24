@@ -12,7 +12,7 @@ function registry(presets: Record<string, Preset>) {
   return {
     lookupPreset: (id: string) =>
       (presets[id] ?? null) as ReturnType<
-        typeof import("@/lib/ai/agent/external/presets").getPresetConfig
+        typeof import("@/lib/ai/agent/external/config/presets").getPresetConfig
       >,
     listPresets: () => Object.keys(presets),
   }

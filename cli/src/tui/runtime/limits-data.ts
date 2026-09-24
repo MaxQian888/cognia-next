@@ -23,12 +23,12 @@ import { join } from "node:path"
 
 import { parse as parseToml } from "smol-toml"
 
-import { providerIdForPreset } from "@/lib/ai/agent/external/preset-provider"
+import { providerIdForPreset } from "@/lib/ai/agent/external/config/preset-provider"
 import { resolveLimitsSources } from "@/lib/subscription/limits/registry"
 import { runCustomLimitsSources } from "@/lib/subscription/limits/custom/runner"
 import { balanceMeter, windowMeter } from "@/lib/subscription/limits/meters"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
-import type { CodexAppServerStatus } from "@/lib/ai/agent/external/codex-app-server-client"
+import type { CodexAppServerStatus } from "@/lib/ai/agent/external/runtimes/codex/codex-app-server-client"
 
 import type { LimitsSourceContext, ProviderId, ProviderLimits } from "@/types/subscription"
 import type { ResolvedConfig } from "../../config/schema"

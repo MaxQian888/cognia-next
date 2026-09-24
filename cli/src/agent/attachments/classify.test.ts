@@ -1,9 +1,25 @@
 /**
  * @jest-environment node
  */
-import { extractFileRefs, classifyRef } from "./classify"
+import { extractFileRefs, extractFileRefSpans, classifyRef } from "./classify"
 
 describe("extractFileRefs", () => {
+  it("does not interpret email addresses or internal identifiers as attachment refs", () => {
+    expect(
+      extractFileRefs("alice@example.com member@company.org value@module.ts @decorator @bob")
+    ).toEqual([])
+  })
+
+  it("returns exact spans across quoted padding, punctuation, Windows paths, and newlines", () => {
+    const text = '( @"  a file.txt  " )\n[@C:\\tmp\\b.md], alice@example.com'
+    const spans = extractFileRefSpans(text)
+    expect(spans.map(({ ref }) => ref)).toEqual(["a file.txt", "C:\\tmp\\b.md"])
+    expect(spans.map(({ start, end }) => text.slice(start, end))).toEqual([
+      '@"  a file.txt  "',
+      "@C:\\tmp\\b.md",
+    ])
+  })
+
   it("extracts @-prefixed file refs, excluding trailing sentence punctuation", () => {
     expect(extractFileRefs("see @a.png and @./docs/spec.pdf.")).toEqual([
       "a.png",

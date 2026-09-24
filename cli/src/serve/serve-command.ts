@@ -31,8 +31,8 @@ import { bootstrapHeadlessRuntimes } from "@/lib/headless/bootstrap"
 import {
   installRemoteWorkerRuntime,
   type RemoteWorkerDescriptor,
-} from "@/lib/ai/agent/team/remote-worker-runtime"
-import { WorkerRpcPool } from "@/lib/ai/agent/team/worker-rpc-pool"
+} from "@/lib/ai/agent/team/workers/remote-worker-runtime"
+import { WorkerRpcPool } from "@/lib/ai/agent/team/workers/worker-rpc-pool"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"

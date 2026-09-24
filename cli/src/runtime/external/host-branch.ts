@@ -2,7 +2,7 @@ import { constants } from "node:fs"
 import { open, realpath, stat, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 
-import type { AcpHostCapabilities } from "@/lib/ai/agent/external/acp-feature-profile"
+import type { AcpHostCapabilities } from "@/lib/ai/agent/external/runtimes/acp/acp-feature-profile"
 import { NodeExternalAgentBackend } from "./node-backend"
 
 interface CliExternalAgentBackend {

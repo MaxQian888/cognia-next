@@ -7,12 +7,12 @@ import { isDeepStrictEqual } from "node:util"
 import type {
   DshDoctorReport,
   DshInstalledRuntimeFacts,
-} from "@/lib/ai/agent/external/dsh-runtime-install"
+} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 import {
   buildDshChannelManifest,
   doctorDshRuntime,
   dshPlatformKey,
-} from "@/lib/ai/agent/external/dsh-runtime-install"
+} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 import type { DshProfileId, DshRuntimeChannel } from "@/types/agent/dsh-runtime-channel"
 
 import { createRuntimeHasher, hashHex } from "../crypto-hasher"
@@ -20,7 +20,7 @@ import { createRuntimeHasher, hashHex } from "../crypto-hasher"
 /**
  * Installs the Cognia-owned DeepSeek Harness runtime into an isolated home.
  *
- * The verdict logic lives in `lib/ai/agent/external/dsh-runtime-install.ts` and
+ * The verdict logic lives in `lib/ai/agent/external/runtimes/dsh/dsh-runtime-install.ts` and
  * is pure; this module is only the IO that gathers facts for it and moves bytes.
  * Keeping the split means the Tauri and headless paths cannot drift on what
  * counts as a healthy install.
@@ -52,7 +52,7 @@ export {
   DSH_UPSTREAM_VERSION as UPSTREAM_VERSION,
   DSH_NODE_MAJOR_REQUIRED as NODE_MAJOR_REQUIRED,
   DSH_CONFORMANCE_SUITE_VERSION as CONFORMANCE_SUITE_VERSION,
-} from "@/lib/ai/agent/external/dsh-runtime-install"
+} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 
 export interface DshInstallPaths {
   /** Cognia data root, e.g. `~/.cognia`. */

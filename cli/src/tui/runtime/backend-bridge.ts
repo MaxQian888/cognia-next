@@ -19,7 +19,7 @@
  */
 import type { McpServer } from "@cognia/agent-config-types"
 import type { AcpMcpServerConfig, CodexAgentOptions } from "@/types/agent/external-agent"
-import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/resolve-acp-mcp-servers"
+import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers"
 
 import type { ResolvedConfig, ThinkingLevel } from "../../config/schema"
 import { usesCodexOptions } from "./backend-capabilities"

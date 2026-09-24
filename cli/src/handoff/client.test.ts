@@ -10,6 +10,7 @@ import {
   type HandoffClientDeps,
 } from "./client"
 import { endpointFilePath } from "./endpoint"
+import { createServer } from "node:http"
 
 const ENDPOINT = { baseUrl: "http://127.0.0.1:7891", devToken: "tok123" }
 const EP_FILE = endpointFilePath("linux", { XDG_CONFIG_HOME: "/cfg" }, "/home/u")
@@ -49,6 +50,20 @@ describe("detectDesktop", () => {
   it("returns null when health throws (desktop gone)", async () => {
     const fetchMock = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"))
     expect(await detectDesktop(depsWith(fetchMock, JSON.stringify(ENDPOINT)))).toBeNull()
+  })
+
+  it("bounds health discovery when a desktop accepts but never responds", async () => {
+    const fetchMock = jest.fn(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true })
+        })
+    )
+    const result = detectDesktop({
+      ...depsWith(fetchMock, JSON.stringify(ENDPOINT)),
+      healthTimeoutMs: 10,
+    })
+    await expect(result).resolves.toBeNull()
   })
 })
 
@@ -102,5 +117,89 @@ describe("pushHandoff", () => {
         }
       )
     ).rejects.toThrow(/HTTP 401/)
+  })
+
+  it("preserves a renderer persistence failure in the error", async () => {
+    await expect(
+      pushHandoff(
+        ENDPOINT,
+        { sessionId: "s", messages: [] },
+        {
+          fetch: jest.fn().mockResolvedValue({
+            ok: false,
+            status: 502,
+            json: async () => ({
+              ok: false,
+              error: "renderer request timed out: session_handoff",
+            }),
+          }),
+        }
+      )
+    ).rejects.toThrow("renderer request timed out: session_handoff")
+  })
+
+  it.each([12, {}, "   "])("rejects malformed persisted target id %p", async (sessionId) => {
+    await expect(
+      pushHandoff(
+        ENDPOINT,
+        { sessionId: "s", messages: [] },
+        {
+          fetch: jest.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ ok: true, result: { sessionId, persisted: true } }),
+          }),
+        }
+      )
+    ).rejects.toThrow("did not confirm persisted import")
+  })
+
+  it("reports an uncertain timeout without automatically reposting the snapshot", async () => {
+    const fetchMock = jest.fn(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true })
+        })
+    )
+    await expect(
+      pushHandoff(
+        ENDPOINT,
+        { sessionId: "s", messages: [] },
+        {
+          fetch: fetchMock as unknown as typeof fetch,
+          requestTimeoutMs: 10,
+        }
+      )
+    ).rejects.toThrow("Retry the same snapshot")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("times out a real loopback response that sends headers but stalls its acknowledgement body", async () => {
+    let requests = 0
+    const server = createServer((_req, res) => {
+      requests += 1
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.write('{"ok":true,')
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    try {
+      const address = server.address()
+      if (!address || typeof address === "string") throw new Error("missing loopback address")
+      await expect(
+        pushHandoff(
+          { ...ENDPOINT, baseUrl: `http://127.0.0.1:${address.port}` },
+          {
+            sessionId: "timeout-regression",
+            messages: [],
+          },
+          { requestTimeoutMs: 200 }
+        )
+      ).rejects.toThrow("Retry the same snapshot")
+      expect(requests).toBe(1)
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      )
+    }
   })
 })

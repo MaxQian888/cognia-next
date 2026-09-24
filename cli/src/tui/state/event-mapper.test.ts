@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/pi-rpc-events"
+import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-events"
 import { externalAgentEventToCanonicalFallback } from "../../runtime/external/external-event-mapper"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 

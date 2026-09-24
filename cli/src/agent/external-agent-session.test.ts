@@ -20,8 +20,8 @@ jest.mock("@/lib/claude/adapter-hooks", () => {
 jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => {
-  const actual = jest.requireActual("@/lib/ai/agent/external/presets")
+jest.mock("@/lib/ai/agent/external/config/presets", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/config/presets")
   return {
     ...actual,
     resolvePreferredCodexExecutablePresetId: jest.fn(
@@ -51,7 +51,7 @@ import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
 import type { TranscriptFs } from "./transcript"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
-import * as externalPresets from "@/lib/ai/agent/external/presets"
+import * as externalPresets from "@/lib/ai/agent/external/config/presets"
 
 import {
   acpPermissionRequestToCli,

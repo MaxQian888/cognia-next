@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import type { McpServer } from "@cognia/agent-config-types"
-import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/resolve-acp-mcp-servers"
+import { mcpServerToAcpConfig } from "@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { mcpConfigVersion, type SessionMcpSnapshot } from "../../agent/tool-host/mcp-status"
 import { sessionMcpRows, runtimeMcpRowId } from "./mcp-session-view"

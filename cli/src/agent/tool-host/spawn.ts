@@ -124,4 +124,4 @@ export const COGNIA_TOOL_NAMESPACES: readonly string[] = [
  * prompts: the agent's generic "may I call this MCP tool?" and Cognia's real
  * one, which is the authoritative decision.
  */
-export { isCogniaProjectedTool } from "@/lib/ai/agent/external/tool-preapproval"
+export { isCogniaProjectedTool } from "@/lib/ai/agent/external/policy/tool-preapproval"

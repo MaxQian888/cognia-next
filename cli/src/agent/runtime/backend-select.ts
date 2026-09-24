@@ -48,9 +48,9 @@ import {
   type ExternalAgentCapabilityId,
 } from "@cognia/agent-config-types/external-agent-capability"
 
-import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/presets"
-import { preflightExternalAgent } from "@/lib/ai/agent/external/capability-preflight"
-import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
+import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
+import { preflightExternalAgent } from "@/lib/ai/agent/external/capability/capability-preflight"
+import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/policy/security-policy"
 
 /** The built-in Cognia sidecar. Not a preset — it is the default host. */
 export const BUILTIN_BACKEND = "builtin"

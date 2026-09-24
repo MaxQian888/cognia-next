@@ -62,6 +62,12 @@ describe("mintSessionId", () => {
 })
 
 describe("runHeadlessTurn — parameter mapping", () => {
+  it("forwards the attachment validation callback to the runtime", async () => {
+    const onAttachments = jest.fn()
+    await runHeadlessTurn({ config, prompt: "source", gate, onAttachments })
+    expect(lastParams().onAttachments).toBe(onAttachments)
+  })
+
   it("forwards the required trio unchanged", async () => {
     await runHeadlessTurn({ config, prompt: "do it", gate })
     expect(lastParams()).toMatchObject({ config, prompt: "do it", gate })

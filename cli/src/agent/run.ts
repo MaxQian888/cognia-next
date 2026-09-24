@@ -51,6 +51,7 @@ export interface RunHeadlessParams {
   home?: string
   /** Narrow this turn's resolved options (tool-less text generation only). */
   resolveOptions?: UnifiedTurnParams["resolveOptions"]
+  onAttachments?: UnifiedTurnParams["onAttachments"]
   transcriptFs?: TranscriptFs
   now?: number
 
@@ -97,6 +98,7 @@ export async function runHeadlessTurn(params: RunHeadlessParams): Promise<RunHea
     ...(params.maxTurns !== undefined ? { maxSteps: params.maxTurns } : {}),
     ...(params.home ? { home: params.home } : {}),
     ...(params.resolveOptions ? { resolveOptions: params.resolveOptions } : {}),
+    ...(params.onAttachments ? { onAttachments: params.onAttachments } : {}),
     ...(params.transcriptFs ? { transcriptFs: params.transcriptFs } : {}),
     ...(params.now !== undefined ? { now: () => params.now as number } : {}),
     ...(params.onEvent

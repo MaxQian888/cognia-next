@@ -9,7 +9,7 @@ import {
   registerSessionMcpStatus,
   type AgentMcpEvidence,
 } from "./tool-host/mcp-status"
-import { buildDeclaredCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
+import { buildDeclaredCapabilityProfile } from "@/lib/ai/agent/external/capability/capability-profile"
 import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
 import {
   dispatchUserPromptSubmit,
@@ -49,16 +49,16 @@ import {
   type AgentCapabilityResult,
   type ExternalAgentManager,
 } from "@/lib/ai/agent/external/manager"
-import { resolveExternalAgentThinking } from "@/lib/ai/agent/external/session-models"
-import { clampThinkingLevel } from "@/lib/ai/agent/external/pi-rpc-client"
+import { resolveExternalAgentThinking } from "@/lib/ai/agent/external/session/session-models"
+import { clampThinkingLevel } from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
 import { projectAgentLevels, type EffortTier } from "@/lib/ai/thinking-level"
-import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-dynamic-mcp-controller"
-import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-client"
+import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
 import {
   createAgentFromPreset,
   getPresetConfig,
   resolvePreferredCodexExecutablePresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 import {
   RunAndCaptureError,
   type CapturePermissionDecision,

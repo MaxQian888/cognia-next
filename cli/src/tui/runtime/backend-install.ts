@@ -25,7 +25,10 @@
 import { spawn as nodeSpawn } from "node:child_process"
 import readline from "node:readline"
 
-import { findRuntimeById, isDistributionInstallable } from "@/lib/ai/agent/external/runtime-catalog"
+import {
+  findRuntimeById,
+  isDistributionInstallable,
+} from "@/lib/ai/agent/external/config/install-catalog"
 
 import { resolveAgentSearchPath } from "../../runtime/external/agent-path"
 

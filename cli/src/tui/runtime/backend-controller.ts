@@ -21,7 +21,7 @@ import {
   createAgentFromPreset,
   getPresetConfig,
   resolvePreferredCodexExecutablePresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 
 import {

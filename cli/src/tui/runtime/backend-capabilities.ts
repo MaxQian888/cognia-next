@@ -39,15 +39,15 @@ import {
 import {
   buildDeclaredCapabilityProfile,
   negotiateCapabilityProfile,
-} from "@/lib/ai/agent/external/capability-profile"
-import { liveCapabilityFacts } from "@/lib/ai/agent/external/capability-live-facts"
-import { getPresetConfig } from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/capability/capability-profile"
+import { liveCapabilityFacts } from "@/lib/ai/agent/external/capability/capability-live-facts"
+import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 // Pure mode arithmetic (a protocol→supported-modes table plus a permissiveness
 // rank), NOT the protocol stack this module otherwise keeps out of its graph:
 // `permission-modes` → `permission-cascade` → `sandbox/policy-bridge` are three
 // dependency-free modules. Duplicating the table here would be the drift the
 // single-source comment on `PROTOCOL_PERMISSION_MODE_SUPPORT` warns about.
-import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/policy/permission-modes"
 import type { ToolHostSnapshot } from "../../agent/tool-host/status"
 
 /**

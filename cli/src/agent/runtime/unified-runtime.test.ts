@@ -100,6 +100,39 @@ function params(fsx: MemoryFs, overrides: Partial<UnifiedTurnParams> = {}): Unif
   } as UnifiedTurnParams
 }
 
+it("runs attachment validation before provider send and surfaces rejection", async () => {
+  const fsx = createMemoryFs()
+  const validation = jest.fn(() => {
+    throw new Error("attachment extraction failed")
+  })
+  let sent = false
+  const { result } = await runUnifiedTurn(
+    params(fsx, {
+      onAttachments: validation,
+      createSession: () => ({
+        sessionId: "fake",
+        async send(_prompt, options) {
+          options.onAttachments?.({
+            failed: ["source.png"],
+            skipped: [],
+            ocr: [],
+            injectedFiles: [],
+            imageCount: 0,
+            documentCount: 0,
+          })
+          sent = true
+          return { text: "must not send" } as RunAndCaptureResult
+        },
+        async close() {},
+      }),
+    })
+  )
+  expect(validation).toHaveBeenCalled()
+  expect(sent).toBe(false)
+  expect(result.status).toBe("failed")
+  expect(result.error?.message).toContain("attachment extraction failed")
+})
+
 describe("backend selection", () => {
   it("fails without spawning anything when the backend is unknown", async () => {
     const fsx = createMemoryFs()

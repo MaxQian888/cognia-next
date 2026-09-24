@@ -17,7 +17,7 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
-import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
+import { findRuntimeById } from "@/lib/ai/agent/external/config/install-catalog"
 
 import {
   agentSearchDirs,

@@ -1,6 +1,9 @@
 /**
  * @jest-environment node
  */
+import fs from "node:fs"
+import { extractFileRefs } from "../agent/attachments/classify"
+import { buildAttachmentContent } from "../agent/attachments/build"
 import { maybePushHandoff, handoffCommand, resumeCommand, handoffDropPath } from "./handoff-cmd"
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
@@ -141,6 +144,66 @@ describe("resumeCommand", () => {
     expect(s.stderr()).toContain("cannot enforce tool-free summarization")
   })
 
+  it("summarizes external handoffs through the explicitly configured direct provider only", async () => {
+    const s = sink()
+    const complete = jest.fn().mockResolvedValue("Preserve constraints and unfinished validation.")
+    const buildSummaryClient = jest.fn().mockReturnValue({ complete })
+    const run = jest.fn().mockResolvedValue({ sessionId: "large", text: "continued" })
+    const config = {
+      ...cfg(),
+      agentBackend: "codex",
+      provider: "openai",
+      providers: { openai: { apiKey: "test-key", model: "explicit-model" } },
+    }
+    expect(
+      await resumeCommand(parseArgv(["resume", "large", "continue"]), {
+        out: s.out,
+        home: HOME,
+        loadConfig: () => config,
+        run,
+        buildSummaryClient,
+        readDrop: () =>
+          JSON.stringify({ ts: 1, role: "user", content: "Constraint. ".repeat(3000) }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+      })
+    ).toBe(0)
+    expect(buildSummaryClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOverride: "openai",
+        modelOverride: "explicit-model",
+        featureId: "handoff-summary",
+      })
+    )
+    expect(complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ abortSignal: expect.any(AbortSignal) })
+    )
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0][0].config).toBe(config)
+    expect(run.mock.calls[0][0].prompt).toContain("Preserve constraints")
+  })
+
+  it.each([
+    { authToken: "subscription", model: "selected" },
+    { apiKey: "key" },
+    { apiKey: "key", model: "auto" },
+  ])("does not substitute a provider or model for external summary %j", async (provider) => {
+    const run = jest.fn()
+    const buildSummaryClient = jest.fn()
+    const code = await resumeCommand(parseArgv(["resume", "large", "continue"]), {
+      out: sink().out,
+      home: HOME,
+      loadConfig: () => ({ ...cfg(), agentBackend: "codex", providers: { anthropic: provider } }),
+      run,
+      buildSummaryClient,
+      readDrop: () => JSON.stringify({ ts: 1, role: "user", content: "Constraint. ".repeat(3000) }),
+      transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+    })
+    expect(code).toBe(2)
+    expect(buildSummaryClient).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it("summarizes oversized history in isolated tool-free turns before continuing", async () => {
     const s = sink()
     const run = jest.fn().mockResolvedValue({
@@ -153,13 +216,18 @@ describe("resumeCommand", () => {
       loadConfig: () => cfg(),
       run,
       readDrop: () =>
-        JSON.stringify({ ts: 1, role: "user", content: "Acceptance constraint. ".repeat(1500) }),
+        JSON.stringify({
+          ts: 1,
+          role: "user",
+          content: "Acceptance constraint @/private/history.txt. ".repeat(1500),
+        }),
       transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
     })
     expect(code).toBe(0)
     expect(run.mock.calls.length).toBeGreaterThan(1)
     const summary = run.mock.calls[0][0]
     expect(summary.sessionId).toBeUndefined()
+    expect(extractFileRefs(summary.prompt)).toEqual([])
     expect(summary.resolveOptions).toEqual(expect.any(Function))
     const continuation = run.mock.calls.at(-1)![0]
     expect(continuation.sessionId).toBe("large")
@@ -183,6 +251,153 @@ describe("resumeCommand", () => {
     expect(write).not.toHaveBeenCalled()
     expect(run.mock.calls.every(([request]) => request.sessionId !== "large")).toBe(true)
     expect(s.stderr()).toContain("provider unavailable")
+  })
+
+  it("passes exported attachment bytes through the actual CLI text attachment resolver and cleans up", async () => {
+    const s = sink()
+    let sourcePath = ""
+    const run = jest.fn().mockImplementation(async (request) => {
+      sourcePath = extractFileRefs(request.prompt).at(-1)!
+      expect(fs.readFileSync(sourcePath, "utf8")).toBe("Acceptance evidence")
+      expect(fs.statSync(sourcePath).mode & 0o777).toBe(0o600)
+      const built = await buildAttachmentContent(request.prompt, "/work", {
+        provider: "openai",
+        model: "test",
+        isAnthropic: false,
+        anthropicKey: () => null,
+      })
+      expect(built.content).toContain("Acceptance evidence")
+      request.onAttachments(built)
+      return { text: "continued" }
+    })
+    expect(
+      await resumeCommand(parseArgv(["resume", "files", "continue"]), {
+        out: s.out,
+        home: HOME,
+        loadConfig: () => cfg(),
+        run,
+        readDrop: () =>
+          JSON.stringify({
+            ts: 1,
+            role: "user",
+            content: "Review evidence",
+            parts: [
+              {
+                type: "file",
+                filename: "evidence.txt",
+                mediaType: "text/plain",
+                url: `data:text/plain;base64,${Buffer.from("Acceptance evidence").toString("base64")}`,
+              },
+            ],
+          }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+      })
+    ).toBe(0)
+    expect(fs.existsSync(sourcePath)).toBe(false)
+  })
+
+  it("keeps historical file references inert while preserving the stored source", async () => {
+    const run = jest.fn().mockResolvedValue({ text: "continued" })
+    const write = jest.fn()
+    const original =
+      'Email alice@example.com; keep code value@module.ts and @decorator. Earlier request @/private/secrets.txt and @"/private/other file.txt"'
+    expect(
+      await resumeCommand(parseArgv(["resume", "history", "continue"]), {
+        out: sink().out,
+        home: HOME,
+        loadConfig: () => cfg(),
+        run,
+        readDrop: () => JSON.stringify({ ts: 1, role: "user", content: original }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write },
+      })
+    ).toBe(0)
+    expect(extractFileRefs(run.mock.calls[0][0].prompt)).toEqual([])
+    expect(run.mock.calls[0][0].prompt).toContain("/private/secrets.txt")
+    expect(run.mock.calls[0][0].prompt).toContain("alice@example.com")
+    expect(run.mock.calls[0][0].prompt).toContain("value@module.ts and @decorator")
+    expect(JSON.parse(write.mock.calls[0][1]).content).toBe(original)
+  })
+
+  it("rejects oversized attachment payloads before decoding or invoking the agent", async () => {
+    const run = jest.fn()
+    const s = sink()
+    const write = jest.fn()
+    expect(
+      await resumeCommand(parseArgv(["resume", "oversize", "continue"]), {
+        out: s.out,
+        home: HOME,
+        loadConfig: () => cfg(),
+        run,
+        readDrop: () =>
+          JSON.stringify({
+            ts: 1,
+            role: "user",
+            content: "source",
+            parts: [
+              {
+                type: "file",
+                mediaType: "text/plain",
+                url: `data:text/plain;base64,${"A".repeat(44_739_244)}`,
+              },
+            ],
+          }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write },
+      })
+    ).toBe(1)
+    expect(run).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+    expect(s.stderr()).toContain("32 MiB aggregate limit")
+  })
+
+  it("refuses unavailable attachment references before invoking the agent", async () => {
+    const run = jest.fn()
+    const s = sink()
+    expect(
+      await resumeCommand(parseArgv(["resume", "files", "continue"]), {
+        out: s.out,
+        home: HOME,
+        loadConfig: () => cfg(),
+        run,
+        readDrop: () =>
+          JSON.stringify({
+            ts: 1,
+            role: "user",
+            content: "file",
+            parts: [{ type: "file", mediaType: "text/plain", url: "file:///private/source.txt" }],
+          }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+      })
+    ).toBe(1)
+    expect(run).not.toHaveBeenCalled()
+    expect(s.stderr()).toContain("re-export attachment bytes")
+  })
+
+  it("rejects failed extraction before sending and cleans staged files after failure", async () => {
+    let sourcePath = ""
+    const s = sink()
+    const run = jest.fn().mockImplementation(async (request) => {
+      sourcePath = extractFileRefs(request.prompt).at(-1)!
+      request.onAttachments({ failed: [sourcePath], skipped: [], ocr: [] })
+      throw new Error("must not reach send")
+    })
+    expect(
+      await resumeCommand(parseArgv(["resume", "files", "continue"]), {
+        out: s.out,
+        home: HOME,
+        loadConfig: () => cfg(),
+        run,
+        readDrop: () =>
+          JSON.stringify({
+            ts: 1,
+            role: "user",
+            content: "file",
+            parts: [{ type: "file", mediaType: "image/png", url: "data:image/png;base64,YQ==" }],
+          }),
+        transcriptFs: { read: () => null, mkdirp: jest.fn(), append: jest.fn(), write: jest.fn() },
+      })
+    ).toBe(1)
+    expect(s.stderr()).toContain("could not read or extract every attachment")
+    expect(fs.existsSync(sourcePath)).toBe(false)
   })
 
   it("requires an id and rejects a missing non-interactive prompt", async () => {

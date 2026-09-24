@@ -93,17 +93,24 @@ export const TEXT_EXTS = new Set([
 const FILE_REF = /@"([^"\n]+)"|@([^\s"]+\.[A-Za-z0-9]+)/g
 const SKILL_OR_AGENT = /^(skill|agent):/
 
-export function extractFileRefs(prompt: string): string[] {
-  const refs: string[] = []
+/** Source spans shared by extraction and historical-context escaping. */
+export function extractFileRefSpans(
+  prompt: string
+): Array<{ ref: string; start: number; end: number }> {
+  const refs: Array<{ ref: string; start: number; end: number }> = []
   for (const m of prompt.matchAll(FILE_REF)) {
-    // Exactly one alternative matched, so exactly one group is filled: the
-    // quoted form fills group 1, the bare form group 2.
-    const p = (m[1] ?? m[2] ?? "").trim()
-    // Reachable via `@"   "` — quoted whitespace is a ref to nothing.
-    if (!p || SKILL_OR_AGENT.test(p)) continue
-    refs.push(p)
+    const start = m.index
+    // An @ embedded in an email, URL, or identifier is ordinary text, not a file request.
+    if (start > 0 && /[\p{L}\p{N}_.$%+/@-]/u.test(prompt[start - 1])) continue
+    const ref = (m[1] ?? m[2] ?? "").trim()
+    if (!ref || SKILL_OR_AGENT.test(ref)) continue
+    refs.push({ ref, start, end: start + m[0].length })
   }
   return refs
+}
+
+export function extractFileRefs(prompt: string): string[] {
+  return extractFileRefSpans(prompt).map(({ ref }) => ref)
 }
 
 export function classifyRef(ref: string): RefKind {

@@ -5,7 +5,8 @@
  * the command line (`model_provider=cognia`, `model_providers.cognia.*`). If
  * an installed Codex refuses dotted `-c` keys, this writes a temporary
  * `CODEX_HOME` with an equivalent `config.toml` and links the user's own
- * `auth.json` and `prompts/` into it, so their login and prompts survive.
+ * `prompts/` into it. Authentication uses only the gateway key; the user's
+ * `auth.json` is never shared, so token refresh cannot alter their login.
  * The user's real `~/.codex/config.toml` is never touched.
  *
  * Opt-in through `--codex-home-fallback` (or `COGNIA_X_CODEX_HOME_FALLBACK=1`).
@@ -26,12 +27,14 @@ export function renderCodexConfigToml(gatewayBaseUrl: string, model?: string): s
   const lines = [
     "# Written by cognia-agent x codex for ONE launch. Not your ~/.codex/config.toml.",
     'model_provider = "cognia"',
+    'cli_auth_credentials_store = "file"',
     ...(model ? [`model = ${JSON.stringify(model)}`] : []),
     "",
     "[model_providers.cognia]",
     'name = "Cognia gateway"',
     `base_url = ${JSON.stringify(base)}`,
     'env_key = "COGNIA_GATEWAY_KEY"',
+    "requires_openai_auth = false",
     'wire_api = "chat"',
     "",
   ]
@@ -52,8 +55,8 @@ export interface TemporaryCodexHomeDeps {
 }
 
 /**
- * Create the temporary home. Links (never copies) `auth.json` and `prompts/`
- * from the user's home when they exist.
+ * Create the temporary home with gateway-only authentication. Reuse prompts
+ * when present, but never inspect, copy, or link the user's credentials.
  */
 export function writeTemporaryCodexHome(
   input: { gatewayBaseUrl: string; model?: string },
@@ -69,11 +72,9 @@ export function writeTemporaryCodexHome(
     path.join(dir, "config.toml"),
     renderCodexConfigToml(input.gatewayBaseUrl, input.model)
   )
-  for (const entry of ["auth.json", "prompts"]) {
-    const source = path.join(userHome, entry)
-    if (fsImpl.existsSync(source)) {
-      fsImpl.symlinkSync(source, path.join(dir, entry))
-    }
+  const prompts = path.join(userHome, "prompts")
+  if (fsImpl.existsSync(prompts)) {
+    fsImpl.symlinkSync(prompts, path.join(dir, "prompts"))
   }
   let cleaned = false
   return {
