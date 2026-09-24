@@ -33,6 +33,7 @@ import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
 
 import { extractCallback } from "@/lib/logto/extract-callback"
+import { isDevLocalAccountEnabled } from "@/lib/accounts/dev-auto-unlock"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import { isCapacitor as detectCapacitor } from "@/lib/platform/detect"
@@ -172,6 +173,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   // The E2E build walks past the gate, except in the lane that exists to test
   // it: `NEXT_PUBLIC_E2E_CLOUD_GATE=1` keeps the gate live under E2E.
   const ungated =
+    isDevLocalAccountEnabled() ||
     (process.env.NEXT_PUBLIC_E2E === "1" && process.env.NEXT_PUBLIC_E2E_CLOUD_GATE !== "1") ||
     // This entry handles Feishu SSO itself, then requests the existing host
     // pairing or team sign-in according to the mode the user opens.

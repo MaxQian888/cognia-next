@@ -19,6 +19,7 @@ import {
 } from "./provider-registry"
 
 import { isTauri } from "@/lib/tauri"
+import { setSecretStoreReadiness } from "@/lib/credentials/secret-store-readiness"
 import { subscribeSubscriptionChanged } from "./subscription-events"
 
 import {
@@ -76,66 +77,77 @@ export function useSubscriptionAccounts() {
     Record<string, { action: UseAccountsResult["pendingAction"]; accountId: string }>
   >({})
   const generation = useRef(0)
-  const reload = useCallback(async () => {
-    const current = ++generation.current
-    if (!isTauri() || !localAccountId) {
-      setProviders(registered)
-      setRows({})
-      setLoadedScope(localAccountId)
-      setLoading(false)
-      setError(null)
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const inventory = await listSubscriptionProviderIds()
-      const definitions = [...registered]
-      for (const id of inventory) {
-        if (!definitions.some((definition) => definition.id === id)) {
-          definitions.push({
-            id,
-            name: id,
-            authMode: "api-key",
-            source: "unavailable",
-            available: false,
-          })
-        }
-      }
-      const entries = await Promise.all(
-        definitions.map(async (definition) => {
-          try {
-            const [accounts, active] = await Promise.all([
-              listAccounts(definition.id),
-              getActiveAccount(definition.id),
-            ])
-            return [
-              definition.id,
-              { accounts, activeAccountId: active.activeAccountId ?? null, error: null },
-            ] as const
-          } catch (cause) {
-            return [
-              definition.id,
-              { accounts: [], activeAccountId: null, error: errorMessage(cause) },
-            ] as const
-          }
-        })
-      )
-      if (current !== generation.current) return
-      setProviders(definitions)
-      setLoadedScope(localAccountId)
-      setRows(Object.fromEntries(entries))
-    } catch (cause) {
-      if (current === generation.current) {
-        setRows({})
+  const reload = useCallback(
+    async ({ allowInteraction = false } = {}) => {
+      const current = ++generation.current
+      if (!isTauri() || !localAccountId) {
         setProviders(registered)
+        setRows({})
         setLoadedScope(localAccountId)
-        setError(errorMessage(cause))
+        setLoading(false)
+        setError(null)
+        return
       }
-    } finally {
-      if (current === generation.current) setLoading(false)
-    }
-  }, [registered, localAccountId])
+      setLoading(true)
+      setError(null)
+      try {
+        // Only an explicit retry may display a keychain authorization prompt.
+        const inventory =
+          allowInteraction === true
+            ? await listSubscriptionProviderIds(true)
+            : await listSubscriptionProviderIds()
+        // The interactive path re-ran the native secret-store initialization
+        // before listing; reaching here means the store is open. Publishing it
+        // re-runs every consumer deferred while it was locked.
+        if (allowInteraction === true) setSecretStoreReadiness("ready")
+        const definitions = [...registered]
+        for (const id of inventory) {
+          if (!definitions.some((definition) => definition.id === id)) {
+            definitions.push({
+              id,
+              name: id,
+              authMode: "api-key",
+              source: "unavailable",
+              available: false,
+            })
+          }
+        }
+        const entries = await Promise.all(
+          definitions.map(async (definition) => {
+            try {
+              const [accounts, active] = await Promise.all([
+                listAccounts(definition.id),
+                getActiveAccount(definition.id),
+              ])
+              return [
+                definition.id,
+                { accounts, activeAccountId: active.activeAccountId ?? null, error: null },
+              ] as const
+            } catch (cause) {
+              return [
+                definition.id,
+                { accounts: [], activeAccountId: null, error: errorMessage(cause) },
+              ] as const
+            }
+          })
+        )
+        if (current !== generation.current) return
+        setProviders(definitions)
+        setLoadedScope(localAccountId)
+        setRows(Object.fromEntries(entries))
+      } catch (cause) {
+        if (current === generation.current) {
+          setRows({})
+          setProviders(registered)
+          setLoadedScope(localAccountId)
+          setError(errorMessage(cause))
+        }
+      } finally {
+        if (current === generation.current) setLoading(false)
+      }
+    },
+    [registered, localAccountId]
+  )
   useEffect(() => {
     setPending({})
     void reload()

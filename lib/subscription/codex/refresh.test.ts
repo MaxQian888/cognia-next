@@ -2,6 +2,7 @@ import { __resetSubscriptionBreakerForTesting } from "@/lib/subscription/retry/b
 
 import { CodexReauthenticationRequiredError, refreshCodexAccountIfStale } from "./refresh"
 import { discoverCodexAuth, discoveredToCredential } from "./discovery"
+import { reauthenticateManagedCodexAccount } from "@/lib/subscription/core/transport"
 
 import type { Account, CodexCredentialData } from "@/types/subscription"
 
@@ -9,11 +10,21 @@ import type { Account, CodexCredentialData } from "@/types/subscription"
 // refresh fail would otherwise gate every later case for the same account id.
 beforeEach(() => {
   __resetSubscriptionBreakerForTesting()
+  jest.mocked(reauthenticateManagedCodexAccount).mockReset()
 })
 
 jest.mock("./discovery", () => ({
   discoverCodexAuth: jest.fn(),
   discoveredToCredential: jest.fn(),
+}))
+
+// Never load the native transport or a real account store in this unit suite.
+jest.mock("@/lib/subscription/core/transport", () => ({
+  getAccount: jest.fn(),
+  saveAccount: jest.fn(),
+  setActiveAccount: jest.fn(),
+  refreshManagedCodexAccount: jest.fn(),
+  reauthenticateManagedCodexAccount: jest.fn(),
 }))
 
 const NOW = 1_000_000
@@ -90,11 +101,69 @@ describe("refreshCodexAccountIfStale", () => {
     expect(fresh?.accessToken).toBe("cli-current-bearer")
     expect(d.discoverLocalCredential).toHaveBeenCalledTimes(1)
     expect(d.refreshCodexToken).not.toHaveBeenCalled()
-    expect(d.saveAccount.mock.calls[0][1].credential).toMatchObject({
-      provider: "codex",
-      accessToken: "cli-current-bearer",
+    expect(reauthenticateManagedCodexAccount).toHaveBeenCalledWith("acc-1", local)
+    expect(d.saveAccount).not.toHaveBeenCalled()
+  })
+
+  it("rejects a different CLI identity without saving, activating, or refreshing it", async () => {
+    jest
+      .mocked(reauthenticateManagedCodexAccount)
+      .mockRejectedValue(
+        new Error("Codex reauthentication identity mismatch; original account was not changed")
+      )
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(credential({ originalSource: "file" }))),
+      discoverLocalCredential: jest.fn().mockResolvedValue(credential({ originalSource: "file" })),
+      reactivate: true,
+    })
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toMatchObject({
+        code: "reauth_required",
+        reason: "external_login_unverified",
+      })
+    }
+    expect(d.saveAccount).not.toHaveBeenCalled()
+    expect(d.setActiveAccount).not.toHaveBeenCalled()
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+
+    // Restoring the original CLI login must recover without a latched refresh breaker.
+    jest.mocked(reauthenticateManagedCodexAccount).mockResolvedValue(undefined as never)
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toMatchObject({
       originalSource: "file",
     })
+  })
+
+  it.each([
+    { authMode: "api_key" as const, accessToken: "different-api-key" },
+    { authMode: "chatgpt" as const, accessToken: "chatgpt-token" },
+  ])("does not silently replace a reused API key with $authMode credentials", async (next) => {
+    const d = deps({
+      getAccount: jest
+        .fn()
+        .mockResolvedValue(account(credential({ originalSource: "file", authMode: "api_key" }))),
+      discoverLocalCredential: jest
+        .fn()
+        .mockResolvedValue(credential({ originalSource: "file", ...next })),
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toMatchObject({
+      code: "reauth_required",
+    })
+    expect(d.saveAccount).not.toHaveBeenCalled()
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+    expect(reauthenticateManagedCodexAccount).not.toHaveBeenCalled()
+  })
+
+  it("keeps an unchanged reused API key without rewriting credentials", async () => {
+    const linked = credential({ originalSource: "keyring", authMode: "api_key" })
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(linked)),
+      discoverLocalCredential: jest.fn().mockResolvedValue(linked),
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toEqual(linked)
+    expect(d.saveAccount).not.toHaveBeenCalled()
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
+    expect(reauthenticateManagedCodexAccount).not.toHaveBeenCalled()
   })
 
   it("uses the default CLI discovery adapter for a linked account", async () => {
@@ -143,9 +212,28 @@ describe("refreshCodexAccountIfStale", () => {
       discoverLocalCredential: jest.fn().mockResolvedValue(null),
     })
 
-    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toBeNull()
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toMatchObject({
+      code: "reauth_required",
+      reason: "external_login_unavailable",
+    })
     expect(d.refreshCodexToken).not.toHaveBeenCalled()
     expect(d.saveAccount).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when the CLI credential source cannot be read", async () => {
+    const d = deps({
+      getAccount: jest.fn().mockResolvedValue(account(credential({ originalSource: "keyring" }))),
+      discoverLocalCredential: jest.fn().mockRejectedValue(new Error("keyring unavailable")),
+      reactivate: true,
+    })
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toMatchObject({
+      code: "reauth_required",
+      reason: "external_login_unavailable",
+    })
+    expect(d.saveAccount).not.toHaveBeenCalled()
+    expect(d.setActiveAccount).not.toHaveBeenCalled()
+    expect(d.refreshCodexToken).not.toHaveBeenCalled()
   })
 
   it("does not flip the active pointer by default (chat must not restart the sidecar)", async () => {
@@ -217,6 +305,15 @@ describe("refreshCodexAccountIfStale", () => {
   it("propagates a failed refresh exchange so callers decide how to degrade", async () => {
     const d = deps({ refreshCodexToken: jest.fn().mockRejectedValue(new Error("invalid_grant")) })
     await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow("invalid_grant")
+    expect(d.saveAccount).not.toHaveBeenCalled()
+  })
+
+  it("never falls back to a renderer token exchange without a host lifecycle", async () => {
+    const { refreshCodexToken: _refreshCodexToken, ...d } = deps()
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow(
+      "Direct renderer token refresh is disabled"
+    )
     expect(d.saveAccount).not.toHaveBeenCalled()
   })
 

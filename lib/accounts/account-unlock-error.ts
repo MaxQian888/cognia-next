@@ -25,6 +25,10 @@ export type AccountUnlockErrorCode =
   | "vault-incompatible"
   /** Too many failed attempts; the caller must wait out the cooldown. */
   | "throttled"
+  /** The password was right, but the desktop secret store refused to keep it
+   *  for "unlock automatically on this device". Retrying without that option
+   *  works; nothing was unlocked. */
+  | "secret-store-unavailable"
   /** The local database was written by a storage layout this build cannot open.
    *  The data is intact on disk; the only way forward is an explicit reset. */
   | "storage-layout-unsupported"

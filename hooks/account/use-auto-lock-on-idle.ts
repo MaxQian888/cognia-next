@@ -37,6 +37,11 @@
  *   browser has a real local account backed by the Browser Vault, and locking it
  *   is exactly as meaningful there.
  *
+ * - **Not on profiles that open without a prompt.** The device-managed desktop
+ *   workspace and any profile with "unlock automatically on this device"
+ *   reopen themselves on the next reload, so locking them protects nothing and
+ *   only interrupts. See `unlocksWithoutPrompt`.
+ *
  * - **Never armed in a development build.** `pnpm dev` / `pnpm tauri dev`
  *   spend most of their life backgrounded behind an editor, which reads as
  *   pure idle — the lock bought no security there (the dev-local account's
@@ -44,11 +49,14 @@
  *   `NEXT_PUBLIC_ACCOUNT_GATE=1`, the same flag that forces the real password
  *   gate in dev, re-arms the timer so the lock stays testable.
  *
- * Inert until the user sets a non-zero timeout in Settings → Account → Security.
+ * The default is Never (`accountAutoLockMinutes: 0` in `lib/db/settings.ts`), so
+ * it is inert until the user sets a non-zero timeout in Settings → Account →
+ * Security. Rows that persisted the old default of 30 keep it.
  */
 
 import { useEffect, useRef } from "react"
 
+import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { isAccountGateForced } from "@/lib/accounts/dev-auto-unlock"
 import { interruptSession } from "@/lib/claude/ipc"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
@@ -75,13 +83,16 @@ function autoLockAppliesInThisBuild(): boolean {
 export function useAutoLockOnIdle(): void {
   const minutes = useSettingsStore((s) => s.settings?.accountAutoLockMinutes ?? 0)
   const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
+  const opensWithoutPrompt = useAccountStore((s) =>
+    unlocksWithoutPrompt(s.accounts?.find((account) => account.id === s.unlockedAccountId))
+  )
   const lastActivityRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
     if (!autoLockAppliesInThisBuild()) return
-    if (minutes <= 0 || !unlockedAccountId) return
+    if (minutes <= 0 || !unlockedAccountId || opensWithoutPrompt) return
     if (isSecondaryOverlayRole(getPetWindowRole())) return
 
     const windowMs = minutes * 60_000
@@ -167,5 +178,5 @@ export function useAutoLockOnIdle(): void {
       document.removeEventListener("visibilitychange", onVisibility)
       window.removeEventListener("focus", onVisibility)
     }
-  }, [minutes, unlockedAccountId])
+  }, [minutes, unlockedAccountId, opensWithoutPrompt])
 }

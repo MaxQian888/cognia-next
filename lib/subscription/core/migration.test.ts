@@ -1,5 +1,9 @@
 import { toast } from "sonner"
 
+import {
+  __resetSecretStoreReadinessForTesting,
+  getSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 import { _resetMigrationToastFlag, subscriptionInitOnce } from "./migration"
 import { subscriptionInit } from "./transport"
 
@@ -152,6 +156,29 @@ describe("subscriptionInitOnce", () => {
     expect(result.outcomes).toEqual([])
     expect(result.migratedCount).toBe(0)
     expect(mockedSuccess).not.toHaveBeenCalled()
+  })
+
+  it("types a locked secret store and reports it once instead of warning", async () => {
+    __resetSecretStoreReadinessForTesting()
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockedInit.mockRejectedValueOnce(
+      "SECRET_STORE_LOCKED: master key read: Platform failure: passphrase not correct"
+    )
+    const result = await subscriptionInitOnce({ storage: new MemoryStorage() })
+    expect(result.secretStoreUnavailable).toBe(true)
+    expect(result.error).toContain("SECRET_STORE_LOCKED")
+    expect(getSecretStoreReadiness()).toBe("locked")
+    expect(warn).not.toHaveBeenCalledWith("subscription_init failed:", expect.anything())
+    warn.mockRestore()
+  })
+
+  it("keeps other failures untyped", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockedInit.mockRejectedValueOnce(new Error("vault parse failed"))
+    const result = await subscriptionInitOnce({ storage: new MemoryStorage() })
+    expect(result.secretStoreUnavailable).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith("subscription_init failed:", "vault parse failed")
+    warn.mockRestore()
   })
 
   it("falls back to English defaults when no translator is supplied", async () => {

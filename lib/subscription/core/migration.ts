@@ -23,6 +23,7 @@
 import { toast } from "sonner"
 
 import { isTauri } from "@/lib/platform/detect"
+import { reportSecretStoreFailure } from "@/lib/credentials/secret-store-readiness"
 import type { MigrationOutcome } from "@/types/subscription"
 import { subscriptionInit } from "./transport"
 
@@ -39,6 +40,12 @@ export interface SubscriptionInitResult {
    * failure.
    */
   skipped?: boolean
+  /**
+   * True when `subscription_init` failed only because the encrypted secret
+   * store was locked or still initializing. Already reported (and logged once)
+   * through the readiness sink; the caller defers a re-run until it unlocks.
+   */
+  secretStoreUnavailable?: boolean
 }
 
 /**
@@ -81,12 +88,14 @@ export async function subscriptionInitOnce(
     outcomes = await subscriptionInit()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.warn("subscription_init failed:", message)
+    const secretStoreUnavailable = reportSecretStoreFailure(err, "subscription.init")
+    if (!secretStoreUnavailable) console.warn("subscription_init failed:", message)
     return {
       outcomes: [],
       migratedCount: 0,
       toastShown: false,
       error: message,
+      ...(secretStoreUnavailable ? { secretStoreUnavailable: true } : {}),
     }
   }
 

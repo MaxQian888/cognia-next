@@ -44,7 +44,7 @@ export type CloudSignInView =
       identities?: CollabExternalIdentity[]
     }
   | { kind: "unaffiliated"; deployment: ReadyDeployment; allowClaim: boolean }
-  | { kind: "unavailable"; baseUrl: string; message: string; canContinueOffline: boolean }
+  | { kind: "unavailable"; baseUrl: string | null; message: string; canContinueOffline: boolean }
 
 export interface CloudSignInScreenProps {
   view: CloudSignInView
@@ -112,7 +112,9 @@ export function CloudSignInScreen(props: CloudSignInScreenProps) {
               {t("unavailable.title")}
             </Heading>
             <p className="text-sm text-muted-foreground">
-              {t("unavailable.body", { baseUrl: view.baseUrl, message: view.message })}
+              {view.baseUrl
+                ? t("unavailable.body", { baseUrl: view.baseUrl, message: view.message })
+                : t("unavailable.discoveryFailed", { message: view.message })}
             </p>
             {view.canContinueOffline ? <OfflineButton onClick={props.onContinueOffline} /> : null}
           </div>

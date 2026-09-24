@@ -10,6 +10,33 @@ import type { ProfileCloudIdentityCleanup } from "@/lib/identity/forget-profile-
 
 import type { AccountStoreDependencies } from "./account-store"
 
+let mockDesktopLocalEnabled = false
+const mockDesktopLocalPassword = jest.fn<Promise<string | null>, [boolean?]>()
+const mockSaveDesktopRecovery = jest.fn<Promise<void>, [string]>()
+const mockReadDesktopRecovery = jest.fn<Promise<string | null>, []>()
+const mockClearDesktopRecovery = jest.fn<Promise<void>, []>()
+const mockClearDesktopLocalPassword = jest.fn<Promise<void>, []>()
+const mockReadDeviceUnlockSecret = jest.fn<Promise<string | null>, [string]>()
+const mockSaveDeviceUnlockSecret = jest.fn<Promise<void>, [string, string]>()
+const mockClearDeviceUnlockSecret = jest.fn<Promise<void>, [string]>()
+jest.mock("@/lib/accounts/desktop-local-account", () => ({
+  DESKTOP_LOCAL_ACCOUNT_ID: "acct_desktop_local_workspace",
+  isDesktopLocalAccountEnabled: () => mockDesktopLocalEnabled,
+  isDeviceUnlockSupported: () => mockDesktopLocalEnabled,
+  isDeviceManagedAccount: (record: LocalAccountRecord | null | undefined) =>
+    record?.id === "acct_desktop_local_workspace" && record.protection === "device",
+  isRememberedOnDevice: (record: LocalAccountRecord | null | undefined) =>
+    !!record && record.protection !== "device" && record.rememberOnDevice === true,
+  readDeviceUnlockSecret: (id: string) => mockReadDeviceUnlockSecret(id),
+  saveDeviceUnlockSecret: (id: string, secret: string) => mockSaveDeviceUnlockSecret(id, secret),
+  clearDeviceUnlockSecret: (id: string) => mockClearDeviceUnlockSecret(id),
+  desktopLocalAccountPassword: (...args: [boolean?]) => mockDesktopLocalPassword(...args),
+  clearDesktopLocalAccountPassword: () => mockClearDesktopLocalPassword(),
+  saveDesktopLocalAccountRecoveryKey: (key: string) => mockSaveDesktopRecovery(key),
+  readDesktopLocalAccountRecoveryKey: () => mockReadDesktopRecovery(),
+  clearDesktopLocalAccountRecoveryKey: () => mockClearDesktopRecovery(),
+}))
+
 const mockForgetProfileCloudIdentity = jest.fn()
 jest.mock("@/lib/identity/forget-profile-identity", () => ({
   forgetProfileCloudIdentity: (...args: unknown[]) => mockForgetProfileCloudIdentity(...args),
@@ -35,6 +62,7 @@ const mockUpdatePasswordVerifier = jest.fn<
 const mockSetActiveAccountId = jest.fn<Promise<void>, [string]>()
 const mockDeleteRegistryAccount = jest.fn<Promise<void>, [string, unknown?]>()
 const mockUpdateAvatarRegistry = jest.fn<Promise<LocalAccountRecord>, [string, string | null]>()
+const mockUpdateRememberOnDevice = jest.fn<Promise<LocalAccountRecord>, [string, boolean]>()
 
 jest.mock("@/lib/accounts/account-db", () => ({
   LocalAccountRegistry: jest.fn().mockImplementation(() => ({
@@ -44,6 +72,7 @@ jest.mock("@/lib/accounts/account-db", () => ({
     renameAccount: mockRenameRegistryAccount,
     updatePasswordVerifier: mockUpdatePasswordVerifier,
     updateAvatar: mockUpdateAvatarRegistry,
+    updateRememberOnDevice: mockUpdateRememberOnDevice,
     setActiveAccountId: mockSetActiveAccountId,
     deleteAccount: mockDeleteRegistryAccount,
   })),
@@ -221,6 +250,12 @@ function makeStore() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockDesktopLocalEnabled = false
+  mockSaveDesktopRecovery.mockResolvedValue()
+  mockReadDesktopRecovery.mockResolvedValue("preserved-recovery-key")
+  mockClearDesktopRecovery.mockResolvedValue()
+  mockDesktopLocalPassword.mockResolvedValue("device-random-secret")
+  mockClearDesktopLocalPassword.mockResolvedValue()
   window.localStorage.clear()
   window.sessionStorage.clear()
   mockIsTauri = true
@@ -276,6 +311,13 @@ beforeEach(() => {
     ...account(id, id),
     avatarDataUrl: avatarDataUrl ?? undefined,
   }))
+  mockUpdateRememberOnDevice.mockImplementation(async (id, enabled) => ({
+    ...account(id, id),
+    ...(enabled ? { rememberOnDevice: true } : {}),
+  }))
+  mockReadDeviceUnlockSecret.mockResolvedValue(null)
+  mockSaveDeviceUnlockSecret.mockResolvedValue()
+  mockClearDeviceUnlockSecret.mockResolvedValue()
   mockDropAccountDatabase.mockResolvedValue()
   mockPurgeAccountLocalState.mockResolvedValue()
   mockActivateAccountLocalState.mockResolvedValue()
@@ -450,7 +492,7 @@ describe("development local account", () => {
   })
 
   it("re-opens the disposable account in a new tab, with nothing remembered", async () => {
-    // `resumeDevSessionUnlock` reads sessionStorage, which dies with the tab.
+    // `resumeTabSessionUnlock` reads sessionStorage, which dies with the tab.
     // The constant password is what makes a second window free.
     const dev = account("acct_dev_local_workspace", "Developer")
     mockListAccounts.mockResolvedValue([dev])
@@ -650,11 +692,11 @@ describe("browser Vault lifecycle", () => {
   })
 })
 
-// The leaf's own rules live in `lib/accounts/dev-session-unlock.test.ts`. What
+// The leaf's own rules live in `lib/accounts/tab-session-unlock.test.ts`. What
 // these pin is the wiring, which is the half this repo keeps shipping dormant:
 // a remembered secret is worth nothing unless `load()` actually consults it,
 // and worse than nothing if `lock()` does not erase it.
-describe("development session unlock", () => {
+describe("browser tab session unlock", () => {
   beforeEach(() => {
     mockIsTauri = false
   })
@@ -744,6 +786,30 @@ describe("development session unlock", () => {
     await reloaded.getState().load()
 
     expect(reloaded.getState().unlockedAccountId).toBe("acct_browser")
+  })
+
+  it("does not resume in a production browser build, which never keeps the password", async () => {
+    const originalNodeEnv = process.env.NODE_ENV
+    Object.defineProperty(process.env, "NODE_ENV", { value: "production", configurable: true })
+    try {
+      const browserAccount = account("acct_browser", "Browser")
+      mockListAccounts.mockResolvedValue([browserAccount])
+      mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+      const first = makeStore()
+      await first.getState().load()
+      await first.getState().unlockAccount(browserAccount.id, "secret")
+
+      const reloaded = makeStore()
+      await reloaded.getState().load()
+
+      expect(reloaded.getState().unlockedAccountId).toBeNull()
+    } finally {
+      Object.defineProperty(process.env, "NODE_ENV", {
+        value: originalNodeEnv,
+        configurable: true,
+      })
+    }
   })
 
   it("does not resume on the desktop, where the password also binds the keyring", async () => {
@@ -1668,5 +1734,716 @@ describe("dropDexieAccountDatabase", () => {
     expect(await Dexie.exists("cognia-account-acct_plain-encrypted-v1-router-fusion-v1")).toBe(
       false
     )
+  })
+})
+
+describe("device-managed desktop workspace", () => {
+  const id = "acct_desktop_local_workspace"
+  const deviceAccount = (): LocalAccountRecord => ({
+    ...account(id, "Local"),
+    protection: "device",
+  })
+
+  it("provisions fresh desktop using the persisted native secret and no recovery gate", async () => {
+    mockDesktopLocalEnabled = true
+    mockBrowserVaultExists.mockResolvedValue(false)
+    let records: LocalAccountRecord[] = []
+    mockListAccounts.mockImplementation(async () => records)
+    mockGetState.mockImplementation(async () => ({ activeAccountId: records[0]?.id ?? null }))
+    mockCreateRegistryAccount.mockImplementation(async () => {
+      const created = deviceAccount()
+      records = [created]
+      return created
+    })
+    const store = makeStore()
+    await store.getState().load()
+    expect(mockSaveDesktopRecovery).toHaveBeenCalledWith("recovery-key")
+    expect(mockDesktopLocalPassword).toHaveBeenCalledWith(true)
+    expect(mockProvisionBrowserVault).toHaveBeenCalledWith(id, "device-random-secret")
+    expect(mockVerifyPassword).toHaveBeenCalledWith("device-random-secret", expect.anything(), id)
+    expect(store.getState()).toMatchObject({
+      unlockedAccountId: id,
+      locked: false,
+      pendingRecoveryKey: null,
+    })
+  })
+
+  it("reopens only the existing device profile through native verification", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([deviceAccount()])
+    mockGetState.mockResolvedValue({ activeAccountId: id })
+    const store = makeStore()
+    await store.getState().load()
+    expect(mockDesktopLocalPassword).not.toHaveBeenCalledWith(true)
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(id, "device-random-secret")
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(store.getState().locked).toBe(false)
+  })
+
+  it("keeps explicit password profiles locked", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([{ ...deviceAccount(), protection: "password" }])
+    mockGetState.mockResolvedValue({ activeAccountId: id })
+    const store = makeStore()
+    await store.getState().load()
+    expect(store.getState().locked).toBe(true)
+    expect(mockDesktopLocalPassword).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when an existing native secret is missing", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([deviceAccount()])
+    mockGetState.mockResolvedValue({ activeAccountId: id })
+    mockDesktopLocalPassword.mockResolvedValue(null)
+    const store = makeStore()
+    // Named for what happened, not "password required": nobody typed one.
+    await expect(store.getState().load()).rejects.toThrow("device credential is missing")
+    expect(store.getState()).toMatchObject({ loaded: true, locked: true })
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+  })
+
+  it("does not replace a vault whose registry entry was lost", async () => {
+    mockDesktopLocalEnabled = true
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow("registry is missing")
+    expect(mockDesktopLocalPassword).not.toHaveBeenCalled()
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+  })
+
+  it("does not regenerate a missing vault during resume", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([deviceAccount()])
+    mockGetState.mockResolvedValue({ activeAccountId: id })
+    mockBrowserVaultExists.mockResolvedValue(false)
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow("vault is missing")
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+  })
+
+  it("promotes an unlocked device workspace to password protection", async () => {
+    const store = makeStore()
+    store.setState({ accounts: [deviceAccount()], activeAccountId: id, unlockedAccountId: id })
+    mockUpdatePasswordVerifier.mockResolvedValue({ ...deviceAccount(), protection: "password" })
+    await store.getState().changePassword(id, "", "user-new-password")
+    expect(mockRotateNativePassword).toHaveBeenCalledWith(
+      id,
+      "device-random-secret",
+      expect.anything(),
+      "user-new-password"
+    )
+    expect(mockUpdatePasswordVerifier).toHaveBeenCalledWith(
+      id,
+      expect.anything(),
+      undefined,
+      "password"
+    )
+    expect(store.getState().pendingRecoveryKey).toBe("preserved-recovery-key")
+    expect(mockClearDesktopRecovery).not.toHaveBeenCalled()
+    expect(mockClearDesktopLocalPassword).toHaveBeenCalled()
+    expect(store.getState().accounts[0]?.protection).toBe("password")
+  })
+
+  it("reports the promotion as done even when the old device secret cannot be cleared", async () => {
+    const store = makeStore()
+    store.setState({ accounts: [deviceAccount()], activeAccountId: id, unlockedAccountId: id })
+    mockUpdatePasswordVerifier.mockResolvedValue({ ...deviceAccount(), protection: "password" })
+    mockClearDesktopLocalPassword.mockRejectedValueOnce(new Error("SECRET_STORE_LOCKED: denied"))
+    await expect(
+      store.getState().changePassword(id, "", "user-new-password")
+    ).resolves.toMatchObject({ protection: "password" })
+    expect(store.getState().error).toBeNull()
+    expect(store.getState().accounts[0]?.protection).toBe("password")
+  })
+
+  it("cannot set a device workspace password from a locked session", async () => {
+    const store = makeStore()
+    store.setState({ accounts: [deviceAccount()], activeAccountId: id, unlockedAccountId: null })
+    await expect(store.getState().changePassword(id, "", "user-new-password")).rejects.toThrow(
+      "Unlock the local workspace"
+    )
+    expect(mockRotateNativePassword).not.toHaveBeenCalled()
+  })
+})
+
+describe("desktop bootstrap failure and recovery handover", () => {
+  const id = "acct_desktop_local_workspace"
+  const device = (): LocalAccountRecord => ({ ...account(id, "Local"), protection: "device" })
+
+  it("rolls back native activation when the fresh database cannot open and retries without replacement", async () => {
+    mockDesktopLocalEnabled = true
+    let records: LocalAccountRecord[] = []
+    mockListAccounts.mockImplementation(async () => records)
+    mockGetState.mockImplementation(async () => ({ activeAccountId: records[0]?.id ?? null }))
+    mockBrowserVaultExists.mockResolvedValue(false)
+    mockCreateRegistryAccount.mockImplementation(async () => {
+      records = [device()]
+      mockBrowserVaultExists.mockResolvedValue(true)
+      return records[0]!
+    })
+    mockPrepareDatabase.mockRejectedValueOnce(new Error("database unavailable"))
+    const store = makeStore()
+    await expect(store.getState().load()).rejects.toThrow("database unavailable")
+    expect(store.getState()).toMatchObject({
+      unlockedAccountId: null,
+      locked: true,
+      loaded: true,
+      accounts: [device()],
+    })
+    expect(mockUnbindLocalAccount).toHaveBeenCalled()
+    expect(mockLockBrowserVault).toHaveBeenCalled()
+    expect(mockClearAccountLocalState).toHaveBeenCalled()
+    await store.getState().load()
+    expect(store.getState().locked).toBe(false)
+    expect(mockProvisionBrowserVault).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([false, true])("rejects invalid device-profile creation (Tauri=%s)", async (tauri) => {
+    mockIsTauri = tauri
+    const store = makeStore()
+    await expect(
+      store.getState().createAccount({
+        id: tauri ? "acct_other" : id,
+        displayName: "Local",
+        password: "password-123",
+        protection: "device",
+      })
+    ).rejects.toThrow("reserved")
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+  })
+
+  it("preserves the device secret and recovery material when password promotion rolls back", async () => {
+    const store = makeStore()
+    store.setState({ accounts: [device()], activeAccountId: id, unlockedAccountId: id })
+    mockUpdatePasswordVerifier.mockRejectedValueOnce(new Error("registry offline"))
+    await expect(store.getState().changePassword(id, "", "new-password")).rejects.toThrow(
+      "registry offline"
+    )
+    expect(mockClearDesktopLocalPassword).not.toHaveBeenCalled()
+    expect(mockClearDesktopRecovery).not.toHaveBeenCalled()
+    expect(store.getState().accounts[0]?.protection).toBe("device")
+    expect(mockChangeBrowserVaultPassword).toHaveBeenLastCalledWith(
+      id,
+      "new-password",
+      "device-random-secret"
+    )
+    mockUpdatePasswordVerifier.mockResolvedValueOnce({ ...device(), protection: "password" })
+    await store.getState().changePassword(id, "", "new-password")
+    expect(store.getState().accounts[0]?.protection).toBe("password")
+  })
+
+  it("restores pending recovery after a protected unlock until acknowledgment succeeds", async () => {
+    const store = makeStore()
+    store.setState({
+      accounts: [{ ...device(), protection: "password" }],
+      activeAccountId: id,
+      unlockedAccountId: null,
+      locked: true,
+    })
+    await store.getState().unlockAccount(id, "user-password")
+    expect(store.getState().pendingRecoveryKey).toBe("preserved-recovery-key")
+    mockClearDesktopRecovery.mockRejectedValueOnce(new Error("delete denied"))
+    store.getState().acknowledgeRecoveryKey()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.getState().pendingRecoveryKey).toBe("preserved-recovery-key")
+    expect(store.getState().error).toBe("delete denied")
+    store.getState().acknowledgeRecoveryKey()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(store.getState().pendingRecoveryKey).toBeNull()
+  })
+})
+
+describe("unlock automatically on this device", () => {
+  const id = "acct_remembered"
+  const remembered = (): LocalAccountRecord => ({
+    ...account(id, "Max"),
+    rememberOnDevice: true,
+  })
+  const plain = (): LocalAccountRecord => account(id, "Max")
+
+  beforeEach(() => {
+    mockDesktopLocalEnabled = true
+    mockIsTauri = true
+  })
+
+  describe("at boot", () => {
+    it("opens a remembered profile from the secret store without a prompt", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockReadDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(mockVerifyPassword).toHaveBeenCalledWith("hunter22", expect.anything(), id)
+      expect(store.getState()).toMatchObject({
+        unlockedAccountId: id,
+        locked: false,
+        autoUnlockFailure: null,
+        error: null,
+      })
+    })
+
+    it("falls back to the lock screen when the secret store cannot be read, keeping the secret", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockRejectedValue(new Error("SECRET_STORE_LOCKED: denied"))
+      const store = makeStore()
+
+      await expect(store.getState().load()).resolves.toBeUndefined()
+
+      expect(store.getState()).toMatchObject({
+        loaded: true,
+        unlockedAccountId: null,
+        locked: true,
+        error: null,
+        autoUnlockFailure: {
+          accountId: id,
+          reason: "secret-store-unavailable",
+          message: "SECRET_STORE_LOCKED: denied",
+        },
+      })
+      expect(mockClearDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(mockUpdateRememberOnDevice).not.toHaveBeenCalled()
+    })
+
+    it("turns the option off when the store holds no secret", async () => {
+      let records = [remembered()]
+      mockListAccounts.mockImplementation(async () => records)
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockUpdateRememberOnDevice.mockImplementation(async (accountId, enabled) => {
+        records = [{ ...plain(), ...(enabled ? { rememberOnDevice: true } : {}) }]
+        return records[0]!
+      })
+      mockReadDeviceUnlockSecret.mockResolvedValue(null)
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+      expect(store.getState().autoUnlockFailure).toEqual({
+        accountId: id,
+        reason: "secret-missing",
+      })
+      expect(store.getState().locked).toBe(true)
+      // The published list reflects the flag the registry now holds.
+      expect(store.getState().accounts[0]?.rememberOnDevice).toBeUndefined()
+    })
+
+    it("forgets a secret the profile no longer opens with", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("old-password")
+      mockVerifyPassword.mockResolvedValue(false)
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockClearDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+      expect(store.getState()).toMatchObject({
+        locked: true,
+        error: null,
+        autoUnlockFailure: { accountId: id, reason: "secret-rejected" },
+      })
+    })
+
+    it("reports other activation failures without failing the boot", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      mockPrepareDatabase.mockRejectedValueOnce(new Error("database blocked"))
+      const store = makeStore()
+
+      await expect(store.getState().load()).resolves.toBeUndefined()
+
+      expect(store.getState().autoUnlockFailure).toMatchObject({
+        accountId: id,
+        reason: "unlock-failed",
+      })
+      expect(store.getState().locked).toBe(true)
+      // A good secret is not thrown away over an unrelated failure.
+      expect(mockClearDeviceUnlockSecret).not.toHaveBeenCalled()
+    })
+
+    it("does not open anything by itself when the gate is forced on", async () => {
+      mockDesktopLocalEnabled = false
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockReadDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(store.getState().locked).toBe(true)
+    })
+
+    it("leaves a profile that never opted in on the lock screen", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      const store = makeStore()
+
+      await store.getState().load()
+
+      expect(mockReadDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(store.getState()).toMatchObject({ locked: true, autoUnlockFailure: null })
+    })
+  })
+
+  describe("choosing it on the lock screen", () => {
+    it("stores the proven password and flags the profile", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      const store = makeStore()
+      await store.getState().load()
+
+      await store.getState().unlockAccount(id, "hunter22", { rememberOnDevice: true })
+
+      expect(mockSaveDeviceUnlockSecret).toHaveBeenCalledWith(id, "hunter22")
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, true)
+      // Secret first, flag second: boot never sees a flag with no secret.
+      expect(mockSaveDeviceUnlockSecret.mock.invocationCallOrder[0]).toBeLessThan(
+        mockUpdateRememberOnDevice.mock.invocationCallOrder[0]!
+      )
+      expect(store.getState().unlockedAccountId).toBe(id)
+      expect(store.getState().accounts.find((a) => a.id === id)?.rememberOnDevice).toBe(true)
+    })
+
+    it("fails the attempt with its own code when the store refuses, and rolls back", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockSaveDeviceUnlockSecret.mockRejectedValue(new Error("keychain denied"))
+      const store = makeStore()
+      await store.getState().load()
+
+      await expect(
+        store.getState().unlockAccount(id, "hunter22", { rememberOnDevice: true })
+      ).rejects.toMatchObject({ code: "secret-store-unavailable" })
+
+      expect(store.getState().unlockedAccountId).toBeNull()
+      expect(mockUpdateRememberOnDevice).not.toHaveBeenCalled()
+      expect(mockUnbindLocalAccount).toHaveBeenCalled()
+    })
+
+    it("unticking it turns the option off before anything opens", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockRejectedValue(new Error("SECRET_STORE_LOCKED"))
+      const store = makeStore()
+      await store.getState().load()
+
+      await store.getState().unlockAccount(id, "hunter22", { rememberOnDevice: false })
+
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+      expect(mockClearDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(mockSaveDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(store.getState().unlockedAccountId).toBe(id)
+    })
+
+    it("leaves the stored choice alone when no option is passed", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      const store = makeStore()
+      await store.getState().load()
+
+      await store.getState().unlockAccount(id, "hunter22")
+
+      expect(mockSaveDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(mockUpdateRememberOnDevice).not.toHaveBeenCalled()
+    })
+
+    it("clears the boot failure once the profile is open", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockRejectedValue(new Error("SECRET_STORE_LOCKED"))
+      const store = makeStore()
+      await store.getState().load()
+      expect(store.getState().autoUnlockFailure).not.toBeNull()
+
+      await store.getState().unlockAccount(id, "hunter22")
+
+      expect(store.getState().autoUnlockFailure).toBeNull()
+    })
+  })
+
+  describe("setRememberOnDevice from Settings", () => {
+    async function unlockedStore(record: LocalAccountRecord) {
+      mockListAccounts.mockResolvedValue([record])
+      mockGetState.mockResolvedValue({ activeAccountId: record.id })
+      const store = makeStore()
+      await store.getState().load()
+      await store.getState().unlockAccount(record.id, "hunter22")
+      mockVerifyPassword.mockClear()
+      return store
+    }
+
+    it("verifies the password without re-binding the host, then stores it", async () => {
+      const store = await unlockedStore(plain())
+
+      const updated = await store.getState().setRememberOnDevice(id, true, "hunter22")
+
+      // Two arguments: no account id, so the host binding is untouched.
+      expect(mockVerifyPassword).toHaveBeenCalledWith("hunter22", expect.anything())
+      expect(mockSaveDeviceUnlockSecret).toHaveBeenCalledWith(id, "hunter22")
+      expect(updated.rememberOnDevice).toBe(true)
+    })
+
+    it("refuses a wrong password and stores nothing", async () => {
+      const store = await unlockedStore(plain())
+      mockVerifyPassword.mockResolvedValue(false)
+
+      await expect(store.getState().setRememberOnDevice(id, true, "nope")).rejects.toMatchObject({
+        code: "invalid-password",
+      })
+      expect(mockSaveDeviceUnlockSecret).not.toHaveBeenCalled()
+      expect(mockUpdateRememberOnDevice).not.toHaveBeenCalled()
+    })
+
+    it("requires the password to turn it on", async () => {
+      const store = await unlockedStore(plain())
+
+      await expect(store.getState().setRememberOnDevice(id, true)).rejects.toMatchObject({
+        code: "password-required",
+      })
+    })
+
+    it("turns it off without a password", async () => {
+      const store = await unlockedStore(remembered())
+
+      await store.getState().setRememberOnDevice(id, false)
+
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+      expect(mockClearDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(mockVerifyPassword).not.toHaveBeenCalled()
+    })
+
+    it("keeps the flag off even if the secret cannot be removed", async () => {
+      const store = await unlockedStore(remembered())
+      mockClearDeviceUnlockSecret.mockRejectedValue(new Error("store locked"))
+
+      await expect(store.getState().setRememberOnDevice(id, false)).resolves.toMatchObject({
+        id,
+      })
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+    })
+
+    it("refuses the device-managed workspace, which has no typed password", async () => {
+      const deviceId = "acct_desktop_local_workspace"
+      mockListAccounts.mockResolvedValue([{ ...account(deviceId, "Local"), protection: "device" }])
+      mockGetState.mockResolvedValue({ activeAccountId: deviceId })
+      const store = makeStore()
+      await store.getState().load()
+
+      await expect(store.getState().setRememberOnDevice(deviceId, true, "x")).rejects.toThrow(
+        /already opens on this device/
+      )
+    })
+
+    it("is refused outside the desktop shell", async () => {
+      const store = await unlockedStore(plain())
+      mockDesktopLocalEnabled = false
+
+      await expect(
+        store.getState().setRememberOnDevice(id, true, "hunter22")
+      ).rejects.toMatchObject({ code: "secret-store-unavailable" })
+      expect(mockSaveDeviceUnlockSecret).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("keeping the stored password in step", () => {
+    it("stores the new password after a change", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      const store = makeStore()
+      await store.getState().load()
+
+      await store.getState().changePassword(id, "hunter22", "correct-horse-9")
+
+      expect(mockSaveDeviceUnlockSecret).toHaveBeenCalledWith(id, "correct-horse-9")
+    })
+
+    it("turns the option off and says so when the new password cannot be stored", async () => {
+      mockListAccounts.mockResolvedValue([remembered()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      mockReadDeviceUnlockSecret.mockResolvedValue("hunter22")
+      const store = makeStore()
+      await store.getState().load()
+      mockSaveDeviceUnlockSecret.mockRejectedValue(new Error("keychain denied"))
+
+      await expect(
+        store.getState().changePassword(id, "hunter22", "correct-horse-9")
+      ).rejects.toMatchObject({ code: "secret-store-unavailable" })
+
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+      // The password change itself stood.
+      expect(mockRotateNativePassword).toHaveBeenCalled()
+    })
+
+    it("does not touch the store for a profile that never opted in", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      const store = makeStore()
+      await store.getState().load()
+      await store.getState().unlockAccount(id, "hunter22")
+
+      await store.getState().changePassword(id, "hunter22", "correct-horse-9")
+
+      expect(mockSaveDeviceUnlockSecret).not.toHaveBeenCalled()
+    })
+
+    it("removes a deleted profile's stored password without failing the deletion", async () => {
+      const other = account("acct_other", "Other")
+      mockListAccounts.mockResolvedValue([remembered(), other])
+      mockGetState.mockResolvedValue({ activeAccountId: other.id })
+      mockClearDeviceUnlockSecret.mockRejectedValue(new Error("store locked"))
+      const store = makeStore()
+      await store.getState().load()
+
+      await expect(store.getState().deleteAccount(id)).resolves.toMatchObject({ accountId: id })
+      expect(mockClearDeviceUnlockSecret).toHaveBeenCalledWith(id)
+    })
+  })
+
+  describe("switching", () => {
+    const other = account("acct_other", "Other")
+
+    async function unlockedOnOther(target: LocalAccountRecord) {
+      mockListAccounts.mockResolvedValue([other, target])
+      mockGetState.mockResolvedValue({ activeAccountId: other.id })
+      const store = makeStore()
+      await store.getState().load()
+      await store.getState().unlockAccount(other.id, "hunter22")
+      mockUnbindLocalAccount.mockClear()
+      return store
+    }
+
+    it("refuses a switch with no credential BEFORE locking the current profile", async () => {
+      const store = await unlockedOnOther(plain())
+
+      await expect(store.getState().switchAccount(id)).rejects.toMatchObject({
+        code: "password-required",
+      })
+
+      // Still inside the profile the owner was using.
+      expect(store.getState().unlockedAccountId).toBe(other.id)
+      expect(store.getState().locked).toBe(false)
+      expect(mockUnbindLocalAccount).not.toHaveBeenCalled()
+    })
+
+    it("opens a remembered profile from the secret store", async () => {
+      const store = await unlockedOnOther(remembered())
+      mockReadDeviceUnlockSecret.mockResolvedValue("target-secret")
+
+      await store.getState().switchAccount(id)
+
+      expect(mockVerifyPassword).toHaveBeenLastCalledWith("target-secret", expect.anything(), id)
+      expect(store.getState().unlockedAccountId).toBe(id)
+    })
+
+    it("forgets a stale stored password when the switch is refused", async () => {
+      const store = await unlockedOnOther(remembered())
+      mockReadDeviceUnlockSecret.mockResolvedValue("stale")
+      mockVerifyPassword.mockResolvedValue(false)
+
+      await expect(store.getState().switchAccount(id)).rejects.toMatchObject({
+        code: "invalid-password",
+      })
+      expect(mockClearDeviceUnlockSecret).toHaveBeenCalledWith(id)
+      expect(mockUpdateRememberOnDevice).toHaveBeenCalledWith(id, false)
+    })
+  })
+
+  describe("never re-deciding an unlocked session", () => {
+    it("a failed action followed by another boot read leaves the session open", async () => {
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+      const store = makeStore()
+      await store.getState().load()
+      await store.getState().unlockAccount(id, "hunter22")
+      mockVerifyPassword.mockResolvedValue(false)
+      mockRotateNativePassword.mockRejectedValueOnce(new Error("Invalid local account password."))
+      await expect(
+        store.getState().changePassword(id, "wrong", "correct-horse-9")
+      ).rejects.toThrow()
+      expect(store.getState().error).not.toBeNull()
+      mockListAccounts.mockClear()
+
+      await store.getState().load()
+
+      expect(mockListAccounts).not.toHaveBeenCalled()
+      expect(store.getState().unlockedAccountId).toBe(id)
+      expect(store.getState().locked).toBe(false)
+    })
+
+    it("still retries a boot read that failed before anything was unlocked", async () => {
+      mockListAccounts.mockRejectedValueOnce(new Error("registry blocked"))
+      const store = makeStore()
+      await expect(store.getState().load()).rejects.toThrow("registry blocked")
+      mockListAccounts.mockResolvedValue([plain()])
+      mockGetState.mockResolvedValue({ activeAccountId: id })
+
+      await store.getState().load()
+
+      expect(store.getState().error).toBeNull()
+      expect(store.getState().accounts).toHaveLength(1)
+    })
+  })
+})
+
+describe("recovery key acknowledgement", () => {
+  const localId = "acct_desktop_local_workspace"
+
+  it("keeps the Local workspace's stored key when a second profile's key is acknowledged", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([{ ...account(localId, "Local"), protection: "device" }])
+    mockGetState.mockResolvedValue({ activeAccountId: localId })
+    const store = makeStore()
+    await store.getState().load()
+    expect(store.getState().activeAccountId).toBe(localId)
+
+    // The manage dialog creates the second profile without activating it.
+    await store
+      .getState()
+      .createAccount({ id: "acct_second", displayName: "Second", password: "secret-pass" })
+    expect(store.getState().pendingRecoveryKeyAccountId).toBe("acct_second")
+
+    store.getState().acknowledgeRecoveryKey()
+
+    expect(mockClearDesktopRecovery).not.toHaveBeenCalled()
+    expect(store.getState().pendingRecoveryKey).toBeNull()
+    expect(store.getState().pendingRecoveryKeyAccountId).toBeNull()
+  })
+
+  it("clears the stored key when it is the Local workspace's own", async () => {
+    mockDesktopLocalEnabled = true
+    mockListAccounts.mockResolvedValue([{ ...account(localId, "Local"), protection: "password" }])
+    mockGetState.mockResolvedValue({ activeAccountId: localId })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount(localId, "hunter22")
+    expect(store.getState().pendingRecoveryKeyAccountId).toBe(localId)
+
+    store.getState().acknowledgeRecoveryKey()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockClearDesktopRecovery).toHaveBeenCalled()
+  })
+
+  it("does not let an unreadable secret store fail an unlock the password proved", async () => {
+    mockDesktopLocalEnabled = true
+    mockReadDesktopRecovery.mockRejectedValue(new Error("SECRET_STORE_LOCKED"))
+    mockListAccounts.mockResolvedValue([{ ...account(localId, "Local"), protection: "password" }])
+    mockGetState.mockResolvedValue({ activeAccountId: localId })
+    const store = makeStore()
+    await store.getState().load()
+
+    await store.getState().unlockAccount(localId, "hunter22")
+
+    expect(store.getState().unlockedAccountId).toBe(localId)
+    expect(store.getState().pendingRecoveryKey).toBeNull()
   })
 })

@@ -3,6 +3,8 @@ import { transport } from "@/lib/tauri"
 import { discoverCodexAuth, discoveredToCredential, toCodexProviderCredential } from "./discovery"
 import type { DiscoveredCodexAuth } from "./discovery"
 
+jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+
 const chatgptDiscovered: DiscoveredCodexAuth = {
   source: "file",
   authJsonPath: "/home/user/.codex/auth.json",
@@ -39,6 +41,14 @@ afterEach(() => {
 })
 
 describe("discoverCodexAuth", () => {
+  it("forwards explicit Keychain consent separately from passive discovery", async () => {
+    ;(transport.call as jest.Mock).mockResolvedValueOnce(null)
+    await discoverCodexAuth(true)
+    expect(transport.call).toHaveBeenCalledWith("codex_oauth_discover", {
+      allowKeychainPrompt: true,
+    })
+  })
+
   it("forwards through codex_oauth_discover", async () => {
     ;(transport.call as jest.Mock).mockResolvedValueOnce(chatgptDiscovered)
     const got = await discoverCodexAuth()
@@ -167,6 +177,82 @@ describe("discoveredToCredential", () => {
     })
   })
 
+  it.each(["ApiKey", "apikey"])(
+    "respects explicit %s mode despite retained OAuth tokens",
+    (authMode) => {
+      const got = discoveredToCredential(
+        { ...chatgptDiscovered, ...apiKeyDiscovered, authMode, tokens: chatgptDiscovered.tokens },
+        now
+      )
+      expect(got).toMatchObject({
+        authMode: "api_key",
+        accessToken: "sk-test-1234",
+        refreshToken: "",
+      })
+    }
+  )
+
+  it.each(["ChatGPT", "chatgpt"])(
+    "respects explicit %s mode despite a retained API key",
+    (authMode) => {
+      const got = discoveredToCredential(
+        { ...chatgptDiscovered, authMode, openaiApiKey: "sk-stale" },
+        now
+      )
+      expect(got).toMatchObject({ authMode: "chatgpt", accessToken: "oat-discovered" })
+    }
+  )
+
+  it.each([undefined, ""])(
+    "does not revive OAuth when explicit ApiKey has unusable key %s",
+    (openaiApiKey) => {
+      expect(
+        discoveredToCredential({ ...chatgptDiscovered, authMode: "ApiKey", openaiApiKey }, now)
+      ).toBeNull()
+    }
+  )
+
+  it("does not revive a retained API key when explicit ChatGPT has no tokens", () => {
+    expect(discoveredToCredential({ ...apiKeyDiscovered, authMode: "ChatGPT" }, now)).toBeNull()
+  })
+
+  it("does not revive a retained API key when explicit ChatGPT has an empty bearer", () => {
+    expect(
+      discoveredToCredential(
+        {
+          ...chatgptDiscovered,
+          tokens: { ...chatgptDiscovered.tokens!, accessToken: "" },
+          openaiApiKey: "sk-stale",
+        },
+        now
+      )
+    ).toBeNull()
+  })
+
+  it("rejects unsupported explicit auth modes instead of guessing from retained fields", () => {
+    expect(
+      discoveredToCredential(
+        { ...chatgptDiscovered, authMode: "unsupported", openaiApiKey: "sk-stale" },
+        now
+      )
+    ).toBeNull()
+  })
+
+  it("preserves token precedence for legacy records without authMode", () => {
+    expect(
+      discoveredToCredential(
+        { ...chatgptDiscovered, authMode: undefined, openaiApiKey: "sk-legacy" },
+        now
+      )
+    ).toMatchObject({ authMode: "chatgpt", accessToken: "oat-discovered" })
+  })
+
+  it("adopts an API key for legacy records without authMode or tokens", () => {
+    expect(discoveredToCredential({ ...apiKeyDiscovered, authMode: undefined }, now)).toMatchObject(
+      { authMode: "api_key", accessToken: "sk-test-1234" }
+    )
+  })
+
   it("returns null when neither tokens.accessToken nor openaiApiKey is present", () => {
     const empty: DiscoveredCodexAuth = {
       source: "file",
@@ -180,6 +266,7 @@ describe("discoveredToCredential", () => {
   it("treats empty-string tokens.accessToken as missing", () => {
     const got = discoveredToCredential({
       ...chatgptDiscovered,
+      authMode: undefined,
       tokens: { ...chatgptDiscovered.tokens!, accessToken: "" },
       openaiApiKey: "sk-fallback",
     })

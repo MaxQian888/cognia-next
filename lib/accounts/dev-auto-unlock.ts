@@ -7,7 +7,10 @@
  * `pnpm tauri dev`) the webview restarts constantly (Rust rebuilds, HMR, manual
  * refreshes). Ordinary development builds must still exercise the real
  * password path because it activates the Browser Vault and native plugin
- * account session together.
+ * account session together. The paths that reopen a profile WITHOUT the
+ * prompt live elsewhere and apply to shipped builds too: the browser
+ * tab-session resume (`lib/accounts/tab-session-unlock.ts`) and desktop device
+ * unlock (`lib/accounts/desktop-local-account.ts`).
  *
  * Scope is deliberately narrow:
  *  - Enabled only in a dedicated `NEXT_PUBLIC_E2E=1` static browser artifact.

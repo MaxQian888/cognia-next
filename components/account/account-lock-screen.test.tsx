@@ -525,3 +525,144 @@ describe("unsupported storage layout", () => {
     expect(screen.queryByTestId("account-lock-screen-storage-layout")).not.toBeInTheDocument()
   })
 })
+
+describe("unlock automatically on this device", () => {
+  const REMEMBERED: LocalAccountRecord = { ...ALPHA, rememberOnDevice: true }
+  const LOCAL: LocalAccountRecord = {
+    ...account("acct_desktop_local_workspace", "Local"),
+    protection: "device",
+  }
+
+  function submitWith(password: string) {
+    fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: password } })
+    fireEvent.click(screen.getByTestId("account-lock-screen-submit"))
+  }
+
+  it("is not offered where the runtime cannot keep a secret", () => {
+    renderScreen()
+    expect(screen.queryByTestId("account-lock-screen-remember")).not.toBeInTheDocument()
+  })
+
+  it("sends the choice when the owner ticks it", async () => {
+    const { props } = renderScreen({ supportsRememberOnDevice: true })
+    const checkbox = screen.getByTestId("account-lock-screen-remember")
+    expect(checkbox).not.toBeChecked()
+
+    fireEvent.click(checkbox)
+    submitWith("secret")
+
+    await waitFor(() =>
+      expect(props.onUnlock).toHaveBeenCalledWith("acct_alpha", "secret", {
+        rememberOnDevice: true,
+      })
+    )
+  })
+
+  it("sends nothing when the choice is left as it was", async () => {
+    const { props } = renderScreen({ supportsRememberOnDevice: true, accounts: [REMEMBERED] })
+    expect(screen.getByTestId("account-lock-screen-remember")).toBeChecked()
+
+    submitWith("secret")
+
+    await waitFor(() => expect(props.onUnlock).toHaveBeenCalledWith("acct_alpha", "secret"))
+  })
+
+  it("sends `false` when the owner unticks a remembered profile", async () => {
+    const { props } = renderScreen({ supportsRememberOnDevice: true, accounts: [REMEMBERED] })
+
+    fireEvent.click(screen.getByTestId("account-lock-screen-remember"))
+    submitWith("secret")
+
+    await waitFor(() =>
+      expect(props.onUnlock).toHaveBeenCalledWith("acct_alpha", "secret", {
+        rememberOnDevice: false,
+      })
+    )
+  })
+
+  it("follows the picked account's own setting", () => {
+    renderScreen({ supportsRememberOnDevice: true, accounts: [REMEMBERED, BETA] })
+    expect(screen.getByTestId("account-lock-screen-remember")).toBeChecked()
+
+    fireEvent.change(screen.getByTestId("account-lock-screen-picker"), {
+      target: { value: "acct_beta" },
+    })
+
+    expect(screen.getByTestId("account-lock-screen-remember")).not.toBeChecked()
+  })
+
+  it("asks for no password for the device-managed workspace and just opens it", async () => {
+    const { props } = renderScreen({
+      supportsRememberOnDevice: true,
+      accounts: [LOCAL],
+      activeAccountId: LOCAL.id,
+    })
+
+    expect(screen.getByLabelText("passwordLabel").closest("[hidden]")).not.toBeNull()
+    expect(screen.queryByTestId("account-lock-screen-remember")).not.toBeInTheDocument()
+    expect(screen.getByTestId("account-lock-screen-device")).toHaveTextContent(
+      "deviceWorkspaceHint"
+    )
+    const open = screen.getByTestId("account-lock-screen-submit")
+    expect(open).toHaveTextContent("openLocalWorkspace")
+
+    fireEvent.click(open)
+
+    await waitFor(() => expect(props.onUnlock).toHaveBeenCalledWith(LOCAL.id, ""))
+  })
+
+  it("explains why boot could not open the profile by itself", () => {
+    renderScreen({
+      supportsRememberOnDevice: true,
+      accounts: [REMEMBERED],
+      autoUnlockFailure: {
+        accountId: "acct_alpha",
+        reason: "secret-store-unavailable",
+        message: "SECRET_STORE_LOCKED: denied",
+      },
+    })
+
+    const notice = screen.getByTestId("account-lock-screen-auto-unlock-failure")
+    expect(notice).toHaveTextContent("autoUnlockFailedTitle")
+    expect(notice).toHaveTextContent("autoUnlockFailedStore")
+    expect(notice).toHaveTextContent("SECRET_STORE_LOCKED: denied")
+  })
+
+  it("keeps the notice to the profile it is about", () => {
+    renderScreen({
+      supportsRememberOnDevice: true,
+      accounts: [ALPHA, BETA],
+      activeAccountId: "acct_beta",
+      autoUnlockFailure: { accountId: "acct_alpha", reason: "secret-rejected" },
+    })
+
+    expect(screen.queryByTestId("account-lock-screen-auto-unlock-failure")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["secret-missing", "autoUnlockFailedMissing"],
+    ["secret-rejected", "autoUnlockFailedRejected"],
+    ["unlock-failed", "autoUnlockFailedOther"],
+  ] as const)("names the %s failure", (reason, key) => {
+    renderScreen({
+      supportsRememberOnDevice: true,
+      autoUnlockFailure: { accountId: "acct_alpha", reason },
+    })
+    expect(screen.getByTestId("account-lock-screen-auto-unlock-failure")).toHaveTextContent(key)
+  })
+
+  it("translates a store that refused the secret into its own message", async () => {
+    renderScreen({
+      supportsRememberOnDevice: true,
+      onUnlock: jest
+        .fn()
+        .mockRejectedValue(new AccountUnlockError("secret-store-unavailable", "keychain denied")),
+    })
+
+    fireEvent.click(screen.getByTestId("account-lock-screen-remember"))
+    submitWith("secret")
+
+    await waitFor(() => expect(screen.getByText("errorSecretStoreUnavailable")).toBeVisible())
+    expect(screen.queryByText("keychain denied")).not.toBeInTheDocument()
+  })
+})

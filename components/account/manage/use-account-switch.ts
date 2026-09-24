@@ -15,6 +15,7 @@
 
 import { useState } from "react"
 
+import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { useAccountStore } from "@/stores/account/account-store"
 
 export interface AccountSwitchController {
@@ -44,6 +45,7 @@ export interface UseAccountSwitchOptions {
 }
 
 export function useAccountSwitch(options: UseAccountSwitchOptions = {}): AccountSwitchController {
+  const accounts = useAccountStore((state) => state.accounts)
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const switchAccount = useAccountStore((state) => state.switchAccount)
@@ -82,7 +84,10 @@ export function useAccountSwitch(options: UseAccountSwitchOptions = {}): Account
       setPendingId(null)
       return true
     }
-    if (accountId === unlockedAccountId) {
+    if (
+      accountId === unlockedAccountId ||
+      unlocksWithoutPrompt(accounts?.find((account) => account.id === accountId))
+    ) {
       // Verified earlier this session → activate without re-prompting.
       return finish(accountId)
     }

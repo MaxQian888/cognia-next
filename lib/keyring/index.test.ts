@@ -36,3 +36,15 @@ describe("desktop secret-store IPC", () => {
     expect(invokeMock).not.toHaveBeenCalled()
   })
 })
+
+it("distinguishes a missing strict credential from a failed native read", async () => {
+  invokeMock.mockResolvedValueOnce(null)
+  await expect(getSecret(ref, { strict: true })).resolves.toBeNull()
+  invokeMock.mockRejectedValueOnce(new Error("keychain unavailable"))
+  await expect(getSecret(ref, { strict: true })).rejects.toThrow("keychain unavailable")
+})
+
+it("reports native deletion failures to strict callers", async () => {
+  invokeMock.mockRejectedValueOnce(new Error("delete denied"))
+  await expect(clearSecret(ref, { strict: true })).rejects.toThrow("delete denied")
+})

@@ -36,3 +36,20 @@ export function resolveUserTimeZone(profile?: Pick<UserProfile, "timezone"> | nu
   const tz = profile?.timezone?.trim()
   return tz && tz.length > 0 ? tz : deviceTimeZone()
 }
+
+/**
+ * The zone a formatting provider (`NextIntlClientProvider`) should print in:
+ * the user's zone, validated. A profile override is free text as far as this
+ * layer knows, and an unknown zone makes every `Intl.DateTimeFormat` call
+ * throw — so a value the runtime rejects falls back to the device zone rather
+ * than taking every formatted date in the app down with it. The result is the
+ * runtime's canonical spelling of the zone.
+ */
+export function resolveFormattingTimeZone(profile?: Pick<UserProfile, "timezone"> | null): string {
+  const zone = resolveUserTimeZone(profile)
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone
+  } catch {
+    return deviceTimeZone()
+  }
+}

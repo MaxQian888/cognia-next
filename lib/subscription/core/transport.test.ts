@@ -1,4 +1,5 @@
 import {
+  anthropicOauthDiscover,
   anthropicOauthSavePkceResult,
   codexOauthDiscover,
   codexOauthPollDeviceCode,
@@ -20,6 +21,7 @@ import {
   opencodeSaveZenKey,
   renameAccount,
   replaceAccountCredential,
+  refreshAnthropicAccountCredential,
   saveProviderPreset,
   saveAccount,
   setActiveAccount,
@@ -33,6 +35,11 @@ import type { Account, AnthropicCredentialData } from "@/types/subscription"
 import type { CustomProviderSettings } from "@cognia/provider-types/provider"
 import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
 import { subscribeSubscriptionChanged } from "./subscription-events"
+import { clearCredentialBlocks } from "@/lib/subscription/retry/failover"
+
+jest.mock("@/lib/subscription/retry/failover", () => ({
+  clearCredentialBlocks: jest.fn(),
+}))
 
 jest.mock("@/lib/tauri", () => {
   return {
@@ -56,9 +63,21 @@ jest.mock("@/stores/account/account-store", () => ({
 import { transport } from "@/lib/tauri"
 const mockedCall = transport.call as jest.MockedFunction<typeof transport.call>
 
+it("keeps background Claude discovery noninteractive and requires explicit prompt opt-in", async () => {
+  mockedCall.mockResolvedValueOnce(undefined)
+  await expect(anthropicOauthDiscover()).resolves.toBeNull()
+  expect(mockedCall).toHaveBeenLastCalledWith("anthropic_oauth_discover")
+  mockedCall.mockResolvedValueOnce(null)
+  await expect(anthropicOauthDiscover(true)).resolves.toBeNull()
+  expect(mockedCall).toHaveBeenLastCalledWith("anthropic_oauth_discover", {
+    allowKeychainPrompt: true,
+  })
+})
+
 afterEach(() => {
   __resetVaultChangeTrackerForTesting()
   mockedCall.mockReset()
+  jest.mocked(clearCredentialBlocks).mockClear()
   mockAccountStoreState.unlockedAccountId = "local_acct_a"
 })
 
@@ -160,6 +179,66 @@ describe("subscription core transport", () => {
       accountId: "id-1",
       credential,
     })
+  })
+
+  it("background refresh pins its original local scope and never clears credential blocks", async () => {
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
+    const expected = anthropicData()
+    const credential = { ...expected, accessToken: "rotated-fixture-token" }
+    mockedCall.mockResolvedValueOnce({ id: "id-1" })
+    await expect(
+      refreshAnthropicAccountCredential("local_acct_a", "id-1", expected, credential)
+    ).resolves.toEqual({ id: "id-1" })
+    expect(mockedCall).toHaveBeenCalledWith("subscription_replace_account_credential", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      accountId: "id-1",
+      expectedCredential: { ...expected, provider: "anthropic" },
+      credential: { ...credential, provider: "anthropic" },
+      backgroundRefresh: true,
+    })
+    expect(clearCredentialBlocks).not.toHaveBeenCalled()
+    expect(changed).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it("background refresh never publishes completion into a newly unlocked local account", async () => {
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
+    mockedCall.mockImplementationOnce(async () => {
+      mockAccountStoreState.unlockedAccountId = "local_acct_b"
+      return { id: "id-1" }
+    })
+    await refreshAnthropicAccountCredential(
+      "local_acct_a",
+      "id-1",
+      anthropicData(),
+      anthropicData()
+    )
+    expect(mockedCall).toHaveBeenCalledWith(
+      "subscription_replace_account_credential",
+      expect.objectContaining({ localAccountId: "local_acct_a" })
+    )
+    expect(changed).not.toHaveBeenCalled()
+    expect(clearCredentialBlocks).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
+  it("background refresh rejects missing scope and propagates stale credential failures", async () => {
+    await expect(
+      refreshAnthropicAccountCredential(" ", "id-1", anthropicData(), anthropicData())
+    ).rejects.toThrow("localAccountId must not be empty")
+    expect(mockedCall).not.toHaveBeenCalled()
+    const changed = jest.fn()
+    const unsubscribe = subscribeSubscriptionChanged(changed)
+    mockedCall.mockRejectedValueOnce(new Error("credential changed while refresh was in flight"))
+    await expect(
+      refreshAnthropicAccountCredential("local_acct_a", "id-1", anthropicData(), anthropicData())
+    ).rejects.toThrow("credential changed")
+    expect(changed).not.toHaveBeenCalled()
+    expect(clearCredentialBlocks).not.toHaveBeenCalled()
+    unsubscribe()
   })
 
   it("deleteAccount forwards provider + accountId", async () => {
@@ -454,6 +533,19 @@ test("provider inventory forwards the unlocked local account and dynamic ids", a
   await expect(listSubscriptionProviderIds()).resolves.toEqual(["anthropic", "example:api"])
   expect(mockedCall).toHaveBeenCalledWith("subscription_list_provider_ids", {
     localAccountId: "local_acct_a",
+  })
+})
+
+test("provider inventory only requests keychain interaction after explicit opt-in", async () => {
+  mockedCall.mockResolvedValue(["anthropic"])
+  await listSubscriptionProviderIds(false)
+  expect(mockedCall).toHaveBeenLastCalledWith("subscription_list_provider_ids", {
+    localAccountId: "local_acct_a",
+  })
+  await listSubscriptionProviderIds(true)
+  expect(mockedCall).toHaveBeenLastCalledWith("subscription_list_provider_ids", {
+    localAccountId: "local_acct_a",
+    allowInteraction: true,
   })
 })
 

@@ -14,7 +14,7 @@ import type { Account, AnthropicCredentialData } from "@/types/subscription"
 
 export type { DiscoveredAnthropicAuth }
 
-let nativeDiscoveryInFlight: Promise<DiscoveredAnthropicAuth | null> | null = null
+const nativeDiscoveryInFlight = new Map<boolean, Promise<DiscoveredAnthropicAuth | null>>()
 
 /**
  * Probe `~/.claude/.credentials.json` + Claude Code's keyring entry. Returns
@@ -27,23 +27,28 @@ let nativeDiscoveryInFlight: Promise<DiscoveredAnthropicAuth | null> | null = nu
  * without a real local login. Setting it to `null` exercises the "no
  * credential found" branch; leaving it `undefined` falls through to Rust.
  */
-export async function discoverAnthropicAuth(): Promise<DiscoveredAnthropicAuth | null> {
+export async function discoverAnthropicAuth(
+  allowKeychainPrompt = false
+): Promise<DiscoveredAnthropicAuth | null> {
   if (typeof window !== "undefined") {
     const w = window as { __cogniaE2EAnthropicDiscovery?: DiscoveredAnthropicAuth | null }
     if (w.__cogniaE2EAnthropicDiscovery !== undefined) {
       return w.__cogniaE2EAnthropicDiscovery
     }
   }
-  if (!nativeDiscoveryInFlight) {
-    nativeDiscoveryInFlight = (async () => {
-      try {
-        return await anthropicOauthDiscover()
-      } finally {
-        nativeDiscoveryInFlight = null
-      }
-    })()
+  if (!nativeDiscoveryInFlight.has(allowKeychainPrompt)) {
+    nativeDiscoveryInFlight.set(
+      allowKeychainPrompt,
+      (async () => {
+        try {
+          return await anthropicOauthDiscover(allowKeychainPrompt)
+        } finally {
+          nativeDiscoveryInFlight.delete(allowKeychainPrompt)
+        }
+      })()
+    )
   }
-  return await nativeDiscoveryInFlight
+  return await nativeDiscoveryInFlight.get(allowKeychainPrompt)!
 }
 
 /**

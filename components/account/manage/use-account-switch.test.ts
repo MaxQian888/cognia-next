@@ -9,6 +9,7 @@ import { useAccountSwitch } from "./use-account-switch"
 const switchAccountMock = jest.fn<Promise<void>, [string, string?]>()
 
 let mockState: {
+  accounts?: { id: string; protection?: string; rememberOnDevice?: boolean }[]
   activeAccountId: string | null
   unlockedAccountId: string | null
   switchAccount: typeof switchAccountMock
@@ -132,4 +133,47 @@ describe("useAccountSwitch", () => {
     expect(result.current.password).toBe("")
     expect(result.current.error).toBeNull()
   })
+})
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("switches to a device workspace without opening a password prompt", async () => {
+  const id = "acct_desktop_local_workspace"
+  mockState.accounts = [{ id, protection: "device" }]
+  enterTauriShell()
+  const { result } = renderHook(() => useAccountSwitch())
+  await act(async () => {
+    expect(await result.current.begin(id)).toBe(true)
+  })
+  expect(switchAccountMock).toHaveBeenCalledWith(id, undefined)
+  expect(result.current.pendingId).toBeNull()
+})
+
+it("switches to a remembered profile without opening a password prompt", async () => {
+  const id = "acct_remembered"
+  mockState.accounts = [{ id, rememberOnDevice: true }]
+  enterTauriShell()
+  const { result } = renderHook(() => useAccountSwitch())
+  await act(async () => {
+    expect(await result.current.begin(id)).toBe(true)
+  })
+  expect(switchAccountMock).toHaveBeenCalledWith(id, undefined)
+  expect(result.current.pendingId).toBeNull()
+})
+
+it("still asks for a password for a remembered profile outside the desktop shell", async () => {
+  const id = "acct_remembered"
+  mockState.accounts = [{ id, rememberOnDevice: true }]
+  const { result } = renderHook(() => useAccountSwitch())
+  await act(async () => {
+    expect(await result.current.begin(id)).toBe(false)
+  })
+  expect(switchAccountMock).not.toHaveBeenCalled()
+  expect(result.current.pendingId).toBe(id)
 })

@@ -90,6 +90,7 @@ describe("useAnthropicDiscovery", () => {
     discoverMock.mockResolvedValue(sample())
     await act(async () => {
       await result.current.reload()
+      expect(discoverMock).toHaveBeenLastCalledWith(true)
     })
     expect(result.current.error).toBeNull()
     expect(result.current.discovered?.source).toBe("file")

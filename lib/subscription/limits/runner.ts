@@ -6,9 +6,18 @@
 // Reuses `accessTokenOf` + `resolvePresetForAccount` from the balance runner so
 // token/preset resolution stays identical across the two subsystems.
 
-import { refreshAndPersistAnthropicAccount } from "@/lib/subscription/anthropic/refresh"
+import {
+  AnthropicReauthenticationRequiredError,
+  refreshAndPersistAnthropicAccount,
+} from "@/lib/subscription/anthropic/refresh"
 import { isAnthropicCredentialFresh } from "@/lib/subscription/anthropic/oauth"
-import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
+import { useAccountStore } from "@/stores/account/account-store"
+import {
+  assertCodexAccountLifecycleReady,
+  CodexReauthenticationRequiredError,
+  normalizeCodexLifecycleError,
+  refreshCodexAccountIfStale,
+} from "@/lib/subscription/codex/refresh"
 import { isCodexCredentialFresh } from "@/lib/subscription/codex/oauth"
 import { accessTokenOf, resolvePresetForAccount } from "@/lib/subscription/balance/runner"
 import {
@@ -38,6 +47,7 @@ export interface LimitsRunnerDeps {
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
   getProviderPreset: (provider: ProviderId) => Promise<ProviderPreset | null>
   now: () => number
+  getLocalAccountId: () => string | null
   /**
    * Refresh + persist an Anthropic account's OAuth token, returning the new
    * bearer. Injected so the free `/api/oauth/usage` GET never 401s on a stale
@@ -72,6 +82,7 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
   listPresets: defaultListPresets,
   getProviderPreset: defaultGetProviderPreset,
   now: () => Date.now(),
+  getLocalAccountId: () => useAccountStore.getState().unlockedAccountId,
   refreshAnthropicToken: async (accountId) => {
     const merged = await refreshAndPersistAnthropicAccount(accountId, { reactivate: false })
     return merged?.accessToken ?? null
@@ -110,13 +121,24 @@ export async function queryAccountLimits(
     isCredentialFresh,
     refreshCodexToken,
     isCodexFresh,
+    getLocalAccountId,
   } = {
     ...DEFAULT_DEPS,
     ...deps,
   }
 
+  const localAccountId = getLocalAccountId()
+  let lifecycleError: Error | null = null
+  const assertScope = () => {
+    if (getLocalAccountId() !== localAccountId) {
+      lifecycleError = new Error("Subscription local account changed during limits query")
+    }
+    if (lifecycleError) throw lifecycleError
+  }
   const account = await getAccount(provider, accountId)
+  assertScope()
   if (!account) return null
+  if (account.credential.provider === "codex") assertCodexAccountLifecycleReady(account)
 
   let token = accessTokenOf(account.credential)
 
@@ -150,13 +172,26 @@ export async function queryAccountLimits(
   let refreshAttempt: Promise<string | null> | null = null
   const refreshBearer: (() => Promise<string | null>) | undefined = runRefresh
     ? () => {
-        refreshAttempt ??= runRefresh()
+        assertScope()
+        refreshAttempt ??= runRefresh().catch((cause) => {
+          const error = normalizeCodexLifecycleError(cause)
+          if (
+            (codexCred && error instanceof CodexReauthenticationRequiredError) ||
+            (anthropicCred && error instanceof AnthropicReauthenticationRequiredError)
+          ) {
+            lifecycleError = error
+          }
+          throw error
+        })
         return refreshAttempt
       }
     : undefined
 
   const isStale =
-    (anthropicCred && !isCredentialFresh(anthropicCred, now())) ||
+    (anthropicCred &&
+      (anthropicCred.originalSource === "file" ||
+        anthropicCred.originalSource === "keyring" ||
+        !isCredentialFresh(anthropicCred, now()))) ||
     (codexCred && !isCodexFresh(codexCred, now()))
 
   if (isStale && refreshBearer) {
@@ -164,12 +199,16 @@ export async function queryAccountLimits(
       const refreshed = await refreshBearer()
       if (refreshed) token = refreshed
     } catch {
-      // Fall through with the stale token; the reactive retry below still tries.
+      if (lifecycleError) throw lifecycleError
+      // Only transient refresh failures may fall back to the stored token.
     }
   }
 
+  assertScope()
   const presets = await listPresets(provider)
+  assertScope()
   const preset = await resolvePresetForAccount(account, presets, () => getProviderPreset(provider))
+  assertScope()
 
   const ctx: LimitsSourceContext = {
     provider,
@@ -180,13 +219,22 @@ export async function queryAccountLimits(
     baseUrl: preset?.baseUrl,
     providerKey: preset?.templateId,
     presetHeaders: preset?.extraHeaders,
-    authedGet,
-    authedRequest: authedRequestDep,
+    // Sources can catch refresh errors themselves. Once identity validation
+    // fails, no source may continue with the cached bearer or try another source.
+    authedGet: (...args) => {
+      assertScope()
+      return authedGet(...args)
+    },
+    authedRequest: (...args) => {
+      assertScope()
+      return authedRequestDep(...args)
+    },
     refreshToken: refreshBearer
       ? async () => {
           try {
             return await refreshBearer()
           } catch {
+            if (lifecycleError) throw lifecycleError
             return null
           }
         }
@@ -208,6 +256,7 @@ export async function queryAccountLimits(
     } catch {
       snapshot = null
     }
+    assertScope()
     if (snapshot && (snapshot.meters.length > 0 || snapshot.error)) {
       // Persistence and account-level consumers key by the vault identity.
       // Preserve the source separately so relay branding/provenance survives.

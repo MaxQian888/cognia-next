@@ -5,7 +5,7 @@
  * blank-line-delimited blocks, comments and other fields ignored — which is
  * everything the JSON-RPC-over-SSE agents in this repo actually send.
  *
- * Lifted out of `lib/ai/agent/external/a2a-client.ts` when the ACP client
+ * Lifted out of `lib/ai/agent/external/runtimes/remote/a2a-client.ts` when the ACP client
  * needed the identical loop. The alternative was `EventSource`, and it is not
  * an alternative: it cannot set `Authorization`, the packaged shell's
  * `connect-src` blocks it, and it never sees the configured proxy. Feeding

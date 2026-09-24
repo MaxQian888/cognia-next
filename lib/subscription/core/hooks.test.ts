@@ -3,6 +3,10 @@
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react"
+import {
+  getSecretStoreReadiness,
+  setSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 import type { AccountSummary, ProviderPreset } from "@/types/subscription"
 
@@ -25,7 +29,7 @@ jest.mock("@/lib/tauri", () => ({
 
 const transport = {
   listAccounts: jest.fn<Promise<AccountSummary[]>, [unknown]>(),
-  listSubscriptionProviderIds: jest.fn<Promise<string[]>, []>(),
+  listSubscriptionProviderIds: jest.fn<Promise<string[]>, [boolean?]>(),
   getActiveAccount: jest.fn<Promise<{ activeAccountId?: string; env: [] }>, [unknown]>(),
   setActiveAccount: jest.fn<Promise<void>, [unknown, string | null]>(),
   renameAccount: jest.fn<Promise<void>, [unknown, string, string | null]>(),
@@ -43,7 +47,8 @@ jest.mock("./transport", () => ({
   getAccount: jest.fn(),
   getActiveAccount: (...args: [unknown]) => transport.getActiveAccount(...args),
   listAccounts: (...args: [unknown]) => transport.listAccounts(...args),
-  listSubscriptionProviderIds: () => transport.listSubscriptionProviderIds(),
+  listSubscriptionProviderIds: (...args: [boolean?]) =>
+    transport.listSubscriptionProviderIds(...args),
   renameAccount: (...args: [unknown, string, string | null]) => transport.renameAccount(...args),
   setActiveAccount: (...args: [unknown, string | null]) => transport.setActiveAccount(...args),
   setProviderPreset: jest.fn(),
@@ -320,6 +325,22 @@ describe("useSubscriptionAccounts", () => {
     expect(result.current.error).toBe("inventory unavailable")
     await act(async () => result.current.reload())
     expect(result.current.error).toBeNull()
+  })
+
+  it("allows keychain interaction only for an explicitly requested reload", async () => {
+    const { result } = renderHook(() => useSubscriptionAccounts())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(transport.listSubscriptionProviderIds).toHaveBeenLastCalledWith()
+
+    setSecretStoreReadiness("locked")
+    await act(async () => result.current.reload({ allowInteraction: true }))
+    expect(transport.listSubscriptionProviderIds).toHaveBeenLastCalledWith(true)
+    // A successful interactive reload proves the secret store is open again.
+    expect(getSecretStoreReadiness()).toBe("ready")
+
+    await act(async () => notifySubscriptionChanged())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(transport.listSubscriptionProviderIds).toHaveBeenLastCalledWith()
   })
 })
 

@@ -106,6 +106,37 @@ beforeEach(() => {
 })
 
 describe("CloudSignInGate", () => {
+  it("does not interrupt local development with deployment login", () => {
+    const environment = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NODE_ENV: "development",
+      NEXT_PUBLIC_ACCOUNT_GATE: "0",
+    })
+    try {
+      const d = deps({ profile: "desktop" })
+      renderGate(d)
+      expect(screen.getByTestId("app")).toBeInTheDocument()
+      expect(d.discover).not.toHaveBeenCalled()
+    } finally {
+      environment.restore()
+    }
+  })
+
+  it("allows development to explicitly exercise deployment login", async () => {
+    const environment = jest.replaceProperty(process, "env", {
+      ...process.env,
+      NODE_ENV: "development",
+      NEXT_PUBLIC_ACCOUNT_GATE: "1",
+    })
+    try {
+      renderGate(deps())
+      expect(await screen.findByTestId("cloud-sign-in-social-github")).toBeInTheDocument()
+      expect(screen.queryByTestId("app")).not.toBeInTheDocument()
+    } finally {
+      environment.restore()
+    }
+  })
+
   it.each(["/lark/workbench", "/lark/workbench/", "/lark/workbench.html"])(
     "lets the Feishu entry choose personal or team authentication at %s",
     (pathname) => {

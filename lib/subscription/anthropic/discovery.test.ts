@@ -57,6 +57,14 @@ afterEach(() => {
 })
 
 describe("discoverAnthropicAuth", () => {
+  it("only permits a Keychain prompt for an explicit request", async () => {
+    discoverMock.mockResolvedValue(null)
+    await discoverAnthropicAuth()
+    expect(discoverMock).toHaveBeenLastCalledWith(false)
+    await discoverAnthropicAuth(true)
+    expect(discoverMock).toHaveBeenLastCalledWith(true)
+  })
+
   it("delegates to the Rust command", async () => {
     discoverMock.mockResolvedValue(sample())
     const got = await discoverAnthropicAuth()

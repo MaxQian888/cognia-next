@@ -35,10 +35,20 @@ jest.mock("@/lib/claude/ipc", () => ({
 }))
 
 const lockMock = jest.fn()
+let mockDeviceManaged = false
+let mockRemembered = false
 let mockUnlockedAccountId: string | null = "acct_1"
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: Object.assign(
-    (selector: (s: unknown) => unknown) => selector({ unlockedAccountId: mockUnlockedAccountId }),
+    (selector: (s: unknown) => unknown) =>
+      selector({
+        unlockedAccountId: mockUnlockedAccountId,
+        accounts: mockDeviceManaged
+          ? [{ id: mockUnlockedAccountId, protection: "device" }]
+          : mockRemembered
+            ? [{ id: mockUnlockedAccountId, rememberOnDevice: true }]
+            : [],
+      }),
     { getState: () => ({ lock: lockMock }) }
   ),
 }))
@@ -60,6 +70,8 @@ beforeEach(() => {
   jest.useFakeTimers()
   jest.setSystemTime(new Date("2026-01-01T00:00:00Z"))
   jest.clearAllMocks()
+  mockDeviceManaged = false
+  mockRemembered = false
   mockPetRole = null
   mockAutoLockMinutes = 5
   mockSettingsPresent = true
@@ -272,4 +284,36 @@ describe("useAutoLockOnIdle", () => {
 
     expect(lockMock).toHaveBeenCalledTimes(1)
   })
+})
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("never arms idle locking before a device workspace has a user password", () => {
+  mockDeviceManaged = true
+  mockUnlockedAccountId = "acct_desktop_local_workspace"
+  enterTauriShell()
+  renderHook(() => useAutoLockOnIdle())
+  act(() => jest.advanceTimersByTime(FIVE_MINUTES * 3))
+  expect(lockMock).not.toHaveBeenCalled()
+})
+
+it("never arms idle locking for a profile that unlocks automatically on this device", () => {
+  mockRemembered = true
+  enterTauriShell()
+  renderHook(() => useAutoLockOnIdle())
+  act(() => jest.advanceTimersByTime(FIVE_MINUTES * 3))
+  expect(lockMock).not.toHaveBeenCalled()
+})
+
+it("still arms idle locking for a remembered profile outside the desktop shell", () => {
+  mockRemembered = true
+  renderHook(() => useAutoLockOnIdle())
+  act(() => jest.advanceTimersByTime(FIVE_MINUTES + 1))
+  expect(lockMock).toHaveBeenCalledTimes(1)
 })

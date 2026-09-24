@@ -16,6 +16,12 @@ import { downloadFile } from "@/lib/files/download"
 import { readLockScreenPreferences } from "@/lib/appearance/lock-screen-preferences"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import {
+  isDeviceManagedAccount,
+  isDeviceUnlockSupported,
+} from "@/lib/accounts/desktop-local-account"
+import { classifySecretStoreError } from "@/lib/credentials/secret-store-readiness"
+import { unlockSecretStore } from "@/lib/tauri/recovery"
+import {
   selectActiveAccount,
   useAccountStore,
   usesBrowserVault,
@@ -37,6 +43,7 @@ export function AccountGate({ children }: AccountGateProps) {
   const activeAccountId = useAccountStore((state) => state.activeAccountId)
   const storeError = useAccountStore((state) => state.error)
   const pendingRecoveryKey = useAccountStore((state) => state.pendingRecoveryKey)
+  const autoUnlockFailure = useAccountStore((state) => state.autoUnlockFailure)
   const createAccount = useAccountStore((state) => state.createAccount)
   const unlockAccount = useAccountStore((state) => state.unlockAccount)
   const unlockAccountWithRecoveryKey = useAccountStore(
@@ -139,6 +146,7 @@ export function AccountGate({ children }: AccountGateProps) {
           >
             {t("recoveryContinue")}
           </Button>
+          {visibleError && <ErrorText>{visibleError}</ErrorText>}
         </section>
       </GateShell>
     )
@@ -222,6 +230,45 @@ export function AccountGate({ children }: AccountGateProps) {
     )
   }
 
+  if (locked && targetAccount && isDeviceManagedAccount(targetAccount)) {
+    // Nothing failed (a pairing step or a deleted profile locked it): say it
+    // is locked and offer to open it. Something failed: say that, and when the
+    // cause is the credential store itself, offer the one action that can fix
+    // it, the explicit unlock that is allowed to show the OS prompt. Retrying
+    // the silent read alone only replays the cached refusal.
+    const credentialStoreBlocked =
+      visibleError !== null && classifySecretStoreError(visibleError) !== null
+    return (
+      <GateShell>
+        <section
+          className="flex w-full max-w-sm flex-col gap-4"
+          data-testid="account-device-workspace"
+        >
+          <p>{t(visibleError ? "localWorkspaceUnavailable" : "localWorkspaceLocked")}</p>
+          {visibleError && <ErrorText>{visibleError}</ErrorText>}
+          <Button
+            disabled={submitting}
+            data-testid="account-device-workspace-open"
+            onClick={async () => {
+              setSubmitting(true)
+              setActionError(null)
+              try {
+                if (credentialStoreBlocked) await unlockSecretStore()
+                await unlockAccount(targetAccount.id, "")
+              } catch (error) {
+                setActionError(toErrorMessage(error, t("operationFailed")))
+              } finally {
+                setSubmitting(false)
+              }
+            }}
+          >
+            {t(credentialStoreBlocked ? "allowCredentialStoreAccess" : "openLocalWorkspace")}
+          </Button>
+        </section>
+      </GateShell>
+    )
+  }
+
   if (locked || !targetAccount) {
     // The unlock screen owns its own submit lifecycle (pending stages, watchdog,
     // attempt backoff, recovery-key mode), so it takes the store actions rather
@@ -233,6 +280,8 @@ export function AccountGate({ children }: AccountGateProps) {
           accounts={accounts}
           activeAccountId={targetAccount?.id ?? activeAccountId}
           supportsRecoveryKey={usesBrowserVault()}
+          supportsRememberOnDevice={isDeviceUnlockSupported()}
+          autoUnlockFailure={autoUnlockFailure}
           onUnlock={unlockAccount}
           onRecoveryUnlock={unlockAccountWithRecoveryKey}
           onQuickUnlock={unlockAccountWithQuickMethod}

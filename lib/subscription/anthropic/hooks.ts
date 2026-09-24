@@ -179,7 +179,7 @@ export function useAnthropicDiscovery(
     setLoading(true)
     setError(null)
     try {
-      const got = await discoverAnthropicAuth()
+      const got = await discoverAnthropicAuth(true)
       setDiscovered(got)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

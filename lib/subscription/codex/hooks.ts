@@ -33,7 +33,7 @@ export function useCodexDiscovery(): UseCodexDiscoveryResult {
     setLoading(true)
     setError(null)
     try {
-      const got = await discoverCodexAuth()
+      const got = await discoverCodexAuth(true)
       setDiscovered(got)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

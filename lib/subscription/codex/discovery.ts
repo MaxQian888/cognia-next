@@ -24,14 +24,16 @@ export type { DiscoveredCodexAuth, DiscoveredCodexTokens }
  * exercises the "no credential found" branch; setting it to `undefined`
  * (or omitting it entirely) falls through to the Rust command.
  */
-export async function discoverCodexAuth(): Promise<DiscoveredCodexAuth | null> {
+export async function discoverCodexAuth(
+  allowKeychainPrompt = false
+): Promise<DiscoveredCodexAuth | null> {
   if (typeof window !== "undefined") {
     const w = window as { __cogniaE2ECodexDiscovery?: DiscoveredCodexAuth | null }
     if (w.__cogniaE2ECodexDiscovery !== undefined) {
       return w.__cogniaE2ECodexDiscovery
     }
   }
-  return await codexOauthDiscover()
+  return await codexOauthDiscover(allowKeychainPrompt)
 }
 
 /**
@@ -41,9 +43,11 @@ export async function discoverCodexAuth(): Promise<DiscoveredCodexAuth | null> {
  * the CLI store so refresh re-discovers the current token pair instead of
  * rotating a copied refresh token behind codex-cli's back.
  *
- * Returns `null` when the discovered payload has neither a ChatGPT bearer
- * nor an API key (in which case the renderer should treat it as "credential
- * present but unusable" and stay logged-out).
+ * An explicit auth mode selects the only usable credential. Codex may retain
+ * the previous mode's fields after switching; those must never revive an old
+ * login. Legacy records without a mode retain token-first selection.
+ * Returns `null` for unsupported modes or missing credentials for the selected
+ * mode, so the renderer treats the payload as present but unusable.
  */
 export function discoveredToCredential(
   discovered: DiscoveredCodexAuth,
@@ -54,10 +58,13 @@ export function discoveredToCredential(
     storedAtMs: nowMs,
   } satisfies Pick<CodexCredentialData, "originalSource" | "storedAtMs">
 
-  if (discovered.tokens && discovered.tokens.accessToken) {
+  const authMode = discovered.authMode?.toLowerCase()
+  if (authMode != null && authMode !== "chatgpt" && authMode !== "apikey") return null
+
+  if (authMode !== "apikey" && discovered.tokens?.accessToken) {
     return chatGptCredentialFrom(discovered.tokens, stored)
   }
-  if (discovered.openaiApiKey) {
+  if (authMode !== "chatgpt" && discovered.openaiApiKey) {
     return apiKeyCredentialFrom(discovered.openaiApiKey, stored)
   }
   return null

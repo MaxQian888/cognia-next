@@ -1,4 +1,4 @@
-import { deviceTimeZone, resolveUserTimeZone } from "./timezone"
+import { deviceTimeZone, resolveFormattingTimeZone, resolveUserTimeZone } from "./timezone"
 
 describe("deviceTimeZone", () => {
   it("returns a non-empty IANA-ish string", () => {
@@ -37,5 +37,23 @@ describe("resolveUserTimeZone", () => {
     expect(resolveUserTimeZone(undefined)).toBe(device)
     expect(resolveUserTimeZone(null)).toBe(device)
     expect(resolveUserTimeZone({})).toBe(device)
+  })
+})
+
+describe("resolveFormattingTimeZone", () => {
+  it("uses a valid profile override, in the runtime's spelling", () => {
+    expect(resolveFormattingTimeZone({ timezone: "Asia/Shanghai" })).toBe("Asia/Shanghai")
+    expect(resolveFormattingTimeZone({ timezone: " UTC " })).toBe("UTC")
+  })
+
+  it("falls back to the device zone when there is no override", () => {
+    expect(resolveFormattingTimeZone(undefined)).toBe(deviceTimeZone())
+    expect(resolveFormattingTimeZone({ timezone: "" })).toBe(deviceTimeZone())
+  })
+
+  // An unknown zone makes every Intl.DateTimeFormat throw — one typo in the
+  // profile must not take every formatted date in the app down with it.
+  it("falls back to the device zone when the override is not a zone", () => {
+    expect(resolveFormattingTimeZone({ timezone: "Not/AZone" })).toBe(deviceTimeZone())
   })
 })

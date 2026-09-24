@@ -182,6 +182,38 @@ describe("LocalAccountRegistry", () => {
     db.close()
   })
 
+  it("records and removes the unlock-automatically flag", async () => {
+    const { db, registry } = await freshRegistry("remember-on-device")
+    await registry.createAccount({
+      id: "acct_one",
+      displayName: "One",
+      passwordVerifier: verifier,
+      now: 10,
+    })
+
+    await expect(registry.updateRememberOnDevice("acct_one", true, 20)).resolves.toMatchObject({
+      id: "acct_one",
+      rememberOnDevice: true,
+      updatedAt: 20,
+    })
+    await expect(registry.listAccounts()).resolves.toEqual([
+      expect.objectContaining({ rememberOnDevice: true }),
+    ])
+
+    // Turning it off removes the field rather than writing `false`.
+    const cleared = await registry.updateRememberOnDevice("acct_one", false, 15)
+    expect("rememberOnDevice" in cleared).toBe(false)
+    expect(cleared.updatedAt).toBe(21)
+    const [stored] = await registry.listAccounts()
+    expect(stored && "rememberOnDevice" in stored).toBe(false)
+
+    await expect(registry.updateRememberOnDevice("acct_missing", true, 30)).rejects.toThrow(
+      /does not exist/i
+    )
+
+    db.close()
+  })
+
   it("sets and clears the account avatar with monotonic updatedAt", async () => {
     const { db, registry } = await freshRegistry("update-avatar")
     await registry.createAccount({
@@ -347,4 +379,27 @@ describe("generateAccountId", () => {
     now.mockRestore()
     random.mockRestore()
   })
+})
+
+it("persists device protection and atomically promotes it with the password verifier", async () => {
+  const { db, registry } = await freshRegistry("device-protection")
+  const created = await registry.createAccount({
+    id: "acct_device",
+    displayName: "Local",
+    passwordVerifier: verifier,
+    protection: "device",
+  })
+  expect(created.protection).toBe("device")
+  const changed = await registry.updatePasswordVerifier(
+    created.id,
+    { ...verifier, hash: "new-hash" },
+    200,
+    "password"
+  )
+  expect(changed.protection).toBe("password")
+  expect((await registry.listAccounts())[0]).toMatchObject({
+    protection: "password",
+    passwordVerifier: { hash: "new-hash" },
+  })
+  db.close()
 })

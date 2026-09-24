@@ -159,3 +159,35 @@ describe("AccountSwitcher", () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("does not offer locking a device-managed workspace", () => {
+  const id = "acct_desktop_local_workspace"
+  setSwitcherState({
+    accounts: [{ ...account(id, "Local"), protection: "device" }],
+    activeAccountId: id,
+  })
+  enterTauriShell()
+  renderSwitcher()
+  fireEvent.click(screen.getByTestId("account-switcher"))
+  expect(screen.queryByTestId("account-switcher-lock")).not.toBeInTheDocument()
+})
+
+it("does not offer locking a profile that unlocks automatically on this device", () => {
+  const id = "acct_remembered"
+  setSwitcherState({
+    accounts: [{ ...account(id, "Max"), rememberOnDevice: true }],
+    activeAccountId: id,
+  })
+  enterTauriShell()
+  renderSwitcher()
+  fireEvent.click(screen.getByTestId("account-switcher"))
+  expect(screen.queryByTestId("account-switcher-lock")).not.toBeInTheDocument()
+})

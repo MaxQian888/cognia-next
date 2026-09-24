@@ -5,20 +5,33 @@ import {
   registerLimitsSource,
 } from "@/lib/plugin/registries/limits-source-registry"
 
-import type { Account, ProviderPreset } from "@/types/subscription"
+import type { Account, LimitsSourceContext, ProviderPreset } from "@/types/subscription"
 import { authedRequest } from "@/lib/subscription/core/transport"
-import { refreshAndPersistAnthropicAccount } from "@/lib/subscription/anthropic/refresh"
-import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
+import {
+  AnthropicReauthenticationRequiredError,
+  refreshAndPersistAnthropicAccount,
+} from "@/lib/subscription/anthropic/refresh"
+import {
+  CodexReauthenticationRequiredError,
+  refreshCodexAccountIfStale,
+} from "@/lib/subscription/codex/refresh"
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: { getState: () => ({ unlockedAccountId: "local-test" }) },
+}))
 
 jest.mock("@/lib/subscription/anthropic/refresh", () => ({
+  ...jest.requireActual("@/lib/subscription/anthropic/refresh"),
   refreshAndPersistAnthropicAccount: jest.fn(async () => null),
 }))
 jest.mock("@/lib/subscription/codex/refresh", () => ({
+  ...jest.requireActual("@/lib/subscription/codex/refresh"),
   refreshCodexAccountIfStale: jest.fn(async () => null),
 }))
 
 jest.mock("@/lib/subscription/core/transport", () => ({
-  ...jest.requireActual("@/lib/subscription/core/transport"),
+  getAccount: jest.fn(),
+  listPresets: jest.fn(),
   getProviderPreset: jest.fn(async () => null),
   authedRequest: jest.fn(),
 }))
@@ -90,6 +103,123 @@ const moonshotPreset: ProviderPreset = {
 }
 
 describe("queryAccountLimits", () => {
+  it.each([false, true])(
+    "stops quota requests after a Codex identity failure (reactive: %s)",
+    async (reactive) => {
+      const authedGet = jest.fn(async () => "{}")
+      const lifecycleError = new CodexReauthenticationRequiredError("external_login_unverified")
+      const fetch = jest.fn(async (ctx: LimitsSourceContext) => {
+        if (reactive) await ctx.refreshToken?.()
+        await ctx.authedGet("https://example.invalid/quota")
+        return null
+      })
+      registerLimitsSource(
+        "stub:identity",
+        {
+          id: "stub:identity",
+          key: "codex",
+          matches: () => true,
+          fetch,
+        },
+        { pluginId: "stub" }
+      )
+
+      await expect(
+        queryAccountLimits("codex", "acc-3", {
+          getAccount: async () => codexChatgptAccount(),
+          listPresets: async () => [],
+          authedGet,
+          isCodexFresh: () => reactive,
+          refreshCodexToken: async () => {
+            throw lifecycleError
+          },
+        })
+      ).rejects.toBe(lifecycleError)
+      expect(authedGet).not.toHaveBeenCalled()
+      if (!reactive) expect(fetch).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["get", "post"])(
+    "blocks %s even if a quota source catches the identity error",
+    async (method) => {
+      const lifecycleError = new CodexReauthenticationRequiredError("external_login_changed")
+      const authedGet = jest.fn(async () => "{}")
+      const request = jest.fn(async () => ({ status: 200, headers: [], body: "{}" }))
+      registerLimitsSource(
+        "stub:swallow",
+        {
+          id: "stub:swallow",
+          key: "codex",
+          matches: () => true,
+          fetch: async (ctx) => {
+            await ctx.refreshToken?.().catch(() => null)
+            if (method === "get") await ctx.authedGet("https://example.invalid/quota")
+            else await ctx.authedRequest?.({ url: "https://example.invalid/quota", method: "POST" })
+            return null
+          },
+        },
+        { pluginId: "stub" }
+      )
+      await expect(
+        queryAccountLimits("codex", "acc-3", {
+          getAccount: async () => codexChatgptAccount(),
+          listPresets: async () => [],
+          authedGet,
+          authedRequest: request,
+          isCodexFresh: () => true,
+          refreshCodexToken: async () => {
+            throw lifecycleError
+          },
+        })
+      ).rejects.toBe(lifecycleError)
+      expect(authedGet).not.toHaveBeenCalled()
+      expect(request).not.toHaveBeenCalled()
+    }
+  )
+
+  it("forwards authenticated POST requests when no lifecycle error exists", async () => {
+    jest.mocked(authedRequest).mockResolvedValueOnce({ status: 200, headers: [], body: "{}" })
+    registerLimitsSource(
+      "stub:post",
+      {
+        id: "stub:post",
+        key: "codex",
+        matches: () => true,
+        fetch: async (ctx) => {
+          await ctx.authedRequest?.({ url: "https://example.invalid/quota", method: "POST" })
+          return null
+        },
+      },
+      { pluginId: "stub" }
+    )
+    await queryAccountLimits("codex", "acc-3", {
+      getAccount: async () => codexChatgptAccount(),
+      listPresets: async () => [],
+      isCodexFresh: () => true,
+    })
+    expect(authedRequest).toHaveBeenCalledWith({
+      url: "https://example.invalid/quota",
+      method: "POST",
+    })
+  })
+
+  it("does not query an account already marked as requiring reauthentication", async () => {
+    const authedGet = jest.fn()
+    await expect(
+      queryAccountLimits("codex", "acc-3", {
+        getAccount: async () =>
+          codexChatgptAccount({
+            authMetadata: { reauthRequiredAtMs: 1, reauthReason: "external_login_changed" },
+          }),
+        listPresets: async () => [],
+        authedGet,
+        isCodexFresh: () => true,
+      })
+    ).rejects.toMatchObject({ code: "reauth_required" })
+    expect(authedGet).not.toHaveBeenCalled()
+  })
+
   it.each([200, 401])("uses the native status-preserving transport for HTTP %s", async (status) => {
     jest.mocked(authedRequest).mockResolvedValueOnce({
       status,
@@ -658,4 +788,107 @@ describe("queryAccountLimits", () => {
     })
     expect(snap).toBeNull()
   })
+})
+
+it("stops a limits query if the local account switches during preset resolution", async () => {
+  let scope = "local-a"
+  const authedGet = jest.fn()
+  await expect(
+    queryAccountLimits("anthropic", "acc-1", {
+      getLocalAccountId: () => scope,
+      getAccount: async () => anthropicAccount(),
+      isCredentialFresh: () => true,
+      listPresets: async () => {
+        scope = "local-b"
+        return []
+      },
+      authedGet,
+    })
+  ).rejects.toThrow("local account changed")
+  expect(authedGet).not.toHaveBeenCalled()
+})
+
+it("blocks cached requests when the local account changes inside a source", async () => {
+  let scope = "local-a"
+  const authedGet = jest.fn()
+  registerLimitsSource(
+    "stub:scope-change",
+    {
+      id: "stub:scope-change",
+      key: "anthropic",
+      matches: (q) => q.provider === "anthropic",
+      fetch: async (ctx) => {
+        scope = "local-b"
+        await expect(
+          Promise.resolve().then(() => ctx.authedGet("https://example.invalid"))
+        ).rejects.toThrow("local account changed")
+        return null
+      },
+    },
+    { pluginId: "stub" }
+  )
+  await expect(
+    queryAccountLimits("anthropic", "acc-1", {
+      getLocalAccountId: () => scope,
+      getAccount: async () => anthropicAccount(),
+      isCredentialFresh: () => true,
+      listPresets: async () => [],
+      authedGet,
+    })
+  ).rejects.toThrow("local account changed")
+  expect(authedGet).not.toHaveBeenCalled()
+})
+
+it("rejects a changed linked Claude login before using a still-fresh cached bearer", async () => {
+  const account = anthropicAccount()
+  if (account.credential.provider !== "anthropic") throw new Error("fixture")
+  account.credential.originalSource = "keyring"
+  const authedGet = jest.fn()
+  await expect(
+    queryAccountLimits("anthropic", account.id, {
+      getAccount: async () => account,
+      isCredentialFresh: () => true,
+      refreshAnthropicToken: async () => {
+        throw new AnthropicReauthenticationRequiredError("external_login_changed")
+      },
+      authedGet,
+    })
+  ).rejects.toThrow("external_login_changed")
+  expect(authedGet).not.toHaveBeenCalled()
+})
+
+it("blocks cached Claude requests even when a source catches its refresh failure", async () => {
+  const authedGet = jest.fn()
+  const authedRequest = jest.fn()
+  registerLimitsSource(
+    "stub:claude-lifecycle",
+    {
+      id: "stub:claude-lifecycle",
+      key: "anthropic",
+      matches: (q) => q.provider === "anthropic",
+      fetch: async (ctx) => {
+        await ctx.refreshToken?.().catch(() => null)
+        expect(() =>
+          ctx.authedGet("https://example.invalid", { Authorization: "Bearer cached" })
+        ).toThrow("external_login_unavailable")
+        expect(() => ctx.authedRequest({} as never)).toThrow("external_login_unavailable")
+        return null
+      },
+    },
+    { pluginId: "stub" }
+  )
+  await expect(
+    queryAccountLimits("anthropic", "acc-1", {
+      getAccount: async () => anthropicAccount(),
+      isCredentialFresh: () => true,
+      listPresets: async () => [],
+      refreshAnthropicToken: async () => {
+        throw new AnthropicReauthenticationRequiredError("external_login_unavailable")
+      },
+      authedGet,
+      authedRequest,
+    })
+  ).rejects.toThrow("external_login_unavailable")
+  expect(authedGet).not.toHaveBeenCalled()
+  expect(authedRequest).not.toHaveBeenCalled()
 })

@@ -35,6 +35,17 @@ export interface LocalAccountRecord {
   passwordVerifier: PasswordVerifierRecord
   createdAt: number
   updatedAt: number
+  /** Absent on existing profiles, which always require their chosen password. */
+  protection?: "device" | "password"
+  /**
+   * Desktop only: the owner chose "unlock automatically on this device", so
+   * the password also sits in the native secret store and boot opens the
+   * profile without a prompt. The password keeps working on the lock screen.
+   * Meaningless on `protection: "device"`, which never has a typed password.
+   * Non-indexed, so adding it needs no registry version bump. See
+   * `lib/accounts/desktop-local-account.ts`.
+   */
+  rememberOnDevice?: boolean
   /**
    * Optional per-account avatar as a downscaled, size-capped data URL (the
    * same shape `ProfileAvatarPicker` / `lib/profile/avatar-image.ts` produce).

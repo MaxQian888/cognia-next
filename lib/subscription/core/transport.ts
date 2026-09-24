@@ -109,8 +109,11 @@ export async function listAccounts(provider: ProviderId): Promise<AccountSummary
 }
 
 /** Includes persisted providers whose declaring plugin is currently disabled. */
-export async function listSubscriptionProviderIds(): Promise<ProviderId[]> {
-  return transport.call<ProviderId[]>("subscription_list_provider_ids", subscriptionScope())
+export async function listSubscriptionProviderIds(allowInteraction = false): Promise<ProviderId[]> {
+  return transport.call<ProviderId[]>("subscription_list_provider_ids", {
+    ...subscriptionScope(),
+    ...(allowInteraction === true ? { allowInteraction: true } : {}),
+  })
 }
 
 export async function getAccount(provider: ProviderId, accountId: string): Promise<Account | null> {
@@ -159,6 +162,28 @@ export async function replaceAccountCredential(
   // account looking dead until the next restart.
   clearCredentialBlocks(provider, accountId)
   await vaultConnectionMutated(provider, scope.localAccountId)
+  return detail
+}
+
+/** Persist a refresh only while its original account and credential still exist. */
+export async function refreshAnthropicAccountCredential(
+  localAccountId: string,
+  accountId: string,
+  expected: AnthropicCredentialData,
+  credential: AnthropicCredentialData
+): Promise<AccountDetail> {
+  if (!localAccountId.trim()) throw new Error("localAccountId must not be empty")
+  const detail = await transport.call<AccountDetail>("subscription_replace_account_credential", {
+    provider: "anthropic",
+    localAccountId,
+    accountId,
+    expectedCredential: { ...expected, provider: "anthropic" },
+    credential: { ...credential, provider: "anthropic" },
+    backgroundRefresh: true,
+  })
+  // A refresh is not explicit reauthentication and cannot clear a revoked-token
+  // block. Avoid publishing another local account's completion after a switch.
+  if (useAccountStore.getState().unlockedAccountId === localAccountId) vaultMutated()
   return detail
 }
 
@@ -450,8 +475,14 @@ export interface DiscoveredAnthropicAuth {
   rateLimitTier?: string
 }
 
-export async function anthropicOauthDiscover(): Promise<DiscoveredAnthropicAuth | null> {
-  const got = await transport.call<DiscoveredAnthropicAuth | null>("anthropic_oauth_discover")
+export async function anthropicOauthDiscover(
+  allowKeychainPrompt = false
+): Promise<DiscoveredAnthropicAuth | null> {
+  const got = allowKeychainPrompt
+    ? await transport.call<DiscoveredAnthropicAuth | null>("anthropic_oauth_discover", {
+        allowKeychainPrompt: true,
+      })
+    : await transport.call<DiscoveredAnthropicAuth | null>("anthropic_oauth_discover")
   return got ?? null
 }
 
@@ -480,8 +511,14 @@ export interface DiscoveredCodexTokens {
   chatgptAccountId?: string
 }
 
-export async function codexOauthDiscover(): Promise<DiscoveredCodexAuth | null> {
-  const got = await transport.call<DiscoveredCodexAuth | null>("codex_oauth_discover")
+export async function codexOauthDiscover(
+  allowKeychainPrompt = false
+): Promise<DiscoveredCodexAuth | null> {
+  const got = allowKeychainPrompt
+    ? await transport.call<DiscoveredCodexAuth | null>("codex_oauth_discover", {
+        allowKeychainPrompt: true,
+      })
+    : await transport.call<DiscoveredCodexAuth | null>("codex_oauth_discover")
   return got ?? null
 }
 

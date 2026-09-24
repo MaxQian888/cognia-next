@@ -108,6 +108,7 @@ export interface CreateAccountInput {
   passwordVerifier: PasswordVerifierRecord
   activate?: boolean
   now?: number
+  protection?: LocalAccountRecord["protection"]
 }
 
 export interface DeleteAccountOptions {
@@ -153,6 +154,7 @@ export class LocalAccountRegistry {
       passwordVerifier: clonePasswordVerifier(input.passwordVerifier),
       createdAt: now,
       updatedAt: now,
+      ...(input.protection ? { protection: input.protection } : {}),
     }
 
     await this.db.transaction("rw", this.db.accounts, this.db.state, async () => {
@@ -204,7 +206,8 @@ export class LocalAccountRegistry {
   async updatePasswordVerifier(
     accountId: string,
     passwordVerifier: PasswordVerifierRecord,
-    now = Date.now()
+    now = Date.now(),
+    protection?: LocalAccountRecord["protection"]
   ): Promise<LocalAccountRecord> {
     assertAccountId(accountId)
     let updated: LocalAccountRecord | undefined
@@ -215,8 +218,43 @@ export class LocalAccountRegistry {
       updated = {
         ...account,
         passwordVerifier: clonePasswordVerifier(passwordVerifier),
+        ...(protection ? { protection } : {}),
         updatedAt: nextTimestamp(now, account.updatedAt),
       }
+      await this.db.accounts.put(updated)
+    })
+
+    return updated as LocalAccountRecord
+  }
+
+  /**
+   * Record whether the profile unlocks automatically on this device.
+   *
+   * Only the flag lives here; the secret itself is in the native store. The
+   * field is removed rather than written `false`, so a profile that never
+   * opted in carries no trace of the option.
+   */
+  async updateRememberOnDevice(
+    accountId: string,
+    enabled: boolean,
+    now = Date.now()
+  ): Promise<LocalAccountRecord> {
+    assertAccountId(accountId)
+    let updated: LocalAccountRecord | undefined
+
+    await this.db.transaction("rw", this.db.accounts, async () => {
+      const account = await this.db.accounts.get(accountId)
+      if (!account) throw accountNotFound(accountId)
+      const next: LocalAccountRecord = {
+        ...account,
+        updatedAt: nextTimestamp(now, account.updatedAt),
+      }
+      if (enabled) {
+        next.rememberOnDevice = true
+      } else {
+        delete next.rememberOnDevice
+      }
+      updated = next
       await this.db.accounts.put(updated)
     })
 

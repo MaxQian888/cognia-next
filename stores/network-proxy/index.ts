@@ -144,8 +144,11 @@ let lastPushedSerialized: string | null = null
 export async function applyProxyToRust(cfg?: NetworkProxySettings | null): Promise<void> {
   if (!isTauri() || !isMainAppWindow()) return
   const source = (cfg ?? getNetworkProxy()) as LegacyNetworkProxySettings
-  const migration = await migrateLegacyProxyPassword(source)
-  const settings = migration.settings
+  // Native proxy_apply resolves credentials only when the policy needs them.
+  // A presence check here would make even direct traffic depend on keychain
+  // availability during startup. Touch keyring only for an actual legacy row.
+  const migration = source.password === undefined ? null : await migrateLegacyProxyPassword(source)
+  const settings = migration?.settings ?? source
   const payload = {
     mode: settings.mode,
     protocol: settings.protocol,
@@ -161,7 +164,7 @@ export async function applyProxyToRust(cfg?: NetworkProxySettings | null): Promi
   lastPushedSerialized = serialized
   notifyNetworkProxyApplied()
 
-  if (migration.migrated) {
+  if (migration?.migrated) {
     // Persist the sanitized row only after both keyring verification and the
     // atomic native apply succeed. The recursive apply triggered by `save` is
     // deduped by the marker above.

@@ -21,6 +21,7 @@
 
 import {
   getAccount as defaultGetAccount,
+  reauthenticateManagedCodexAccount,
   refreshManagedCodexAccount as defaultRefreshManagedCodexAccount,
   saveAccount as defaultSaveAccount,
   setActiveAccount as defaultSetActiveAccount,
@@ -79,6 +80,8 @@ export interface RefreshCodexDeps {
   now: () => number
   /** Re-read the CLI-owned credential for accounts adopted via Reuse. */
   discoverLocalCredential: () => Promise<CodexCredentialData | null>
+  /** Host-owned identity check and atomic update for a linked ChatGPT login. */
+  reauthenticateAccount: typeof reauthenticateManagedCodexAccount
   /**
    * When `true`, re-activate the account after persisting so the Rust-side
    * active-env snapshot is rebuilt with the new bearer. Defaults to `false` —
@@ -102,6 +105,7 @@ const DEFAULT_DEPS: RefreshCodexDeps = {
     const discovered = await discoverCodexAuth()
     return discovered ? discoveredToCredential(discovered) : null
   },
+  reauthenticateAccount: reauthenticateManagedCodexAccount,
   reactivate: false,
   refreshManagedAccount: defaultRefreshManagedCodexAccount,
 }
@@ -130,15 +134,54 @@ function refreshManagedOnce(
  * `api_key` login (keys don't expire), it carries no refresh token, or it is
  * still fresh. Callers treat `null` as "keep using what you have".
  *
- * Throws only if the refresh exchange itself fails (network / invalid_grant) —
- * callers decide whether to swallow. Both current callers do, falling back to
- * the existing token so a refresh outage degrades to a 401 rather than blocking
- * the turn outright.
+ * Linked CLI credentials are checked through the host's identity-safe
+ * reauthentication command. Missing or changed logins fail closed; callers
+ * must not fall back to a stored credential after a lifecycle error.
  */
 export async function refreshCodexAccountIfStale(
   accountId: string,
   deps: Partial<RefreshCodexDeps> = {}
 ): Promise<CodexCredentialData | null> {
+  const account = await (deps.getAccount ?? DEFAULT_DEPS.getAccount)("codex", accountId)
+  if (!account || account.credential.provider !== "codex") return null
+  assertCodexAccountLifecycleReady(account)
+  const credential = account.credential
+
+  // CLI-owned logins are re-read, never refreshed by Cognia. Keep local
+  // identity checks outside the token-endpoint breaker so every attempt
+  // rejects a mismatched login and restoring the original login can recover.
+  if (credential.originalSource === "file" || credential.originalSource === "keyring") {
+    let synced: CodexCredentialData | null
+    try {
+      synced = await (deps.discoverLocalCredential ?? DEFAULT_DEPS.discoverLocalCredential)()
+    } catch {
+      throw new CodexReauthenticationRequiredError("external_login_unavailable")
+    }
+    if (!synced) throw new CodexReauthenticationRequiredError("external_login_unavailable")
+    if (synced.authMode !== credential.authMode) {
+      throw new CodexReauthenticationRequiredError("external_login_changed")
+    }
+    if (credential.authMode === "api_key") {
+      // API keys have no verifiable user/workspace identity. A changed key
+      // needs an explicit import instead of replacing the selected account.
+      if (!synced.accessToken || synced.accessToken !== credential.accessToken) {
+        throw new CodexReauthenticationRequiredError("external_login_changed")
+      }
+    } else {
+      try {
+        // Reuse the host's locked identity check and update. Generic save
+        // would allow a CLI account swap or resurrect a concurrently deleted row.
+        await (deps.reauthenticateAccount ?? DEFAULT_DEPS.reauthenticateAccount)(accountId, synced)
+      } catch {
+        throw new CodexReauthenticationRequiredError("external_login_unverified")
+      }
+    }
+    if (deps.reactivate) {
+      await (deps.setActiveAccount ?? DEFAULT_DEPS.setActiveAccount)("codex", accountId)
+    }
+    return synced
+  }
+
   const breaker = deps.breaker ?? getSubscriptionBreaker()
   const now = deps.now ?? DEFAULT_DEPS.now
   const key = credentialKey("codex", accountId, BREAKER_SCOPES.refresh)
@@ -149,7 +192,7 @@ export async function refreshCodexAccountIfStale(
   if (!breaker.shouldAttempt(key, now()).allowed) return null
 
   try {
-    const fresh = await runRefreshCodexAccountIfStale(accountId, deps)
+    const fresh = await runRefreshCodexAccountIfStale(account, credential, deps)
     // Only a completed exchange clears the block. The many `null` returns here
     // mean "nothing to refresh", which is no evidence the endpoint is healthy.
     if (fresh) breaker.recordSuccess(key)
@@ -161,9 +204,11 @@ export async function refreshCodexAccountIfStale(
 }
 
 async function runRefreshCodexAccountIfStale(
-  accountId: string,
+  account: Account,
+  credential: CodexCredentialData,
   deps: Partial<RefreshCodexDeps>
 ): Promise<CodexCredentialData | null> {
+  const accountId = account.id
   const useHostLifecycle =
     deps.refreshManagedAccount !== undefined ||
     (deps.refreshCodexToken === undefined &&
@@ -172,36 +217,14 @@ async function runRefreshCodexAccountIfStale(
       deps.discoverLocalCredential === undefined)
   const {
     refreshCodexToken,
-    getAccount,
     saveAccount,
     setActiveAccount,
     now,
-    discoverLocalCredential,
     reactivate,
     refreshManagedAccount,
   } = {
     ...DEFAULT_DEPS,
     ...deps,
-  }
-
-  const account = await getAccount("codex", accountId)
-  if (!account || account.credential.provider !== "codex") return null
-  assertCodexAccountLifecycleReady(account)
-  const credential = account.credential
-
-  // A reused CLI login remains owned by codex-cli. Refresh tokens may rotate,
-  // so exchanging our copied token would invalidate the CLI's auth.json/keyring
-  // copy. Re-read the authoritative local login instead (CCSwitch's model).
-  if (credential.originalSource === "file" || credential.originalSource === "keyring") {
-    const synced = await discoverLocalCredential()
-    if (!synced) return null
-    await saveAccount("codex", {
-      ...account,
-      credential: toProviderCredential(synced),
-      lastUsedAtMs: now(),
-    })
-    if (reactivate) await setActiveAccount("codex", accountId)
-    return synced
   }
 
   // `api_key` never expires and has no refresh token; `isCodexCredentialFresh`

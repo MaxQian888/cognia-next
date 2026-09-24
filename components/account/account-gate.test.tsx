@@ -37,6 +37,13 @@ jest.mock("@/lib/pet/window-role", () => ({
     role === "overlay" || role === "popup" || role === "island",
 }))
 
+// The explicit, prompt-allowed secret-store unlock. Never reached by a
+// silent retry, only by the device screen's "allow access" action.
+const mockUnlockSecretStore = jest.fn<Promise<null>, []>()
+jest.mock("@/lib/tauri/recovery", () => ({
+  unlockSecretStore: () => mockUnlockSecretStore(),
+}))
+
 const mockCreateAccount = jest.fn<Promise<LocalAccountRecord>, [unknown]>()
 const mockUnlockAccount = jest.fn<Promise<void>, [string, string]>()
 const mockUnlockWithRecoveryKey = jest.fn<Promise<void>, [string, string, string]>()
@@ -52,6 +59,7 @@ let mockState: Pick<
   | "locked"
   | "error"
   | "pendingRecoveryKey"
+  | "autoUnlockFailure"
   | "createAccount"
   | "unlockAccount"
   | "unlockAccountWithRecoveryKey"
@@ -94,6 +102,7 @@ function setGateState(overrides: Partial<typeof mockState> = {}) {
     locked: false,
     error: null,
     pendingRecoveryKey: null,
+    autoUnlockFailure: null,
     createAccount: mockCreateAccount,
     unlockAccount: mockUnlockAccount,
     unlockAccountWithRecoveryKey: mockUnlockWithRecoveryKey,
@@ -109,7 +118,12 @@ beforeEach(() => {
   mockPetRole = "main"
   mockCreateAccount.mockResolvedValue(account("acct_first", "First"))
   mockUnlockAccount.mockResolvedValue()
+  mockUnlockSecretStore.mockResolvedValue(null)
   setGateState()
+})
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 })
 
 describe("AccountGate", () => {
@@ -552,5 +566,129 @@ describe("AccountGate", () => {
       </AccountGate>
     )
     expect(screen.getByText("firstRunTitle")).toBeInTheDocument()
+  })
+})
+
+it("retries the device workspace without requesting an unknown password", async () => {
+  const device = {
+    ...account("acct_desktop_local_workspace", "Local"),
+    protection: "device" as const,
+  }
+  setGateState({ accounts: [device], activeAccountId: device.id, locked: true })
+  render(
+    <AccountGate>
+      <div>workspace</div>
+    </AccountGate>
+  )
+  expect(screen.queryByLabelText("passwordLabel")).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "openLocalWorkspace" }))
+  await waitFor(() => expect(mockUnlockAccount).toHaveBeenCalledWith(device.id, ""))
+})
+
+describe("device-managed workspace screen", () => {
+  const device = {
+    ...account("acct_desktop_local_workspace", "Local"),
+    protection: "device" as const,
+  }
+
+  function renderGate() {
+    render(
+      <AccountGate>
+        <div>workspace</div>
+      </AccountGate>
+    )
+  }
+
+  it("says the workspace is locked, not that it failed, when nothing went wrong", () => {
+    setGateState({ accounts: [device], activeAccountId: device.id, locked: true })
+    renderGate()
+    expect(screen.getByText("localWorkspaceLocked")).toBeInTheDocument()
+    expect(screen.queryByText("localWorkspaceUnavailable")).not.toBeInTheDocument()
+    expect(screen.getByTestId("account-device-workspace-open")).toHaveTextContent(
+      "openLocalWorkspace"
+    )
+  })
+
+  it("offers the prompt-allowed credential store unlock when that store is the blocker", async () => {
+    setGateState({
+      accounts: [device],
+      activeAccountId: device.id,
+      locked: true,
+      error: "SECRET_STORE_LOCKED: master key read: Platform failure",
+    })
+    renderGate()
+    expect(screen.getByText("localWorkspaceUnavailable")).toBeInTheDocument()
+    const allow = screen.getByTestId("account-device-workspace-open")
+    expect(allow).toHaveTextContent("allowCredentialStoreAccess")
+
+    fireEvent.click(allow)
+
+    await waitFor(() => expect(mockUnlockAccount).toHaveBeenCalledWith(device.id, ""))
+    expect(mockUnlockSecretStore).toHaveBeenCalledTimes(1)
+    expect(mockUnlockSecretStore.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUnlockAccount.mock.invocationCallOrder[0]!
+    )
+  })
+
+  it("does not open the OS prompt for a failure that is not the credential store's", async () => {
+    setGateState({
+      accounts: [device],
+      activeAccountId: device.id,
+      locked: true,
+      error: "The local workspace vault is missing.",
+    })
+    renderGate()
+    fireEvent.click(screen.getByRole("button", { name: "openLocalWorkspace" }))
+    await waitFor(() => expect(mockUnlockAccount).toHaveBeenCalledWith(device.id, ""))
+    expect(mockUnlockSecretStore).not.toHaveBeenCalled()
+  })
+
+  it("stays on the screen and shows why when the store is still refused", async () => {
+    setGateState({
+      accounts: [device],
+      activeAccountId: device.id,
+      locked: true,
+      error: "SECRET_STORE_LOCKED: denied",
+    })
+    mockUnlockSecretStore.mockRejectedValue(new Error("user cancelled the keychain prompt"))
+    renderGate()
+    fireEvent.click(screen.getByTestId("account-device-workspace-open"))
+    await waitFor(() =>
+      expect(screen.getByText("user cancelled the keychain prompt")).toBeInTheDocument()
+    )
+    expect(mockUnlockAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe("lock screen wiring for automatic unlock", () => {
+  const alpha = account("acct_alpha", "Alpha")
+
+  it("offers the choice in the desktop shell and hands over boot's failure", () => {
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    setGateState({
+      accounts: [alpha],
+      activeAccountId: alpha.id,
+      locked: true,
+      autoUnlockFailure: { accountId: alpha.id, reason: "secret-missing" },
+    })
+    render(
+      <AccountGate>
+        <div>workspace</div>
+      </AccountGate>
+    )
+    expect(screen.getByTestId("account-lock-screen-remember")).toBeInTheDocument()
+    expect(screen.getByTestId("account-lock-screen-auto-unlock-failure")).toHaveTextContent(
+      "autoUnlockFailedMissing"
+    )
+  })
+
+  it("does not offer it in a browser", () => {
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    render(
+      <AccountGate>
+        <div>workspace</div>
+      </AccountGate>
+    )
+    expect(screen.queryByTestId("account-lock-screen-remember")).not.toBeInTheDocument()
   })
 })

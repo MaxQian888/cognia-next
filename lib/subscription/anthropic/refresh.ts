@@ -1,24 +1,11 @@
-// Refresh + persist an Anthropic OAuth account's access token.
-//
-// This is the single source of truth for "the stored access token is stale →
-// swap the refresh_token for a fresh access_token and write it back to the
-// vault". Two callers use it:
-//   * `useActiveAnthropicCredential.refresh` (Account tab) — with
-//     `reactivate: true`, so the in-process bearer + sidecar pick up the new
-//     token (its historical behaviour).
-//   * the unified-limits runner (`limits/runner.ts`) — with `reactivate: false`,
-//     so a background quota refresh keeps the vaulted token fresh WITHOUT
-//     flipping the active pointer / restarting the sidecar mid-chat.
-//
-// The function always re-reads the account from the vault so it uses the latest
-// refresh_token (the server may rotate it on every refresh — see oauth.ts). All
-// I/O is injected via `deps` so the runner + hook stay unit-testable offline.
-
+// Claude Code owns reused logins. Cognia may re-read their credentials, but
+// must never rotate a copied refresh token or silently adopt a different login.
 import {
   getAccount as defaultGetAccount,
-  saveAccount as defaultSaveAccount,
+  refreshAnthropicAccountCredential,
   setActiveAccount as defaultSetActiveAccount,
 } from "@/lib/subscription/core/transport"
+import { useAccountStore } from "@/stores/account/account-store"
 import {
   BREAKER_SCOPES,
   credentialKey,
@@ -26,41 +13,44 @@ import {
   type SubscriptionBreaker,
 } from "@/lib/subscription/retry/breaker"
 import { classifyThrownFailure } from "@/lib/subscription/retry/failure-class"
-
 import { refreshAccessToken as defaultRefreshAccessToken } from "./oauth"
 import { discoverAnthropicAuth, discoveredToCredential } from "./discovery"
-
 import type { Account, AnthropicCredentialData, ProviderId } from "@/types/subscription"
+
+export class AnthropicReauthenticationRequiredError extends Error {
+  readonly code = "reauth_required"
+
+  constructor(readonly reason: string) {
+    super(`Claude account requires reauthentication (${reason})`)
+    this.name = "AnthropicReauthenticationRequiredError"
+  }
+}
 
 export interface RefreshAnthropicDeps {
   refreshAccessToken: typeof defaultRefreshAccessToken
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
-  saveAccount: (provider: ProviderId, account: Account) => Promise<void>
+  /** The host compares the old credential under the vault mutation lock. */
+  persistCredential: (
+    localAccountId: string,
+    accountId: string,
+    expected: AnthropicCredentialData,
+    credential: AnthropicCredentialData
+  ) => Promise<unknown>
+  getLocalAccountId: () => string | null
   setActiveAccount: (provider: ProviderId, accountId: string | null) => Promise<void>
   now: () => number
-  /** Re-read the CLI-owned credential for accounts adopted via Reuse. */
   discoverLocalCredential: () => Promise<AnthropicCredentialData | null>
-  /**
-   * When `true`, re-activate the account after persisting so the in-process
-   * OAuth bearer + sidecar pick up the new token (restarts the sidecar).
-   * Defaults to `false` — background quota refreshes must not restart the
-   * sidecar.
-   */
+  /** Only the explicit Account-tab refresh reactivates the account. */
   reactivate: boolean
-  /**
-   * Credential ledger gating the token endpoint. A refresh that fails is
-   * blocked before it can be repeated, and `invalid_grant` latches until the
-   * user re-authenticates. Defaults to the process-wide ledger.
-   */
   breaker: SubscriptionBreaker
-  /** Deterministic jitter source for the recorded backoff. */
   random?: () => number
 }
 
 const DEFAULT_DEPS: RefreshAnthropicDeps = {
   refreshAccessToken: defaultRefreshAccessToken,
   getAccount: defaultGetAccount,
-  saveAccount: defaultSaveAccount,
+  persistCredential: refreshAnthropicAccountCredential,
+  getLocalAccountId: () => useAccountStore.getState().unlockedAccountId,
   setActiveAccount: defaultSetActiveAccount,
   now: () => Date.now(),
   discoverLocalCredential: async () => {
@@ -79,133 +69,158 @@ interface RefreshInFlight {
 const refreshesInFlight = new Map<string, RefreshInFlight>()
 
 /**
- * Refresh the OAuth access token for one Anthropic account and persist the
- * result back to the vault (an upsert by the same account id). Returns the
- * merged credential on success, or `null` when the account no longer exists or
- * isn't an Anthropic credential. Throws only if the refresh exchange itself
- * fails (network / invalid_grant) — callers decide whether to swallow. Calls
- * for the same account are single-flight so a rotating refresh token is never
- * exchanged twice. Reactivation is applied at most once, right after
- * persistence: a caller requesting it that joins *before* the shared refresh
- * reaches that step promotes the in-flight refresh to reactivate. A caller
- * that joins in the narrow window *after* the reactivation decision (but before
- * the entry is cleared) still shares the credential result, yet does not
- * trigger a second (redundant) sidecar restart.
+ * Coalesce refreshes within one local account. Persist with a host-side
+ * compare-and-swap, never an upsert, and stop if the local account is locked
+ * or switched while asynchronous discovery/exchange is in progress.
  *
- * A failed exchange now arms a block on the token endpoint, and a revoked
- * refresh token latches permanently. Single-flight alone only ever stopped
- * SIMULTANEOUS refreshes: once the in-flight entry cleared, the next caller
- * holding a stale credential exchanged the same dead token again, and the
- * callers that matter here poll on a five minute loop. Re-POSTing a revoked
- * refresh_token every five minutes for as long as the app is open is the
- * clearest way there is to get a subscription account flagged.
+ * Claude's discovered tokens are opaque and contain no verified identity.
+ * A changed refresh token therefore requires explicit re-import, including
+ * a legitimate CLI rotation: guessing would silently switch users.
  */
 export function refreshAndPersistAnthropicAccount(
   accountId: string,
   deps: Partial<RefreshAnthropicDeps> = {}
 ): Promise<AnthropicCredentialData | null> {
-  const existing = refreshesInFlight.get(accountId)
+  const resolved = { ...DEFAULT_DEPS, ...deps }
+  const localAccountId = resolved.getLocalAccountId()
+  if (!localAccountId) {
+    return Promise.reject(new AnthropicReauthenticationRequiredError("local_account_locked"))
+  }
+  const flightKey = JSON.stringify([localAccountId, accountId])
+  const existing = refreshesInFlight.get(flightKey)
   if (existing) {
-    if (deps.reactivate === true) existing.reactivateRequested = true
+    if (resolved.reactivate) existing.reactivateRequested = true
     return existing.promise
   }
-
-  const breaker = deps.breaker ?? getSubscriptionBreaker()
-  const now = deps.now ?? DEFAULT_DEPS.now
-  const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.refresh)
-  // The token endpoint is far more tightly limited than the usage endpoint, and
-  // a refresh that just failed will fail the same way until something changes.
-  if (!breaker.shouldAttempt(key, now()).allowed) return Promise.resolve(null)
-
   const entry: RefreshInFlight = {
     promise: Promise.resolve(null),
-    reactivateRequested: deps.reactivate === true,
+    reactivateRequested: resolved.reactivate,
   }
-  entry.promise = runRefreshAndPersistAnthropicAccount(
+  entry.promise = runRefresh(
+    localAccountId,
     accountId,
-    deps,
+    resolved,
     () => entry.reactivateRequested
-  )
-    .then((merged) => {
-      // Only a completed exchange clears the block. A `null` return means the
-      // account was missing or not an Anthropic credential, which is not
-      // evidence that the token endpoint is healthy.
-      if (merged) breaker.recordSuccess(key)
-      return merged
-    })
-    .catch((error: unknown) => {
-      breaker.recordFailure(key, classifyThrownFailure(error, now()), now(), deps.random)
-      throw error
-    })
-    .finally(() => {
-      if (refreshesInFlight.get(accountId) === entry) refreshesInFlight.delete(accountId)
-    })
-  refreshesInFlight.set(accountId, entry)
+  ).finally(() => {
+    if (refreshesInFlight.get(flightKey) === entry) refreshesInFlight.delete(flightKey)
+  })
+  refreshesInFlight.set(flightKey, entry)
   return entry.promise
 }
 
-/**
- * Test-only: drop the single-flight map so a suite does not inherit a pending
- * entry from a previous case.
- */
 export function __resetAnthropicRefreshInFlightForTesting(): void {
   refreshesInFlight.clear()
 }
 
-async function runRefreshAndPersistAnthropicAccount(
+async function runRefresh(
+  localAccountId: string,
   accountId: string,
-  deps: Partial<RefreshAnthropicDeps>,
+  deps: RefreshAnthropicDeps,
   shouldReactivate: () => boolean
 ): Promise<AnthropicCredentialData | null> {
-  const {
-    refreshAccessToken,
-    getAccount,
-    saveAccount,
-    setActiveAccount,
-    now,
-    discoverLocalCredential,
-  } = {
-    ...DEFAULT_DEPS,
-    ...deps,
+  const assertScope = () => {
+    if (deps.getLocalAccountId() !== localAccountId) {
+      throw new AnthropicReauthenticationRequiredError("local_account_changed")
+    }
   }
-
-  const account = await getAccount("anthropic", accountId)
-  if (!account || account.credential.provider !== "anthropic") return null
+  let account: Account | null
+  try {
+    account = await deps.getAccount("anthropic", accountId)
+  } catch {
+    assertScope()
+    throw new AnthropicReauthenticationRequiredError("account_unavailable")
+  }
+  assertScope()
+  if (!account) throw new AnthropicReauthenticationRequiredError("account_removed")
+  if (account.credential.provider !== "anthropic") return null
   const credential = account.credential
-
-  // A reused Claude Code login remains owned by the CLI. Its refresh token can
-  // rotate, so exchanging Cognia's copied token would invalidate the keyring /
-  // credentials-file copy. CCSwitch avoids that race by reading the CLI store
-  // at query time; mirror that ownership rule here.
-  const followsLocalLogin =
-    credential.originalSource === "file" || credential.originalSource === "keyring"
-  const updated = followsLocalLogin
-    ? await discoverLocalCredential()
-    : await refreshAccessToken({
+  const linked = credential.originalSource === "file" || credential.originalSource === "keyring"
+  let updated: AnthropicCredentialData
+  if (linked) {
+    // Local discovery is not a token-endpoint request. Never suppress identity
+    // checks through the network breaker or fall back to a cached login.
+    let discovered: AnthropicCredentialData | null
+    try {
+      discovered = await deps.discoverLocalCredential()
+    } catch {
+      throw new AnthropicReauthenticationRequiredError("external_login_unavailable")
+    }
+    assertScope()
+    if (!discovered) throw new AnthropicReauthenticationRequiredError("external_login_unavailable")
+    if (
+      !credential.refreshToken ||
+      !discovered.accessToken ||
+      discovered.refreshToken !== credential.refreshToken ||
+      discovered.mode !== credential.mode
+    ) {
+      throw new AnthropicReauthenticationRequiredError("external_login_changed")
+    }
+    updated = discovered
+  } else {
+    const { breaker, now } = deps
+    const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.refresh)
+    if (!breaker.shouldAttempt(key, now()).allowed) return null
+    try {
+      updated = await deps.refreshAccessToken({
         refreshToken: credential.refreshToken,
         mode: credential.mode,
       })
-  if (!updated) return null
+      breaker.recordSuccess(key)
+    } catch (error) {
+      assertScope()
+      breaker.recordFailure(key, classifyThrownFailure(error, now()), now(), deps.random)
+      throw error
+    }
+    // No scope check between a successful exchange and its persistence: the
+    // server has already rotated (and revoked) the old refresh token, and the
+    // write below is addressed to the captured local account. Dropping the
+    // response here would leave that account's vault holding a dead token.
+  }
   const merged: AnthropicCredentialData = {
     ...credential,
     ...updated,
-    // The refresh response may omit claims present on the original login; keep
-    // the richer of the two so the UI badge doesn't lose email / plan.
+    originalSource: credential.originalSource,
     email: updated.email ?? credential.email,
     plan: updated.plan ?? credential.plan,
   }
-
-  const next: Account = {
-    ...account,
-    credential: { provider: "anthropic", ...merged },
-    lastUsedAtMs: now(),
+  let result = merged
+  // A linked login re-read unchanged (the common poll) is not a vault write:
+  // persisting it would bump the rotation stamp, mark the vault for cloud sync
+  // and re-fire every subscription listener on each limits query.
+  if (!sameCredential(merged, credential)) {
+    try {
+      await deps.persistCredential(localAccountId, accountId, credential, merged)
+    } catch {
+      // A deleted row must not be recreated by an old refresh response. A lost
+      // compare-and-swap is different: the stored credential changed while
+      // this refresh was in flight (the configdir watcher saving a CLI
+      // rotation, a reimport), and that newer credential is the account's
+      // truth — adopt it instead of calling a healthy account unauthenticated.
+      const current = await deps.getAccount("anthropic", accountId).catch(() => null)
+      const stored = current?.credential.provider === "anthropic" ? current.credential : null
+      if (!stored || sameCredential(stored, credential)) {
+        throw new AnthropicReauthenticationRequiredError("credential_update_rejected")
+      }
+      result = stored
+    }
   }
-  // The Rust vault treats a save with an existing id as an upsert.
-  await saveAccount("anthropic", next)
+  assertScope()
+  if (shouldReactivate()) {
+    await deps.setActiveAccount("anthropic", accountId)
+    assertScope()
+  }
+  return result
+}
 
-  // Only the Account-tab refresh wants the sidecar to adopt the new bearer
-  // immediately; the quota path deliberately skips this to avoid a restart.
-  if (shouldReactivate()) await setActiveAccount("anthropic", accountId)
-
-  return merged
+/** Same login material: the fields a refresh writes or a watcher rotates. */
+function sameCredential(a: AnthropicCredentialData, b: AnthropicCredentialData): boolean {
+  return (
+    a.accessToken === b.accessToken &&
+    a.refreshToken === b.refreshToken &&
+    a.expiresAtMs === b.expiresAtMs &&
+    a.mode === b.mode &&
+    a.scope === b.scope &&
+    a.email === b.email &&
+    a.plan === b.plan
+  )
 }

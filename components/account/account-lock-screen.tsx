@@ -43,6 +43,7 @@ import {
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -62,6 +63,8 @@ import {
   type UnlockThrottleStatus,
 } from "@/lib/accounts/unlock-throttle"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
+import { isDeviceManagedAccount } from "@/lib/accounts/desktop-local-account"
+import type { AutoUnlockFailure, UnlockAccountOptions } from "@/stores/account/account-store"
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { PasswordStrengthMeter } from "./password-strength-meter"
@@ -83,6 +86,13 @@ const STAGE_LABEL_KEY: Record<Exclude<AccountUnlockStage, "ready" | "failed">, s
   activating: "stageActivating",
 }
 
+const AUTO_UNLOCK_FAILURE_KEY: Record<AutoUnlockFailure["reason"], string> = {
+  "secret-store-unavailable": "autoUnlockFailedStore",
+  "secret-missing": "autoUnlockFailedMissing",
+  "secret-rejected": "autoUnlockFailedRejected",
+  "unlock-failed": "autoUnlockFailedOther",
+}
+
 const ERROR_KEY: Record<AccountUnlockErrorCode, string> = {
   "invalid-password": "errorInvalidPassword",
   "password-required": "errorPasswordRequired",
@@ -91,13 +101,26 @@ const ERROR_KEY: Record<AccountUnlockErrorCode, string> = {
   "vault-incompatible": "errorVaultIncompatible",
   "storage-layout-unsupported": "errorStorageLayoutUnsupported",
   throttled: "errorThrottled",
+  "secret-store-unavailable": "errorSecretStoreUnavailable",
   unknown: "errorUnknown",
 }
 
 export interface AccountLockScreenProps {
   accounts: LocalAccountRecord[]
   activeAccountId: string | null
-  onUnlock: (localAccountId: string, password: string) => Promise<void>
+  onUnlock: (
+    localAccountId: string,
+    password: string,
+    options?: UnlockAccountOptions
+  ) => Promise<void>
+  /**
+   * True where a profile can keep its password in the native secret store and
+   * open without a prompt (the desktop shell). Shows the "unlock automatically
+   * on this device" choice under the password.
+   */
+  supportsRememberOnDevice?: boolean
+  /** Why boot could not open a remembered profile by itself, if it tried. */
+  autoUnlockFailure?: AutoUnlockFailure | null
   /**
    * Redeem a Browser Vault recovery key and set a new password. Absent on the
    * desktop host, which mints no recovery key — see `supportsRecoveryKey`.
@@ -155,6 +178,8 @@ export function AccountLockScreen({
   onUnlock,
   onRecoveryUnlock,
   supportsRecoveryKey,
+  supportsRememberOnDevice = false,
+  autoUnlockFailure = null,
   onQuickUnlock,
   appearance,
   activeWallpaperId = null,
@@ -168,6 +193,7 @@ export function AccountLockScreen({
   const newPasswordId = useId()
   const confirmPasswordId = useId()
   const accountPickerId = useId()
+  const rememberId = useId()
   const passwordRef = useRef<HTMLInputElement>(null)
 
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -209,6 +235,11 @@ export function AccountLockScreen({
     [accounts, selectedId]
   )
   const localAccountId = account?.id ?? null
+  // The device-managed workspace has no password anyone typed: the secret
+  // store opens it, so the form asks for nothing and just opens it.
+  const deviceManaged = isDeviceManagedAccount(account)
+  const offerRemember = supportsRememberOnDevice && !deviceManaged && account !== null
+  const [rememberOnDevice, setRememberOnDevice] = useState(() => account?.rememberOnDevice === true)
 
   const [throttle, setThrottle] = useState<UnlockThrottleStatus>(() =>
     localAccountId ? readUnlockThrottle(localAccountId) : EMPTY_THROTTLE
@@ -223,6 +254,7 @@ export function AccountLockScreen({
     setThrottle(localAccountId ? readUnlockThrottle(localAccountId) : EMPTY_THROTTLE)
     setErrorCode(null)
     setLocalError(null)
+    setRememberOnDevice(account?.rememberOnDevice === true)
   }
 
   useEffect(() => {
@@ -295,7 +327,18 @@ export function AccountLockScreen({
   const handlePasswordSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!localAccountId || submitting || blocked) return
-    void run(() => onUnlock(localAccountId, password), localAccountId)
+    // Only a CHANGED choice is sent. Re-sending an unchanged "on" would
+    // rewrite the stored secret on every unlock, and after a boot that could
+    // not read the store it would fail an unlock the password alone passes.
+    const rememberChanged =
+      offerRemember && rememberOnDevice !== (account?.rememberOnDevice === true)
+    void run(
+      () =>
+        rememberChanged
+          ? onUnlock(localAccountId, password, { rememberOnDevice })
+          : onUnlock(localAccountId, password),
+      localAccountId
+    )
   }
 
   const handleRecoverySubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -393,6 +436,21 @@ export function AccountLockScreen({
         </FieldBlock>
       )}
 
+      {autoUnlockFailure && autoUnlockFailure.accountId === localAccountId && !submitting && (
+        <Alert role="status" data-testid="account-lock-screen-auto-unlock-failure">
+          <TriangleAlertIcon aria-hidden="true" />
+          <AlertTitle>{t("autoUnlockFailedTitle")}</AlertTitle>
+          <AlertDescription>
+            {t(AUTO_UNLOCK_FAILURE_KEY[autoUnlockFailure.reason])}
+            {autoUnlockFailure.message && (
+              <span className="mt-1 block font-mono text-[11px] break-all opacity-80">
+                {autoUnlockFailure.message}
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {mode === "quick" && onQuickUnlock && localAccountId ? (
         <QuickUnlockPanel
           localAccountId={localAccountId}
@@ -411,7 +469,7 @@ export function AccountLockScreen({
           hidden={layoutUnsupported}
           onSubmit={handlePasswordSubmit}
         >
-          <FieldBlock>
+          <FieldBlock hidden={deviceManaged}>
             <Label htmlFor={passwordId}>{t("passwordLabel")}</Label>
             <div className="relative">
               <Input
@@ -442,6 +500,28 @@ export function AccountLockScreen({
               </p>
             )}
           </FieldBlock>
+
+          {deviceManaged && (
+            <p className="text-sm text-muted-foreground" data-testid="account-lock-screen-device">
+              {t("deviceWorkspaceHint")}
+            </p>
+          )}
+
+          {offerRemember && (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id={rememberId}
+                checked={rememberOnDevice}
+                disabled={submitting}
+                data-testid="account-lock-screen-remember"
+                onCheckedChange={(checked) => setRememberOnDevice(checked === true)}
+              />
+              <div className="grid gap-1 leading-none">
+                <Label htmlFor={rememberId}>{t("rememberOnDeviceLabel")}</Label>
+                <p className="text-xs text-muted-foreground">{t("rememberOnDeviceHelp")}</p>
+              </div>
+            </div>
+          )}
 
           {!submitting && visibleError && (
             <ErrorText>
@@ -479,7 +559,7 @@ export function AccountLockScreen({
                 {t("unlocking")}
               </>
             ) : (
-              t("unlockAccount")
+              t(deviceManaged ? "openLocalWorkspace" : "unlockAccount")
             )}
           </Button>
         </form>
@@ -735,8 +815,12 @@ function RevealToggle({
   )
 }
 
-function FieldBlock({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-2">{children}</div>
+function FieldBlock({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
+  return (
+    <div className="flex flex-col gap-2" hidden={hidden}>
+      {children}
+    </div>
+  )
 }
 
 function ErrorText({ children }: { children: ReactNode }) {

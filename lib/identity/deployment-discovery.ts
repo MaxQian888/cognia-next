@@ -64,7 +64,7 @@ export type DeploymentDiscovery =
   | {
       status: "unavailable"
       reason: "unreachable" | "malformed"
-      baseUrl: string
+      baseUrl: string | null
       message: string
     }
   | {
@@ -104,7 +104,7 @@ export interface DiscoverDeploymentDeps {
 async function desktopServerStatus(): Promise<{ running: boolean; boundPort?: number | null }> {
   // Lazy so this module stays a leaf for the node test project and for the
   // web bundle, where the Tauri transport is never constructed.
-  const { transport } = await import("@/lib/tauri")
+  const { localTransport: transport } = await import("@/lib/tauri")
   return transport.call<{ running: boolean; boundPort?: number | null }>(
     "companion_server_status",
     {}
@@ -165,34 +165,33 @@ export async function resolveDiscoverySource(
 export async function discoverDeployment(
   deps: DiscoverDeploymentDeps = {}
 ): Promise<DeploymentDiscovery> {
-  const source = await resolveDiscoverySource(deps)
-  if ("none" in source) return { status: "none", reason: source.none }
-  const fetchConfig =
-    deps.fetchConfig ??
-    ((baseUrl: string, fingerprint?: string) => fetchCompanionAuthConfig(baseUrl, fingerprint))
-  let config: CompanionAuthConfig
+  let source: DiscoverySource | undefined
   try {
-    config = await fetchConfig(source.baseUrl, source.fingerprint)
+    const resolved = await resolveDiscoverySource(deps)
+    if ("none" in resolved) return { status: "none", reason: resolved.none }
+    source = resolved
+    const fetchConfig = deps.fetchConfig ?? fetchCompanionAuthConfig
+    const config = await fetchConfig(source.baseUrl, source.fingerprint)
+    if (config.deploymentMode !== "multi-tenant" || !config.oidc) {
+      return { status: "none", reason: "single-user" }
+    }
+    return {
+      status: "ready",
+      baseUrl: source.baseUrl,
+      ...(source.fingerprint ? { fingerprint: source.fingerprint } : {}),
+      config,
+      social: authConfigSocialProviders(config),
+      collaborationServiceUrl: authConfigCollaborationServiceUrl(config),
+      registrationPolicy: config.collaboration?.registrationPolicy ?? null,
+      webOrigin: authConfigWebOrigin(config),
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return {
       status: "unavailable",
       reason: /malformed|unexpected|invalid|parse/i.test(message) ? "malformed" : "unreachable",
-      baseUrl: source.baseUrl,
+      baseUrl: source?.baseUrl ?? null,
       message,
     }
-  }
-  if (config.deploymentMode !== "multi-tenant" || !config.oidc) {
-    return { status: "none", reason: "single-user" }
-  }
-  return {
-    status: "ready",
-    baseUrl: source.baseUrl,
-    ...(source.fingerprint ? { fingerprint: source.fingerprint } : {}),
-    config,
-    social: authConfigSocialProviders(config),
-    collaborationServiceUrl: authConfigCollaborationServiceUrl(config),
-    registrationPolicy: config.collaboration?.registrationPolicy ?? null,
-    webOrigin: authConfigWebOrigin(config),
   }
 }

@@ -11,6 +11,21 @@ import { AccountRegistryError } from "@/lib/accounts/account-types"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { withAccountProvisioningLock } from "@/lib/accounts/provisioning-lock"
 import {
+  DESKTOP_LOCAL_ACCOUNT_ID,
+  isDesktopLocalAccountEnabled,
+  isDeviceManagedAccount,
+  isDeviceUnlockSupported,
+  isRememberedOnDevice,
+  desktopLocalAccountPassword,
+  clearDesktopLocalAccountPassword,
+  readDeviceUnlockSecret,
+  saveDeviceUnlockSecret,
+  clearDeviceUnlockSecret,
+  saveDesktopLocalAccountRecoveryKey,
+  readDesktopLocalAccountRecoveryKey,
+  clearDesktopLocalAccountRecoveryKey,
+} from "@/lib/accounts/desktop-local-account"
+import {
   AccountContentCipher,
   activateAccountContentCipher,
   lockAccountContentCipher,
@@ -33,10 +48,10 @@ import {
   isDevLocalAccountEnabled,
 } from "@/lib/accounts/dev-auto-unlock"
 import {
-  forgetDevSessionUnlock,
-  readDevSessionUnlock,
-  rememberDevSessionUnlock,
-} from "@/lib/accounts/dev-session-unlock"
+  forgetTabSessionUnlock,
+  readTabSessionUnlock,
+  rememberTabSessionUnlock,
+} from "@/lib/accounts/tab-session-unlock"
 import {
   clearQuickUnlockDeviceMaterial,
   enrollQuickUnlock,
@@ -111,10 +126,42 @@ export interface CreateLocalAccountInput {
   displayName: string
   password: string
   activate?: boolean
+  protection?: LocalAccountRecord["protection"]
 }
 
 export interface DeleteLocalAccountOptions {
   replacementAccountId?: string
+}
+
+export interface UnlockAccountOptions {
+  /**
+   * Desktop only. `true` keeps the password just proved in the native secret
+   * store so the profile opens without a prompt from now on, `false` turns
+   * that off, absent leaves the choice as it was.
+   */
+  rememberOnDevice?: boolean
+}
+
+/**
+ * Why a profile that should have opened on its own did not.
+ *
+ * Only a remembered password profile produces one: its password still works,
+ * so boot falls back to the lock screen and says why instead of failing.
+ *
+ *  - `secret-store-unavailable`: the native store could not be read (locked,
+ *    access denied). The secret is kept, and the next launch tries again.
+ *  - `secret-missing`: the store answered but held nothing, so the option was
+ *    turned off.
+ *  - `secret-rejected`: the stored password no longer opens the profile (it was
+ *    changed elsewhere), so the stale copy was forgotten and the option turned
+ *    off.
+ *  - `unlock-failed`: the secret was fine but activation failed for another
+ *    reason, reported in `message`.
+ */
+export interface AutoUnlockFailure {
+  accountId: string
+  reason: "secret-store-unavailable" | "secret-missing" | "secret-rejected" | "unlock-failed"
+  message?: string
 }
 
 export interface AccountStoreState {
@@ -126,11 +173,34 @@ export interface AccountStoreState {
   locked: boolean
   error: string | null
   pendingRecoveryKey: string | null
+  /**
+   * Whose key `pendingRecoveryKey` is. Acknowledging it may delete a stored
+   * copy, and only the profile the key belongs to may lose one: the manage
+   * dialog creates a second profile without activating it, so the active
+   * profile is the wrong thing to ask.
+   */
+  pendingRecoveryKeyAccountId: string | null
+  /** Set when boot could not open a remembered profile on its own. */
+  autoUnlockFailure: AutoUnlockFailure | null
   accountRevision: number
 
   load: () => Promise<void>
   createAccount: (input: CreateLocalAccountInput) => Promise<LocalAccountRecord>
-  unlockAccount: (accountId: string, password: string) => Promise<void>
+  unlockAccount: (
+    accountId: string,
+    password: string,
+    options?: UnlockAccountOptions
+  ) => Promise<void>
+  /**
+   * Turn "unlock automatically on this device" on or off for a password
+   * profile. Enabling requires the profile's password, which is exactly the
+   * secret that gets stored. Desktop only.
+   */
+  setRememberOnDevice: (
+    accountId: string,
+    enabled: boolean,
+    password?: string
+  ) => Promise<LocalAccountRecord>
   /**
    * Open an account with an enrolled PIN, pattern or passkey.
    *
@@ -249,6 +319,8 @@ const DEFAULT_STATE = {
   locked: false,
   error: null,
   pendingRecoveryKey: null,
+  pendingRecoveryKeyAccountId: null,
+  autoUnlockFailure: null,
   accountRevision: 0,
 }
 
@@ -354,10 +426,9 @@ export function createAccountStore(
 
     /**
      * `rememberSecret` is the password the caller just proved, handed down so
-     * the dev-only session resume can reuse it after an HMR reload. It is
-     * stored only once the whole activation has succeeded, and only in a
-     * development browser build. Callers that already unlocked from a
-     * remembered secret pass nothing.
+     * the browser tab-session resume can reuse it after a reload. It is stored
+     * only once the whole activation has succeeded, and only in a browser.
+     * Callers that already unlocked from a remembered secret pass nothing.
      */
     const activateUnlockedAccount = async (
       accountId: string,
@@ -386,14 +457,27 @@ export function createAccountStore(
         target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
       )
       await dependencies.activateAccountLocalState(accountId)
+      const record = get().accounts.find((account) => account.id === accountId)
+      const pendingDesktopRecovery =
+        isTauri() && accountId === DESKTOP_LOCAL_ACCOUNT_ID && record?.protection === "password"
+          ? await readDesktopLocalAccountRecoveryKey().catch(() => null)
+          : null
       set((state) => ({
         activeAccountId: accountId,
         unlockedAccountId: accountId,
         locked: false,
         error: null,
+        autoUnlockFailure: null,
         accountRevision: state.accountRevision + 1,
+        // A recovery key still waiting in the secret store is surfaced here
+        // until it is acknowledged. An unreadable store must not fail an
+        // unlock the password already proved: the key is simply shown on a
+        // later unlock, once the store answers.
+        ...(pendingDesktopRecovery
+          ? { pendingRecoveryKey: pendingDesktopRecovery, pendingRecoveryKeyAccountId: accountId }
+          : {}),
       }))
-      if (rememberSecret) rememberDevSessionUnlock(accountId, rememberSecret)
+      if (rememberSecret) rememberTabSessionUnlock(accountId, rememberSecret)
       publishUnlockStage(accountId, "ready")
     }
 
@@ -403,27 +487,140 @@ export function createAccountStore(
      * Returns the unlocked account id, or null to leave the gate up. Every
      * failure path is silent and forgets the secret rather than throwing: a
      * stale or wrong remembered value must degrade to "type your password",
-     * never to a boot that cannot settle. See `lib/accounts/dev-session-unlock.ts`.
+     * never to a boot that cannot settle. See `lib/accounts/tab-session-unlock.ts`.
      */
-    const resumeDevSessionUnlock = async (
+    const resumeTabSessionUnlock = async (
       accounts: LocalAccountRecord[],
       activeAccountId: string | null
     ): Promise<string | null> => {
       if (!activeAccountId) return null
       if (!accounts.some((account) => account.id === activeAccountId)) return null
-      const password = readDevSessionUnlock(activeAccountId)
+      const password = readTabSessionUnlock(activeAccountId)
       if (!password) return null
       try {
         if (!(await browserVaultExists(activeAccountId))) {
-          forgetDevSessionUnlock(activeAccountId)
+          forgetTabSessionUnlock(activeAccountId)
           return null
         }
         await unlockBrowserVault(activeAccountId, password)
         await activateUnlockedAccount(activeAccountId)
         return activeAccountId
       } catch {
-        forgetDevSessionUnlock(activeAccountId)
+        forgetTabSessionUnlock(activeAccountId)
         publishUnlockStage(activeAccountId, "failed")
+        return null
+      }
+    }
+
+    /**
+     * Forget a stored device secret the profile no longer opens with, and turn
+     * the option off so boot stops trying it. Best-effort on both halves: a
+     * stale secret is harmless beyond the one refused attempt it costs.
+     */
+    const forgetRejectedDeviceSecret = async (accountId: string): Promise<void> => {
+      await clearDeviceUnlockSecret(accountId).catch(() => undefined)
+      try {
+        const updated = await dependencies.registry.updateRememberOnDevice(accountId, false)
+        set((state) => ({ accounts: upsertAccount(state.accounts, updated) }))
+      } catch {
+        // The registry refusing leaves the flag on; the next boot finds no
+        // secret and reports `secret-missing`, which turns it off again.
+      }
+    }
+
+    /**
+     * Turn "unlock automatically on this device" on or off. The caller has
+     * already proven `password`.
+     *
+     * Enabling writes the secret first and the registry flag second, so boot
+     * never sees the flag without a secret behind it; a refused registry write
+     * takes the secret back out. Disabling runs the other way round: the flag
+     * is what boot consults, so clearing it is what turns the option off, and
+     * the secret is removed after it on a best-effort basis.
+     */
+    const applyRememberOnDevice = async (
+      accountId: string,
+      enabled: boolean,
+      password?: string
+    ): Promise<LocalAccountRecord> => {
+      if (!enabled) {
+        const updated = await dependencies.registry.updateRememberOnDevice(accountId, false)
+        set((state) => ({ accounts: upsertAccount(state.accounts, updated) }))
+        await clearDeviceUnlockSecret(accountId).catch(() => undefined)
+        return updated
+      }
+      if (!isDeviceUnlockSupported()) {
+        throw new AccountUnlockError(
+          "secret-store-unavailable",
+          "Automatic unlock is only available in the desktop app."
+        )
+      }
+      assertPasswordProvided(password)
+      try {
+        await saveDeviceUnlockSecret(accountId, password)
+      } catch (error) {
+        throw new AccountUnlockError(
+          "secret-store-unavailable",
+          `This device's credential store did not keep the password: ${toError(error).message}`
+        )
+      }
+      try {
+        const updated = await dependencies.registry.updateRememberOnDevice(accountId, true)
+        set((state) => ({ accounts: upsertAccount(state.accounts, updated) }))
+        return updated
+      } catch (error) {
+        await clearDeviceUnlockSecret(accountId).catch(() => undefined)
+        throw error
+      }
+    }
+
+    /**
+     * Open a remembered password profile from the native secret store.
+     *
+     * Never throws. The profile's password still works, so every failure ends
+     * on the ordinary lock screen with `autoUnlockFailure` saying why, rather
+     * than on a boot error the owner cannot act on.
+     */
+    const openRememberedAccount = async (account: LocalAccountRecord): Promise<string | null> => {
+      let secret: string | null
+      try {
+        secret = await readDeviceUnlockSecret(account.id)
+      } catch (error) {
+        set({
+          autoUnlockFailure: {
+            accountId: account.id,
+            reason: "secret-store-unavailable",
+            message: toError(error).message,
+          },
+        })
+        return null
+      }
+      if (!secret) {
+        await forgetRejectedDeviceSecret(account.id)
+        set({ autoUnlockFailure: { accountId: account.id, reason: "secret-missing" } })
+        return null
+      }
+      try {
+        await get().unlockAccount(account.id, secret)
+        return account.id
+      } catch (error) {
+        const unlockError = asUnlockError(error)
+        if (unlockError.code === "invalid-password") {
+          await forgetRejectedDeviceSecret(account.id)
+          set({
+            error: null,
+            autoUnlockFailure: { accountId: account.id, reason: "secret-rejected" },
+          })
+        } else {
+          set({
+            error: null,
+            autoUnlockFailure: {
+              accountId: account.id,
+              reason: "unlock-failed",
+              message: unlockError.message,
+            },
+          })
+        }
         return null
       }
     }
@@ -455,7 +652,7 @@ export function createAccountStore(
         // The recovery-key screen is the last of the six first-run
         // interactions, and this key wraps a throwaway database whose password
         // is a constant in the bundle. Surfacing it would defeat the point.
-        set({ pendingRecoveryKey: null, error: null })
+        set({ pendingRecoveryKey: null, pendingRecoveryKeyAccountId: null, error: null })
         return account.id
       } catch {
         // `createAccount` already recorded the failure through `setFailure`.
@@ -469,7 +666,7 @@ export function createAccountStore(
     /**
      * Re-open the development account from its constant password.
      *
-     * Unlike `resumeDevSessionUnlock` this needs nothing remembered, which is
+     * Unlike `resumeTabSessionUnlock` this needs nothing remembered, which is
      * the whole point: `sessionStorage` dies with the tab, so a second window
      * or a fresh agent context would otherwise be back at the lock screen.
      */
@@ -494,14 +691,88 @@ export function createAccountStore(
         // the app hangs on "Loading accounts…" forever. The `!error` term is
         // what keeps that from making a transient registry failure permanent:
         // a settled-but-failed load can still be retried.
+        //
+        // An unlocked session is never re-decided, whatever `error` says. Any
+        // failed action (a wrong current password in Settings, say) leaves
+        // `error` set, and re-running the boot read then recomputed
+        // `unlockedAccountId` from scratch, which locked the app out from
+        // under someone who was using it.
         if (get().loading) return
-        if (get().loaded && !get().error) return
-        set({ loading: true, error: null })
+        if (get().loaded && (!get().error || get().unlockedAccountId)) return
+        set({ loading: true, error: null, autoUnlockFailure: null })
+        let desktopBootstrapAttempted = false
         try {
           let [accounts, registryState] = await Promise.all([
             dependencies.registry.listAccounts(),
             dependencies.registry.getState(),
           ])
+          let desktopLocalAccountId: string | null = null
+          if (isDesktopLocalAccountEnabled()) {
+            desktopLocalAccountId = await withAccountProvisioningLock(
+              DESKTOP_LOCAL_ACCOUNT_ID,
+              async () => {
+                const current = await dependencies.registry.listAccounts()
+                const currentState = await dependencies.registry.getState()
+                const selected = current.find(
+                  (record) => record.id === currentState.activeAccountId
+                )
+                if (current.length === 0) {
+                  desktopBootstrapAttempted = true
+                  // An orphaned vault is data, not permission to mint a new DEK.
+                  if (await browserVaultExists(DESKTOP_LOCAL_ACCOUNT_ID)) {
+                    throw new AccountUnlockError(
+                      "vault-not-provisioned",
+                      "The local workspace registry is missing; restore it before continuing."
+                    )
+                  }
+                  const password = (await desktopLocalAccountPassword(true)) ?? undefined
+                  assertPasswordProvided(password)
+                  const created = await get().createAccount({
+                    id: DESKTOP_LOCAL_ACCOUNT_ID,
+                    displayName: "Local",
+                    password,
+                    protection: "device",
+                  })
+                  set({ pendingRecoveryKey: null, pendingRecoveryKeyAccountId: null })
+                  return created.id
+                }
+                if (!isDeviceManagedAccount(selected)) return null
+                desktopBootstrapAttempted = true
+                set({ accounts: current, activeAccountId: selected.id, locked: true })
+                if (!(await browserVaultExists(selected.id))) {
+                  throw new AccountUnlockError(
+                    "vault-not-provisioned",
+                    "The local workspace vault is missing; restore it before continuing."
+                  )
+                }
+                await get().unlockAccount(selected.id, "")
+                return selected.id
+              }
+            )
+            if (desktopLocalAccountId) {
+              ;[accounts, registryState] = await Promise.all([
+                dependencies.registry.listAccounts(),
+                dependencies.registry.getState(),
+              ])
+            }
+          }
+          // A password profile whose owner chose "unlock automatically on this
+          // device". Its password still works, so any failure here ends on the
+          // ordinary lock screen with `autoUnlockFailure` explaining it, never
+          // on a failed boot.
+          let rememberedAccountId: string | null = null
+          if (!desktopLocalAccountId && isDesktopLocalAccountEnabled()) {
+            const selected = accounts.find((record) => record.id === registryState.activeAccountId)
+            if (isRememberedOnDevice(selected)) {
+              rememberedAccountId = await openRememberedAccount(selected)
+              // A rejected or missing secret turned the option off in the
+              // registry, so the list this boot publishes must say so too.
+              ;[accounts, registryState] = await Promise.all([
+                dependencies.registry.listAccounts(),
+                dependencies.registry.getState(),
+              ])
+            }
+          }
           const e2eAutoUnlockAccountId = resolveE2EAutoUnlockTarget(
             accounts,
             registryState.activeAccountId
@@ -546,14 +817,20 @@ export function createAccountStore(
             }
           }
           const activeAccountId =
-            e2eAutoUnlockAccountId ?? devLocalAccountId ?? registryState.activeAccountId
-          // Dev convenience, one tab, one typed password. Never provisions a
-          // vault: a remembered secret may only re-open a vault that already
-          // exists, so first-run account creation stays a deliberate choice.
-          const unlockedAccountId =
+            desktopLocalAccountId ??
+            rememberedAccountId ??
             e2eAutoUnlockAccountId ??
             devLocalAccountId ??
-            (await resumeDevSessionUnlock(accounts, activeAccountId))
+            registryState.activeAccountId
+          // Browser tab-session resume, one tab, one typed password. Never
+          // provisions a vault: a remembered secret may only re-open a vault
+          // that already exists, so account creation stays a deliberate choice.
+          const unlockedAccountId =
+            desktopLocalAccountId ??
+            rememberedAccountId ??
+            e2eAutoUnlockAccountId ??
+            devLocalAccountId ??
+            (await resumeTabSessionUnlock(accounts, activeAccountId))
           set((state) => ({
             accounts,
             activeAccountId,
@@ -565,6 +842,30 @@ export function createAccountStore(
             accountRevision: state.accountRevision,
           }))
         } catch (error) {
+          if (desktopBootstrapAttempted) {
+            const rollbackFailures = await rollbackNativeAccountActivation(DESKTOP_LOCAL_ACCOUNT_ID)
+            try {
+              dependencies.clearAccountLocalState()
+            } catch (rollbackError) {
+              rollbackFailures.push(rollbackError)
+            }
+            try {
+              const [accounts, registryState] = await Promise.all([
+                dependencies.registry.listAccounts(),
+                dependencies.registry.getState(),
+              ])
+              set({ accounts, activeAccountId: registryState.activeAccountId })
+            } catch (registryError) {
+              rollbackFailures.push(registryError)
+            }
+            set({ unlockedAccountId: null, locked: true })
+            if (rollbackFailures.length > 0) {
+              error = new AggregateError(
+                [error, ...rollbackFailures],
+                "Local workspace startup failed and cleanup was incomplete."
+              )
+            }
+          }
           set({ loaded: true })
           throw setFailure(error)
         }
@@ -573,6 +874,14 @@ export function createAccountStore(
       createAccount: async (input) => {
         set({ error: null })
         try {
+          if (
+            input.protection === "device" &&
+            (!isTauri() || input.id !== DESKTOP_LOCAL_ACCOUNT_ID)
+          ) {
+            throw new Error(
+              "Device-managed protection is reserved for the local desktop workspace."
+            )
+          }
           const existingAccounts = get().loaded
             ? get().accounts
             : await dependencies.registry.listAccounts()
@@ -603,16 +912,26 @@ export function createAccountStore(
                   )
                 }
               }
+              if (input.protection === "device" && (await browserVaultExists(accountId))) {
+                throw new AccountUnlockError(
+                  "vault-not-provisioned",
+                  "An existing local workspace vault cannot be replaced."
+                )
+              }
               const provisioned = shouldActivate
                 ? await provisionBrowserVault(accountId, input.password)
                 : await provisionBrowserVault(accountId, input.password, false)
               let created: LocalAccountRecord
               try {
+                if (input.protection === "device") {
+                  await saveDesktopLocalAccountRecoveryKey(provisioned)
+                }
                 created = await dependencies.registry.createAccount({
                   id: accountId,
                   displayName: input.displayName,
                   passwordVerifier,
                   activate: shouldActivate,
+                  ...(input.protection ? { protection: input.protection } : {}),
                 })
               } catch (error) {
                 await deleteBrowserVault(accountId).catch(() => {})
@@ -659,7 +978,8 @@ export function createAccountStore(
               // key that opens it left the user with a secret they were never
               // shown. The unlock path already surfaces it on those runtimes
               // (see `unlockAccount`), so gating it here was an inconsistency.
-              pendingRecoveryKey: recoveryKey,
+              pendingRecoveryKey: input.protection === "device" ? null : recoveryKey,
+              pendingRecoveryKeyAccountId: input.protection === "device" ? null : account.id,
               accountRevision: shouldActivate ? state.accountRevision + 1 : state.accountRevision,
             }
           })
@@ -675,10 +995,10 @@ export function createAccountStore(
             )
             await dependencies.activateAccountLocalState(account.id)
             // Creation leaves the account unlocked without going through
-            // `activateUnlockedAccount`, so the dev resume has to be seeded
+            // `activateUnlockedAccount`, so the tab resume has to be seeded
             // here too. Without it the very first navigation after first-run
             // setup asks for the password that was typed seconds earlier.
-            rememberDevSessionUnlock(account.id, input.password)
+            rememberTabSessionUnlock(account.id, input.password)
           }
 
           return account
@@ -687,12 +1007,31 @@ export function createAccountStore(
         }
       },
 
-      unlockAccount: async (accountId, password) => {
+      unlockAccount: async (accountId, password, options = {}) => {
         set({ error: null })
         let nativeAccountActivated = false
         try {
-          assertPasswordProvided(password)
           const account = await findAccount(accountId)
+          if (isDeviceManagedAccount(account)) {
+            if (!isTauri() || !(await browserVaultExists(account.id))) {
+              throw new AccountUnlockError(
+                "vault-not-provisioned",
+                "The local workspace vault is missing."
+              )
+            }
+            const deviceSecret = await desktopLocalAccountPassword()
+            if (!deviceSecret) {
+              // Not "password required": nobody ever typed one. The store
+              // answered and holds no credential for this workspace (a
+              // restored or separate store, e.g. a debug build's dev store).
+              throw new AccountUnlockError(
+                "vault-not-provisioned",
+                "The local workspace's device credential is missing from this device's credential store."
+              )
+            }
+            password = deviceSecret
+          }
+          assertPasswordProvided(password)
           publishUnlockStage(account.id, "verifying")
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
@@ -706,8 +1045,15 @@ export function createAccountStore(
               await unlockBrowserVault(account.id, password)
             } else {
               const recoveryKey = await provisionBrowserVault(account.id, password)
-              set({ pendingRecoveryKey: recoveryKey })
+              set({ pendingRecoveryKey: recoveryKey, pendingRecoveryKeyAccountId: account.id })
             }
+          }
+          // After the password is proven and before anything opens: a store
+          // that refuses the secret fails this attempt with its own code, so
+          // the owner can untick the option and get in, rather than landing in
+          // an app that silently did not keep the choice they just made.
+          if (options.rememberOnDevice !== undefined && !isDeviceManagedAccount(account)) {
+            await applyRememberOnDevice(account.id, options.rememberOnDevice, password)
           }
           await activateUnlockedAccount(account.id, password)
         } catch (error) {
@@ -722,6 +1068,36 @@ export function createAccountStore(
           }
           publishUnlockStage(accountId, "failed")
           throw setFailure(asUnlockError(error))
+        }
+      },
+
+      setRememberOnDevice: async (accountId, enabled, password) => {
+        set({ error: null })
+        try {
+          const account = await findAccount(accountId)
+          if (isDeviceManagedAccount(account)) {
+            throw new AccountUnlockError(
+              "invalid-password",
+              "The local workspace already opens on this device; set a password to require one."
+            )
+          }
+          if (!enabled) {
+            return await applyRememberOnDevice(account.id, false)
+          }
+          assertPasswordProvided(password)
+          // Proving the password is what earns the stored copy: a secret the
+          // profile does not open with would only fail at the next launch.
+          // Verified without an account id, so the host binding of the
+          // session that is already unlocked is left exactly as it is.
+          const ok = shouldUseBrowserVault()
+            ? await verifyBrowserVaultPassword(account.id, password)
+            : await verifyPassword(password, account.passwordVerifier)
+          if (!ok) {
+            throw new AccountUnlockError("invalid-password", "Invalid local account password.")
+          }
+          return await applyRememberOnDevice(account.id, true, password)
+        } catch (error) {
+          throw setFailure(error)
         }
       },
 
@@ -874,6 +1250,32 @@ export function createAccountStore(
             await activateUnlockedAccount(accountId)
             return
           }
+          // Work out what the target opens with BEFORE locking anything. A
+          // switch with no password and no stored secret can only fail, and
+          // failing after the lock stranded the owner on the lock screen of
+          // the account they were trying to leave. Nothing here is checked
+          // against the host yet, so resolving it early widens nothing.
+          const account = await findAccount(accountId)
+          let credentialFromDevice = false
+          if (!password && isDeviceManagedAccount(account) && isTauri()) {
+            if (!(await browserVaultExists(account.id))) {
+              throw new AccountUnlockError(
+                "vault-not-provisioned",
+                "The local workspace vault is missing."
+              )
+            }
+            password = (await desktopLocalAccountPassword()) ?? undefined
+            if (!password) {
+              throw new AccountUnlockError(
+                "vault-not-provisioned",
+                "The local workspace's device credential is missing from this device's credential store."
+              )
+            }
+          } else if (!password && isDesktopLocalAccountEnabled() && isRememberedOnDevice(account)) {
+            password = (await readDeviceUnlockSecret(account.id).catch(() => null)) ?? undefined
+            credentialFromDevice = password !== undefined
+          }
+          assertPasswordProvided(password)
           // Switching begins at the security boundary, not after the target
           // password succeeds. This prevents a surviving plugin runtime from
           // observing the target account's native permission ledger during the
@@ -882,14 +1284,13 @@ export function createAccountStore(
           if (get().unlockedAccountId) {
             await get().lock()
           }
-          assertPasswordProvided(password)
-          const account = await findAccount(accountId)
           publishUnlockStage(account.id, "verifying")
           if (shouldUseBrowserVault()) {
             await unlockBrowserVault(account.id, password)
           } else {
             const ok = await verifyPassword(password, account.passwordVerifier, account.id)
             if (!ok) {
+              if (credentialFromDevice) await forgetRejectedDeviceSecret(account.id)
               throw new AccountUnlockError("invalid-password", "Invalid local account password.")
             }
             nativeAccountActivated = true
@@ -897,7 +1298,7 @@ export function createAccountStore(
               await unlockBrowserVault(account.id, password)
             } else {
               const recoveryKey = await provisionBrowserVault(account.id, password)
-              set({ pendingRecoveryKey: recoveryKey })
+              set({ pendingRecoveryKey: recoveryKey, pendingRecoveryKeyAccountId: account.id })
             }
           }
           await activateUnlockedAccount(account.id, password)
@@ -937,9 +1338,27 @@ export function createAccountStore(
       changePassword: async (accountId, currentPassword, newPassword) => {
         set({ error: null })
         try {
-          assertPasswordProvided(currentPassword)
           assertPasswordProvided(newPassword)
           const account = await findAccount(accountId)
+          const deviceManaged = isDeviceManagedAccount(account)
+          let managedRecoveryKey: string | null = null
+          if (deviceManaged) {
+            if (!isTauri() || get().unlockedAccountId !== accountId) {
+              throw new AccountUnlockError(
+                "invalid-password",
+                "Unlock the local workspace before setting its password."
+              )
+            }
+            currentPassword = (await desktopLocalAccountPassword()) ?? ""
+            managedRecoveryKey = await readDesktopLocalAccountRecoveryKey()
+            if (!managedRecoveryKey) {
+              throw new AccountUnlockError(
+                "vault-not-provisioned",
+                "The local workspace recovery key is unavailable."
+              )
+            }
+          }
+          assertPasswordProvided(currentPassword)
           const useBrowserVault = shouldUseBrowserVault()
           let passwordVerifier: LocalAccountRecord["passwordVerifier"]
           let updated: LocalAccountRecord
@@ -1006,10 +1425,14 @@ export function createAccountStore(
               throw vaultError
             }
             try {
-              updated = await dependencies.registry.updatePasswordVerifier(
-                accountId,
-                passwordVerifier
-              )
+              updated = deviceManaged
+                ? await dependencies.registry.updatePasswordVerifier(
+                    accountId,
+                    passwordVerifier,
+                    undefined,
+                    "password"
+                  )
+                : await dependencies.registry.updatePasswordVerifier(accountId, passwordVerifier)
             } catch (registryError) {
               const rollbackErrors: unknown[] = []
               try {
@@ -1043,8 +1466,34 @@ export function createAccountStore(
               accounts,
               locked: computeLocked(accounts, state.activeAccountId, state.unlockedAccountId),
               error: null,
+              ...(managedRecoveryKey
+                ? { pendingRecoveryKey: managedRecoveryKey, pendingRecoveryKeyAccountId: accountId }
+                : {}),
             }
           })
+          if (deviceManaged) {
+            // Best-effort: the vault is already rekeyed and the profile is a
+            // password profile now, so the device secret opens nothing (unlock
+            // only consults it for `protection: "device"`). A locked store
+            // must not report the committed change as a failure.
+            await clearDesktopLocalAccountPassword().catch(() => undefined)
+          }
+          // A remembered profile must keep opening on its own, so the stored
+          // copy follows the new password. If the store refuses, the old copy
+          // would be rejected at the next launch; turning the option off now
+          // says so plainly instead of surprising the owner then.
+          if (isDesktopLocalAccountEnabled() && isRememberedOnDevice(account)) {
+            try {
+              await saveDeviceUnlockSecret(accountId, newPassword)
+            } catch (storeError) {
+              const disabled = await applyRememberOnDevice(accountId, false)
+              set((state) => ({ accounts: upsertAccount(state.accounts, disabled) }))
+              throw new AccountUnlockError(
+                "secret-store-unavailable",
+                `The password was changed, but automatic unlock could not be updated and was turned off: ${toError(storeError).message}`
+              )
+            }
+          }
           return updated
         } catch (error) {
           throw setFailure(error)
@@ -1096,6 +1545,16 @@ export function createAccountStore(
           }
           await dependencies.purgeAccountLocalState(accountId)
           await deleteBrowserVault(accountId)
+          if (accountId === DESKTOP_LOCAL_ACCOUNT_ID) {
+            await clearDesktopLocalAccountPassword()
+            await clearDesktopLocalAccountRecoveryKey()
+          } else if (isTauri()) {
+            // A remembered password outlives nothing it could open once the
+            // vault and database are gone, so a store that cannot be reached
+            // right now does not get to fail a deletion that has already
+            // destroyed the data.
+            await clearDeviceUnlockSecret(accountId).catch(() => undefined)
+          }
           const browserVaultDeleted = true
 
           set((state) => {
@@ -1168,11 +1627,11 @@ export function createAccountStore(
           }
         }
 
-        // First, and outside `attempt`: a lock that left the remembered dev
-        // secret behind would be undone by the very next boot, which is the one
-        // outcome a lock must never produce. Clearing storage cannot throw in a
-        // way the helper does not already swallow.
-        forgetDevSessionUnlock()
+        // First, and outside `attempt`: a lock that left the tab's remembered
+        // secret behind would be undone by the very next reload, which is the
+        // one outcome a lock must never produce. Clearing storage cannot throw
+        // in a way the helper does not already swallow.
+        forgetTabSessionUnlock()
 
         await attempt(() => dependencies.stopRuntimeSubscriptions())
         if (unlockedAccountId) {
@@ -1203,7 +1662,21 @@ export function createAccountStore(
       },
 
       acknowledgeRecoveryKey: () => {
-        set({ pendingRecoveryKey: null })
+        // Keyed on whose key is on screen, never on the active profile: a
+        // second profile created from the manage dialog is not activated, and
+        // acknowledging ITS key used to delete the Local workspace's stored
+        // one, which "set a password" then needed and could not find.
+        if (isTauri() && get().pendingRecoveryKeyAccountId === DESKTOP_LOCAL_ACCOUNT_ID) {
+          void clearDesktopLocalAccountRecoveryKey()
+            .then(() =>
+              set({ pendingRecoveryKey: null, pendingRecoveryKeyAccountId: null, error: null })
+            )
+            .catch((error) => {
+              setFailure(error)
+            })
+          return
+        }
+        set({ pendingRecoveryKey: null, pendingRecoveryKeyAccountId: null })
       },
     }
   })

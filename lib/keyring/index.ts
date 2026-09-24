@@ -57,10 +57,15 @@ async function safeInvokeThrowing<T>(name: string, payload?: unknown): Promise<T
 /**
  * Read a secret. Returns `null` when the entry is missing, the Rust call
  * fails, or the web fallback has no passphrase configured.
+ * Desktop callers that must distinguish absence from failure pass `strict: true`.
  */
-export async function getSecret(ref: KeyringRef): Promise<string | null> {
+export async function getSecret(
+  ref: KeyringRef,
+  options: { strict?: boolean } = {}
+): Promise<string | null> {
   if (isTauri()) {
-    const value = await safeInvoke<string | null>("secret_store_get", {
+    const read = options.strict ? safeInvokeThrowing<string | null> : safeInvoke<string | null>
+    const value = await read("secret_store_get", {
       input: { namespace: ref.namespace, key: ref.key } satisfies IpcInput,
     })
     return value ?? null
@@ -80,10 +85,14 @@ export async function setSecret(ref: KeyringRef, value: string): Promise<void> {
   await writeWebFallback(ref, value)
 }
 
-/** Remove an entry. Idempotent. */
-export async function clearSecret(ref: KeyringRef): Promise<void> {
+/** Remove an entry. Idempotent; `strict: true` propagates desktop deletion failures. */
+export async function clearSecret(
+  ref: KeyringRef,
+  options: { strict?: boolean } = {}
+): Promise<void> {
   if (isTauri()) {
-    await safeInvoke<null>("secret_store_delete", {
+    const remove = options.strict ? safeInvokeThrowing<null> : safeInvoke<null>
+    await remove("secret_store_delete", {
       input: { namespace: ref.namespace, key: ref.key } satisfies IpcInput,
     })
     return

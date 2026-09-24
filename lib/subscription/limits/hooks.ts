@@ -9,7 +9,9 @@
 import { useCallback, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { reportSecretStoreFailure } from "@/lib/credentials/secret-store-readiness"
 import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -148,6 +150,17 @@ export function useAllConfiguredLimits(activeProvider?: ProviderId): UseAllConfi
       setSnapshots(all)
       for (const snap of all) {
         await recordLimitsSnapshot(snap)
+      }
+    } catch (error) {
+      // Every automatic caller (status bar, tray, palette, composer) fires
+      // `void refresh()`, so a rejection here escaped as one unhandled promise
+      // rejection per mounted instance. A locked secret store is reported once
+      // centrally; the subscription initializer re-runs after the unlock and
+      // its change notification re-fires every mounted refresh.
+      if (!reportSecretStoreFailure(error, "subscription.limits")) {
+        loggers.store.warn("Configured limits refresh failed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     } finally {
       setRefreshing(false)

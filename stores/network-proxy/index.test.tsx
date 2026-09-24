@@ -4,6 +4,7 @@
 
 import { render } from "@testing-library/react"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
+import { migrateLegacyProxyPassword } from "@/lib/network/proxy-credentials"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -182,6 +183,93 @@ describe("getNetworkProxy", () => {
 })
 
 describe("applyProxyToRust", () => {
+  it.each(["off", "manual"] as const)(
+    "applies %s without a frontend keyring lookup when no legacy password exists",
+    async (mode) => {
+      tauri.isTauri.mockReturnValue(true)
+      tauriCore.invoke.mockResolvedValue(undefined)
+
+      await proxyStore.applyProxyToRust({
+        ...DEFAULT_NETWORK_PROXY_SETTINGS,
+        mode,
+        host: "127.0.0.1",
+        port: 7890,
+      })
+
+      expect(migrateLegacyProxyPassword).not.toHaveBeenCalled()
+      expect(tauriCore.invoke).toHaveBeenCalledWith(
+        "proxy_apply",
+        expect.objectContaining({ input: expect.objectContaining({ mode }) })
+      )
+    }
+  )
+
+  it("preserves native credential failures and retries the authenticated policy", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    tauriCore.invoke.mockRejectedValueOnce(new Error("PROXY_CREDENTIAL_UNAVAILABLE"))
+    tauriCore.invoke.mockResolvedValueOnce(undefined)
+    const settings = {
+      ...DEFAULT_NETWORK_PROXY_SETTINGS,
+      mode: "manual" as const,
+      host: "proxy.corp",
+      port: 8080,
+      username: "alice",
+    }
+
+    await expect(proxyStore.applyProxyToRust(settings)).rejects.toThrow(
+      "PROXY_CREDENTIAL_UNAVAILABLE"
+    )
+    await expect(proxyStore.applyProxyToRust(settings)).resolves.toBeUndefined()
+
+    expect(tauriCore.invoke).toHaveBeenCalledTimes(2)
+    for (const [, args] of tauriCore.invoke.mock.calls) {
+      expect(args.input).toMatchObject({ mode: "manual", username: "alice" })
+    }
+  })
+
+  it("does not apply or erase a legacy password when migration fails", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    jest
+      .mocked(migrateLegacyProxyPassword)
+      .mockRejectedValueOnce(new Error("PROXY_CREDENTIAL_UNAVAILABLE"))
+    const settings = { ...DEFAULT_NETWORK_PROXY_SETTINGS, password: "legacy-secret" }
+    const save = jest.fn()
+    useSettingsStore.setState({ save })
+
+    await expect(proxyStore.applyProxyToRust(settings)).rejects.toThrow(
+      "PROXY_CREDENTIAL_UNAVAILABLE"
+    )
+
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled()
+    expect(settings.password).toBe("legacy-secret")
+  })
+
+  it.each(["legacy-secret", ""])(
+    "persists a migrated legacy password row only after native apply succeeds (%p)",
+    async (password) => {
+      tauri.isTauri.mockReturnValue(true)
+      const sanitized = { ...DEFAULT_NETWORK_PROXY_SETTINGS }
+      jest.mocked(migrateLegacyProxyPassword).mockResolvedValueOnce({
+        settings: sanitized,
+        migrated: true,
+        credentialConfigured: password.length > 0,
+      })
+      const save = jest.fn().mockResolvedValue(undefined)
+      useSettingsStore.setState({ save })
+      tauriCore.invoke.mockImplementationOnce(async () => {
+        expect(save).not.toHaveBeenCalled()
+      })
+
+      const legacySettings = { ...sanitized, password }
+      await proxyStore.applyProxyToRust(legacySettings)
+
+      expect(migrateLegacyProxyPassword).toHaveBeenCalledWith({ ...sanitized, password })
+      expect(save).toHaveBeenCalledWith({ networkProxy: sanitized })
+      expect(tauriCore.invoke.mock.calls[0][1].input).not.toHaveProperty("password")
+    }
+  )
+
   it("is a no-op outside Tauri", async () => {
     tauri.isTauri.mockReturnValue(false)
     await proxyStore.applyProxyToRust()

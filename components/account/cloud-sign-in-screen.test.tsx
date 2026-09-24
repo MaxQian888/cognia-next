@@ -211,4 +211,26 @@ describe("CloudSignInScreen", () => {
     fireEvent.click(screen.getByTestId("cloud-sign-in-offline"))
     expect(h.onContinueOffline).toHaveBeenCalled()
   })
+
+  it("shows discovery failure without inventing a host address", () => {
+    const h = handlers()
+    render(
+      <CloudSignInScreen
+        view={{
+          kind: "unavailable",
+          baseUrl: null,
+          message: "IPC unavailable",
+          canContinueOffline: true,
+        }}
+        error={null}
+        busy={false}
+        {...h}
+      />
+    )
+    expect(screen.getByTestId("cloud-sign-in-unavailable")).toHaveTextContent(
+      "unavailable.discoveryFailed(IPC unavailable)"
+    )
+    fireEvent.click(screen.getByTestId("cloud-sign-in-offline"))
+    expect(h.onContinueOffline).toHaveBeenCalled()
+  })
 })

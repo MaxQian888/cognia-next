@@ -2,6 +2,13 @@ import type { CompanionAuthConfig } from "@/lib/tauri/companion-auth"
 
 import { discoverDeployment, resolveDiscoverySource } from "./deployment-discovery"
 
+jest.mock("@/lib/tauri", () => ({
+  localTransport: { call: jest.fn() },
+  transport: { call: jest.fn() },
+}))
+
+import { localTransport, transport } from "@/lib/tauri"
+
 const MULTI: CompanionAuthConfig = {
   configVersion: 2,
   deploymentMode: "multi-tenant",
@@ -21,6 +28,37 @@ const MULTI: CompanionAuthConfig = {
 } as unknown as CompanionAuthConfig
 
 describe("resolveDiscoverySource", () => {
+  it("reads the local desktop server independently of the selected remote host", async () => {
+    ;(localTransport.call as jest.Mock).mockResolvedValue({ running: true, boundPort: 7890 })
+    await expect(
+      resolveDiscoverySource({
+        profile: "desktop",
+        deploymentSource: () => null,
+      })
+    ).resolves.toEqual({ baseUrl: "http://127.0.0.1:7890" })
+    expect(localTransport.call).toHaveBeenCalledWith("companion_server_status", {})
+    expect(transport.call).not.toHaveBeenCalled()
+  })
+
+  it("reports a failed source lookup without throwing or treating it as no host", async () => {
+    const fetchConfig = jest.fn()
+    await expect(
+      discoverDeployment({
+        profile: "desktop",
+        deploymentSource: () => null,
+        serverStatus: async () => {
+          throw new Error("IPC unavailable")
+        },
+        fetchConfig,
+      })
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "unreachable",
+      baseUrl: null,
+      message: "IPC unavailable",
+    })
+    expect(fetchConfig).not.toHaveBeenCalled()
+  })
   it("asks the desktop's own server on its loopback port, or nothing when stopped", async () => {
     expect(
       await resolveDiscoverySource({

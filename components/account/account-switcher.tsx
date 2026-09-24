@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { cn } from "@/lib/utils"
 import { selectActiveAccount, useAccountStore } from "@/stores/account/account-store"
 
@@ -133,21 +134,23 @@ export function AccountSwitcher() {
           )}
 
           <Separator className="my-1" />
-          <button
-            type="button"
-            onClick={() => {
-              void Promise.resolve(lock())
-                .then(() => setOpen(false))
-                .catch((cause) =>
-                  toast.error(cause instanceof Error ? cause.message : t("operationFailed"))
-                )
-            }}
-            data-testid="account-switcher-lock"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-          >
-            <LockKeyholeIcon className="size-4 text-muted-foreground" />
-            {t("lock")}
-          </button>
+          {!unlocksWithoutPrompt(activeAccount) && (
+            <button
+              type="button"
+              onClick={() => {
+                void Promise.resolve(lock())
+                  .then(() => setOpen(false))
+                  .catch((cause) =>
+                    toast.error(cause instanceof Error ? cause.message : t("operationFailed"))
+                  )
+              }}
+              data-testid="account-switcher-lock"
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            >
+              <LockKeyholeIcon className="size-4 text-muted-foreground" />
+              {t("lock")}
+            </button>
+          )}
           <button
             type="button"
             onClick={openManage}

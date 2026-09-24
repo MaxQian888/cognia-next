@@ -25,6 +25,20 @@ jest.mock("@/components/settings/security/auto-lock-control", () => ({
   AutoLockControl: () => <div data-testid="auto-lock-control" />,
 }))
 
+jest.mock("./remember-on-device-control", () => ({
+  RememberOnDeviceControl: ({ account }: { account: { id: string } }) => (
+    <div data-testid="remember-on-device-control" data-account={account.id} />
+  ),
+}))
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
 import { AccountSecurityTab } from "./account-security-tab"
 
 const account: LocalAccountRecord = {
@@ -121,5 +135,58 @@ describe("AccountSecurityTab", () => {
   it("renders the shared auto-lock control", () => {
     render(<AccountSecurityTab account={account} />)
     expect(screen.getByTestId("auto-lock-control")).toBeInTheDocument()
+  })
+})
+
+it("offers setting a password before exposing locks for a device-managed workspace", async () => {
+  const device = { ...account, id: "acct_desktop_local_workspace", protection: "device" as const }
+  render(<AccountSecurityTab account={device} />)
+  expect(screen.queryByLabelText("currentPasswordLabel")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("account-security-lock-now")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("auto-lock-control")).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText("changeNewPasswordLabel"), {
+    target: { value: "new-secret" },
+  })
+  fireEvent.change(screen.getByLabelText("confirmNewPasswordLabel"), {
+    target: { value: "new-secret" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "setPassword" }))
+  await waitFor(() => expect(changePasswordMock).toHaveBeenCalledWith(device.id, "", "new-secret"))
+})
+
+describe("unlock automatically on this device", () => {
+  it("offers the switch for a password profile in the desktop shell", () => {
+    enterTauriShell()
+    render(<AccountSecurityTab account={account} />)
+    expect(screen.getByTestId("remember-on-device-control")).toHaveAttribute(
+      "data-account",
+      "acct_a"
+    )
+    expect(screen.getByTestId("auto-lock-control")).toBeInTheDocument()
+    expect(screen.getByTestId("account-security-lock-now")).toBeInTheDocument()
+  })
+
+  it("does not offer it in a browser", () => {
+    render(<AccountSecurityTab account={account} />)
+    expect(screen.queryByTestId("remember-on-device-control")).not.toBeInTheDocument()
+  })
+
+  it("explains instead of offering locks a remembered profile would undo", () => {
+    enterTauriShell()
+    render(<AccountSecurityTab account={{ ...account, rememberOnDevice: true }} />)
+    expect(screen.getByTestId("account-security-remembered-help")).toHaveTextContent(
+      "sessionSecurityRememberedHelp"
+    )
+    expect(screen.queryByTestId("auto-lock-control")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("account-security-lock-now")).not.toBeInTheDocument()
+    // The password itself stays changeable.
+    expect(screen.getByLabelText("currentPasswordLabel")).toBeInTheDocument()
+  })
+
+  it("never offers it for the device-managed workspace, which has no typed password", () => {
+    enterTauriShell()
+    const device = { ...account, id: "acct_desktop_local_workspace", protection: "device" as const }
+    render(<AccountSecurityTab account={device} />)
+    expect(screen.queryByTestId("remember-on-device-control")).not.toBeInTheDocument()
   })
 })

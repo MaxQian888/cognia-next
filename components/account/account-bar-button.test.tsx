@@ -150,3 +150,49 @@ describe("AccountBarButton", () => {
     expect(screen.getByTestId("account-bar-button")).not.toHaveTextContent("A")
   })
 })
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("does not offer locking a device-managed workspace", () => {
+  const id = "acct_desktop_local_workspace"
+  mockState = {
+    accounts: [{ ...acc(id, "Local"), protection: "device" }],
+    activeAccountId: id,
+    lock: jest.fn(),
+  }
+  enterTauriShell()
+  render(<AccountBarButton />)
+  fireEvent.click(screen.getByTestId("account-bar-button"))
+  expect(screen.queryByTestId("account-bar-lock")).not.toBeInTheDocument()
+})
+
+it("does not offer locking a profile that unlocks automatically on this device", () => {
+  const id = "acct_remembered"
+  mockState = {
+    accounts: [{ ...acc(id, "Max"), rememberOnDevice: true }],
+    activeAccountId: id,
+    lock: jest.fn(),
+  }
+  enterTauriShell()
+  render(<AccountBarButton />)
+  fireEvent.click(screen.getByTestId("account-bar-button"))
+  expect(screen.queryByTestId("account-bar-lock")).not.toBeInTheDocument()
+})
+
+it("still offers locking in a browser, where no profile opens by itself", () => {
+  const id = "acct_desktop_local_workspace"
+  mockState = {
+    accounts: [{ ...acc(id, "Local"), protection: "device" }],
+    activeAccountId: id,
+    lock: jest.fn(),
+  }
+  render(<AccountBarButton />)
+  fireEvent.click(screen.getByTestId("account-bar-button"))
+  expect(screen.getByTestId("account-bar-lock")).toBeInTheDocument()
+})
