@@ -323,8 +323,16 @@ export function readPromptPreambleSummary(metadata: unknown): PromptPreambleSumm
  * verbatim (same snapshot the user approved the first time), not rebuilt from
  * the records' current state. Content that already opens with an envelope is
  * returned as is.
+ *
+ * `attachmentCount` is how many attachment blocks lead `edited` (the length of
+ * its attachment manifest). The envelope goes on the typed block after them,
+ * where the composer put it: an extracted document is a text block too.
  */
-export function carryPromptPreamble(originalParts: unknown, edited: SendContent): SendContent {
+export function carryPromptPreamble(
+  originalParts: unknown,
+  edited: SendContent,
+  attachmentCount = 0
+): SendContent {
   const preamble = promptPreambleOfParts(originalParts)
   if (!preamble) return edited
   const prepend = (text: string): string =>
@@ -334,7 +342,9 @@ export function carryPromptPreamble(originalParts: unknown, edited: SendContent)
         ? `${preamble}\n\n${text}`
         : preamble
   if (typeof edited === "string") return prepend(edited)
-  const index = edited.findIndex((block) => block.type === "text")
+  const index = edited.findIndex(
+    (block, position) => position >= attachmentCount && block.type === "text"
+  )
   if (index < 0) return [...edited, { type: "text", text: preamble }]
   const next = [...edited]
   const block = edited[index] as { type: "text"; text: string }

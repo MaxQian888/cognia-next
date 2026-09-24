@@ -6,6 +6,10 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 const setDataValue = jest.fn()
 const updateDataModel = jest.fn()
@@ -69,6 +73,24 @@ describe("DataModelPanel", () => {
     expect(screen.getByText("count")).toBeInTheDocument()
     expect(screen.getByText("done")).toBeInTheDocument()
     expect(screen.getByText("3 keys")).toBeInTheDocument()
+  })
+
+  it("keeps the row actions reachable without a hover", () => {
+    storeState.surfaces = { sx: { dataModel: { name: "Alice" } } }
+    renderPanel()
+    const edit = screen.getByRole("button", { name: "Edit value at /name" })
+    const actions = edit.parentElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(actions).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(actions).not.toHaveClass(forbidden)
+    }
+    expect(actions).toContainElement(screen.getByRole("button", { name: "Delete value at /name" }))
+    edit.focus()
+    expect(edit).toHaveFocus()
+    fireEvent.click(edit)
+    expect(screen.getByRole("textbox", { name: "Edit value at /name" })).toBeInTheDocument()
   })
 
   it("atomically replaces the data model when a value is edited", () => {

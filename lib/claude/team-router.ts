@@ -424,7 +424,7 @@ export interface AutoRoundPlan {
  * Two, not one, because "A asks B, B answers, A concludes" is the shape that
  * makes a handoff worth having. Not more, because A and B addressing each
  * other is otherwise a perpetual motion machine that bills by the token: the
- * time-based ping-pong guard in `lib/ai/agent/team/message-guard.ts` cannot
+ * time-based ping-pong guard in `lib/ai/agent/team/gates/message-guard.ts` cannot
  * help here, since these rounds run back to back with no gap between them.
  */
 export const MAX_TURNS_PER_MEMBER_PER_ROUND = 2

@@ -5,6 +5,7 @@
 
 import type { A2UIComponent, A2UIServerMessage } from "@/types/a2ui/schema"
 import { deepClone } from "../data-model"
+import { formatTimerDisplay } from "../surface-timer"
 import {
   formatBuiltInRuntimeMessage,
   generateTemplateId,
@@ -127,24 +128,29 @@ export function generateTimerApp(
 ): GeneratedApp {
   const id = generateTemplateId("timer")
 
-  const _isCountdown = /倒计时|countdown/i.test(description)
   const isPomodoro = /番茄|pomodoro|25分钟/i.test(description)
 
-  let presetMinutes = 5
+  // A pomodoro opens on its 25-minute work block; a plain timer on 5 minutes.
+  // An explicit length in the description ("10 分钟", "20 min") wins either way.
+  let presetMinutes = isPomodoro ? 25 : 5
   const minuteMatch = description.match(/(\d+)\s*(?:分钟|分|min|minute)/i)
   if (minuteMatch) {
-    presetMinutes = parseInt(minuteMatch[1], 10)
+    const parsed = parseInt(minuteMatch[1], 10)
+    if (parsed > 0) presetMinutes = parsed
   }
+  const totalSeconds = presetMinutes * 60
 
   const components = localizeFactory(
     isPomodoro ? "pomodoro" : "timer",
     createTimerComponents(isPomodoro),
     ctx
   )
+  // The display starts on the loaded length (e.g. "25:00"), matching what the
+  // surface timer runtime shows once Reset is pressed; "00:00" read as broken.
   const dataModel = {
-    display: "00:00",
+    display: formatTimerDisplay(totalSeconds),
     seconds: 0,
-    totalSeconds: presetMinutes * 60,
+    totalSeconds,
     progress: 0,
     isRunning: false,
     mode: isPomodoro ? "pomodoro" : "timer",

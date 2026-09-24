@@ -71,6 +71,8 @@ jest.mock("@/components/ai-elements/mic-selector", () => ({
   MicSelectorValue: () => <span>value</span>,
 }))
 
+// `mockSettings` is read lazily inside the selector, so each test can flip it.
+let mockSettings: Record<string, unknown> | undefined = undefined
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (
     selector: (s: {
@@ -78,7 +80,12 @@ jest.mock("@/stores/settings", () => ({
       save: jest.Mock
       ensureProviderKeys: jest.Mock
     }) => unknown
-  ) => selector({ settings: undefined, save: jest.fn(), ensureProviderKeys: jest.fn() }),
+  ) => selector({ settings: mockSettings, save: jest.fn(), ensureProviderKeys: jest.fn() }),
+}))
+
+// Live voice is its own surface with its own suite; here it only has to exist.
+jest.mock("./live-voice-dialog", () => ({
+  LiveVoiceDialog: () => null,
 }))
 
 jest.mock("@cognia/tts/speech", () => ({
@@ -106,6 +113,7 @@ const renderWithTooltipProvider = (ui: React.ReactElement) =>
 describe("VoiceControls", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSettings = undefined
     micPermission.state = "prompt"
     micDevices.length = 0
     delete (globalThis as Record<string, unknown>).__mockSpeechMode
@@ -166,8 +174,29 @@ describe("VoiceControls", () => {
     await user.click(screen.getByLabelText("voiceSettings"))
   }
 
+  // Dictation is Web Speech, which always records from the system default
+  // input; only live voice honours a picked device.
+  it("leaves the microphone picker out while live voice is off", async () => {
+    const user = userEvent.setup()
+    renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+    await openSettingsPopover(user)
+    expect(screen.queryByTestId("voice-settings-microphone")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mic-trigger")).not.toBeInTheDocument()
+    expect(screen.getByText("languageLabel")).toBeInTheDocument()
+  })
+
+  it("offers the microphone picker, and says what it drives, with live voice on", async () => {
+    const user = userEvent.setup()
+    mockSettings = { liveVoice: { enabled: true } }
+    renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
+    await openSettingsPopover(user)
+    expect(screen.getByTestId("voice-settings-microphone")).toHaveTextContent("microphoneLiveOnly")
+    expect(screen.getByTestId("mic-trigger")).toBeInTheDocument()
+  })
+
   it("offers an explicit grant-access button when permission has not been granted", async () => {
     const user = userEvent.setup()
+    mockSettings = { liveVoice: { enabled: true } }
     micPermission.state = "prompt"
     renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
     await openSettingsPopover(user)
@@ -176,6 +205,7 @@ describe("VoiceControls", () => {
 
   it("shows a denied hint instead of the grant button when permission is denied", async () => {
     const user = userEvent.setup()
+    mockSettings = { liveVoice: { enabled: true } }
     micPermission.state = "denied"
     renderWithTooltipProvider(<VoiceControls onTranscription={() => {}} />)
     await openSettingsPopover(user)
@@ -185,6 +215,7 @@ describe("VoiceControls", () => {
 
   it("hides the grant button once devices are labelled (permission granted)", async () => {
     const user = userEvent.setup()
+    mockSettings = { liveVoice: { enabled: true } }
     micPermission.state = "granted"
     micDevices.push({
       deviceId: "abc",

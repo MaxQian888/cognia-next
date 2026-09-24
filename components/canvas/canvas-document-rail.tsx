@@ -53,6 +53,7 @@ import {
   SidebarHeader,
   SidebarSeparator,
 } from "@/components/ui/sidebar"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import {
   filterCanvasDocumentsByWorkspace,
@@ -270,7 +271,11 @@ export function CanvasDocumentRail() {
                       ev.stopPropagation()
                       setDeleteCandidateId(doc.id)
                     }}
-                    className="size-5 shrink-0 opacity-0 transition group-hover:opacity-70 hover:opacity-100"
+                    className={cn(
+                      "size-5 shrink-0",
+                      HOVER_REVEAL_CONTROL_BASE_CLASS,
+                      "transition group-hover:opacity-70 hover:opacity-100"
+                    )}
                   >
                     <X className="size-3" />
                   </Button>

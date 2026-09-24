@@ -11,6 +11,7 @@ import { History, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useWorkspaceContext } from "./a2ui-workspace-context"
 
@@ -76,7 +77,7 @@ export function VersionHistoryPanel() {
                     <Button
                       variant="ghost"
                       size="xs"
-                      className="opacity-0 transition-opacity group-hover:opacity-100"
+                      className={HOVER_REVEAL_CONTROL_CLASS}
                       onClick={() => handleRestore(originalIndex)}
                     >
                       <RotateCcw data-icon="inline-start" />

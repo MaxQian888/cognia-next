@@ -50,7 +50,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 }))
 
 const mockResolveRemotePermission = jest.fn(async () => ({ resolved: true }))
-jest.mock("@/lib/ai/agent/external/remote-run-client", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-client", () => ({
   resolveRemotePermission: (...args: unknown[]) => mockResolveRemotePermission(...(args as [])),
 }))
 
@@ -66,7 +66,7 @@ import {
 import {
   __resetExternalApprovalsForTests,
   registerExternalApproval,
-} from "@/lib/ai/agent/external/chat-decision-bridge"
+} from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import { APPROVAL_SUPERSEDED_REASON, supersedePendingApprovals } from "./approval-supersede"
 
 function approval(over: Partial<PendingApproval>): PendingApproval {

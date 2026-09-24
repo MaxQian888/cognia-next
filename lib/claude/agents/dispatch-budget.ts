@@ -11,7 +11,7 @@
  * so we pass a silent notifier and `onCritical: "notify"` (the no-op branch).
  */
 
-import { createBudgetGuard, type BudgetGuard } from "@/lib/ai/agent/team/budget-guard"
+import { createBudgetGuard, type BudgetGuard } from "@/lib/ai/agent/team/gates/budget-guard"
 import type { TeamNotifier } from "@/lib/ai/agent/team/team-notifier"
 
 const SILENT_NOTIFIER: TeamNotifier = {

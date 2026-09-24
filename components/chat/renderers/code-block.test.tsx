@@ -1,4 +1,4 @@
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CODE_AUTO_RENDER_MAX_LINES, CodeBlock } from "./code-block"
 import { highlightCached, clearHighlightCache } from "@/lib/shiki/highlight-cache"
@@ -99,6 +99,75 @@ describe("CodeBlock", () => {
       expect(container.querySelectorAll("pre").length).toBeGreaterThanOrEqual(2)
       expect(container.innerHTML).toContain("const cached = 1")
     })
+
+    it("never displays the previous snippet while a replacement highlight is pending", async () => {
+      await highlightCached("const original = 1", "ts")
+      const { container, rerender } = renderInProvider(
+        <CodeBlock code="const original = 1" language="ts" showLineNumbers={false} />
+      )
+      let complete!: (value: { light: string; dark: string }) => void
+      ;(highlightCached as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve
+          })
+      )
+      rerender(
+        <TooltipProvider>
+          <CodeBlock code="const replacement = 2" language="ts" showLineNumbers={false} />
+        </TooltipProvider>
+      )
+      expect(container.textContent).toContain("const replacement = 2")
+      expect(container.textContent).not.toContain("const original = 1")
+      complete({
+        light: "<pre>const replacement = 2</pre>",
+        dark: "<pre>const replacement = 2</pre>",
+      })
+      await waitFor(() => expect(container.querySelectorAll("pre")).toHaveLength(2))
+    })
+
+    it.each(["resolve", "reject"])(
+      "ignores an obsolete highlight that later %ss",
+      async (outcome) => {
+        let resolveOld!: (value: { light: string; dark: string }) => void
+        let rejectOld!: (reason: Error) => void
+        let resolveNew!: (value: { light: string; dark: string }) => void
+        ;(highlightCached as jest.Mock)
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve, reject) => {
+                resolveOld = resolve
+                rejectOld = reject
+              })
+          )
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                resolveNew = resolve
+              })
+          )
+        const { container, rerender } = renderInProvider(
+          <CodeBlock code="obsolete" language="ts" showLineNumbers={false} />
+        )
+        rerender(
+          <TooltipProvider>
+            <CodeBlock code="current" language="ts" showLineNumbers={false} />
+          </TooltipProvider>
+        )
+        await act(async () =>
+          resolveNew({ light: "<pre>current</pre>", dark: "<pre>current</pre>" })
+        )
+        expect(container.querySelectorAll("pre")).toHaveLength(2)
+        await act(async () => {
+          if (outcome === "resolve")
+            resolveOld({ light: "<pre>obsolete</pre>", dark: "<pre>obsolete</pre>" })
+          else rejectOld(new Error("obsolete highlight failed"))
+        })
+        expect(container.querySelectorAll("pre")).toHaveLength(2)
+        expect(container.textContent).toContain("current")
+        expect(container.textContent).not.toContain("obsolete")
+      }
+    )
 
     it("falls back to plain-pre for a cold snippet not yet in cache", () => {
       const { container } = renderInProvider(
@@ -230,6 +299,16 @@ describe("CodeBlock", () => {
 
       expect(queryByRole("button", { name: /show all/i })).toBeNull()
       expect(container.querySelectorAll("tbody tr")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES)
+    })
+
+    it("counts CRLF and a trailing empty line at the truncation boundary", () => {
+      const value = "row\r\n".repeat(CODE_AUTO_RENDER_MAX_LINES)
+      const { container, getByRole } = renderInProvider(
+        <CodeBlock code={value} showLineNumbers isStreaming />
+      )
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES)
+      fireEvent.click(getByRole("button", { name: /show all/i }))
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(CODE_AUTO_RENDER_MAX_LINES + 1)
     })
 
     it("copies the whole block, not the truncated view", async () => {

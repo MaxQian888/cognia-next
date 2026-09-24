@@ -263,16 +263,14 @@ describe("detectTrigger — @file mode (default)", () => {
   })
 })
 
-describe("detectTrigger — @agent mode", () => {
-  it("returns the agent kind when mentionMode is agents", () => {
-    const tg = detectTrigger("@codex hi", 6, { mentionMode: "agents" })
-    expect(tg?.kind).toBe("agent")
+describe("detectTrigger — @ route targets and combined mode", () => {
+  it("a leading @codex is a file-kind trigger; the popover adds the route rows", () => {
+    // Route targets (`@claude` / `@codex` / Squad members) are a SECTION of the
+    // combined panel, not a trigger kind of their own.
+    const tg = detectTrigger("@codex hi", 6, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
     expect(tg?.query).toBe("codex")
     expect(tg?.tokenStart).toBe(0)
-  })
-
-  it("respects whitespace boundary in agent mode", () => {
-    expect(detectTrigger("foo@bar", 7, { mentionMode: "agents" })).toBeNull()
   })
 
   it("falls back to file kind when mentionMode is files (explicit)", () => {
@@ -281,8 +279,8 @@ describe("detectTrigger — @agent mode", () => {
   })
 
   it("supports an empty query right after the @ char", () => {
-    const tg = detectTrigger("hi @", 4, { mentionMode: "agents" })
-    expect(tg?.kind).toBe("agent")
+    const tg = detectTrigger("hi @", 4, { mentionMode: "combined" })
+    expect(tg?.kind).toBe("file")
     expect(tg?.query).toBe("")
   })
 
@@ -322,12 +320,6 @@ describe("detectTrigger — @skill: / @preset: namespaced prefixes", () => {
     const tg = detectTrigger("@skill", 6, { mentionMode: "combined" })
     expect(tg?.kind).toBe("file")
     expect(tg?.query).toBe("skill")
-  })
-
-  it("does NOT flip in agents mode (team workspace `@` means members)", () => {
-    const tg = detectTrigger("@skill:rev", 10, { mentionMode: "agents" })
-    expect(tg?.kind).toBe("agent")
-    expect(tg?.query).toBe("skill:rev")
   })
 
   it("keeps a dotted/colon token as a single token (boundary at whitespace)", () => {
@@ -435,13 +427,6 @@ describe("detectTrigger — remote document namespaces (@lark: / @gdoc:)", () =>
     expect(detectTrigger("@lar", 4)).toMatchObject({ kind: "file", query: "lar" })
   })
 
-  it("does not claim the prefixes in the agent-team composer", () => {
-    expect(detectTrigger("@lark:spec", 10, { mentionMode: "agents" })).toMatchObject({
-      kind: "agent",
-      query: "lark:spec",
-    })
-  })
-
   it("does not claim the prefixes in the workflow composer", () => {
     expect(detectTrigger("@lark:spec", 10, { mentionMode: "workflow" })).toMatchObject({
       kind: "wfNode",
@@ -496,12 +481,6 @@ describe("detectTrigger — entity namespaces (@memory: / @issue: / …)", () =>
   it("stays a file token until the colon is typed", () => {
     const tg = detectTrigger("@issue", 6, { mentionMode: "combined" })
     expect(tg?.kind).toBe("file")
-  })
-
-  it("does NOT flip in the team workspace, where `@` means a member", () => {
-    const tg = detectTrigger("@issue:rac", 10, { mentionMode: "agents" })
-    expect(tg?.kind).toBe("agent")
-    expect(tg?.query).toBe("issue:rac")
   })
 
   it("does NOT flip in the workflow composer", () => {
@@ -628,9 +607,5 @@ describe("^ shortcut", () => {
 
   it("is inert in the workflow composer, where @ already means a node", () => {
     expect(detectTrigger("^re", 3, { mentionMode: "workflow" })?.namespace).not.toBe("result:")
-  })
-
-  it("is inert in the team workspace, where @ means a member", () => {
-    expect(detectTrigger("^re", 3, { mentionMode: "agents" })?.namespace).not.toBe("result:")
   })
 })

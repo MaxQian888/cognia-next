@@ -30,10 +30,12 @@ import { CheckIcon, ClockIcon, PencilIcon, TriangleAlertIcon, Undo2Icon, XIcon }
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { resolveSteerDisplayState, steerMetaOf, stripSteerPrefix } from "@/lib/claude/steer"
 import { discardPendingSteer, editPendingSteer } from "@/hooks/chat/steer-runtime"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useSessionStatus, useSessionSteerQueue } from "@/stores/chat"
+import { isChatTurnQueued } from "@/lib/execution/chat-lease"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 
@@ -58,7 +60,10 @@ export function SteerStatusBadge({
   // only once there is a second entry to be ahead of or behind.
   const queueIndex = steerQueue.findIndex((entry) => entry.id === meta.entryId)
   const state = resolveSteerDisplayState(meta, {
-    sessionBusy: status === "streaming" || status === "awaiting_approval",
+    // A turn still waiting for its working tree is busy too: follow-ups typed
+    // behind it are queued for it, not stranded.
+    sessionBusy:
+      status === "streaming" || status === "awaiting_approval" || isChatTurnQueued(sessionId),
     stillQueued: queueIndex >= 0,
   })
   // Delivered and folded into the conversation — nothing left to say.
@@ -147,7 +152,10 @@ export function SteerStatusBadge({
                 )
               }
               aria-label={t("ariaEdit")}
-              className="opacity-0 transition-opacity hover:text-foreground group-hover/steer:opacity-100 focus-visible:opacity-100"
+              className={cn(
+                HOVER_REVEAL_CONTROL_BASE_CLASS,
+                "hover:text-foreground group-hover/steer:opacity-100"
+              )}
             >
               <PencilIcon className="size-3" aria-hidden />
             </button>
@@ -155,7 +163,10 @@ export function SteerStatusBadge({
               type="button"
               onClick={() => discardPendingSteer(sessionId, meta.entryId)}
               aria-label={t("ariaRemove")}
-              className="opacity-0 transition-opacity hover:text-foreground group-hover/steer:opacity-100 focus-visible:opacity-100"
+              className={cn(
+                HOVER_REVEAL_CONTROL_BASE_CLASS,
+                "hover:text-foreground group-hover/steer:opacity-100"
+              )}
             >
               <XIcon className="size-3" aria-hidden />
             </button>

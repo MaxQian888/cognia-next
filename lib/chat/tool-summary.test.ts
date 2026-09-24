@@ -339,3 +339,38 @@ it("does not summarize denied or approval-responded calls as completed", () => {
   expect(aggregateToolStatus(["approval-responded"])).toBe("warning")
   expect(aggregateToolStatus(["input-streaming", "output-available"])).toBe("pending")
 })
+
+describe("clampTarget exact prefix semantics", () => {
+  const original = (value: string, max = 72) => {
+    const normalized = value.replace(/\s+/g, " ").trim()
+    return normalized.length > max ? normalized.slice(0, max - 1) + "…" : normalized
+  }
+  it.each([
+    "",
+    "   ",
+    "\r\n\t alpha\u00a0beta\u2028gamma\ufeff ",
+    "x".repeat(72),
+    "x".repeat(72) + " ".repeat(100000),
+    "x".repeat(72) + " ".repeat(100000) + "y",
+    " ".repeat(100000) + "echo" + " ".repeat(100000) + "done ",
+    "🙂".repeat(80),
+    "x\u200by",
+    "a\r\nb\tc",
+  ])("matches normalized truncation for %p", (value) => {
+    for (const max of [0, -1, 0.5, 1, 2, 8.5, 72, Infinity, NaN]) {
+      expect(clampTarget(value, max)).toBe(original(value, max))
+    }
+  })
+  it("matches the existing contract across deterministic mixed Unicode strings", () => {
+    const chars = ["a", "b", " ", "\n", "\r", "\t", "\u00a0", "\ufeff", "\u2028", "🙂", "\u200b"]
+    let seed = 37
+    for (let sample = 0; sample < 200; sample++) {
+      let value = ""
+      for (let i = 0; i < 150; i++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+        value += chars[seed % chars.length]
+      }
+      expect(clampTarget(value, (sample % 80) + 1)).toBe(original(value, (sample % 80) + 1))
+    }
+  })
+})

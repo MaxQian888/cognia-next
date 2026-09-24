@@ -52,7 +52,8 @@ export function countCanvasSymbols(symbols: DocumentSymbol[]): number {
   return symbols.reduce((sum, s) => sum + 1 + countCanvasSymbols(s.children ?? []), 0)
 }
 
-function SymbolKindIcon({ kind }: { kind: SymbolKind }) {
+/** Kind glyph shared with the project editor's `@` quick-open mode. */
+export function SymbolKindIcon({ kind }: { kind: SymbolKind }) {
   const className = "size-3.5 shrink-0 text-muted-foreground"
   switch (kind) {
     case "class":

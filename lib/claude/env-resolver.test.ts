@@ -157,20 +157,60 @@ describe("resolveAccountEnv", () => {
     expect(mockCall).not.toHaveBeenCalled()
   })
 
-  it("uses the validated provider active account when no override/default is selected", async () => {
+  it("resolves an isolated env for the active account instead of reusing its cached projection", async () => {
     mockCall.mockResolvedValueOnce({
       activeAccountId: "active-account",
-      env: [["CLAUDE_CODE_OAUTH_TOKEN", "active-token"]],
+      env: [["CLAUDE_CODE_OAUTH_TOKEN", "stale-active-token"]],
     })
+    mockCall.mockResolvedValueOnce([
+      { key: "CLAUDE_CODE_OAUTH_TOKEN", value: "active-token" },
+      { key: "CLAUDE_CONFIG_DIR", value: "/synthetic/local_acct_a/active-account" },
+    ])
 
     await expect(resolveAccountEnv("anthropic", null)).resolves.toEqual({
       CLAUDE_CODE_OAUTH_TOKEN: "active-token",
+      CLAUDE_CONFIG_DIR: "/synthetic/local_acct_a/active-account",
     })
     expect(mockCall).toHaveBeenCalledWith("subscription_get_active", {
       provider: "anthropic",
       localAccountId: "local_acct_a",
     })
+    expect(mockCall).toHaveBeenCalledWith("claude_env_for_account", {
+      provider: "anthropic",
+      localAccountId: "local_acct_a",
+      accountId: "active-account",
+    })
   })
+
+  it("stops before resolving the env if the local account changes during active lookup", async () => {
+    mockCall.mockImplementationOnce(async () => {
+      unlockedAccountId = "local_acct_b"
+      return { activeAccountId: "active-account", env: [] }
+    })
+    await expect(resolveAccountEnv("anthropic", null)).rejects.toMatchObject({
+      name: "SubscriptionAccountResolutionError",
+      message: expect.stringContaining("local account changed"),
+    })
+    expect(mockCall).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([null, "selected-account"])(
+    "discards resolved credentials if the local account locks during env lookup (%s)",
+    async (accountId) => {
+      if (!accountId) {
+        mockCall.mockResolvedValueOnce({ activeAccountId: "active-account", env: [] })
+      }
+      mockCall.mockImplementationOnce(async () => {
+        unlockedAccountId = null
+        return [{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: "old-scope-token" }]
+      })
+      await expect(resolveAccountEnv("anthropic", accountId)).rejects.toMatchObject({
+        name: "SubscriptionAccountResolutionError",
+        accountId: accountId ?? "active-account",
+        message: expect.stringContaining("local account changed"),
+      })
+    }
+  )
 
   it("fails actionably when the provider has no active account", async () => {
     mockCall.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })

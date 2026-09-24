@@ -38,6 +38,31 @@ export function sendChatMessage(sessionId: string, text: string): boolean {
   return true
 }
 
+/**
+ * Re-run a session's last turn — the Retry on a transcript row whose turn never
+ * ran (`components/chat/message-parts/turn-admission-badge.tsx`). A separate
+ * registration because a retry is a regenerate, not a new message: the user's
+ * message is already in the transcript and must not be appended again.
+ */
+export type ChatRetryBridge = (sessionId: string) => void
+
+let retryBridge: ChatRetryBridge | undefined
+
+export function registerChatRetryBridge(retry: ChatRetryBridge): () => void {
+  retryBridge = retry
+  return () => {
+    if (retryBridge === retry) retryBridge = undefined
+  }
+}
+
+/** Returns false when no chat runtime is mounted to run the retry. */
+export function retryChatTurn(sessionId: string): boolean {
+  if (!retryBridge || !sessionId) return false
+  retryBridge(sessionId)
+  return true
+}
+
 export function __resetChatSendBridgeForTesting(): void {
   bridge = undefined
+  retryBridge = undefined
 }

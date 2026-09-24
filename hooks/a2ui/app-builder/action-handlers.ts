@@ -3,19 +3,25 @@
  * Default action handlers for built-in app templates (calculator, timer, todo, etc.)
  */
 
-import { useCallback, useRef } from "react"
+import { useCallback, useMemo } from "react"
 import type { Locale } from "@/i18n/config"
 import { formatBuiltInRuntimeMessage } from "@/lib/a2ui/templates"
+import { formatTimerDisplay, surfaceTimers, type SurfaceTimerHost } from "@/lib/a2ui/surface-timer"
 import type { A2UIUserAction } from "@/types/a2ui/schema"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.app
 
 interface ActionHandlerDeps {
+  /**
+   * Must read the LIVE data model (the store's current state), not a
+   * render-time snapshot: the timer runtime calls it from interval ticks long
+   * after the render that created this handler, and consecutive actions can
+   * fire before React re-renders.
+   */
   getAppData: (appId: string) => Record<string, unknown> | undefined
   setAppData: (appId: string, path: string, value: unknown) => void
   resetAppData: (appId: string) => void
-  surfaces: Record<string, { dataModel: Record<string, unknown> }>
   setDataValue: (surfaceId: string, path: string, value: unknown) => void
   getAppLocale: (appId: string) => Locale
   onAction?: (action: A2UIUserAction) => void
@@ -24,9 +30,7 @@ interface ActionHandlerDeps {
 // ========== Pure helper functions ==========
 
 export function formatTime(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  return formatTimerDisplay(totalSeconds)
 }
 
 export function performCalculation(a: number, b: number, operator: string): number {
@@ -140,64 +144,13 @@ function updateExpenseStats(
  * Hook providing default action handlers for A2UI app templates
  */
 export function useAppActionHandlers(deps: ActionHandlerDeps) {
-  const { getAppData, setAppData, resetAppData, surfaces, setDataValue, getAppLocale, onAction } =
-    deps
-  const timerIntervalsRef = useRef(new Map<string, NodeJS.Timeout>())
+  const { getAppData, setAppData, resetAppData, setDataValue, getAppLocale, onAction } = deps
 
-  const stopTimerInterval = useCallback((surfaceId: string): void => {
-    const interval = timerIntervalsRef.current.get(surfaceId)
-    if (interval) {
-      clearInterval(interval)
-      timerIntervalsRef.current.delete(surfaceId)
-    }
-  }, [])
-
-  const setTimerPreset = useCallback(
-    (surfaceId: string, seconds: number): void => {
-      setDataValue(surfaceId, "/totalSeconds", seconds)
-      setDataValue(surfaceId, "/seconds", 0)
-      setDataValue(surfaceId, "/display", formatTime(seconds))
-      setDataValue(surfaceId, "/progress", 0)
-      setDataValue(surfaceId, "/isRunning", false)
-      stopTimerInterval(surfaceId)
-    },
-    [setDataValue, stopTimerInterval]
-  )
-
-  const startTimerInterval = useCallback(
-    (surfaceId: string): void => {
-      stopTimerInterval(surfaceId)
-      const interval = setInterval(() => {
-        const surface = surfaces[surfaceId]
-        if (!surface || !surface.dataModel.isRunning) {
-          stopTimerInterval(surfaceId)
-          return
-        }
-
-        const seconds = (surface.dataModel.seconds as number) || 0
-        const totalSeconds = (surface.dataModel.totalSeconds as number) || 0
-        const mode = surface.dataModel.mode as string
-
-        if (mode === "countdown" || mode === "pomodoro" || mode === "timer") {
-          const remaining = totalSeconds - seconds
-          if (remaining <= 0) {
-            setDataValue(surfaceId, "/isRunning", false)
-            setDataValue(surfaceId, "/display", "00:00")
-            setDataValue(surfaceId, "/progress", 100)
-            stopTimerInterval(surfaceId)
-            return
-          }
-          setDataValue(surfaceId, "/seconds", seconds + 1)
-          setDataValue(surfaceId, "/display", formatTime(remaining - 1))
-          setDataValue(surfaceId, "/progress", Math.round(((seconds + 1) / totalSeconds) * 100))
-        } else {
-          setDataValue(surfaceId, "/seconds", seconds + 1)
-          setDataValue(surfaceId, "/display", formatTime(seconds + 1))
-        }
-      }, 1000)
-      timerIntervalsRef.current.set(surfaceId, interval)
-    },
-    [setDataValue, surfaces, stopTimerInterval]
+  // Timer / stopwatch / pomodoro state machine lives in the module-scoped
+  // surface timer runtime; it reads the live data model on every tick.
+  const timerHost = useMemo<SurfaceTimerHost>(
+    () => ({ read: getAppData, write: setDataValue }),
+    [getAppData, setDataValue]
   )
 
   const handleAppAction = useCallback(
@@ -371,56 +324,46 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
         // ========== Timer Actions ==========
         case "start":
         case "start_timer": {
-          const currentData = getAppData(surfaceId)
-          if (currentData && !currentData.isRunning) {
-            setAppData(surfaceId, "/isRunning", true)
-            startTimerInterval(surfaceId)
-          }
+          // A persisted `isRunning: true` without a live ticker (reload) must
+          // not make Start a dead button, so only the runtime's state counts.
+          surfaceTimers.start(surfaceId, timerHost)
           break
         }
 
         case "pause":
         case "pause_timer": {
-          setAppData(surfaceId, "/isRunning", false)
-          stopTimerInterval(surfaceId)
+          surfaceTimers.pause(surfaceId, timerHost)
           break
         }
 
         case "reset":
         case "reset_timer": {
-          const currentData = getAppData(surfaceId)
-          if (currentData) {
-            setAppData(surfaceId, "/isRunning", false)
-            setAppData(surfaceId, "/seconds", 0)
-            setAppData(surfaceId, "/display", formatTime((currentData.totalSeconds as number) || 0))
-            setAppData(surfaceId, "/progress", 0)
-            stopTimerInterval(surfaceId)
-          }
+          surfaceTimers.reset(surfaceId, timerHost)
           break
         }
 
         case "set_1":
         case "set_1min": {
-          setTimerPreset(surfaceId, 60)
+          surfaceTimers.setPreset(surfaceId, timerHost, 60)
           break
         }
         case "set_5":
         case "set_5min": {
-          setTimerPreset(surfaceId, 300)
+          surfaceTimers.setPreset(surfaceId, timerHost, 300)
           break
         }
         case "set_10":
         case "set_10min": {
-          setTimerPreset(surfaceId, 600)
+          surfaceTimers.setPreset(surfaceId, timerHost, 600)
           break
         }
         case "set_15": {
-          setTimerPreset(surfaceId, 900)
+          surfaceTimers.setPreset(surfaceId, timerHost, 900)
           break
         }
         case "set_25":
         case "set_25min": {
-          setTimerPreset(surfaceId, 1500)
+          surfaceTimers.setPreset(surfaceId, timerHost, 1500)
           break
         }
 
@@ -840,17 +783,7 @@ export function useAppActionHandlers(deps: ActionHandlerDeps) {
           onAction?.(action)
       }
     },
-    [
-      getAppData,
-      setAppData,
-      resetAppData,
-      setDataValue,
-      getAppLocale,
-      onAction,
-      startTimerInterval,
-      stopTimerInterval,
-      setTimerPreset,
-    ]
+    [getAppData, setAppData, resetAppData, setDataValue, getAppLocale, onAction, timerHost]
   )
 
   return { handleAppAction }

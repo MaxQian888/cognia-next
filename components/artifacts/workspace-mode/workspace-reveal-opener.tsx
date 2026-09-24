@@ -6,7 +6,7 @@ import { useClientLiveQuery } from "@/hooks/data"
 import { getSession } from "@/lib/db/sessions"
 import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { resolveSessionExecutionRoot } from "@/lib/workspace/session-root"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -24,7 +24,10 @@ export function WorkspaceRevealOpener() {
     undefined
   )
   const projects = useProjectStore((state) => state.projects)
-  const rootPath = resolveSessionProjectRoot(session, projects).root?.path
+  // The session's *execution* root, matching what the docked editor follows —
+  // a managed worktree's reveal must target the worktree, not the workspace's
+  // primary root (which the editor may not even have selected).
+  const rootPath = resolveSessionExecutionRoot(session, projects).root ?? undefined
 
   useEffect(() => {
     if (!session || !rootPath || !hasWorkspaceFsBackend()) return

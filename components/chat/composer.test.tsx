@@ -115,10 +115,15 @@ jest.mock("@/components/inbox/inbox-composer-actions-host", () => ({
 // Platform is the gate for the mobile (Capacitor) Claude-style layout. Default
 // to "web" so the existing tests keep the desktop/web responsive layout.
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
+// Layout and pointer are separate questions from the platform (see
+// `hooks/ui/use-compact-layout.ts`); each test sets the combination it means.
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: jest.fn(() => false) }))
+jest.mock("@/hooks/ui/use-pointer", () => ({
+  ...jest.requireActual("@/hooks/ui/use-pointer"),
+  useCoarsePointer: jest.fn(() => false),
+}))
 // Capacitor wrappers consumed by the mobile send path (haptic on send,
-// keyboard dismiss after send). Mocked so the mobile tests can assert calls;
-// `subscribeKeyboard` is included because use-keyboard-insets (via
-// MentionPopover) imports from the same module.
+// keyboard dismiss after send). Mocked so the mobile tests can assert calls.
 jest.mock("@/lib/capacitor/haptics", () => ({
   __esModule: true,
   impact: jest.fn(),
@@ -129,7 +134,6 @@ jest.mock("@/lib/capacitor/keyboard", () => ({
   __esModule: true,
   hideKeyboard: jest.fn(async () => undefined),
   showKeyboard: jest.fn(async () => undefined),
-  subscribeKeyboard: jest.fn(() => null),
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -146,6 +150,8 @@ import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { execTerminalCommand } from "@/lib/terminal/remote-api"
 import { isTauri } from "@/lib/tauri"
 import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
@@ -155,6 +161,8 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 const mockUsePlatform = usePlatform as jest.Mock
+const mockUseCompactLayout = useCompactLayout as jest.Mock
+const mockUseCoarsePointer = useCoarsePointer as jest.Mock
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -566,6 +574,75 @@ describe("Composer — mobile (Claude-style) layout", () => {
     })
     await waitFor(() => expect(ta.value).toBe(""))
     expect(hideKeyboard).not.toHaveBeenCalled()
+  })
+
+  // A phone browser renders the mobile shell and has a soft keyboard, but no
+  // Capacitor plugin: blur so the keyboard folds, never call the native one.
+  it("folds a phone browser's keyboard by blurring, without the native plugin", async () => {
+    mockUsePlatform.mockReturnValue("web")
+    mockUseCompactLayout.mockReturnValue(true)
+    mockUseCoarsePointer.mockReturnValue(true)
+    const { impact } = jest.requireMock("@/lib/capacitor/haptics") as { impact: jest.Mock }
+    const { hideKeyboard } = jest.requireMock("@/lib/capacitor/keyboard") as {
+      hideKeyboard: jest.Mock
+    }
+    impact.mockClear()
+    hideKeyboard.mockClear()
+    try {
+      renderComposer()
+      const ta = document.querySelector("textarea") as HTMLTextAreaElement
+      ta.focus()
+      await act(async () => {
+        fireEvent.change(ta, { target: { value: "hello" } })
+      })
+      await act(async () => {
+        fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(ta.value).toBe(""))
+      expect(document.activeElement).not.toBe(ta)
+      expect(hideKeyboard).not.toHaveBeenCalled()
+      expect(impact).not.toHaveBeenCalled()
+    } finally {
+      mockUseCompactLayout.mockReturnValue(false)
+      mockUseCoarsePointer.mockReturnValue(false)
+    }
+  })
+
+  // Phone-shaped, but with a hardware keyboard: the follow-up is typed right
+  // away, so the box keeps focus.
+  it("keeps focus after a send in a narrow desktop window", async () => {
+    mockUsePlatform.mockReturnValue("web")
+    mockUseCompactLayout.mockReturnValue(true)
+    try {
+      renderComposer()
+      const ta = document.querySelector("textarea") as HTMLTextAreaElement
+      await act(async () => {
+        fireEvent.change(ta, { target: { value: "hello" } })
+      })
+      await act(async () => {
+        fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(ta.value).toBe(""))
+      await waitFor(() => expect(document.activeElement).toBe(ta))
+    } finally {
+      mockUseCompactLayout.mockReturnValue(false)
+    }
+  })
+
+  it("lays a narrow browser out like the phone, but keeps its paperclip", () => {
+    mockUsePlatform.mockReturnValue("web")
+    mockUseCompactLayout.mockReturnValue(true)
+    try {
+      renderComposer()
+      expect(screen.queryByTestId("composer-plus-toggle")).toBeNull()
+      expect(document.querySelector('button[aria-label="Send"]')?.className).toContain(
+        "touch-target"
+      )
+    } finally {
+      mockUseCompactLayout.mockReturnValue(false)
+    }
   })
 
   it("keeps the paperclip button (no plus menu) on web/desktop", () => {

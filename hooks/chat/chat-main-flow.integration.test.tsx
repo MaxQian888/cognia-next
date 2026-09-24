@@ -174,7 +174,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     setDelegationRules: jest.fn(),
   }),
 }))
-jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
+jest.mock("@/lib/ai/agent/external/session/event-to-parts", () => ({
   applyExternalAgentEventToParts: (parts: unknown) => parts ?? [],
 }))
 // Title generation is a detached fire-and-forget task in send's tail; skip it

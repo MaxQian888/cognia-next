@@ -2,11 +2,8 @@
  * @jest-environment jsdom
  *
  * Phase 3 — composer additions:
- *   - mobile-only inline @-mention popover (props.mobileMentionMembers)
+ *   - a team room's `@` panel (the room's members, in the combined panel)
  *   - per-session draft persistence (Dexie chatDrafts table)
- *
- * Desktop behaviors (no mobileMentionMembers, no session) must remain
- * unchanged — covered by the existing `composer.test.tsx` regressions.
  */
 
 import "fake-indexeddb/auto"
@@ -27,6 +24,26 @@ jest.mock("@/lib/files/memory", () => ({
 }))
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
+}))
+// The saved-draft read, with a gate a test can hold shut to type into the box
+// while the read is still in flight. Delegates to the real Dexie read.
+const mockDraftReadGate: { hold: Promise<void> | null } = { hold: null }
+jest.mock("@/lib/db/chat-drafts", () => {
+  const actual = jest.requireActual("@/lib/db/chat-drafts")
+  return {
+    ...actual,
+    getDraft: async (...args: unknown[]) => {
+      if (mockDraftReadGate.hold) await mockDraftReadGate.hold
+      return actual.getDraft(...args)
+    },
+  }
+})
+// `mockTeamMembers` is read lazily, inside the hook, so each test can set the
+// room it means.
+const mockTeamMembers = jest.fn((_teamId: string | null | undefined): unknown[] => [])
+jest.mock("@/hooks/use-team-members", () => ({
+  useTeamMembers: (teamId: string | null | undefined) => mockTeamMembers(teamId),
+  useTeamMemberRoles: () => new Map(),
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -92,13 +109,21 @@ beforeEach(async () => {
   await whenSeeded()
 })
 
-describe("Composer — desktop regression (no mobile props)", () => {
-  it("does not mount the mobile mention popover container when mobileMentionMembers is undefined", () => {
+describe("Composer — a team room's @ panel", () => {
+  // A phone used to swap the combined panel for a members-only sheet, so the
+  // same room could `@` a file on desktop and not on a phone. Every surface now
+  // gets the one combined panel, which lists the room's members first.
+  const members = [mkChar("c1", "Alice"), mkChar("c2", "Bob")]
+
+  function renderRoom() {
+    mockTeamMembers.mockImplementation((teamId: string | null | undefined) =>
+      teamId === "team_1" ? members : []
+    )
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
         <Composer
-          session={mkSession()}
+          session={mkSession({ kind: "team", teamId: "team_1" })}
           onStartNewSession={async () => undefined}
           onOpenSettings={() => undefined}
           onSend={async () => undefined}
@@ -106,99 +131,43 @@ describe("Composer — desktop regression (no mobile props)", () => {
         />
       </Wrapper>
     )
+    return document.querySelector("textarea")! as HTMLTextAreaElement
+  }
+
+  afterEach(() => {
+    mockTeamMembers.mockReset()
+    mockTeamMembers.mockReturnValue([])
+  })
+
+  it("lists the room's members in the combined panel, not a separate sheet", async () => {
+    const ta = renderRoom()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "@", selectionStart: 1 } })
+    })
+    expect(await screen.findByText("Alice")).toBeInTheDocument()
+    expect(screen.getByText("Bob")).toBeInTheDocument()
     expect(screen.queryByTestId("mobile-mention-popover")).toBeNull()
   })
-})
 
-describe("Composer — mobile mention popover", () => {
-  it("opens the mobile popover when the user types @ and mobileMentionMembers is set", async () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <Composer
-          session={mkSession()}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-          mobileMentionMembers={[mkChar("c1", "Alice"), mkChar("c2", "Bob")]}
-        />
-      </Wrapper>
-    )
-    const ta = document.querySelector("textarea")! as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "@" } })
-    expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
-    expect(screen.getByText("Alice")).toBeInTheDocument()
-    expect(screen.getByText("Bob")).toBeInTheDocument()
-  })
-
-  it("filters the popover by the @ token query", async () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <Composer
-          session={mkSession()}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-          mobileMentionMembers={[mkChar("c1", "Alice"), mkChar("c2", "Bob")]}
-        />
-      </Wrapper>
-    )
-    const ta = document.querySelector("textarea")! as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "@al" } })
-    expect(screen.getByText("Alice")).toBeInTheDocument()
+  it("filters the members by the @ query", async () => {
+    const ta = renderRoom()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "@al", selectionStart: 3 } })
+    })
+    expect(await screen.findByText("Alice")).toBeInTheDocument()
     expect(screen.queryByText("Bob")).not.toBeInTheDocument()
   })
 
-  it("inserts @<name> when a row is tapped and closes the popover", async () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <Composer
-          session={mkSession()}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-          mobileMentionMembers={[mkChar("c1", "Alice")]}
-        />
-      </Wrapper>
-    )
-    const ta = document.querySelector("textarea")! as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "@" } })
-    fireEvent.click(screen.getByRole("button", { name: /alice/i }))
-    await waitFor(() => {
-      expect(ta.value).toMatch(/^@Alice\s/)
+  it("inserts @<name> when a member is picked", async () => {
+    const ta = renderRoom()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "@al", selectionStart: 3 } })
     })
-    expect(screen.queryByTestId("mobile-mention-popover")).toBeNull()
-  })
-
-  it("dismisses on Escape (replaces the legacy hand-rolled backdrop click)", async () => {
-    const Wrapper = withAdapter(makeAdapter())
-    render(
-      <Wrapper>
-        <Composer
-          session={mkSession()}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-          mobileMentionMembers={[mkChar("c1", "Alice")]}
-        />
-      </Wrapper>
-    )
-    const ta = document.querySelector("textarea")! as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: "@" } })
-    expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
-    // The popover was migrated from a hand-rolled overlay+backdrop button
-    // to shadcn Sheet, which dismisses via Escape / outside-click via the
-    // Radix overlay. Asserting Escape covers the same UX contract without
-    // depending on Radix's internal overlay markup.
-    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
-    await Promise.resolve()
-    expect(screen.queryByTestId("mobile-mention-popover")).toBeNull()
+    await screen.findByText("Alice")
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" })
+    })
+    await waitFor(() => expect(ta.value).toMatch(/^@Alice\s/))
   })
 })
 
@@ -221,6 +190,41 @@ describe("Composer — per-session draft persistence", () => {
     await waitFor(() => {
       expect(ta.value).toBe("saved text")
     })
+  })
+
+  // The stored draft used to land on top of whatever was typed while it
+  // loaded, replacing the message the user was in the middle of writing.
+  it("keeps what was typed while the saved draft was still loading", async () => {
+    await setDraft("ses_gap", "saved text")
+    let release: () => void = () => undefined
+    mockDraftReadGate.hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <Composer
+            session={mkSession({ id: "ses_gap" })}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={async () => undefined}
+            onStop={async () => undefined}
+          />
+        </Wrapper>
+      )
+      const ta = document.querySelector("textarea")! as HTMLTextAreaElement
+      await act(async () => {
+        fireEvent.change(ta, { target: { value: "typed meanwhile" } })
+      })
+      await act(async () => {
+        release()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      })
+      expect(ta.value).toBe("typed meanwhile")
+    } finally {
+      mockDraftReadGate.hold = null
+    }
   })
 
   it("eventually persists the draft to Dexie after the debounce window", async () => {

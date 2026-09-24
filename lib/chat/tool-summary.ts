@@ -105,8 +105,30 @@ function urlHost(u: string): string {
 
 /** Collapse whitespace + clamp a target to keep the row single-line. */
 export function clampTarget(value: string, max = 72): string {
-  const oneLine = value.replace(/\s+/g, " ").trim()
-  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
+  // Short inputs and unusual limits retain the original slice semantics.
+  if (value.length <= max || max < 1 || !Number.isFinite(max)) {
+    const oneLine = value.replace(/\s+/g, " ").trim()
+    return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
+  }
+
+  // Only normalize enough UTF-16 units to decide the visible prefix. Native
+  // whitespace search skips arbitrarily long blank runs without a JS loop.
+  const whitespace = /\s+/y
+  let prefix = ""
+  let index = 0
+  while (index < value.length) {
+    if (/\s/.test(value[index])) {
+      whitespace.lastIndex = index
+      whitespace.test(value)
+      index = whitespace.lastIndex
+      if (index === value.length) break
+      if (prefix) prefix += " "
+    } else {
+      prefix += value[index++]
+    }
+    if (prefix.length > max) return `${prefix.slice(0, max - 1)}…`
+  }
+  return prefix
 }
 
 const ICON_BY_NAME: Record<string, ToolIconKey> = {

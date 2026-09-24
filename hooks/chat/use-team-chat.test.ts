@@ -13,6 +13,7 @@ jest.mock("@/lib/companion/room-send-client", () => ({
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { toast } from "sonner"
 
 // The factory must not close over a `const` declared in this file: hoisted
 // imports evaluate a keyring store that calls `isTauri()` at module load,
@@ -440,6 +441,27 @@ describe("useTeamChat — actions", () => {
     )
   })
 
+  it("send() refuses a runtime route instead of posting it to the room as text", async () => {
+    // A room routes `@Name` itself; a direct-chat route handed here must say
+    // why it did nothing, not vanish and leave "@codex …" in the room.
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("@codex fix the build", {
+        turnRoute: {
+          target: { kind: "runtime", runtime: "codex" },
+          handle: "codex",
+          label: "codex",
+        },
+      })
+    })
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "team-1",
+      expect.objectContaining({ code: "turnRouteUnavailable", source: "agent-team" })
+    )
+    expect(getSessionMock).not.toHaveBeenCalled()
+  })
+
   it("send() errors when the team is missing in the database", async () => {
     getSessionMock.mockResolvedValueOnce({ id: "team-1", kind: "team", teamId: "t-1" })
     getTeamMock.mockResolvedValueOnce(null)
@@ -622,6 +644,58 @@ describe("useTeamChat — actions", () => {
       await result.current.regenerate()
     })
     expect(truncateAfterMock).not.toHaveBeenCalled()
+  })
+
+  it("editAndResend names a file the edit could not resend", async () => {
+    const warning = jest.spyOn(toast, "warning").mockImplementation(() => "t")
+    chatState.messages = [
+      {
+        id: "m-1",
+        role: "user",
+        parts: [
+          {
+            type: "file",
+            mediaType: "text/plain",
+            text: "A cat jumps.",
+            videoAttachment: {
+              groupId: "g-1",
+              filename: "clip.mp4",
+              sourceMediaType: "video/mp4",
+              kind: "video",
+              durationSec: 4,
+              width: 640,
+              height: 360,
+              delivery: "native",
+              strategy: "uniform",
+              range: null,
+              frameTimes: [],
+              engine: "browser",
+            },
+          },
+          { type: "text", text: "what happens?" },
+        ],
+      },
+    ]
+    getSessionMock.mockResolvedValueOnce({ id: "team-1", kind: "team", teamId: "t-1", title: "T" })
+    getTeamMock.mockResolvedValueOnce({
+      id: "t-1",
+      orchestration: "round_robin",
+      members: [],
+      supervisorCharacterId: null,
+    })
+    routeTurnMock.mockReturnValueOnce([])
+    try {
+      const { result } = renderHook(() => useTeamChat())
+      await flush()
+      await act(async () => {
+        await result.current.editAndResend("m-1", "what happens next?")
+      })
+      expect(warning).toHaveBeenCalledWith(
+        "clip.mp4 couldn't be sent again and was left out. Attach it again to include it."
+      )
+    } finally {
+      warning.mockRestore()
+    }
   })
 
   it("editAndResend keeps the original team turn as a sibling branch", async () => {
@@ -3375,6 +3449,34 @@ describe("remote room mutation rejection", () => {
         expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith("team-1", expect.anything())
         unmount()
       } finally {
+        pairing.mockReturnValue(false)
+      }
+    }
+  )
+
+  it.each(["regenerate", "editAndResend"] as const)(
+    "names the files the host could not resend with a %s",
+    async (action) => {
+      isTauriMock.mockReturnValue(false)
+      const pairing = jest.requireMock("@/lib/platform/web-companion")
+        .hasWebCompanionTarget as jest.Mock
+      pairing.mockReturnValue(true)
+      const sendRoomTurn = jest.requireMock("@/lib/companion/room-send-client")
+        .sendRoomTurn as jest.Mock
+      sendRoomTurn.mockResolvedValue({ accepted: true, notResent: ["clip.mp4", "photo.png"] })
+      const warning = jest.spyOn(toast, "warning").mockImplementation(() => "t")
+      try {
+        const { result, unmount } = renderHook(() => useTeamChat())
+        await act(async () => {
+          if (action === "regenerate") await result.current.regenerate()
+          else await result.current.editAndResend("u-1", "edit")
+        })
+        expect(warning).toHaveBeenCalledWith(
+          "clip.mp4, photo.png couldn't be sent again and were left out. Attach them again to include them."
+        )
+        unmount()
+      } finally {
+        warning.mockRestore()
         pairing.mockReturnValue(false)
       }
     }

@@ -11,7 +11,7 @@ import type { PopoverItem } from "@/components/chat/composer-popover"
 // the sweep below is WHICH kinds produce a handle, not what the handle says.
 const FIXTURES: Record<string, unknown> = {
   file: { kind: "file", entry: { relPath: "src/app.ts", isDir: false } },
-  agent: { kind: "agent", target: { name: "reviewer" } },
+  agent: { kind: "agent", target: { name: "Reviewer", handle: "reviewer" } },
   subagent: { kind: "subagent", target: { handle: "reviewer", name: "Reviewer" } },
   member: { kind: "member", target: { id: "char-1", name: "Critic" }, role: "Reviewer" },
   skill: { kind: "skill", skill: { id: "s1", name: "Skill" } },
@@ -79,6 +79,18 @@ describe("resource parameter kinds", () => {
       id: "char-1",
       label: "Critic",
       raw: "@Critic",
+    })
+  })
+
+  // Same projection for a route target: the handle is the id AND the token,
+  // which is what makes the substituted `@reviewer` route the turn it lands in.
+  it("binds a route target to its handle and labels it by name", () => {
+    const handler = listMentionPickHandlers().find((h) => h.kind === "agent")
+    const ref = handler!.toContextRef(FIXTURES.agent as Extract<PopoverItem, { kind: never }>)
+    expect(resourceOptionFromRef(ref!)).toEqual({
+      id: "reviewer",
+      label: "Reviewer",
+      raw: "@reviewer",
     })
   })
 

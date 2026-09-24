@@ -19,6 +19,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { getLucideExport } from "@/lib/icons/lucide-catalog"
 import { cn } from "@/lib/utils"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import type { UIMessage } from "ai"
 import { MessageMotionProvider } from "@/components/chat/motion/motion-reveal"
@@ -124,10 +125,15 @@ function useMessageMetadata(
   const usage = metadata.usage as UsageInfo | undefined
   const createdAt = typeof metadata.createdAt === "number" ? metadata.createdAt : undefined
   const isAssistant = message.role === "assistant"
-  // The sealed preset/agent name beats the generic "Assistant"; a room speaker
-  // beats both — a named speaker is the only thing that says which participant
-  // is talking.
-  const identity = speakerName ?? run?.agent?.name ?? (isAssistant ? t("assistant") : t("you"))
+  // The sealed preset/agent name beats the generic "Assistant"; the runtime or
+  // Squad member an addressed turn went to beats that (it is who actually
+  // answered); a room speaker beats all of them — a named speaker is the only
+  // thing that says which participant is talking.
+  const identity =
+    speakerName ??
+    (isAssistant ? run?.route?.label : undefined) ??
+    run?.agent?.name ??
+    (isAssistant ? t("assistant") : t("you"))
   // One formatted value per metadata field, read by BOTH placements. `header`
   // and `details` used to be assembled independently, and the header list
   // simply omitted `usage` and `cost` — so choosing "header" for either
@@ -255,7 +261,14 @@ export function MessageShell({
    * `speakerName` and keeps honouring the setting exactly as before.
    */
   const inRoom = Boolean(speakerName)
-  const showIdentity = inRoom || display.metadata.identity === "header"
+  /**
+   * An addressed turn (`@codex`, `@claude`, a Squad member) was answered by
+   * someone other than the conversation's own runtime. Like a room speaker,
+   * that is only visible if the header says so, so it shows regardless of the
+   * placement preference.
+   */
+  const route = isAssistant ? run?.route : undefined
+  const showIdentity = inRoom || Boolean(route) || display.metadata.identity === "header"
   // Auto-routing explainability chip (ADR-0043 Phase 12). Opt-out: the flag
   // defaults to on and only an explicit `false` hides it.
   const showRoutingIndicator =
@@ -328,6 +341,8 @@ export function MessageShell({
               <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
                 {speakerAvatar ? (
                   <AvatarBadge subject={speakerAvatar} size={14} textClassName="text-[8px]" />
+                ) : route?.brandId ? (
+                  <BrandIcon id={route.brandId} label={identity} size={14} />
                 ) : isAssistant ? (
                   (agentIconNode(run?.agent?.icon, "size-3.5", speakerColor) ?? (
                     <BotIcon
@@ -339,6 +354,15 @@ export function MessageShell({
                   <UserIcon className="size-3.5" />
                 )}
                 <span style={speakerColor ? { color: speakerColor } : undefined}>{identity}</span>
+                {route ? (
+                  <span
+                    className="font-normal text-muted-foreground"
+                    data-testid="message-route-via"
+                    data-route-runtime={route.runtimeKind}
+                  >
+                    {t("routedVia", { handle: route.handle })}
+                  </span>
+                ) : null}
               </span>
             )}
             {onStopSpeaker ? (

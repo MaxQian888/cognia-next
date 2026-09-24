@@ -276,6 +276,12 @@ interface ChatPaneProps {
     templateRun?: ChatTemplateRun | null,
     turnMetadata?: ComposerTurnMetadata
   ) => void | Promise<void>
+  /**
+   * Whether the hero composer may address a runtime with a leading `@handle`
+   * (`Composer.routing`). The shell knows where `onHeroSend` delivers; pass
+   * false when that is a team room. Defaults to on.
+   */
+  heroRouting?: boolean
   /** Recent sessions for the welcome page "Continue" group. */
   recentSessions?: readonly RecentSessionEntry[]
   /** Resume a recent session by id from the welcome page. */
@@ -290,8 +296,6 @@ interface ChatPaneProps {
   composerDisabled?: boolean
   /** One recovery surface, centered without history and compact beside cached messages. */
   runtimeNotice?: ReactNode
-  /** When provided, opens the mobile inline @-mention popover on `@`. */
-  mobileMentionMembers?: readonly Character[]
   /**
    * Workflow-editor copilot wiring — forwarded to the `<Composer>` so `@`
    * opens a workflow node/edge picker. Only the workflow chat tab passes this.
@@ -374,7 +378,6 @@ export function ChatPane({
   composerRef,
   composerDisabled,
   runtimeNotice,
-  mobileMentionMembers,
   onResumeAfterPlanApproval,
   onSendPlanFeedback,
   onSplitView,
@@ -383,6 +386,7 @@ export function ChatPane({
   emptyState,
   welcomeExtras,
   onHeroSend,
+  heroRouting,
   workflowMention,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
@@ -724,8 +728,8 @@ export function ChatPane({
                 onSend={onHeroSend}
                 onStop={() => void onStop()}
                 disabled={composerDisabled}
-                mobileMentionMembers={mobileMentionMembers}
                 toolbar={welcomeComposerToolbar}
+                routing={heroRouting}
               />
             </div>
           ) : undefined
@@ -759,7 +763,6 @@ export function ChatPane({
         // "don't use that tool, do it another way", and `send` already routes a
         // message in that state into the steer queue rather than a new turn.
         disabled={(atCapacity && !activeSession.platformBinding) || composerDisabled}
-        mobileMentionMembers={mobileMentionMembers}
         workflowMention={workflowMention}
       />
     )

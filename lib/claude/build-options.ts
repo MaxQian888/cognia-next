@@ -19,7 +19,7 @@ import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
 import {
   externalAgentIdFromProviderId,
   isExternalAgentProviderId,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
@@ -38,7 +38,7 @@ import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   deriveExternalSessionPermission,
   type ExternalSessionPermissionSpec,
-} from "@/lib/ai/agent/external/permission-cascade"
+} from "@/lib/ai/agent/external/policy/permission-cascade"
 import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
@@ -760,7 +760,7 @@ export interface BuildOptionsContext {
    * and by the team sidecar path from the team→teammate cascade. Absent for
    * top-level chat (no parent ⇒ no ceiling).
    */
-  permissionCeiling?: import("@/lib/ai/agent/external/permission-cascade").ExternalSessionPermissionSpec
+  permissionCeiling?: import("@/lib/ai/agent/external/policy/permission-cascade").ExternalSessionPermissionSpec
   /**
    * Surface that owns this turn — drives the agent-trace root span's `surface`.
    * Defaults to "chat". Connector ai-runs pass "connector", workflow nodes

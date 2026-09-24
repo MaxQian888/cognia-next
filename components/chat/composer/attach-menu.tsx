@@ -169,8 +169,12 @@ export function ComposerAttachMenu({
     onInsert?.(text)
   }
 
+  // 32px like every other icon button on the box's action row (the voice
+  // controls beside it); the send button is the one 36px control, because it
+  // is the primary action. A 36px paperclip made the left end of the row read
+  // as a different scale from the rest of it.
   const triggerClassName = cn(
-    "size-9 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60",
+    "touch-hit size-8 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60",
     className
   )
 

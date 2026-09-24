@@ -3,7 +3,7 @@
  *
  * This replaces two copies of a near-identical function that both read the
  * model's `tool_use` INPUT instead (`lib/claude/adapter.ts` and
- * `lib/ai/agent/external/event-to-parts.ts`). Reading the input was the bug:
+ * `lib/ai/agent/external/session/event-to-parts.ts`). Reading the input was the bug:
  * a `tool_use` block is seen before the tool has run, so the id in it is
  * whatever the model guessed — and `createArtifact` mints its own. The part
  * therefore pointed at a row that did not exist, and

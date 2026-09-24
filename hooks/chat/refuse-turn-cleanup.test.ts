@@ -142,7 +142,12 @@ describe("a refusal that never owned a working copy", () => {
     const body = leaseFailureBody()
     // Whitespace-tolerant: the branch must pick the busy code, not merely
     // mention it somewhere in the same refusal.
-    expect(body).toMatch(/isWorkspaceBusyRefusal\(error\)\s*\?\s*createDiagnostic\("workspaceBusy"/)
+    // Typed where the host's sentence enters, then branched on the type.
+    expect(body).toContain(
+      "const conflict = isWorkspaceBusyRefusal(error) ? workingCopyConflict(error) : null"
+    )
+    expect(body).toMatch(/conflict\s*\?\s*createDiagnostic\("workspaceBusy"/)
+    expect(body).toContain("leaseResource: conflict.resource")
     expect(body).toMatch(/:\s*createDiagnostic\("workspaceUnavailable"/)
   })
 

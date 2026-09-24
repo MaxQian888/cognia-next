@@ -418,9 +418,14 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
 
   // ========== App Data ==========
 
+  // Reads the store's CURRENT state rather than this render's `surfaces`
+  // snapshot. The built-in action handlers call it from timer ticks and from
+  // back-to-back actions dispatched before React re-renders; a snapshot read
+  // there made the timer stop on its first tick (it still saw isRunning=false).
   const getAppData = useCallback(
-    (appId: string): Record<string, unknown> | undefined => surfaces[appId]?.dataModel,
-    [surfaces]
+    (appId: string): Record<string, unknown> | undefined =>
+      useA2UIStore.getState().surfaces[appId]?.dataModel,
+    []
   )
 
   const setAppData = useCallback(
@@ -466,7 +471,6 @@ export function useA2UIAppBuilder(options: UseA2UIAppBuilderOptions = {}) {
     getAppData,
     setAppData,
     resetAppData,
-    surfaces: surfaces as Record<string, { dataModel: Record<string, unknown> }>,
     setDataValue: a2ui.setDataValue,
     getAppLocale,
     onAction,

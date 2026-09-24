@@ -119,6 +119,75 @@ describe("createDebouncedCallback", () => {
     h.flush()
     expect(fn).toHaveBeenCalledTimes(1)
   })
+
+  it("bounds continuous calls while ordinary debounce remains trailing-only", () => {
+    const bounded = jest.fn()
+    const trailing = jest.fn()
+    const checkpoint = createDebouncedCallback<[number]>(bounded, 250, 1000)
+    const ordinary = createDebouncedCallback<[number]>(trailing, 250)
+    for (let token = 0; token < 200; token++) {
+      checkpoint.call(token)
+      ordinary.call(token)
+      jest.advanceTimersByTime(10)
+    }
+    expect(bounded.mock.calls).toEqual([[99], [199]])
+    expect(trailing).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(250)
+    expect(bounded).toHaveBeenCalledTimes(2)
+    expect(trailing).toHaveBeenCalledWith(199)
+  })
+
+  it("flush and cancel clear both timers, allowing a fresh checkpoint window", () => {
+    const fn = jest.fn()
+    const h = createDebouncedCallback<[number]>(fn, 250, 1000)
+    h.call(1)
+    h.flush()
+    h.flush()
+    expect(jest.getTimerCount()).toBe(0)
+    jest.advanceTimersByTime(1000)
+    expect(fn.mock.calls).toEqual([[1]])
+    h.call(2)
+    h.cancel()
+    expect(jest.getTimerCount()).toBe(0)
+    h.flush()
+    jest.advanceTimersByTime(1000)
+    expect(fn.mock.calls).toEqual([[1]])
+    h.call(3)
+    jest.advanceTimersByTime(250)
+    expect(fn.mock.calls).toEqual([[1], [3]])
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("zero delay stays synchronous with max wait and leaves no timers", () => {
+    const fn = jest.fn()
+    const h = createDebouncedCallback<[number]>(fn, 0, 1000)
+    h.call(1)
+    h.call(2)
+    h.flush()
+    expect(fn.mock.calls).toEqual([[1], [2]])
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("honors a maximum wait shorter than the trailing window", () => {
+    const fn = jest.fn()
+    const h = createDebouncedCallback<[number]>(fn, 2000, 1000)
+    h.call(1)
+    jest.advanceTimersByTime(1000)
+    expect(fn.mock.calls).toEqual([[1]])
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("retains a new call scheduled from inside the callback", () => {
+    const fn = jest.fn((value: number) => {
+      if (value === 1) h.call(2)
+    })
+    const h = createDebouncedCallback<[number]>(fn, 250, 1000)
+    h.call(1)
+    h.flush()
+    jest.advanceTimersByTime(250)
+    expect(fn.mock.calls).toEqual([[1], [2]])
+    expect(jest.getTimerCount()).toBe(0)
+  })
 })
 
 describe("SessionCoalescingRegistry", () => {
@@ -194,8 +263,9 @@ describe("SessionCoalescingRegistry", () => {
 
 /**
  * ADR-0127 §5 acceptance, deterministic half: at a synthetic 100 tok/s stream
- * the registry must produce ≤ 1 store commit per animation frame and ≤ 1 Dexie
- * write per 250 ms debounce window. This is the Jest gate that backs the
+ * the registry must produce ≤ 1 store commit per animation frame and request
+ * checkpoints at least once per second during continuous deltas. Callback
+ * counts measure scheduling, not completed Dexie transactions. This backs the
  * timing bars measured by the opt-in `@perf` Playwright suite.
  */
 describe("ADR-0127 streaming budget (100 tok/s)", () => {
@@ -252,13 +322,74 @@ describe("ADR-0127 streaming budget (100 tok/s)", () => {
     // ≤ 1 React commit per frame (and at least one — the stream is live).
     expect(onCommit.mock.calls.length).toBeLessThanOrEqual(framesDrained)
     expect(onCommit.mock.calls.length).toBeGreaterThan(0)
-    // Trailing debounce: while deltas keep arriving faster than 250 ms apart,
-    // the writer never fires; it fires once after the stream goes quiet.
+    // The 960 ms burst is shorter than the checkpoint deadline. Its latest
+    // snapshot is submitted by the one-second deadline after streaming stops.
     expect(onPersist).not.toHaveBeenCalled()
     jest.advanceTimersByTime(250)
     expect(onPersist).toHaveBeenCalledTimes(1)
     expect(onPersist).toHaveBeenLastCalledWith("s1", [msg(`t${TOKENS}`)])
     registry.release("s1")
+  })
+
+  it("checkpoints a simulated hour at 100 tok/s with at most 1000 ms of pending updates", () => {
+    jest.setSystemTime(0)
+    let latestSubmittedAt = 0
+    let maxPendingMs = 0
+    let submissions = 0
+    let lastToken = ""
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: (_sessionId, messages) => {
+        submissions++
+        lastToken = messages[0].id
+        maxPendingMs = Math.max(maxPendingMs, Date.now() - latestSubmittedAt)
+        latestSubmittedAt = Date.now()
+      },
+      persistDelayMs: 250,
+    })
+    const persist = registry.get("hour-long").persist
+    for (let token = 0; token < 360_000; token++) {
+      persist.call([msg(String(token))])
+      jest.advanceTimersByTime(10)
+    }
+    maxPendingMs = Math.max(maxPendingMs, Date.now() - latestSubmittedAt)
+    expect({ submissions, maxPendingMs, lastToken }).toEqual({
+      submissions: 3600,
+      maxPendingMs: 1000,
+      lastToken: "359999",
+    })
+    registry.flushAllPersist()
+    registry.clear()
+    expect(submissions).toBe(3600)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("keeps independently offset checkpoint deadlines and cancels released sessions", () => {
+    const onPersist = jest.fn()
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist,
+      persistDelayMs: 250,
+      persistMaxWaitMs: 500,
+    })
+    for (let tick = 0; tick < 10; tick++) {
+      registry.get("A").persist.call([msg(`a${tick}`)])
+      if (tick >= 2) registry.get("B").persist.call([msg(`b${tick}`)])
+      jest.advanceTimersByTime(50)
+    }
+    expect(onPersist.mock.calls).toEqual([["A", [msg("a9")]]])
+    registry.get("B").persist.call([msg("b10")])
+    jest.advanceTimersByTime(100)
+    expect(onPersist.mock.calls).toEqual([
+      ["A", [msg("a9")]],
+      ["B", [msg("b10")]],
+    ])
+    registry.get("C").persist.call([msg("c1")])
+    registry.release("C")
+    jest.advanceTimersByTime(1000)
+    expect(onPersist).toHaveBeenCalledTimes(2)
+    registry.clear()
+    expect(jest.getTimerCount()).toBe(0)
   })
 
   it("keeps sessions independent: N concurrent streams ⇒ N commits per frame, not N×tokens", () => {

@@ -32,7 +32,10 @@ export interface SendButtonInput {
   isPreparingAttachments: boolean
   /** Trimmed text is non-empty, or at least one attachment is staged. */
   hasContent: boolean
-  /** Connector draft-review mode: the button becomes "Edit draft" instead. */
+  /**
+   * A platform conversation has drafted replies waiting for review. With an
+   * empty box the button offers to review them; typing takes it back.
+   */
   hasPendingDrafts: boolean
   /** `ComposerInner`'s `disabled` prop (concurrent-stream cap, etc.). */
   composerDisabled: boolean
@@ -41,7 +44,8 @@ export interface SendButtonInput {
 }
 
 /**
- * - `draft` — connector draft review; opens the draft dialog.
+ * - `draft` — pending connector drafts and an empty box; opens the draft
+ *   review dialog.
  * - `busy` — a dispatch (or attachment prep) is in flight; non-interactive.
  * - `send` — submits. `queues` says whether that lands as a follow-up.
  * - `stop` — interrupts the running turn.
@@ -63,10 +67,16 @@ export interface SendButtonState {
 /**
  * Resolve the button. Priority is deliberate:
  *
- * 1. **draft** — a pending connector draft replaces the control outright.
- * 2. **busy** — a local dispatch or attachment prep owns the button; it shows a
+ * 1. **busy** — a local dispatch or attachment prep owns the button; it shows a
  *    spinner and rejects clicks (`submit()` has its own re-entrancy guard, this
  *    just stops the button from lying about being clickable).
+ * 2. **draft** — pending connector drafts, with nothing typed and no turn
+ *    running. An empty box has nothing to send, so the button's one useful job
+ *    is the drafts waiting beside it. The moment the user types, it is Send
+ *    again: a pending draft must never stand between someone and their own
+ *    reply, which is what the old "replace the control outright" rule did.
+ *    Reviewing is a local action, so the concurrent-stream cap and a blocked
+ *    outbound path do not disable it.
  * 3. **streaming** — Send when the send would be accepted, Stop otherwise.
  * 4. **idle / error** — Send, enabled only when there is something to send.
  */
@@ -81,20 +91,15 @@ export function resolveSendButton(input: SendButtonInput): SendButtonState {
     outboundBlocked,
   } = input
 
-  if (hasPendingDrafts) {
-    return {
-      mode: "draft",
-      disabled: composerDisabled,
-      queues: false,
-      variant: "secondary",
-    }
-  }
-
   // `submitted` is included for completeness even though the wrapper never
   // emits it today: it means "dispatched, not yet streaming", a window where a
   // second send would restart the turn rather than steer it.
   if (isSending || isPreparingAttachments || status === "submitted") {
     return { mode: "busy", disabled: true, queues: false, variant: "default" }
+  }
+
+  if (hasPendingDrafts && !hasContent && status !== "streaming") {
+    return { mode: "draft", disabled: false, queues: false, variant: "secondary" }
   }
 
   // A send is only possible with something to send, and only if nothing blocks

@@ -10,6 +10,13 @@ jest.mock("@/lib/db/connector-drafts", () => ({
   listPendingForConversation: jest.fn(async () => []),
 }))
 jest.mock("@/components/inbox/canned-response-picker", () => ({ CannedResponsePicker: () => null }))
+// The draft dialog's body is the inbox's editor, with its own suite; here it
+// only has to show up when the review button opens the dialog.
+jest.mock("@/components/inbox/draft-editor", () => ({
+  DraftEditor: ({ draft }: { draft: { id: string } }) => (
+    <div data-testid={`draft-editor-${draft.id}`} />
+  ),
+}))
 jest.mock("@/components/inbox/inbox-composer-actions-host", () => ({
   InboxComposerActionsHost: () => null,
 }))
@@ -357,6 +364,32 @@ it("offers a send button on a remote route and a separate draft-review action", 
   await waitFor(() =>
     expect(screen.getByRole("button", { name: /Review drafts|reviewDrafts/ })).toBeInTheDocument()
   )
+})
+
+// The primary button's draft mode existed but was hard-wired off; the only way
+// in was the small "Review drafts" link above the box.
+it("turns the empty send button into the draft review, and gives it back on typing", async () => {
+  const { listPendingForConversation } = jest.requireMock("@/lib/db/connector-drafts") as {
+    listPendingForConversation: jest.Mock
+  }
+  listPendingForConversation.mockResolvedValue([
+    { id: "d1", conversationKey: "c1", content: "Drafted reply", status: "pending" },
+  ])
+  try {
+    const { ta } = renderComposer(boundSession())
+    const review = await screen.findByTestId("composer-review-drafts")
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
+    fireEvent.click(review)
+    expect(await screen.findByTestId("draft-editor-d1")).toBeInTheDocument()
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByTestId("draft-editor-d1")).toBeNull())
+
+    fireEvent.change(ta, { target: { value: "my own reply" } })
+    expect(screen.queryByTestId("composer-review-drafts")).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+  } finally {
+    listPendingForConversation.mockResolvedValue([])
+  }
 })
 
 it.each(["/clear", "!echo hello", "#remember this", "/local explain this"])(

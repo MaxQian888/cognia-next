@@ -121,6 +121,151 @@ describe("SessionCostBadge — popover with persisted rows", () => {
     expect(await screen.findByTestId("cost-popover-empty")).toBeInTheDocument()
   })
 
+  it("keeps reported totals for older external turns without fabricating ledger details", async () => {
+    liveQueryReturn = []
+    const user = userEvent.setup()
+    renderUI(
+      <SessionCostBadge
+        sessionId="pi-session"
+        inMemoryUsage={{ inputTokens: 267000, outputTokens: 11, totalCostUsd: 0.25 }}
+        tokensLabel={tokens}
+      />
+    )
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(await screen.findByTestId("cost-popover-turns")).toHaveTextContent("—")
+    expect(screen.getByText("267k")).toBeInTheDocument()
+    expect(screen.getByText("11")).toBeInTheDocument()
+    expect(screen.getByText("$0.2500")).toBeInTheDocument()
+    expect(screen.getByTestId("cost-popover-empty")).toBeInTheDocument()
+  })
+
+  it("keeps historical totals when only the newest Pi turn has a ledger row", async () => {
+    liveQueryReturn = [
+      {
+        messageId: "new",
+        sessionId: "pi-session",
+        at: 1,
+        model: "pi-model",
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheReadTokens: 3,
+        cacheCreationTokens: 1,
+        costUsd: 0.1,
+        durationMs: 1000,
+      },
+    ]
+    const user = userEvent.setup()
+    renderUI(
+      <SessionCostBadge
+        sessionId="pi-session"
+        tokensLabel={tokens}
+        inMemoryUsage={{
+          inputTokens: 267010,
+          outputTokens: 13,
+          cacheReadInputTokens: 43,
+          cacheCreationInputTokens: 7,
+          totalCostUsd: 0.35,
+        }}
+      />
+    )
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(await screen.findByTestId("cost-popover-turns")).toHaveTextContent("—")
+    expect(screen.getByText("267k")).toBeInTheDocument()
+    expect(screen.getByText("13")).toBeInTheDocument()
+    expect(screen.getByText("$0.3500")).toBeInTheDocument()
+    expect(screen.getByTestId("cost-popover-speed")).toHaveTextContent("—")
+    expect(screen.getByText("partialModelData")).toBeInTheDocument()
+    expect(screen.getByTestId("cost-popover-by-model")).toHaveTextContent("pi-model")
+  })
+
+  it("uses complete ledger totals for the chip when only recent messages are loaded", async () => {
+    liveQueryReturn = [
+      {
+        messageId: "m",
+        sessionId: "s1",
+        at: 1,
+        inputTokens: 2000,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0.5,
+        durationMs: 1000,
+      },
+    ]
+    const user = userEvent.setup()
+    renderUI(
+      <SessionCostBadge
+        sessionId="s1"
+        tokensLabel={tokens}
+        inMemoryUsage={{ inputTokens: 10, outputTokens: 2, totalCostUsd: 0.1 }}
+      />
+    )
+    expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("2.0k")
+    expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("0.5000")
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(await screen.findByTestId("cost-popover-turns")).toHaveTextContent("1")
+    expect(screen.queryByText("partialModelData")).toBeNull()
+  })
+
+  it("retains known ledger input and cost while newer message output is still unpersisted", async () => {
+    liveQueryReturn = [
+      {
+        messageId: "m",
+        sessionId: "s1",
+        at: 1,
+        inputTokens: 2000,
+        outputTokens: 50,
+        cacheReadTokens: 100,
+        cacheCreationTokens: 5,
+        costUsd: 0.5,
+        durationMs: 1000,
+      },
+    ]
+    const user = userEvent.setup()
+    renderUI(
+      <SessionCostBadge
+        sessionId="s1"
+        tokensLabel={tokens}
+        inMemoryUsage={{ inputTokens: 10, outputTokens: 60 }}
+      />
+    )
+    expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("2.0k")
+    expect(screen.getByTestId("session-cost-trigger")).toHaveTextContent("0.5000")
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(screen.getByText("60")).toBeInTheDocument()
+    expect(screen.getByText("$0.5000")).toBeInTheDocument()
+    expect(screen.getByText("partialModelData")).toBeInTheDocument()
+    expect(screen.getByTestId("cost-popover-turns")).toHaveTextContent("—")
+  })
+
+  it("keeps newly reported reasoning even when other ledger counters already match", async () => {
+    liveQueryReturn = [
+      {
+        messageId: "m",
+        sessionId: "s1",
+        at: 1,
+        inputTokens: 10,
+        outputTokens: 60,
+        reasoningTokens: 2,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0.5,
+        durationMs: 1000,
+      },
+    ]
+    const user = userEvent.setup()
+    renderUI(
+      <SessionCostBadge
+        sessionId="s1"
+        tokensLabel={tokens}
+        inMemoryUsage={{ inputTokens: 10, outputTokens: 60, reasoningTokens: 7, totalCostUsd: 0.5 }}
+      />
+    )
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    expect(screen.getByText("7")).toBeInTheDocument()
+    expect(screen.getByText("partialModelData")).toBeInTheDocument()
+  })
+
   it("aggregates rows + builds per-model breakdown sorted by cost desc", async () => {
     liveQueryReturn = [
       {

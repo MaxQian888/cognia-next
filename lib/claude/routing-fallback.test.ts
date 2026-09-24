@@ -176,6 +176,29 @@ describe("attemptRoutingFallback", () => {
     expect(cached?.options.modelParams?.maxOutputTokens).toBe(1024)
   })
 
+  it("keeps an addressed turn's route stamp across the provider swap", async () => {
+    const routeStamp = { handle: "claude", label: "Claude", runtimeKind: "builtin" as const }
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      options: baseOptions([
+        { providerId: "openai", modelId: "gpt-4o-mini" },
+        { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+      ]),
+      attemptIndex: 0,
+      routeStamp,
+    })
+    await expect(attemptRoutingFallback("s1", "rate limit exceeded")).resolves.toBe(true)
+    expect(useChatStore.getState().lastSendBySession.s1?.routeStamp).toEqual(routeStamp)
+
+    // An unaddressed turn gains no stamp.
+    seedCache("s2", [
+      { providerId: "openai", modelId: "gpt-4o-mini" },
+      { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+    ])
+    await attemptRoutingFallback("s2", "rate limit exceeded")
+    expect(useChatStore.getState().lastSendBySession.s2).not.toHaveProperty("routeStamp")
+  })
+
   it("stays silent when the retry itself could not be issued", async () => {
     seedCache("s1", [
       { providerId: "openai", modelId: "gpt-4o-mini" },

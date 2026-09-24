@@ -32,7 +32,7 @@ jest.mock("@/lib/db/sessions", () => ({
   createSession: (p: unknown) => createSessionMock(p),
   deleteSession: (id: string) => deleteSessionMock(id),
   bulkDeleteSessions: (ids: readonly string[]) => bulkDeleteSessionsMock(ids),
-  listScopedSessions: (projectId?: string) => listSessionsMock(projectId),
+  listWorkspaceSessions: (projectId: string) => listSessionsMock(projectId),
   listSessions: () => listAllSessionsMock(),
   updateSession: (id: string, p: unknown) => updateSessionMock(id, p),
   getSession: (id: string) => getSessionMock(id),
@@ -61,8 +61,18 @@ jest.mock("@/lib/db/characters", () => ({
   resolveCharacterById: (id: string) => resolveCharacterByIdMock(id),
 }))
 
+// `transaction` runs its scope inline and records what it was asked for, so a
+// test can tell a batched write from a loop of single ones.
+const dbTransactionMock = jest.fn((_mode: string, _table: unknown, scope: () => Promise<unknown>) =>
+  scope()
+)
 jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({ connected: true }),
+  getDb: () => ({
+    connected: true,
+    sessions: "sessions-table",
+    transaction: (mode: string, table: unknown, scope: () => Promise<unknown>) =>
+      dbTransactionMock(mode, table, scope),
+  }),
 }))
 
 const closeSessionIpcMock = jest.fn()
@@ -342,6 +352,8 @@ describe("useSessions", () => {
   })
 
   it("reports isLoadingSessions until the first live query resolves", () => {
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
     liveQueryMock.mockReturnValue(undefined)
     const { result, rerender } = renderHook(() => useSessions())
     expect(result.current.isLoadingSessions).toBe(true)
@@ -351,6 +363,113 @@ describe("useSessions", () => {
     rerender()
     expect(result.current.isLoadingSessions).toBe(false)
     expect(result.current.sessions).toEqual([{ id: "s1" }])
+  })
+
+  it("stays loading while the project store hydrates, even though the query answered []", () => {
+    // Before hydration there is no workspace to scope to, so the querier
+    // answers [] without asking Dexie. That is "not asked yet"; reporting it
+    // as loaded flashed the empty state on every cold start.
+    mockProjectState.loaded = false
+    liveQueryMock.mockReturnValue([])
+    const { result, rerender } = renderHook(() => useSessions())
+    expect(result.current.isLoadingSessions).toBe(true)
+
+    mockProjectState.loaded = true
+    mockProjectState.activeProjectId = "project-default"
+    rerender()
+    expect(result.current.isLoadingSessions).toBe(false)
+  })
+
+  it("never reports loading for a disabled consumer", () => {
+    mockProjectState.loaded = false
+    liveQueryMock.mockReturnValue([])
+    const { result } = renderHook(() => useSessions({ enabled: false }))
+    expect(result.current.isLoadingSessions).toBe(false)
+  })
+
+  describe("structural sharing across live-query emissions", () => {
+    // Capture the querier `useLiveQuery` was handed and drive it by hand, the
+    // way Dexie re-runs it on every write to the table.
+    function captureQuerier() {
+      mockProjectState.loaded = true
+      mockProjectState.activeProjectId = "project-default"
+      // The hook runs two live queries per render — the sessions, then the
+      // folders. The sessions querier is the first one handed over.
+      type Row = Record<string, unknown>
+      const queriers: Array<() => Promise<readonly Row[]>> = []
+      liveQueryMock.mockImplementation((fn: () => Promise<readonly Row[]>) => {
+        queriers.push(fn)
+        return undefined
+      })
+      renderHook(() => useSessions())
+      return () => queriers[0]!()
+    }
+    const row = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      kind: "direct",
+      title: id,
+      createdAt: 1,
+      updatedAt: 1,
+      ...extra,
+    })
+
+    it("hands back the previous array when only transcriptRevision moved", async () => {
+      // A streaming reply bumps `transcriptRevision` about four times a
+      // second. Returning the same array is what lets `useLiveQuery` skip the
+      // render — the whole sidebar used to re-render on each of those.
+      const query = captureQuerier()
+      listSessionsMock.mockResolvedValueOnce([
+        row("a", { transcriptRevision: 1 }),
+        row("b", { transcriptRevision: 7 }),
+      ])
+      const first = await query()
+      listSessionsMock.mockResolvedValueOnce([
+        row("a", { transcriptRevision: 2 }),
+        row("b", { transcriptRevision: 7 }),
+      ])
+      const second = await query()
+      expect(second).toBe(first)
+    })
+
+    it("keeps unchanged rows' identity when one row really changed", async () => {
+      const query = captureQuerier()
+      listSessionsMock.mockResolvedValueOnce([row("a"), row("b"), row("c")])
+      const first = await query()
+      listSessionsMock.mockResolvedValueOnce([
+        row("a", { lastMessageAt: 50, lastMessagePreview: "new" }),
+        row("b"),
+        row("c"),
+      ])
+      const second = await query()
+      expect(second).not.toBe(first)
+      expect(second[0]).not.toBe(first[0])
+      expect(second[0]).toEqual(expect.objectContaining({ lastMessagePreview: "new" }))
+      expect(second[1]).toBe(first[1])
+      expect(second[2]).toBe(first[2])
+    })
+
+    it("treats a dropped field, a nested change and a re-order as changes", async () => {
+      const query = captureQuerier()
+      listSessionsMock.mockResolvedValueOnce([
+        row("a", { pinned: true, collaboration: { syncCursor: 1 } }),
+        row("b"),
+      ])
+      const first = await query()
+      listSessionsMock.mockResolvedValueOnce([
+        row("a", { collaboration: { syncCursor: 2 } }),
+        row("b"),
+      ])
+      const second = await query()
+      expect(second[0]).not.toBe(first[0])
+      expect(second[1]).toBe(first[1])
+      listSessionsMock.mockResolvedValueOnce([second[1], second[0]].map((r) => ({ ...r })))
+      const third = await query()
+      expect(third).not.toBe(second)
+      // Same rows by value, new order: the rows keep their identity, the
+      // array does not.
+      expect(third[0]).toBe(second[1])
+      expect(third[1]).toBe(second[0])
+    })
   })
 
   it("hydrates messages when activeSessionId changes", async () => {
@@ -776,6 +895,57 @@ describe("useSessions", () => {
       await result.current.bulkArchive([])
     })
     expect(bulkArchiveSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it("files a whole selection in one transaction", async () => {
+    // One write for the batch: the list re-emits once, and a refused row rolls
+    // the whole move back instead of leaving the selection half-filed.
+    dbTransactionMock.mockClear()
+    assignSessionToFolderMock.mockReset().mockResolvedValue(undefined)
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkAssignToFolder(["s1", "s2", "s1"], "f1")
+    })
+    expect(dbTransactionMock).toHaveBeenCalledTimes(1)
+    expect(dbTransactionMock).toHaveBeenCalledWith("rw", "sessions-table", expect.any(Function))
+    // Duplicates collapse; each distinct row is written once.
+    expect(assignSessionToFolderMock.mock.calls).toEqual([
+      ["s1", "f1"],
+      ["s2", "f1"],
+    ])
+  })
+
+  it("propagates a refused row out of the batch", async () => {
+    dbTransactionMock.mockClear()
+    assignSessionToFolderMock
+      .mockReset()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("handoff-locked"))
+    const { result } = renderHook(() => useSessions())
+    await expect(
+      act(async () => {
+        await result.current.bulkAssignToFolder(["s1", "s2"], null)
+      })
+    ).rejects.toThrow("handoff-locked")
+  })
+
+  it("does not open a transaction for an empty selection", async () => {
+    dbTransactionMock.mockClear()
+    const { result } = renderHook(() => useSessions())
+    await act(async () => {
+      await result.current.bulkAssignToFolder([], "f1")
+    })
+    expect(dbTransactionMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps the empty folder list's identity across renders", () => {
+    // It is forwarded to every memoized row; a fresh [] per render re-rendered
+    // all of them.
+    liveQueryMock.mockReturnValue(undefined)
+    const { result, rerender } = renderHook(() => useSessions())
+    const folders = result.current.folders
+    rerender()
+    expect(result.current.folders).toBe(folders)
   })
 
   it("exposes folder CRUD that delegates to the folders data layer", async () => {

@@ -88,6 +88,13 @@ describe("ChatPaneGroup", () => {
     expect(queryByTestId("rpg")).toBeNull()
   })
 
+  it("tells the pane whether its welcome composer may address a runtime", () => {
+    // The shell knows where the first turn goes (a team room carries no
+    // runtime route); the group only relays it to the pane that owns the hero.
+    render(<ChatPaneGroup {...makeProps({ onHeroSend: jest.fn(), heroRouting: false })} />)
+    expect(paneRenders.at(-1)?.heroRouting).toBe(false)
+  })
+
   it("disables the composer in every pane while keeping conversation panes mounted", () => {
     chatState.splitSessionId = "b"
     render(<ChatPaneGroup {...makeProps({ composerDisabled: true })} />)

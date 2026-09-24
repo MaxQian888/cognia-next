@@ -15,6 +15,7 @@ import type { ToolUIPart } from "ai"
 import { Button } from "@/components/ui/button"
 import { ReadingCollapse } from "@/components/chat/motion/motion-reveal"
 import { useCopy } from "@/hooks/ui"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 
 /** Aggregate states the activity-group header can collapse a run into. */
@@ -207,7 +208,13 @@ export function ToolRowShell({
           // same right edge — in-flow actions used to push the chevron ~24px
           // left on rows that had them. The muted chip covers the meta text it
           // overlays only while hovered.
-          <div className="absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-muted px-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/trow:opacity-100">
+          <div
+            className={cn(
+              "absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-md bg-muted px-0.5",
+              HOVER_REVEAL_GROUP_BASE_CLASS,
+              "group-hover/trow:opacity-100"
+            )}
+          >
             {actions}
           </div>
         ) : null}

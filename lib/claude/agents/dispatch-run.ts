@@ -14,7 +14,7 @@
  * Center re-run, boot auto-resume) can dispatch without a live tool call.
  */
 
-import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 import type {
   PluginDispatchErrorEnvelope,
   PluginSubagentDispatchResult,

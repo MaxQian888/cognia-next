@@ -1,5 +1,7 @@
 import {
+  registerChatRetryBridge,
   registerChatSendBridge,
+  retryChatTurn,
   sendChatMessage,
   __resetChatSendBridgeForTesting,
 } from "./chat-send-bridge"
@@ -42,5 +44,26 @@ describe("chat-send-bridge", () => {
     sendChatMessage("s-1", "hi")
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledWith("hi", "s-1")
+  })
+})
+
+describe("chat retry bridge", () => {
+  beforeEach(() => __resetChatSendBridgeForTesting())
+
+  it("re-runs the named session's turn through the registered retry", () => {
+    const retry = jest.fn()
+    registerChatRetryBridge(retry)
+    expect(retryChatTurn("s-1")).toBe(true)
+    expect(retry).toHaveBeenCalledWith("s-1")
+  })
+
+  it("returns false with no runtime, an empty id, or after unregistering", () => {
+    expect(retryChatTurn("s-1")).toBe(false)
+    const retry = jest.fn()
+    const unregister = registerChatRetryBridge(retry)
+    expect(retryChatTurn("")).toBe(false)
+    unregister()
+    expect(retryChatTurn("s-1")).toBe(false)
+    expect(retry).not.toHaveBeenCalled()
   })
 })

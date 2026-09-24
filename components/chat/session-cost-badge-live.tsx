@@ -28,9 +28,11 @@ interface Props {
   tokensLabel: (input: string, output: string) => string
   /** Short form — see {@link SessionCostBadge}. Set by the toolbar's fold tier. */
   compact?: boolean
+  /** Forwarded to {@link SessionCostBadge} — the host row's chip class. */
+  triggerClassName?: string
 }
 
-export function SessionCostBadgeLive({ sessionId, tokensLabel, compact }: Props) {
+export function SessionCostBadgeLive({ sessionId, tokensLabel, compact, triggerClassName }: Props) {
   // Cheap usage signature instead of an O(n) aggregate in the selector: the
   // old selector walked every message on EVERY store set (each streamed
   // frame), even when `useShallow` then bailed the render. Usage only moves
@@ -52,6 +54,7 @@ export function SessionCostBadgeLive({ sessionId, tokensLabel, compact }: Props)
       inMemoryUsage={usage}
       tokensLabel={tokensLabel}
       compact={compact}
+      triggerClassName={triggerClassName}
     />
   )
 }

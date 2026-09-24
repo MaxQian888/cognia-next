@@ -18,6 +18,7 @@ import {
   PromptInputProvider,
   usePromptInputAttachments,
   usePromptInputController,
+  type TextInputContext,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus, UIMessage } from "ai"
 import { FileTextIcon, XIcon } from "lucide-react"
@@ -25,6 +26,7 @@ import {
   ChangeEvent,
   forwardRef,
   KeyboardEvent as ReactKeyboardEvent,
+  memo,
   type ReactNode,
   type Ref,
   useCallback,
@@ -65,7 +67,6 @@ import type {
   SendContent,
   SendOptions,
   ChatSession,
-  Character,
   MessageReplyTo,
 } from "@cognia/agent-config-types"
 import {
@@ -111,7 +112,8 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
-import { useElementHeight } from "@/hooks/use-element-height"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { useCoarsePointer } from "@/hooks/ui/use-pointer"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import {
@@ -141,7 +143,16 @@ import {
 } from "@/hooks/chat/use-plugin-slash-commands"
 import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
-import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import { useRouteTargets } from "@/hooks/chat/use-route-targets"
+import { isLeadingTokenPosition, parseLeadingRoute } from "@/lib/chat/turn-route/parse"
+import { resolveRouteLane } from "@/lib/chat/turn-route/resolve"
+import { requestRouteStores, snapshotRouteContext } from "@/lib/chat/turn-route/snapshot"
+import { isRoutableSession, type TurnRoute } from "@/lib/chat/turn-route/types"
+import { isChatTurnQueued } from "@/lib/execution/chat-lease"
+import { sessionStatusOf } from "@/hooks/chat/steer-runtime"
+import { routeFailureText } from "@/components/agent/workspace/agent-mention-picker"
+import type { RouteChipState } from "./composer-chip-overlay"
+import type { MentionSegment } from "@/lib/slash-commands/parse-segments"
 import { ContextChipBar } from "./composer/context-chip-bar"
 import { hasSlashCompletion } from "./composer/slash-completion"
 import { useLinkFolding } from "./composer/hooks/use-link-folding"
@@ -168,6 +179,7 @@ import {
   type SlashContext,
 } from "@/lib/slash-commands/builtin"
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import { mergeSlashCommands } from "@/lib/slash-commands/merge"
 import {
   DIAGNOSTICS_PART_TYPE,
   type SystemMessageBlock,
@@ -231,6 +243,7 @@ import {
 import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
 import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
 import type { InlineCommandInfo } from "@/lib/chat/completion/inline/types"
+import { useLatestTextInput } from "./composer/hooks/use-latest-text-input"
 import { useInputHistory } from "./composer/hooks/use-input-history"
 import { CommandParamForm } from "./composer/command-param-form"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
@@ -249,7 +262,6 @@ import { useUpdateSession } from "@/lib/data-hooks/context"
 import { loggers } from "@cognia/logging"
 import { impact, notify } from "@/lib/capacitor/haptics"
 import { hideKeyboard } from "@/lib/capacitor/keyboard"
-import { MentionPopover } from "@/components/mobile/chat/mention-popover"
 import {
   clearDraft as clearChatDraft,
   getDraft as getChatDraft,
@@ -315,27 +327,10 @@ interface Props {
   onStop: () => void | Promise<void>
   disabled?: boolean
   /**
-   * What `@` should mean in this composer. Defaults to `"files"` (the
-   * standard chat). Set to `"agents"` in the agent-team workspace where
-   * `@` opens the team-member / virtual-runtime picker instead.
-   */
-  mentionMode?: MentionMode
-  /**
-   * Mentionable agents — required when `mentionMode === "agents"`.
-   */
-  mentionables?: readonly MentionTarget[]
-  /**
    * Override the default placeholder. Useful for the team workspace which
    * needs a different hint text.
    */
   placeholder?: string
-  /**
-   * When provided, typing `@` opens a mobile-styled inline mention popover
-   * over the textarea instead of routing to the desktop `@file`/`@agent`
-   * picker. Designed for the mobile app shell where the team-member sheet
-   * was a two-tap affair. Desktop callers leave this undefined.
-   */
-  mobileMentionMembers?: readonly Character[]
   /**
    * Workflow-editor copilot integration. When set, `@` (and `@node:` /
    * `@edge:`) open a picker over the workflow's graph elements; picking one
@@ -343,6 +338,15 @@ interface Props {
    * Undefined for every non-workflow composer.
    */
   workflowMention?: ComposerWorkflowMention
+  /**
+   * Whether a leading `@claude` / `@codex` / `@<Squad member>` may address a
+   * runtime (`lib/chat/turn-route/`). Defaults to on; the session decides the
+   * rest. Only the new-chat composer needs this: it has no session to read,
+   * and when its first turn lands in a team room — which routes `@Name`
+   * through its own router — the route would otherwise be offered and then
+   * silently dropped by the room's send.
+   */
+  routing?: boolean
   /**
    * Where this composer sits. `"docked"` (default) is the bar pinned under a
    * message list. `"hero"` is the centred box on the welcome screen, which has
@@ -469,7 +473,13 @@ interface InnerProps {
     files: SubmittedFile[],
     precomputed?: ReadonlyMap<string, ExtractedAttachment>,
     templateRun?: ChatTemplateRun | null,
-    submission?: { replyTo: MessageReplyTo | null }
+    submission?: { replyTo: MessageReplyTo | null },
+    /**
+     * The runtime the text's leading `@handle` addresses, read against the
+     * targets this composer's `@` panel offered — so a handle the panel
+     * disambiguated (`squad-member`) routes exactly as it was picked.
+     */
+    route?: TurnRoute | null
   ) => boolean | Promise<boolean>
   /**
    * Binds a picked document's citation to the attachment it staged. Owned by
@@ -493,12 +503,18 @@ interface InnerProps {
   onOpenCheatsheet: () => void
   /** Open a settings tab — the enhance wand's "no model" toast uses it. */
   onOpenSettings: (tab: SettingsTab) => void
+  /**
+   * Drafted replies waiting in this platform conversation. With an empty box
+   * the send button offers to review them (`send-button-mode.ts`).
+   */
+  pendingDraftCount?: number
+  /** Open the draft review dialog the outer composer owns. */
+  onReviewDrafts?: () => void
   handleRef?: Ref<ComposerHandle>
-  mentionMode?: MentionMode
-  mentionables?: readonly MentionTarget[]
   placeholder?: string
-  mobileMentionMembers?: readonly Character[]
   workflowMention?: ComposerWorkflowMention
+  /** See the outer `Props.routing`. */
+  routing?: boolean
   /** Rotating hints for the empty box — see `ComposerBoxProps`. */
   placeholderHints?: readonly string[]
   /** Compact mode embeds the model and agent controls into the input surface. */
@@ -522,10 +538,25 @@ function ComposerInner(props: InnerProps) {
   const tSkill = useTranslations("chat.composer.skills")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
-  // Capacitor native shell. Mobile gets a Claude-style vertical layout
-  // (textarea on top, a single bottom action row) regardless of container
-  // width; web/desktop keep the container-query responsive layout below.
-  const isMobile = platform === "mobile"
+  // Three different questions, kept apart (see `hooks/ui/use-compact-layout.ts`):
+  //
+  //  - `nativeMobile`: the Capacitor shell — native camera / album pickers,
+  //    haptics, the native keyboard plugin.
+  //  - `isMobile`: the PHONE-SHAPED layout — textarea on top, one action row
+  //    underneath, touch-sized controls — regardless of container width. A
+  //    375px browser renders the same `AppShellMobile` the native shell does,
+  //    and used to get the desktop composer inside it.
+  //  - `softKeyboard`: a keyboard that covers the reply after a send. True in
+  //    the native shell and in a narrow touch browser; a narrow DESKTOP window
+  //    keeps its hardware keyboard, and blurring the box there would only cost
+  //    the user a click before the follow-up.
+  const nativeMobile = platform === "mobile"
+  const compactShell = useCompactLayout()
+  const coarsePointer = useCoarsePointer()
+  const isMobile = nativeMobile || compactShell
+  const softKeyboard = nativeMobile || (compactShell && coarsePointer)
+  /** Keyboard hints (`Tab`, `Esc`, the manual-completion key) need a keyboard. */
+  const touchInput = nativeMobile || coarsePointer
   const inboxReadiness = useInboxWriteReadiness()
   const outboundBlocked =
     !!props.session?.platformBinding &&
@@ -543,6 +574,15 @@ function ComposerInner(props: InnerProps) {
   const inputHistoryRecall = composerBehavior?.inputHistoryRecall !== false
   const persistDrafts = composerBehavior?.persistDrafts !== false
   const controller = usePromptInputController()
+  // The draft, two ways. `textValue` is the text THIS render is drawing —
+  // memos over the draft and the JSX read it, and it is what re-renders them.
+  // `textInput` is a stable handle whose `value` is always the latest text:
+  // callbacks and effects go through it, so a keystroke no longer rebuilds
+  // `submit`, `onKeyDown`, the popover pick, the imperative handle and the
+  // attachment intake, or re-runs the draft hydration and the template re-run
+  // subscription. See `useLatestTextInput`.
+  const textValue = controller.textInput.value
+  const textInput = useLatestTextInput(controller.textInput)
   const attachments = usePromptInputAttachments()
   // Extraction results / chip order / OCR opt-in for the staged attachments.
   const staged = useStagedAttachments()
@@ -558,15 +598,20 @@ function ComposerInner(props: InnerProps) {
   const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
   const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
   const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
-  const capabilityMenu =
-    props.session?.kind === "workflow-editor" ? null : (
-      <ComposerCapabilityMenu
-        session={props.session}
-        status={props.status}
-        disabled={props.disabled}
-        onOpenSettings={props.onOpenSettings}
-      />
-    )
+  // Memoized so the `+` menus that receive it (a prop of the box) are handed
+  // the same element between keystrokes.
+  const capabilityMenu = useMemo(
+    () =>
+      props.session?.kind === "workflow-editor" ? null : (
+        <ComposerCapabilityMenu
+          session={props.session}
+          status={props.status}
+          disabled={props.disabled}
+          onOpenSettings={props.onOpenSettings}
+        />
+      ),
+    [props.session, props.status, props.disabled, props.onOpenSettings]
+  )
 
   // Composer attachment OCR. It used to live on a hover menu on the chip and
   // append text straight into the draft — which silently doubled the payload,
@@ -589,8 +634,8 @@ function ComposerInner(props: InnerProps) {
         blob,
         mimeType: file.mediaType || blob.type,
         run: ocr.run,
-        getInput: () => controller.textInput.value,
-        setInput: (value) => controller.textInput.setInput(value),
+        getInput: () => textInput.value,
+        setInput: (value) => textInput.setInput(value),
         showResult: (result) => {
           // Panel gets the flat text (that is what would be sent); the per-page
           // result stays available behind the panel's "details" action so the
@@ -603,7 +648,7 @@ function ComposerInner(props: InnerProps) {
         },
       })
     },
-    [attachments, ocr, controller.textInput, staged]
+    [attachments, ocr, textInput, staged]
   )
   const handleRunOcrForPanel = useCallback(
     (attachmentId: string) => runComposerOcr(attachmentId, "view-result"),
@@ -634,10 +679,6 @@ function ComposerInner(props: InnerProps) {
     activeHintRef.current = hint
   }, [])
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
-  // Measured composer height — feeds the mobile @-mention popover so it floats
-  // exactly above the composer instead of a hardcoded guess (which broke once
-  // the composer grew with attachments / goal·loop pills / multi-line drafts).
-  const composerHeight = useElementHeight(containerEl)
   const popoverRef = useRef<ComposerPopoverHandle | null>(null)
 
   const [caret, setCaret] = useState(0)
@@ -687,7 +728,7 @@ function ComposerInner(props: InnerProps) {
   } = useAttachmentIntake({
     attachments,
     attachmentCitations,
-    textInput: controller.textInput,
+    textInput: textInput,
     textareaRef,
     setCaret,
     isDesktop,
@@ -716,21 +757,21 @@ function ComposerInner(props: InnerProps) {
   // rather than the input/attachments captured before their first await.
   const currentDraftRef = useRef({
     sessionId,
-    text: controller.textInput.value,
+    text: textValue,
     files: attachments.files,
   })
   useEffect(() => {
     currentDraftRef.current = {
       sessionId,
-      text: controller.textInput.value,
+      text: textValue,
       files: attachments.files,
     }
-  }, [sessionId, controller.textInput.value, attachments.files])
+  }, [sessionId, textValue, attachments.files])
 
-  // `@` mode resolution. Callers may set `mentionMode` explicitly. Otherwise a
-  // direct chat AND a team room default to the combined panel, so every
-  // general-chat composer gets `@agent` and every team room gets `@member`
-  // without each call site opting in. Other composers keep the file picker.
+  // `@` mode resolution: a direct chat AND a team room get the combined panel,
+  // so every general-chat composer gets `@agent` and every team room gets
+  // `@member` without each call site opting in. The workflow copilot makes `@`
+  // mean a node. Other composers keep the file picker.
   //
   // A team room used to fall through to `"files"`, which meant desktop had no
   // `@` completion for the people in the room at all: `parseMentions` still
@@ -738,13 +779,11 @@ function ComposerInner(props: InnerProps) {
   // character name, and the only affordance was the `@` button on each row of
   // the members panel.
   const isTeamRoom = props.session?.kind === "team" && Boolean(props.session.teamId)
-  const resolvedMentionMode: MentionMode =
-    props.mentionMode ??
-    (props.workflowMention
-      ? "workflow"
-      : props.session?.kind === "direct" || isTeamRoom
-        ? "combined"
-        : "files")
+  const resolvedMentionMode: MentionMode = props.workflowMention
+    ? "workflow"
+    : props.session?.kind === "direct" || isTeamRoom
+      ? "combined"
+      : "files"
   const isCombinedMention = resolvedMentionMode === "combined"
   // The people in this room. Empty (and free) outside a team session.
   const teamMembers = useTeamMembers(isTeamRoom ? props.session?.teamId : null)
@@ -762,6 +801,27 @@ function ComposerInner(props: InnerProps) {
     const seen = new Set(mentionableSubagents.map((t) => t.id))
     return [...mentionableSubagents, ...markdownAgents.filter((t) => !seen.has(t.id))]
   }, [isCombinedMention, mentionableSubagents, markdownAgents])
+  // `@claude` / `@codex` / Squad members as the LEADING token route the turn
+  // (`lib/chat/turn-route/`). Only in a conversation that has a lane of its
+  // own to leave — a direct chat, or the new-chat composer — and never in the
+  // workflow copilot, where `@` means a node.
+  const routeEnabled =
+    props.routing !== false && !props.workflowMention && isRoutableSession(props.session)
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
+  // The provider the builtin lane would use, so `@claude` names the engine
+  // that will really answer. Same resolution as the toolbar's runtime chip.
+  const routeProviderId = props.session?.providerOverride ?? defaultProvider ?? "anthropic"
+  // A member never shadows a subagent handle the same panel offers.
+  const routeReservedHandles = useMemo(
+    () => (chatAgents ?? mentionableSubagents).map((agent) => agent.handle),
+    [chatAgents, mentionableSubagents]
+  )
+  const routes = useRouteTargets({
+    enabled: routeEnabled,
+    session: props.session,
+    providerId: routeProviderId,
+    reservedHandles: routeReservedHandles,
+  })
   // `@skill:` / `@preset:` namespaced mention sources (general chat only).
   // Scope for the `@memory:` / `@issue:` / … sources. The SESSION's workspace,
   // not the focused one: a background pane composing into another workspace's
@@ -824,7 +884,13 @@ function ComposerInner(props: InnerProps) {
       return
     }
     if (hydratedFor.current !== props.session.id) return
-    if (props.session.permissionMode === permissionMode) return
+    // Same normalization as the hydration check above: the row stores
+    // `permissionMode` as optional (absent → `undefined`) while the store
+    // uses `null` for "unset". Comparing raw values makes `undefined !== null`
+    // diverge forever — each write bumps `updatedAt`, the live query re-emits
+    // a fresh session object, this effect re-runs and writes again. That is a
+    // self-sustaining IDB write loop that re-renders the whole sidebar tree.
+    if ((props.session.permissionMode ?? null) === permissionMode) return
     void updateSession(props.session.id, {
       permissionMode: permissionMode ?? undefined,
     }).catch((err) => {
@@ -841,10 +907,11 @@ function ComposerInner(props: InnerProps) {
   const pluginCommands = usePluginSlashCommands()
 
   const slashCommands = useMemo(
-    () =>
-      [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].filter(
-        (c) => !c.hiddenFromPicker
-      ),
+    // Deduped by name — `record-skill` is declared by both the builtin table
+    // and the skill-recorder plugin; the picker keys rows `slash-${name}`, so
+    // an undeduped merge rendered duplicate React keys (and two identical
+    // rows). Last-wins matches `commandMap`'s submit-time precedence below.
+    () => mergeSlashCommands(BUILTIN_SLASH_COMMANDS, customCommands, pluginCommands),
     [customCommands, pluginCommands]
   )
 
@@ -868,8 +935,8 @@ function ComposerInner(props: InnerProps) {
   // the overlay (so it paints blue), and the send/clipboard paths (so the URL
   // comes back).
   const linkFolding = useLinkFolding({
-    value: controller.textInput.value,
-    setInput: controller.textInput.setInput,
+    value: textValue,
+    setInput: textInput.setInput,
     textareaRef,
     setCaret,
     display: composerBehavior?.linkChips,
@@ -897,19 +964,15 @@ function ComposerInner(props: InnerProps) {
   // and the `hasCommand` check. NO mentions here — `runSegments` expects the
   // plain command/text view.
   const segments = useMemo(
-    () =>
-      parseSegments(controller.textInput.value, (name) => commandMap.has(name), { isLinkToken }),
-    [controller.textInput.value, commandMap, isLinkToken]
+    () => parseSegments(textValue, (name) => commandMap.has(name), { isLinkToken }),
+    [textValue, commandMap, isLinkToken]
   )
 
   // Which spans of the input are code, so `{{parameter}}` tokens inside a fenced
   // block or an inline span stay ordinary text. `{{ }}` belongs to Vue,
   // Handlebars and Jinja too, and pasting one of those into a prompt is
   // completely ordinary.
-  const codeRanges = useMemo(
-    () => computeCodeRanges(controller.textInput.value),
-    [controller.textInput.value]
-  )
+  const codeRanges = useMemo(() => computeCodeRanges(textValue), [textValue])
 
   // The chip overlay's view: derive `@mention` and `{{parameter}}` pills from
   // the already-parsed `segments` (commands pass through, only text is
@@ -926,6 +989,32 @@ function ComposerInner(props: InnerProps) {
         codeRanges
       ),
     [segments, codeRanges, linkFolding.spans]
+  )
+  // The leading `@handle`, read by the very parser the send uses, so the pill
+  // is tinted exactly when the turn will be addressed: sky when its runtime can
+  // answer, amber when the send would be refused. Every other mention keeps
+  // the ordinary chip. The callback is keyed on primitives, so typing past the
+  // handle does not hand the overlay a new function.
+  const leadingRoute = useMemo(
+    () => (routes.targets.length > 0 ? parseLeadingRoute(textValue, routes.targets) : null),
+    [textValue, routes.targets]
+  )
+  const leadingRouteStart = textValue.length - textValue.trimStart().length
+  const leadingRouteToken = leadingRoute?.rawToken ?? null
+  const leadingRouteHandle = leadingRoute?.target.handle ?? null
+  const leadingRouteState = useMemo<RouteChipState | undefined>(() => {
+    if (!leadingRouteHandle) return undefined
+    const option = routes.options.find(
+      (candidate) => candidate.target.handle === leadingRouteHandle
+    )
+    return option && !option.lane.ok ? "unavailable" : "ready"
+  }, [leadingRouteHandle, routes.options])
+  const routeState = useCallback(
+    (segment: MentionSegment): RouteChipState | undefined =>
+      leadingRouteToken && segment.start === leadingRouteStart && segment.raw === leadingRouteToken
+        ? leadingRouteState
+        : undefined,
+    [leadingRouteToken, leadingRouteStart, leadingRouteState]
   )
 
   // ── `{{parameter}}` values ────────────────────────────────────────────────
@@ -987,11 +1076,11 @@ function ComposerInner(props: InnerProps) {
     () =>
       onTemplateRerunRequest((detail) => {
         if (!sessionId || detail.sessionId !== sessionId) return
-        if (controller.textInput.value.trim().length > 0) {
+        if (textInput.value.trim().length > 0) {
           toast.info(tTemplateParams("rerunBusy"))
           return
         }
-        controller.textInput.setInput(detail.run.text)
+        textInput.setInput(detail.run.text)
         setTemplateBinding(bindingFromRun(detail.run, Date.now()))
         setPendingLaunchSpec(null)
         // Land on the first parameter with its editor open — the reason to
@@ -1007,7 +1096,7 @@ function ComposerInner(props: InnerProps) {
           if (first) setActiveParamId(first.paramId)
         })
       }),
-    [sessionId, controller.textInput, textareaRef, setCaret, tTemplateParams]
+    [sessionId, textInput, textareaRef, setCaret, tTemplateParams]
   )
 
   // Templates that travel IN the checkout, behind the same Workspace Trust
@@ -1056,8 +1145,13 @@ function ComposerInner(props: InnerProps) {
         return list.length === 0 || list.some((agent) => agent.handle === value.id)
       }
       if (value.resourceKind === "agent") {
-        const list = props.mentionables ?? []
-        return list.length === 0 || list.some((target) => target.name === value.id)
+        // Matched on the handle AND the name: a template saved before route
+        // targets carried handles stored the target's name as its id.
+        const list = routes.targets
+        return (
+          list.length === 0 ||
+          list.some((target) => target.handle === value.id || target.name === value.id)
+        )
       }
       if (value.resourceKind === "member") {
         // Empty outside a team room: no evidence either way. Inside one, the
@@ -1071,7 +1165,7 @@ function ComposerInner(props: InnerProps) {
       }
       return true
     },
-    [chatAgents, props.mentionables, teamMembers]
+    [chatAgents, routes.targets, teamMembers]
   )
   const paramPillState = useCallback(
     (paramId: string) => paramStateOfValue(effectiveBinding?.params[paramId], isResourceResolvable),
@@ -1099,7 +1193,7 @@ function ComposerInner(props: InnerProps) {
   const searchTemplateResources = useTemplateResourceSearch({
     cwd,
     chatAgents,
-    mentionables: props.mentionables,
+    routeTargets: routes.targets,
     teamMembers,
   })
   /** The parameter token containing `caret`, or null. */
@@ -1116,10 +1210,10 @@ function ComposerInner(props: InnerProps) {
     if (paramTokens.length === 0) return null
     return {
       on: previewRequested,
-      text: renderParamTokens(controller.textInput.value, paramTokens, effectiveBinding).text,
+      text: renderParamTokens(textValue, paramTokens, effectiveBinding).text,
       toggle: () => setPreviewRequested((on) => !on),
     }
-  }, [paramTokens, previewRequested, controller.textInput.value, effectiveBinding])
+  }, [paramTokens, previewRequested, textValue, effectiveBinding])
 
   const tSaveTemplate = useTranslations("chat.composer.saveTemplate")
   const tLaunchDiff = useTranslations("chat.composer.launchDiff")
@@ -1184,21 +1278,21 @@ function ComposerInner(props: InnerProps) {
       // The composer is not remounted per session, so the draft-hydration
       // effect clears the box for the new one — set the body after it has,
       // which is the same frame the session id lands in props.
-      requestAnimationFrame(() => controller.textInput.setInput(pending.body))
+      requestAnimationFrame(() => textInput.setInput(pending.body))
     } catch (err) {
       loggers.chat.error("composer: starting a session from a template failed", err)
     }
-  }, [pendingLaunchSpec, controller.textInput])
+  }, [pendingLaunchSpec, textInput])
   const saveCurrentAsTemplate = useCallback(
     async (input: { name: string; description?: string; launchSpec?: ChatTemplateLaunchSpec }) => {
-      await createChatTemplate({ ...input, body: controller.textInput.value })
+      await createChatTemplate({ ...input, body: textInput.value })
       // Re-read rather than push onto the local list: the store derives the
       // declarations and the id, and re-reading is the only way the `/` menu
       // shows exactly what was stored.
       setTemplateEpoch((epoch) => epoch + 1)
       toast.success(tSaveTemplate("saved"))
     },
-    [controller.textInput, tSaveTemplate]
+    [textInput, tSaveTemplate]
   )
 
   const setParamValue = useCallback((paramId: string, value: ChatTemplateParamValue) => {
@@ -1243,7 +1337,7 @@ function ComposerInner(props: InnerProps) {
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
     if (props.session?.platformBinding) return null
-    const tg = detectTrigger(controller.textInput.value, caret, {
+    const tg = detectTrigger(textValue, caret, {
       mentionMode: resolvedMentionMode,
       hasCommandPrefix,
       isLinkToken,
@@ -1258,7 +1352,7 @@ function ComposerInner(props: InnerProps) {
     }
     return tg
   }, [
-    controller.textInput.value,
+    textValue,
     caret,
     popoverDismissed,
     props.session?.platformBinding,
@@ -1278,6 +1372,24 @@ function ComposerInner(props: InnerProps) {
     () => (hasSlashCompletion(trigger, slashCommands) ? trigger : null),
     [trigger, slashCommands]
   )
+  // Route rows are offered only while the bare `@` being completed is the
+  // message's FIRST token — the one position the send path reads a route from
+  // — so `@codex` typed mid-sentence is never offered as something that would
+  // move the turn. Either the live list or nothing: no new array per keystroke.
+  const routeOptionsForTrigger =
+    completionTrigger?.kind === "file" &&
+    routes.options.length > 0 &&
+    isLeadingTokenPosition(textValue, completionTrigger.tokenStart)
+      ? routes.options
+      : undefined
+  // The Squad members section reads the Squad mirror, which boots with the
+  // `knowledge-agents` capability — not requested by the chat route on its own
+  // in the development profile. Asked for the first time the route rows open,
+  // so the members fill in while the user is still choosing.
+  const routeRowsOpen = routeOptionsForTrigger !== undefined
+  useEffect(() => {
+    if (routeRowsOpen) requestRouteStores()
+  }, [routeRowsOpen])
 
   // ── `!` mode shell intelligence ──────────────────────────────────────
   // The line is `value` minus the leading `!`, up to the first newline — the
@@ -1286,10 +1398,10 @@ function ComposerInner(props: InnerProps) {
   // completion spans and diagnostic ranges map back with a single addition.
   const shellLine = useMemo(() => {
     if (trigger?.kind !== "bash") return null
-    const value = controller.textInput.value
+    const value = textValue
     const newline = value.indexOf("\n")
     return value.slice(1, newline === -1 ? value.length : newline)
-  }, [trigger?.kind, controller.textInput.value])
+  }, [trigger?.kind, textValue])
 
   const tShellUi = useTranslations("chat.composer.popover")
   const shellMessages = useMemo(
@@ -1344,7 +1456,7 @@ function ComposerInner(props: InnerProps) {
 
   useEffect(() => {
     if (!popoverDismissed) return
-    const tg = detectTrigger(controller.textInput.value, caret, {
+    const tg = detectTrigger(textValue, caret, {
       mentionMode: resolvedMentionMode,
       hasCommandPrefix,
     })
@@ -1353,7 +1465,7 @@ function ComposerInner(props: InnerProps) {
       setPopoverDismissed(null)
     }
   }, [
-    controller.textInput.value,
+    textValue,
     caret,
     popoverDismissed,
     props.session?.platformBinding,
@@ -1368,13 +1480,13 @@ function ComposerInner(props: InnerProps) {
   // command batches).
   const removeCommandSegment = useCallback(
     (start: number, end: number) => {
-      const value = controller.textInput.value
+      const value = textInput.value
       let cutEnd = end
       if (value[cutEnd] === " ") cutEnd += 1
       else if (value[cutEnd] === "\r" && value[cutEnd + 1] === "\n") cutEnd += 2
       else if (value[cutEnd] === "\n") cutEnd += 1
       const next = value.slice(0, start) + value.slice(cutEnd)
-      controller.textInput.setInput(next)
+      textInput.setInput(next)
       setCaret(start)
       setCommandErrors([])
       requestAnimationFrame(() => {
@@ -1385,7 +1497,7 @@ function ComposerInner(props: InnerProps) {
         }
       })
     },
-    [controller.textInput]
+    [textInput]
   )
 
   const dismissPopover = useCallback(() => {
@@ -1407,9 +1519,9 @@ function ComposerInner(props: InnerProps) {
       if (!trigger) return
       const ta = textareaRef.current
       if (!ta) return
-      const cur = controller.textInput.value
+      const cur = textInput.value
       const result = spliceToken(cur, trigger.tokenStart, trigger.tokenEnd, replacement)
-      controller.textInput.setInput(result.value)
+      textInput.setInput(result.value)
       // Keep the caret STATE in step with the programmatic move (the DOM
       // selection is set in rAF below, but setSelectionRange does not fire a
       // `select` event, so trigger detection / ghost suppression would read a
@@ -1424,7 +1536,7 @@ function ComposerInner(props: InnerProps) {
       })
       if (opts?.closeAfter ?? true) dismissPopover()
     },
-    [trigger, controller.textInput, dismissPopover]
+    [trigger, textInput, dismissPopover]
   )
 
   // Delete the active trigger token outright (no replacement, no trailing
@@ -1432,11 +1544,11 @@ function ComposerInner(props: InnerProps) {
   // session config rather than inserting text.
   const removeTriggerToken = useCallback(() => {
     if (!trigger) return
-    const cur = controller.textInput.value
+    const cur = textInput.value
     const before = cur.slice(0, trigger.tokenStart)
     const after = cur.slice(trigger.tokenEnd)
     const next = before + after
-    controller.textInput.setInput(next)
+    textInput.setInput(next)
     setCaret(before.length)
     requestAnimationFrame(() => {
       const ta = textareaRef.current
@@ -1446,7 +1558,7 @@ function ComposerInner(props: InnerProps) {
       }
     })
     dismissPopover()
-  }, [trigger, controller.textInput, dismissPopover])
+  }, [trigger, textInput, dismissPopover])
 
   // The picker's active row → a transient canvas highlight. Depend on the
   // (memoized) onHighlight fn, not the whole props object, so this callback
@@ -1484,14 +1596,14 @@ function ComposerInner(props: InnerProps) {
         // along, because the `!` is not part of the line. Everything else about
         // the splice — the trailing space, the caret — belongs to the shared
         // `applyShellCompletion` so the popup and any future surface agree.
-        const currentValue = controller.textInput.value
+        const currentValue = textInput.value
         const newline = currentValue.indexOf("\n")
         const lineEnd = newline === -1 ? currentValue.length : newline
         const line = currentValue.slice(1, lineEnd)
         const applied = applyShellCompletion(line, item.completion)
         const nextValue = `!${applied.line}${currentValue.slice(lineEnd)}`
         const nextCaret = applied.cursor + 1
-        controller.textInput.setInput(nextValue)
+        textInput.setInput(nextValue)
         setCaret(nextCaret)
         requestAnimationFrame(() => {
           const textarea = textareaRef.current
@@ -1506,9 +1618,9 @@ function ComposerInner(props: InnerProps) {
         return
       }
       if (item.kind === "slashArgument") {
-        const currentValue = controller.textInput.value
+        const currentValue = textInput.value
         const result = spliceToken(currentValue, item.replaceStart, item.replaceEnd, item.value)
-        controller.textInput.setInput(result.value)
+        textInput.setInput(result.value)
         setCaret(result.caret)
         requestAnimationFrame(() => {
           const textarea = textareaRef.current
@@ -1525,12 +1637,12 @@ function ComposerInner(props: InnerProps) {
         // so the caret and trailing-space rules cannot drift from the others.
         const template = item.template
         const result = spliceToken(
-          controller.textInput.value,
+          textInput.value,
           trigger.tokenStart,
           trigger.tokenEnd,
           template.body
         )
-        controller.textInput.setInput(result.value)
+        textInput.setInput(result.value)
         // Seed from what this template was set to last time — in practice most
         // values repeat — falling back to the declared default. Both are
         // filtered to parameters the body still declares, so a value orphaned
@@ -1606,10 +1718,10 @@ function ComposerInner(props: InnerProps) {
         // rest of the message, and wiping it here silently discarded any
         // commands or prose the user had typed on later lines.
         if (ok) {
-          const value = controller.textInput.value
+          const value = textInput.value
           const newline = value.indexOf("\n")
           const rest = newline === -1 ? "" : value.slice(newline + 1)
-          controller.textInput.setInput(rest)
+          textInput.setInput(rest)
           setCaret(0)
         }
         dismissPopover()
@@ -1644,7 +1756,7 @@ function ComposerInner(props: InnerProps) {
     [
       trigger,
       isDesktop,
-      controller.textInput,
+      textInput,
       addReferencedPath,
       insertReplacement,
       removeTriggerToken,
@@ -1666,10 +1778,10 @@ function ComposerInner(props: InnerProps) {
     (args: string) => {
       setParamForm((current) => {
         if (!current) return null
-        const cur = controller.textInput.value
+        const cur = textInput.value
         const replacement = `/${current.command.name}${args ? ` ${args}` : ""}`
         const { value, caret } = spliceToken(cur, current.tokenStart, current.tokenEnd, replacement)
-        controller.textInput.setInput(value)
+        textInput.setInput(value)
         noteCommandUsed(current.command.name)
         requestAnimationFrame(() => {
           const ta = textareaRef.current
@@ -1681,7 +1793,7 @@ function ComposerInner(props: InnerProps) {
         return null
       })
     },
-    [controller.textInput, noteCommandUsed]
+    [textInput, noteCommandUsed]
   )
 
   const handleParamFormCancel = useCallback(() => {
@@ -1689,9 +1801,19 @@ function ComposerInner(props: InnerProps) {
     textareaRef.current?.focus()
   }, [])
 
+  // The route a send is addressed to, read from the text it actually sends
+  // (after any leading command ran) with the same parser and targets the
+  // pill above was tinted from.
+  const routeTargets = routes.targets
+  const routeOf = useCallback(
+    (outgoing: string): TurnRoute | null =>
+      routeTargets.length > 0 ? (parseLeadingRoute(outgoing, routeTargets)?.route ?? null) : null,
+    [routeTargets]
+  )
+
   // --- Submit handler ----------------------------------------------------
   const submit = useCallback(async () => {
-    const text = controller.textInput.value
+    const text = textInput.value
     if (props.disabled || outboundBlocked) return
     if (attachmentPrepareCountRef.current > 0) return
     // Re-entrancy guard (send protection): reject a second dispatch while one is
@@ -1726,15 +1848,17 @@ function ComposerInner(props: InnerProps) {
 
     // Tactile confirmation for the most frequent chat action. The wrapper
     // no-ops off the Capacitor shell, so this is safe unconditionally.
-    if (isMobile) void impact("light")
+    if (nativeMobile) void impact("light")
 
-    // Post-send focus policy: desktop refocuses the textarea for rapid
-    // follow-ups; mobile blurs it and collapses the soft keyboard so the
-    // streaming reply isn't hidden behind it (ChatGPT-app behavior).
+    // Post-send focus policy: with a hardware keyboard the textarea keeps focus
+    // for rapid follow-ups; with a soft keyboard it blurs so the keyboard folds
+    // away and the streaming reply isn't hidden behind it (ChatGPT-app
+    // behavior). `hideKeyboard` is the native plugin; a browser folds its
+    // keyboard on the blur alone.
     const settleFocusAfterSend = () => {
-      if (isMobile) {
+      if (softKeyboard) {
         textareaRef.current?.blur()
-        void hideKeyboard()
+        if (nativeMobile) void hideKeyboard()
       } else {
         textareaRef.current?.focus()
       }
@@ -1773,7 +1897,7 @@ function ComposerInner(props: InnerProps) {
       // `attachments.clear()` revokes every staged blob URL, so clearing here
       // would irrecoverably destroy the files on any rejected / cancelled /
       // thrown send (e.g. declining the oversize dialog).
-      controller.textInput.clear()
+      textInput.clear()
       setPastedBlocks({})
       setFoldedLinks({})
       cleared = true
@@ -1813,7 +1937,7 @@ function ComposerInner(props: InnerProps) {
       // A failed request cannot replace follow-up typing or another session's
       // draft. Restore only while its optimistic empty input is still current.
       if (currentDraft.sessionId !== sessionId || currentDraft.text) return
-      controller.textInput.setInput(text)
+      textInput.setInput(text)
       setPastedBlocks(pasteMap)
       // The text comes back holding SHORT labels, so the label→URL map has to
       // come back with it. Without this a failed send left every folded link as
@@ -1973,11 +2097,14 @@ function ComposerInner(props: InnerProps) {
         // today's "action command clears the input, no turn" behavior.
         let sent = true
         if (outgoingText.length > 0 || filesToSend.length > 0) {
+          const outgoing = restoreText(outgoingText)
           sent = await props.onSubmit(
-            restoreText(outgoingText),
+            outgoing,
             filesToSend,
             precomputed,
-            templateRun
+            templateRun,
+            undefined,
+            routeOf(outgoing)
           )
         } else if (!ranAction && !modeRan) {
           // Defensive: no prose, no files, no action, no first-line mode —
@@ -1989,7 +2116,7 @@ function ComposerInner(props: InnerProps) {
         if (sent) finalizeSend()
         else {
           restoreInputAfterFailure()
-          if (isMobile) void notify("error")
+          if (nativeMobile) void notify("error")
         }
         return
       }
@@ -2001,23 +2128,26 @@ function ComposerInner(props: InnerProps) {
         return
       }
 
+      const outgoing = restoreText(pipelineText)
       const sent = await props.onSubmit(
-        restoreText(pipelineText),
+        outgoing,
         filesToSend,
         precomputed,
-        templateRun
+        templateRun,
+        undefined,
+        routeOf(outgoing)
       )
       if (sent) finalizeSend()
       else {
         restoreInputAfterFailure()
-        if (isMobile) void notify("error")
+        if (nativeMobile) void notify("error")
       }
     } catch (err) {
       // A thrown send must not leave the user's text lost — restore the
       // optimistically-cleared input and surface the failure (don't rethrow
       // into the fire-and-forget click handler).
       restoreInputAfterFailure()
-      if (isMobile) void notify("error")
+      if (nativeMobile) void notify("error")
       loggers.chat.error("composer send failed", err)
     } finally {
       // Always release the guard. On a successful send the store has already
@@ -2033,7 +2163,7 @@ function ComposerInner(props: InnerProps) {
     // the lint rule can no longer prove it. Naming them costs nothing.
     attachmentPrepareCountRef,
     setPastedBlocks,
-    controller.textInput,
+    textInput,
     paramIds,
     paramTokens,
     paramDeclarations,
@@ -2055,7 +2185,9 @@ function ComposerInner(props: InnerProps) {
     foldedLinks,
     setFoldedLinks,
     noteCommandUsed,
-    isMobile,
+    nativeMobile,
+    softKeyboard,
+    routeOf,
   ])
 
   // Accept the inline ghost-text suggestion: write the completed value back
@@ -2066,7 +2198,7 @@ function ComposerInner(props: InnerProps) {
   const acceptGhost = useCallback((): boolean => {
     const next = ghost.accept()
     if (next === null) return false
-    controller.textInput.setInput(next)
+    textInput.setInput(next)
     setCaret(next.length)
     requestAnimationFrame(() => {
       const ta = textareaRef.current
@@ -2076,7 +2208,7 @@ function ComposerInner(props: InnerProps) {
       }
     })
     return true
-  }, [ghost, controller.textInput])
+  }, [ghost, textInput])
 
   // --- Textarea key handling --------------------------------------------
   /**
@@ -2110,7 +2242,7 @@ function ComposerInner(props: InnerProps) {
     (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
       // `?` opens the shortcut cheatsheet — but ONLY on a completely empty
       // input, so it never swallows a question mark the user is typing.
-      if (e.key === "?" && controller.textInput.value.length === 0) {
+      if (e.key === "?" && textInput.value.length === 0) {
         e.preventDefault()
         props.onOpenCheatsheet()
         return
@@ -2129,14 +2261,14 @@ function ComposerInner(props: InnerProps) {
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
-        controller.textInput.value === "" &&
+        textInput.value === "" &&
         activeHintRef.current !== "" &&
         !isComposing &&
         !e.nativeEvent.isComposing
       ) {
         e.preventDefault()
         const hint = activeHintRef.current
-        controller.textInput.setInput(hint)
+        textInput.setInput(hint)
         setCaret(hint.length)
         // A controlled textarea restores the pre-edit caret (position 0)
         // once React commits the new value — park it at the end instead.
@@ -2224,16 +2356,16 @@ function ComposerInner(props: InnerProps) {
         const ta = e.currentTarget
         if (ta.selectionStart === ta.selectionEnd) {
           const range = pillDeleteRange(
-            controller.textInput.value,
+            textInput.value,
             ta.selectionStart,
             overlaySegments,
             e.key === "Backspace" ? "backward" : "forward"
           )
           if (range) {
             e.preventDefault()
-            const cur = controller.textInput.value
+            const cur = textInput.value
             const next = cur.slice(0, range.start) + cur.slice(range.end)
-            controller.textInput.setInput(next)
+            textInput.setInput(next)
             setCaret(range.start)
             requestAnimationFrame(() => {
               const ta2 = textareaRef.current
@@ -2345,12 +2477,12 @@ function ComposerInner(props: InnerProps) {
         const ta = e.currentTarget
         const caretAtStart = ta.selectionStart === 0 && ta.selectionEnd === 0
         const next = history.recall(e.key === "ArrowUp" ? "up" : "down", {
-          value: controller.textInput.value,
+          value: textInput.value,
           caretAtStart,
         })
         if (next !== null) {
           e.preventDefault()
-          controller.textInput.setInput(next)
+          textInput.setInput(next)
           setCaret(next.length)
           requestAnimationFrame(() => {
             const t = textareaRef.current
@@ -2381,7 +2513,7 @@ function ComposerInner(props: InnerProps) {
       submit,
       isComposing,
       history,
-      controller.textInput,
+      textInput,
       overlaySegments,
       paramTokens,
       stepToParam,
@@ -2399,7 +2531,7 @@ function ComposerInner(props: InnerProps) {
 
   const onChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
-      controller.textInput.setInput(e.target.value)
+      textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
       // A team room's members wait for the human to finish a sentence before
       // an auto round (ADR-0177 batch 3). The runner polls this at round
@@ -2426,14 +2558,14 @@ function ComposerInner(props: InnerProps) {
         linkFolding.fold(e.target.value, e.target.selectionStart ?? e.target.value.length)
       }
     },
-    [controller.textInput, history, isComposing, linkFolding, props.session]
+    [textInput, history, isComposing, linkFolding, props.session]
   )
 
   // Leaving the box settles every remaining URL, including one just pasted with
   // the caret still sitting at its end.
   const onBlur = useCallback(() => {
-    linkFolding.fold(controller.textInput.value, -1)
-  }, [linkFolding, controller.textInput.value])
+    linkFolding.fold(textInput.value, -1)
+  }, [linkFolding, textInput])
 
   const onSelect = useCallback(
     (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -2482,26 +2614,6 @@ function ComposerInner(props: InnerProps) {
     [paramTokenAt, linkFolding.spans]
   )
 
-  // ── Mobile inline mention popover ──────────────────────────────────────
-  // When `mobileMentionMembers` is supplied, the chat shell wants the inline
-  // bottom-sheet popover instead of the desktop `<ComposerPopover>`'s
-  // @file/@agent picker. We branch by whether the active trigger is `@`-kind
-  // (`file` or `agent`); other kinds (slash/bash/memory) keep the desktop
-  // popover so all existing flows still work on mobile.
-  const mobileMentionEnabled = !!props.mobileMentionMembers
-  const isAtTrigger = trigger?.kind === "file" || trigger?.kind === "agent"
-  const mobileMentionOpen = !!(mobileMentionEnabled && isAtTrigger)
-  const mobileMentionQuery = mobileMentionOpen ? (trigger?.query ?? "") : ""
-
-  const desktopTrigger = mobileMentionOpen ? null : completionTrigger
-
-  const onPickMobileMember = useCallback(
-    (member: Character) => {
-      insertReplacement(`@${member.name}`)
-    },
-    [insertReplacement]
-  )
-
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
   // Subscribed (not just read at send) so the save effect below re-fires when
@@ -2541,7 +2653,7 @@ function ComposerInner(props: InnerProps) {
     // second time.
     if (clearedForSessionRef.current !== sessionId) {
       clearedForSessionRef.current = sessionId
-      controller.textInput.setInput("")
+      textInput.setInput("")
       attachments.clear()
       // Folded-paste bodies are in-memory only (not persisted); drop them too.
       setPastedBlocks({})
@@ -2557,17 +2669,24 @@ function ComposerInner(props: InnerProps) {
     getChatDraft(sessionId)
       .then((row) => {
         if (cancelled) return
-        // Populate the saved draft only when the target actually has one — never
-        // clobber text the user typed during this async gap with an empty draft.
-        if (row?.text) {
-          controller.textInput.setInput(row.text)
+        // The box was emptied synchronously above, so any text in it now was
+        // typed during this async gap. That text wins: the stored draft used to
+        // land on top of it the moment the read resolved, replacing what the
+        // user was in the middle of writing. The stored text's companions —
+        // parameter values, folded links — describe THAT text, so they stay
+        // out with it; attachments and context chips below are additive and
+        // still come back.
+        const typedDuringLoad = textInput.value.length > 0
+        if (!typedDuringLoad) {
+          // Populate the saved draft only when the target actually has one.
+          if (row?.text) textInput.setInput(row.text)
+          // The tokens come back with the text; their values come back here.
+          setTemplateBinding(row?.templateBinding)
+          // Same for links: the text holds short labels, and this is what
+          // turns them back into URLs on send. Without it a restored draft
+          // would ship `svenstaro/genact` as prose.
+          setFoldedLinks(row?.foldedLinks ?? {})
         }
-        // The tokens come back with the text; their values come back here.
-        setTemplateBinding(row?.templateBinding)
-        // Same for links: the text holds short labels, and this is what turns
-        // them back into URLs on send. Without it a restored draft would ship
-        // `svenstaro/genact` as prose.
-        setFoldedLinks(row?.foldedLinks ?? {})
         // Attachments whose binary survived are re-staged for real: the file
         // comes back, ready to send. Seed the store with its cached extraction
         // first so re-staging doesn't re-parse a document we already read.
@@ -2661,7 +2780,7 @@ function ComposerInner(props: InnerProps) {
     sessionId,
     draftHydratedFor,
     setFoldedLinks,
-    controller.textInput,
+    textInput,
     attachments,
     attachmentCitations,
     staged,
@@ -2678,18 +2797,19 @@ function ComposerInner(props: InnerProps) {
     const intent = consumeComposerIntent(sessionId, pendingComposerIntent.candidateId)
     if (!intent) return
     if (intent.prompt) {
-      const merged = mergeComposerIntentPrompt(controller.textInput.value, intent.prompt)
-      controller.textInput.setInput(merged)
+      const merged = mergeComposerIntentPrompt(textInput.value, intent.prompt)
+      textInput.setInput(merged)
       // Auto-send (tray quick panel) is armed here but fired by the effect
-      // below, once the input state has actually flushed: `submit` closes over
-      // `controller.textInput.value`, so calling it now would send the text
-      // that was in the box BEFORE this line.
+      // below, once the input state has actually flushed: `submit` builds the
+      // turn from the committed input and its derived state (segments, param
+      // tokens, folded pastes), none of which has caught up with this write
+      // until the next commit.
       if (intent.autoSend) pendingAutoSendRef.current = merged
     }
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [
     consumeComposerIntent,
-    controller.textInput,
+    textInput,
     draftHydratedFor,
     pendingComposerIntent,
     persistDrafts,
@@ -2701,10 +2821,10 @@ function ComposerInner(props: InnerProps) {
   useEffect(() => {
     const pending = pendingAutoSendRef.current
     if (pending === null) return
-    if (controller.textInput.value !== pending) return
+    if (textValue !== pending) return
     pendingAutoSendRef.current = null
     void submit()
-  }, [controller.textInput.value, submit])
+  }, [textValue, submit])
 
   useEffect(() => {
     if (!persistDrafts) return
@@ -2725,7 +2845,7 @@ function ComposerInner(props: InnerProps) {
       // `undefined` keeps the default debounce. The binding is passed on every
       // save (never omitted) so clearing the last parameter actually clears the
       // stored value — omission means "preserve" in `setDraft`.
-      setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments, undefined, {
+      setChatDraftDebounced(sessionId, textValue, draftAttachments, undefined, {
         templateBinding: effectiveBinding ?? null,
         // Passed on every save (never omitted) so removing the last link
         // actually clears the stored map — omission means "preserve".
@@ -2739,7 +2859,7 @@ function ComposerInner(props: InnerProps) {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
   }, [
-    controller.textInput.value,
+    textValue,
     attachments.files,
     staged.byId,
     attachmentCitations,
@@ -2769,7 +2889,7 @@ function ComposerInner(props: InnerProps) {
     if (isComposing) return
     ta.style.height = "auto"
     ta.style.height = `${Math.min(ta.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
-  }, [controller.textInput.value, isComposing])
+  }, [textValue, isComposing])
 
   // Imperative handle: insert `@name ` at the caret. Used by the desktop
   // shell's member list to mention a teammate without going through any
@@ -2779,12 +2899,12 @@ function ComposerInner(props: InnerProps) {
     () => ({
       insertMention: (name: string) => {
         const ta = textareaRef.current
-        const cur = controller.textInput.value
+        const cur = textInput.value
         const pos = ta?.selectionStart ?? cur.length
         const needsLeadSpace = pos > 0 && !/\s$/.test(cur.slice(0, pos))
         const insertion = `${needsLeadSpace ? " " : ""}@${name} `
         const next = cur.slice(0, pos) + insertion + cur.slice(pos)
-        controller.textInput.setInput(next)
+        textInput.setInput(next)
         const caret = pos + insertion.length
         requestAnimationFrame(() => {
           const ta2 = textareaRef.current
@@ -2799,7 +2919,7 @@ function ComposerInner(props: InnerProps) {
         textareaRef.current?.focus()
       },
     }),
-    [controller.textInput]
+    [textInput]
   )
 
   const isStreaming = props.status === "streaming"
@@ -2816,9 +2936,8 @@ function ComposerInner(props: InnerProps) {
     isSending: props.commandRunning ? false : isSending,
     isPreparingAttachments,
     hasContent:
-      !props.commandRunning &&
-      (controller.textInput.value.trim().length > 0 || attachments.files.length > 0),
-    hasPendingDrafts: false,
+      !props.commandRunning && (textValue.trim().length > 0 || attachments.files.length > 0),
+    hasPendingDrafts: (props.pendingDraftCount ?? 0) > 0,
     composerDisabled: !!props.disabled,
     outboundBlocked,
   })
@@ -2831,13 +2950,33 @@ function ComposerInner(props: InnerProps) {
   // and only the most recent feed is queried, so this always reflects state.
   const ghostFeed = ghost.feed
   useEffect(() => {
-    const value = controller.textInput.value
+    const value = textValue
     const suppress = !!trigger || isStreaming || !!props.disabled || caret !== value.length
     ghostFeed(value, { suppress })
-  }, [controller.textInput.value, caret, trigger, isStreaming, props.disabled, ghostFeed])
+  }, [textValue, caret, trigger, isStreaming, props.disabled, ghostFeed])
 
   const ephemeralSkillIds = useComposerEphemeralSkillIds(props.session?.id ?? null)
   const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
+  // Keyed by THIS pane's conversation, matching where `ephemeralSkillIds` are read
+  // from — the bare action defaults to the focused pane, so × detached a skill
+  // from the conversation beside it and left this chip standing.
+  const composerSessionIdForSkills = props.session?.id ?? null
+  const removeEphemeralSkill = useCallback(
+    (skillId: string) => toggleEphemeralSkill(skillId, composerSessionIdForSkills),
+    [toggleEphemeralSkill, composerSessionIdForSkills]
+  )
+  const dismissRestoredAttachments = useCallback(() => setRestoredAttachments([]), [])
+  // A folded paste is large by definition — that is why it folded — and its
+  // chip only shows a line count. Counted once per paste, not by splitting
+  // every body again on every keystroke.
+  const pastedLineCounts = useMemo(
+    () =>
+      Object.entries(pastedBlocks).map(
+        ([placeholder, body]) => [placeholder, countLines(body)] as const
+      ),
+    [pastedBlocks]
+  )
+  const openOcrBubble = useCallback(() => setOcrBubbleOpen(true), [])
 
   return (
     // Every composer control below writes its draft state through actions that
@@ -2864,28 +3003,24 @@ function ComposerInner(props: InnerProps) {
             />
           ) : null}
           <Collapse>
-            <DraftRestoredAttachments
+            <MemoDraftRestoredAttachments
               items={restoredAttachments}
-              onDismiss={() => setRestoredAttachments([])}
+              onDismiss={dismissRestoredAttachments}
             />
           </Collapse>
-          <OcrResultBubble
+          <MemoOcrResultBubble
             open={ocrBubbleOpen}
             onOpenChange={setOcrBubbleOpen}
             result={ocrBubbleResult}
             imageSrc={ocrBubbleImageSrc ?? undefined}
-            onCopy={(text) => void navigator.clipboard?.writeText(text)}
-            onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
+            onCopy={copyToClipboard}
+            onCopyPage={copyPageToClipboard}
           />
           <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
           <Collapse>
-            <SkillChipRow
+            <MemoSkillChipRow
               ids={ephemeralSkillIds}
-              // Keyed by THIS pane's conversation, matching where the ids above
-              // are read from — the bare action defaults to the focused pane,
-              // so × detached a skill from the conversation beside it and left
-              // this chip standing.
-              onRemove={(skillId) => toggleEphemeralSkill(skillId, props.session?.id ?? null)}
+              onRemove={removeEphemeralSkill}
               disabledIds={props.session?.disabledSkillIds}
             />
           </Collapse>
@@ -2893,19 +3028,17 @@ function ComposerInner(props: InnerProps) {
           text (manual deletion drops the chip too). */}
           <Collapse>
             {(() => {
-              const chips = Object.entries(pastedBlocks).filter(([ph]) =>
-                controller.textInput.value.includes(ph)
-              )
+              const chips = pastedLineCounts.filter(([ph]) => textValue.includes(ph))
               if (chips.length === 0) return null
               return (
                 <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
-                  {chips.map(([ph, body]) => (
+                  {chips.map(([ph, lineCount]) => (
                     <span
                       key={ph}
                       className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
                     >
                       <FileTextIcon className="size-3 shrink-0" aria-hidden />
-                      {t("pastedChip", { count: body.split("\n").length })}
+                      {t("pastedChip", { count: lineCount })}
                       <Button
                         type="button"
                         variant="ghost"
@@ -2927,9 +3060,7 @@ function ComposerInner(props: InnerProps) {
           placeholder text stays visible so they see exactly where). */}
           <Collapse>
             {(() => {
-              const orphans = findPastePlaceholders(controller.textInput.value).filter(
-                (ph) => !(ph in pastedBlocks)
-              )
+              const orphans = findPastePlaceholders(textValue).filter((ph) => !(ph in pastedBlocks))
               if (orphans.length === 0) return null
               return (
                 <div
@@ -2941,23 +3072,16 @@ function ComposerInner(props: InnerProps) {
               )
             })()}
           </Collapse>
-          {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
-          <Collapse>
-            <GoalStatusPill sessionId={sessionId} />
-          </Collapse>
-          {/* /loop status + controls; self-hides when no open loop. */}
-          <Collapse>
-            <LoopStatusPill sessionId={sessionId} />
-          </Collapse>
-          {/* Plan-mode state banner; self-hides outside plan mode. */}
-          <Collapse>
-            <PlanModeBanner />
-          </Collapse>
+          <ComposerStatusBands sessionId={sessionId} />
         </div>
         <ComposerBox
           skin={props.skin}
           compactLayout={compactLayout}
           isMobile={isMobile}
+          onReviewDrafts={props.onReviewDrafts}
+          pendingDraftCount={props.pendingDraftCount}
+          nativeShell={nativeMobile}
+          touchInput={touchInput}
           disabled={props.disabled}
           permissionMode={permissionMode}
           placeholder={props.placeholder}
@@ -2979,18 +3103,17 @@ function ComposerInner(props: InnerProps) {
           onMouseUp={onTextareaMouseUp}
           paramState={paramPillState}
           commandScope={commandScope}
+          routeState={routeState}
           preview={preview}
-          saveAsTemplate={
-            controller.textInput.value.trim().length > 0 ? () => setSaveTemplateOpen(true) : null
-          }
+          saveAsTemplate={textValue.trim().length > 0 ? () => setSaveTemplateOpen(true) : null}
           enhance={
             // Same gate as the bookmark beside it: a wand over an empty box has
             // nothing to rewrite, and `enhancePrompt` would only answer
             // "empty". Off entirely when the user disabled the feature.
-            enhanceEnabled && controller.textInput.value.trim().length > 0 ? (
+            enhanceEnabled && textValue.trim().length > 0 ? (
               <EnhanceButton
-                value={controller.textInput.value}
-                onApply={(next) => controller.textInput.setInput(next)}
+                value={textValue}
+                onApply={(next) => textInput.setInput(next)}
                 session={props.session}
                 disabled={props.disabled || props.status === "streaming"}
                 className="size-6 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
@@ -3022,9 +3145,9 @@ function ComposerInner(props: InnerProps) {
           // owning a second picker. Append, never replace — a half-written
           // message is not the menu's to discard.
           onInsertText={(text) => {
-            const current = controller.textInput.value
+            const current = textInput.value
             const needsSpace = current.length > 0 && !/\s$/.test(current)
-            controller.textInput.setInput(`${current}${needsSpace ? " " : ""}${text}`)
+            textInput.setInput(`${current}${needsSpace ? " " : ""}${text}`)
             textareaRef.current?.focus()
           }}
           onOpenExternalServices={() => props.onOpenSettings("services")}
@@ -3041,8 +3164,8 @@ function ComposerInner(props: InnerProps) {
           toolbar={props.toolbar}
           bridges={
             <>
-              <VoiceTranscriptionBridge disabled={props.disabled} />
-              <ComposerAppendBridge sessionId={props.session?.id} />
+              <VoiceTranscriptionBridge disabled={props.disabled} textInput={textInput} />
+              <ComposerAppendBridge sessionId={props.session?.id} textInput={textInput} />
             </>
           }
           contextRow={
@@ -3050,14 +3173,18 @@ function ComposerInner(props: InnerProps) {
             // @-references, artifacts — plus any command that FAILED. Commands
             // and links show up in the text itself. Rendered INSIDE the input
             // card so staged media reads as part of the message being written.
-            <ContextChipBar
+            <MemoContextChipBar
               videoRoute={props.videoRoute}
               onRunOcr={handleRunOcrForPanel}
               ocrBusy={ocr.status === "running"}
               onExtractOcrToInput={handleExtractOcrToInput}
-              onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
+              onViewOcrDetail={ocrBubbleResult ? openOcrBubble : undefined}
               preparingImageCount={preparingImageCount}
-              segments={segments}
+              // The segments are read ONLY to name the commands that failed.
+              // Passed on every keystroke they re-rendered the whole row —
+              // attachments, references, artifacts — for a list that is empty
+              // unless a command failed.
+              segments={commandErrors.length > 0 ? segments : undefined}
               commandErrors={commandErrors}
               onRemoveCommand={removeCommandSegment}
             />
@@ -3066,11 +3193,7 @@ function ComposerInner(props: InnerProps) {
           tAttach={tAttach}
         />
 
-        <CommandHintBar
-          trigger={desktopTrigger}
-          commandMap={commandMap}
-          value={controller.textInput.value}
-        />
+        <CommandHintBar trigger={completionTrigger} commandMap={commandMap} value={textValue} />
 
         {/* Reads scheduling intent out of what is being typed and offers the
             scheduler's create form pre-filled. Never intercepts the turn —
@@ -3084,18 +3207,14 @@ function ComposerInner(props: InnerProps) {
             composer means walking out of a conversation that is not the user's
             alone. A direct chat is the only place that detour is harmless. */}
         {isCombinedMention ? (
-          <ScheduleSuggestion
-            value={controller.textInput.value}
-            sessionId={props.session?.id}
-            className="mx-1"
-          />
+          <ScheduleSuggestion value={textValue} sessionId={props.session?.id} className="mx-1" />
         ) : null}
 
         <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
         <SaveAsTemplateDialog
           open={saveTemplateOpen}
-          body={controller.textInput.value}
+          body={textValue}
           launchSpec={currentLaunchSpec}
           onOpenChange={setSaveTemplateOpen}
           onSave={saveCurrentAsTemplate}
@@ -3120,13 +3239,21 @@ function ComposerInner(props: InnerProps) {
           onClose={() => setActiveParamId(null)}
         />
 
+        {/* One `@` panel on every surface. A phone's team room used to swap it
+            for a members-only bottom sheet, which took `@` away from files,
+            agents, skills and the rest of this panel there — the same room on
+            desktop could reference a file and the phone could not — and floated
+            that sheet by a measured height that left out the toolbar row, so it
+            sat on top of the input it was completing. This panel already lists
+            the room's members (with their roles) and sizes its rows for a
+            finger. */}
         <ComposerPopover
           ref={popoverRef}
-          trigger={desktopTrigger}
+          trigger={completionTrigger}
           cwd={cwd}
           slashCommands={slashCommands}
           anchor={containerEl}
-          mentionables={props.mentionables}
+          routeOptions={routeOptionsForTrigger}
           chatAgents={chatAgents}
           teamMembers={teamMembers}
           teamMemberRoleById={teamMemberRoleById}
@@ -3145,17 +3272,6 @@ function ComposerInner(props: InnerProps) {
           shellEmptyMessage={shellEmptyMessage}
         />
 
-        {mobileMentionEnabled ? (
-          <MentionPopover
-            open={mobileMentionOpen}
-            query={mobileMentionQuery}
-            members={props.mobileMentionMembers ?? []}
-            composerHeight={composerHeight}
-            onPick={onPickMobileMember}
-            onDismiss={dismissPopover}
-          />
-        ) : null}
-
         <CommandParamForm
           command={paramForm?.command ?? null}
           onSubmit={handleParamFormSubmit}
@@ -3166,19 +3282,91 @@ function ComposerInner(props: InnerProps) {
   )
 }
 
-function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
-  const controller = usePromptInputController()
+/*
+ * Memo boundaries for what renders around the input box.
+ *
+ * `ComposerInner` re-renders on every keystroke — the draft is its state — and
+ * nothing it rendered was memoized, so every band above the box, the chip row
+ * inside it and the OCR sheet re-rendered with it. Their props are stable
+ * between keystrokes (the handlers above are callbacks, the data changes only
+ * when its own source does), so a memo boundary is all it takes for typing to
+ * stop reaching them.
+ */
+const MemoContextChipBar = memo(ContextChipBar)
+const MemoSkillChipRow = memo(SkillChipRow)
+const MemoDraftRestoredAttachments = memo(DraftRestoredAttachments)
+const MemoOcrResultBubble = memo(OcrResultBubble)
+
+/** Line count of a text block, without allocating the lines. */
+function countLines(text: string): number {
+  let lines = 1
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) lines++
+  return lines
+}
+
+/** The OCR sheet's copy actions. Module-level so they keep one identity. */
+function copyToClipboard(text: string): void {
+  void navigator.clipboard?.writeText(text)
+}
+function copyPageToClipboard(_page: number, text: string): void {
+  void navigator.clipboard?.writeText(text)
+}
+
+/**
+ * The self-hiding status bands under the attachments: the goal (ADR-0019), the
+ * open `/loop`, and the plan-mode banner. Each reads its own store; the only
+ * thing the composer tells them is which conversation they belong to.
+ */
+const ComposerStatusBands = memo(function ComposerStatusBands({
+  sessionId,
+}: {
+  sessionId: string | null
+}) {
+  return (
+    <>
+      {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
+      <Collapse>
+        <GoalStatusPill sessionId={sessionId} />
+      </Collapse>
+      {/* /loop status + controls; self-hides when no open loop. */}
+      <Collapse>
+        <LoopStatusPill sessionId={sessionId} />
+      </Collapse>
+      {/* Plan-mode state banner; self-hides outside plan mode. */}
+      <Collapse>
+        <PlanModeBanner />
+      </Collapse>
+    </>
+  )
+})
+
+/**
+ * Speech → text, appended to the draft.
+ *
+ * Takes the composer's stable text handle as a prop instead of reading the
+ * prompt-input context: a context consumer re-renders on every keystroke, and
+ * this one carries the whole voice cluster (dictation, live voice, the
+ * settings popover) with it. Memoized with a stable handle, typing never
+ * reaches it.
+ */
+const VoiceTranscriptionBridge = memo(function VoiceTranscriptionBridge({
+  disabled,
+  textInput,
+}: {
+  disabled?: boolean
+  textInput: TextInputContext
+}) {
   const onTranscription = useCallback(
     (text: string) => {
       if (!text.trim()) return
-      const cur = controller.textInput.value
+      const cur = textInput.value
       const sep = cur && !cur.endsWith(" ") ? " " : ""
-      controller.textInput.setInput(`${cur}${sep}${text}`)
+      textInput.setInput(`${cur}${sep}${text}`)
     },
-    [controller.textInput]
+    [textInput]
   )
   return <VoiceControls disabled={disabled} onTranscription={onTranscription} />
-}
+})
 
 /** Window-event name a chat-message card dispatches to append text to the composer. */
 export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
@@ -3206,8 +3394,14 @@ export function dispatchComposerAppend(detail: ComposerAppendDetail): void {
  * result card in the message list, or a sidechat handing a conclusion back)
  * append text to the composer by dispatching `COMPOSER_APPEND_EVENT`.
  */
-function ComposerAppendBridge({ sessionId }: { sessionId?: string }) {
-  const controller = usePromptInputController()
+const ComposerAppendBridge = memo(function ComposerAppendBridge({
+  sessionId,
+  textInput,
+}: {
+  sessionId?: string
+  /** The composer's stable text handle — see `VoiceTranscriptionBridge`. */
+  textInput: TextInputContext
+}) {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   useEffect(() => {
     const onAppend = (e: Event) => {
@@ -3219,15 +3413,15 @@ function ComposerAppendBridge({ sessionId }: { sessionId?: string }) {
       // callers working without making every composer echo it.
       const target = detail?.sessionId ?? activeSessionId
       if (target && sessionId && target !== sessionId) return
-      const cur = controller.textInput.value
+      const cur = textInput.value
       const sep = cur && !cur.endsWith(" ") ? " " : ""
-      controller.textInput.setInput(`${cur}${sep}${text}`)
+      textInput.setInput(`${cur}${sep}${text}`)
     }
     window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
     return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
-  }, [controller.textInput, activeSessionId, sessionId])
+  }, [textInput, activeSessionId, sessionId])
   return null
-}
+})
 
 function ComposerCapabilityMenu({
   session,
@@ -3271,11 +3465,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     onSend,
     onStop,
     disabled,
-    mentionMode,
-    mentionables,
     placeholder,
-    mobileMentionMembers,
     workflowMention,
+    routing,
     placement = "docked",
     defaultSkin,
     placeholderHints,
@@ -3298,6 +3490,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tPlatformName = useTranslations("inbox.platformBadge.names")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
+  const tRoute = useTranslations("chat.composer.route")
+  const tRouteRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
   // One prediction for the panel and the send: the controller still re-checks
   // the route the turn actually resolves.
   const { verdict: videoRoute } = useComposerVideoRoute(session)
@@ -3306,7 +3500,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [attachmentCitations] = useState(createAttachmentCitations)
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
   const stylePack = useSettingsStore((s) => s.settings?.stylePack)
-  const isMobileShell = usePlatform() === "mobile"
+  // Layout, not runtime: the skin's mobile floors (touch-sized send, the
+  // stacked box) belong to every phone-shaped composer, including a 375px
+  // browser rendering the same mobile shell — see `useCompactLayout`.
+  const compactShell = useCompactLayout()
+  const isMobileShell = usePlatform() === "mobile" || compactShell
   // One resolver owns pack default ← preset ← overrides ← mobile floors, so the
   // box never has to reason about any of it. `classic` (the default under the
   // Soft pack) resolves to today's exact geometry and emits no variables at
@@ -3349,6 +3547,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     []
   )
   const [draftDialogOpen, setDraftDialogOpen] = useState(false)
+  const openDraftReview = useCallback(() => setDraftDialogOpen(true), [])
   // Oversize attachment confirmation: handleSubmit parks a resolver here while
   // the dialog below collects the user's choice (send anyway / cancel).
   const [oversizeConfirm, setOversizeConfirm] = useState<{
@@ -3586,7 +3785,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       files: SubmittedFile[],
       precomputed?: ReadonlyMap<string, ExtractedAttachment>,
       templateRun?: ChatTemplateRun | null,
-      submission?: { replyTo: MessageReplyTo | null }
+      submission?: { replyTo: MessageReplyTo | null },
+      route?: TurnRoute | null
     ) => {
       const trimmed = text.trim()
       // NOTE: `!shell` / `#memory` are NOT detected here any more. They are
@@ -3620,6 +3820,63 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 })
               : tPlatform("sendFailed")
           )
+          return false
+        }
+      }
+
+      // ── Addressed turn: `@claude` / `@codex` / `@<Squad member>` ─────
+      // Checked before anything below consumes a toggle, a chip or a receipt,
+      // so a refused route leaves the draft AND everything staged with it in
+      // place. The controller re-checks at commit (a lane can change between
+      // here and there); this is the check that can still say why, offer the
+      // way to fix it, and keep the text in the box.
+      if (route) {
+        // A live follow-up can only reach the runtime already answering, and
+        // queued follow-ups merge into one payload — neither can move a turn.
+        // Same verdict the controller's steer gate reaches.
+        if (session?.id) {
+          const current = sessionStatusOf(session.id)
+          if (
+            current === "streaming" ||
+            current === "awaiting_approval" ||
+            isChatTurnQueued(session.id)
+          ) {
+            toast.error(tRoute("busy", { handle: route.handle }))
+            return false
+          }
+        }
+        // `@codex` alone addresses a runtime with nothing to ask it. The token
+        // is stripped before the runtime sees the turn, so this would send an
+        // empty prompt — or, since stripping refuses to empty a message, the
+        // bare handle as the question.
+        const afterHandle = trimmed.slice(route.handle.length + 1).trim()
+        if (!afterHandle && files.length === 0) {
+          toast.error(tRoute("emptyPrompt", { handle: route.handle }))
+          return false
+        }
+        const snapshot = await snapshotRouteContext(session?.id ?? null, {
+          providerId:
+            session?.providerOverride ??
+            useSettingsStore.getState().settings?.defaultProvider ??
+            "anthropic",
+          session: session ?? null,
+        })
+        const lane = resolveRouteLane(route.target, snapshot)
+        if (!lane.ok) {
+          toast.error(tRoute("unavailable", { handle: route.handle }), {
+            description: routeFailureText(
+              lane,
+              { handle: route.handle, name: route.label },
+              tRoute,
+              tRouteRuntime
+            ),
+            action: {
+              label: tRoute("openSettings"),
+              // A missing member is fixed in the Squad; everything else is an
+              // external agent to add, enable or repair.
+              onClick: () => onOpenSettings(lane.reason === "member-missing" ? "squads" : "agents"),
+            },
+          })
           return false
         }
       }
@@ -3797,8 +4054,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // Read from THIS composer's slice, like the chips, and handed over with
       // the turn: the destination conversation of a first message does not
       // exist yet, so the send path cannot find these by looking it up.
+      // A picked remote document leaves no token and no chip-bar selection: its
+      // citation is bound to the attachment it staged, so it is read off the
+      // files this turn actually submits. A chip removed before sending, or an
+      // extraction that was rejected, therefore cites nothing.
       const citations = mergeContextRefs(
-        citationsForSelections(contextSelections),
+        [
+          ...citationsForSelections(contextSelections),
+          ...attachmentCitations.citationsFor(files, precomputed),
+        ],
         selectComposerCitedRefs(useChatStore.getState(), session?.id ?? null)
       )
       const turnMetadata: ComposerTurnMetadata = {
@@ -3814,6 +4078,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             }
           : {}),
         ...(citations.length > 0 ? { citations } : {}),
+        ...(route ? { route } : {}),
       }
       if (Object.keys(turnMetadata).length > 0) {
         await onSend(content, attachmentResult.manifest, templateRun, turnMetadata)
@@ -3852,6 +4117,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       tWebSearch,
       session,
       videoRoute.available,
+      attachmentCitations,
+      tRoute,
+      tRouteRuntime,
+      onOpenSettings,
     ]
   )
 
@@ -3972,9 +4241,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 onSubmitShell={handleBashSubmit}
                 onOpenCheatsheet={() => setCheatsheetOpen(true)}
                 onOpenSettings={onOpenSettings}
+                pendingDraftCount={session?.platformBinding ? pendingDrafts.length : 0}
+                onReviewDrafts={openDraftReview}
                 handleRef={ref}
-                mentionMode={mentionMode}
-                mentionables={mentionables}
                 placeholder={
                   session?.platformBinding
                     ? tPlatform("destination", {
@@ -3985,8 +4254,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                       })
                     : placeholder
                 }
-                mobileMentionMembers={mobileMentionMembers}
                 workflowMention={workflowMention}
+                routing={routing}
                 placeholderHints={placeholderHints}
                 compactLayout={compactLayout}
                 skin={skin}

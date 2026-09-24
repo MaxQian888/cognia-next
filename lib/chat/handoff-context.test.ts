@@ -8,6 +8,26 @@ const message = (id: string, text: string): UIMessage => ({
 })
 
 describe("handoff context", () => {
+  it("retains a complete derived summary including its final constraint", async () => {
+    const summary = "Evidence: ".repeat(45) + "Never deploy without user approval."
+    const result = await prepareHandoffContext([message("large", "history ".repeat(1000))], {
+      maxChars: 1000,
+      state: { oldEvents: "event ".repeat(500) },
+      client: { complete: jest.fn().mockResolvedValue(summary) },
+    })
+    expect(result.text).toContain(summary)
+    expect(result.text.length).toBeLessThanOrEqual(1000)
+  })
+
+  it("refuses a live handoff when even the complete derived summary exceeds its budget", async () => {
+    await expect(
+      prepareHandoffContext([message("large", "history ".repeat(1000))], {
+        maxChars: 500,
+        client: { complete: jest.fn().mockResolvedValue("critical constraint ".repeat(100)) },
+      })
+    ).rejects.toThrow("handoff_context_summary_exceeds_budget")
+  })
+
   it("preserves constraints, multiline evidence and tool identities without private reasoning", () => {
     const result = buildHandoffContext([
       message("goal", "Only investigate. Do not edit files."),

@@ -86,6 +86,37 @@ describe("CharacterPicker", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("leaves no heading behind while closed (it stays mounted over the active chat)", () => {
+    // DesktopChatWorkspace mounts the picker unconditionally with open=false.
+    // The title used to render outside DialogContent, so a hidden
+    // "Pick a character" <h2> sat in the accessibility tree above every
+    // conversation, including ones that already had messages.
+    const Wrapper = withAdapter(makeAdapter([mkChar("Alice")]))
+    const { rerender } = render(
+      <Wrapper>
+        <CharacterPicker open={false} onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    expect(screen.queryByRole("heading", { name: "Pick a character" })).toBeNull()
+    expect(screen.queryByText("Pick a character")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
+
+    rerender(
+      <Wrapper>
+        <CharacterPicker open onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    // Opened: the dialog carries the title as its accessible name.
+    expect(screen.getByRole("dialog", { name: "Pick a character" })).toBeInTheDocument()
+
+    rerender(
+      <Wrapper>
+        <CharacterPicker open={false} onOpenChange={() => undefined} onPick={() => undefined} />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Pick a character")).toBeNull()
+  })
+
   it("treats undefined adapter return as an empty list (no crash)", () => {
     const adapter: DataAdapter = {
       ...makeAdapter([]),

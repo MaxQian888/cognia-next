@@ -10,6 +10,13 @@
  * leaves the child's own onClick / pointer handlers intact (events
  * bubble up).
  *
+ * Once the press has fired, the release that ends it is not also a tap: the
+ * click the browser synthesizes on pointerup is swallowed (capture phase, so
+ * the child's onClick never runs), and so is the platform context menu /
+ * selection callout a held touch would otherwise raise on top of whatever
+ * `onLongPress` opened. Without this, a long-press on a list row opened its
+ * action menu AND navigated into the row the moment the finger lifted.
+ *
  * Used by:
  *   - chat-room message rows → action sheet
  *   - chat-list rows → tap=open / long-press=context menu
@@ -54,6 +61,12 @@ export function LongPress({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startPosRef = useRef<{ x: number; y: number } | null>(null)
   const firedRef = useRef(false)
+  /**
+   * The current press already fired, so the click (and context menu) it ends
+   * with belong to the long-press. Survives `cancel()` on pointerup because
+   * the click is dispatched after it; cleared by the next press or keydown.
+   */
+  const consumedRef = useRef(false)
 
   const cancel = useCallback(() => {
     if (timerRef.current !== null) {
@@ -68,14 +81,26 @@ export function LongPress({
 
   const start = (e: React.PointerEvent<HTMLElement>) => {
     cancel()
+    consumedRef.current = false
+    // A secondary mouse button opens the context menu on its own; timing it as
+    // a hold would fire a second time when the menu closes.
+    if (e.pointerType === "mouse" && e.button !== 0) return
     startPosRef.current = { x: e.clientX, y: e.clientY }
     timerRef.current = setTimeout(() => {
+      timerRef.current = null
       firedRef.current = true
+      consumedRef.current = true
       if (!silent) {
         void impact("medium")
       }
       onLongPress()
     }, delayMs)
+  }
+
+  const swallowIfConsumed = (e: React.SyntheticEvent) => {
+    if (!consumedRef.current) return
+    e.preventDefault()
+    e.stopPropagation()
   }
 
   const move = (e: React.PointerEvent<HTMLElement>) => {
@@ -95,6 +120,19 @@ export function LongPress({
       onPointerMove={move}
       onPointerCancel={cancel}
       onPointerLeave={cancel}
+      onClickCapture={(e) => {
+        if (!consumedRef.current) return
+        consumedRef.current = false
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+      // Android raises `contextmenu` for a held touch at about the same moment
+      // the timer fires; iOS raises its callout. Either one on top of the
+      // menu `onLongPress` just opened is a second, competing menu.
+      onContextMenuCapture={swallowIfConsumed}
+      onKeyDownCapture={() => {
+        consumedRef.current = false
+      }}
       data-long-press-active="true"
     >
       {children}

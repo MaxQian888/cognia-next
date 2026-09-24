@@ -167,3 +167,20 @@ describe("subscribeClaudeSettings", () => {
     expect(handler).toHaveBeenCalledWith(evt)
   })
 })
+
+it("contains native unregister rejections", async () => {
+  const failures: Promise<void>[] = []
+  const spies: jest.SpyInstance[] = []
+  const off = jest.fn(() => {
+    const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    failures.push(failure)
+    spies.push(jest.spyOn(failure, "catch"))
+    return failure
+  })
+  mockedListen.mockResolvedValue(off)
+  const stop = await subscribeClaudeSettings(() => {})
+  stop()
+  const attached = spies.map((spy) => spy.mock.calls.length)
+  await Promise.all(failures.map((failure) => failure.catch(() => {})))
+  expect(attached).toEqual([1])
+})

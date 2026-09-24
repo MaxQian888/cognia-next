@@ -6,6 +6,10 @@ import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 const undo = jest.fn()
 const storeState: {
@@ -74,5 +78,28 @@ describe("VersionHistoryPanel", () => {
     expect(restoreButtons.length).toBeGreaterThan(0)
     fireEvent.click(restoreButtons[0])
     expect(undo).toHaveBeenCalled()
+  })
+
+  it("keeps the restore button reachable without a hover", () => {
+    storeState.undoStacks = {
+      sx: [
+        { id: "v1", description: "Initial", timestamp: 1_000 },
+        { id: "v2", description: "Rename", timestamp: 2_000 },
+      ],
+    }
+    renderPanel()
+    const restore = screen.getByRole("button", { name: "Restore" })
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(restore).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(restore).not.toHaveClass(forbidden)
+    }
+    restore.focus()
+    expect(restore).toHaveFocus()
+    fireEvent.click(restore)
+    // Restoring "Initial" (index 0) from a two-entry stack steps back twice.
+    expect(undo).toHaveBeenCalledTimes(2)
+    expect(undo).toHaveBeenCalledWith("sx")
   })
 })

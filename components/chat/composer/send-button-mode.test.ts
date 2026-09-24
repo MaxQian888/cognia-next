@@ -132,15 +132,45 @@ describe("resolveSendButton — in flight", () => {
 })
 
 describe("resolveSendButton — connector draft review", () => {
-  it("outranks every other state", () => {
-    expect(
-      resolveSendButton(input({ hasPendingDrafts: true, status: "streaming", hasContent: true }))
-    ).toEqual({ mode: "draft", disabled: false, queues: false, variant: "secondary" })
+  it("offers the waiting drafts when the box is empty", () => {
+    expect(resolveSendButton(input({ hasPendingDrafts: true }))).toEqual({
+      mode: "draft",
+      disabled: false,
+      queues: false,
+      variant: "secondary",
+    })
   })
 
-  it("follows the composer's disabled prop", () => {
+  // A pending draft must never stand between someone and their own reply.
+  it("gives the button back to Send the moment there is something typed", () => {
+    expect(resolveSendButton(input({ hasPendingDrafts: true, hasContent: true }))).toEqual({
+      mode: "send",
+      disabled: false,
+      queues: false,
+      variant: "default",
+    })
+  })
+
+  // Opening the review dialog is local — the stream cap and a shell that
+  // cannot write outbound have no bearing on it.
+  it("stays reviewable while the composer or the outbound path is blocked", () => {
     expect(
-      resolveSendButton(input({ hasPendingDrafts: true, composerDisabled: true }))
-    ).toMatchObject({ mode: "draft", disabled: true })
+      resolveSendButton(
+        input({ hasPendingDrafts: true, composerDisabled: true, outboundBlocked: true })
+      )
+    ).toMatchObject({ mode: "draft", disabled: false })
+  })
+
+  it("yields to a dispatch in flight", () => {
+    expect(resolveSendButton(input({ hasPendingDrafts: true, isSending: true }))).toMatchObject({
+      mode: "busy",
+      disabled: true,
+    })
+  })
+
+  it("yields to Stop while a turn is running", () => {
+    expect(resolveSendButton(input({ hasPendingDrafts: true, status: "streaming" }))).toMatchObject(
+      { mode: "stop" }
+    )
   })
 })

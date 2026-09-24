@@ -4,6 +4,7 @@ import { nanoid } from "nanoid"
 import { useCallback, useMemo } from "react"
 
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
+import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import {
   buildConversationFilterOptions,
   type ConversationFilterOptions,
@@ -118,6 +119,11 @@ export interface ConversationFilterActions {
   setActivity: (activity: ConversationActivityFilter) => void
   reset: () => void
   setSortBy: (sortBy: ConversationSortBy) => void
+  /**
+   * Write the grouping preference. The desktop rail's ⋯ menu drives it on the
+   * compact surfaces; the merged rail never offers it, because its grouping is
+   * the scope tree itself (always the team axis).
+   */
   setGroupBy: (groupBy: ConversationGroupBy) => void
   setSearchOptions: (patch: Partial<ConversationSearchOptions>) => void
   /** Put the list into a saved view; unknown ids are ignored. */
@@ -152,7 +158,12 @@ export interface ConversationFilterController {
   groupBy: ConversationGroupBy
   /** The resolved search reach — feed to the list and the scope control. */
   search: ConversationViewState["search"]
-  options: ConversationFilterOptions
+  /**
+   * The per-facet candidates the menu offers. Built on first read and cached
+   * until the inputs change, so a render that never opens a facet list never
+   * walks the sessions for it.
+   */
+  readonly options: ConversationFilterOptions
   /** Every view the menu should offer: visible built-ins, then the saved ones. */
   views: ResolvedConversationView[]
   /** The view the list is sitting in, if it still exists. */
@@ -177,8 +188,12 @@ const EMPTY_SESSIONS: readonly ChatSession[] = []
 const EMPTY_DRIFT: ConversationViewDimension[] = []
 const EMPTY_IDS: string[] = []
 const EMPTY_VIEWS: ConversationView[] = []
-/** Built-in defaults when neither the profile nor the character names one — mirrors the row metadata. */
-const FALLBACK_MODEL = "claude-sonnet-4-5"
+/**
+ * Built-in defaults when neither the profile nor the character names one — the
+ * same constants the row metadata falls back to (`channel-list.tsx`), so a
+ * model filter matches exactly the rows whose detail line names that model.
+ */
+const FALLBACK_MODEL = ANTHROPIC_DEFAULT_MODEL
 const FALLBACK_PROVIDER = "anthropic"
 
 export function useConversationFilterController({
@@ -284,9 +299,14 @@ export function useConversationFilterController({
     [characters]
   )
 
-  const options = useMemo(
-    () =>
-      buildConversationFilterOptions({
+  // Lazy: the candidates walk every session, and they are rebuilt whenever the
+  // session list moves — yet most renders (menu closed, no list-facet chip on
+  // screen) never look at them. The holder lives and dies with the inputs, so a
+  // read after they change always builds from the new ones.
+  const readOptions = useMemo(() => {
+    const holder: { built?: ConversationFilterOptions } = {}
+    return (): ConversationFilterOptions => {
+      holder.built ??= buildConversationFilterOptions({
         sessions: sessions ?? EMPTY_SESSIONS,
         workspaces,
         folders,
@@ -303,9 +323,10 @@ export function useConversationFilterController({
           models: filters.models,
           providers: filters.providers,
         },
-      }),
-    [sessions, workspaces, folders, agents, teams, filterContext, filters]
-  )
+      })
+      return holder.built
+    }
+  }, [sessions, workspaces, folders, agents, teams, filterContext, filters])
 
   const saveViews = useCallback(
     (next: ConversationView[]) => void saveSidebarSettings({ views: next }),
@@ -439,7 +460,9 @@ export function useConversationFilterController({
     sortBy,
     groupBy,
     search,
-    options,
+    get options() {
+      return readOptions()
+    },
     views,
     activeView,
     activeViewDrift,

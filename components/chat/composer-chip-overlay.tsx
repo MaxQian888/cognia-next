@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 import { brandIconAsset } from "@/components/icons/brand-icon"
 import { brandIdForHost } from "@/lib/chat/link-display"
 import { LINK_MARKER } from "@/lib/chat/link-fold"
-import type { RichSegment } from "@/lib/slash-commands/parse-segments"
+import type { MentionSegment, RichSegment } from "@/lib/slash-commands/parse-segments"
 import type { SlashScope } from "@/lib/slash-commands/builtin"
 
 /**
@@ -132,6 +132,25 @@ function LinkMarker({ url }: { url?: string }) {
   )
 }
 
+/**
+ * How a leading `@handle` that ROUTES the turn should read
+ * (`lib/chat/turn-route/`).
+ *
+ * - `ready` — the runtime it names can take the turn. Tinted, so a message that
+ *   is about to leave the conversation's own runtime says so before it does.
+ * - `unavailable` — it names a runtime that cannot run here. Amber, the same
+ *   "this will not do what it looks like" tone an unresolved parameter uses;
+ *   the send path refuses it with the reason.
+ *
+ * Only ever a tint: the glyphs stay exactly the textarea's.
+ */
+export type RouteChipState = "ready" | "unavailable"
+
+const ROUTE_PILL_CLASS: Record<RouteChipState, string> = {
+  ready: "bg-sky-500/[0.08] text-sky-700 ring-1 ring-sky-500/35 ring-inset dark:text-sky-300",
+  unavailable: "bg-amber-500/10 ring-1 ring-amber-500/40 ring-inset",
+}
+
 const PARAM_PILL_CLASS: Record<ParamPillState, string> = {
   empty: "border border-dashed border-muted-foreground/50",
   filled: "bg-primary/10 ring-1 ring-primary/25 ring-inset",
@@ -231,6 +250,12 @@ interface ComposerChipOverlayProps {
    * the neutral default a caller with no command map can safely fall back to.
    */
   commandScope?: (name: string) => SlashScope | undefined
+  /**
+   * The route state of an `@mention` pill, or undefined for an ordinary
+   * mention. The composer answers only for the message's leading token, the
+   * one position a route is read from.
+   */
+  routeState?: (segment: MentionSegment) => RouteChipState | undefined
   /** Mirror the textarea's monospace family — see {@link OVERLAY_MONO_CLASS}. */
   mono?: boolean
   /**
@@ -253,7 +278,7 @@ interface ComposerChipOverlayProps {
 
 const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
   function ComposerChipOverlay(
-    { value, segments, paramState, commandScope, mono, hidden, padEndClass },
+    { value, segments, paramState, commandScope, routeState, mono, hidden, padEndClass },
     innerRef
   ) {
     // Nothing to paint when there are no pill segments — render an invisible
@@ -331,11 +356,20 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
                   )
                 }
                 if (seg.kind === "mention") {
+                  // A routing token keeps its exact characters — only the pill's
+                  // tint says where the turn is about to go.
+                  const route = routeState?.(seg)
                   return (
                     <span
                       key={`${seg.start}-${i}`}
                       data-chip="mention"
-                      className="box-decoration-clone rounded-md bg-muted/60 ring-1 ring-border ring-inset"
+                      data-route-state={route}
+                      className={cn(
+                        "box-decoration-clone rounded-md",
+                        route
+                          ? ROUTE_PILL_CLASS[route]
+                          : "bg-muted/60 ring-1 ring-border ring-inset"
+                      )}
                     >
                       {seg.raw}
                     </span>

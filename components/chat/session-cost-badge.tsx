@@ -45,23 +45,63 @@ interface Props {
    * wide the pane holding this badge is.
    */
   compact?: boolean
+  /**
+   * The host row's chip class, merged after the badge's own. The composer
+   * toolbar passes its quiet chip here so the cost reads at the same height,
+   * padding and type size as the controls beside it.
+   */
+  triggerClassName?: string
 }
 
-export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compact }: Props) {
+export function SessionCostBadge({
+  sessionId,
+  inMemoryUsage,
+  tokensLabel,
+  compact,
+  triggerClassName,
+}: Props) {
   const t = useTranslations("chat.sessionCost")
 
   // Live read of every persisted row for this session. `useLiveQuery` returns
   // `undefined` until the first emission; treat that as "no data yet".
   const rows = useLiveQuery(() => listUsageForSession(sessionId), [sessionId])
 
-  const breakdown = useMemo(() => buildBreakdown(rows ?? []), [rows])
+  const breakdown = useMemo(() => {
+    const persisted = buildBreakdown(rows ?? [])
+    const partial =
+      !rows?.length ||
+      (inMemoryUsage.inputTokens ?? 0) > persisted.inputTokens ||
+      (inMemoryUsage.outputTokens ?? 0) > persisted.outputTokens ||
+      (inMemoryUsage.cacheReadInputTokens ?? 0) > persisted.cacheReadTokens ||
+      (inMemoryUsage.cacheCreationInputTokens ?? 0) > persisted.cacheCreationTokens ||
+      (inMemoryUsage.reasoningTokens ?? 0) > persisted.reasoningTokens ||
+      (inMemoryUsage.totalCostUsd ?? 0) > persisted.costUsd
+    if (!partial) return { ...persisted, partial: false }
+    // Either source can cover only part of the history. Keep the largest
+    // reported cumulative counters without adding overlapping turns. Partial
+    // provenance stays visible; no complete turn count or speed is inferred.
+    return {
+      ...persisted,
+      partial: true,
+      inputTokens: Math.max(persisted.inputTokens, inMemoryUsage.inputTokens ?? 0),
+      outputTokens: Math.max(persisted.outputTokens, inMemoryUsage.outputTokens ?? 0),
+      cacheReadTokens: Math.max(persisted.cacheReadTokens, inMemoryUsage.cacheReadInputTokens ?? 0),
+      cacheCreationTokens: Math.max(
+        persisted.cacheCreationTokens,
+        inMemoryUsage.cacheCreationInputTokens ?? 0
+      ),
+      costUsd: Math.max(persisted.costUsd, inMemoryUsage.totalCostUsd ?? 0),
+      reasoningTokens: Math.max(persisted.reasoningTokens, inMemoryUsage.reasoningTokens ?? 0),
+      durationMs: 0,
+    }
+  }, [rows, inMemoryUsage])
   // Session throughput: summed output tokens ÷ summed generation time. `null`
   // when no persisted turn reported a duration → "—".
   const speed = tokensPerSecond(breakdown.outputTokens, breakdown.durationMs)
 
-  const inputs = inMemoryUsage.inputTokens ?? 0
-  const outputs = inMemoryUsage.outputTokens ?? 0
-  const cost = inMemoryUsage.totalCostUsd ?? 0
+  const inputs = breakdown.inputTokens
+  const outputs = breakdown.outputTokens
+  const cost = breakdown.costUsd
 
   return (
     <Popover>
@@ -74,7 +114,8 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compac
               size="sm"
               className={cn(
                 "inline-flex h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground",
-                "hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/50"
+                "hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/50",
+                triggerClassName
               )}
               aria-label={t("trigger")}
               data-testid="session-cost-trigger"
@@ -108,7 +149,7 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compac
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
           <dt className="text-muted-foreground">{t("turns")}</dt>
           <dd className="text-right font-mono" data-testid="cost-popover-turns">
-            {breakdown.turns}
+            {breakdown.partial ? "—" : breakdown.turns}
           </dd>
           <dt className="text-muted-foreground">{t("input")}</dt>
           <dd className="text-right font-mono">{formatTokens(breakdown.inputTokens)}</dd>
@@ -156,6 +197,7 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel, compac
         ) : (
           <div className="space-y-1">
             <p className="text-muted-foreground">{t("byModelTitle")}</p>
+            {breakdown.partial && <p className="text-muted-foreground">{t("partialModelData")}</p>}
             <ul className="space-y-1" data-testid="cost-popover-by-model">
               {breakdown.byModel.map((m) => {
                 const modelSpeed = tokensPerSecond(m.outputTokens, m.durationMs)

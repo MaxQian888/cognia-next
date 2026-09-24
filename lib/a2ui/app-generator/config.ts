@@ -139,7 +139,7 @@ export const appPatterns = {
     template: "calculator",
   },
   timer: {
-    keywords: ["计时", "倒计时", "timer", "countdown", "秒表", "stopwatch"],
+    keywords: ["计时", "倒计时", "timer", "countdown", "秒表", "stopwatch", "番茄", "pomodoro"],
     template: "timer",
   },
   todo: {

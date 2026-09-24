@@ -213,3 +213,44 @@ describe("describeRunningProgress", () => {
     ).toBeNull()
   })
 })
+
+describe("large-result summary semantics", () => {
+  it.each(["", "\n", "a\n", "a\r\n\r\nb", " \t\n\u00a0\n\ufeff\n", "a\u2028b\n\u200b\n"])(
+    "retains raw and nonblank line counts for %p",
+    (output) => {
+      const rawCount = output ? output.split("\n").length : 0
+      const nonblankCount = output.split("\n").filter((line) => line.trim().length > 0).length
+      expect(
+        (describeToolResult(tool("tool-Read", { output })) as { count?: number } | null)?.count ?? 0
+      ).toBe(rawCount)
+      expect(
+        (describeToolResult(tool("tool-Grep", { output })) as { count?: number } | null)?.count ?? 0
+      ).toBe(nonblankCount)
+      expect(
+        describeRunningProgress(tool("tool-Bash", { state: "input-available", output }))?.lines ?? 0
+      ).toBe(rawCount)
+    }
+  )
+  it("keeps the first nonblank error line and ignores a large hidden trace", () => {
+    const tail = "  at worker.js:12:4\n".repeat(100000)
+    expect(resultErrorPreview("\r\n \t\n\u00a0fatal🙂 \r\n" + tail)).toBe("fatal🙂")
+    expect(resultErrorPreview([{ text: " \n" }, { text: "failure\n" + tail }])).toBe("failure")
+    expect(resultErrorPreview("\u00a0\n\ufeff")).toBe("")
+  })
+  it("retains MCP text joining, fallback JSON, and UTF-16 progress length", () => {
+    const output = [
+      { text: "a\n" },
+      { text: "" },
+      { type: "image", data: "base64" },
+      { text: "\n🙂" },
+    ]
+    expect(describeToolResult(tool("tool-Read", { output }))).toMatchObject({ count: 4 })
+    expect(describeToolResult(tool("tool-Grep", { output }))).toMatchObject({ count: 2 })
+    expect(
+      describeRunningProgress(tool("tool-Bash", { state: "input-available", output }))
+    ).toEqual({ lines: 4, bytes: 6 })
+    expect(describeToolResult(tool("tool-Read", { output: { stdout: "a\nb" } }))).toMatchObject({
+      count: 1,
+    })
+  })
+})

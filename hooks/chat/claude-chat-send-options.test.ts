@@ -235,6 +235,64 @@ describe("Claude chat send-option seam", () => {
     ).toBeUndefined()
   })
 
+  describe("addressed-turn overrides", () => {
+    const lastOptions = () => jest.mocked(resolveSendOptions).mock.calls.at(-1)?.[0]
+    const session = {
+      id: "s-route",
+      model: "session-model",
+      providerOverride: "openai",
+      systemPrompt: "Standing prompt",
+    } as never
+    const member = {
+      id: "__teammate__:tm-1",
+      name: "Critic",
+      avatarColor: "#000",
+      systemPrompt: "You are the critic.",
+      model: "member-model",
+      createdAt: 0,
+      updatedAt: 0,
+    } as never
+
+    it("runs on the addressed lane instead of the session's", async () => {
+      await buildSendOptions(session, "go", undefined, undefined, undefined, undefined, {
+        runtimeRef: { kind: "external", agentId: "codex-1" },
+      })
+      expect(lastOptions()).toMatchObject({ externalRuntimeId: "codex-1", session })
+      await buildSendOptions(session, "go", undefined, undefined, undefined, undefined, {
+        runtimeRef: { kind: "builtin" },
+      })
+      expect(lastOptions()).not.toHaveProperty("externalRuntimeId")
+    })
+
+    it("answers as the member: its character, and its prompt over the session's", async () => {
+      await buildSendOptions(session, "go", undefined, undefined, undefined, undefined, {
+        runtimeRef: { kind: "builtin" },
+        character: member,
+      })
+      const options = lastOptions()
+      expect(options?.character).toBe(member)
+      expect(options?.session).toMatchObject({ id: "s-route", systemPrompt: undefined })
+      // The session keeps its own model unless the member's model is asked to win.
+      expect(options?.session).toMatchObject({ model: "session-model", providerOverride: "openai" })
+      expect(options).not.toHaveProperty("memberOverride")
+    })
+
+    it("lets the member's own model win for the turn, without touching the row", async () => {
+      await buildSendOptions(session, "go", undefined, undefined, undefined, undefined, {
+        runtimeRef: { kind: "builtin" },
+        character: member,
+        clearSessionModel: true,
+      })
+      const options = lastOptions()
+      expect(options?.session).toMatchObject({ model: undefined, providerOverride: undefined })
+      expect(options?.memberOverride).toEqual({
+        characterId: "__teammate__:tm-1",
+        modelOverride: "member-model",
+      })
+      expect((session as { model: string }).model).toBe("session-model")
+    })
+  })
+
   it("forwards the durable onboarding request as request-scoped authorization", async () => {
     createOnboardingRequest({
       cardId: "summarize-web",

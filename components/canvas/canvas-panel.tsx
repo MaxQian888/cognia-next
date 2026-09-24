@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
@@ -1035,7 +1036,10 @@ function CanvasToolbar({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                            // `transition-all` after the policy keeps the Button's own
+                            // transition, which `transition-opacity` would replace.
+                            className={cn("h-6 w-6", HOVER_REVEAL_CONTROL_CLASS, "transition-all")}
+                            aria-label={tActions("more")}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <MoreHorizontal className="h-3 w-3" />
@@ -1063,7 +1067,7 @@ function CanvasToolbar({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                        className={cn("h-6 w-6", HOVER_REVEAL_CONTROL_CLASS, "transition-all")}
                         aria-label={`${t("close")} ${doc.title}`}
                         onClick={(e) => {
                           e.stopPropagation()

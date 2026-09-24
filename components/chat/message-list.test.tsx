@@ -2252,6 +2252,9 @@ describe("MessageList — selection mode", () => {
   const tick = (id: string) =>
     row(id)?.querySelector<HTMLElement>('[data-testid="transcript-row-select"]') ?? null
   const bar = () => document.querySelector("[data-test='selection-bar']")
+  // The pointer and the keyboard share one way in: the message menu's "Select",
+  // which reaches the list through the host every row reads.
+  const enter = (id: string) => act(() => selectionHosts.at(-1)!.start(id))
 
   beforeEach(() => {
     selectionHosts.length = 0
@@ -2260,29 +2263,31 @@ describe("MessageList — selection mode", () => {
 
   const MESSAGES = [userMsg("m1", "q"), compactMarker, assistantMsg("m2", "a"), userMsg("m3", "q2")]
 
-  it("offers a tick on every message but not on a marker, out of the tab order until the mode is on", () => {
+  it("renders no tick outside the mode — hovering a message reveals none", () => {
     render(
       <Wrapper>
         <MessageList messages={MESSAGES} status="idle" />
       </Wrapper>
     )
-    expect(tick("m1")).toHaveAttribute("tabindex", "-1")
-    expect(tick("m2")).not.toBeNull()
+    expect(tick("m1")).toBeNull()
+    expect(tick("m2")).toBeNull()
     expect(tick("cb")).toBeNull()
     expect(bar()).toBeNull()
   })
 
-  it("opens the mode from a tick, and the bar takes the jump pill's place", () => {
+  it("opens the mode from the message's menu, ticks its message, and puts a tick on every selectable row", () => {
     render(
       <Wrapper>
         <MessageList messages={MESSAGES} status="idle" />
       </Wrapper>
     )
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     expect(bar()).toHaveAttribute("data-count", "1")
     expect(row("m1")).toHaveAttribute("data-selected", "true")
     expect(row("m2")).toHaveAttribute("data-selected", "false")
     expect(tick("m1")).toHaveAttribute("tabindex", "0")
+    expect(tick("m2")).not.toBeNull()
+    expect(tick("cb")).toBeNull()
     expect(screen.queryByTestId("conversation-jump-pill")).toBeNull()
   })
 
@@ -2296,7 +2301,7 @@ describe("MessageList — selection mode", () => {
     fireEvent.click(row("m2"))
     expect(bar()).toBeNull()
 
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     fireEvent.click(row("m2"))
     expect(bar()).toHaveAttribute("data-count", "2")
 
@@ -2313,7 +2318,7 @@ describe("MessageList — selection mode", () => {
         <MessageList messages={MESSAGES} status="idle" />
       </Wrapper>
     )
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     fireEvent.click(row("m3"), { shiftKey: true })
     expect(selectionBarProps.at(-1)!.messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"])
   })
@@ -2324,7 +2329,7 @@ describe("MessageList — selection mode", () => {
         <MessageList messages={MESSAGES} status="idle" />
       </Wrapper>
     )
-    fireEvent.click(tick("m3")!)
+    enter("m3")
     fireEvent.click(tick("m1")!)
     const props = selectionBarProps.at(-1)!
     expect(props.messages.map((m) => m.id)).toEqual(["m1", "m3"])
@@ -2365,6 +2370,7 @@ describe("MessageList — selection mode", () => {
         />
       </Wrapper>
     )
+    enter("m1")
     expect(tick("m1")).not.toBeNull()
     expect(tick("tail")).toBeNull()
   })
@@ -2400,7 +2406,7 @@ describe("MessageList — selection mode", () => {
           <MessageList messages={MESSAGES} status="idle" />
         </Wrapper>
       )
-      fireEvent.click(tick("m1")!)
+      enter("m1")
       fireEvent.click(pressed("m3"))
       expect(sheet()).toHaveAttribute("data-message", "closed")
     })
@@ -2422,7 +2428,7 @@ describe("MessageList — selection mode", () => {
           <MessageList messages={MESSAGES} status="idle" />
         </Wrapper>
       )
-      fireEvent.click(tick("m1")!)
+      enter("m1")
       expect(bar()).not.toBeNull()
       act(() => {
         window.dispatchEvent(new PopStateEvent("popstate"))
@@ -2439,7 +2445,7 @@ describe("MessageList — selection mode", () => {
       </Wrapper>
     )
     expect(row("m1").className).not.toContain("[&_[data-message-actions]]:invisible")
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     expect(row("m2").className).toContain("[&_[data-message-actions]]:invisible")
     expect(row("m2").className).not.toMatch(/\bhidden\b/)
   })
@@ -2452,7 +2458,7 @@ describe("MessageList — selection mode", () => {
     )
     const column = document.querySelector('[data-slot="conversation-reading-column"]')!
     expect(column.className).not.toContain("pb-36")
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     expect(column.className).toContain("pb-36")
   })
 
@@ -2462,7 +2468,7 @@ describe("MessageList — selection mode", () => {
         <MessageList messages={[inSession(userMsg("m1", "q"), "s1")]} status="idle" />
       </Wrapper>
     )
-    fireEvent.click(tick("m1")!)
+    enter("m1")
     expect(bar()).not.toBeNull()
     rerender(
       <Wrapper>

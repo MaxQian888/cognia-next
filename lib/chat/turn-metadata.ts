@@ -2,10 +2,10 @@
  * What the composer assembles for one turn and every host forwards to its
  * send path unchanged.
  *
- * Five hosts (the desktop workspace, the mobile shell, the Inbox page, the
- * workbench chat panel, the workflow copilot) used to spread each field of
- * the metadata into their send options by hand, so a field added here had
- * ten places to be forgotten in. They now all call
+ * The hosts (the desktop workspace, the mobile shell, the workbench chat
+ * panel, the workflow copilot) used to spread each field of the metadata into
+ * their send options by hand, so a field added here had a place to be
+ * forgotten in at every one of their send sites. They now all call
  * {@link turnMetadataSendOptions}.
  *
  * Pure: no store, no React.
@@ -14,6 +14,7 @@
 import type { MessageReplyTo, SendOptions } from "@cognia/agent-config-types"
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
+import type { TurnRoute } from "@/lib/chat/turn-route/types"
 
 /** Metadata assembled before dispatch that must travel with this exact turn. */
 export interface ComposerTurnMetadata {
@@ -43,15 +44,28 @@ export interface ComposerTurnMetadata {
    * of a conversation started from a reference was never cited.
    */
   citations?: readonly ContextRef[]
+  /**
+   * The runtime this turn is addressed to by its leading `@claude` / `@codex` /
+   * `@<Squad member>` (`lib/chat/turn-route/`). Set only by a direct chat or
+   * the new-chat composer, and only once the composer has checked the lane
+   * can run; the send path re-checks it before anything is written.
+   */
+  route?: TurnRoute
+}
+
+/** The send options a turn's metadata maps to, absent keys omitted. */
+export type TurnMetadataSendOptions = Pick<
+  ComposerTurnMetadata,
+  "webSearchContext" | "replyTo" | "targetMemberIds" | "promptPreamble" | "citations"
+> & {
+  /** `route`, under the name the send path's call options use. */
+  turnRoute?: TurnRoute
 }
 
 /** The send-option fields a turn's metadata carries, absent keys omitted. */
 export function turnMetadataSendOptions(
   turnMetadata: ComposerTurnMetadata | undefined
-): Pick<
-  ComposerTurnMetadata,
-  "webSearchContext" | "replyTo" | "targetMemberIds" | "promptPreamble" | "citations"
-> {
+): TurnMetadataSendOptions {
   return {
     ...(turnMetadata?.webSearchContext ? { webSearchContext: turnMetadata.webSearchContext } : {}),
     ...(turnMetadata?.replyTo ? { replyTo: turnMetadata.replyTo } : {}),
@@ -62,5 +76,6 @@ export function turnMetadataSendOptions(
     ...(turnMetadata?.citations && turnMetadata.citations.length > 0
       ? { citations: turnMetadata.citations }
       : {}),
+    ...(turnMetadata?.route ? { turnRoute: turnMetadata.route } : {}),
   }
 }

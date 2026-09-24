@@ -290,7 +290,7 @@ import type { BuildOptionsContext } from "./build-options"
 import {
   EXTERNAL_AGENT_PROVIDER_ID,
   externalAgentProviderId,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type {
   AppSettings,

@@ -17,7 +17,7 @@
 import type { UIMessage } from "ai"
 import { sha256 } from "@noble/hashes/sha256"
 import { bytesToHex } from "@noble/hashes/utils"
-import type { CanonicalTurn } from "@cognia/agent-config-types/canonical-session"
+import type { CanonicalSession, CanonicalTurn } from "@cognia/agent-config-types/canonical-session"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
@@ -57,8 +57,8 @@ export function canonicalTurnToHandoffMessage(turn: CanonicalTurn): HandoffMessa
   }
   for (const call of turn.toolCalls ?? []) {
     const completed =
-      call.status === "completed" ||
-      (call.status === undefined && call.resultText !== undefined && !call.isError)
+      !call.isError &&
+      (call.status === "completed" || (call.status === undefined && call.resultText !== undefined))
     parts.push(
       completed
         ? {
@@ -87,6 +87,11 @@ export interface ImportHandoffParams {
   sessionId: string
   title?: string
   messages: HandoffMessage[]
+  /** Historical data only; approvals and recorded executable events are excluded. */
+  historicalState?: Pick<
+    CanonicalSession,
+    "goals" | "tasks" | "plans" | "checkpoints" | "history" | "interAgentMessages"
+  >
   /** Optional run context to seed the session row. */
   meta?: {
     provider?: string
@@ -181,13 +186,23 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
   }
   const now = params.now ?? Date.now()
   const uiMessages = toUiMessages(messages)
-  const transcript = buildHandoffContext(uiMessages).text
+  const historicalState = params.historicalState
+    ? (Object.fromEntries(
+        (["goals", "tasks", "plans", "checkpoints", "history", "interAgentMessages"] as const)
+          .filter((key) => params.historicalState?.[key] !== undefined)
+          .map((key) => [key, params.historicalState![key]])
+      ) as ImportHandoffParams["historicalState"])
+    : undefined
+  const context = buildHandoffContext(uiMessages, { state: historicalState })
+  const transcript = context.text
   const db = getDb()
 
   // Keep CLI snapshots immutable across retries and continuation. Cross-host
   // handoffs retain their ticket-controlled overwrite semantics.
   const handoffSource = params.handoffSource ?? "cli"
-  const receiptPayload = bytesToHex(sha256(JSON.stringify({ messages, meta, title: params.title })))
+  const receiptPayload = bytesToHex(
+    sha256(JSON.stringify({ messages, meta, title: params.title, historicalState }))
+  )
   const normalized = await Promise.all(uiMessages.map(normalizeMessageMedia))
   const resolvedProjectId = await resolveScopeProjectId(params.projectId)
   return db.transaction("rw", db.sessions, db.messages, db.messageMediaRefs, async () => {
@@ -244,6 +259,19 @@ export async function importHandoffSession(params: ImportHandoffParams): Promise
       model: meta?.model,
       providerOverride: meta?.provider,
       workingDir: meta?.cwd,
+      ...(historicalState ? { importCanonicalState: historicalState } : {}),
+      ...(context.losses.length
+        ? {
+            importLossReport: {
+              fidelity: "contextual" as const,
+              losses: context.losses.map((loss) => ({
+                path: loss.messageId,
+                kind: "dropped" as const,
+                detail: loss.detail,
+              })),
+            },
+          }
+        : {}),
       // Preserve the original creation time on an idempotent re-handoff.
       createdAt: sessionId === existing?.id ? existing.createdAt : now,
       updatedAt: now,

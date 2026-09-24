@@ -115,7 +115,6 @@ import {
   TYPING_POLL_MS,
   TYPING_WINDOW_MS,
   TYPING_YIELD_MAX_MS,
-  asPlainText,
   withMetadata,
 } from "./runner"
 import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
@@ -938,6 +937,128 @@ describe("editing a turn that carried references", () => {
   })
 })
 
+describe("a turn with an attached file", () => {
+  // `buildSendContent` puts an extracted document ahead of the typed text as a
+  // text block of its own; the manifest counts it. Its text names Bee.
+  const NOTES = "Meeting notes: ask @Bee about the budget."
+  const file = { type: "text" as const, text: NOTES }
+  const manifest = [{ filename: "notes.txt", mediaType: "text/plain", kind: "document" as const }]
+  /** The row `makeUserMessage` leaves for that file. */
+  const filePart = { type: "file", filename: "notes.txt", mediaType: "text/plain", text: NOTES }
+  const answeredBy = (w: ReturnType<typeof createWorld>) =>
+    w.calls.sendPrompt.map((call) => decodeSubSession(call.sub)?.characterId)
+
+  it("routes on what the user typed, not on a name inside the file", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }, { characterId: "b" }] } })
+    await w.runner.send([file, { type: "text", text: "@Ava summarize" }], {
+      sessionId: ROOM,
+      attachmentManifest: manifest,
+    })
+    expect(answeredBy(w)).toEqual(["a"])
+  })
+
+  it("queues a steer with the typed text as its text and the file as a block", async () => {
+    const w = createWorld()
+    w.status.set(ROOM, "streaming")
+    await w.runner.send([file, { type: "text", text: "and this" }], {
+      sessionId: ROOM,
+      attachmentManifest: manifest,
+    })
+    expect(w.steerQueues.get(ROOM)?.[0]).toMatchObject({
+      text: "and this",
+      blocks: [file],
+      attachmentManifest: manifest,
+    })
+  })
+
+  it("resends an edited message's files with the edited text", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }, { characterId: "b" }] } })
+    w.seed([
+      { id: "u-0", role: "user", parts: [filePart, { type: "text", text: "summarize" }] } as Msg,
+    ])
+    await w.runner.editAndResend(ROOM, "u-0", "@Ava summarize again")
+    expect(answeredBy(w)).toEqual(["a"])
+    expect(w.calls.sendPrompt[0].content).toEqual([
+      file,
+      { type: "text", text: "@Ava summarize again" },
+    ])
+    const replacement = w.db.get(ROOM)!.filter((m) => m.role === "user")[1]
+    expect(replacement.metadata?.attachmentManifest).toEqual([
+      expect.objectContaining({ filename: "notes.txt", kind: "document" }),
+    ])
+  })
+
+  it("names a file an edit cannot resend, before the turn is accepted", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    const native = {
+      videoAttachment: {
+        groupId: "g-1",
+        filename: "clip.mp4",
+        sourceMediaType: "video/mp4",
+        kind: "video",
+        durationSec: 4,
+        width: 640,
+        height: 360,
+        delivery: "native",
+        strategy: "uniform",
+        range: null,
+        frameTimes: [],
+        engine: "browser",
+      },
+    }
+    w.seed([
+      {
+        id: "u-0",
+        role: "user",
+        parts: [
+          { type: "file", mediaType: "text/plain", text: "A cat jumps.", ...native },
+          { type: "text", text: "what happens?" },
+        ],
+      } as Msg,
+    ])
+    const order: string[] = []
+    await w.runner.editAndResend(ROOM, "u-0", "what happens next?", {
+      onNotResent: (filenames) => order.push(`notResent:${filenames.join(",")}`),
+      onAccepted: () => order.push("accepted"),
+    })
+    expect(order).toEqual(["notResent:clip.mp4", "accepted"])
+    expect(w.calls.sendPrompt[0].content).toBe("what happens next?")
+  })
+
+  it("regenerates a turn from its row, files included, when it is not the cached one", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }, { characterId: "b" }] } })
+    w.seed([
+      {
+        id: "u-0",
+        role: "user",
+        parts: [filePart, { type: "text", text: "@Ava summarize" }],
+      } as Msg,
+      {
+        id: "r-0",
+        role: "assistant",
+        parts: [{ type: "text", text: "old" }],
+        metadata: { senderId: "a" },
+      } as Msg,
+    ])
+    await w.runner.regenerate(ROOM)
+    expect(answeredBy(w)).toEqual(["a"])
+    expect(w.calls.sendPrompt[0].content).toEqual([file, { type: "text", text: "@Ava summarize" }])
+  })
+
+  it("regenerates the turn it just sent with that turn's manifest", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }, { characterId: "b" }] } })
+    await w.runner.send([file, { type: "text", text: "@Ava summarize" }], {
+      sessionId: ROOM,
+      attachmentManifest: manifest,
+    })
+    await flush()
+    w.calls.sendPrompt.length = 0
+    await w.runner.regenerate(ROOM)
+    expect(answeredBy(w)).toEqual(["a"])
+    expect(w.calls.sendPrompt[0].content).toEqual([file, { type: "text", text: "@Ava summarize" }])
+  })
+})
+
 describe("streaming several members at once", () => {
   const SUB_A = `${ROOM}::char::a::t9`
   const SUB_B = `${ROOM}::char::b::t9`
@@ -1078,17 +1199,6 @@ describe("helpers", () => {
   it("merges metadata without dropping what was there", () => {
     const msg = { id: "m", role: "user", parts: [], metadata: { a: 1 } } as unknown as UIMessage
     expect((withMetadata(msg, { b: 2 }) as Msg).metadata).toEqual({ a: 1, b: 2 })
-  })
-
-  it("flattens content blocks to their text", () => {
-    expect(asPlainText("hi")).toBe("hi")
-    expect(
-      asPlainText([
-        { type: "text", text: "a" },
-        { type: "image", source: {} } as never,
-        { type: "text", text: "b" },
-      ])
-    ).toBe("a b")
   })
 })
 

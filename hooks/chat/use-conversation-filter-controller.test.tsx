@@ -33,6 +33,21 @@ jest.mock("@/lib/telemetry/conversation-list-events", () => ({
 }))
 import { trackConversationFiltered } from "@/lib/telemetry/conversation-list-events"
 
+// Wrapped, not replaced: the real candidates, with a count of how often they
+// are built.
+jest.mock("@/lib/chat/conversation-filter-options", () => {
+  const actual = jest.requireActual<typeof import("@/lib/chat/conversation-filter-options")>(
+    "@/lib/chat/conversation-filter-options"
+  )
+  return {
+    ...actual,
+    buildConversationFilterOptions: jest.fn(actual.buildConversationFilterOptions),
+  }
+})
+import { buildConversationFilterOptions } from "@/lib/chat/conversation-filter-options"
+import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
+const buildOptionsMock = jest.mocked(buildConversationFilterOptions)
+
 function session(id: string, overrides: Partial<ChatSession> = {}): ChatSession {
   return { id, title: id, createdAt: 1, updatedAt: 1, ...overrides } as ChatSession
 }
@@ -69,6 +84,7 @@ function setup(settings: ConversationSidebarSettings = {}, scopeOwnsKind = false
 
 beforeEach(() => {
   jest.mocked(trackConversationFiltered).mockClear()
+  buildOptionsMock.mockClear()
   useUIStore.getState().resetConversationFilters()
   useSettingsStore.setState({
     settings: { defaultModel: "default-model", defaultProvider: "default-provider" } as never,
@@ -114,6 +130,40 @@ describe("useConversationFilterController", () => {
       "default-provider",
       "openai",
     ])
+  })
+
+  it("builds the option candidates only when read, once per set of inputs", () => {
+    // They walk every session, and most renders — menu closed, no list-facet
+    // chip — never look at them.
+    const { result } = setup()
+    expect(buildOptionsMock).not.toHaveBeenCalled()
+    void result.current.options.models
+    void result.current.options.providers
+    void result.current.options.workspaceIds
+    // Three reads, one build: the candidates are cached with their inputs.
+    expect(buildOptionsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("rebuilds the candidates after the inputs change", () => {
+    const { result } = setup()
+    void result.current.options.models
+    act(() => result.current.actions.toggleValue("models", "gpt", true))
+    const models = result.current.options.models
+    expect(buildOptionsMock).toHaveBeenCalledTimes(2)
+    // The selected value comes through the new build.
+    expect(models.find((option) => option.value === "gpt")).toBeDefined()
+  })
+
+  it("falls back to the same built-in default model the row metadata names", () => {
+    // It used to fall back to a hard-coded retired model id while the rows
+    // said ANTHROPIC_DEFAULT_MODEL — a "model" filter then matched rows whose
+    // detail line named a different model.
+    useSettingsStore.setState({ settings: {} as never })
+    const { result } = setup()
+    expect(result.current.filterContext.modelOf?.(session("bare"))).toBe(ANTHROPIC_DEFAULT_MODEL)
+    expect(result.current.options.models.map((option) => option.value)).toContain(
+      ANTHROPIC_DEFAULT_MODEL
+    )
   })
 
   it("exposes the same fallback chain as filterContext for the list model", () => {

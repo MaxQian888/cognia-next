@@ -6,9 +6,13 @@
  * a <button>) plus the empty + rename flows.
  */
 
-import { act, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
@@ -76,6 +80,34 @@ describe("CanvasDocumentRail", () => {
     // The document title must be interpolated into the aria-label; a missing
     // {name} arg would render the literal placeholder and throw at runtime.
     expect(screen.getByRole("button", { name: "Delete document Bye" })).toBeInTheDocument()
+  })
+
+  it("keeps the row delete control reachable without a hover", () => {
+    act(() => {
+      useArtifactStore.getState().createCanvasDocument({
+        title: "Reach",
+        content: "",
+        language: "markdown",
+        type: "text",
+      })
+    })
+    renderWithProviders(<CanvasDocumentRail />)
+    const del = screen.getByRole("button", { name: "Delete document Reach" })
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+      expect(del).toHaveClass(variant)
+    }
+    // Mouse path unchanged: 70% on row hover, full on its own hover, all-property transition.
+    expect(del).toHaveClass("group-hover:opacity-70", "hover:opacity-100", "transition")
+    expect(del).not.toHaveClass("transition-opacity")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(del).not.toHaveClass(forbidden)
+    }
+    del.focus()
+    expect(del).toHaveFocus()
+    act(() => {
+      fireEvent.click(del)
+    })
+    expect(screen.getByTestId("canvas-delete-document-confirm")).toBeInTheDocument()
   })
 
   it("activates the document when the row's select button is clicked", async () => {

@@ -2,6 +2,7 @@
 import { renderHook } from "@testing-library/react"
 
 import { useTemplateResourceSearch } from "./use-template-resource-search"
+import { buildRouteTargets } from "@/lib/agent-team/runtime-targets"
 
 const searchWorkspace = jest.fn()
 jest.mock("@/lib/files/workspace-search", () => ({
@@ -58,10 +59,38 @@ describe("useTemplateResourceSearch", () => {
       { id: "c2", name: "Researcher", avatarColor: "#111" },
     ] as never[]
     const { result } = renderHook(() =>
-      useTemplateResourceSearch({ cwd: null, teamMembers: members, mentionables: [] })
+      useTemplateResourceSearch({ cwd: null, teamMembers: members, routeTargets: [] })
     )
     expect(await result.current("member", "crit")).toEqual([
       { id: "c1", label: "Critic", raw: "@Critic" },
+    ])
+  })
+
+  it("offers the route targets for an agent parameter, spelled by handle", async () => {
+    const routeTargets = buildRouteTargets({
+      squads: [
+        {
+          team: { id: "s1", name: "Platform" },
+          teammates: [
+            {
+              id: "tm-1",
+              teamId: "s1",
+              name: "Critic",
+              description: "Pokes holes",
+              config: {},
+            } as never,
+          ],
+        },
+      ],
+    })
+    const { result } = renderHook(() => useTemplateResourceSearch({ cwd: null, routeTargets }))
+    expect(await result.current("agent", "")).toEqual([
+      { id: "claude", label: "claude", raw: "@claude" },
+      { id: "codex", label: "codex", raw: "@codex" },
+      { id: "critic", label: "Critic", raw: "@critic" },
+    ])
+    expect(await result.current("agent", "crit")).toEqual([
+      { id: "critic", label: "Critic", raw: "@critic" },
     ])
   })
 
@@ -69,14 +98,12 @@ describe("useTemplateResourceSearch", () => {
     const { result } = renderHook(() => useTemplateResourceSearch({ cwd: null }))
     expect(await result.current("agent", "")).toEqual([])
     // A member never falls through to the agent source, even when one exists.
-    const teamOnly = renderHook(() =>
+    const routeOnly = renderHook(() =>
       useTemplateResourceSearch({
         cwd: null,
-        mentionables: [
-          { kind: "virtual", id: "claude", name: "Claude", description: "Claude" },
-        ] as never[],
+        routeTargets: buildRouteTargets({ squads: [] }),
       })
     )
-    expect(await teamOnly.result.current("member", "")).toEqual([])
+    expect(await routeOnly.result.current("member", "")).toEqual([])
   })
 })

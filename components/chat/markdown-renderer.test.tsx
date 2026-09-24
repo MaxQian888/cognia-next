@@ -117,8 +117,11 @@ jest.mock("@/components/chat/renderers/task-list", () => ({
   ),
 }))
 
+const mockArtifactCreateClick = jest.fn()
 jest.mock("@/components/artifacts/artifact-create-button", () => ({
-  ArtifactCreateButton: () => null,
+  ArtifactCreateButton: () => (
+    <button type="button" aria-label="create artifact" onClick={() => mockArtifactCreateClick()} />
+  ),
 }))
 
 jest.mock("@/lib/tauri/opener", () => ({
@@ -134,6 +137,10 @@ import path from "node:path"
 import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
 import { clearAllLinkMatchers, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 const mockOpenExternal = openExternal as jest.Mock
 
@@ -363,6 +370,24 @@ describe("MarkdownRenderer", () => {
   it("preserves punctuation in fenced-code language identifiers", () => {
     render(<MarkdownRenderer content={"```c++\nint main() {}\n```"} />)
     expect(document.querySelector("[data-test='code-block']")).toHaveAttribute("data-lang", "c++")
+  })
+
+  it("keeps the code-block artifact control reachable without a hover", () => {
+    mockArtifactCreateClick.mockClear()
+    render(<MarkdownRenderer content={"```js\nconst a = 1\nconst b = 2\n```"} />)
+    const button = screen.getByRole("button", { name: "create artifact" })
+    const wrapper = button.closest("[data-message-rich-control]")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).toHaveClass("group-hover/code:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    expect(mockArtifactCreateClick).toHaveBeenCalledTimes(1)
   })
 
   it("renders inline code as <code> element (not CodeBlock)", () => {

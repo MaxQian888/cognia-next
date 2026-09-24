@@ -85,6 +85,9 @@ describe("standalone receiver continuation and recovery", () => {
       { ticketId: "defaults", deployments: [], messages: [] }
     )
     const incoming = { ...offer, ticket: { ...offer.ticket, role: "target" as const } }
+    incoming.envelope.goals = [
+      { goalId: "goal", description: "Keep production unchanged", status: "active" },
+    ]
     const prepared = await prepareInboundThreadHandoff(incoming, "phone-1")
     expect(prepared?.preflight).toMatchObject({ ok: true, blockers: [] })
     mockCall.mockImplementation(async (_name, args) => ({
@@ -111,11 +114,25 @@ describe("standalone receiver continuation and recovery", () => {
       expect.objectContaining({ role: "source", adminLease: "lease" })
     )
     expect((await getDb().sessions.get("handoff-defaults"))?.handoffLock).toBeUndefined()
+    expect((await getDb().sessions.get("handoff-defaults"))?.importCanonicalState?.goals).toEqual(
+      incoming.envelope.goals
+    )
+    expect((await getDb().sessions.get("handoff-defaults"))?.branchSeed?.content).toContain(
+      "Keep production unchanged"
+    )
   })
 
   it("restores structured content with a frozen target, then resumes a lost source commit response", async () => {
     const offer = await buildThreadHandoffOffer(
-      { id: "source", title: "Thread", createdAt: 1, updatedAt: 1 },
+      {
+        id: "source",
+        title: "Thread",
+        createdAt: 1,
+        updatedAt: 1,
+        model: "target-model",
+        providerOverride: "target-provider",
+        workingDir: "/source/private",
+      },
       { kind: "mobile", hostRef: "phone-1" },
       100,
       {
@@ -139,8 +156,8 @@ describe("standalone receiver continuation and recovery", () => {
       environment: async () => ({
         capabilities: ["thread-handoff-v1", "thread-handoff-structured-v1"],
         hostOperations: [],
-        providerRefs: [],
-        models: [],
+        providerRefs: ["target-provider"],
+        models: ["target-model"],
         credentialProfileRefs: [],
         workspaceRefs: [],
         attachmentRefs: [],
@@ -168,6 +185,10 @@ describe("standalone receiver continuation and recovery", () => {
     const accepted = (await getDb().threadHandoffTickets.get(["retry", "target"]))!
     expect(accepted.state).toBe("accepted")
     expect((await getDb().sessions.get("handoff-retry"))?.handoffLock?.state).toBe("frozen")
+    const target = await getDb().sessions.get("handoff-retry")
+    expect(target?.model).toBe("target-model")
+    expect(target?.providerOverride).toBe("target-provider")
+    expect(target?.workingDir).toBeUndefined()
     expect((await getDb().messages.get("handoff-retry:a"))?.parts).toEqual(
       expect.arrayContaining([{ type: "reasoning", text: "Reason", state: "done" }])
     )

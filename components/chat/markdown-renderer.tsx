@@ -20,6 +20,7 @@ import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import { cjk } from "@streamdown/cjk"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import type { MessageMarkdownOptions } from "@/types/appearance"
 import { withRendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
@@ -486,7 +487,11 @@ function buildComponents(
           {showArtifactButton && (
             <div
               data-message-rich-control
-              className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity"
+              className={cn(
+                "absolute right-1 top-1",
+                HOVER_REVEAL_GROUP_BASE_CLASS,
+                "group-hover/code:opacity-100"
+              )}
             >
               <ArtifactCreateButton
                 content={codeContent}

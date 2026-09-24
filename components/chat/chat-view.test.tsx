@@ -1405,6 +1405,17 @@ describe("ChatPane — welcome personalization reaches the welcome page", () => 
     expect(emptyStateMock.mock.calls.at(-1)?.[0].composerSlot).toBeTruthy()
   })
 
+  it("lets the shell switch runtime routing off on the hero composer", () => {
+    // Where the first turn lands is the shell's knowledge — a team room's send
+    // carries no runtime route, so the hero must not offer one there.
+    render(
+      <ChatPane {...makeProps()} activeSession={null} onHeroSend={jest.fn()} heroRouting={false} />
+    )
+    mockComposerProps.length = 0
+    render(<>{emptyStateMock.mock.calls.at(-1)?.[0].composerSlot}</>)
+    expect(mockComposerProps.at(-1)).toMatchObject({ placement: "hero", routing: false })
+  })
+
   it("omits the hero composer when the shell cannot create a session", () => {
     expect(renderWelcome().composerSlot).toBeUndefined()
   })

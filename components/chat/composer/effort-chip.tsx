@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
+import { COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 import {
   clampThinkingLevel,
   isUltracodeLevel,
@@ -94,11 +95,15 @@ export function EffortChip({ session, disabled, className, glyph }: EffortChipPr
               data-testid="effort-chip"
               data-level={current}
               data-glyph={glyph || undefined}
+              // Tone and glyph geometry go AFTER the host's chip class: the
+              // toolbar's quiet chip carries `text-muted-foreground` and `px-2`,
+              // and placed first it erased the ultra tint and re-padded the
+              // glyph square.
               className={cn(
                 "gap-1",
+                className,
                 ultra && "text-effort-ultra hover:text-effort-ultra",
-                glyph && "w-7 justify-center px-0",
-                className
+                glyph && COMPOSER_TOOLBAR_GLYPH
               )}
             >
               {/* Both halves are keyed by tier so React remounts them and their

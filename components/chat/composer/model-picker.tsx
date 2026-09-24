@@ -48,7 +48,7 @@ import {
   EXTERNAL_AGENT_PROVIDER_ID,
   externalAgentProviderId,
   isExternalAgentProviderId,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 import { useExternalAgentModels } from "@/hooks/agent/use-external-agent-models"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useMemo } from "react"
@@ -56,7 +56,7 @@ import { useMemo } from "react"
 // The reserved group id moved next to the model vocabulary it belongs to, so
 // the send path can recognise a session row this picker stamped. Re-exported
 // here because this is where it was first published.
-export { EXTERNAL_AGENT_PROVIDER_ID } from "@/lib/ai/agent/external/session-models"
+export { EXTERNAL_AGENT_PROVIDER_ID } from "@/lib/ai/agent/external/session/session-models"
 
 interface ModelPickerProps {
   session: ChatSession | null

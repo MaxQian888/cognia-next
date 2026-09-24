@@ -7,6 +7,7 @@ import { useParsedOutput } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { InlineCopyButton } from "@/components/chat/message-parts/tool-row"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { unwrapUntrustedContent } from "@/lib/web/untrusted-content"
 
@@ -143,7 +144,13 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
       ) : (
         <>
           <div className="group/wf relative border-l-2 border-border pl-2.5">
-            <span className="absolute right-0 top-0 z-10 opacity-0 transition-opacity focus-within:opacity-100 group-hover/wf:opacity-100">
+            <span
+              className={cn(
+                "absolute right-0 top-0 z-10",
+                HOVER_REVEAL_GROUP_BASE_CLASS,
+                "group-hover/wf:opacity-100"
+              )}
+            >
               <InlineCopyButton
                 value={content}
                 label={tRow("copyOutput")}

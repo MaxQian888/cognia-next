@@ -26,6 +26,20 @@ import "fake-indexeddb/auto"
 jest.mock("@/lib/slash-commands/custom", () => ({
   loadCustomSlashCommands: jest.fn(async () => []),
 }))
+// The plugin registry is empty in tests; stub the projected command list so a
+// plugin can declare a token a builtin already owns (`record-skill`) — the
+// picker must dedupe it rather than render duplicate React keys.
+jest.mock("@/lib/slash-commands/plugin-commands", () => ({
+  ...jest.requireActual("@/lib/slash-commands/plugin-commands"),
+  getPluginSlashCommands: jest.fn(() => [
+    {
+      name: "record-skill",
+      description: "plugin-side copy of the builtin",
+      scope: "plugin",
+      category: "plugins",
+    },
+  ]),
+}))
 jest.mock("@/lib/search/search-service", () => ({
   search: jest.fn(),
   formatSearchResultsForLLM: jest.fn(),
@@ -147,6 +161,20 @@ describe("Composer — slash popover (keyboard, end-to-end)", () => {
     await typeValue(ta, "/compac")
     await waitFor(() => expect(rows()).toHaveLength(1))
     expect(rowTexts()[0]).toContain("/compact")
+  })
+
+  it("shows one row when a plugin declares a builtin's token (`record-skill` dedupe)", async () => {
+    // Both the builtin table and the mocked plugin list declare `record-skill`.
+    // Undeduped, the picker renders two rows keyed `slash-record-skill` — React
+    // logs a duplicate-key error and the user sees the same command twice.
+    const { ta } = renderComposer()
+    await typeValue(ta, "/record")
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    const recordRows = rowTexts().filter((t) => t.includes("/record-skill"))
+    expect(recordRows).toHaveLength(1)
+    // Last-wins precedence (same as submit-time `commandMap`): the surviving
+    // row is the plugin's copy.
+    expect(recordRows[0]).toContain("plugin-side copy")
   })
 
   it("ArrowDown moves the highlight; Enter confirms the highlighted row (not the first)", async () => {
@@ -362,5 +390,93 @@ describe("Composer — @prompt: (keyboard, end-to-end)", () => {
     })
     expect(ta.value).toBe("")
     expect(onSend).not.toHaveBeenCalled()
+  })
+})
+
+describe("Composer — permissionMode session persistence", () => {
+  // Regression for the renderer-freezing write loop: the row stores
+  // `permissionMode` as optional (`undefined` when unset) while the chat store
+  // uses `null`. The persist effect's equality guard used to compare raw
+  // values, so `undefined !== null` failed forever — every session-row write
+  // re-emitted `props.session`, the effect wrote again, and the loop
+  // re-rendered the entire sidebar tree thousands of times per second.
+  it("does not rewrite the session when a live re-emit carries identical fields", async () => {
+    const updateSession = jest.fn(async () => undefined)
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </DataAdapterProvider>
+    )
+    const session: ChatSession = {
+      id: "ses_slash",
+      title: "Persist guard",
+      kind: "direct",
+      permissionMode: undefined,
+      createdAt: 0,
+      updatedAt: 0,
+      workingDir: "/tmp/work",
+    }
+    const props = {
+      onStartNewSession: async () => undefined,
+      onOpenSettings: () => undefined,
+      onSend: async () => undefined,
+      onStop: async () => undefined,
+    }
+    const { rerender } = render(
+      <Wrapper>
+        <Composer session={session} {...props} />
+      </Wrapper>
+    )
+    // Let hydration + persist effects flush once.
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeNull())
+
+    // Simulate liveQuery re-emissions: an unrelated write (touchSession bumps
+    // `updatedAt` on every send) produces a fresh row object — same fields,
+    // new identity. Each re-emit re-runs the persist effect.
+    for (let i = 1; i <= 3; i++) {
+      rerender(
+        <Wrapper>
+          <Composer session={{ ...session, updatedAt: i }} {...props} />
+        </Wrapper>
+      )
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
+  it("still persists when the store value genuinely diverges from the row", async () => {
+    const updateSession = jest.fn(async () => undefined)
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <TooltipProvider>{children}</TooltipProvider>
+      </DataAdapterProvider>
+    )
+    const session: ChatSession = {
+      id: "ses_slash",
+      title: "Persist diff",
+      kind: "direct",
+      permissionMode: "plan",
+      createdAt: 0,
+      updatedAt: 0,
+      workingDir: "/tmp/work",
+    }
+    render(
+      <Wrapper>
+        <Composer
+          session={session}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    await waitFor(() => expect(document.querySelector("textarea")).not.toBeNull())
+
+    // Hydration pulls "plan" into the store; a user clearing the mode changes
+    // the store side — the next effect pass must persist exactly that diff.
+    useChatStore.getState().setPermissionMode(null, "ses_slash")
+    await waitFor(() => expect(updateSession).toHaveBeenCalled())
+    expect(updateSession).toHaveBeenCalledWith("ses_slash", { permissionMode: undefined })
   })
 })

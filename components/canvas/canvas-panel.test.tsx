@@ -8,8 +8,12 @@
 
 import { readFileSync } from "fs"
 import { join } from "path"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
@@ -559,6 +563,42 @@ describe("CanvasPanel", () => {
         })
 
         expect(screen.queryByTestId("canvas-delete-document-dialog")).not.toBeInTheDocument()
+      })
+
+      it("keeps the tab close and more-actions buttons reachable without a hover", () => {
+        const { idA } = seedTwoOpen()
+        renderWithProviders(<CanvasPanel />)
+
+        const close = screen.getByRole("button", { name: /Close Alpha/i })
+        const tab = close.closest(".group")!
+        const more = within(tab as HTMLElement).getByRole("button", { name: "More" })
+        // The tab is the nearest unnamed `group`, so its hover still reveals both.
+        expect(more.closest(".group")).toBe(tab)
+        for (const control of [close, more]) {
+          for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+            expect(control).toHaveClass(variant)
+          }
+          for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+            expect(control).not.toHaveClass(forbidden)
+          }
+          control.focus()
+          expect(control).toHaveFocus()
+        }
+
+        // A plain click (no prior hover) opens the per-tab menu.
+        act(() => {
+          fireEvent.click(more)
+        })
+        expect(screen.getByRole("menuitem", { name: /Rename/i })).toBeInTheDocument()
+        expect(more).toHaveAttribute("data-state", "open")
+
+        act(() => {
+          fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+        })
+        act(() => {
+          fireEvent.click(close)
+        })
+        expect(useCanvasLayoutStore.getState().openDocIds).not.toContain(idA)
       })
     })
 

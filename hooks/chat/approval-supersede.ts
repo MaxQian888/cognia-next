@@ -77,7 +77,7 @@ async function denyThroughChannel(
   // registry, so `approveTool` must never see these request ids — there is no
   // sidecar-side permission waiting on them.
   const { RENDERER_TOOL_HOST_APPROVAL_PREFIX } =
-    await import("@/lib/ai/agent/external/renderer-tool-host")
+    await import("@/lib/ai/agent/external/session/renderer-tool-host")
   if (requestId.startsWith(RENDERER_TOOL_HOST_APPROVAL_PREFIX)) {
     await denyViaApprovalRegistry(sessionId, requestId)
     return
@@ -97,13 +97,13 @@ async function denyThroughChannel(
   // adapter that asked — as a host RPC when the run lives on a paired host,
   // or through the local manager otherwise.
   const { isExternalAgentApprovalRequestId, getExternalApprovalTarget, resolveExternalApproval } =
-    await import("@/lib/ai/agent/external/chat-decision-bridge")
+    await import("@/lib/ai/agent/external/session/chat-decision-bridge")
   if (isExternalAgentApprovalRequestId(requestId)) {
     const remoteDecisionId = getExternalApprovalTarget(requestId)?.remoteDecisionId
     const respond = remoteDecisionId
       ? async () => {
           const { resolveRemotePermission } =
-            await import("@/lib/ai/agent/external/remote-run-client")
+            await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
           const outcome = await resolveRemotePermission(remoteDecisionId, "deny")
           // `unknown` means the host already decided — nothing left to wait
           // for; `wrong-device` is a genuine routing failure.

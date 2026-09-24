@@ -65,6 +65,7 @@ import {
 } from "@/lib/companion/remote-attach-registry"
 import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
 import { listMessages, persistMessages } from "@/lib/db/messages"
+import { driveInSessionPlanAfterTurn } from "./plan-turn-settle"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import { getSession, setSdkSessionId } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
@@ -123,7 +124,6 @@ import {
   goalJudgeClientWarned,
   renderGoalExitCard,
   renderLoopExitCard,
-  renderPlanExitCard,
   runMemoryTasks,
   runUtilityModelTasks,
   scheduleGoalContinuation,
@@ -1156,6 +1156,9 @@ export async function handleEvent(
             routing: last?.options ? buildRoutingRunMetadata(last.options) : undefined,
             routerFusion: buildRouterFusionRunMetadata(last?.options, routerFusionSummary),
             agent: turnAgentStamp(sessionId),
+            // An addressed turn (`@claude`, a Squad member) names who answered;
+            // the send path parked the stamp on the cached send.
+            ...(last?.routeStamp ? { route: last.routeStamp } : {}),
           })
         )
         nextMessages = attachInteractiveGrounding(nextMessages, last?.options)
@@ -1769,73 +1772,16 @@ export async function handleEvent(
           // workflow runtime owns its steps, and advancing it here would race
           // the orchestrator writing the same rows.
           if (!selfDrivenContinuation) {
-            try {
-              const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
-              const activePlan = await getPlanRuntime().getExecutingPlanForSession(sessionId)
-              if (activePlan) {
-                const { resolvePlanStrategy } = await import("@/lib/agent/plan/strategy")
-                if (resolvePlanStrategy(activePlan) === "in_session") {
-                  const { handlePlanTurnComplete } = await import("@/lib/agent/plan/turn-driver")
-                  const lastAssistant = [...nextMessages]
-                    .reverse()
-                    .find((m) => m.role === "assistant")
-                  const ac = new AbortController()
-                  const unregister = getPlanRuntime().registerAbortController(activePlan.id, ac)
-                  let outcome: Awaited<ReturnType<typeof handlePlanTurnComplete>>
-                  try {
-                    const { defaultLifecycleFirer } =
-                      await import("@/lib/claude/hooks/lifecycle-firer")
-                    outcome = await handlePlanTurnComplete({
-                      planId: activePlan.id,
-                      lastResponse: extractAssistantText(lastAssistant),
-                      capturedGenerationId: activePlan.generationId,
-                      signal: ac.signal,
-                      // Bracket each plan step with settings.json lifecycle
-                      // hooks, the same way the goal driver above does.
-                      firer: defaultLifecycleFirer,
-                      hookContext: {
-                        agentId: "plan-step",
-                        agentKind: "plan-step",
-                        agentRef: activePlan.id,
-                        sessionId,
-                      },
-                    })
-                  } finally {
-                    unregister()
-                  }
-                  if (outcome.kind === "exit") {
-                    useChatStore.getState().appendMessage({
-                      id: `sys-plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                      role: "system",
-                      parts: [
-                        {
-                          type: "text",
-                          text: renderPlanExitCard(
-                            activePlan.title,
-                            outcome.status,
-                            outcome.reason
-                          ),
-                        },
-                      ],
-                    })
-                    await persistMessages(sessionId, useChatStore.getState().messages).catch(
-                      () => {}
-                    )
-                  } else if (outcome.kind === "continue" && sessionId === activeRef.current) {
-                    // No pacing gate: a plan has a finite step list, so the next
-                    // step follows immediately (the user pauses via the tracker
-                    // dock, which rotates the generation and makes this `stale`).
-                    void sendRef.current?.(outcome.userMessage, undefined, {
-                      skipUserAppend: true,
-                    })
-                  }
-                  // aborted | stale | no_plan → no-op: a pause/cancel/refine owns
-                  // the next step and the tracker dock reflects the status.
-                }
-              }
-            } catch (err) {
-              console.warn("plan turn-driver failed", err)
-            }
+            const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+            // One implementation for every runtime (`plan-turn-settle.ts`): the
+            // external-agent lane settles plan steps through the same call.
+            await driveInSessionPlanAfterTurn({
+              sessionId,
+              lastResponse: extractAssistantText(lastAssistant),
+              isActiveSession: () => sessionId === activeRef.current,
+              dispatchNextStep: (userMessage) =>
+                void sendRef.current?.(userMessage, undefined, { skipUserAppend: true }),
+            })
           }
         }
       }

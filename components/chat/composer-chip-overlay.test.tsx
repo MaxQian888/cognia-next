@@ -184,6 +184,30 @@ describe("ComposerChipOverlay", () => {
     expect(container.textContent).toBe("ping @alice on @lib/db")
   })
 
+  it("tints a routing @handle by its state without changing a character", () => {
+    const value = "@codex fix @claude"
+    const { container } = render(
+      <ComposerChipOverlay
+        value={value}
+        segments={segs(value)}
+        // Only the leading token routes; the second is an ordinary mention.
+        routeState={(seg) => (seg.start === 0 ? "unavailable" : undefined)}
+      />
+    )
+    const mentions = Array.from(container.querySelectorAll('[data-chip="mention"]'))
+    expect(mentions.map((m) => m.getAttribute("data-route-state"))).toEqual(["unavailable", null])
+    expect(mentions[0].className).toMatch(/amber/)
+    expect(mentions[1].className).toMatch(/bg-muted/)
+    expect(container.textContent).toBe(value)
+
+    const ready = render(
+      <ComposerChipOverlay value={value} segments={segs(value)} routeState={() => "ready"} />
+    )
+    const first = ready.container.querySelector('[data-chip="mention"]')
+    expect(first).toHaveAttribute("data-route-state", "ready")
+    expect(first?.textContent).toBe("@codex")
+  })
+
   it("does not paint a pill for an email address", () => {
     const value = "mail me at user@host.com"
     const { container } = render(<ComposerChipOverlay value={value} segments={segs(value)} />)

@@ -149,12 +149,16 @@ function registerBuiltinMentionPickHandlers(): void {
   registerMentionPickHandler({
     kind: "agent",
     onPick: (item, ctx) => {
-      ctx.insertReplacement(`@${item.target.name}`)
+      // A route target (`@claude`, `@codex`, a Squad member): the handle, the
+      // one token the send path matches back to the runtime. As the LEADING
+      // token it routes the turn; anywhere else it is only a mention.
+      ctx.insertReplacement(`@${item.target.handle}`)
     },
     toContextRef: (item) => ({
       kind: "agent",
-      id: item.target.name,
-      raw: `@${item.target.name}`,
+      id: item.target.handle,
+      label: item.target.name,
+      raw: `@${item.target.handle}`,
     }),
   })
 

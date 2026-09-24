@@ -19,7 +19,14 @@
 
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from "react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import { ArrowUpIcon, BookmarkPlusIcon, EyeIcon, EyeOffIcon, SquareIcon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  BookmarkPlusIcon,
+  EyeIcon,
+  EyeOffIcon,
+  InboxIcon,
+  SquareIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -35,8 +42,9 @@ import {
   OVERLAY_FONT_SIZE,
   TEXTAREA_TYPOGRAPHY,
   type ParamPillState,
+  type RouteChipState,
 } from "../composer-chip-overlay"
-import type { RichSegment } from "@/lib/slash-commands/parse-segments"
+import type { MentionSegment, RichSegment } from "@/lib/slash-commands/parse-segments"
 import type { SlashScope } from "@/lib/slash-commands/builtin"
 import type { InlineSuggestion } from "@/lib/chat/completion/inline/types"
 import type { ShellDiagnostic } from "@/lib/shell-intelligence/types"
@@ -78,7 +86,25 @@ export interface ComposerBoxProps {
   skin: ResolvedComposerSkin
   /** Stacked layout at every width (mobile, or the compact-layout setting). */
   compactLayout: boolean
+  /**
+   * Phone-shaped layout: the Capacitor shell OR a narrow viewport rendering the
+   * mobile shell. Decides the stack, the order of the rows and touch sizing.
+   */
   isMobile: boolean
+  /**
+   * The Capacitor shell itself — a capability, not a layout. Only it has the
+   * native camera / album pickers the `+` sheet is built around; a phone
+   * browser gets the paperclip menu, whose file picker is what the sheet's
+   * media tiles would degrade to there anyway.
+   */
+  nativeShell?: boolean
+  /**
+   * The primary pointer is a finger (or the native shell). Hides the keyboard
+   * hints — the manual-completion key, `Tab` / `Esc` keycaps — that a touch
+   * user has no key to press for. Separate from `isMobile`: a narrow desktop
+   * window is phone-shaped but still has a keyboard.
+   */
+  touchInput?: boolean
   disabled?: boolean
   /** Amber-tints the surface so a read-only plan turn is unmistakable.
    *  Null before the session's mode has hydrated. */
@@ -140,6 +166,8 @@ export interface ComposerBoxProps {
   paramState?: (paramId: string) => ParamPillState
   /** Command name → scope lookup for the overlay's pill tint. See `ComposerChipOverlay`. */
   commandScope?: (name: string) => SlashScope | undefined
+  /** Route tint of a leading `@handle` pill. See `ComposerChipOverlay`. */
+  routeState?: (segment: MentionSegment) => RouteChipState | undefined
   /**
    * Read-only rendering of the message with its parameters substituted, and the
    * control that toggles it.
@@ -212,6 +240,13 @@ export interface ComposerBoxProps {
 
   // ── send ────────────────────────────────────────────────────────────────
   sendButton: SendButtonState
+  /**
+   * Opens the connector draft review. The primary button takes this job in
+   * `draft` mode (pending drafts, empty box) — see `send-button-mode.ts`.
+   */
+  onReviewDrafts?: () => void
+  /** How many drafted replies are waiting, for the draft button's name. */
+  pendingDraftCount?: number
   sendIconTransition: Transition
   isPreparingAttachments: boolean
   submit: () => void
@@ -235,6 +270,8 @@ export function ComposerBox({
   skin,
   compactLayout,
   isMobile,
+  nativeShell = false,
+  touchInput = false,
   disabled,
   permissionMode,
   placeholder,
@@ -262,6 +299,7 @@ export function ComposerBox({
   isComposing,
   paramState,
   commandScope,
+  routeState,
   preview,
   saveAsTemplate,
   enhance,
@@ -283,6 +321,8 @@ export function ComposerBox({
   onDragLeave,
   onDrop,
   sendButton,
+  onReviewDrafts,
+  pendingDraftCount = 0,
   sendIconTransition,
   isPreparingAttachments,
   submit,
@@ -404,7 +444,7 @@ export function ComposerBox({
         suggestion={ghost.suggestion}
         candidates={ghost.candidates}
         index={ghost.index}
-        isMobile={isMobile}
+        isMobile={touchInput}
         onAccept={acceptGhost}
         onDismiss={ghost.dismiss}
         onCycleTo={ghost.cycleTo}
@@ -449,7 +489,7 @@ export function ComposerBox({
           !isMobile && !compactLayout && "@sm/composer:order-none"
         )}
       >
-        {isMobile ? (
+        {nativeShell ? (
           // Mobile: one WeChat-style "+" menu (camera / album multi-pick /
           // files) replaces the paperclip + camera button pair — fewer
           // 44px targets competing for composer width. Voice stays with
@@ -479,10 +519,6 @@ export function ComposerBox({
             capabilities={capabilityMenu}
             {...(onInsertText ? { onInsert: onInsertText } : {})}
             {...(onOpenExternalServices ? { onOpenExternalServices } : {})}
-            // One control size for the whole action row: the voice buttons
-            // beside it are already 32, and a 36px paperclip made the left end
-            // of the row read as a different scale from everything else on it.
-            className={compactLayout ? "size-8" : undefined}
           />
         )}
 
@@ -529,6 +565,7 @@ export function ComposerBox({
           segments={overlaySegments}
           paramState={paramState}
           commandScope={commandScope}
+          routeState={routeState}
           // Same family as the textarea, or the pills drift out from under the
           // glyphs on a mono skin.
           mono={skin.mono}
@@ -582,7 +619,7 @@ export function ComposerBox({
           // empty box it is noise, and the tier refuses a too-short draft
           // anyway.
           manualHint={
-            !isMobile && ghost.manualAvailable && textInput.value.trim().length > 0
+            !touchInput && ghost.manualAvailable && textInput.value.trim().length > 0
               ? ghost.manualPending
                 ? t("ghostManualPending")
                 : t("ghostManualHint")
@@ -737,17 +774,25 @@ export function ComposerBox({
           <TooltipTrigger asChild>
             {sendButton.mode === "draft" ? (
               <Button
-                aria-label={t("editDraftAria")}
+                aria-label={t("reviewDraftsAria", { count: pendingDraftCount })}
                 className={cn(
-                  "h-9 px-3 text-xs",
-                  skin.isClassic ? "rounded-full" : "rounded-[var(--composer-inner-radius)]"
+                  "gap-1.5 px-3 text-xs has-[>svg]:px-3",
+                  // Same height and corner as the send button it stands in
+                  // for, so the row does not jump when a draft lands.
+                  skin.isClassic
+                    ? "h-9 rounded-full"
+                    : "h-[var(--composer-send-size)] rounded-[var(--composer-inner-radius)]",
+                  isMobile && "touch-target"
                 )}
-                disabled={sendButton.disabled}
-                onClick={() => void submit()}
+                data-testid="composer-review-drafts"
+                disabled={sendButton.disabled || !onReviewDrafts}
+                onClick={onReviewDrafts}
                 type="button"
                 variant={sendButton.variant}
               >
-                {t("editDraftTooltip")}
+                <InboxIcon aria-hidden className="size-4" />
+                {t("reviewDraftsLabel")}
+                <span className="tabular-nums text-muted-foreground">{pendingDraftCount}</span>
               </Button>
             ) : (
               <Button
@@ -809,7 +854,7 @@ export function ComposerBox({
           </TooltipTrigger>
           <TooltipContent>
             {sendButton.mode === "draft"
-              ? t("editDraftTooltip")
+              ? t("reviewDraftsTooltip")
               : sendButton.mode === "stop"
                 ? t("stopTooltip")
                 : sendButton.queues

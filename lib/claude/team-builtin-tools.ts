@@ -30,12 +30,12 @@ import type {
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
 import type { AuditKind } from "@/types/connectors/audit"
-import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/twin-context"
+import type { TwinKnowledgeHit } from "@/lib/ai/agent/team/teammate/twin-context"
 import {
   canSendMessage,
   describeSuppressedMessage,
   type RecentMessage,
-} from "@/lib/ai/agent/team/message-guard"
+} from "@/lib/ai/agent/team/gates/message-guard"
 
 /**
  * System-prompt fragment appended for a team dispatch session (alongside the
@@ -478,7 +478,7 @@ export function buildTeamCollabManifestEntries(
 export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
   const [{ useAgentTeamStore }, sharedMemory, consensus, delegation] = await Promise.all([
     import("@/stores/agent/agent-team-store"),
-    import("@/lib/ai/agent/team/shared-memory-orchestrator"),
+    import("@/lib/ai/agent/team/memory/shared-memory-orchestrator"),
     import("@/lib/ai/agent/team/consensus-orchestrator"),
     import("@/lib/ai/agent/team/delegation-orchestrator"),
   ])
@@ -588,7 +588,7 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
     proposeDecision: async (input) => {
       const team = useAgentTeamStore.getState().teams[input.teamId]
       if (!team) throw new Error(`Unknown Squad: ${input.teamId}`)
-      const { createDecisionLedger } = await import("@/lib/ai/agent/team/decision-ledger")
+      const { createDecisionLedger } = await import("@/lib/ai/agent/team/ledger/decision-ledger")
       return createDecisionLedger({ runId: input.runId, leadId: team.leadId }).propose(input)
     },
     searchTwinKnowledge: async (input) => {
@@ -622,7 +622,8 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
           error: "the twin runtime is not configured (no embedding key / vector store)",
         }
       }
-      const { searchTwinKnowledge: runSearch } = await import("@/lib/ai/agent/team/twin-context")
+      const { searchTwinKnowledge: runSearch } =
+        await import("@/lib/ai/agent/team/teammate/twin-context")
       const res = await runSearch({
         twinId: target,
         query: input.query,

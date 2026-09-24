@@ -249,7 +249,7 @@ async function commandRun(ctx: SlashContext, rest: string): Promise<SquadCommand
   }
 
   const session = await loadSession(ctx.activeSessionId!)
-  const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+  const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
   const result = await startSquadRun({
     squadId: squad.id,
     goal,
@@ -280,7 +280,7 @@ async function commandControl(
   if ("error" in resolved) return { system: resolved.error }
   const { squad } = resolved
   try {
-    const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+    const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
     await agentTeamManager[verb](squad.id)
   } catch (error) {
     const reason = error instanceof Error ? error.message : "dispatch_error"

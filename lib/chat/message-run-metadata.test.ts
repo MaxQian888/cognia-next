@@ -115,6 +115,24 @@ describe("assistant run metadata", () => {
     // A turn with no resolved composition stamps nothing rather than a guess.
     expect(buildCompletedRunMetadata({ completedAt: 500 }).agent).toBeUndefined()
   })
+
+  it("seals who answered an addressed turn, as a copy", () => {
+    const route = {
+      handle: "codex",
+      label: "Codex",
+      runtimeKind: "external" as const,
+      brandId: "codex-app-server",
+    }
+    const sealed = buildCompletedRunMetadata({ completedAt: 500, route })
+    expect(sealed.route).toEqual(route)
+    expect(sealed.route).not.toBe(route)
+
+    const merged = attachRunMetadataToLastAssistant(messages(), sealed)
+    expect(runMetadataOf(merged[1])?.route).toEqual(route)
+
+    // An unaddressed turn carries no route at all.
+    expect("route" in buildCompletedRunMetadata({ completedAt: 500 })).toBe(false)
+  })
 })
 
 describe("buildRouterFusionRunMetadata", () => {

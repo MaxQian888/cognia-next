@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, memo, useCallback, useRef, useEffect } from "react"
+import { useState, memo, useCallback, useRef, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Expand, ListOrdered, WrapText } from "lucide-react"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
@@ -95,21 +95,42 @@ export const CodeBlock = memo(function CodeBlock({
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
   const codeRef = useRef<HTMLPreElement>(null)
 
-  const allLines = code.split("\n")
-  const truncated = !showAllLines && allLines.length > CODE_AUTO_RENDER_MAX_LINES
-  // Everything downstream — highlighting included — works off the visible
-  // slice, so an oversized block costs no more than a capped one.
-  const visibleCode = truncated ? allLines.slice(0, CODE_AUTO_RENDER_MAX_LINES).join("\n") : code
+  // Count without retaining an array for the hidden tail. Toolbar changes
+  // reuse this scan; only the rendered prefix is split into individual lines.
+  const { totalLines, previewEnd } = useMemo(() => {
+    let totalLines = 1
+    let previewEnd = code.length
+    let from = 0
+    for (
+      let newline = code.indexOf("\n", from);
+      newline !== -1;
+      newline = code.indexOf("\n", from)
+    ) {
+      if (totalLines === CODE_AUTO_RENDER_MAX_LINES) previewEnd = newline
+      totalLines++
+      from = newline + 1
+    }
+    return { totalLines, previewEnd }
+  }, [code])
+  const truncated = !showAllLines && totalLines > CODE_AUTO_RENDER_MAX_LINES
+  const visibleCode = truncated ? code.slice(0, previewEnd) : code
+  const lines = useMemo(() => visibleCode.split("\n"), [visibleCode])
 
   // Seed synchronously from the shared highlight cache: when a virtualized row
   // scrolls back into view, an already-highlighted snippet paints coloured on
   // the very first frame (no flash of unstyled <pre>). A cold snippet starts
   // null and fills in once the async pass below resolves.
-  const [highlight, setHighlight] = useState<HighlightHtml | null>(() =>
-    language && visibleCode && !isStreaming
-      ? (getCachedHighlight(visibleCode, language) ?? null)
-      : null
-  )
+  const [highlight, setHighlight] = useState<{
+    code: string
+    language: string
+    html: HighlightHtml
+  } | null>(() => {
+    const html =
+      language && visibleCode && !isStreaming
+        ? getCachedHighlight(visibleCode, language)
+        : undefined
+    return html && language ? { code: visibleCode, language, html } : null
+  })
 
   useEffect(() => {
     // During streaming, skip Shiki entirely — the block's content is still
@@ -126,14 +147,14 @@ export const CodeBlock = memo(function CodeBlock({
 
     const cached = getCachedHighlight(visibleCode, language)
     if (cached) {
-      setHighlight(cached)
+      setHighlight({ code: visibleCode, language, html: cached })
       return
     }
 
     let cancelled = false
     void highlightCached(visibleCode, language)
       .then((result) => {
-        if (!cancelled) setHighlight(result)
+        if (!cancelled) setHighlight({ code: visibleCode, language, html: result })
       })
       .catch(() => {
         if (!cancelled) setHighlight(null)
@@ -144,10 +165,14 @@ export const CodeBlock = memo(function CodeBlock({
     }
   }, [visibleCode, language, isStreaming])
 
-  const highlightedHtml = highlight?.light ?? ""
-  const darkHighlightedHtml = highlight?.dark ?? ""
-
-  const lines = truncated ? allLines.slice(0, CODE_AUTO_RENDER_MAX_LINES) : allLines
+  // A prop change must show the new source immediately, while its async
+  // highlight is pending; retaining the previous HTML would display old code.
+  const currentHighlight =
+    !isStreaming && highlight?.code === visibleCode && highlight.language === language
+      ? highlight.html
+      : null
+  const highlightedHtml = currentHighlight?.light ?? ""
+  const darkHighlightedHtml = currentHighlight?.dark ?? ""
 
   const handleCopy = useCallback(async () => {
     await copy(code)
@@ -284,11 +309,12 @@ export const CodeBlock = memo(function CodeBlock({
       <span className="text-muted-foreground">
         {t("truncatedNotice", {
           shown: CODE_AUTO_RENDER_MAX_LINES,
-          total: allLines.length,
+          total: totalLines,
         })}
       </span>
       <button
         type="button"
+        data-scroll-disclosure
         onClick={() => setShowAllLines(true)}
         className={cn(
           "rounded font-medium text-primary hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none",

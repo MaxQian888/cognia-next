@@ -367,6 +367,94 @@ describe("status dot and agent identity", () => {
     expect(header).toHaveTextContent("Ana")
     expect(header).not.toHaveTextContent("Build")
   })
+
+  it("names who answered an addressed turn, with its glyph and the handle it was sent to", () => {
+    const routed: UIMessage = {
+      ...message,
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: {
+          providerId: "external",
+          agent: { presetId: "build", name: "Build", icon: "Hammer" },
+          route: {
+            handle: "codex",
+            label: "My Codex",
+            runtimeKind: "external",
+            brandId: "codex-app-server",
+          },
+        },
+      },
+    }
+    render(
+      <MessageShell
+        message={routed}
+        // Identity is hidden by preference: an addressed turn still shows it,
+        // because the header is the only place that says the answer came from
+        // somewhere other than the conversation's own runtime.
+        display={resolveMessageDisplayOptions(undefined, {
+          preset: "balanced",
+          overrides: { metadata: { identity: "hidden" } },
+        })}
+      >
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toHaveTextContent("My Codex")
+    expect(header).not.toHaveTextContent("Build")
+    expect(screen.getByTestId("message-route-via")).toHaveTextContent("via @codex")
+    expect(screen.getByTestId("message-route-via")).toHaveAttribute(
+      "data-route-runtime",
+      "external"
+    )
+    expect(header.querySelector("svg.lucide-hammer")).toBeNull()
+  })
+
+  it("names a Squad member that answered, and a room speaker still wins", () => {
+    const routed: UIMessage = {
+      ...message,
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: {
+          route: { handle: "critic", label: "Critic", runtimeKind: "builtin", teammateId: "tm-1" },
+        },
+      },
+    }
+    const { unmount } = render(
+      <MessageShell message={routed} display={resolveMessageDisplayOptions()}>
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Critic")
+    expect(screen.getByTestId("message-route-via")).toHaveTextContent("via @critic")
+    unmount()
+
+    render(
+      <MessageShell message={routed} display={resolveMessageDisplayOptions()} speakerName="Ana">
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Ana")
+  })
+
+  it("says nothing about a route on an unaddressed turn or a user row", () => {
+    render(
+      <MessageShell
+        message={{
+          id: "u1",
+          role: "user",
+          parts: [],
+          metadata: {
+            run: { route: { handle: "codex", label: "Codex", runtimeKind: "external" } },
+          },
+        }}
+        display={resolveMessageDisplayOptions()}
+      >
+        <p>Hi</p>
+      </MessageShell>
+    )
+    expect(screen.queryByTestId("message-route-via")).toBeNull()
+  })
 })
 
 describe("MessageMetaLine", () => {

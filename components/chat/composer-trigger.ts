@@ -31,7 +31,6 @@ export type TriggerKind =
   | "file"
   | "bash"
   | "memory"
-  | "agent"
   | "subagent"
   | "skill"
   | "preset"
@@ -40,7 +39,7 @@ export type TriggerKind =
   | "doc"
   | "entity"
 
-export type MentionMode = "files" | "agents" | "combined" | "workflow"
+export type MentionMode = "files" | "combined" | "workflow"
 
 /**
  * A workflow graph element the copilot `@` picker can reference. Produced by
@@ -117,11 +116,14 @@ export interface DetectTriggerOptions {
   /**
    * What `@` should mean in this composer:
    *   - `"files"` (default) → file picker (workspace search).
-   *   - `"agents"` → agent picker only (the agent-team workspace chat).
-   *   - `"combined"` → general chat: ONE `@` panel listing subagents + files.
-   *     The trigger kind stays `"file"` (so the async file search still runs);
-   *     the popover prepends the subagent section. So both `"files"` and
-   *     `"combined"` produce a `"file"` trigger — only `"agents"` differs.
+   *   - `"combined"` → general chat: ONE `@` panel listing route targets,
+   *     members, subagents and files. The trigger kind stays `"file"` (so the
+   *     async file search still runs); the popover prepends the other sections.
+   *   - `"workflow"` → the workflow copilot, where a bare `@` means a node.
+   *
+   * The agent-team workspace's `"agents"` mode (an agents-only panel) is gone
+   * with the workspace chat it served (ADR-0140): its route targets now live in
+   * the combined panel of a direct chat.
    *
    * The token-boundary rules are identical; only the `kind` of the returned
    * trigger differs.
@@ -149,7 +151,6 @@ const SLASH_TRIGGER: TriggerKind = "slash"
 const FILE_TRIGGER: TriggerKind = "file"
 const BASH_TRIGGER: TriggerKind = "bash"
 const MEMORY_TRIGGER: TriggerKind = "memory"
-const AGENT_TRIGGER: TriggerKind = "agent"
 const SKILL_TRIGGER: TriggerKind = "skill"
 const PRESET_TRIGGER: TriggerKind = "preset"
 const WFNODE_TRIGGER: TriggerKind = "wfNode"
@@ -204,11 +205,11 @@ const WORKFLOW_NAMESPACE_PREFIXES: ReadonlyArray<{ prefix: string; kind: Trigger
  *
  * Read from the registry per call, exactly like the prefixes: a test that
  * resets the registry must not leave this list stale. Empty for the workflow
- * and team composers, where `@` already means something else and a second
- * symbol would mean a third thing.
+ * composer, where `@` already means something else and a second symbol would
+ * mean a third thing.
  */
 function shortcutsFor(mode: MentionMode | undefined) {
-  if (mode === "workflow" || mode === "agents") return []
+  if (mode === "workflow") return []
   return entityMentionShortcuts()
 }
 
@@ -216,8 +217,6 @@ function namespacePrefixesFor(
   mode: MentionMode | undefined
 ): ReadonlyArray<{ prefix: string; kind: TriggerKind }> {
   if (mode === "workflow") return WORKFLOW_NAMESPACE_PREFIXES
-  // The team workspace (`agents`) reserves `@` for members — no typed prefixes.
-  if (mode === "agents") return []
   return chatNamespacePrefixes()
 }
 
@@ -437,7 +436,7 @@ function detectShortcutAt(
  * Searches backwards from the caret for an `@` whose left neighbour is
  * whitespace or the start of the scanned region, stopping at whitespace. The
  * bare-`@` kind depends on the composer's `mentionMode`: the workflow composer
- * makes a bare `@` mean "workflow node", the team workspace makes it a member.
+ * makes a bare `@` mean "workflow node"; everywhere else it is the file panel.
  *
  * `minStart` bounds the backwards walk. It is the command word's end when
  * scanning inside a command's arguments, so the scan can never reach back over
@@ -450,12 +449,7 @@ function detectMentionAt(
   minStart = 0,
   withinCommand?: string
 ): ComposerTrigger | null {
-  const atKind: TriggerKind =
-    opts?.mentionMode === "workflow"
-      ? WFNODE_TRIGGER
-      : opts?.mentionMode === "agents"
-        ? AGENT_TRIGGER
-        : FILE_TRIGGER
+  const atKind: TriggerKind = opts?.mentionMode === "workflow" ? WFNODE_TRIGGER : FILE_TRIGGER
   const namespacePrefixes = namespacePrefixesFor(opts?.mentionMode)
   const commandField = withinCommand ? { withinCommand } : {}
   for (let i = caret - 1; i >= minStart; i--) {

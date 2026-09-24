@@ -391,7 +391,6 @@ export function MessageList({
     const checked = selecting && selection.selected.has(m.id)
     return {
       rowClassName: cn(
-        "group/msgrow",
         // In the mode a row is one thing to tick: its own controls step back
         // (kept in layout, so no row changes height and the list holds still),
         // and a long press selects no text.
@@ -955,16 +954,16 @@ const ROW_INTERACTIVE_SELECTOR =
   "a,button,input,textarea,select,summary,label,[role=button],[role=link],[role=menuitem],[role=checkbox],[contenteditable=true],[data-row-select]"
 
 /**
- * The tick beside a message.
+ * The tick beside a message, rendered only inside selection mode.
  *
- * Out of the mode it shows on hovering the message, as the way in; it is not a
- * tab stop there, because forty invisible checkboxes between every message would
- * be forty stops a keyboard user never asked for — the message menu's "Select"
- * is their way in. On touch there is no hover, so it only appears in the mode,
- * which the long-press sheet's "Select" opens.
+ * Entering the mode is a deliberate act on every surface — the message menu's
+ * "Select" for pointer and keyboard alike, the long-press sheet's "Select" on
+ * touch. A checkbox that floated in on row hover did both jobs badly: it was
+ * visual noise on every settled message and a click landed on it more often
+ * than intent did.
  *
- * Both states sit in the row's left padding, in the same place, so the tick a
- * pointer found on hover is the one that stays when the mode starts.
+ * It sits in the row's own padding from `sm` up so no text moves when the
+ * mode starts; a phone's 12px gutter makes room with `max-sm:pl-10` on the row.
  */
 function RowSelectControl({
   checked,
@@ -977,22 +976,16 @@ function RowSelectControl({
   label: string
   onToggle: (shiftKey: boolean) => void
 }) {
+  if (!active) return null
   return (
     <div
       data-row-select=""
-      className={cn(
-        "absolute top-3 z-10 flex",
-        // In the mode the row makes room for it; on hover it sits in the row's
-        // own padding so nothing shifts under the pointer.
-        active
-          ? "left-3 duration-150 animate-in fade-in-0 zoom-in-75 sm:left-0.5"
-          : "left-0.5 hidden opacity-0 transition-opacity group-hover/msgrow:opacity-100 focus-within:opacity-100 sm:flex [@media(hover:none)]:hidden"
-      )}
+      className="absolute left-3 top-3 z-10 flex duration-150 animate-in fade-in-0 zoom-in-75 sm:left-0.5"
     >
       <Checkbox
         checked={checked}
         aria-label={label}
-        tabIndex={active ? 0 : -1}
+        tabIndex={0}
         data-testid="transcript-row-select"
         className="bg-background"
         onClick={(event) => {

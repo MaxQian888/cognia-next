@@ -12,8 +12,12 @@
 //                                     file AND GUI work run inside a bound
 //                                     sandbox connection (Epic 5)
 //   - crossed ShieldOff   / muted   — sandbox disabled (today's default)
+//   - check   ShieldCheck / muted   — external runtime: the ADR-0028 switch
+//                                     does not apply; the agent process runs
+//                                     inside the mandatory launcher sandbox
+//                                     (ADR-0077 / ADR-0119)
 
-import { MonitorCheck, Shield, ShieldOff } from "lucide-react"
+import { MonitorCheck, Shield, ShieldCheck, ShieldOff } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -28,8 +32,9 @@ import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SandboxShellTier } from "@/types/sandbox"
 import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 
-export type ShieldState = "os" | "microvm" | "cua-desktop" | "off"
+export type ShieldState = "os" | "microvm" | "cua-desktop" | "off" | "external"
 
 export interface SandboxShieldProps {
   session: ChatSession | null
@@ -45,7 +50,20 @@ export function resolveShieldState(args: {
   characterSandboxTier?: SandboxShellTier
   defaultEnabled?: boolean
   defaultTier?: "os" | "microvm"
+  /**
+   * The session's turns run on an external agent (Pi, Codex, an ACP agent) or
+   * a host-owned configuration rather than the built-in SDK runtime.
+   *
+   * Checked first because the precedence chain below does not govern that
+   * lane at all: the external branch of the send path reads none of the
+   * sandbox options it resolves, and the agent process is always wrapped by
+   * `cognia-external-agent-launcher` with no unsandboxed fallback. Reporting
+   * "Sandbox off — SDK builtin Bash / Edit / Write are unrestricted" there
+   * described a switch that does nothing and tools that do not exist.
+   */
+  externalRuntime?: boolean
 }): ShieldState {
+  if (args.externalRuntime) return "external"
   const enabled =
     args.session?.sandboxEnabled ?? args.characterSandboxEnabled ?? args.defaultEnabled ?? false
   if (!enabled) return "off"
@@ -58,6 +76,8 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
   const t = useTranslations("chat.composer.sandboxShield")
   const settings = useSettingsStore((s) => s.settings)
   const availability = useSandboxRuntimeAvailability()
+  const runtimeRef = useRuntimeRefForSession(session?.id)
+  const externalRuntime = runtimeRef.kind !== "builtin"
   const characterId = session?.characterId
   const character = useLiveQuery(
     () => (characterId ? getCharacter(characterId) : Promise.resolve(undefined)),
@@ -72,9 +92,11 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       characterSandboxTier: character?.sandboxTier,
       defaultEnabled: settings?.sandboxDefaultEnabled,
       defaultTier: settings?.sandboxTier,
+      externalRuntime,
     })
   }, [
     forceState,
+    externalRuntime,
     session,
     character?.sandboxEnabled,
     character?.sandboxTier,
@@ -87,7 +109,7 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       ? availability.os.available
       : state === "microvm"
         ? availability.microvm.available
-        : state === "off"
+        : state === "off" || state === "external"
           ? true
           : false
   const ariaLabel = runtimeAvailable ? t(`label.${state}`) : t(`unavailableLabel.${state}`)
@@ -100,7 +122,11 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       : t(`unavailableDetail.${state}`)
 
   const icon =
-    state === "off" ? (
+    state === "external" ? (
+      // Its own glyph: this is protection the ADR-0028 switch neither grants
+      // nor removes, so it must read neither as "off" nor as an OS/microVM tier.
+      <ShieldCheck className={cn("size-3.5 text-muted-foreground", className)} aria-hidden="true" />
+    ) : state === "off" ? (
       <ShieldOff className={cn("size-3.5 text-muted-foreground", className)} aria-hidden="true" />
     ) : state === "cua-desktop" ? (
       // A distinct glyph, not a differently-coloured shield: this tier moves
@@ -134,7 +160,7 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
   // sandboxed send so a default changed elsewhere cannot re-tier a conversation
   // mid-flight. A pin with no way out would be worse than the drift it fixes,
   // so releasing it lives right here, on the badge that reports it.
-  const pinned = state !== "off" && !!session?.sandboxTier
+  const pinned = state !== "off" && state !== "external" && !!session?.sandboxTier
   const sessionId = session?.id
 
   return (
@@ -149,7 +175,7 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
               data-pinned={pinned ? "true" : "false"}
               data-available={runtimeAvailable ? "true" : "false"}
               aria-label={ariaLabel}
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              className="touch-hit inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               {icon}
             </button>
@@ -160,7 +186,10 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       <PopoverContent align="start" sideOffset={4} className="w-72 space-y-2 p-3">
         <p className="text-sm font-medium">{ariaLabel}</p>
         <p className="text-xs text-muted-foreground">{tooltip}</p>
-        {state !== "off" && (
+        {state === "external" && (
+          <p className="border-t pt-2 text-xs text-muted-foreground">{t("externalDetail")}</p>
+        )}
+        {state !== "off" && state !== "external" && (
           <div className="space-y-2 border-t pt-2">
             <p className="text-xs text-muted-foreground">
               {pinned ? t("pinnedDetail") : t("inheritedDetail")}

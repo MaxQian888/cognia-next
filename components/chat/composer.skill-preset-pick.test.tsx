@@ -37,7 +37,13 @@ jest.mock("@/hooks/chat/use-mentionable-presets", () => ({
   ],
 }))
 jest.mock("@/hooks/chat/use-markdown-chat-agents", () => ({ useMarkdownChatAgents: () => [] }))
-jest.mock("@/hooks/chat/use-plugin-slash-commands", () => ({ usePluginSlashCommands: () => [] }))
+// Partial: only the plugin command LIST is stubbed. The composer also calls
+// `usePluginSlashCommandExecution` from the same module, and a full mock left
+// it undefined, so every render in this file threw before reaching a picker.
+jest.mock("@/hooks/chat/use-plugin-slash-commands", () => ({
+  ...jest.requireActual("@/hooks/chat/use-plugin-slash-commands"),
+  usePluginSlashCommands: () => [],
+}))
 
 const applyPresetSpy = jest.fn(async () => true)
 jest.mock("@/hooks/chat/use-apply-preset", () => ({ useApplyPreset: () => applyPresetSpy }))

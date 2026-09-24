@@ -3,7 +3,7 @@
  *
  * `types/agent/tool.ts` has declared `artifact_create` / `artifact_update` /
  * `canvas_create` / … for a long time, and BOTH message-conversion paths
- * (`lib/claude/adapter.ts`, `lib/ai/agent/external/event-to-parts.ts`) already
+ * (`lib/claude/adapter.ts`, `lib/ai/agent/external/session/event-to-parts.ts`) already
  * knew how to turn such a call into an `ArtifactPart` — but nothing ever
  * defined, registered or executed one. Artifacts could only be born from the
  * heuristic fence detector (`lib/ai/generation/artifact-detector.ts`) at turn

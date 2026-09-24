@@ -238,6 +238,20 @@ describe("carryPromptPreamble", () => {
     expect(carryPromptPreamble(parts, "   ")).toBe(original.preamble)
   })
 
+  it("carries onto the typed block past the attachments, never onto a file's text", () => {
+    // An extracted document is a text block too, and leads the content.
+    const file = { type: "text" as const, text: "Q3 revenue grew 12%." }
+    expect(carryPromptPreamble(parts, [file, { type: "text", text: "again" }], 1)).toEqual([
+      file,
+      { type: "text", text: `${original.preamble}\n\nagain` },
+    ])
+    // Nothing typed: the envelope takes the typed block's place after the files.
+    expect(carryPromptPreamble(parts, [file], 1)).toEqual([
+      file,
+      { type: "text", text: original.preamble },
+    ])
+  })
+
   it("leaves content alone when the original had no envelope or the edit has one", () => {
     expect(carryPromptPreamble([{ type: "text", text: "plain" }], "edited")).toBe("edited")
     expect(carryPromptPreamble(parts, original.text)).toBe(original.text)

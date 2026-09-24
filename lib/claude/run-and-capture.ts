@@ -55,7 +55,7 @@ import {
 import { RouterFusionRefusalError } from "@/lib/router-fusion/gate/faults"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
@@ -1727,15 +1727,18 @@ async function captureHostExternalReply(
   options?: SendOptions,
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
-  const { externalAgentIdFromProviderId } = await import("@/lib/ai/agent/external/session-models")
-  const { getRemoteHostConfig } = await import("@/lib/ai/agent/external/remote-host-configs")
+  const { externalAgentIdFromProviderId } =
+    await import("@/lib/ai/agent/external/session/session-models")
+  const { getRemoteHostConfig } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-host-configs")
   const {
     startRemoteExternalTurn,
     subscribeRemoteExternalRun,
     cancelRemoteExternalTurn,
     resolveRemotePermission,
-  } = await import("@/lib/ai/agent/external/remote-run-client")
-  const { remoteDecisionId } = await import("@/lib/ai/agent/external/remote-run-service")
+  } = await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
+  const { remoteDecisionId } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
   const { canonicalEventFromExternalEvent, captureEventFromCanonical } =
     await import("@/lib/ai/agent/execution/event-envelope")
   const configId = externalAgentIdFromProviderId(options?.provider)

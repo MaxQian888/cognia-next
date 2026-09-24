@@ -109,11 +109,13 @@ import { loggers } from "@cognia/logging"
 import {
   AgentMentionRow,
   SubagentMentionRow,
-  filterMentionables,
   filterSubagents,
   filterTeamMembers,
 } from "@/components/agent/workspace/agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { AgentRuntimeDescriptor } from "@/lib/ai/agent/runtime-catalog/types"
+import type { RouteLane } from "@/lib/chat/turn-route/types"
+import type { RouteOption } from "@/hooks/chat/use-route-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 import type { ShellCompletion } from "@/lib/shell-intelligence/types"
@@ -147,7 +149,18 @@ export type PopoverItem =
       /** False when the shell can't perform this write (file scopes off desktop). */
       available: boolean
     }
-  | { kind: "agent"; target: MentionTarget }
+  /**
+   * A route target: `@claude`, `@codex` or a Squad member. Offered only for
+   * the message's LEADING token, where it routes the turn to that runtime
+   * (`lib/chat/turn-route/`); `lane` is where it would run right now, and a
+   * lane that cannot run renders the row dimmed with the reason.
+   */
+  | {
+      kind: "agent"
+      target: MentionTarget
+      lane?: RouteLane
+      descriptor?: AgentRuntimeDescriptor
+    }
   | { kind: "subagent"; target: SubagentMentionTarget }
   /**
    * One member of the character team this session belongs to.
@@ -213,6 +226,21 @@ export interface ComposerPopoverHandle {
 }
 
 /** The row taken as text, or null when it has no text to give. */
+/**
+ * Two item-less file lists that would render identically — the synchronous
+ * "cannot search" verdicts, which carry only a message.
+ */
+function isSameStaticList(prev: ItemList | null, next: ItemList): boolean {
+  return (
+    prev !== null &&
+    prev.items.length === 0 &&
+    next.items.length === 0 &&
+    prev.loading === next.loading &&
+    prev.error === next.error &&
+    prev.emptyMessage === next.emptyMessage
+  )
+}
+
 export function insertTextPick(item: PopoverItem): PopoverItem | null {
   return item.kind === "entity" && item.candidate.insertText ? { ...item, mode: "text" } : null
 }
@@ -227,15 +255,18 @@ interface Props {
   /** Anchor element — typically the composer container. */
   anchor: HTMLElement | null
   /**
-   * Mentionable agents for the agent picker. Required when the composer's
-   * `mentionMode` is `"agents"`. Empty in file mode.
+   * Route targets with their live lanes (`useRouteTargets`). The composer
+   * passes them only while the `@` being completed is the message's LEADING
+   * token — the one position the send path reads a route from — so a `@codex`
+   * typed mid-sentence is never offered as something that would route. They
+   * lead the panel, under "Runtimes" and "Squad members".
    */
-  mentionables?: readonly MentionTarget[]
+  routeOptions?: readonly RouteOption[]
   /**
    * Subagents mentionable in the GENERAL chat composer (combined `@` mode).
    * When non-empty, the `@file` panel prepends an "Agents" section with these,
-   * above the workspace file results. Empty / undefined in file-only or
-   * team (`mentionMode="agents"`) composers.
+   * above the workspace file results. Empty / undefined in file-only
+   * composers.
    */
   chatAgents?: readonly SubagentMentionTarget[]
   /**
@@ -320,7 +351,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     cwd,
     slashCommands,
     anchor,
-    mentionables,
+    routeOptions,
     chatAgents,
     teamMembers,
     teamMemberRoleById,
@@ -398,13 +429,19 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       setFileList(null)
       return
     }
+    // The two synchronous verdicts below re-run whenever `t` changes identity
+    // (a locale switch), and a fresh-but-equal object would re-render the
+    // panel for nothing — or, with a translator that is new every render,
+    // forever. Publish only a list that actually differs.
+    const publishStatic = (next: ItemList) =>
+      setFileList((prev) => (isSameStaticList(prev, next) ? prev : next))
     if (!isWorkspaceSearchReachable()) {
       // Intentional dormancy (project rule 7, UI axis): a plain browser with no
       // paired host cannot search files, and the panel says so rather than
       // leaking `WebStubTransport`'s "tauri-only command from web mode: …".
       // Not an `error`, because the combined `@` panel suppresses errors when
       // agents are showing — this must survive as the files section's message.
-      setFileList({
+      publishStatic({
         items: [],
         loading: false,
         error: null,
@@ -413,7 +450,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       return
     }
     if (!cwd) {
-      setFileList({
+      publishStatic({
         items: [],
         loading: false,
         error: t("workspaceMissing"),
@@ -561,21 +598,6 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage: shellEmptyMessage ?? "",
       }
     }
-    if (trigger.kind === "agent") {
-      const list = mentionables ?? []
-      const filtered = filterMentionables(list, trigger.query)
-      return {
-        items: filtered.map((target) => ({ kind: "agent" as const, target })),
-        loading: false,
-        error: null,
-        emptyMessage:
-          list.length === 0
-            ? safeLookup(tAgent, "noAgents", "No agents available")
-            : safeLookup(tAgent, "noMatches", `No agent matches "${trigger.query}"`, {
-                query: trigger.query,
-              }),
-      }
-    }
     if (trigger.kind === "skill") {
       const list = chatSkills ?? []
       const filtered = fuzzyFilterSort(list, trigger.query, (s) => s.name, {
@@ -711,6 +733,21 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     // An explicit `@file:` means files and nothing else — that is the only
     // reason to type it over a bare `@`, which lists both.
     const filesOnly = trigger.namespace === "file:"
+    // Route targets lead: at the message's first token, `@codex` / `@claude` /
+    // a Squad member is what decides who answers, so it is the most
+    // consequential thing this panel can insert there. Runtimes before Squad
+    // members, the order the target list already has.
+    const routeItems: PopoverItem[] =
+      !filesOnly && routeOptions && routeOptions.length > 0
+        ? fuzzyFilterSort(routeOptions, trigger.query, (option) => option.target.handle, {
+            secondaryText: (option) => `${option.target.name} ${option.target.description}`,
+          }).map(({ target, lane, descriptor }) => ({
+            kind: "agent" as const,
+            target,
+            lane,
+            ...(descriptor ? { descriptor } : {}),
+          }))
+        : []
     // Members lead. In a team room the overwhelmingly likely thing you want
     // after `@` is one of the people in it, and unlike a file or a subagent the
     // name has to be spelled exactly for `parseMentions` to route the turn.
@@ -728,9 +765,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             target,
           }))
         : []
-    if (memberItems.length === 0 && agentItems.length === 0) return base
+    if (routeItems.length === 0 && memberItems.length === 0 && agentItems.length === 0) {
+      return base
+    }
     return {
-      items: [...memberItems, ...agentItems, ...base.items],
+      items: [...routeItems, ...memberItems, ...agentItems, ...base.items],
       loading: base.loading,
       // Agents are showing — never surface a file-search error (e.g. no
       // workspace in web mode) that would replace the whole list. Files just
@@ -748,7 +787,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     tMemory,
     isDesktop,
     tAgent,
-    mentionables,
+    routeOptions,
     chatAgents,
     teamMembers,
     teamMemberRoleById,
@@ -838,10 +877,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 
   useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
-  const title = useMemo(
-    () => triggerTitle(trigger?.kind, t, tAgent, tDocs),
-    [trigger?.kind, t, tAgent, tDocs]
-  )
+  const title = useMemo(() => triggerTitle(trigger?.kind, t, tDocs), [trigger?.kind, t, tDocs])
   // `!` mode with nothing to say. The composer sends a blank `shellEmptyMessage`
   // when shell intelligence is switched off — no completions were looked up, so
   // "no completions" would be untrue — and the empty-state block would then
@@ -863,10 +899,14 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
   const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
   // Hoisted out of the per-row header check so it isn't recomputed N times.
-  // Members count as well as subagents: a team room can list members and files
-  // with no subagent between them, and without a header the two run together.
+  // Members and route targets count as well as subagents: a team room can list
+  // members and files with no subagent between them, and a direct chat can list
+  // runtimes and files, and without a header the two run together.
   const hasMentionSections = useMemo(
-    () => displayList.items.some((i) => i.kind === "subagent" || i.kind === "member"),
+    () =>
+      displayList.items.some(
+        (i) => i.kind === "subagent" || i.kind === "member" || i.kind === "agent"
+      ),
     [displayList.items]
   )
 
@@ -1098,7 +1138,6 @@ const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
 function triggerTitle(
   kind: TriggerKind | undefined,
   t: (key: string) => string,
-  tAgent: (key: string) => string,
   tDocs: (key: string) => string
 ): {
   icon: React.ReactNode
@@ -1130,20 +1169,38 @@ function triggerTitle(
       return { icon: <DatabaseIcon className="size-3.5" />, label: t("entityTitle") }
     case "subagent":
       return { icon: <AtSignIcon className="size-3.5" />, label: t("agentsSection") }
-    case "agent":
-      return {
-        icon: <AtSignIcon className="size-3.5" />,
-        label: safeLookup(tAgent, "mentionTitle", "Mention an agent"),
-      }
     default:
       return { icon: null, label: "" }
   }
 }
 
 /**
+ * Which `@` section a row belongs to. A route target splits in two — the
+ * virtual runtimes and the Squad members — because "which engine answers" and
+ * "which colleague answers" are different questions even though both route.
+ */
+type MentionSection = "runtimes" | "squadMembers" | "member" | "subagent" | "file"
+
+function mentionSectionOf(item: PopoverItem | undefined): MentionSection | null {
+  if (!item) return null
+  if (item.kind === "agent") return item.target.kind === "virtual" ? "runtimes" : "squadMembers"
+  if (item.kind === "member" || item.kind === "subagent" || item.kind === "file") return item.kind
+  return null
+}
+
+const MENTION_SECTION_LABEL_KEYS: Record<MentionSection, string> = {
+  runtimes: "runtimesSection",
+  squadMembers: "squadMembersSection",
+  member: "membersSection",
+  subagent: "agentsSection",
+  file: "filesSection",
+}
+
+/**
  * Section-header label for a row, or null when no header precedes it. Covers the
  * empty-query slash grouping (Pinned/Recent/category) and the combined-`@` mode
- * (subagents/files). Headers carry no `data-index`, so keyboard nav is unaffected.
+ * (runtimes/Squad members/members/subagents/files). Headers carry no
+ * `data-index`, so keyboard nav is unaffected.
  */
 function sectionHeader(
   item: PopoverItem,
@@ -1158,13 +1215,9 @@ function sectionHeader(
   if (item.kind === "chatTemplate" && prev?.kind !== "chatTemplate") {
     return t("templatesSection")
   }
-  if (
-    hasMentionSections &&
-    item.kind !== prev?.kind &&
-    (item.kind === "member" || item.kind === "subagent" || item.kind === "file")
-  ) {
-    if (item.kind === "member") return t("membersSection")
-    return item.kind === "subagent" ? t("agentsSection") : t("filesSection")
+  const section = mentionSectionOf(item)
+  if (hasMentionSections && section && section !== mentionSectionOf(prev)) {
+    return t(MENTION_SECTION_LABEL_KEYS[section])
   }
   return null
 }
@@ -1449,7 +1502,7 @@ const ItemRow = memo(function ItemRow({
     return <ShellCompletionRow completion={item.completion} />
   }
   if (item.kind === "agent") {
-    return <AgentMentionRow target={item.target} />
+    return <AgentMentionRow target={item.target} lane={item.lane} descriptor={item.descriptor} />
   }
   if (item.kind === "subagent") {
     return <SubagentMentionRow target={item.target} />

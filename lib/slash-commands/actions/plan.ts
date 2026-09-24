@@ -5,13 +5,14 @@
 // LLM (`decomposeIntoPlan`) and both projections (`planInputFromTeam` /
 // `planInputFromGoal`) were fully built, tested — and called by nothing.
 //
-// Surface (6 subcommands + aliases):
+// Surface (7 subcommands + aliases):
 //   /plan                             — status card for the session's open plan
 //   /plan <objective>                 — planner LLM decomposition  (planner_llm)
 //   /plan new <title> | <s1> | <s2>   — hand-authored plan         (manual)
 //   /plan from-goal                   — project the open goal      (goal_projection)
 //   /plan from-team                   — project the team task DAG  (team_projection)
 //   /plan to-team                     — mirror the plan back into team tasks
+//   /plan reject [reason]             — reject a plan awaiting approval (terminal `rejected`)
 //   /plan cancel                      — cancel the open plan (alias: stop, clear)
 //
 // Every branch funnels into `PlanRuntime.createPlan`, so the one-open-plan-per-
@@ -38,6 +39,7 @@ import { ensureSoloTeam, soloTeamId } from "@/lib/agent/plan-mode-bridge"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentPlan, CreatePlanInput, CreatePlanStepInput } from "@/types/agent/plan"
+import { isRejectablePlanStatus } from "@/types/agent/plan"
 
 /** Max characters kept from a hand-authored plan title (steps clamp in `linearAgentTurnSteps`). */
 const MAX_PLAN_TITLE_LEN = 120
@@ -87,6 +89,8 @@ export async function dispatchPlanSubcommand(ctx: SlashContext): Promise<PlanCom
     case "from-workflow":
     case "workflow":
       return await commandFromWorkflow(ctx, rest)
+    case "reject":
+      return await commandReject(ctx, rest)
     case "cancel":
     case "stop":
     case "clear":
@@ -350,6 +354,31 @@ async function commandFromWorkflow(ctx: SlashContext, rest: string): Promise<Pla
   return { system: renderCreatedCard(plan, "workflow") }
 }
 
+/**
+ * `/plan reject [reason]` — decline a plan that has not started. Lands the
+ * terminal `rejected` status with its own trail entry; a plan already running
+ * is cancelled, not rejected, so that case points at `/plan cancel`.
+ */
+async function commandReject(ctx: SlashContext, reason: string): Promise<PlanCommandResult> {
+  const runtime = getPlanRuntime()
+  const plan = await runtime.getOpenPlanForSession(ctx.activeSessionId!)
+  if (!plan) return { system: "No open plan to reject." }
+  if (!isRejectablePlanStatus(plan.status)) {
+    return {
+      system: `Plan "${plan.title}" is already ${plan.status} — only a plan that has not started can be rejected. Use \`/plan cancel\` to stop it.`,
+    }
+  }
+  const rejected = await runtime.rejectPlan(plan.id, reason || undefined)
+  if (rejected?.status !== "rejected") {
+    return { system: `Plan "${plan.title}" could not be rejected.` }
+  }
+  return {
+    system: reason
+      ? `🚫 Plan rejected — "${plan.title}".\n\n> ${reason}`
+      : `🚫 Plan rejected — "${plan.title}".`,
+  }
+}
+
 /** `/plan cancel` — cancel the session's open plan. */
 async function commandCancel(ctx: SlashContext): Promise<PlanCommandResult> {
   const runtime = getPlanRuntime()
@@ -431,8 +460,24 @@ function renderStatusCard(plan: AgentPlan): string {
   ]
   for (const step of ordered) {
     lines.push(`${stepGlyph(step.status)} ${step.title}`)
+    if (step.status === "failed" && step.error) lines.push(`  - ⚠️ ${step.error}`)
   }
-  lines.push("", "Cancel with `/plan cancel`.")
+  const halted = plan.status === "paused" ? plan.stepHalt : undefined
+  if (halted) {
+    const step = halted.stepId ? ordered.find((s) => s.id === halted.stepId) : undefined
+    lines.push(
+      "",
+      step
+        ? `⚠️ **Halted on "${step.title}"** (${halted.cause.replace(/_/g, " ")}) — retry, skip or mark it done from the plan card above the composer.`
+        : `⚠️ **Halted between steps** (${halted.cause.replace(/_/g, " ")}) — resume it from the plan card above the composer.`
+    )
+  }
+  lines.push(
+    "",
+    isRejectablePlanStatus(plan.status)
+      ? "Reject with `/plan reject [reason]`, or cancel with `/plan cancel`."
+      : "Cancel with `/plan cancel`."
+  )
   return lines.join("\n")
 }
 
@@ -448,6 +493,8 @@ function statusEmoji(status: AgentPlan["status"]): string {
       return "🛑"
     case "cancelled":
       return "⏹️"
+    case "rejected":
+      return "🚫"
     case "awaiting_approval":
       return "🕐"
     default:

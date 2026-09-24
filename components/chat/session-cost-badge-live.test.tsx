@@ -47,6 +47,16 @@ describe("SessionCostBadgeLive", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it("hands the host row's chip class to the trigger", () => {
+    // The composer toolbar dresses its copy as one of the row's chips; the
+    // menu and rail copies pass nothing and keep the badge's own trigger.
+    storeState = { messages: [msgWithUsage("a", { inputTokens: 10, outputTokens: 5 })] }
+    renderUI(
+      <SessionCostBadgeLive sessionId="s1" tokensLabel={tokens} triggerClassName="row-chip-probe" />
+    )
+    expect(screen.getByTestId("session-cost-trigger")).toHaveClass("row-chip-probe")
+  })
+
   it("renders summed in-memory tokens when usage is present", () => {
     storeState = {
       messages: [

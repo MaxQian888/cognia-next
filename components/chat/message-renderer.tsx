@@ -170,6 +170,7 @@ import { requestTemplateRerun } from "@/lib/chat/template/rerun-request"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
+import { TurnAdmissionBadge } from "@/components/chat/message-parts/turn-admission-badge"
 import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { saveMessageAsMemory } from "@/lib/chat/save-message-as-memory"
@@ -206,9 +207,17 @@ import type { RewindFilesResult } from "@/lib/claude/ipc"
  * constant is that triple for the message surface, shared so the three groups
  * here cannot drift apart. The strings, not the DOM, are what is shared: two of
  * the three only render once a plugin contributes to them.
+ *
+ * A fourth reveal covers the case hover and focus both lie about: a Radix
+ * popup opened from inside the group (the "…" overflow, a plugin menu). Its
+ * content portals out, so the pointer sits over the menu and focus lives in
+ * it — neither `group-hover` nor `focus-within` holds, and the group would
+ * fade away under the open popup. The trigger keeps `data-state="open"` while
+ * its popup is up, so `:has` on that keeps the group revealed for exactly the
+ * popup's lifetime.
  */
 export const HOVER_REVEAL_CLASS =
-  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
+  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-state=open]]:opacity-100"
 
 interface Props {
   message: UIMessage
@@ -968,6 +977,9 @@ function MessageRendererInner({
           {/* Delivery state of a mid-run follow-up. Self-hides for every message
             that is not a pending steer. */}
           <SteerStatusBadge message={message} sessionId={branchSessionId} />
+          {/* Whether this turn ran at all: queued behind a held working tree,
+            or failed before producing anything. Self-hides otherwise. */}
+          <TurnAdmissionBadge message={message} sessionId={branchSessionId} />
           <SessionPeerOriginBadge metadata={message.metadata} />
 
           <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
@@ -1065,9 +1077,9 @@ function MessageRendererInner({
                   // them this whole bar (copy / edit / retry / branch / plugin
                   // actions) is permanently invisible on touch — where the app
                   // ships through Capacitor — and a keyboard user lands focus on
-                  // a control they cannot see. Same triple every other
-                  // hover-revealed group in the repo carries (code-block,
-                  // mermaid-block, math-block, image-block, video-block).
+                  // a control they cannot see. The shared constant also keeps
+                  // the bar up while the "…" overflow's portal is open — both
+                  // hover and focus-within sit inside that portal then.
                   display.actions === "hover" && HOVER_REVEAL_CLASS,
                   message.role === "user" ? "w-fit" : ""
                 )}

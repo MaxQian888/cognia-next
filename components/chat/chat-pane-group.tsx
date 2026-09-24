@@ -15,7 +15,7 @@ import type { ComposerHandle, ComposerTurnMetadata } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useChatStore } from "@/stores/chat"
-import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
+import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 
@@ -60,6 +60,8 @@ export interface ChatPaneGroupProps {
     templateRun?: ChatTemplateRun | null,
     turnMetadata?: ComposerTurnMetadata
   ) => void | Promise<void>
+  /** Whether that hero composer may address a runtime — see `ChatPane.heroRouting`. */
+  heroRouting?: boolean
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
@@ -73,7 +75,6 @@ export interface ChatPaneGroupProps {
   /** Disable every pane composer without hiding cached conversation data. */
   composerDisabled?: boolean
   runtimeNotice?: ReactNode
-  mobileMentionMembers?: readonly Character[]
   /** Per-session plan-approval resume (switch mode + send the resume turn). */
   onResumeAfterPlanApproval?: (
     prompt: string,
@@ -98,6 +99,7 @@ export function ChatPaneGroup({
   onPickCharacter,
   onUseSample,
   onHeroSend,
+  heroRouting,
   onOpenSettings,
   newChatExecutionControls,
   welcomeContextBarSlot,
@@ -107,7 +109,6 @@ export function ChatPaneGroup({
   composerRef,
   composerDisabled,
   runtimeNotice,
-  mobileMentionMembers,
   onResumeAfterPlanApproval,
 }: ChatPaneGroupProps) {
   const activeSessionId = useChatStore((s) => s.activeSessionId)
@@ -171,6 +172,7 @@ export function ChatPaneGroup({
         onPickCharacter={onPickCharacter}
         onUseSample={onUseSample}
         onHeroSend={onHeroSend}
+        heroRouting={heroRouting}
         onOpenSettings={onOpenSettings}
         newChatExecutionControls={newChatExecutionControls}
         welcomeContextBarSlot={welcomeContextBarSlot}
@@ -182,7 +184,6 @@ export function ChatPaneGroup({
         composerRef={withComposerRef ? composerRef : undefined}
         composerDisabled={composerDisabled}
         runtimeNotice={runtimeNotice}
-        mobileMentionMembers={mobileMentionMembers}
         onResumeAfterPlanApproval={
           onResumeAfterPlanApproval && sessionId
             ? (prompt, mode) => onResumeAfterPlanApproval(prompt, mode, sessionId)

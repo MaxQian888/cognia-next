@@ -94,18 +94,39 @@ describe("generateTimerApp", () => {
   it("regular timer defaults to a 5-minute preset when no number is in the description", () => {
     const app = generateTimerApp("T", "做个普通计时器")
     expectGenerated(app)
-    expect(app.dataModel).toMatchObject({ totalSeconds: 5 * 60, mode: "timer" })
+    expect(app.dataModel).toMatchObject({ totalSeconds: 5 * 60, mode: "timer", display: "05:00" })
   })
 
   it("extracts the preset minute count from descriptions like '20 分钟'", () => {
     const app = generateTimerApp("T", "做一个 20 分钟的计时器")
-    expect(app.dataModel).toMatchObject({ totalSeconds: 20 * 60 })
+    expect(app.dataModel).toMatchObject({ totalSeconds: 20 * 60, display: "20:00" })
   })
 
   it("selects pomodoro components + mode on '番茄' keyword", () => {
     const app = generateTimerApp("Pomodoro", "番茄钟应用")
     expect(app.dataModel).toMatchObject({ mode: "pomodoro" })
     expect(app.components.find((c) => c.id === "work-btn")).toBeDefined()
+  })
+
+  it("opens a pomodoro on its 25-minute work block, showing 25:00 rather than 00:00", () => {
+    const app = generateTimerApp("Pomodoro", "Pomodoro Timer")
+    expect(app.dataModel).toMatchObject({
+      mode: "pomodoro",
+      totalSeconds: 25 * 60,
+      seconds: 0,
+      display: "25:00",
+      isRunning: false,
+    })
+  })
+
+  it("lets an explicit length override the pomodoro default and ignores a zero length", () => {
+    expect(generateTimerApp("P", "pomodoro 50 min").dataModel).toMatchObject({
+      totalSeconds: 50 * 60,
+      display: "50:00",
+    })
+    expect(generateTimerApp("T", "0 min timer").dataModel).toMatchObject({
+      totalSeconds: 5 * 60,
+    })
   })
 })
 

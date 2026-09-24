@@ -49,6 +49,7 @@ const createWorkflowMock = createWorkflow as jest.Mock
 const createPlan = jest.fn()
 const getOpenPlanForSession = jest.fn()
 const cancelPlan = jest.fn()
+const rejectPlan = jest.fn()
 const getOpenGoalForSession = jest.fn()
 
 /** The plan `createPlan` echoes back, shaped from whatever input it received. */
@@ -100,7 +101,8 @@ beforeEach(() => {
   getOpenPlanForSession.mockResolvedValue(undefined)
   cancelPlan.mockResolvedValue(null)
   getOpenGoalForSession.mockResolvedValue(undefined)
-  getPlanRuntimeMock.mockReturnValue({ createPlan, getOpenPlanForSession, cancelPlan })
+  rejectPlan.mockImplementation(async (id: string) => ({ id, status: "rejected" }))
+  getPlanRuntimeMock.mockReturnValue({ createPlan, getOpenPlanForSession, cancelPlan, rejectPlan })
   getGoalRuntimeMock.mockReturnValue({ getOpenGoalForSession })
   loadPlanConfigDefaultsMock.mockResolvedValue(undefined)
   getSessionMock.mockResolvedValue({ id: "ses_a", characterId: "char_1" })
@@ -488,6 +490,82 @@ describe("/plan to-team — reverse projection", () => {
     const res = await dispatchPlanSubcommand(ctx({ args: "to-team" }))
     expect(upsertTask).not.toHaveBeenCalled()
     expect(res.system).toMatch(/Could not resolve a team/)
+  })
+})
+
+describe("/plan status — halts and rejection", () => {
+  const base = () => planFrom({ sessionId: "ses_a", title: "Ship", source: "manual", steps: [] })
+
+  it("shows a halted step's error and where to recover it", async () => {
+    getOpenPlanForSession.mockResolvedValue({
+      ...base(),
+      status: "paused",
+      steps: [
+        {
+          id: "a",
+          title: "migrate",
+          kind: "agent_turn",
+          status: "failed",
+          order: 0,
+          dependencies: [],
+          error: "Pi process exited",
+        },
+      ],
+      stepHalt: { stepId: "a", cause: "turn_failed", detail: "Pi process exited", at: 1 },
+    })
+    const res = await dispatchPlanSubcommand(ctx({ args: "status" }))
+    expect(res.system).toContain("- [!] migrate")
+    expect(res.system).toContain("⚠️ Pi process exited")
+    expect(res.system).toContain('Halted on "migrate"')
+    expect(res.system).toContain("turn failed")
+    // A running plan is cancelled, not rejected.
+    expect(res.system).not.toContain("/plan reject")
+  })
+
+  it("offers /plan reject while the plan awaits approval", async () => {
+    getOpenPlanForSession.mockResolvedValue(base())
+    const res = await dispatchPlanSubcommand(ctx({ args: "status" }))
+    expect(res.system).toContain("/plan reject")
+  })
+})
+
+describe("/plan reject", () => {
+  it("rejects a plan awaiting approval with the reason", async () => {
+    getOpenPlanForSession.mockResolvedValue({
+      id: "p9",
+      title: "Ship",
+      status: "awaiting_approval",
+    })
+    const res = await dispatchPlanSubcommand(ctx({ args: "reject out of scope" }))
+    expect(rejectPlan).toHaveBeenCalledWith("p9", "out of scope")
+    expect(res.system).toContain("🚫 Plan rejected")
+    expect(res.system).toContain("> out of scope")
+  })
+
+  it("rejects without a reason", async () => {
+    getOpenPlanForSession.mockResolvedValue({ id: "p9", title: "Ship", status: "draft" })
+    const res = await dispatchPlanSubcommand(ctx({ args: "reject" }))
+    expect(rejectPlan).toHaveBeenCalledWith("p9", undefined)
+    expect(res.system).not.toContain(">")
+  })
+
+  it("points a running plan at /plan cancel instead", async () => {
+    getOpenPlanForSession.mockResolvedValue({ id: "p9", title: "Ship", status: "executing" })
+    const res = await dispatchPlanSubcommand(ctx({ args: "reject" }))
+    expect(rejectPlan).not.toHaveBeenCalled()
+    expect(res.system).toContain("/plan cancel")
+  })
+
+  it("reports a rejection the runtime refused, and the no-plan case", async () => {
+    getOpenPlanForSession.mockResolvedValue({ id: "p9", title: "Ship", status: "approved" })
+    rejectPlan.mockResolvedValueOnce({ id: "p9", status: "approved" })
+    expect((await dispatchPlanSubcommand(ctx({ args: "reject" }))).system).toMatch(
+      /could not be rejected/
+    )
+    getOpenPlanForSession.mockResolvedValue(undefined)
+    expect((await dispatchPlanSubcommand(ctx({ args: "reject" }))).system).toMatch(
+      /No open plan to reject/
+    )
   })
 })
 

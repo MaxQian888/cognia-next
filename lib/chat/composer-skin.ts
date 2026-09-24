@@ -322,10 +322,11 @@ export function resolveToolbarLayout(
   toolbarWidth: number
 ): ComposerToolbarLayout {
   if (toolbarWidth <= 0 || toolbarWidth >= COMPACT_TOOLBAR_PX) return proposed
-  // `detached` keeps its OWN narrow packing — the two-row compact branch that
-  // predates skins. Rewriting it to `embedded` here would move the row from
-  // below the box to inside it the moment a pane narrowed, which is not what
-  // narrowing has ever meant for the classic composer.
+  // `detached` keeps its OWN narrow packing — the single-row fold ladder in
+  // `bottom-toolbar.tsx`, which folds into "⋯" and never wraps to a second
+  // row. Rewriting it to `embedded` here would move the row from below the box
+  // to inside it the moment a pane narrowed, which is not what narrowing has
+  // ever meant for the classic composer.
   if (proposed === "detached") return "detached"
   // `folded` is already the tightest arrangement — narrowing cannot improve it.
   if (proposed === "folded") return "folded"
@@ -378,3 +379,33 @@ export function resolveToolbarFoldTier(toolbarWidth: number): ToolbarFoldTier {
   if (toolbarWidth >= TOOLBAR_FOLD_PX.tight) return 3
   return 4
 }
+
+/**
+ * The one chip style every composer toolbar control wears — the model, effort,
+ * permission, mode, runtime, preset, context, cost and credential chips, and
+ * anything a host puts on the same row. Lives here rather than in
+ * `bottom-toolbar.tsx` so the controls that toolbar imports (the composition
+ * chip) can wear it without an import cycle.
+ *
+ * - `h-7 rounded-md text-[11px]`: one height, one radius, one type size, so the
+ *   row reads as a single quiet strip.
+ * - `min-w-0 shrink`: the shadcn button base is `shrink-0`, so a chip inside a
+ *   `min-w-0` group kept its intrinsic width while the group compressed and
+ *   the surplus painted over its neighbour. Shrinkable chips ellipsize instead.
+ * - `has-[>svg]:px-2`: the Button's size variants carry `has-[>svg]:px-2.5` /
+ *   `px-3`, and `:has()` out-specifies a bare `px-2` — so without this every
+ *   chip with a leading icon was 2-4px wider per side than the row it sat in,
+ *   and the context chip's `px-1.5` never applied at all.
+ * - `touch-hit`: a 44px hit area on a coarse pointer without a 44px box — the
+ *   row paints at 28px on a phone and still answers a thumb.
+ */
+export const COMPOSER_TOOLBAR_CHIP =
+  "touch-hit h-7 min-w-0 shrink rounded-md border-transparent bg-transparent px-2 has-[>svg]:px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
+
+/**
+ * The square, icon-only form of a toolbar chip. Goes AFTER
+ * {@link COMPOSER_TOOLBAR_CHIP} in `cn(...)` so its padding wins — including
+ * over the Button's `has-[>svg]` padding, which is why the `has-` reset is part
+ * of it.
+ */
+export const COMPOSER_TOOLBAR_GLYPH = "w-7 justify-center px-0 has-[>svg]:px-0"

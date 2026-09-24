@@ -3,9 +3,10 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { COMPOSER_TOOLBAR_CHIP } from "@/lib/chat/composer-skin"
 import { EffortChip } from "./effort-chip"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 jest.mock("@/lib/db/sessions", () => ({
   updateSession: jest.fn(async () => undefined),
@@ -163,6 +164,25 @@ describe("label", () => {
     const chip = screen.getByTestId("effort-chip")
     expect(chip).toHaveTextContent("Ultracode")
     expect(chip.className).toContain("text-effort-ultra")
+  })
+
+  // The toolbar hands every chip its quiet `text-muted-foreground` / `px-2`
+  // class. Merged BEFORE the chip's own tone it erased the ultra tint, and the
+  // glyph square was re-padded back into a rectangle.
+  it("keeps its tint and glyph square under the toolbar's chip class", () => {
+    renderChip(
+      <EffortChip
+        session={{ ...session, thinkingLevel: "ultracode" }}
+        glyph
+        className={COMPOSER_TOOLBAR_CHIP}
+      />
+    )
+    const chip = screen.getByTestId("effort-chip")
+    expect(chip.className).toContain("text-effort-ultra")
+    expect(chip.className).not.toMatch(/(^|\s)text-muted-foreground(\s|$)/)
+    expect(chip.className).toMatch(/(^|\s)px-0(\s|$)/)
+    expect(chip.className).toContain("has-[>svg]:px-0")
+    expect(chip.className).not.toMatch(/(^|\s)px-2(\s|$)/)
   })
 
   // The chip is often the only part of the control on screen when the tier

@@ -268,6 +268,60 @@ describe("pre-search source folding", () => {
       candidateCount: 1,
     })
   })
+
+  it("seals who answered an addressed builtin turn from the cached send", async () => {
+    const routeStamp = {
+      handle: "critic",
+      label: "Critic",
+      runtimeKind: "builtin" as const,
+      brandId: "anthropic",
+      teammateId: "tm-1",
+      squadId: "s1",
+    }
+    useChatStore.setState({
+      sessions: {
+        s6: {
+          ...(useChatStore.getState().sessions.s6 ?? {}),
+          messages: [],
+          status: "streaming",
+          pendingApprovals: [],
+        },
+      },
+      openSessionIds: ["s6"],
+      lastSendBySession: {
+        s6: { content: "q", options: {}, attemptIndex: 0, routeStamp },
+      },
+    } as never)
+    applySdkEventMock.mockReturnValueOnce({
+      messages: [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "answer" }] }],
+      turnComplete: true,
+    })
+    const registry = new SessionCoalescingRegistry({
+      onCommit: () => {},
+      onPersist: () => {},
+      persistDelayMs: 0,
+    })
+
+    await handleEvent(
+      { type: "event", sessionId: "s6", event: { type: "result" } } as never,
+      { current: "s6" },
+      { current: [] },
+      { current: new Map() },
+      { current: new Map() },
+      { current: null },
+      {
+        messagesMirrorRef: { current: new Map() },
+        registry,
+        getExecutionHandle: () => undefined,
+      } as never
+    ).catch(() => {})
+
+    const assistant = useChatStore
+      .getState()
+      .sessions.s6?.messages.find((m) => m.role === "assistant")
+    const run = (assistant?.metadata as { run?: { route?: unknown } } | undefined)?.run
+    expect(run?.route).toEqual(routeStamp)
+  })
 })
 
 describe("sidecar log frames", () => {

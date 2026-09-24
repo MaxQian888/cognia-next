@@ -20,18 +20,36 @@ jest.mock("./char-counter", () => ({ CharCounter: () => null }))
 // Stubbed, but not to nothing: the overlay is the composer's TEXT layer now,
 // so whether it is painting is part of the box's arrangement.
 jest.mock("../composer-chip-overlay", () => ({
-  ComposerChipOverlay: ({ hidden }: { hidden?: boolean }) => (
-    <div data-testid="composer-chip-overlay" data-hidden={hidden ? "true" : undefined} />
+  ComposerChipOverlay: ({
+    hidden,
+    routeState,
+  }: {
+    hidden?: boolean
+    routeState?: (segment: { start: number; name: string }) => string | undefined
+  }) => (
+    <div
+      data-testid="composer-chip-overlay"
+      data-hidden={hidden ? "true" : undefined}
+      // Probes the forwarded callback with a leading `@codex` segment.
+      data-leading-route={routeState?.({ start: 0, name: "codex" })}
+    />
   ),
   TEXTAREA_TYPOGRAPHY: "",
   // Real value, not "": the preview box reads it to stay at the textarea's
   // size, and the test below asserts it lands.
   OVERLAY_FONT_SIZE: "var(--composer-text-size, 0.875rem)",
 }))
-jest.mock("./composer-ghost-text", () => ({ ComposerGhostText: () => null }))
+// Both surface only what the touch split decides: whether the manual
+// completion key is advertised, and whether the card drops its keycaps.
+jest.mock("./composer-ghost-text", () => ({
+  ComposerGhostText: ({ manualHint }: { manualHint?: string }) =>
+    manualHint ? <div data-testid="ghost-manual-hint">{manualHint}</div> : null,
+}))
 jest.mock("./composer-ghost-card", () => ({
-  ComposerGhostCard: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="composer-ghost-card" /> : null,
+  ComposerGhostCard: ({ open, isMobile }: { open: boolean; isMobile?: boolean }) =>
+    open ? (
+      <div data-testid="composer-ghost-card" data-touch={isMobile ? "true" : undefined} />
+    ) : null,
 }))
 jest.mock("./drag-overlay", () => ({
   DragOverlay: ({ visible }: { visible: boolean }) =>
@@ -157,10 +175,23 @@ describe("ComposerBox — attach cluster", () => {
     expect(screen.queryByTestId("plus-menu")).not.toBeInTheDocument()
   })
 
-  it('uses the single "+" menu on mobile, where 44px targets compete for width', () => {
-    render(<ComposerBox {...props({ isMobile: true })} />)
+  it('uses the single "+" menu in the native shell, whose camera and album it drives', () => {
+    render(<ComposerBox {...props({ isMobile: true, nativeShell: true })} />)
     expect(screen.getByTestId("plus-menu")).toBeInTheDocument()
     expect(screen.queryByTestId("attach-menu")).not.toBeInTheDocument()
+  })
+
+  // A 375px browser renders the phone layout, but has no native pickers: its
+  // media tiles would all degrade to the file picker the paperclip already is.
+  it("keeps the paperclip menu in a phone-shaped browser layout", () => {
+    render(<ComposerBox {...props({ isMobile: true, nativeShell: false })} />)
+    expect(screen.getByTestId("attach-menu")).toBeInTheDocument()
+    expect(screen.queryByTestId("plus-menu")).not.toBeInTheDocument()
+  })
+
+  it("floors the send button to the touch target in the phone layout", () => {
+    render(<ComposerBox {...props({ isMobile: true })} />)
+    expect(screen.getByRole("button", { name: "ariaSend" }).className).toContain("touch-target")
   })
 
   it("shows the drop overlay only while a file drag is active", () => {
@@ -177,6 +208,42 @@ describe("ComposerBox — send button", () => {
     render(<ComposerBox {...props({ submit })} />)
     screen.getByLabelText("ariaSend").click()
     expect(submit).toHaveBeenCalled()
+  })
+
+  // The draft mode was built, then left unreachable behind a hard-coded
+  // `false` — and its button called `submit()` on an empty box. It opens the
+  // review dialog now.
+  it("opens the draft review instead of submitting in draft mode", () => {
+    const submit = jest.fn()
+    const onReviewDrafts = jest.fn()
+    render(
+      <ComposerBox
+        {...props({
+          submit,
+          onReviewDrafts,
+          pendingDraftCount: 2,
+          sendButton: { mode: "draft", disabled: false, variant: "secondary", queues: false },
+        })}
+      />
+    )
+    const button = screen.getByTestId("composer-review-drafts")
+    expect(button).toHaveAccessibleName("reviewDraftsAria")
+    expect(button).toHaveTextContent("reviewDraftsLabel")
+    expect(button).toHaveTextContent("2")
+    button.click()
+    expect(onReviewDrafts).toHaveBeenCalledTimes(1)
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it("does not offer a draft review it cannot open", () => {
+    render(
+      <ComposerBox
+        {...props({
+          sendButton: { mode: "draft", disabled: false, variant: "secondary", queues: false },
+        })}
+      />
+    )
+    expect(screen.getByTestId("composer-review-drafts")).toBeDisabled()
   })
 
   it("stops instead of sending while a turn is running", () => {
@@ -208,15 +275,16 @@ describe("ComposerBox — send button", () => {
     expect(screen.getByLabelText("preparing")).toBeInTheDocument()
   })
 
-  it("renders the draft-edit affordance as a labelled button, not an arrow", () => {
+  it("renders the draft review as a labelled button, not an arrow", () => {
     render(
       <ComposerBox
         {...props({
+          onReviewDrafts: jest.fn(),
           sendButton: { mode: "draft", disabled: false, variant: "default", queues: false },
         })}
       />
     )
-    expect(screen.getByLabelText("editDraftAria")).toBeInTheDocument()
+    expect(screen.getByLabelText("reviewDraftsAria")).toBeInTheDocument()
     expect(screen.queryByLabelText("ariaSend")).not.toBeInTheDocument()
   })
 })
@@ -349,6 +417,23 @@ describe("ComposerBox — resolved tokens actually reach the DOM", () => {
   })
 })
 
+describe("ComposerBox — route tint", () => {
+  it("hands the overlay the composer's route verdict for a mention", () => {
+    const routeState = jest.fn(() => "unavailable" as const)
+    render(<ComposerBox {...props({ routeState })} />)
+    expect(screen.getByTestId("composer-chip-overlay")).toHaveAttribute(
+      "data-leading-route",
+      "unavailable"
+    )
+    expect(routeState).toHaveBeenCalledWith({ start: 0, name: "codex" })
+  })
+
+  it("paints no route without a verdict", () => {
+    render(<ComposerBox {...props()} />)
+    expect(screen.getByTestId("composer-chip-overlay")).not.toHaveAttribute("data-leading-route")
+  })
+})
+
 describe("ComposerBox — the preview owns the words", () => {
   const withPreview = (on: boolean) =>
     props({
@@ -399,5 +484,39 @@ describe("ComposerBox — the preview owns the words", () => {
     render(<ComposerBox {...props({ ...withPreview(false), saveAsTemplate: jest.fn() })} />)
     expect(screen.getByTestId("composer-save-as-template").className).toContain("z-[3]")
     expect(screen.getByTestId("composer-param-preview-toggle").className).toContain("z-[3]")
+  })
+})
+
+describe("ComposerBox — keyboard hints follow the input, not the width", () => {
+  // `isMobile` is layout (a narrow window gets the phone arrangement);
+  // `touchInput` is whether there is a keyboard to press the hinted keys on.
+  const withDraft = (overrides: Partial<ComposerBoxProps>) => {
+    const base = props()
+    return props({
+      textInput: { value: "a draft worth continuing", setInput: jest.fn() },
+      ghost: { ...base.ghost, manualAvailable: true },
+      ...overrides,
+    })
+  }
+
+  it("does not advertise the manual-completion key on a touch screen", () => {
+    render(<ComposerBox {...withDraft({ isMobile: true, touchInput: true })} />)
+    expect(screen.queryByTestId("ghost-manual-hint")).not.toBeInTheDocument()
+  })
+
+  it("keeps advertising it in a narrow desktop window", () => {
+    render(<ComposerBox {...withDraft({ isMobile: true, touchInput: false })} />)
+    expect(screen.getByTestId("ghost-manual-hint")).toHaveTextContent("ghostManualHint")
+  })
+
+  it("drops the suggestion card's keycaps only for touch input", () => {
+    const querying = (touchInput: boolean) => {
+      const base = props()
+      return props({ isMobile: true, touchInput, ghost: { ...base.ghost, querying: true } })
+    }
+    const { rerender } = render(<ComposerBox {...querying(false)} />)
+    expect(screen.getByTestId("composer-ghost-card")).not.toHaveAttribute("data-touch")
+    rerender(<ComposerBox {...querying(true)} />)
+    expect(screen.getByTestId("composer-ghost-card")).toHaveAttribute("data-touch", "true")
   })
 })

@@ -1,18 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CodeIcon, GitCompareArrowsIcon } from "lucide-react"
+import { FileCodeIcon, FolderTreeIcon, GitCompareArrowsIcon, ListChecksIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
 import { CodeServerWebPane } from "@/components/editor/project/code-server-web-pane"
 import { EditorEngineToggle } from "@/components/editor/project/editor-engine-toggle"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
-import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
 import { ProjectRootSwitcher } from "@/components/editor/project/project-root-switcher"
 import {
   ProjectEditorFileWorkbench,
@@ -255,6 +255,7 @@ function WorkspaceEditorBody({
     // Whichever engine is mounted owns project-editor jumps; in Pro IDE mode the
     // CodeServerPane registers the opener instead.
     registerProjectOpener: engine === "monaco",
+    layout: layout === "mobile" ? "mobile" : "split",
   })
   const { gotoLine } = workbench
   const editor = workbench.editor
@@ -283,19 +284,7 @@ function WorkspaceEditorBody({
       cancelled = true
     }
   }, [activeTask, activateTask, sessionId, workingDir])
-  const {
-    roots,
-    rootKey,
-    rootPath,
-    openFiles,
-    activePath,
-    dirtyCount,
-    selectRoot,
-    closeFile,
-    setActivePath,
-    pinned,
-    resumeFollow,
-  } = editor
+  const { roots, rootKey, rootPath, selectRoot, pinned, resumeFollow } = editor
 
   // One resolver for every directory-facing panel. The pin layer is fed from
   // the editor's own selection rather than a separate store — for this panel
@@ -327,6 +316,15 @@ function WorkspaceEditorBody({
   const selectFile = useGitStore((state) => state.selectFile)
   const committing = useGitStore((state) => state.ops.commit)
   const hasReview = gitRootDir === rootPath && repoState?.isRepo === true
+  // Distinct paths across every group — a file staged and then edited again
+  // is one change to review, not two.
+  const changeCount = useMemo(
+    () =>
+      status
+        ? new Set([...status.staged, ...status.changes, ...status.merge].map((f) => f.path)).size
+        : 0,
+    [status]
+  )
   const refresh = useCallback(() => refreshGitStatus(rootPath), [rootPath])
   const gitActions = useGitActions(refresh)
   const selectReviewFile = useCallback(
@@ -441,140 +439,165 @@ function WorkspaceEditorBody({
     reviewEmpty
   )
 
+  const touch = layout === "mobile"
+  const zen = workbench.zenMode && !touch && engine === "monaco" && visibleSurface === "file"
+  // One visual language for every switch on the toolbar row — the engine
+  // toggle beside them is the same outline ToggleGroup.
+  const toggleItemClass = cn("gap-1 text-xs", touch ? "h-9 px-3 text-sm" : "h-7 px-2")
+  // The dock runs from its 480px floor to ~900px, and one row has to hold the
+  // root controls and up to three switches. Rather than wrap onto a second row
+  // (a band of chrome the editor pays for in height), the switches drop their
+  // words for their icons as the dock narrows — the scope and engine switches
+  // first, the Editor/Review switch last. Touch keeps its labels: the phone
+  // sheet wraps instead, and icon-only targets are guesswork on a phone.
+  const scopeLabelClass = touch ? undefined : "hidden @3xl/dock-ws:inline"
+  const surfaceLabelClass = touch ? undefined : "hidden @2xl/dock-ws:inline"
+
   return (
     <div
-      className="flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-x-hidden"
+      className="@container/dock-ws flex h-full w-full min-h-0 min-w-0 max-w-full flex-col overflow-x-hidden"
       data-testid="dock-workspace"
-      onKeyDown={workbench.onKeyDown}
     >
-      {roots.length > 1 || hasTaskScope || rootTarget.root ? (
+      <div
+        className={cn(
+          "flex min-w-0 shrink-0 items-center gap-x-2 gap-y-1 border-b bg-muted/20 px-2 py-1",
+          touch ? "flex-wrap" : "flex-nowrap"
+        )}
+        data-testid="dock-workspace-toolbar"
+        // Zen hides every surface around the text; the dock's own toolbar is
+        // one of them. Esc Esc (or ⌘K Z) inside the editor brings it back.
+        hidden={zen}
+      >
+        <ProjectRootSwitcher
+          roots={roots}
+          rootKey={rootKey}
+          onSelect={selectRoot}
+          followedRoot={followedRoot}
+          density={touch ? "touch" : "compact"}
+        />
+        <PanelRootChip
+          panel="editor"
+          target={rootTarget}
+          {
+            /* Only while pinned. Following has no "pin here" to offer — the
+              root switcher beside it is how you pin, and a control that did
+              nothing would be the dead affordance the chip exists to avoid. */
+            ...(pinned ? { onTogglePin: resumeFollow } : {})
+          }
+          className="min-w-0"
+        />
         <div
-          className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1"
-          data-testid="dock-workspace-toolbar"
+          className={cn(
+            "ml-auto flex min-w-0 items-center justify-end gap-1.5",
+            touch ? "flex-wrap" : "shrink-0 flex-nowrap"
+          )}
         >
-          <ProjectRootSwitcher
-            roots={roots}
-            rootKey={rootKey}
-            onSelect={selectRoot}
-            followedRoot={followedRoot}
-            density={layout === "mobile" ? "touch" : "compact"}
-          />
-          <PanelRootChip
-            panel="editor"
-            target={rootTarget}
-            {
-              /* Only while pinned. Following has no "pin here" to offer — the
-                root switcher above is how you pin, and a control that did
-                nothing would be the dead affordance the chip exists to avoid. */
-              ...(pinned ? { onTogglePin: resumeFollow } : {})
-            }
-            className="min-w-0"
-          />
-          {hasTaskScope ? (
-            <div
-              className="ml-auto flex rounded-md border bg-muted/30 p-0.5"
-              role="group"
-              aria-label={t("scopeLabel")}
+          {visibleScope === "workspace" && hasReview ? (
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={visibleSurface}
+              // Radix lets the pressed item deselect itself, which would leave
+              // the dock showing nothing — an empty value is ignored instead.
+              onValueChange={(next) => {
+                if (next === "file" || next === "review") setSurface(next)
+              }}
+              aria-label={t("surfaceLabel")}
+              data-testid="workspace-surface-switch"
             >
-              <button
-                type="button"
-                aria-pressed={visibleScope === "task"}
-                className={cn(
-                  "rounded px-2 py-1 text-xs",
-                  visibleScope === "task" ? "bg-background shadow-sm" : "text-muted-foreground"
-                )}
-                onClick={() => setScope("task")}
+              <ToggleGroupItem
+                value="file"
+                className={toggleItemClass}
+                data-testid="workspace-surface-file"
+                aria-label={editorLabels("editorTab")}
+                title={touch ? undefined : editorLabels("editorTab")}
               >
-                {t("currentTask")}
-              </button>
-              <button
-                type="button"
-                aria-pressed={visibleScope === "workspace"}
-                className={cn(
-                  "rounded px-2 py-1 text-xs",
-                  visibleScope === "workspace" ? "bg-background shadow-sm" : "text-muted-foreground"
-                )}
-                onClick={() => setScope("workspace")}
+                <FileCodeIcon className="size-3.5" />
+                <span className={surfaceLabelClass}>{editorLabels("editorTab")}</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="review"
+                className={toggleItemClass}
+                data-testid="workspace-surface-review"
+                aria-label={
+                  changeCount > 0 ? t("reviewWithCount", { count: changeCount }) : t("review")
+                }
+                title={
+                  touch
+                    ? undefined
+                    : changeCount > 0
+                      ? t("reviewWithCount", { count: changeCount })
+                      : t("review")
+                }
               >
-                {t("allWorkspace")}
-              </button>
-            </div>
+                <GitCompareArrowsIcon className="size-3.5" />
+                <span className={surfaceLabelClass}>{t("review")}</span>
+                {changeCount > 0 ? (
+                  <span
+                    className="min-w-4 rounded-full bg-primary/15 px-1 text-[10px] font-semibold leading-4 text-primary tabular-nums"
+                    data-testid="workspace-review-count"
+                    aria-hidden
+                  >
+                    {changeCount > 99 ? "99+" : changeCount}
+                  </span>
+                ) : null}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          ) : null}
+          {proIdeAllowed && visibleScope === "workspace" ? (
+            <EditorEngineToggle
+              value={engine}
+              onChange={setEngine}
+              proIdeSupport={proIdeSupport}
+              projectRoot={rootPath}
+              proIdeProfile={proIdeProfile}
+              onProIdeProfileChange={setProIdeProfile}
+              labelClassName={scopeLabelClass}
+            />
+          ) : null}
+          {hasTaskScope ? (
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={visibleScope}
+              onValueChange={(next) => {
+                if (next === "task" || next === "workspace") setScope(next)
+              }}
+              aria-label={t("scopeLabel")}
+              data-testid="workspace-scope-switch"
+            >
+              <ToggleGroupItem
+                value="task"
+                className={toggleItemClass}
+                data-testid="workspace-scope-task"
+                aria-label={t("currentTask")}
+                title={touch ? undefined : t("currentTask")}
+              >
+                <ListChecksIcon className="size-3.5" />
+                <span className={scopeLabelClass}>{t("currentTask")}</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="workspace"
+                className={toggleItemClass}
+                data-testid="workspace-scope-all"
+                aria-label={t("allWorkspace")}
+                title={touch ? undefined : t("allWorkspace")}
+              >
+                <FolderTreeIcon className="size-3.5" />
+                <span className={scopeLabelClass}>{t("allWorkspace")}</span>
+              </ToggleGroupItem>
+            </ToggleGroup>
           ) : null}
         </div>
-      ) : null}
+      </div>
       {visibleScope === "task" ? (
         <div className="min-h-0 flex-1">
           <TaskResourcesPanel sessionId={sessionId} layout={layout} />
         </div>
       ) : (
         <>
-          <ProjectEditorTabs
-            density={layout === "mobile" ? "touch" : "compact"}
-            trailingContent={
-              proIdeAllowed && visibleScope === "workspace" ? (
-                <EditorEngineToggle
-                  value={engine}
-                  onChange={setEngine}
-                  proIdeSupport={proIdeSupport}
-                  projectRoot={rootPath}
-                  proIdeProfile={proIdeProfile}
-                  onProIdeProfileChange={setProIdeProfile}
-                />
-              ) : undefined
-            }
-            fixedTabs={
-              hasReview
-                ? [
-                    ...(engine === "codeserver" || openFiles.length === 0
-                      ? [
-                          {
-                            id: "file",
-                            label: editorLabels("editorTab"),
-                            icon: <CodeIcon className="size-3.5" />,
-                            active: visibleSurface === "file",
-                            onSelect: showFileSurface,
-                          },
-                        ]
-                      : []),
-                    {
-                      id: "review",
-                      label: t("review"),
-                      icon: <GitCompareArrowsIcon className="size-3.5" />,
-                      active: visibleSurface === "review",
-                      onSelect: () => setSurface("review"),
-                    },
-                  ]
-                : undefined
-            }
-            // Pro IDE keeps its own editor tabs inside VS Code; showing Monaco's
-            // open-file strip alongside would list a different set of files. The
-            // strip still renders so the fixed "review" tab stays reachable.
-            files={engine === "codeserver" ? [] : openFiles}
-            activePath={visibleSurface === "file" ? activePath : null}
-            previewPath={engine === "codeserver" ? null : editor.previewPath}
-            dirtyCount={engine === "codeserver" ? 0 : dirtyCount}
-            onSelect={(path) => {
-              setSurface("file")
-              if (layout === "mobile") workbench.setMobilePane("editor")
-              setActivePath(path)
-            }}
-            onClose={closeFile}
-            onPin={editor.pinFile}
-            onSaveAll={workbench.saveAll}
-            onMove={editor.moveOpenFile}
-            onCloseOthers={editor.closeOtherFiles}
-            onCloseToRight={editor.closeFilesToRight}
-            onCloseAll={editor.closeAllFiles}
-            onReopenClosed={editor.reopenClosedFile}
-            onCopyPath={(relPath, absolute) => {
-              const target = openFiles.find((f) => f.relPath === relPath)
-              if (target) {
-                void navigator.clipboard?.writeText(absolute ? target.absolutePath : target.relPath)
-              }
-            }}
-            onRevert={(relPath) => void editor.reloadFile(relPath)}
-          />
-
           {engine === "codeserver" ? (
             <div
               className={cn("min-h-0 flex-1", visibleSurface !== "file" && "hidden")}
@@ -607,21 +630,22 @@ function WorkspaceEditorBody({
               className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden"
               data-testid="workspace-file-layout"
               hidden={visibleSurface !== "file"}
+              // Editor chords belong to the editor surface alone: bound on the
+              // dock root they also fired from the Review and task surfaces,
+              // saving or closing a tab nobody could see.
+              onKeyDown={workbench.onKeyDown}
             >
               <ProjectEditorFileWorkbench
                 workbench={workbench}
                 active={visibleSurface === "file"}
-                sidebarPosition="right"
                 panelIdPrefix="workspace"
-                showContextWorkbench={false}
-                layout={layout === "mobile" ? "mobile" : "split"}
               />
             </div>
           ) : null}
 
           {visibleSurface === "review" && hasReview ? (
             <div className="min-h-0 flex-1" data-testid="workspace-review-layout">
-              {layout === "mobile" ? (
+              {touch ? (
                 <div className="flex h-full min-h-0 flex-col">
                   <div
                     className="grid shrink-0 grid-cols-2 border-b bg-background/95 p-1"

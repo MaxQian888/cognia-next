@@ -13,6 +13,7 @@ import { useChatStore, type PermissionMode } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 import {
   cyclePermissionMode,
   permissionModeMeta,
@@ -78,7 +79,7 @@ export function PermissionModeIndicator({
           className={cn(
             "h-auto min-w-0 shrink gap-1 px-2 py-0.5 text-[11px] font-normal transition-colors hover:bg-accent",
             className,
-            glyph && "w-7 justify-center px-0",
+            glyph && COMPOSER_TOOLBAR_GLYPH,
             meta.tone
           )}
           aria-label={t("aria", { label })}

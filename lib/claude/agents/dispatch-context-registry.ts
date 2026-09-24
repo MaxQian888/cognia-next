@@ -17,7 +17,7 @@
  * `finally` so a re-used sessionId never inherits a stale context.
  */
 
-import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 
 export interface DispatchContext {
   /** Nesting level the agent owning this session runs at. Top-level chat = 0. */

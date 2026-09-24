@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { importHandoffSession, canonicalTurnToHandoffMessage } from "./import-handoff-session"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
@@ -16,6 +17,46 @@ beforeEach(async () => {
 afterAll(dbFixture.dispose)
 
 describe("importHandoffSession", () => {
+  it("persists historical goals in the seed without restoring historical permissions", async () => {
+    const state = {
+      goals: [{ goalId: "g", description: "Do not deploy", status: "active" }],
+      permissions: [{ requestId: "p", toolName: "shell", decision: "allow" }],
+    }
+    const session = await importHandoffSession({
+      sessionId: "state",
+      messages: [{ role: "user", content: "Continue" }],
+      historicalState: state as never,
+    })
+    expect(session.importCanonicalState?.goals).toEqual(state.goals)
+    expect(session.importCanonicalState?.permissions).toBeUndefined()
+    expect(session.branchSeed?.content).toContain("Do not deploy")
+    expect(session.branchSeed?.content).not.toContain('"decision":"allow"')
+  })
+
+  it("keeps a completed tool error as failed historical evidence", () => {
+    const message = canonicalTurnToHandoffMessage({
+      turnId: "failed",
+      role: "assistant",
+      text: "",
+      toolCalls: [
+        {
+          callId: "call",
+          toolName: "test",
+          status: "completed",
+          isError: true,
+          resultText: "Tests failed",
+        },
+      ],
+    })
+    expect(message.parts).toContainEqual(
+      expect.objectContaining({
+        toolCallId: "call",
+        state: "output-error",
+        errorText: "Tests failed",
+      })
+    )
+  })
+
   it("imports structured turns and the target lock atomically, with stable scoped message ids", async () => {
     const message = canonicalTurnToHandoffMessage({
       turnId: "turn",

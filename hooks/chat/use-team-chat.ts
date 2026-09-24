@@ -30,9 +30,12 @@ import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import { createDiagnostic } from "@cognia/diagnostics"
+import type { TurnRoute } from "@/lib/chat/turn-route/types"
 import { onClaudeMessage } from "@/lib/claude/ipc"
 import { makeUserMessage } from "@/lib/claude/adapter"
 import type {
@@ -76,12 +79,22 @@ export interface TeamSendOptions {
   promptPreamble?: PromptPreambleSummary
   /** The records this turn cites, from the composer's sent chips. */
   citations?: readonly ContextRef[]
+  /**
+   * A runtime route (`@claude` / `@codex` / `@<Squad member>`,
+   * `lib/chat/turn-route/`) belongs to direct chats: a room routes `@Name`
+   * through its own router and has no lane to move one turn to. Declared only
+   * so a route that reaches this send through a shared path is REFUSED with
+   * the reason — spread into these options it would otherwise be dropped
+   * without a word and the room would get "@codex …" as plain text.
+   */
+  turnRoute?: TurnRoute | null
 }
 
 type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
 
 export function useTeamChat() {
   const tInlineErr = useTranslations("chat.inlineError")
+  const tAttachments = useTranslations("chat.composer.attachments")
   const companion = isCompanionShell()
   const engine = useMemo<{ runner: RoomRunner; projector: CompanionRoomProjector | null }>(
     () =>
@@ -189,11 +202,27 @@ export function useTeamChat() {
         useChatStore.getState().setError(tInlineErr("noSession"))
         return
       }
-      if (engine.projector) {
-        await sendViaHost(sessionId, content, opts)
+      if (opts?.turnRoute) {
+        // Same code and reason the direct controller uses for a route into a
+        // conversation that cannot take one; nothing is written to the room.
+        useChatStore.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("turnRouteUnavailable", {
+            source: "agent-team",
+            meta: {
+              sessionId,
+              extra: { handle: opts.turnRoute.handle, reason: "unroutable-session" },
+            },
+          })
+        )
         return
       }
-      await engine.runner.send(content, { ...opts, sessionId })
+      const { turnRoute: _route, ...roomOpts } = opts ?? {}
+      if (engine.projector) {
+        await sendViaHost(sessionId, content, roomOpts)
+        return
+      }
+      await engine.runner.send(content, { ...roomOpts, sessionId })
     },
     [engine, sendViaHost, tInlineErr]
   )
@@ -286,6 +315,21 @@ export function useTeamChat() {
     [engine, drainSteerInto]
   )
 
+  /**
+   * Name the files an edit or a regenerate could not send again. The runner
+   * that rebuilt the turn reports them: this device's own, or the host's
+   * through `room_send`'s result.
+   */
+  const warnNotResent = useCallback(
+    (filenames: readonly string[] | undefined) => {
+      if (!filenames?.length) return
+      toast.warning(
+        tAttachments("notResent", { count: filenames.length, names: filenames.join(", ") })
+      )
+    },
+    [tAttachments]
+  )
+
   /** Re-issue the most recent user turn, keeping the old replies as branches. */
   const regenerate = useCallback(
     async (targetSessionId?: string) => {
@@ -296,6 +340,7 @@ export function useTeamChat() {
         try {
           const result = await sendRoomTurn({ sessionId, regenerate: true })
           if (!result.accepted) throw new Error("room_send was not accepted")
+          warnNotResent(result.notResent)
         } catch (err) {
           useChatStore.getState().setSessionStatus(sessionId, "idle")
           useChatStore
@@ -307,9 +352,9 @@ export function useTeamChat() {
         }
         return
       }
-      await engine.runner.regenerate(sessionId)
+      await engine.runner.regenerate(sessionId, undefined, warnNotResent)
     },
-    [engine]
+    [engine, warnNotResent]
   )
 
   /** Edit a sent user message without destroying the team turn below it. */
@@ -326,6 +371,7 @@ export function useTeamChat() {
             editMessageId: messageId,
           })
           if (!result.accepted) throw new Error("room_send was not accepted")
+          warnNotResent(result.notResent)
         } catch (err) {
           useChatStore.getState().setSessionStatus(sessionId, "idle")
           useChatStore
@@ -337,9 +383,11 @@ export function useTeamChat() {
         }
         return
       }
-      await engine.runner.editAndResend(sessionId, messageId, newContent)
+      await engine.runner.editAndResend(sessionId, messageId, newContent, {
+        onNotResent: warnNotResent,
+      })
     },
-    [engine]
+    [engine, warnNotResent]
   )
 
   /** Approve or deny a tool call. Routes to the member sub-session. */

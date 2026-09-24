@@ -72,7 +72,7 @@ import {
   type AutoRoundStop,
   type TeamReply,
 } from "@/lib/claude/team-router"
-import { canSendMessage, type RecentMessage } from "@/lib/ai/agent/team/message-guard"
+import { canSendMessage, type RecentMessage } from "@/lib/ai/agent/team/gates/message-guard"
 import {
   duplicateTeamResponseIds,
   resolveTeamResponseCap,
@@ -184,6 +184,12 @@ export interface RoomSendOptions {
   citations?: readonly ContextRef[]
 }
 
+/** Options for `editAndResend`: a send's, plus where to report files left out. */
+export type RoomEditOptions = Omit<RoomSendOptions, "sessionId" | "branchTag"> & {
+  /** The filenames the edited row cannot send again, before the turn is accepted. */
+  onNotResent?: (filenames: readonly string[]) => void
+}
+
 interface SubResolver {
   resolve: () => void
   reject: (err: Error) => void
@@ -276,7 +282,20 @@ export class RoomRunner {
    */
   private readonly pendingEditOwners = new Map<string, string>()
   private readonly pendingWebSearch = new Map<string, SendOptions["webSearchContext"]>()
-  private readonly lastUserContent = new Map<string, SendContent>()
+  /**
+   * The user turn this runner last wrote, per room: exactly what was sent (a
+   * natively sent video's file is not in the row), its attachment manifest,
+   * and the row it belongs to. A regenerate of any other turn rebuilds from
+   * that turn's own row.
+   */
+  private readonly lastUserContent = new Map<
+    string,
+    {
+      messageId: string
+      content: SendContent
+      manifest: readonly AttachmentManifestEntry[] | undefined
+    }
+  >()
   /** Per member sub-session: the activity last published and its stale timer. */
   private readonly activity = new Map<
     string,
@@ -391,8 +410,11 @@ export class RoomRunner {
     if (!skipsUserTurn(opts)) {
       const st = sinks.status.get(sessionId)
       if (st === "streaming" || st === "awaiting_approval") {
-        const text = steerTextOf(content)
-        const blocks = steerBlocksOf(content)
+        // Past the attachments, as direct chat queues a steer: an extracted
+        // document is a text block too, and is not what the user typed.
+        const attachmentCount = opts.attachmentManifest?.length ?? 0
+        const text = steerTextOf(content, attachmentCount)
+        const blocks = steerBlocksOf(content, attachmentCount)
         if (!text && blocks.length === 0) return
         const entryId = crypto.randomUUID()
         const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
@@ -413,6 +435,13 @@ export class RoomRunner {
           id: entryId,
           text,
           blocks: blocks.length > 0 ? blocks : undefined,
+          ...(opts.attachmentManifest?.length
+            ? {
+                attachmentManifest: opts.attachmentManifest.map(
+                  ({ original: _original, ...entry }) => entry
+                ),
+              }
+            : {}),
           webSearchContext: opts.webSearchContext,
           ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
           // The queue copy is what a replay forwards when this device is not
@@ -455,9 +484,10 @@ export class RoomRunner {
     const members = await deps.db.listCharactersByIds(memberIds)
     const memberByCharId = new Map<string, TeamMember>(team.members.map((m) => [m.characterId, m]))
     // Routing, the twin embedding, `@member` parsing and memory all key off what
-    // the user typed — never off a referenced document in front of it.
-    const userText = stripPromptPreamble(asPlainText(content))
-    this.lastUserContent.set(sessionId, content)
+    // the user typed — never off a referenced document in front of it, an
+    // attached file's extracted text (a text block ahead of the typed one), or
+    // a fetched page after it.
+    const userText = stripPromptPreamble(steerTextOf(content, opts.attachmentManifest?.length ?? 0))
 
     // Embed the user message ONCE per turn so twin-bound members can share the
     // same query vector, and build the memory read deps once for the same reason.
@@ -521,6 +551,11 @@ export class RoomRunner {
       const before = sinks.messages.read(sessionId) ?? (await deps.db.listMessages(sessionId))
       const after = [...before, userMsg]
       sinks.messages.commit(sessionId, after)
+      this.lastUserContent.set(sessionId, {
+        messageId: userMsg.id,
+        content,
+        manifest: opts.attachmentManifest,
+      })
       try {
         await deps.db.persistMessages(sessionId, after)
         await deps.db.touchSession(sessionId)
@@ -787,12 +822,26 @@ export class RoomRunner {
   /**
    * Re-issue the most recent user turn. Non-destructive: existing replies
    * become branches, tagged per member.
+   *
+   * The turn goes again with its files. `onNotResent` receives, before the
+   * turn is accepted, the filenames its row cannot send again (a natively sent
+   * video, an image whose bytes are gone), for the caller to tell the user.
    */
-  async regenerate(sessionId: string, onAccepted?: () => void): Promise<void> {
-    return this.reserveTurn(sessionId, () => this.regenerateTurn(sessionId, onAccepted))
+  async regenerate(
+    sessionId: string,
+    onAccepted?: () => void,
+    onNotResent?: (filenames: readonly string[]) => void
+  ): Promise<void> {
+    return this.reserveTurn(sessionId, () =>
+      this.regenerateTurn(sessionId, onAccepted, onNotResent)
+    )
   }
 
-  private async regenerateTurn(sessionId: string, onAccepted?: () => void): Promise<void> {
+  private async regenerateTurn(
+    sessionId: string,
+    onAccepted?: () => void,
+    onNotResent?: (filenames: readonly string[]) => void
+  ): Promise<void> {
     const messages =
       this.sinks.messages.read(sessionId) ?? (await this.deps.db.listMessages(sessionId))
     let lastUserIdx = -1
@@ -821,24 +870,44 @@ export class RoomRunner {
       seenByMember: new Map(),
     })
 
+    // The turn goes again as it was sent: from the cache when it is the turn
+    // this runner last wrote, else rebuilt from its own row, files included,
+    // with the manifest that keeps them from reading as the question.
     const cached = this.lastUserContent.get(sessionId)
-    const content: SendContent =
-      cached ??
-      anchor.parts
-        .filter(
-          (p): p is { type: "text"; text: string } => (p as { type?: string }).type === "text"
-        )
-        .map((p) => p.text)
-        .join("")
-    await this.sendTurn(content, { sessionId, skipPersistUserTurn: true, onAccepted })
+    let content: SendContent
+    let manifest: readonly AttachmentManifestEntry[] | undefined
+    if (cached?.messageId === anchor.id) {
+      content = cached.content
+      manifest = cached.manifest
+    } else {
+      const { resendableUserTurn } = await import("@/lib/chat/attachments/resend")
+      const rebuilt = await resendableUserTurn(anchor.parts)
+      content = rebuilt.content
+      manifest = rebuilt.manifest
+      if (rebuilt.unavailable.length > 0) onNotResent?.(rebuilt.unavailable)
+    }
+    await this.sendTurn(content, {
+      sessionId,
+      skipPersistUserTurn: true,
+      ...(manifest?.length ? { attachmentManifest: manifest } : {}),
+      onAccepted,
+    })
   }
 
-  /** Edit a sent user message without destroying the turn below it. */
+  /**
+   * Edit a sent user message without destroying the turn below it.
+   *
+   * Same as the direct-chat edit: plain-text `newContent` (every edit surface
+   * drafts the typed text alone) goes with the original's files, read from its
+   * row. A caller that builds the blocks passes their `attachmentManifest` and
+   * decides the files itself. `onNotResent` receives, before the turn is
+   * accepted, the filenames the row cannot send again.
+   */
   async editAndResend(
     sessionId: string,
     messageId: string,
     newContent: SendContent,
-    options: Omit<RoomSendOptions, "sessionId" | "branchTag"> = {}
+    options: RoomEditOptions = {}
   ): Promise<void> {
     return this.reserveTurn(sessionId, () =>
       this.editTurn(sessionId, messageId, newContent, options)
@@ -849,13 +918,28 @@ export class RoomRunner {
     sessionId: string,
     messageId: string,
     newContent: SendContent,
-    options: Omit<RoomSendOptions, "sessionId" | "branchTag">
+    { onNotResent, ...options }: RoomEditOptions
   ): Promise<void> {
     const messages =
       this.sinks.messages.read(sessionId) ?? (await this.deps.db.listMessages(sessionId))
     const editedIdx = messages.findIndex((message) => message.id === messageId)
     if (editedIdx < 0 || messages[editedIdx].role !== "user") return
     const edited = messages[editedIdx]
+    // The original's files go with a plain-text edit, read before anything is
+    // tagged.
+    let content: SendContent = newContent
+    let attachmentManifest = options.attachmentManifest
+    if (typeof newContent === "string" && !attachmentManifest?.length) {
+      const { resendableAttachments } = await import("@/lib/chat/attachments/resend")
+      const carried = await resendableAttachments(edited.parts)
+      if (carried.blocks.length > 0) {
+        content = newContent.trim()
+          ? [...carried.blocks, { type: "text", text: newContent }]
+          : carried.blocks
+        attachmentManifest = carried.manifest
+      }
+      if (carried.unavailable.length > 0) onNotResent?.(carried.unavailable)
+    }
     const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
     this.sinks.messages.commit(sessionId, merged)
     await this.deps.db.persistMessages(sessionId, merged)
@@ -863,13 +947,17 @@ export class RoomRunner {
     // original envelope and its citations come from the row being replaced.
     const promptPreamble = readPromptPreambleSummary(edited.metadata)
     const citations = chipCitationsOf(edited.metadata)
-    await this.sendTurn(carryPromptPreamble(edited.parts, newContent), {
-      ...options,
-      ...(promptPreamble ? { promptPreamble } : {}),
-      ...(citations.length > 0 ? { citations } : {}),
-      sessionId,
-      branchTag: { groupId, index: nextIndex },
-    })
+    await this.sendTurn(
+      carryPromptPreamble(edited.parts, content, attachmentManifest?.length ?? 0),
+      {
+        ...options,
+        ...(attachmentManifest?.length ? { attachmentManifest } : {}),
+        ...(promptPreamble ? { promptPreamble } : {}),
+        ...(citations.length > 0 ? { citations } : {}),
+        sessionId,
+        branchTag: { groupId, index: nextIndex },
+      }
+    )
   }
 
   /** Approve or deny a tool call on a member sub-session. */
@@ -926,6 +1014,9 @@ export class RoomRunner {
             steerDrain: true,
             webSearchContext,
             ...(replyTo ? { replyTo } : {}),
+            ...(references?.attachmentManifest
+              ? { attachmentManifest: references.attachmentManifest }
+              : {}),
             ...(references?.citations ? { citations: references.citations } : {}),
             ...(references?.promptPreamble ? { promptPreamble: references.promptPreamble } : {}),
             onAccepted: () => {
@@ -1792,12 +1883,4 @@ function authorMetadata(opts: RoomSendOptions): Record<string, unknown> {
       },
     },
   }
-}
-
-export function asPlainText(content: SendContent): string {
-  if (typeof content === "string") return content
-  return content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
-    .join(" ")
 }

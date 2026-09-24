@@ -38,7 +38,7 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: (...a: unknown[]) => tryBuildTwinDepsMock(...a),
 }))
 const runTwinSearchMock = jest.fn()
-jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+jest.mock("@/lib/ai/agent/team/teammate/twin-context", () => ({
   searchTwinKnowledge: (...a: unknown[]) => runTwinSearchMock(...a),
 }))
 // team_post_to_chat (W5) default-deps seams — all dynamic-imported by

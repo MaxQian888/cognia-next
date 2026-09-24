@@ -19,7 +19,7 @@ jest.mock("@/components/desktop/status-bar-zone", () => ({
   StatusBarZone: ({ items }: { items: { id: string }[] }) =>
     items.map(({ id }) => <span key={id} data-testid={`segment-${id}`} />),
 }))
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
 import {
@@ -208,12 +208,20 @@ jest.mock("./preset-chip", () => ({
     movedControlsVisible ? <div data-testid="composer-preset-chip" className={className} /> : null,
 }))
 jest.mock("./credential-badge", () => ({
-  ComposerCredentialBadge: () =>
-    movedControlsVisible ? <div data-testid="composer-credential-badge" /> : null,
+  ComposerCredentialBadge: (props: { glyph?: boolean }) =>
+    movedControlsVisible ? (
+      <div data-testid="composer-credential-badge" data-glyph={props.glyph ? "true" : undefined} />
+    ) : null,
 }))
 jest.mock("@/components/chat/session-cost-badge-live", () => ({
-  SessionCostBadgeLive: (props: { compact?: boolean }) => (
-    <div data-testid="session-cost-badge" data-compact={props.compact || undefined} />
+  SessionCostBadgeLive: (props: { compact?: boolean; triggerClassName?: string }) => (
+    <div
+      data-testid="session-cost-badge"
+      data-compact={props.compact || undefined}
+      // Only the row copy wears the toolbar chip; the menu and rail copies
+      // keep the badge's own trigger.
+      data-row-chip={props.triggerClassName?.includes("h-7") ? "true" : undefined}
+    />
   ),
 }))
 
@@ -297,6 +305,10 @@ describe("BottomToolbar — session-kind branching", () => {
       const cluster = screen.getByTestId("composer-status-cluster")
       expect(cluster).toContainElement(screen.getByTestId("session-cost-badge"))
       expect(cluster).toContainElement(screen.getByTestId("composer-credential-badge"))
+      // On the wide row both are chips of the row, and the warning keeps its
+      // words.
+      expect(screen.getByTestId("session-cost-badge")).toHaveAttribute("data-row-chip", "true")
+      expect(screen.getByTestId("composer-credential-badge")).not.toHaveAttribute("data-glyph")
     } finally {
       movedControlsVisible = false
     }
@@ -314,6 +326,17 @@ describe("BottomToolbar — session-kind branching", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.queryByTestId("composition-chip")).toBeNull()
+  })
+
+  it("does not apply builtin credential warnings to an external runtime", () => {
+    agentRuntimeState.runtimeRef = { kind: "external", agentId: "pi" }
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} />)
+      expect(screen.queryByTestId("composer-credential-badge")).toBeNull()
+    } finally {
+      movedControlsVisible = false
+    }
   })
 
   /**
@@ -705,6 +728,19 @@ describe("BottomToolbar — the fold ladder", () => {
     }
   })
 
+  it("folds the credential warning to its key glyph at tier 2", () => {
+    mockToolbarWidth = 450
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} />)
+      // The "No API key" warning folds to its key glyph with the per-turn
+      // chips — its words were what squeezed the model chip on a phone.
+      expect(screen.getByTestId("composer-credential-badge")).toHaveAttribute("data-glyph", "true")
+    } finally {
+      movedControlsVisible = false
+    }
+  })
+
   it("glyphs the per-turn chips and folds Agent mode at tier 2", () => {
     mockToolbarWidth = 450
     render(<BottomToolbar session={session} />)
@@ -734,6 +770,7 @@ describe("BottomToolbar — the fold ladder", () => {
       expect(screen.getByTestId("fusion-mode-chip")).toBeInTheDocument()
       expect(fusionChipProps.at(-1)).toMatchObject({ glyph: false })
       expect(screen.getByTestId("session-cost-badge")).not.toHaveAttribute("data-compact")
+      expect(screen.getByTestId("session-cost-badge")).not.toHaveAttribute("data-row-chip")
     } finally {
       fusionChipVisible = false
     }
@@ -866,6 +903,20 @@ describe("BottomToolbar — every layout keeps the whole roster reachable", () =
     fireEvent.click(screen.getByTestId("composer-toolbar-more"))
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+  })
+
+  it("gives the ambient rail the full-verbosity cost and credential", () => {
+    movedControlsVisible = true
+    try {
+      render(<BottomToolbar session={session} variant="expanded" />)
+      const rail = screen.getByTestId("composer-ambient-rail")
+      // The rail owns the ambient numbers at full verbosity, whatever the tier.
+      const credential = within(rail).getByTestId("composer-credential-badge")
+      expect(credential).not.toHaveAttribute("data-glyph")
+      expect(within(rail).getByTestId("session-cost-badge")).not.toHaveAttribute("data-row-chip")
+    } finally {
+      movedControlsVisible = false
+    }
   })
 
   it("lays the roster out inline under full, with an ambient rail beside it", () => {

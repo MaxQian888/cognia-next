@@ -478,6 +478,10 @@ describe("message display actions", () => {
       expect(cls).toContain("group-hover:opacity-100")
       expect(cls).toContain("focus-within:opacity-100")
       expect(cls).toContain("pointer-coarse:opacity-100")
+      // A Radix popup (the "…" overflow) portals out of the row — hover and
+      // focus-within both fail while it is open, and without this the bar
+      // vanishes under its own menu.
+      expect(cls).toContain("has-[[data-state=open]]:opacity-100")
     } finally {
       mockActions = "all"
     }
@@ -494,6 +498,7 @@ describe("message display actions", () => {
       "group-hover:opacity-100",
       "focus-within:opacity-100",
       "pointer-coarse:opacity-100",
+      "has-[[data-state=open]]:opacity-100",
     ]) {
       expect(HOVER_REVEAL_CLASS).toContain(cls)
     }
@@ -549,6 +554,25 @@ describe("message display actions", () => {
     expect(screen.getByLabelText("copyTooltip")).toBeInTheDocument()
     expect(screen.getByLabelText("moreLabel")).toBeInTheDocument()
     expect(screen.queryByLabelText("shareTooltip")).not.toBeInTheDocument()
+  })
+
+  it("marks the overflow trigger data-state=open for the menu's whole lifetime", () => {
+    // The hover bar's `has-[[data-state=open]]` reveal hangs off exactly this
+    // attribute: the menu portals out, so hover and focus-within both stop
+    // holding while it is open, and the bar would fade under its own menu.
+    mockActions = "hover"
+    try {
+      render(<MessageRenderer message={assistantMsg()} />)
+      const trigger = screen.getByLabelText("moreLabel")
+      const bar = document.querySelector("[data-test='message-actions']")
+      expect(bar).toContainElement(trigger)
+      expect(trigger).toHaveAttribute("data-state", "closed")
+      fireEvent.pointerDown(trigger)
+      expect(trigger).toHaveAttribute("data-state", "open")
+      expect(screen.getByRole("menu")).toBeInTheDocument()
+    } finally {
+      mockActions = "all"
+    }
   })
 })
 

@@ -78,18 +78,28 @@ export function createRafThrottle<TArgs extends readonly unknown[]>(
 }
 
 /**
- * Imperative trailing-edge debounce — mirrors `useDebouncedCallback`. A
- * `delayMs <= 0` degrades to synchronous (test / SSR friendliness).
+ * Imperative trailing-edge debounce — mirrors `useDebouncedCallback`. Optional
+ * `maxWaitMs` bounds postponement during continuous calls. `delayMs <= 0`
+ * degrades to synchronous (test / SSR friendliness).
  */
 export function createDebouncedCallback<TArgs extends readonly unknown[]>(
   fn: (...args: TArgs) => void,
-  delayMs: number
+  delayMs: number,
+  maxWaitMs?: number
 ): DebouncedCallbackHandle<TArgs> {
   let timer: ReturnType<typeof setTimeout> | null = null
+  let maxTimer: ReturnType<typeof setTimeout> | null = null
   let args: TArgs | null = null
 
-  const drain = () => {
+  const clearTimers = () => {
+    if (timer !== null) clearTimeout(timer)
+    if (maxTimer !== null) clearTimeout(maxTimer)
     timer = null
+    maxTimer = null
+  }
+
+  const drain = () => {
+    clearTimers()
     const a = args
     args = null
     if (a !== null) fn(...a)
@@ -104,23 +114,15 @@ export function createDebouncedCallback<TArgs extends readonly unknown[]>(
     }
     if (timer !== null) clearTimeout(timer)
     timer = setTimeout(drain, delayMs)
+    if (maxTimer === null && maxWaitMs !== undefined) {
+      maxTimer = setTimeout(drain, maxWaitMs)
+    }
   }
 
-  const flush = () => {
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
-    }
-    const a = args
-    args = null
-    if (a !== null) fn(...a)
-  }
+  const flush = drain
 
   const cancel = () => {
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
-    }
+    clearTimers()
     args = null
   }
 
@@ -131,17 +133,19 @@ export function createDebouncedCallback<TArgs extends readonly unknown[]>(
 export interface SessionCoalescing {
   /** rAF-throttled React store commit (≤1/frame). `call(msgs)`. */
   commit: RafThrottleHandle<[UIMessage[]]>
-  /** Debounced Dexie write. `call(msgs)`. */
+  /** Debounced checkpoint request with bounded postponement. `call(msgs)`. */
   persist: DebouncedCallbackHandle<[UIMessage[]]>
 }
 
 export interface SessionCoalescingOptions {
   /** Push the latest message snapshot into the store for `sessionId`. */
   onCommit: (sessionId: string, msgs: UIMessage[]) => void
-  /** Durably persist the latest message snapshot for `sessionId`. */
+  /** Submit the latest snapshot for persistence; the callback owns durability. */
   onPersist: (sessionId: string, msgs: UIMessage[]) => void
   /** Debounce window for the persist write (0 → synchronous, used in tests). */
   persistDelayMs: number
+  /** Maximum checkpoint postponement while streaming (default: 1000 ms). */
+  persistMaxWaitMs?: number
 }
 
 /**
@@ -163,7 +167,8 @@ export class SessionCoalescingRegistry {
       commit: createRafThrottle<[UIMessage[]]>((msgs) => this.opts.onCommit(sessionId, msgs)),
       persist: createDebouncedCallback<[UIMessage[]]>(
         (msgs) => this.opts.onPersist(sessionId, msgs),
-        this.opts.persistDelayMs
+        this.opts.persistDelayMs,
+        this.opts.persistMaxWaitMs ?? 1000
       ),
     }
     this.map.set(sessionId, pair)

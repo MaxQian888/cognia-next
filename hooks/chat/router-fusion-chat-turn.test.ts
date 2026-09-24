@@ -61,6 +61,7 @@ function deps(over: Partial<FusionChatTurnDeps> = {}): FusionChatTurnDeps {
     runTurn: jest.fn(async () => ({ kind: "succeeded" as const, answer, summary })),
     cancelRun: jest.fn(async () => {}),
     commitUserMessage: jest.fn(async () => {}),
+    commitAnswer: jest.fn(async () => {}),
     refusalDiagnostic: jest.fn(async (input) =>
       diagnostic(`${input.kind ?? "refused"}:${input.code}:${(input.reasons ?? []).join(",")}`)
     ),
@@ -214,6 +215,115 @@ describe("runFusionChatTurn", () => {
     expect(failing.runTurn).toHaveBeenCalled()
     expect(error).toHaveBeenCalled()
     error.mockRestore()
+  })
+
+  describe("the answer's branch stamp", () => {
+    const run = (d: FusionChatTurnDeps, claimReplyBranch?: (replyId: string) => object) =>
+      runFusionChatTurn(
+        {
+          sessionId: SESSION,
+          stamp,
+          messages: [],
+          userMessage: null,
+          workspaceRoot: null,
+          settings: null,
+          ...(claimReplyBranch
+            ? { claimReplyBranch: claimReplyBranch as (id: string) => Record<string, unknown> }
+            : {}),
+        },
+        d
+      )
+    const shownAnswer = () => session()?.messages.find((m) => m.id === "rf-run-1-answer")
+
+    it("files the answer where the send armed it, on screen and on disk", async () => {
+      // A regenerate's slot and an edit's owner, as the controller claims them.
+      const branch = { branchGroupId: "u1", branchIndex: 1, branchOwnerId: "u-edit" }
+      const claim = jest.fn(() => {
+        // Claimed before the answer is shown: the navigator never shows it unfiled.
+        expect(shownAnswer()).toBeUndefined()
+        return branch
+      })
+      const d = deps()
+      expect(await run(d, claim)).toBe("completed")
+      expect(claim).toHaveBeenCalledTimes(1)
+      expect(claim).toHaveBeenCalledWith("rf-run-1-answer")
+      const expected = {
+        ...answer,
+        metadata: { routerFusion: answer.metadata.routerFusion, ...branch },
+      }
+      expect(shownAnswer()).toEqual(expected)
+      // The outbox wrote the run's row unstamped; the stamped one replaces it.
+      expect(d.commitAnswer).toHaveBeenCalledTimes(1)
+      expect(d.commitAnswer).toHaveBeenCalledWith(SESSION, expected)
+      // The run's own answer object is not mutated.
+      expect(answer.metadata).toEqual({
+        routerFusion: { runId: "run-1", mode: "panel", origin: "chat" },
+      })
+    })
+
+    it("shows an answer nothing was armed for as the run wrote it, without writing it again", async () => {
+      const d = deps()
+      const claim = jest.fn(() => ({}))
+      expect(await run(d, claim)).toBe("completed")
+      expect(claim).toHaveBeenCalledWith("rf-run-1-answer")
+      expect(shownAnswer()).toEqual(answer)
+      expect(d.commitAnswer).not.toHaveBeenCalled()
+
+      // A caller with no branch bookkeeping at all.
+      const plain = deps()
+      expect(await run(plain)).toBe("completed")
+      expect(shownAnswer()).toEqual(answer)
+      expect(plain.commitAnswer).not.toHaveBeenCalled()
+    })
+
+    it("still settles the turn, stamped on screen, when the stamped row cannot be saved", async () => {
+      const error = jest.spyOn(console, "error").mockImplementation(() => {})
+      const onSettled = jest.fn()
+      const d = deps({ commitAnswer: jest.fn(async () => Promise.reject(new Error("disk"))) })
+      const result = await runFusionChatTurn(
+        {
+          sessionId: SESSION,
+          stamp,
+          messages: [],
+          userMessage: null,
+          workspaceRoot: null,
+          settings: null,
+          claimReplyBranch: () => ({ branchGroupId: "u1", branchIndex: 1 }),
+          onSettled,
+        },
+        d
+      )
+      expect(result).toBe("completed")
+      expect(shownAnswer()?.metadata).toMatchObject({ branchGroupId: "u1", branchIndex: 1 })
+      expect(session()?.status).toBe("idle")
+      expect(onSettled).toHaveBeenCalledWith("completed")
+      expect(error).toHaveBeenCalled()
+      error.mockRestore()
+    })
+
+    it.each([
+      ["fails", { kind: "failed", code: "VERIFICATION_FAILED", message: "no", summary: null }],
+      ["is refused", { kind: "refused", code: "SESSION_BUSY" }],
+      ["is cancelled", { kind: "cancelled", summary: null }],
+    ])("claims nothing when the run %s", async (_label, outcome) => {
+      const claim = jest.fn(() => ({ branchGroupId: "u1", branchIndex: 1 }))
+      const d = deps({ runTurn: jest.fn(async () => outcome) as never })
+      await run(d, claim)
+      expect(claim).not.toHaveBeenCalled()
+      expect(shownAnswer()).toBeUndefined()
+      expect(d.commitAnswer).not.toHaveBeenCalled()
+    })
+
+    it("claims nothing when the run throws", async () => {
+      const claim = jest.fn(() => ({ branchGroupId: "u1", branchIndex: 1 }))
+      const d = deps({
+        runTurn: jest.fn(async () => {
+          throw new Error("boom")
+        }),
+      })
+      expect(await run(d, claim)).toBe("failed")
+      expect(claim).not.toHaveBeenCalled()
+    })
   })
 
   it("reports a failed run with its code and message", async () => {

@@ -2215,7 +2215,7 @@ describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
   })
 })
 
-jest.mock("@/lib/ai/agent/external/remote-run-service", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-service", () => ({
   remoteDecisionId: (runId: string, requestId: string) => `${runId}:${requestId}`,
 }))
 const getRemoteConfigMock = jest.fn()
@@ -2225,15 +2225,16 @@ const resolveExternalPermissionMock = jest.fn<Promise<{ resolved: boolean }>, un
   async () => ({ resolved: true })
 )
 let externalHandlers:
-  import("@/lib/ai/agent/external/remote-run-client").RemoteRunSubscription | undefined
+  | import("@/lib/ai/agent/external/runtimes/remote/remote-run-client").RemoteRunSubscription
+  | undefined
 const stopExternalMock = jest.fn()
-jest.mock("@/lib/ai/agent/external/remote-host-configs", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-host-configs", () => ({
   getRemoteHostConfig: (...args: unknown[]) => getRemoteConfigMock(...args),
 }))
-jest.mock("@/lib/ai/agent/external/remote-run-client", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-client", () => ({
   subscribeRemoteExternalRun: (
     _id: string,
-    handlers: import("@/lib/ai/agent/external/remote-run-client").RemoteRunSubscription
+    handlers: import("@/lib/ai/agent/external/runtimes/remote/remote-run-client").RemoteRunSubscription
   ) => {
     externalHandlers = handlers
     return stopExternalMock

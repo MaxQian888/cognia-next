@@ -63,6 +63,11 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
   const save = useSettingsStore((s) => s.save)
   const language = (settings?.sttLanguage ?? DEFAULT_SPEECH_LANGUAGE) as SpeechLanguageCode
   const selectedMicId = settings?.selectedMicId
+  // The microphone choice only reaches live voice. Dictation runs on the Web
+  // Speech API, which records from the system default input and has no device
+  // parameter — so offering the picker without live voice was a setting that
+  // changed nothing.
+  const liveVoiceEnabled = settings?.liveVoice?.enabled === true
 
   // Mirror persisted values into local state for snappy UI (save() awaits IO
   // before updating the store). When the persisted value changes externally
@@ -134,9 +139,12 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
     <SpeechInput
       aria-label={speechLabel}
       className={cn(
-        "size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
+        // `touch-hit`: the action row's icon buttons all paint at 32px and all
+        // answer a thumb at 44px — the hit slop, not a bigger box, so the mic
+        // stays the same size as the "+" and the voice settings beside it.
+        "touch-hit size-8! rounded-md! shadow-none! data-[disabled=true]:opacity-50",
         listening
-          ? "bg-destructive! text-white! hover:bg-destructive/80! hover:text-white!"
+          ? "bg-destructive! text-destructive-foreground! hover:bg-destructive/80! hover:text-destructive-foreground!"
           : "bg-transparent! text-muted-foreground! hover:bg-muted/60! hover:text-foreground!"
       )}
       disabled={disabled}
@@ -184,7 +192,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
             <PopoverTrigger asChild>
               <Button
                 aria-label={t("voiceSettings")}
-                className="size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
+                className="touch-hit size-8 shrink-0 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
                 disabled={disabled}
                 size="icon"
                 type="button"
@@ -198,56 +206,59 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
         </Tooltip>
 
         <PopoverContent align="end" side="top" className="w-72 space-y-4 p-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <AudioLinesIcon className="size-3.5" />
-              {t("microphoneLabel")}
+          {liveVoiceEnabled ? (
+            <div className="space-y-2" data-testid="voice-settings-microphone">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <AudioLinesIcon className="size-3.5" />
+                {t("microphoneLabel")}
+              </div>
+              <p className="text-[11px] text-muted-foreground">{t("microphoneLiveOnly")}</p>
+              <MicSelector onValueChange={onMicChange} value={mic}>
+                <MicSelectorTrigger
+                  aria-label={t("selectMicAria")}
+                  className={cn("h-9 w-full justify-between gap-2 px-3 text-left text-xs")}
+                  size="sm"
+                  variant="outline"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <AudioLinesIcon className="size-3.5 shrink-0" />
+                    <MicSelectorValue />
+                  </div>
+                </MicSelectorTrigger>
+                <MicSelectorContent>
+                  <MicSelectorInput />
+                  <MicSelectorList>
+                    {(devices, permission) => (
+                      <>
+                        {devices.length > 0 ? (
+                          devices.map((device) => (
+                            <MicSelectorItem key={device.deviceId} value={device.deviceId}>
+                              <MicSelectorLabel device={device} />
+                            </MicSelectorItem>
+                          ))
+                        ) : (
+                          <MicSelectorEmpty>{t("noMicFound")}</MicSelectorEmpty>
+                        )}
+                        {permission.state === "denied" ? (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">
+                            {t("micPermissionDenied")}
+                          </p>
+                        ) : (
+                          permission.state !== "granted" &&
+                          devices.every((device) => !device.label) && (
+                            <MicSelectorRequestAccess>
+                              <AudioLinesIcon className="size-3.5" />
+                              {t("grantMicAccess")}
+                            </MicSelectorRequestAccess>
+                          )
+                        )}
+                      </>
+                    )}
+                  </MicSelectorList>
+                </MicSelectorContent>
+              </MicSelector>
             </div>
-            <MicSelector onValueChange={onMicChange} value={mic}>
-              <MicSelectorTrigger
-                aria-label={t("selectMicAria")}
-                className={cn("h-9 w-full justify-between gap-2 px-3 text-left text-xs")}
-                size="sm"
-                variant="outline"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <AudioLinesIcon className="size-3.5 shrink-0" />
-                  <MicSelectorValue />
-                </div>
-              </MicSelectorTrigger>
-              <MicSelectorContent>
-                <MicSelectorInput />
-                <MicSelectorList>
-                  {(devices, permission) => (
-                    <>
-                      {devices.length > 0 ? (
-                        devices.map((device) => (
-                          <MicSelectorItem key={device.deviceId} value={device.deviceId}>
-                            <MicSelectorLabel device={device} />
-                          </MicSelectorItem>
-                        ))
-                      ) : (
-                        <MicSelectorEmpty>{t("noMicFound")}</MicSelectorEmpty>
-                      )}
-                      {permission.state === "denied" ? (
-                        <p className="px-3 py-2 text-xs text-muted-foreground">
-                          {t("micPermissionDenied")}
-                        </p>
-                      ) : (
-                        permission.state !== "granted" &&
-                        devices.every((device) => !device.label) && (
-                          <MicSelectorRequestAccess>
-                            <AudioLinesIcon className="size-3.5" />
-                            {t("grantMicAccess")}
-                          </MicSelectorRequestAccess>
-                        )
-                      )}
-                    </>
-                  )}
-                </MicSelectorList>
-              </MicSelectorContent>
-            </MicSelector>
-          </div>
+          ) : null}
 
           <div className="space-y-2">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

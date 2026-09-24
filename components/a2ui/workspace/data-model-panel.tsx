@@ -47,6 +47,7 @@ import {
   parseJsonPointer,
   setValueByPath,
 } from "@/lib/a2ui/data-model"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useWorkspaceContext } from "./a2ui-workspace-context"
@@ -233,7 +234,7 @@ function DataNode({
                 {value === null ? "null" : typeof value === "string" ? `"${value}"` : String(value)}
               </span>
             )}
-            <div className="ml-auto flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+            <div className={cn("ml-auto flex shrink-0 items-center", HOVER_REVEAL_GROUP_CLASS)}>
               <Button
                 type="button"
                 variant="ghost"

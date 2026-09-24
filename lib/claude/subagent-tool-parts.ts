@@ -4,7 +4,7 @@
  * inline tool list under an expanded `SubagentPart` reuses the exact same
  * rendering as the main chat's tool flow.
  *
- * Mirrors the state mapping in `lib/ai/agent/external/event-to-parts.ts`:
+ * Mirrors the state mapping in `lib/ai/agent/external/session/event-to-parts.ts`:
  *   running → input-available, done → output-available, error → output-error.
  */
 

@@ -4,6 +4,7 @@ import {
   resolveTargetAgentId,
 } from "./chat-mention-targets"
 import type { SubagentMentionTarget } from "./chat-mention-targets"
+import { buildRouteTargets } from "@/lib/agent-team/runtime-targets"
 
 // Mock only the subagent source; slugify + parseMentions run for real so the
 // handle derivation and the scanner reuse are exercised end-to-end.
@@ -63,6 +64,21 @@ describe("buildChatMentionTargets", () => {
     const targets = buildChatMentionTargets()
     // Both would slug to "reviewer" → each keeps its unique id as the handle.
     expect(targets.map((t) => t.handle)).toEqual(["plugin:reviewer", "template:reviewer"])
+  })
+
+  it("gives a subagent named like a reserved route runtime its id as handle", () => {
+    // `@codex` addresses the Codex runtime (lib/chat/turn-route); a subagent
+    // that slugs to the same token must not be able to answer it.
+    mockResolve.mockReturnValue([
+      { id: "plugin:codex", def: { id: "plugin:codex", name: "Codex", description: "" } },
+      { id: "template:claude", def: { id: "template:claude", name: "Claude", description: "" } },
+      { id: "plugin:other", def: { id: "plugin:other", name: "Other", description: "" } },
+    ])
+    expect(buildChatMentionTargets().map((t) => t.handle)).toEqual([
+      "plugin:codex",
+      "template:claude",
+      "other",
+    ])
   })
 
   it("returns an empty list when no subagents are registered", () => {
@@ -131,5 +147,57 @@ describe("chatMentionResolvers", () => {
       label: "My Reviewer",
     })
     expect(resolvers.resolveAgentHandle("nobody")).toBeNull()
+  })
+
+  it("resolves the reserved runtime handles to agent refs, case-insensitively", () => {
+    mockResolve.mockReturnValue([])
+    const resolvers = chatMentionResolvers()
+    expect(resolvers.resolveAgentHandle("codex")).toEqual({
+      kind: "agent",
+      id: "codex",
+      label: "codex",
+    })
+    expect(resolvers.resolveAgentHandle("Claude")).toEqual({
+      kind: "agent",
+      id: "claude",
+      label: "claude",
+    })
+  })
+
+  it("resolves a Squad member's handle only when the route targets are passed", () => {
+    mockResolve.mockReturnValue([])
+    const routeTargets = buildRouteTargets({
+      squads: [
+        {
+          team: { id: "s1", name: "Platform" },
+          teammates: [
+            {
+              id: "tm-1",
+              teamId: "s1",
+              name: "Critic",
+              description: "",
+              role: "teammate",
+              status: "idle",
+              config: {},
+              completedTaskIds: [],
+              tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+              progress: 0,
+              createdAt: new Date(),
+            },
+          ],
+        },
+      ],
+    })
+    expect(chatMentionResolvers(routeTargets).resolveAgentHandle("critic")).toEqual({
+      kind: "agent",
+      id: "critic",
+      label: "Critic",
+    })
+    expect(chatMentionResolvers(routeTargets).resolveAgentHandle("CODEX")).toMatchObject({
+      kind: "agent",
+      id: "codex",
+    })
+    // Without the conversation's targets a member handle is not a route.
+    expect(chatMentionResolvers().resolveAgentHandle("critic")).toBeNull()
   })
 })

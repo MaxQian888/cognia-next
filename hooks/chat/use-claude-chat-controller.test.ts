@@ -3,7 +3,9 @@ import {
   useClaudeChat,
   userPromptText,
   rewriteUserPromptText,
+  externalTurnPrompt,
 } from "./use-claude-chat-controller"
+import type { SendContentBlock } from "@cognia/agent-config-types"
 
 describe("Claude chat controller seam", () => {
   it("exports the public hook implementation", () => {
@@ -65,5 +67,80 @@ describe("attachment prompt hook isolation", () => {
       content.slice(0, 1)
     )
     expect(rewriteUserPromptText("original", "new")).toBe("new")
+  })
+})
+
+describe("externalTurnPrompt", () => {
+  const doc = { type: "text" as const, text: "EXTRACTED REPORT BODY" }
+  const typed = { type: "text" as const, text: "Summarize the report" }
+  const link = { type: "text" as const, text: "Fetched page context" }
+  const image: SendContentBlock = {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+  }
+  /** Nothing left out. */
+  const none = { attachments: [], unnamed: 0, trailingText: 0 }
+
+  it("sends a plain-string turn whole", () => {
+    expect(externalTurnPrompt("fix the bug")).toEqual({
+      request: "fix the bug",
+      prompt: "fix the bug",
+      omitted: none,
+    })
+  })
+
+  it("reads the question past an extracted document and keeps the document ahead of it", () => {
+    expect(externalTurnPrompt([doc, typed], 1)).toEqual({
+      request: "Summarize the report",
+      prompt: "EXTRACTED REPORT BODY\n\nSummarize the report",
+      omitted: none,
+    })
+  })
+
+  it("carries an image's OCR text but not the image, and every text attachment in order", () => {
+    const ocr = { type: "text" as const, text: "OCR LINES" }
+    expect(externalTurnPrompt([image, ocr, doc, typed], 3)).toEqual({
+      request: "Summarize the report",
+      prompt: "OCR LINES\n\nEXTRACTED REPORT BODY\n\nSummarize the report",
+      // The image itself, by its manifest index, so the lane can name it.
+      omitted: { ...none, attachments: [0] },
+    })
+  })
+
+  it("keeps provider lines in front of the attachments, and nothing after the question", () => {
+    const reply = { type: "text" as const, text: '[Replying to: "earlier"]' }
+    expect(externalTurnPrompt([reply, doc, typed, link], 1, 1)).toEqual({
+      request: "Summarize the report",
+      prompt: '[Replying to: "earlier"]\n\nEXTRACTED REPORT BODY\n\nSummarize the report',
+      omitted: { ...none, trailingText: 1 },
+    })
+  })
+
+  it("sends only the question when nothing is attached, as before", () => {
+    expect(externalTurnPrompt([typed, link], 0)).toEqual({
+      request: "Summarize the report",
+      prompt: "Summarize the report",
+      omitted: { ...none, trailingText: 1 },
+    })
+    expect(externalTurnPrompt([image, typed], 1)).toEqual({
+      request: "Summarize the report",
+      prompt: "Summarize the report",
+      omitted: { ...none, attachments: [0] },
+    })
+  })
+
+  it("sends the attachment text alone when nothing was typed", () => {
+    expect(externalTurnPrompt([doc], 1)).toEqual({
+      request: "",
+      prompt: "EXTRACTED REPORT BODY",
+      omitted: none,
+    })
+  })
+
+  it("counts a non-text block no manifest names, and ignores an empty trailing block", () => {
+    expect(externalTurnPrompt([typed, image, { type: "text", text: "  " }], 0).omitted).toEqual({
+      ...none,
+      unnamed: 1,
+    })
   })
 })

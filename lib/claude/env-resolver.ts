@@ -107,9 +107,20 @@ export async function resolveAccountEnv(
       "A local account must be unlocked before a provider account can be resolved."
     )
   }
-  if (!accountId) {
+  let resolvedAccountId = accountId
+  const assertScope = () => {
+    if (useAccountStore.getState().unlockedAccountId !== localAccountId) {
+      throw new SubscriptionAccountResolutionError(
+        providerId,
+        resolvedAccountId ?? "",
+        "The local account changed while resolving provider credentials."
+      )
+    }
+  }
+  if (!resolvedAccountId) {
     try {
       const active = await getActiveAccount(scopedProvider)
+      assertScope()
       if (!active.activeAccountId) {
         throw new SubscriptionAccountResolutionError(
           providerId,
@@ -117,7 +128,9 @@ export async function resolveAccountEnv(
           `No active ${providerId} account is available. Add or activate an account in Settings.`
         )
       }
-      return Object.fromEntries(active.env)
+      // The cached active projection contains a bearer but no isolated config
+      // directory. Resolve its account through the same host path as overrides.
+      resolvedAccountId = active.activeAccountId
     } catch (err) {
       if (err instanceof SubscriptionAccountResolutionError) throw err
       throw new SubscriptionAccountResolutionError(
@@ -134,14 +147,15 @@ export async function resolveAccountEnv(
       {
         provider: scopedProvider,
         localAccountId,
-        accountId,
+        accountId: resolvedAccountId,
       }
     )
+    assertScope()
     if (!entries) {
       throw new SubscriptionAccountResolutionError(
         providerId,
-        accountId,
-        `Provider account ${accountId} is no longer available for ${providerId}.`
+        resolvedAccountId,
+        `Provider account ${resolvedAccountId} is no longer available for ${providerId}.`
       )
     }
     return Object.fromEntries(entries.map(({ key, value }) => [key, value]))
@@ -150,8 +164,8 @@ export async function resolveAccountEnv(
     console.warn("resolveAccountEnv failed", err)
     throw new SubscriptionAccountResolutionError(
       providerId,
-      accountId,
-      `Could not resolve provider account ${accountId} for ${providerId}.`,
+      resolvedAccountId,
+      `Could not resolve provider account ${resolvedAccountId} for ${providerId}.`,
       err
     )
   }

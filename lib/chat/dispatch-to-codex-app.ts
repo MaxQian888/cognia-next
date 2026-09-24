@@ -1,9 +1,11 @@
 import type { UIMessage } from "ai"
+import { sha256 } from "@noble/hashes/sha256"
+import { bytesToHex } from "@noble/hashes/utils"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import type { ExternalAgentMessage } from "@/types/agent/external-agent"
-import { hasNoLeakingExternalAgentPromptInput } from "@/lib/ai/agent/external/outbound-prompt-pii"
+import { hasNoLeakingExternalAgentPromptInput } from "@/lib/ai/agent/external/policy/outbound-prompt-pii"
 import { materializeMessageMedia } from "@/lib/chat/media/normalize-message-media"
 import { serializeHandoffParts } from "@/lib/chat/export-handoff-to-cli"
 import { getSession, updateSession } from "@/lib/db/sessions"
@@ -183,23 +185,149 @@ export function dispatchSessionToCodexApp(session: ChatSession): Promise<{ threa
   return dispatch
 }
 
-/** Reuse the canonical importer; never merge two independently advanced histories. */
+/** Return immutable, content-addressed snapshots so continued histories never get overwritten. */
 export async function returnSessionFromCodexApp(session: ChatSession): Promise<string> {
-  const binding = session.codexHandoff
+  const source = (await getSession(session.id)) ?? session
+  const binding = source.codexHandoff
   if (!binding) throw new CodexAppDispatchError("TARGET_NOT_FOUND")
-  const { resolveScanInput, listSessionsForSource, importSessions } =
+  const { resolveScanInput, listSessionsForSource, parseSessions } =
     await import("@/lib/session-import")
   const { importedSessionId } = await import("@/lib/session-import/to-parts")
+  const { applyImported } = await import("@/lib/data/import-registry")
   const input = await resolveScanInput()
   const summaries = await listSessionsForSource("codex", input)
   const target = summaries.find((summary) => summary.ref.originalSessionId === binding.threadId)
   if (!target) throw new CodexAppDispatchError("TARGET_NOT_FOUND")
-  const imported = await importSessions([target.ref], input, session.projectId)
-  if (imported.failures?.length)
-    throw new Error(imported.failures.map((failure) => failure.message).join("; "))
-  const returnedSessionId = importedSessionId("codex", binding.threadId)
-  if (!(await getSession(returnedSessionId))) throw new CodexAppDispatchError("TARGET_NOT_FOUND")
-  await updateSession(returnedSessionId, { parentSessionId: session.id })
-  await updateSession(session.id, { codexHandoff: { ...binding, returnedSessionId } })
+  const conversations = await parseSessions([target.ref], input, source.projectId)
+  const originalRootId = importedSessionId("codex", binding.threadId)
+  if (!conversations.some((conversation) => conversation.session.id === originalRootId)) {
+    throw new CodexAppDispatchError("TARGET_NOT_FOUND")
+  }
+
+  // Hash source evidence, not local decorations or parse-time fallback dates.
+  // A retry after local continuation resolves the same snapshot; an updated
+  // Codex transcript receives a new identity and preserves both branches.
+  const digest = bytesToHex(
+    sha256(
+      JSON.stringify({
+        sourceSessionId: source.id,
+        conversations: conversations
+          .map((conversation) => ({
+            id: conversation.session.id,
+            title: conversation.session.title,
+            workingDir: conversation.session.workingDir,
+            model: conversation.session.model,
+            state: conversation.session.importCanonicalState,
+            relation: conversation.session.importRelation,
+            lifecycle: conversation.session.importLifecycle,
+            messages: conversation.messages.map((message) => ({
+              id: message.id,
+              role: message.role,
+              parts: message.parts,
+              metadata: message.metadata,
+            })),
+          }))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      })
+    )
+  )
+  const ids = new Map(
+    conversations.map((conversation) => [
+      conversation.session.id,
+      `${conversation.session.id}:handoff:${digest}`,
+    ])
+  )
+  const returnedSessionId = ids.get(originalRootId)!
+  if (!(await getSession(returnedSessionId))) {
+    const messageIds = new Map(
+      conversations.flatMap((conversation) =>
+        conversation.messages.map(
+          (message, index) =>
+            [message.id, `${ids.get(conversation.session.id)!}:m${index}`] as const
+        )
+      )
+    )
+    const remapReferences = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(remapReferences)
+      if (!value || typeof value !== "object") return value
+      return Object.fromEntries(
+        Object.entries(value).map(([key, nested]) => [
+          key,
+          typeof nested === "string" &&
+          ["sessionId", "parentSessionId", "lifecycleOwnerSessionId", "subagentSessionId"].includes(
+            key
+          )
+            ? (ids.get(nested) ?? nested)
+            : typeof nested === "string" &&
+                ["messageId", "parentMessageId", "anchorMessageId"].includes(key)
+              ? (messageIds.get(nested) ?? nested)
+              : remapReferences(nested),
+        ])
+      )
+    }
+    const snapshots = conversations.map((conversation) => {
+      const originalId = conversation.session.id
+      const id = ids.get(originalId)!
+      const surface = conversation.session.surfaceBinding
+      return {
+        ...conversation,
+        session: {
+          ...conversation.session,
+          id,
+          importFrozen: true,
+          importOwnership: "cognia-owned" as const,
+          importRuntimeBinding: undefined,
+          sdkSessionId: undefined,
+          externalAgentSession: undefined,
+          parentSessionId:
+            originalId === originalRootId
+              ? source.id
+              : (ids.get(conversation.session.parentSessionId ?? "") ??
+                conversation.session.parentSessionId),
+          importGraphRootId: returnedSessionId,
+          ...(conversation.session.attachedChild
+            ? {
+                attachedChild: remapReferences(conversation.session.attachedChild) as NonNullable<
+                  ChatSession["attachedChild"]
+                >,
+              }
+            : {}),
+          ...(surface?.kind === "session"
+            ? {
+                surfaceBinding: {
+                  ...surface,
+                  sessionId: ids.get(surface.sessionId) ?? surface.sessionId,
+                },
+              }
+            : {}),
+        },
+        messages: conversation.messages.map((message, index) => ({
+          ...message,
+          id: `${id}:m${index}`,
+          sessionId: id,
+          parts: remapReferences(message.parts) as typeof message.parts,
+          metadata: remapReferences(message.metadata) as typeof message.metadata,
+        })),
+      }
+    })
+    await applyImported(snapshots)
+  }
+  const persisted = await getSession(returnedSessionId)
+  if (persisted?.id !== returnedSessionId) throw new CodexAppDispatchError("TARGET_NOT_FOUND")
+  // The comparison and patch share a transaction: an export racing this scan
+  // cannot replace its binding between our read and write.
+  const { getDb } = await import("@/lib/db/schema")
+  const db = getDb()
+  await db.transaction("rw", db.sessions, async () => {
+    const currentSource = await db.sessions.get(source.id)
+    if (
+      currentSource?.codexHandoff?.threadId === binding.threadId &&
+      currentSource.codexHandoff.exportedAt === binding.exportedAt
+    ) {
+      await updateSession(source.id, {
+        codexHandoff: { ...currentSource.codexHandoff, returnedSessionId },
+      })
+    }
+  })
   return returnedSessionId
 }

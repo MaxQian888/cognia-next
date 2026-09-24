@@ -7,11 +7,41 @@
  */
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { act, renderHook } from "@testing-library/react"
-import type { SendOptions } from "@cognia/agent-config-types"
+import type { SendContentBlock, SendOptions } from "@cognia/agent-config-types"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
-import type { StartSquadRunInput, StartSquadRunResult } from "@/lib/ai/agent/team/start-squad-run"
-import type { WatchSquadRunInput } from "@/lib/ai/agent/team/watch-squad-run"
+import type {
+  StartSquadRunInput,
+  StartSquadRunResult,
+} from "@/lib/ai/agent/team/squad/start-squad-run"
+import type { WatchSquadRunInput } from "@/lib/ai/agent/team/squad/watch-squad-run"
+import type {
+  ArmVerificationInput,
+  ArmVerificationResult,
+} from "@/lib/agent/composition/verified-fresh-agent"
+
+const recordExternalAgentUsageMock = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/session-usage", () => ({
+  ...jest.requireActual("@/lib/db/session-usage"),
+  recordExternalAgentUsage: (...args: unknown[]) => recordExternalAgentUsageMock(...args),
+}))
+
+jest.mock("@/lib/task-workspace/client", () => {
+  const actual = jest.requireActual("@/lib/task-workspace/client")
+  return {
+    ...actual,
+    acquireWorkspaceBundle: jest.fn(actual.acquireWorkspaceBundle),
+    settleTaskWorkspaceTurn: jest.fn(actual.settleTaskWorkspaceTurn),
+  }
+})
+jest.mock("@/lib/code-adoption/client", () => {
+  const actual = jest.requireActual("@/lib/code-adoption/client")
+  return {
+    ...actual,
+    endCodeAdoptionTurn: jest.fn(actual.endCodeAdoptionTurn),
+    consumeCodeAdoptionTrackingAttempt: jest.fn(actual.consumeCodeAdoptionTrackingAttempt),
+  }
+})
 
 const persistSessionAssetsMock = jest.fn(
   async (_sessionId: string, message: import("ai").UIMessage) => message
@@ -262,7 +292,19 @@ const setSdkSessionIdMock = jest.fn().mockResolvedValue(undefined)
 const touchSessionMock = jest.fn().mockResolvedValue(undefined)
 const updateSessionMock = jest.fn().mockResolvedValue(undefined)
 const clearBranchSeedMock = jest.fn().mockResolvedValue(undefined)
+const mockHandoffClient = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/ai/generation/agent-backed-client", () => ({
+  buildAgentBackedLlmClient: (...args: unknown[]) => mockHandoffClient(...args),
+}))
 const freezeImportedSessionMock = jest.fn().mockResolvedValue(undefined)
+// The send-time Workspace Trust gate (`resolveWorkspaceTrustForSend`) reads
+// persisted grants from Dexie for every project root. This suite has no
+// IndexedDB: an unmocked read opens the shared database, fails, and leaves it
+// closed for every later test in the file. Every root is trusted here; the gate
+// has its own suite (lib/workspace/trust-gate.test.ts).
+jest.mock("@/lib/db/trusted-workspaces", () => ({
+  isWorkspaceTrusted: jest.fn(async () => true),
+}))
 jest.mock("@/lib/db/sessions", () => ({
   clearBranchSeed: (...a: unknown[]) => clearBranchSeedMock(...a),
   freezeImportedSession: (...a: unknown[]) => freezeImportedSessionMock(...a),
@@ -350,8 +392,8 @@ jest.mock("@/lib/claude/adapter-hooks", () => ({
 // runtime is "external". Mock both so the branch is drivable from a test.
 const executeOnExternalAgentMock = jest.fn()
 const executeOnRemoteHostAgentMock = jest.fn()
-jest.mock("@/lib/ai/agent/external/remote-execute", () => ({
-  ...jest.requireActual("@/lib/ai/agent/external/remote-execute"),
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-execute", () => ({
+  ...jest.requireActual("@/lib/ai/agent/external/runtimes/remote/remote-execute"),
   executeOnRemoteHostAgent: (...args: unknown[]) => executeOnRemoteHostAgentMock(...args),
 }))
 const rendererToolHostStartMock = jest.fn(async (..._args: unknown[]) => ({
@@ -371,7 +413,7 @@ const respondExternalPermissionMock = jest.fn(async (..._args: unknown[]) => {})
 const externalProtocolMock = { value: "acp" }
 const externalPresetMock = { value: "" }
 const externalMcpLevelMock = { value: "native" }
-jest.mock("@/lib/ai/agent/external/renderer-tool-host", () => ({
+jest.mock("@/lib/ai/agent/external/session/renderer-tool-host", () => ({
   RENDERER_TOOL_HOST_APPROVAL_PREFIX: "external-tool-host:",
   createRendererToolHost: (...args: unknown[]) => createRendererToolHostMock(...args),
 }))
@@ -447,10 +489,10 @@ const PARTS_EVENTS = new Set([
   // delta and assert one appended character per event.
   "text",
 ])
-jest.mock("@/lib/ai/agent/external/event-to-parts", () => {
-  const actual = jest.requireActual<typeof import("@/lib/ai/agent/external/event-to-parts")>(
-    "@/lib/ai/agent/external/event-to-parts"
-  )
+jest.mock("@/lib/ai/agent/external/session/event-to-parts", () => {
+  const actual = jest.requireActual<
+    typeof import("@/lib/ai/agent/external/session/event-to-parts")
+  >("@/lib/ai/agent/external/session/event-to-parts")
   return {
     applyExternalAgentEventToParts: (parts: unknown, event: unknown, options?: unknown) => {
       const type = (event as { type?: string } | undefined)?.type
@@ -474,14 +516,36 @@ const stopSquadWatchMock = jest.fn()
 const watchSquadRunSettlementMock = jest.fn<() => void, [WatchSquadRunInput]>(
   () => stopSquadWatchMock
 )
-jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: (input: StartSquadRunInput) => startSquadRunMock(input),
 }))
-jest.mock("@/lib/ai/agent/team/watch-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/watch-squad-run", () => ({
   watchSquadRunSettlement: (input: WatchSquadRunInput) => watchSquadRunSettlementMock(input),
+}))
+const armVerifiedFreshAgentFollowupMock = jest.fn<
+  Promise<ArmVerificationResult>,
+  [ArmVerificationInput]
+>(async () => ({ armed: true, settled: Promise.resolve() }))
+jest.mock("@/lib/agent/composition/verified-fresh-agent", () => ({
+  armVerifiedFreshAgentFollowup: (input: ArmVerificationInput) =>
+    armVerifiedFreshAgentFollowupMock(input),
 }))
 jest.mock("@/lib/execution/agent-team-bridge", () => ({
   agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
+}))
+
+// `@agent` turn routing (`lib/chat/turn-route/`): the send path re-reads the
+// route context at commit time. Stubbed so each test states the catalog, the
+// Squads and the switch it runs against; the parser and the lane resolver stay
+// real, so a test proves the send path's decision rather than a stub's.
+const routeSnapshotMock = jest.fn<
+  Promise<import("@/lib/chat/turn-route/snapshot").RouteContextSnapshot>,
+  [string | null | undefined, unknown?]
+>()
+jest.mock("@/lib/chat/turn-route/snapshot", () => ({
+  ...jest.requireActual("@/lib/chat/turn-route/snapshot"),
+  snapshotRouteContext: (sessionId: string | null | undefined, options?: unknown) =>
+    routeSnapshotMock(sessionId, options),
 }))
 
 interface SliceLike {
@@ -541,6 +605,7 @@ interface ChatStateLike {
   setSessionError: jest.Mock
   setSessionDiagnostic: jest.Mock
   setSessionActiveBranch: jest.Mock
+  hydrateSessionActiveBranches: jest.Mock
   pushApproval: jest.Mock
   clearApproval: jest.Mock
   markApprovalInterrupted: jest.Mock
@@ -630,6 +695,9 @@ const chatState: ChatStateLike = {
     const cur = chatState.sessions[id]?.activeBranchByGroup ?? {}
     sliceWrite(id, { activeBranchByGroup: { ...cur, [g]: mid } })
   }),
+  hydrateSessionActiveBranches: jest.fn((id: string, map: Record<string, string>) =>
+    sliceWrite(id, { activeBranchByGroup: { ...map } })
+  ),
   pushApproval: jest.fn((a: { sessionId: string }) => {
     const cur = chatState.sessions[a.sessionId]?.pendingApprovals ?? []
     sliceWrite(a.sessionId, { pendingApprovals: [...cur, a], status: "awaiting_approval" })
@@ -661,39 +729,55 @@ const chatState: ChatStateLike = {
 const subscribers: Array<(s: ChatStateLike) => void> = []
 const selectIsAtStreamCapMock = jest.fn((_s: unknown, _id: string) => false)
 
-jest.mock("@/stores/chat", () => ({
-  useChatStore: Object.assign(<T>(selector: (s: ChatStateLike) => T): T => selector(chatState), {
-    getState: () => chatState,
-    subscribe: (fn: (s: ChatStateLike) => void) => {
-      subscribers.push(fn)
-      return () => {
-        const i = subscribers.indexOf(fn)
-        if (i >= 0) subscribers.splice(i, 1)
-      }
-    },
-  }),
-  selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
-  // Same per-conversation resolution the real store exports: the send path
-  // reads THIS session's draft, not the focused projection.
-  selectComposerEphemeralSkillIds: (s: ChatStateLike, id?: string | null) =>
-    (id ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.ephemeralSkillIds : null) ??
-    s.ephemeralSkillIds ??
-    [],
-  selectComposerPendingCommandOverrides: (s: ChatStateLike, id?: string | null) =>
-    (id
-      ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.pendingCommandOverrides
-      : null) ??
-    s.pendingCommandOverrides ??
-    null,
-  // Chip-style citations (a staged document / memory / issue / plan / chat /
-  // artifact). They leave no token in the text, so the send path merges this
-  // list with the ones `resolve-mentions.ts` parses out of it — same
-  // per-conversation resolution as the two above.
-  selectComposerCitedRefs: (s: ChatStateLike, id?: string | null) =>
-    (id ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.citedRefs : null) ??
-    s.citedRefs ??
-    [],
-}))
+jest.mock("@/stores/chat/chat-store", () => jest.requireMock("@/stores/chat"))
+
+jest.mock("@/stores/chat", () => {
+  // Loaded with the mock rather than on first use: pulling the real store's
+  // module graph in mid-send stalls the turn long enough for unrelated
+  // IndexedDB-backed effects to surface as test failures.
+  const actualChatStore = jest.requireActual<typeof import("@/stores/chat/chat-store")>(
+    "@/stores/chat/chat-store"
+  )
+  return {
+    useChatStore: Object.assign(<T>(selector: (s: ChatStateLike) => T): T => selector(chatState), {
+      getState: () => chatState,
+      subscribe: (fn: (s: ChatStateLike) => void) => {
+        subscribers.push(fn)
+        return () => {
+          const i = subscribers.indexOf(fn)
+          if (i >= 0) subscribers.splice(i, 1)
+        }
+      },
+    }),
+    selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
+    // Same per-conversation resolution the real store exports: the send path
+    // reads THIS session's draft, not the focused projection.
+    selectComposerEphemeralSkillIds: (s: ChatStateLike, id?: string | null) =>
+      (id
+        ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.ephemeralSkillIds
+        : null) ??
+      s.ephemeralSkillIds ??
+      [],
+    selectComposerPendingCommandOverrides: (s: ChatStateLike, id?: string | null) =>
+      (id
+        ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.pendingCommandOverrides
+        : null) ??
+      s.pendingCommandOverrides ??
+      null,
+    // Chip-style citations (a staged document / memory / issue / plan / chat /
+    // artifact). They leave no token in the text, so the send path merges this
+    // list with the ones `resolve-mentions.ts` parses out of it — same
+    // per-conversation resolution as the two above.
+    selectComposerCitedRefs: (s: ChatStateLike, id?: string | null) =>
+      (id ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.citedRefs : null) ??
+      s.citedRefs ??
+      [],
+    // The real branch-visibility rule: the send path hands a lane the turns it
+    // has not seen from the VISIBLE thread (`lib/chat/turn-route/history.ts`).
+    // Pure, so the actual implementation is used rather than a lookalike.
+    selectVisibleMessages: actualChatStore.selectVisibleMessages,
+  }
+})
 
 // The unified execution broker governs the concurrency cap; stub it so a test
 // can flip the session at/over capacity without standing up the real broker.
@@ -706,8 +790,21 @@ jest.mock("@/lib/execution/broker", () => ({
 // Chat admission is exercised in lib/execution/chat-lease.test.ts; here it is a
 // no-op so the hook's send path stays isolated from the real broker.
 const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
+// The in-session plan edges both runtimes share (`plan-turn-settle.ts` has its
+// own suite); here only WHICH edge the external lane takes is asserted.
+const driveInSessionPlanAfterTurnMock = jest.fn(async (_input: unknown) => false)
+const haltInSessionPlanOnTurnFailureMock = jest.fn(async (_input: unknown) => undefined)
+jest.mock("./plan-turn-settle", () => ({
+  driveInSessionPlanAfterTurn: (input: unknown) => driveInSessionPlanAfterTurnMock(input),
+  haltInSessionPlanOnTurnFailure: (input: unknown) => haltInSessionPlanOnTurnFailureMock(input),
+}))
+
+const isChatTurnQueuedMock = jest.fn((_sessionId: string) => false)
 jest.mock("@/lib/execution/chat-lease", () => ({
   acquireChatLease: (...args: unknown[]) => acquireChatLeaseMock(...args),
+  isChatTurnQueued: (sessionId: string) => isChatTurnQueuedMock(sessionId),
+  isQueuedChatTurnCancellation: (error: unknown) =>
+    error instanceof Error && error.name === "AbortError",
 }))
 
 // Direct-chat journal persistence is covered by lib/execution/direct-chat-run.test.ts.
@@ -792,7 +889,9 @@ jest.mock("@/lib/router-fusion/gate/chat-events", () => ({
 }))
 // A cascade or panel turn (ADR-0188 B3). The default is no fusion turn in flight.
 const fusionChatTurnActiveMock = jest.fn((_sessionId: string) => false)
-const runFusionChatTurnMock = jest.fn(async (..._args: unknown[]) => "completed" as const)
+const runFusionChatTurnMock = jest.fn(
+  async (..._args: unknown[]): Promise<"completed" | "failed" | "cancelled"> => "completed"
+)
 const stopFusionChatTurnMock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("./router-fusion-chat-turn", () => ({
   ...jest.requireActual("./router-fusion-chat-turn"),
@@ -833,6 +932,13 @@ import {
   RouterFusionUnavailableError,
 } from "@/lib/router-fusion/gate/faults"
 import { createElement, useState, type ReactNode } from "react"
+import type { CogniaDiagnostic } from "@cognia/diagnostics"
+import { buildRouteTargets } from "@/lib/agent-team/runtime-targets"
+import type { AgentRuntimeDescriptor } from "@/lib/ai/agent/runtime-catalog/types"
+import type { RouteContextSnapshot } from "@/lib/chat/turn-route/snapshot"
+import type { TurnRoute } from "@/lib/chat/turn-route/types"
+import { subscribeDiagnostic } from "@/lib/diagnostics/bus"
+import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { useClaudeChat } from "./use-claude-chat-controller"
 import { ClaudeChatRuntimeProvider, useClaudeChat as useSharedClaudeChat } from "./use-claude-chat"
 import {
@@ -967,6 +1073,7 @@ beforeEach(() => {
   chatState.setSessionError.mockClear()
   chatState.setSessionDiagnostic.mockClear()
   chatState.setSessionActiveBranch.mockClear()
+  chatState.hydrateSessionActiveBranches.mockClear()
   chatState.pushApproval.mockClear()
   chatState.clearApproval.mockClear()
   chatState.markApprovalInterrupted.mockClear()
@@ -978,6 +1085,9 @@ beforeEach(() => {
   selectIsAtStreamCapMock.mockReset().mockReturnValue(false)
   isAtCapacityMock.mockReset().mockReturnValue(false)
   acquireChatLeaseMock.mockReset().mockResolvedValue(undefined)
+  isChatTurnQueuedMock.mockReset().mockReturnValue(false)
+  driveInSessionPlanAfterTurnMock.mockReset().mockResolvedValue(false)
+  haltInSessionPlanOnTurnFailureMock.mockReset().mockResolvedValue(undefined)
   subscribers.length = 0
   settingsSubscribers.length = 0
   mockGetTwinRuntimeSettings.mockReset()
@@ -1213,6 +1323,44 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
+  // The paired-host executor takes the same single prompt string as the local
+  // one (a phone driving its desktop's agent goes through here), so it gets the
+  // question behind the attached file's text, not the file's text alone.
+  it("sends a host-owned agent the typed question behind an attachment's OCR text", async () => {
+    useAgentRuntimeStore.setState({
+      runtimeRef: {
+        kind: "host",
+        configId: "eac_1",
+        revision: "eacr_1",
+        lifecycleGeneration: 2,
+        name: "Pi",
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send(
+        [
+          { type: "text", text: "WHITEBOARD OCR: ship v2 by Friday" },
+          { type: "text", text: "turn this into a task list" },
+        ],
+        undefined,
+        {
+          attachmentManifest: [
+            { filename: "board.png", mediaType: "image/png", kind: "image" as const },
+          ],
+        }
+      )
+    })
+
+    expect(executeOnRemoteHostAgentMock).toHaveBeenCalledWith(
+      "WHITEBOARD OCR: ship v2 by Friday\n\nturn this into a task list",
+      expect.objectContaining({ chatSessionId: "sess-1" })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
   it("keeps the legacy send path available when durable acceptance fails", async () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
     acceptChatTurnMock.mockRejectedValueOnce(new Error("ledger unavailable"))
@@ -1381,6 +1529,141 @@ describe("useClaudeChat — actions", () => {
       "sess-1",
       expect.stringContaining("managed")
     )
+  })
+
+  describe("a standalone (BYOK) engine turn has no working copy to acquire", () => {
+    // The context `startNewSession` persists for a rootless chat on a shell
+    // that cannot materialize a managed workspace: a web tab with no host, or
+    // a phone in standalone mode.
+    const unmaterializedManagedContext = {
+      location: "managedWorktree",
+      projectId: "project-1",
+      projectRoot: "",
+      workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:sess-1" },
+      managedWorkspace: { availability: "missing-on-device" },
+      taskWorkspace: { taskId: "task-workspace:sess-1", workspaceKey: "sess-1" },
+      lifecycle: { state: "requested", createdAt: 1, updatedAt: 1, pinned: false },
+    }
+
+    beforeEach(() => {
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "builtin" } })
+      // What the real bundle seam does for that context on such a shell.
+      ensureSessionExecutionBundleMock.mockRejectedValue(
+        new Error("managed workspace is not available on this device")
+      )
+    })
+
+    it("runs the first turn of a rootless chat instead of refusing it", async () => {
+      standaloneFlag.value = true
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "New chat",
+        model: "sonnet",
+        projectId: "project-1",
+        executionContext: unmaterializedManagedContext,
+      })
+
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+
+      expect(ensureSessionExecutionBundleMock).not.toHaveBeenCalled()
+      expect(openWorkspaceBundleTurnLeaseMock).not.toHaveBeenCalled()
+      expect(runStandaloneTurnMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "sess-1" })
+      )
+      // No cwd: the engine has no file tool, and no directory was ever bound.
+      const dispatched = runStandaloneTurnMock.mock.calls[0]![0] as { sendOptions: SendOptions }
+      expect(dispatched.sendOptions.cwd).toBeUndefined()
+      expect(dispatched.sendOptions.taskWorkspace).toBeUndefined()
+      expect(settleChatTurnForSessionMock).not.toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ outcome: "failed" })
+      )
+      const codes = chatState.setSessionDiagnostic.mock.calls.map(
+        (call) => (call[1] as { code?: string } | null)?.code
+      )
+      expect(codes).not.toContain("workspaceBundleFailed")
+      expect(codes).not.toContain("workspaceUnavailable")
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    })
+
+    it("does not run a project environment the engine could never execute in", async () => {
+      standaloneFlag.value = true
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "New chat",
+        model: "sonnet",
+        projectId: "project-1",
+        executionContext: { ...unmaterializedManagedContext, environmentId: "env-1" },
+      })
+
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+
+      expect(getProjectEnvironmentMock).not.toHaveBeenCalled()
+      expect(executeProjectEnvironmentMock).not.toHaveBeenCalled()
+      expect(runStandaloneTurnMock).toHaveBeenCalled()
+    })
+
+    it("still refuses the same context on a shell whose turns run on a host", async () => {
+      // Desktop and paired shells are unchanged: their executor opens files,
+      // so a managed workspace this device cannot provide stays a refusal.
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "New chat",
+        model: "sonnet",
+        projectId: "project-1",
+        executionContext: unmaterializedManagedContext,
+      })
+
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+
+      expect(ensureSessionExecutionBundleMock).toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(runStandaloneTurnMock).not.toHaveBeenCalled()
+      expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ code: "workspaceBundleFailed" })
+      )
+      expect(settleChatTurnForSessionMock).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ outcome: "failed", errorCode: "workspace_bundle_unavailable" })
+      )
+    })
+
+    it("keeps the gate for an external lane, which the standalone engine does not run", async () => {
+      // The gate follows the executor, not the shell: a turn routed to an
+      // external agent never reaches the in-webview engine.
+      standaloneFlag.value = true
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "New chat",
+        model: "sonnet",
+        projectId: "project-1",
+        executionContext: unmaterializedManagedContext,
+      })
+
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("hello")
+      })
+
+      expect(ensureSessionExecutionBundleMock).toHaveBeenCalled()
+      expect(runStandaloneTurnMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    })
   })
 
   it("initializes the selected environment inside the managed execution root", async () => {
@@ -1661,6 +1944,119 @@ describe("useClaudeChat — actions", () => {
     expect(interruptSessionMock).not.toHaveBeenCalled()
   })
 
+  it("persists external usage in the same chat session as the assistant turn", async () => {
+    recordExternalAgentUsageMock.mockClear()
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const usage = { promptTokens: 267000, completionTokens: 11, totalTokens: 267011 }
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "done",
+      tokenUsage: usage,
+      duration: 1200,
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    expect(recordExternalAgentUsageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-1",
+        messageId: expect.stringMatching(/^assistant-/),
+        usage,
+        durationMs: 1200,
+      })
+    )
+    const finalMessages = persistMessagesMock.mock.calls.at(-1)?.[1]
+    expect(finalMessages.at(-1)).toMatchObject({
+      id: recordExternalAgentUsageMock.mock.calls[0][0].messageId,
+      metadata: { usage: { inputTokens: 267000, outputTokens: 11 } },
+    })
+  })
+
+  it("releases an acquired workspace after a pre-stream Pi handshake failure and accepts the next send", async () => {
+    const workspace = await import("@/lib/task-workspace/client")
+    const adoption = await import("@/lib/code-adoption/client")
+    const { startCodeAdoptionTracker } = await import("@/lib/code-adoption/turn-tracker")
+    let leased = false
+    const acquire = (workspace.acquireWorkspaceBundle as jest.Mock).mockResolvedValue({
+      bundleId: "pi-bundle",
+      leases: [],
+    } as never)
+    const settle = (workspace.settleTaskWorkspaceTurn as jest.Mock).mockImplementation(async () => {
+      leased = false
+      return null
+    })
+    const end = (adoption.endCodeAdoptionTurn as jest.Mock).mockResolvedValue(null)
+    const consume = (adoption.consumeCodeAdoptionTrackingAttempt as jest.Mock).mockReturnValue(
+      undefined
+    )
+    resolveSendOptionsMock.mockResolvedValue({ model: "sonnet", cwd: "/repo" })
+    openWorkspaceBundleTurnLeaseMock.mockImplementation(async () => {
+      if (leased) throw new Error("working copy in use")
+      leased = true
+      return {
+        bundleTurnId: "pi-turn",
+        run: { runId: "pi-run", executionRoot: "/repo" },
+        primaryAlias: "/repo",
+        additionalAliases: [],
+      }
+    })
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock
+      .mockImplementationOnce(async () => {
+        expect(leased).toBe(true)
+        expect(chatState.status).toBe("streaming")
+        throw new Error("Pi extension handshake timed out")
+      })
+      .mockResolvedValueOnce({ success: true, finalResponse: "recovered" })
+    const oldSetStatus = chatState.setSessionStatus.getMockImplementation()
+    const oldSetDiagnostic = chatState.setSessionDiagnostic.getMockImplementation()
+    chatState.setSessionDiagnostic.mockImplementation((id: string, diagnostic: unknown) => {
+      const before = { sessions: { [id]: { ...chatState.sessions[id] } } }
+      oldSetDiagnostic!(id, diagnostic)
+      for (const sub of [...subscribers]) {
+        ;(sub as (state: unknown, previous: unknown) => void)(chatState, before)
+      }
+    })
+    chatState.setSessionStatus.mockImplementation((id: string, status: string) => {
+      const before = { sessions: { [id]: { ...chatState.sessions[id] } } }
+      sliceWrite(id, { status })
+      for (const sub of [...subscribers]) {
+        ;(sub as (state: unknown, previous: unknown) => void)(chatState, before)
+      }
+    })
+    const stop = startCodeAdoptionTracker()
+    try {
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("first")
+      })
+      await flush()
+      expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledTimes(1)
+      expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+      expect(settle).toHaveBeenCalledWith("sess-1", undefined, "failed")
+      expect(leased).toBe(false)
+      await act(async () => {
+        await result.current.send("second")
+      })
+      expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledTimes(2)
+      expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(2)
+      expect(chatState.status).toBe("idle")
+    } finally {
+      stop()
+      chatState.setSessionStatus.mockImplementation(oldSetStatus!)
+      chatState.setSessionDiagnostic.mockImplementation(oldSetDiagnostic!)
+      const realWorkspace = jest.requireActual("@/lib/task-workspace/client")
+      const realAdoption = jest.requireActual("@/lib/code-adoption/client")
+      acquire.mockReset().mockImplementation(realWorkspace.acquireWorkspaceBundle)
+      settle.mockReset().mockImplementation(realWorkspace.settleTaskWorkspaceTurn)
+      end.mockReset().mockImplementation(realAdoption.endCodeAdoptionTurn)
+      consume.mockReset().mockImplementation(realAdoption.consumeCodeAdoptionTrackingAttempt)
+    }
+  })
+
   it("external-agent writes stream into the sender's own slice across a mid-run focus switch (D1)", async () => {
     // Concurrent-chat behavior: a focus switch mid-run must NOT redirect or
     // drop the in-flight external turn — every write targets the *sender's*
@@ -1732,6 +2128,174 @@ describe("useClaudeChat — actions", () => {
       JSON.stringify(call[1])
     )
     expect(reported.join("\n")).toContain("Insufficient Balance")
+  })
+
+  it("keeps a turn that died during start-up on screen, marked failed with a typed reason", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const { PiProcessExitedError } = jest.requireActual<
+      typeof import("@/lib/ai/agent/external/runtimes/pi/pi-rpc-client")
+    >("@/lib/ai/agent/external/runtimes/pi/pi-rpc-client")
+    executeOnExternalAgentMock.mockRejectedValue(new PiProcessExitedError(1))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    // Classified from the error's type, not its English sentence.
+    const diagnostic = chatState.setSessionDiagnostic.mock.calls.at(-1)?.[1] as {
+      code: string
+      detail?: string
+    }
+    expect(diagnostic.code).toBe("initializationFailed")
+    expect(diagnostic.detail).toContain("Pi process exited (code 1)")
+    // The user's message stays, carrying the failure — in the store AND in
+    // the transcript written to disk, so a reload still shows it.
+    const lastWrite = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      role: string
+      metadata?: { turnAdmission?: { state: string; code: string } }
+    }>
+    const userRow = lastWrite.filter((message) => message.role === "user").at(-1)
+    expect(userRow?.metadata?.turnAdmission).toMatchObject({
+      state: "failed",
+      code: "initializationFailed",
+    })
+    const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as typeof lastWrite
+    expect(persisted.filter((message) => message.role === "user").at(-1)?.metadata).toMatchObject({
+      turnAdmission: { state: "failed" },
+    })
+  })
+
+  it("completes an in-session plan step that ran on an external agent", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "step done" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("Step 1: do it", undefined, { skipUserAppend: true })
+    })
+    expect(driveInSessionPlanAfterTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "sess-1", lastResponse: "step done" })
+    )
+    expect(haltInSessionPlanOnTurnFailureMock).not.toHaveBeenCalled()
+  })
+
+  it("halts the plan on a step whose external turn never started, with the typed cause", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const { LeaseConflictError } = jest.requireActual<
+      typeof import("@/lib/execution/lease-conflict")
+    >("@/lib/execution/lease-conflict")
+    executeOnExternalAgentMock.mockRejectedValue(
+      new LeaseConflictError("agent-process", "Agent pi:s1 is already running")
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("Step 1: do it", undefined, { skipUserAppend: true })
+    })
+    expect(haltInSessionPlanOnTurnFailureMock).toHaveBeenCalledWith({
+      sessionId: "sess-1",
+      cause: "not_started",
+      detail: "agentProcessBusy: Agent pi:s1 is already running",
+    })
+    expect(driveInSessionPlanAfterTurnMock).not.toHaveBeenCalled()
+  })
+
+  it("never halts a plan because a manual message failed", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockRejectedValue(new Error("boom"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    expect(haltInSessionPlanOnTurnFailureMock).not.toHaveBeenCalled()
+  })
+
+  it("names an agent process held by another process as a lease conflict", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const { LeaseConflictError } = jest.requireActual<
+      typeof import("@/lib/execution/lease-conflict")
+    >("@/lib/execution/lease-conflict")
+    executeOnExternalAgentMock.mockRejectedValue(
+      new LeaseConflictError("agent-process", "Agent pi:s1 is already running", {
+        holder: "pi:s1",
+      })
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    const diagnostic = chatState.setSessionDiagnostic.mock.calls.at(-1)?.[1] as { code: string }
+    expect(diagnostic.code).toBe("agentProcessBusy")
+  })
+
+  it("shows a send that has to wait for its working copy as queued, then runs it", async () => {
+    let admit: () => void = () => {}
+    acquireChatLeaseMock.mockImplementationOnce(
+      (params: { onQueued?: (blocker: unknown) => void }) => {
+        params.onQueued?.({
+          reason: "slot",
+          slotKey: "dir:/repo",
+          ahead: 0,
+          holder: { kind: "workflow-step", label: "Ship the refactor" },
+        })
+        return new Promise<void>((resolve) => (admit = resolve))
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    let sending: Promise<void> = Promise.resolve()
+    await act(async () => {
+      sending = result.current.send("hi")
+      await flush()
+    })
+    const queuedWrite = chatState.replaceSessionMessages.mock.calls.at(-1)?.[1] as Array<{
+      role: string
+      metadata?: { turnAdmission?: { state: string; waitingFor?: { holderLabel?: string } } }
+    }>
+    const queuedRow = queuedWrite.filter((message) => message.role === "user").at(-1)
+    expect(queuedRow?.metadata?.turnAdmission).toMatchObject({
+      state: "queued",
+      waitingFor: { reason: "slot", holderKind: "workflow-step", holderLabel: "Ship the refactor" },
+    })
+    // Written through immediately: a switch or reload rehydrates from disk.
+    expect(persistMessagesMock).toHaveBeenCalledWith("sess-1", queuedWrite)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    await act(async () => {
+      admit()
+      await sending
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
+    const admittedRows = chatState.replaceSessionMessages.mock.calls
+      .map((call) => call[1] as typeof queuedWrite)
+      .filter((messages) => messages.some((message) => message.role === "user"))
+    const afterAdmission = admittedRows
+      .at(-1)!
+      .filter((message) => message.role === "user")
+      .at(-1)
+    expect(afterAdmission?.metadata?.turnAdmission).toBeUndefined()
+  })
+
+  it("withdraws a queued send the user cancels without running it", async () => {
+    acquireChatLeaseMock.mockImplementationOnce(
+      async (params: { onQueued?: (blocker: unknown) => void }) => {
+        params.onQueued?.({ reason: "capacity", limit: 1, ahead: 0 })
+        const cancelled = new Error("lease cancelled while queued")
+        cancelled.name = "AbortError"
+        throw cancelled
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("never mind")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    const finalWrite = persistMessagesMock.mock.calls.at(-1)?.[1] as Array<{
+      parts: Array<{ text?: string }>
+    }>
+    expect(JSON.stringify(finalWrite)).not.toContain("never mind")
   })
 
   it("keeps a turn that recovered and answered a success", async () => {
@@ -2011,6 +2575,116 @@ describe("useClaudeChat — actions", () => {
     expect(
       useAgentRuntimeStore.getState().sessionCompositions[id].verifiedNativeResume
     ).toBeUndefined()
+  })
+
+  it.each(["cli", "thread-handoff"])(
+    "prepares complete %s import history before the first builtin send",
+    async (handoffSource) => {
+      const id = "received-task"
+      useAgentRuntimeStore.setState({ runtimeRef: { kind: "builtin" } })
+      getSessionMock.mockResolvedValue({
+        id,
+        title: "Imported",
+        handoffSource,
+        branchSeed: { kind: "transcript", content: "Old truncated seed" },
+        importCanonicalState: { goals: [{ goalId: "g", description: "Never deploy" }] },
+      })
+      listMessagesMock.mockResolvedValue([
+        {
+          id: "prior",
+          role: "user",
+          parts: [{ type: "text", text: "Full original requirements" }],
+        },
+      ])
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("continue", undefined, { sessionId: id })
+      })
+      expect(sendPromptMock).toHaveBeenCalledWith(
+        id,
+        "continue",
+        expect.objectContaining({
+          appendSystemPrompt: expect.stringContaining("Full original requirements"),
+        })
+      )
+      expect(sendPromptMock.mock.calls[0][2].appendSystemPrompt).toContain("Never deploy")
+      expect(clearBranchSeedMock).toHaveBeenCalledWith(id)
+      getSessionMock.mockResolvedValue({ id, handoffSource, importOwnership: "cognia-owned" })
+      await act(async () => {
+        _messageCallback?.({ type: "session_ended", sessionId: id })
+      })
+      listMessagesMock.mockClear()
+      sendPromptMock.mockClear()
+      await act(async () => {
+        await result.current.send("next", undefined, { sessionId: id })
+      })
+      expect(sendPromptMock).toHaveBeenCalled()
+      expect(sendPromptMock.mock.calls[0][2].appendSystemPrompt ?? "").not.toContain(
+        "Full original requirements"
+      )
+      expect(listMessagesMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("refuses oversized imported builtin continuation without a summary client", async () => {
+    const id = "oversized-import"
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "builtin" } })
+    getSessionMock.mockResolvedValue({
+      id,
+      handoffSource: "cli",
+      branchSeed: { kind: "transcript", content: "Truncated" },
+    })
+    listMessagesMock.mockResolvedValue([
+      { id: "prior", role: "user", parts: [{ type: "text", text: "constraint ".repeat(4000) }] },
+    ])
+    mockHandoffClient.mockResolvedValueOnce(null)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(result.current.send("continue", undefined, { sessionId: id })).rejects.toThrow(
+        "handoff_context_summary_unavailable"
+      )
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(clearBranchSeedMock).not.toHaveBeenCalled()
+  })
+
+  it("summarizes full imported state before builtin continuation and blocks locked imports first", async () => {
+    const id = "import:source:large"
+    const imported = {
+      id,
+      branchSeed: { kind: "transcript", content: "Old seed" },
+      importCanonicalState: { goals: [{ goalId: "goal", description: "Never change production" }] },
+      handoffLock: { ticketId: "ticket", state: "frozen" },
+    }
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "builtin" } })
+    getSessionMock.mockResolvedValue(imported)
+    listMessagesMock.mockResolvedValue([
+      { id: "prior", role: "user", parts: [{ type: "text", text: "history ".repeat(4000) }] },
+    ])
+    const complete = jest.fn().mockResolvedValue("Original constraint: Never change production.")
+    mockHandoffClient.mockReset().mockResolvedValue({ complete })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("continue", undefined, { sessionId: id })
+      ).rejects.toMatchObject({ code: "session_handoff_locked" })
+    })
+    expect(mockHandoffClient).not.toHaveBeenCalled()
+    expect(freezeImportedSessionMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    getSessionMock.mockResolvedValue({ ...imported, handoffLock: undefined })
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: id })
+    })
+    expect(complete).toHaveBeenCalled()
+    expect(JSON.stringify(complete.mock.calls)).toContain("Never change production")
+    expect(sendPromptMock.mock.calls[0][2].appendSystemPrompt).toContain(
+      "Original constraint: Never change production."
+    )
+    mockHandoffClient.mockReset().mockResolvedValue(null)
   })
 
   // Verification is what unlocks the resume. Without it the turn must start a
@@ -2607,6 +3281,44 @@ describe("useClaudeChat — actions", () => {
       })
     )
     // Built-in SDK path did NOT run for the delegated turn.
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("routes a delegated turn on the typed question and hands the agent the attached file with it", async () => {
+    chatState.activeSessionId = "sess-1"
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({
+      shouldDelegate: true,
+      targetAgentId: "ext-1",
+      matchedRule: { id: "r1", name: "Code → CC" },
+      reasonCode: "ok",
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "delegated done" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send(
+        [
+          { type: "text", text: "export function legacyParse() {}" },
+          { type: "text", text: "refactor this module" },
+        ],
+        undefined,
+        {
+          attachmentManifest: [
+            { filename: "parse.ts", mediaType: "text/plain", kind: "document" as const },
+          ],
+        }
+      )
+    })
+    // The rules read what the user asked, never the file's contents.
+    expect(checkDelegationMock).toHaveBeenCalledWith("refactor this module", {
+      sessionId: "sess-1",
+    })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "export function legacyParse() {}\n\nrefactor this module",
+      expect.objectContaining({ agentId: "ext-1" })
+    )
     expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
@@ -3266,6 +3978,26 @@ describe("useClaudeChat — actions", () => {
     persistMessagesMock.mockClear()
     await act(async () => {
       await result.current.regenerate()
+    })
+    expect(persistMessagesMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("regenerate and editAndResend are no-ops while the turn waits for admission", async () => {
+    // A queued turn leaves the status idle. Re-issuing it would park a second
+    // copy of the same turn behind the same working tree.
+    chatState.status = "idle"
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    isChatTurnQueuedMock.mockReturnValue(true)
+    persistMessagesMock.mockClear()
+    await act(async () => {
+      await result.current.regenerate()
+      await result.current.editAndResend("u-1", "edited")
     })
     expect(persistMessagesMock).not.toHaveBeenCalled()
     expect(sendPromptMock).not.toHaveBeenCalled()
@@ -5842,4 +6574,1641 @@ it("queues attachment text as an attachment and preserves only the user request 
       attachmentManifest: [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }],
     })
   )
+})
+
+describe("useClaudeChat — @agent turn routing", () => {
+  const CLAUDE: TurnRoute = {
+    target: { kind: "runtime", runtime: "claude" },
+    handle: "claude",
+    label: "claude",
+  }
+  const CODEX: TurnRoute = {
+    target: { kind: "runtime", runtime: "codex" },
+    handle: "codex",
+    label: "codex",
+  }
+  const CRITIC: TurnRoute = {
+    target: { kind: "squadMember", squadId: "squad-r", teammateId: "tm-critic" },
+    handle: "critic",
+    label: "Critic",
+  }
+  const BUILTIN_ROW: AgentRuntimeDescriptor = {
+    ref: { kind: "builtin" },
+    key: "builtin",
+    group: "builtin",
+  }
+  const CODEX_ROW: AgentRuntimeDescriptor = {
+    ref: { kind: "external", agentId: "codex-1" },
+    key: "external:codex-1",
+    group: "external",
+    name: "My Codex",
+    presetId: "codex",
+    brandId: "codex",
+  }
+  const reviewSquad = {
+    id: "squad-r",
+    name: "Review",
+    config: {},
+    teammateIds: ["tm-critic"],
+  } as unknown as AgentTeam
+  const critic: AgentTeammate = {
+    id: "tm-critic",
+    teamId: "squad-r",
+    name: "Critic",
+    description: "",
+    role: "teammate",
+    status: "idle",
+    config: { systemPrompt: "You are the critic.", model: "critic-model" },
+    completedTaskIds: [],
+    tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    progress: 0,
+    createdAt: new Date(0),
+  }
+
+  /** A Codex configured and runnable, and one Squad with one member. */
+  function routeContext(overrides: Partial<RouteContextSnapshot> = {}): RouteContextSnapshot {
+    return {
+      targets: buildRouteTargets({ squads: [{ team: reviewSquad, teammates: [critic] }] }),
+      runtimes: [BUILTIN_ROW, CODEX_ROW],
+      currentRef: { kind: "builtin" },
+      teams: { [reviewSquad.id]: reviewSquad },
+      teammates: { [critic.id]: critic },
+      externalEnabled: true,
+      configuredPresetIds: ["codex"],
+      ...overrides,
+    }
+  }
+
+  let busDiagnostics: CogniaDiagnostic[] = []
+  let unsubscribeBus: () => void = () => {}
+  beforeEach(() => {
+    routeSnapshotMock.mockReset().mockImplementation(async () => routeContext())
+    busDiagnostics = []
+    unsubscribeBus = subscribeDiagnostic(({ diagnostic }) => busDiagnostics.push(diagnostic))
+  })
+  afterEach(() => {
+    unsubscribeBus()
+  })
+
+  type Row = {
+    id: string
+    role: string
+    parts: Array<{ type: string; text?: string }>
+    metadata?: Record<string, unknown>
+  }
+  /** Every user row the send path put in the transcript. */
+  function writtenUserRows(): Row[] {
+    return chatState.replaceSessionMessages.mock.calls.flatMap(([, list]) =>
+      (list as Row[]).filter((message) => message.role === "user")
+    )
+  }
+  function routeRefusal(): { extra?: Record<string, unknown>; message?: string } | undefined {
+    const call = chatState.setSessionDiagnostic.mock.calls.find(
+      ([, diagnostic]) => (diagnostic as { code?: string } | null)?.code === "turnRouteUnavailable"
+    )
+    if (!call) return undefined
+    const diagnostic = call[1] as { message?: string; meta?: { extra?: Record<string, unknown> } }
+    return { extra: diagnostic.meta?.extra, message: diagnostic.message }
+  }
+  async function mount() {
+    const hook = renderHook(() => useClaudeChat())
+    await flush()
+    // Only what the send itself writes counts below.
+    chatState.replaceSessionMessages.mockClear()
+    persistMessagesMock.mockClear()
+    return hook
+  }
+
+  describe("refusal leaves no user row", () => {
+    it.each([
+      ["a team room", { kind: "team" }],
+      ["an IM-bound conversation", { platformBinding: { platform: "lark", chatId: "c-1" } }],
+      [
+        "a shared transcript",
+        {
+          collaboration: {
+            orgId: "o",
+            workspaceId: "w",
+            sessionId: "shared",
+            policyRevision: 1,
+            syncCursor: 0,
+          },
+        },
+      ],
+    ])("refuses an addressed turn in %s instead of running it unrouted", async (_label, extra) => {
+      getSessionMock.mockResolvedValue({ id: "sess-1", title: "Not direct", ...extra })
+      const { result } = await mount()
+      await act(async () => {
+        await expect(
+          result.current.send("@claude hi", undefined, { turnRoute: CLAUDE, throwOnError: true })
+        ).rejects.toThrow("turn_route_unavailable:unroutable-session")
+      })
+      expect(routeRefusal()?.extra).toEqual({ handle: "claude", reason: "unroutable-session" })
+      expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+      expect(writtenUserRows()).toEqual([])
+      expect(sendSharedSessionMessageMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(startSquadRunMock).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      [
+        "no Codex is configured",
+        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] }),
+        { reason: "not-configured", detail: "" },
+      ],
+      [
+        "the only Codex is blocked",
+        routeContext({ runtimes: [BUILTIN_ROW, { ...CODEX_ROW, blockedReason: "codex missing" }] }),
+        { reason: "blocked", detail: "codex missing" },
+      ],
+    ])(
+      "refuses @codex when %s, and never answers it on the builtin lane",
+      async (_l, ctx, want) => {
+        routeSnapshotMock.mockResolvedValue(ctx)
+        const { result } = await mount()
+        await act(async () => {
+          await expect(
+            result.current.send("@codex fix it", undefined, {
+              turnRoute: CODEX,
+              throwOnError: true,
+            })
+          ).rejects.toThrow(`turn_route_unavailable:${want.reason}`)
+        })
+        expect(routeRefusal()).toEqual({
+          extra: { handle: "codex", reason: want.reason },
+          message: want.detail,
+        })
+        // Re-resolved against THIS conversation at commit time.
+        expect(routeSnapshotMock).toHaveBeenCalledWith("sess-1", expect.anything())
+        expect(writtenUserRows()).toEqual([])
+        expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+        expect(resolveSendOptionsMock).not.toHaveBeenCalled()
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      }
+    )
+
+    it("refuses @codex when the turn's tool surface is none, rather than answering on builtin", async () => {
+      // A deny-all tool surface quietly keeps an UNADDRESSED turn builtin; an
+      // addressed one asked for Codex and is refused instead.
+      resolveSendOptionsMock.mockResolvedValue({ model: "sonnet", toolSurface: "none" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send("@codex fix it", undefined, { turnRoute: CODEX })
+      })
+      expect(routeRefusal()?.extra).toEqual({ handle: "codex", reason: "no-tool-surface" })
+      expect(writtenUserRows()).toEqual([])
+      expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(ensureExternalAgentReadyMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it.each([
+    ["streaming", "streaming", false],
+    ["waiting on an approval", "awaiting_approval", false],
+    ["holding a queued turn", "idle", true],
+  ])(
+    "refuses an addressed turn while the session is %s, never demoting it to a steer",
+    async (_label, status, queued) => {
+      chatState.status = status
+      isChatTurnQueuedMock.mockReturnValue(queued)
+      const { result } = await mount()
+      await act(async () => {
+        await expect(
+          result.current.send("@codex also this", undefined, {
+            turnRoute: CODEX,
+            throwOnError: true,
+          })
+        ).rejects.toThrow("turn_route_while_busy")
+      })
+      expect(busDiagnostics).toEqual([
+        expect.objectContaining({
+          code: "turnRouteWhileBusy",
+          meta: expect.objectContaining({ sessionId: "sess-1", extra: { handle: "codex" } }),
+        }),
+      ])
+      // On the bus, not the session: the running turn keeps its status.
+      expect(chatState.setSessionDiagnostic).not.toHaveBeenCalled()
+      expect(persistSessionAssetsMock).not.toHaveBeenCalled()
+      expect(writtenUserRows()).toEqual([])
+      expect(steerSessionMock).not.toHaveBeenCalled()
+      expect(chatState.enqueueSteer).not.toHaveBeenCalled()
+      expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+      expect(routeSnapshotMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it("runs @claude from an external-lane conversation on the builtin lane, and leaves the lane alone", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "external" })
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send("@claude explain", undefined, { turnRoute: CLAUDE })
+    })
+    // The options were built for the ROUTED lane, not the session's...
+    const ctx = (resolveSendOptionsMock.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(ctx).not.toHaveProperty("externalRuntimeId")
+    // ...and the dispatch took that same lane.
+    expect(ensureExternalAgentReadyMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "explain", expect.any(Object))
+    // The reply is sealed as the builtin engine's answer to `@claude`.
+    expect((chatState.lastSendBySession["sess-1"] as { routeStamp?: unknown }).routeStamp).toEqual({
+      handle: "claude",
+      label: "Claude",
+      runtimeKind: "builtin",
+      brandId: "anthropic",
+    })
+    // One turn: the conversation is still on its own lane.
+    expect(useAgentRuntimeStore.getState().runtimeRef).toEqual({
+      kind: "external",
+      agentId: "ext-1",
+    })
+  })
+
+  it("strips the handle from what the runtime reads, keeps it in the transcript, and stamps the route", async () => {
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send("@claude explain this", undefined, { turnRoute: CLAUDE })
+    })
+    expect(sendPromptMock.mock.calls[0]![1]).toBe("explain this")
+    expect(resolveSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routingContextHint: expect.objectContaining({ promptText: "explain this" }),
+      })
+    )
+    const row = writtenUserRows().at(-1)!
+    expect(row.parts[0]!.text).toBe("@claude explain this")
+    expect(row.metadata?.turnRoute).toEqual(CLAUDE)
+  })
+
+  it("strips the handle from the typed text, not from an attachment ahead of it", async () => {
+    // An extracted document is a text block too; a route may not edit it.
+    const attachment = { type: "text" as const, text: "@claude appears in this file" }
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send(
+        [attachment, { type: "text", text: "@claude summarize" }],
+        undefined,
+        {
+          turnRoute: CLAUDE,
+          attachmentManifest: [
+            { filename: "notes.txt", mediaType: "text/plain", kind: "document" as const },
+          ],
+        }
+      )
+    })
+    expect(sendPromptMock.mock.calls[0]![1]).toEqual([
+      attachment,
+      { type: "text", text: "summarize" },
+    ])
+  })
+
+  describe("the external lane's prompt with an attached file", () => {
+    const REPORT = "Q3 revenue grew 12% on the back of the new pricing tier."
+    const manifest = [
+      { filename: "report.pdf", mediaType: "application/pdf", kind: "document" as const },
+    ]
+
+    it("sends @codex the question the user typed, behind the extracted document, not the document alone", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(
+          [
+            { type: "text", text: REPORT },
+            { type: "text", text: "@codex what drove the growth?" },
+          ],
+          undefined,
+          { turnRoute: CODEX, attachmentManifest: manifest }
+        )
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+      const [prompt, options] = executeOnExternalAgentMock.mock.calls[0] as [string, object]
+      // The typed question is what the agent is asked; the file is its material.
+      expect(prompt).toBe(`${REPORT}\n\nwhat drove the growth?`)
+      expect(options).toMatchObject({ agentId: "codex-1" })
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(writtenUserRows().at(-1)!.metadata?.turnRoute).toEqual(CODEX)
+    })
+
+    it("sends @codex exactly the typed text when nothing is attached", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send("@codex what drove the growth?", undefined, {
+          turnRoute: CODEX,
+        })
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "what drove the growth?",
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+    })
+  })
+
+  describe("an attached file's text is never read as the question", () => {
+    // `buildSendContent` puts an extracted document (or an image's OCR) ahead
+    // of the typed text as a text block of its own; the manifest counts them.
+    const REPORT = "Q3 revenue grew 12% on the back of the new pricing tier."
+    const QUESTION = "what drove the growth?"
+    const manifest = [
+      { filename: "report.pdf", mediaType: "application/pdf", kind: "document" as const },
+    ]
+    const withReport = (typed: string) => [
+      { type: "text" as const, text: REPORT },
+      { type: "text" as const, text: typed },
+    ]
+    function routingPromptText(): unknown {
+      const ctx = (resolveSendOptionsMock.mock.calls[0] as unknown[])[0] as {
+        routingContextHint?: { promptText?: unknown }
+      }
+      return ctx.routingContextHint?.promptText
+    }
+
+    it("keys routing and recall off the typed question", async () => {
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(QUESTION), undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      expect(routingPromptText()).toBe(QUESTION)
+    })
+
+    it("strips an addressed turn's handle from the question, not from the file", async () => {
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(`@claude ${QUESTION}`), undefined, {
+          turnRoute: CLAUDE,
+          attachmentManifest: manifest,
+        })
+      })
+      expect(routingPromptText()).toBe(QUESTION)
+    })
+
+    it("gives a turn with nothing typed no question rather than the file", async () => {
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send([{ type: "text", text: REPORT }], undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      expect(resolveSendOptionsMock).toHaveBeenCalledTimes(1)
+      expect(routingPromptText()).toBeUndefined()
+    })
+
+    it("re-reads an edit's handle past the files it resends, and resends them as files", async () => {
+      chatState.messages = [
+        {
+          id: "u-1",
+          role: "user",
+          parts: [
+            { type: "file", filename: "report.pdf", mediaType: "application/pdf", text: REPORT },
+            { type: "text", text: "summarize it" },
+          ],
+        },
+        {
+          id: "a-1",
+          role: "assistant",
+          parts: [{ type: "text", text: "summary" }],
+          metadata: { run: { providerId: "anthropic" } },
+        },
+      ]
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.editAndResend(
+          "u-1",
+          withReport(`@codex ${QUESTION}`),
+          "sess-1",
+          undefined,
+          manifest
+        )
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        `${REPORT}\n\n${QUESTION}`,
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      const replacement = writtenUserRows()
+        .filter((row) => row.id !== "u-1")
+        .at(-1)
+      expect(replacement?.metadata?.turnRoute).toEqual(
+        expect.objectContaining({ target: { kind: "runtime", runtime: "codex" }, handle: "codex" })
+      )
+      // The manifest reaches the row builder, which makes the file a card again
+      // rather than showing its text as what the user typed.
+      const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+        makeUserMessage: jest.Mock
+      }
+      expect(makeUserMessage).toHaveBeenCalledWith(
+        withReport(`@codex ${QUESTION}`),
+        expect.any(String),
+        manifest
+      )
+    })
+
+    it("hands a Squad the whole turn and names the question on its card", async () => {
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "On a squad",
+        model: "sonnet",
+        squadId: "squad-1",
+      })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(QUESTION), undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      // The goal is all the Squad gets: without the file it has nothing to
+      // work from, without the question nothing to do.
+      expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
+        expect.objectContaining({ squadId: "squad-1", goal: `${REPORT}\n\n${QUESTION}` })
+      )
+      const card = chatState.replaceSessionMessages.mock.calls
+        .flatMap(([, list]) => list as Array<{ parts?: Array<Record<string, unknown>> }>)
+        .flatMap((message) => message.parts ?? [])
+        .find((part) => part.type === "squad-run")
+      expect(card?.objective).toBe(QUESTION)
+    })
+
+    it("briefs the independent verifier with the question, without the file", async () => {
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(QUESTION), undefined, {
+          attachmentManifest: manifest,
+          compositionOverride: { presetId: "p1", orchestration: "verified-fresh-agent" },
+        })
+      })
+      await flush()
+      expect(armVerifiedFreshAgentFollowupMock).toHaveBeenCalledTimes(1)
+      expect(armVerifiedFreshAgentFollowupMock.mock.calls[0]![0]).toEqual(
+        expect.objectContaining({ sessionId: "sess-1", request: QUESTION })
+      )
+    })
+
+    it("records the question as the run's user input and the trace's input preview", async () => {
+      const directChatRun = jest.requireMock("@/lib/execution/direct-chat-run") as {
+        startDirectChatExecutionRun: jest.Mock
+      }
+      const { setAgentTraceWriter, __resetAgentTraceEmitterForTesting } =
+        await import("@cognia/agent-trace/emitter")
+      const spans: Array<Record<string, unknown>> = []
+      __resetAgentTraceEmitterForTesting()
+      setAgentTraceWriter((span) => {
+        spans.push(span as unknown as Record<string, unknown>)
+      })
+      try {
+        // A failed dispatch ends the turn's span, which is when the writer sees it.
+        sendPromptMock.mockRejectedValueOnce(new Error("offline"))
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.send(withReport(QUESTION), undefined, {
+            attachmentManifest: manifest,
+          })
+        })
+        expect(directChatRun.startDirectChatExecutionRun).toHaveBeenCalledWith(
+          expect.objectContaining({ prompt: QUESTION })
+        )
+        expect(spans).toHaveLength(1)
+        expect(spans[0]!.inputPreview).toBe(QUESTION)
+      } finally {
+        setAgentTraceWriter(null)
+      }
+    })
+
+    /** The row `makeUserMessage` leaves for an extracted document. */
+    const reportPart = {
+      type: "file",
+      filename: "report.pdf",
+      mediaType: "application/pdf",
+      text: REPORT,
+    }
+    const reply = {
+      id: "a-1",
+      role: "assistant",
+      parts: [{ type: "text", text: "summary" }],
+      metadata: { run: { providerId: "anthropic" } },
+    }
+
+    it("resends an edited message's files with the edited text", async () => {
+      chatState.messages = [
+        { id: "u-1", role: "user", parts: [reportPart, { type: "text", text: "summarize it" }] },
+        reply,
+      ]
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        // Every edit surface hands over the typed text alone.
+        await result.current.editAndResend("u-1", `@codex ${QUESTION}`, "sess-1")
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        `${REPORT}\n\n${QUESTION}`,
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+      const { makeUserMessage } = jest.requireMock("@/lib/claude/adapter") as {
+        makeUserMessage: jest.Mock
+      }
+      expect(makeUserMessage).toHaveBeenCalledWith(
+        withReport(`@codex ${QUESTION}`),
+        expect.any(String),
+        [expect.objectContaining({ filename: "report.pdf", kind: "document" })]
+      )
+      expect(toastWarning).not.toHaveBeenCalled()
+    })
+
+    it("names a file an edit cannot resend instead of dropping it silently", async () => {
+      const native = {
+        videoAttachment: {
+          groupId: "g-1",
+          filename: "clip.mp4",
+          sourceMediaType: "video/mp4",
+          kind: "video",
+          durationSec: 4,
+          width: 640,
+          height: 360,
+          delivery: "native",
+          strategy: "uniform",
+          range: null,
+          frameTimes: [],
+          engine: "browser",
+        },
+      }
+      chatState.messages = [
+        {
+          id: "u-1",
+          role: "user",
+          parts: [
+            { type: "file", mediaType: "text/plain", text: "A cat jumps.", ...native },
+            { type: "text", text: "what happens?" },
+          ],
+        },
+        reply,
+      ]
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.editAndResend("u-1", "what happens next?", "sess-1")
+      })
+      expect(toastWarning).toHaveBeenCalledWith(
+        "clip.mp4 couldn't be sent again and was left out. Attach it again to include it."
+      )
+      expect(sendPromptMock).toHaveBeenCalledWith(
+        "sess-1",
+        "what happens next?",
+        expect.any(Object)
+      )
+    })
+
+    it("regenerates a turn sent before a reload with its files, from its row", async () => {
+      chatState.messages = [
+        {
+          id: "u-1",
+          role: "user",
+          parts: [reportPart, { type: "text", text: `@codex ${QUESTION}` }],
+          metadata: { turnRoute: CODEX },
+        },
+        { ...reply, metadata: { run: { providerId: "external" } } },
+      ]
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "again" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.regenerate("sess-1")
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        `${REPORT}\n\n${QUESTION}`,
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+    })
+
+    it("regenerates the turn it just sent with that turn's manifest", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(`@codex ${QUESTION}`), undefined, {
+          turnRoute: CODEX,
+          attachmentManifest: manifest,
+        })
+      })
+      await act(async () => {
+        await result.current.regenerate("sess-1")
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(2)
+      expect(executeOnExternalAgentMock.mock.calls[1]![0]).toBe(`${REPORT}\n\n${QUESTION}`)
+    })
+
+    it("tells the user what an external agent's text-only prompt left out", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const shot = { filename: "shot.png", mediaType: "image/png", kind: "image" as const }
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(
+          [
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+            },
+            { type: "text", text: "OCR words" },
+            { type: "text", text: `@codex ${QUESTION}` },
+            { type: "text", text: "[Link] https://example.com: page text" },
+          ],
+          undefined,
+          { turnRoute: CODEX, attachmentManifest: [shot, shot] }
+        )
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        `OCR words\n\n${QUESTION}`,
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+      expect(toastWarning).toHaveBeenCalledWith(
+        "External agents receive text only, so the images or video in shot.png weren't sent. " +
+          "Any text extracted from it was. A fetched page wasn't sent: external agents " +
+          "receive only your message and the text of attached files."
+      )
+    })
+
+    describe("a Squad's text-only goal", () => {
+      const shot = { filename: "shot.png", mediaType: "image/png", kind: "image" as const }
+      const turn: SendContentBlock[] = [
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+        },
+        { type: "text", text: "OCR words" },
+        { type: "text", text: QUESTION },
+        { type: "text", text: "[Link] https://example.com: page text" },
+      ]
+      beforeEach(() => {
+        getSessionMock.mockResolvedValue({
+          id: "sess-1",
+          title: "On a squad",
+          model: "sonnet",
+          squadId: "squad-1",
+        })
+      })
+
+      it("tells the user what the goal left out once the Squad takes the run", async () => {
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.send(turn, undefined, { attachmentManifest: [shot, shot] })
+        })
+        expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
+          expect.objectContaining({ goal: `OCR words\n\n${QUESTION}` })
+        )
+        expect(toastWarning).toHaveBeenCalledWith(
+          "A Squad's goal is text only, so the images or video in shot.png weren't handed to it. " +
+            "Any text extracted from it was. A fetched page wasn't handed to the Squad: its goal " +
+            "holds only your message and the text of attached files."
+        )
+      })
+
+      it("says nothing for a run that already existed, whose goal the turn did not set", async () => {
+        startSquadRunMock.mockResolvedValueOnce({
+          started: true,
+          runId: "run_team_abc123def456",
+          duplicate: true,
+        })
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.send(turn, undefined, { attachmentManifest: [shot, shot] })
+        })
+        expect(startSquadRunMock).toHaveBeenCalledTimes(1)
+        expect(toastWarning).not.toHaveBeenCalled()
+      })
+
+      it("says nothing when the goal carried the whole turn", async () => {
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.send(withReport(QUESTION), undefined, {
+            attachmentManifest: manifest,
+          })
+        })
+        expect(startSquadRunMock).toHaveBeenCalledTimes(1)
+        expect(toastWarning).not.toHaveBeenCalled()
+      })
+    })
+
+    it("says nothing when an external agent's prompt carried the whole turn", async () => {
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(`@codex ${QUESTION}`), undefined, {
+          turnRoute: CODEX,
+          attachmentManifest: manifest,
+        })
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+      expect(toastWarning).not.toHaveBeenCalled()
+    })
+
+    it("hands the builtin lane Codex's replies in front of the files, not inside one", async () => {
+      chatState.messages = [
+        { id: "u-1", role: "user", parts: [{ type: "text", text: "first question" }] },
+        { ...reply, parts: [{ type: "text", text: "builtin reply" }] },
+        {
+          id: "u-2",
+          role: "user",
+          parts: [{ type: "text", text: "@codex second question" }],
+          metadata: { turnRoute: CODEX },
+        },
+        {
+          id: "a-2",
+          role: "assistant",
+          parts: [{ type: "text", text: "codex reply" }],
+          metadata: { run: { providerId: "external" } },
+        },
+      ]
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send(withReport(QUESTION), undefined, {
+          attachmentManifest: manifest,
+        })
+      })
+      const sent = sendPromptMock.mock.calls[0]![1] as Array<{ type: string; text: string }>
+      expect(sent).toHaveLength(3)
+      expect(sent[0]!.text).toContain("codex reply")
+      expect(sent[0]!.text.endsWith("Current user request:")).toBe(true)
+      expect(sent.slice(1)).toEqual(withReport(QUESTION))
+    })
+  })
+
+  it("keeps an addressed turn off the host queue, which would record it without its handle", async () => {
+    // The host writes the intent's text as the user row: the `@claude` chip and
+    // `metadata.turnRoute` would be gone, and a regenerate would forget the route.
+    enqueueHostStateIntentMock.mockResolvedValue(true)
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send("@claude hi", undefined, { turnRoute: CLAUDE })
+    })
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "hi", expect.any(Object))
+    expect(writtenUserRows().at(-1)!.metadata?.turnRoute).toEqual(CLAUDE)
+  })
+
+  it("hands the builtin lane what Codex answered since it last spoke, without recording it as typed", async () => {
+    chatState.messages = [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "first question" }] },
+      {
+        id: "a-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "builtin reply" }],
+        metadata: { run: { providerId: "anthropic" } },
+      },
+      {
+        id: "u-2",
+        role: "user",
+        parts: [{ type: "text", text: "@codex second question" }],
+        metadata: { turnRoute: CODEX },
+      },
+      {
+        id: "a-2",
+        role: "assistant",
+        parts: [{ type: "text", text: "codex reply" }],
+        metadata: { run: { providerId: "external" } },
+      },
+    ]
+    // Available, and still not taken: the host would persist the handoff as
+    // the user's own message.
+    enqueueHostStateIntentMock.mockResolvedValue(true)
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send("third question")
+    })
+    expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+    const sent = sendPromptMock.mock.calls[0]![1] as string
+    expect(sent).toContain("codex reply")
+    expect(sent).not.toContain("builtin reply")
+    expect(sent.endsWith("Current user request:\nthird question")).toBe(true)
+    expect(writtenUserRows().at(-1)!.parts[0]!.text).toBe("third question")
+  })
+
+  it("never re-runs a failed @codex turn on the builtin lane", async () => {
+    // Every fallback the send path has is armed: a matching delegation rule
+    // and the "fallback" failure policy. None of them may touch this turn.
+    useExternalAgentStore.setState({ chatFailurePolicy: "fallback" })
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    executeOnExternalAgentMock.mockResolvedValue({ success: false, error: "codex crashed" })
+    const { result } = await mount()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("@codex fix it", undefined, { turnRoute: CODEX })
+    })
+    expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("codex-1", expect.anything())
+    expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "fix it",
+      expect.objectContaining({ agentId: "codex-1" })
+    )
+    expect(checkDelegationMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(busDiagnostics.map((d) => d.code)).not.toContain("fallbackToBuiltin")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        source: "external-agent",
+        meta: expect.objectContaining({ agentId: "codex-1" }),
+      })
+    )
+    const sealed = (chatState.lastSendBySession["sess-1"] ?? {}) as { routeStamp?: unknown }
+    expect(sealed.routeStamp).toBeUndefined()
+  })
+
+  it("runs an addressed turn in a Squad-bound conversation as one direct turn, undelegated", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "On a squad",
+      model: "sonnet",
+      squadId: "squad-1",
+    })
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+    const { result } = await mount()
+    subscribers.forEach((sub) => sub(chatState))
+    await act(async () => {
+      await result.current.send("@claude quick question", undefined, { turnRoute: CLAUDE })
+    })
+    expect(startSquadRunMock).not.toHaveBeenCalled()
+    expect(checkDelegationMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "quick question", expect.any(Object))
+  })
+
+  it("answers a member route as that member, with the member's model for the turn", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Direct",
+      model: "sonnet",
+      providerOverride: "anthropic",
+      systemPrompt: "The conversation's own prompt.",
+    })
+    const { result } = await mount()
+    await act(async () => {
+      await result.current.send("@critic review this", undefined, { turnRoute: CRITIC })
+    })
+    const ctx = (resolveSendOptionsMock.mock.calls[0] as unknown[])[0] as {
+      character: Record<string, unknown>
+      session: Record<string, unknown>
+      memberOverride?: unknown
+    }
+    expect(ctx.character).toEqual(
+      expect.objectContaining({
+        id: "__teammate__:tm-critic",
+        name: "Critic",
+        systemPrompt: "You are the critic.",
+        model: "critic-model",
+      })
+    )
+    // The persona replaces the conversation's prompt, and its model wins.
+    expect(ctx.session.systemPrompt).toBeUndefined()
+    expect(ctx.session.model).toBeUndefined()
+    expect(ctx.session.providerOverride).toBeUndefined()
+    expect(ctx.memberOverride).toEqual({
+      characterId: "__teammate__:tm-critic",
+      modelOverride: "critic-model",
+    })
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "review this", expect.any(Object))
+    expect((chatState.lastSendBySession["sess-1"] as { routeStamp?: unknown }).routeStamp).toEqual(
+      expect.objectContaining({
+        handle: "critic",
+        label: "Critic",
+        runtimeKind: "builtin",
+        teammateId: "tm-critic",
+        squadId: "squad-r",
+      })
+    )
+  })
+
+  describe("regenerate", () => {
+    const routedThread = () => [
+      {
+        id: "u-1",
+        role: "user",
+        parts: [{ type: "text", text: "@codex fix it" }],
+        metadata: { turnRoute: CODEX },
+      },
+      {
+        id: "a-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "old answer" }],
+        metadata: { run: { providerId: "external" } },
+      },
+    ]
+
+    it("re-runs an addressed turn where it was addressed, not on the conversation's lane", async () => {
+      chatState.messages = routedThread()
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "new answer" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.regenerate("sess-1")
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "fix it",
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    })
+
+    it("refuses a route that can no longer run before touching the thread", async () => {
+      chatState.messages = routedThread()
+      routeSnapshotMock.mockResolvedValue(
+        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] })
+      )
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.regenerate("sess-1")
+      })
+      expect(routeRefusal()?.extra).toEqual({ handle: "codex", reason: "not-configured" })
+      // The reply is not re-parented into a branch group nobody fills.
+      expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+      expect(persistMessagesMock).not.toHaveBeenCalled()
+      expect(chatState.messages).toEqual(routedThread())
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    })
+
+    // A branch tag armed for a turn that never runs is consumed by whichever
+    // assistant message lands next — the NEXT turn's reply, filed as a
+    // sibling of the old answer and hiding it.
+    describe("any refusal leaves no branch bookkeeping behind", () => {
+      const plainThread = () => [
+        { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+      ]
+      /** Lands one SDK frame that appends assistant `id` to the session. */
+      async function landReply(id: string): Promise<Row | undefined> {
+        const adapterMock = jest.requireMock("@/lib/claude/adapter") as {
+          applySdkEvent: jest.Mock
+        }
+        adapterMock.applySdkEvent.mockReturnValueOnce({
+          messages: [
+            ...(chatState.messages as Row[]),
+            { id, role: "assistant", parts: [{ type: "text", text: id }] },
+          ],
+          turnComplete: true,
+        })
+        await act(async () => {
+          _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+        })
+        await flush()
+        return chatState.replaceSessionMessages.mock.calls
+          .map(([, list]) => (list as Row[]).find((message) => message.id === id))
+          .findLast((message) => message !== undefined)
+      }
+
+      it("stamps the reply of a regenerate that runs into the anchor's group", async () => {
+        // The control for the refusals below: the same frame, after a
+        // regenerate that was not refused, IS filed as the next sibling.
+        chatState.messages = plainThread()
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(sendPromptMock).toHaveBeenCalledTimes(1)
+        const reply = await landReply("a-2")
+        expect(reply?.metadata).toMatchObject({ branchGroupId: "u-1", branchIndex: 1 })
+        expect(chatState.setSessionActiveBranch).toHaveBeenCalledWith("sess-1", "u-1", "a-2")
+      })
+
+      it.each([
+        [
+          "a plugin prompt guard blocks it",
+          () => {
+            dispatchUserPromptSubmitMock.mockResolvedValueOnce({
+              action: "block",
+              reason: "policy violation",
+            } as never)
+          },
+        ],
+        [
+          "the concurrent-stream cap is reached",
+          () => {
+            isAtCapacityMock.mockReturnValue(true)
+          },
+        ],
+      ])("a regenerate refused because %s", async (_label, refuse) => {
+        chatState.messages = plainThread()
+        const { result } = await mount()
+        refuse()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        // The thread is exactly as it was: the reply was never re-parented.
+        expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+        expect(persistMessagesMock).not.toHaveBeenCalled()
+        expect(chatState.messages).toEqual(plainThread())
+
+        // Nothing is armed: a frame landing now is not filed into the group…
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchGroupId).toBeUndefined()
+
+        // …and neither is the reply of the next ordinary turn.
+        isAtCapacityMock.mockReturnValue(false)
+        await act(async () => {
+          await result.current.send("next question", undefined, { sessionId: "sess-1" })
+        })
+        expect(sendPromptMock).toHaveBeenCalledTimes(1)
+        const reply = await landReply("a-next")
+        expect(reply).toBeDefined()
+        expect(reply?.metadata?.branchGroupId).toBeUndefined()
+        expect(reply?.metadata?.branchIndex).toBeUndefined()
+        expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+        expect(chatState.activeBranchByGroup).toEqual({})
+      })
+
+      it("refuses a regenerate whose turn stopped being the last one while its gates ran", async () => {
+        chatState.messages = plainThread()
+        const follow = { id: "u-2", role: "user", parts: [{ type: "text", text: "and another" }] }
+        dispatchUserPromptSubmitMock.mockImplementationOnce(async () => {
+          // Another surface lands a turn before the regenerate would tag.
+          chatState.messages = [...plainThread(), follow]
+          return { action: "proceed" as const }
+        })
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        // Tagging now would have dropped the new turn and answered the old one.
+        expect(persistMessagesMock).not.toHaveBeenCalled()
+        expect(chatState.messages).toEqual([...plainThread(), follow])
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchGroupId).toBeUndefined()
+      })
+
+      it("disarms the tag of a regenerate refused after it started", async () => {
+        chatState.messages = plainThread()
+        sendPromptMock.mockRejectedValueOnce(new Error("sidecar unavailable"))
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(sendPromptMock).toHaveBeenCalledTimes(1)
+        // No `session_ended` follows a dispatch that never reached the host,
+        // so nothing else would ever drop the tag.
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchGroupId).toBeUndefined()
+        expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+      })
+
+      it("returns the navigator to the original when a refused edit never lands", async () => {
+        chatState.messages = plainThread()
+        persistSessionAssetsMock.mockRejectedValueOnce(new Error("disk full"))
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.editAndResend("u-1", "hello again", "sess-1")
+        })
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        // The pick made for the replacement is undone: it names a row that is
+        // not in the transcript.
+        expect(chatState.setSessionActiveBranch).toHaveBeenCalledWith("sess-1", "edit::u-1", "u1")
+        expect(chatState.activeBranchByGroup).toEqual({})
+        expect((chatState.messages as Row[]).some((message) => message.id === "u1")).toBe(false)
+      })
+
+      it("keeps a failed edit selected but drops its owner stamp", async () => {
+        chatState.messages = plainThread()
+        sendPromptMock.mockRejectedValueOnce(new Error("sidecar unavailable"))
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.editAndResend("u-1", "hello again", "sess-1")
+        })
+        // The edited question stays in the transcript and on screen, so the
+        // failure it carries — and its retry — is what the user sees.
+        expect((chatState.messages as Row[]).some((message) => message.id === "u1")).toBe(true)
+        expect(chatState.activeBranchByGroup).toEqual({ "edit::u-1": "u1" })
+        // A frame landing later is not filed under a turn that never ran.
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchOwnerId).toBeUndefined()
+      })
+    })
+
+    // The external lane and a Squad handoff write their reply themselves, so
+    // no `handleEvent` frame is there to consume what the send armed. Left
+    // armed, the old reply sat alone in its group — both answers on screen and
+    // no navigator — and the slot waited for whatever landed next.
+    describe("a reply the send writes itself takes the armed slot", () => {
+      /** Lands one SDK frame that appends assistant `id` to the session. */
+      async function landReply(id: string): Promise<Row | undefined> {
+        const adapterMock = jest.requireMock("@/lib/claude/adapter") as {
+          applySdkEvent: jest.Mock
+        }
+        adapterMock.applySdkEvent.mockReturnValueOnce({
+          messages: [
+            ...(chatState.messages as Row[]),
+            { id, role: "assistant", parts: [{ type: "text", text: id }] },
+          ],
+          turnComplete: true,
+        })
+        await act(async () => {
+          _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+        })
+        await flush()
+        return (chatState.messages as Row[]).find((message) => message.id === id)
+      }
+      const replies = (): Row[] =>
+        (chatState.messages as Row[]).filter((message) => message.role === "assistant")
+
+      it("files an external regenerate's reply as the anchor's next sibling, and selects it", async () => {
+        chatState.messages = routedThread()
+        executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "new answer" })
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        const [old, reply] = replies()
+        expect(old?.metadata).toMatchObject({ branchGroupId: "u-1", branchIndex: 0 })
+        expect(reply?.parts).toEqual([expect.objectContaining({ text: "new answer" })])
+        expect(reply?.metadata).toMatchObject({
+          branchGroupId: "u-1",
+          branchIndex: 1,
+          run: expect.objectContaining({ providerId: "external" }),
+        })
+        expect(chatState.setSessionActiveBranch).toHaveBeenCalledWith("sess-1", "u-1", reply?.id)
+        expect(chatState.activeBranchByGroup).toEqual({ "u-1": reply?.id })
+        // Dexie holds the same thread: the stamp survives a reload.
+        const persisted = persistMessagesMock.mock.calls.at(-1)?.[1] as Row[]
+        expect(persisted.find((message) => message.id === reply?.id)?.metadata).toMatchObject({
+          branchGroupId: "u-1",
+          branchIndex: 1,
+        })
+
+        // The slot is spent: a frame landing now is not filed into the group…
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchGroupId).toBeUndefined()
+
+        // …and neither is the reply of the next ordinary turn.
+        await act(async () => {
+          await result.current.send("next question", undefined, { sessionId: "sess-1" })
+        })
+        expect(sendPromptMock).toHaveBeenCalledTimes(1)
+        const next = await landReply("a-next")
+        expect(next).toBeDefined()
+        expect(next?.metadata?.branchGroupId).toBeUndefined()
+        expect(next?.metadata?.branchIndex).toBeUndefined()
+        expect(chatState.setSessionActiveBranch).toHaveBeenCalledTimes(1)
+        expect(chatState.activeBranchByGroup).toEqual({ "u-1": reply?.id })
+      })
+
+      it("drops the slot of an external regenerate that ends without a reply", async () => {
+        chatState.messages = routedThread()
+        executeOnExternalAgentMock.mockResolvedValue({ success: false, error: "codex crashed" })
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+        expect(replies().map((message) => message.id)).toEqual(["a-1"])
+        expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+        // This lane produces no `session_ended`, so nothing else would drop it.
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchGroupId).toBeUndefined()
+        expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+      })
+
+      it("files an external edit's reply under the replacement question", async () => {
+        chatState.messages = routedThread()
+        executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "edited" })
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.editAndResend("u-1", "@codex fix it properly", "sess-1")
+        })
+        expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+        // `makeUserMessage` is mocked to id "u1": the replacement variant.
+        const reply = replies().find((message) => message.id !== "a-1")
+        expect(reply?.parts).toEqual([expect.objectContaining({ text: "edited" })])
+        expect(reply?.metadata).toMatchObject({ branchOwnerId: "u1" })
+        expect(reply?.metadata?.branchGroupId).toBeUndefined()
+        // The owner entry is spent with the turn.
+        const late = await landReply("a-late")
+        expect(late).toBeDefined()
+        expect(late?.metadata?.branchOwnerId).toBeUndefined()
+      })
+
+      it("files a Squad regenerate's handoff card as the anchor's next sibling, and selects it", async () => {
+        getSessionMock.mockResolvedValue({
+          id: "sess-1",
+          title: "On a squad",
+          model: "sonnet",
+          squadId: "squad-1",
+        })
+        chatState.messages = [
+          { id: "u-1", role: "user", parts: [{ type: "text", text: "ship it" }] },
+          {
+            id: "a-1",
+            role: "assistant",
+            parts: [{ type: "squad-run", runId: "execution:team:run_old", squadId: "squad-1" }],
+          },
+        ]
+        const { result } = await mount()
+        await act(async () => {
+          await result.current.regenerate("sess-1")
+        })
+        expect(startSquadRunMock).toHaveBeenCalledTimes(1)
+        expect(sendPromptMock).not.toHaveBeenCalled()
+        const [old, card] = replies()
+        expect(old?.metadata).toMatchObject({ branchGroupId: "u-1", branchIndex: 0 })
+        expect(card?.parts[0]?.type).toBe("squad-run")
+        expect(card?.metadata).toMatchObject({ branchGroupId: "u-1", branchIndex: 1 })
+        expect(chatState.activeBranchByGroup).toEqual({ "u-1": card?.id })
+
+        // The run settles; the next ordinary Squad turn's card is its own.
+        const { onSettled } = watchSquadRunSettlementMock.mock.calls[0]![0] as unknown as {
+          onSettled: (status: string) => void
+        }
+        act(() => onSettled("completed"))
+        await act(async () => {
+          await result.current.send("ship the next thing", undefined, { sessionId: "sess-1" })
+        })
+        expect(startSquadRunMock).toHaveBeenCalledTimes(2)
+        const nextCard = replies().at(-1)
+        expect(nextCard?.id).not.toBe(card?.id)
+        expect(nextCard?.metadata).toBeUndefined()
+        expect(chatState.activeBranchByGroup).toEqual({ "u-1": card?.id })
+      })
+
+      // A Router + Fusion run (ADR-0188 B3) writes its verified answer itself
+      // too: `runFusionChatTurn` claims the slot through the send's
+      // `claimReplyBranch` and settles through `onSettled`.
+      describe("a cascade or panel run", () => {
+        const runId = "rf-panel-1"
+        const answerId = `rf-${runId}-answer`
+        const fusionOptions: SendOptions = {
+          provider: "openai",
+          model: "gpt-5",
+          routerFusionRun: {
+            runId,
+            decisionId: "d1",
+            actionId: "panel_review",
+            mode: "panel",
+            ruleId: "R1_explicit_mode",
+            requested: "panel",
+            roles: { judge: "openai::gpt-5" },
+            budgetMode: "tracked",
+            capMicrousd: 2_000_000,
+            acceptanceProfile: "evidence_review",
+          } as NonNullable<SendOptions["routerFusionRun"]>,
+        }
+        const plainThread = () => [
+          { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+          { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+        ]
+        type FusionInput = {
+          sessionId: string
+          claimReplyBranch?: (replyId: string) => Record<string, unknown>
+          onSettled?: (result: string) => void
+        }
+        /** Plays the run's side of the contract, after the send has returned. */
+        function runSettles(outcome: "answer" | "failed") {
+          runFusionChatTurnMock.mockImplementationOnce(async (arg: unknown) => {
+            const input = arg as FusionInput
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            if (outcome === "answer") {
+              const branch = input.claimReplyBranch?.(answerId) ?? {}
+              chatState.replaceSessionMessages(input.sessionId, [
+                ...(chatState.sessions[input.sessionId]?.messages ?? []),
+                {
+                  id: answerId,
+                  role: "assistant",
+                  parts: [{ type: "text", text: "verified" }],
+                  metadata: { routerFusion: { runId, mode: "panel", origin: "chat" }, ...branch },
+                },
+              ])
+            }
+            chatState.setSessionStatus(input.sessionId, "idle")
+            input.onSettled?.(outcome === "answer" ? "completed" : "failed")
+            return outcome === "answer" ? "completed" : "failed"
+          })
+        }
+
+        beforeEach(() => {
+          resolveSendOptionsMock.mockResolvedValue(fusionOptions)
+        })
+
+        it("files a regenerate's verified answer as the anchor's next sibling, and selects it", async () => {
+          chatState.messages = plainThread()
+          runSettles("answer")
+          const { result } = await mount()
+          await act(async () => {
+            await result.current.regenerate("sess-1")
+          })
+          await flush()
+          expect(runFusionChatTurnMock).toHaveBeenCalledTimes(1)
+          expect(sendPromptMock).not.toHaveBeenCalled()
+          const [old, reply] = replies()
+          expect(old?.metadata).toMatchObject({ branchGroupId: "u-1", branchIndex: 0 })
+          expect(reply?.id).toBe(answerId)
+          expect(reply?.metadata).toMatchObject({
+            branchGroupId: "u-1",
+            branchIndex: 1,
+            routerFusion: expect.objectContaining({ runId }),
+          })
+          expect(chatState.setSessionActiveBranch).toHaveBeenCalledWith("sess-1", "u-1", answerId)
+          expect(chatState.activeBranchByGroup).toEqual({ "u-1": answerId })
+
+          // The slot is spent: a frame landing now is not filed into the group.
+          const late = await landReply("a-late")
+          expect(late).toBeDefined()
+          expect(late?.metadata?.branchGroupId).toBeUndefined()
+          expect(chatState.setSessionActiveBranch).toHaveBeenCalledTimes(1)
+        })
+
+        it("drops the slot of a regenerate whose run ends without an answer", async () => {
+          chatState.messages = plainThread()
+          runSettles("failed")
+          const { result } = await mount()
+          await act(async () => {
+            await result.current.regenerate("sess-1")
+          })
+          await flush()
+          expect(runFusionChatTurnMock).toHaveBeenCalledTimes(1)
+          expect(replies().map((message) => message.id)).toEqual(["a-1"])
+          expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+          // This lane produces no `session_ended`, so nothing else would drop it.
+          const late = await landReply("a-late")
+          expect(late).toBeDefined()
+          expect(late?.metadata?.branchGroupId).toBeUndefined()
+          expect(chatState.setSessionActiveBranch).not.toHaveBeenCalled()
+        })
+
+        it("files an edit's verified answer under the replacement question", async () => {
+          chatState.messages = plainThread()
+          runSettles("answer")
+          const { result } = await mount()
+          await act(async () => {
+            await result.current.editAndResend("u-1", "hello again", "sess-1")
+          })
+          await flush()
+          expect(runFusionChatTurnMock).toHaveBeenCalledTimes(1)
+          // `makeUserMessage` is mocked to id "u1": the replacement variant.
+          const reply = replies().find((message) => message.id === answerId)
+          expect(reply?.metadata).toMatchObject({ branchOwnerId: "u1" })
+          expect(reply?.metadata?.branchGroupId).toBeUndefined()
+          // The edit stays selected, and its owner entry is spent with the turn.
+          expect(chatState.activeBranchByGroup).toEqual({ "edit::u-1": "u1" })
+          const late = await landReply("a-late")
+          expect(late).toBeDefined()
+          expect(late?.metadata?.branchOwnerId).toBeUndefined()
+        })
+
+        it("drops an edit's owner when its run ends without an answer, keeping the edit selected", async () => {
+          chatState.messages = plainThread()
+          runSettles("failed")
+          const { result } = await mount()
+          await act(async () => {
+            await result.current.editAndResend("u-1", "hello again", "sess-1")
+          })
+          await flush()
+          expect(runFusionChatTurnMock).toHaveBeenCalledTimes(1)
+          expect(chatState.activeBranchByGroup).toEqual({ "edit::u-1": "u1" })
+          const late = await landReply("a-late")
+          expect(late).toBeDefined()
+          expect(late?.metadata?.branchOwnerId).toBeUndefined()
+        })
+      })
+    })
+  })
+
+  describe("mixed-runtime handoff through the PII gate", () => {
+    // Over the handoff budget (24k), so the unseen turns must be summarized —
+    // and the summary request is refused: the material carries an address.
+    const piiReply = `${"codex output line\n".repeat(1_800)}reach me at someone@example.com`
+    const cleanReply = "codex output line\n".repeat(1_800)
+    const thread = (reply: string, lane: "external" | "anthropic") => [
+      { id: "u-1", role: "user", parts: [{ type: "text", text: "first" }] },
+      {
+        id: "a-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "short" }],
+        metadata: { run: { providerId: lane === "external" ? "anthropic" : "external" } },
+      },
+      { id: "u-2", role: "user", parts: [{ type: "text", text: "second" }] },
+      {
+        id: "a-2",
+        role: "assistant",
+        parts: [{ type: "text", text: reply }],
+        metadata: { run: { providerId: lane } },
+      },
+    ]
+
+    it("fails a builtin turn whose handoff summary is PII-refused, instead of sending the excerpt", async () => {
+      chatState.messages = thread(piiReply, "external")
+      const { result } = await mount()
+      await act(async () => {
+        await expect(
+          result.current.send("@claude continue", undefined, {
+            turnRoute: CLAUDE,
+            throwOnError: true,
+          })
+        ).rejects.toThrow("handoff_context_summary_unavailable:pii")
+      })
+      expect(JSON.stringify(chatState.setSessionDiagnostic.mock.calls)).toContain(
+        "handoff_context_summary_unavailable:pii"
+      )
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(enqueueHostStateIntentMock).not.toHaveBeenCalled()
+      expect(writtenUserRows()).toEqual([])
+    })
+
+    it("still hands the builtin lane the marked excerpt when only no model can summarize", async () => {
+      chatState.messages = thread(cleanReply, "external")
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.send("@claude continue", undefined, { turnRoute: CLAUDE })
+      })
+      const sent = sendPromptMock.mock.calls[0]![1] as string
+      // The head/tail projection, with its explicit notice of what it left out.
+      expect(sent).toContain("History omitted to fit context")
+      expect(sent).toContain("second")
+      expect(sent.endsWith("Current user request:\ncontinue")).toBe(true)
+    })
+
+    it("fails an @codex turn whose handoff summary is PII-refused, and never runs it anywhere", async () => {
+      getSessionMock.mockResolvedValue({
+        id: "sess-1",
+        title: "Direct",
+        model: "sonnet",
+        // Codex has its own session here, so only the unseen turns are handed over.
+        externalAgentSession: { agentId: "codex-1", sessionId: "native-1" },
+      })
+      listMessagesMock.mockResolvedValue(thread(piiReply, "anthropic"))
+      useExternalAgentStore.setState({ chatFailurePolicy: "fallback" })
+      const { result } = await mount()
+      subscribers.forEach((sub) => sub(chatState))
+      await act(async () => {
+        await result.current.send("@codex continue", undefined, { turnRoute: CODEX })
+      })
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      const failure = chatState.setSessionDiagnostic.mock.calls.find(
+        ([, diagnostic]) => (diagnostic as { source?: string } | null)?.source === "external-agent"
+      )
+      expect(failure?.[1]).toEqual(
+        expect.objectContaining({ meta: expect.objectContaining({ agentId: "codex-1" }) })
+      )
+      expect(JSON.stringify(failure?.[1])).toContain("handoff_context_summary_unavailable:pii")
+    })
+  })
+
+  describe("editAndResend", () => {
+    it("re-reads the leading handle of the edited text", async () => {
+      chatState.messages = [
+        { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        {
+          id: "a-1",
+          role: "assistant",
+          parts: [{ type: "text", text: "hi" }],
+          metadata: { run: { providerId: "anthropic" } },
+        },
+      ]
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "done" })
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.editAndResend("u-1", "@codex hello again", "sess-1")
+      })
+      expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+        "hello again",
+        expect.objectContaining({ agentId: "codex-1" })
+      )
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      const replacement = writtenUserRows().find(
+        (row) => row.parts[0]?.text === "@codex hello again"
+      )
+      expect(replacement?.metadata?.turnRoute).toEqual(
+        expect.objectContaining({ target: { kind: "runtime", runtime: "codex" }, handle: "codex" })
+      )
+    })
+
+    it("drops the route when the edit no longer leads with a handle", async () => {
+      chatState.messages = [
+        {
+          id: "u-1",
+          role: "user",
+          parts: [{ type: "text", text: "@codex fix it" }],
+          metadata: { turnRoute: CODEX },
+        },
+        {
+          id: "a-1",
+          role: "assistant",
+          parts: [{ type: "text", text: "patched" }],
+          metadata: { run: { providerId: "external" } },
+        },
+      ]
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.editAndResend("u-1", "just explain it", "sess-1")
+      })
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).toHaveBeenCalled()
+      const replacement = writtenUserRows().find((row) => row.parts[0]?.text === "just explain it")
+      expect(replacement).toBeDefined()
+      expect(replacement?.metadata?.turnRoute).toBeUndefined()
+    })
+
+    it("refuses an edit addressed to a runtime that cannot run, leaving the thread as it was", async () => {
+      chatState.messages = [
+        { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+      ]
+      routeSnapshotMock.mockResolvedValue(
+        routeContext({ runtimes: [BUILTIN_ROW], configuredPresetIds: [] })
+      )
+      const { result } = await mount()
+      await act(async () => {
+        await result.current.editAndResend("u-1", "@codex hello again", "sess-1")
+      })
+      expect(routeRefusal()?.extra).toEqual({ handle: "codex", reason: "not-configured" })
+      expect(chatState.replaceSessionMessages).not.toHaveBeenCalled()
+      expect(persistMessagesMock).not.toHaveBeenCalled()
+      expect(sendPromptMock).not.toHaveBeenCalled()
+      expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+    })
+
+    it("files a failed delegated edit's fallback reply under the row the edit appended", async () => {
+      // The delegation fallback re-issues the turn with `skipUserAppend`. It
+      // used to carry `branchTag` along, so it re-ran the edit bookkeeping on
+      // a second user message it built and never appended: the navigator
+      // picked a row that does not exist, and the reply was not owned by the
+      // edit, so flipping back to the original still showed it.
+      chatState.messages = [
+        { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+      ]
+      useExternalAgentStore.setState({ chatFailurePolicy: "fallback" })
+      getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+      checkDelegationMock.mockReturnValue({ shouldDelegate: true, targetAgentId: "ext-1" })
+      executeOnExternalAgentMock.mockResolvedValue({ success: false, error: "spawn failed" })
+      // Every user message the send path builds gets its own id here, so the
+      // row the edit appended and anything a re-issue builds are told apart.
+      const adapter = jest.requireMock("@/lib/claude/adapter") as {
+        makeUserMessage: jest.Mock
+        applySdkEvent: jest.Mock
+      }
+      const baseMakeUserMessage = adapter.makeUserMessage.getMockImplementation()
+      let built = 0
+      adapter.makeUserMessage.mockImplementation((c: unknown) => ({
+        id: `u-built-${++built}`,
+        role: "user",
+        parts: [{ type: "text", text: c }],
+      }))
+      try {
+        const { result } = await mount()
+        subscribers.forEach((sub) => sub(chatState))
+        await act(async () => {
+          await result.current.editAndResend("u-1", "hello again", "sess-1")
+        })
+        expect(executeOnExternalAgentMock).toHaveBeenCalledTimes(1)
+        expect(sendPromptMock).toHaveBeenCalledTimes(1)
+        expect(busDiagnostics.map((d) => d.code)).toContain("fallbackToBuiltin")
+
+        const rows = (): Row[] => chatState.messages as Row[]
+        const edits = rows().filter((message) => message.role === "user" && message.id !== "u-1")
+        expect(edits).toHaveLength(1)
+        const editedId = edits[0]!.id
+        expect(edits[0]!.metadata).toMatchObject({ branchGroupId: "edit::u-1", branchIndex: 1 })
+        // The appended edit stays selected, and no pick ever named a row that
+        // is not in the transcript.
+        expect(chatState.activeBranchByGroup).toEqual({ "edit::u-1": editedId })
+        const inTranscript = new Set(rows().map((message) => message.id))
+        const picked = chatState.setSessionActiveBranch.mock.calls.map(([, , id]) => id)
+        expect(picked).toEqual([editedId])
+        expect(picked.every((id) => inTranscript.has(id as string))).toBe(true)
+
+        // The sidecar's reply lands owned by the appended edit…
+        adapter.applySdkEvent.mockReturnValueOnce({
+          messages: [
+            ...rows(),
+            { id: "a-2", role: "assistant", parts: [{ type: "text", text: "fallback answer" }] },
+          ],
+          turnComplete: true,
+        })
+        await act(async () => {
+          _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "result" } })
+        })
+        await flush()
+        expect(rows().find((message) => message.id === "a-2")?.metadata).toMatchObject({
+          branchOwnerId: editedId,
+        })
+        // …while the original keeps its own tail.
+        expect(rows().find((message) => message.id === "a-1")?.metadata).toMatchObject({
+          branchOwnerId: "u-1",
+        })
+      } finally {
+        adapter.makeUserMessage.mockImplementation(baseMakeUserMessage)
+      }
+    })
+  })
 })

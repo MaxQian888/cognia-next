@@ -1,5 +1,4 @@
-import { differenceInCalendarDays } from "date-fns"
-
+import { calendarDaysBetween } from "@/lib/chat/conversation-timestamp"
 import {
   EMPTY_CONVERSATION_FILTERS,
   countActiveConversationFilters,
@@ -102,6 +101,12 @@ export interface BuildSectionsOptions {
   view: "active" | "archived"
   /** Injected wall-clock (ms) used for date bucketing. */
   now: number
+  /**
+   * IANA zone the date buckets are cut in — the zone the rows print their
+   * times in (next-intl's `useTimeZone()`), so a "Today" header never sits over
+   * a row stamped with yesterday's date. Omitted = the device's local zone.
+   */
+  timeZone?: string
   /** Folder ids the user has collapsed (P3). */
   collapsedFolderIds: ReadonlySet<string>
   /**
@@ -435,15 +440,22 @@ function orderSectionSessions(
  * `createdAt`: a bucket header is better slightly wrong than absent, and the
  * row would otherwise land in "older" forever.
  */
-export function conversationTimeOf(session: ChatSession, basis: ConversationTimeBasis): number {
+function conversationTimeOf(session: ChatSession, basis: ConversationTimeBasis): number {
   if (basis === "created") return session.createdAt ?? activityAt(session)
   return activityAt(session)
 }
 
-/** Map a session activity timestamp to its relative date bucket (local calendar). */
-export function dateBucketFor(now: number, activityTimestamp: number): DateBucket {
+/**
+ * Map a session activity timestamp to its relative date bucket, on the calendar
+ * of `timeZone` (the device's local zone when omitted).
+ */
+export function dateBucketFor(
+  now: number,
+  activityTimestamp: number,
+  timeZone?: string
+): DateBucket {
   // Future timestamps (clock skew) clamp to "today".
-  const days = differenceInCalendarDays(now, activityTimestamp)
+  const days = calendarDaysBetween(now, activityTimestamp, timeZone)
   if (days <= 0) return "today"
   if (days === 1) return "yesterday"
   if (days <= 7) return "prev7"
@@ -520,6 +532,105 @@ export function dedupeSessionsById<T extends Pick<ChatSession, "id" | "updatedAt
 }
 
 /**
+ * Session fields a write can move without changing anything a conversation
+ * list shows.
+ *
+ * `transcriptRevision` is the transcript's lineage counter: every streamed
+ * persist bumps it (`lib/db/messages.ts:bumpTranscriptRevision`), about four
+ * times a second while a reply streams. Nothing that renders a list reads it;
+ * the readers that need it (companion transcript sources, mention caches) read
+ * the row from Dexie themselves.
+ */
+const LIST_INERT_SESSION_FIELDS: ReadonlySet<string> = new Set(["transcriptRevision"])
+
+function isPlainRecord(value: object): value is Record<string, unknown> {
+  // The tag, not the prototype: rows cloned out of IndexedDB can come from
+  // another realm (a worker, fake-indexeddb under test), where the prototype
+  // check fails for a perfectly plain object.
+  return Object.prototype.toString.call(value) === "[object Object]"
+}
+
+/**
+ * Value equality for what IndexedDB hands back: primitives, arrays, plain
+ * objects and dates, compared structurally. Anything else — a Blob, a typed
+ * array, a Map — only matches itself, which errs towards "changed": the cost
+ * of a wrong "changed" is one extra render, of a wrong "same" a stale row.
+ */
+function sameStoredValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameStoredValue(a[i], b[i])) return false
+    return true
+  }
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime()
+  }
+  if (!isPlainRecord(a) || !isPlainRecord(b)) return false
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false
+    if (!sameStoredValue(a[key], b[key])) return false
+  }
+  return true
+}
+
+/** Whether two reads of one session differ in anything but list-inert fields. */
+function sameListedSession(prev: ChatSession, next: ChatSession): boolean {
+  if (prev === next) return true
+  const prevRecord = prev as unknown as Record<string, unknown>
+  const nextRecord = next as unknown as Record<string, unknown>
+  let compared = 0
+  for (const key of Object.keys(nextRecord)) {
+    if (LIST_INERT_SESSION_FIELDS.has(key)) continue
+    compared += 1
+    if (!Object.prototype.hasOwnProperty.call(prevRecord, key)) return false
+    if (!sameStoredValue(prevRecord[key], nextRecord[key])) return false
+  }
+  // Same count on the other side, so a field the new read dropped is a change.
+  let prevCount = 0
+  for (const key of Object.keys(prevRecord)) {
+    if (!LIST_INERT_SESSION_FIELDS.has(key)) prevCount += 1
+  }
+  return prevCount === compared
+}
+
+/**
+ * Structural sharing between two emissions of a session live query.
+ *
+ * Dexie hands back freshly cloned rows on every emission, and the session table
+ * is written several times a second while a reply streams — so without this
+ * every emission would give every row a new identity, and every memoized row,
+ * section and derived map downstream would recompute for a change only one row
+ * (or none) actually carried. Rows that read the same as their previous copy
+ * keep the previous object; when no row changed at all (the streaming case:
+ * only {@link LIST_INERT_SESSION_FIELDS} moved) the previous array itself comes
+ * back, which `useLiveQuery` treats as "no new value" and skips the render
+ * entirely.
+ *
+ * The flip side is written into the contract: a kept row carries the inert
+ * fields of the read it came from. Read those from Dexie when you need them.
+ */
+export function shareUnchangedSessions<T extends ChatSession>(
+  previous: readonly T[] | undefined,
+  next: readonly T[]
+): readonly T[] {
+  if (!previous || previous.length === 0) return next
+  const previousById = new Map<string, T>()
+  for (const row of previous) previousById.set(row.id, row)
+  let changed = previous.length !== next.length
+  const shared = next.map((row, index) => {
+    const prior = previousById.get(row.id)
+    const kept = prior !== undefined && sameListedSession(prior, row) ? prior : row
+    if (previous[index] !== kept) changed = true
+    return kept
+  })
+  return changed ? shared : previous
+}
+
+/**
  * Whether `folder` may hold `session`.
  *
  * A folder is workspace-scoped (`listFolders` reads one workspace's rows), so
@@ -531,7 +642,10 @@ export function dedupeSessionsById<T extends Pick<ChatSession, "id" | "updatedAt
  * workspace isolation), so the check only rejects when the two are known and
  * disagree.
  */
-function folderAcceptsSession(folder: SessionFolder, session: ChatSession): boolean {
+export function folderAcceptsSession(
+  folder: Pick<SessionFolder, "projectId">,
+  session: Pick<ChatSession, "projectId">
+): boolean {
   return !folder.projectId || !session.projectId || folder.projectId === session.projectId
 }
 
@@ -636,6 +750,7 @@ export function buildConversationSections(
     query,
     view,
     now,
+    timeZone,
     collapsedFolderIds,
     groupBy = "date",
     workspaces = EMPTY_GROUPS,
@@ -814,7 +929,7 @@ export function buildConversationSections(
   } else {
     const buckets = new Map<DateBucket, ChatSession[]>()
     for (const s of loose) {
-      const bucket = dateBucketFor(now, conversationTimeOf(s, timeBasis))
+      const bucket = dateBucketFor(now, conversationTimeOf(s, timeBasis), timeZone)
       const list = buckets.get(bucket)
       if (list) list.push(s)
       else buckets.set(bucket, [s])

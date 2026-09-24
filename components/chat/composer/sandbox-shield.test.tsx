@@ -37,6 +37,7 @@ jest.mock("@/lib/db/sessions", () => ({
 
 import { useSettingsStore } from "@/stores/settings"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 
 const mockUseSettings = useSettingsStore as unknown as jest.Mock
 const mockUseLiveQuery = useLiveQuery as unknown as jest.Mock
@@ -93,6 +94,7 @@ beforeEach(() => {
   mockUseSettings.mockReset()
   mockUseLiveQuery.mockReset()
   updateSessionMock.mockClear()
+  useAgentRuntimeStore.getState().clearSessionRuntimeRef("s1")
 })
 
 // Radix tooltips throw without a provider — app/layout mounts one in production.
@@ -174,6 +176,19 @@ describe("resolveShieldState", () => {
     ).toBe("cua-desktop")
   })
 
+  it("reports the external-agent sandbox instead of the ADR-0028 chain on an external runtime", () => {
+    expect(
+      resolveShieldState({
+        session: { ...session, sandboxEnabled: true, sandboxTier: "microvm" },
+        defaultEnabled: false,
+        externalRuntime: true,
+      })
+    ).toBe("external")
+    expect(resolveShieldState({ session, defaultEnabled: false, externalRuntime: true })).toBe(
+      "external"
+    )
+  })
+
   it("still reports 'off' when the sandbox is disabled, whatever the tier", () => {
     expect(
       resolveShieldState({
@@ -185,6 +200,21 @@ describe("resolveShieldState", () => {
 })
 
 describe("SandboxShield component", () => {
+  it("does not claim 'Sandbox off' for a session on an external agent", () => {
+    mockUseSettings.mockReturnValue({})
+    mockUseLiveQuery.mockReturnValue(undefined)
+    useAgentRuntimeStore
+      .getState()
+      .setSessionRuntimeRef("s1", { kind: "external", agentId: "pi-agent" })
+    withIntl(<SandboxShield session={{ ...session, sandboxTier: "os" }} />)
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-state", "external")
+    expect(shield).toHaveAttribute("aria-label", "Agent sandbox — external runtime")
+    expect(shield).toHaveAttribute("data-pinned", "false")
+    expect(screen.queryByTestId("sandbox-shield-unpin")).not.toBeInTheDocument()
+    expect(screen.getByText(/built-in sandbox setting does not apply here/)).toBeInTheDocument()
+  })
+
   it("renders the 'off' state when nothing enables the sandbox", () => {
     mockUseSettings.mockReturnValue({})
     mockUseLiveQuery.mockReturnValue(undefined)

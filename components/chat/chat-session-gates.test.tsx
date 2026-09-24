@@ -18,7 +18,7 @@ jest.mock("@/lib/chat/room/runner-host", () => ({
   getCompanionRoomProjector: () => ({ runner: { respondToApproval: companionApproval } }),
 }))
 jest.mock("@/lib/chat/room/shell", () => ({ isCompanionShell: () => companionShell() }))
-jest.mock("@/lib/ai/agent/external/chat-decision-bridge", () => ({
+jest.mock("@/lib/ai/agent/external/session/chat-decision-bridge", () => ({
   deliverExternalElicitation: (...args: unknown[]) => deliver(...args),
 }))
 jest.mock("./tool-approval-dialog", () => ({

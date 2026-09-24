@@ -89,16 +89,23 @@ describe("built-in handlers", () => {
     expect(handler.toContextRef(item)).toEqual({ kind: "file", id: "src", raw: "@src/" })
   })
 
-  it("agent: inserts @name and yields an agent ref", async () => {
+  it("agent: inserts the route handle and yields an agent ref labelled by name", async () => {
+    // A Squad member whose name collided got a qualified handle: the HANDLE is
+    // what the send path matches, so it is what gets inserted and recorded.
     const ctx = makeCtx()
-    const item = { kind: "agent", target: { name: "alice" } } as unknown as Extract<
-      PopoverItem,
-      { kind: "agent" }
-    >
+    const item = {
+      kind: "agent",
+      target: { name: "Alice", handle: "platform-alice" },
+    } as unknown as Extract<PopoverItem, { kind: "agent" }>
     const handler = getMentionPickHandler("agent")!
     await handler.onPick(item, ctx)
-    expect(ctx.insertReplacement).toHaveBeenCalledWith("@alice")
-    expect(handler.toContextRef(item)).toMatchObject({ kind: "agent", id: "alice" })
+    expect(ctx.insertReplacement).toHaveBeenCalledWith("@platform-alice")
+    expect(handler.toContextRef(item)).toEqual({
+      kind: "agent",
+      id: "platform-alice",
+      label: "Alice",
+      raw: "@platform-alice",
+    })
   })
 
   it("subagent: inserts the unique handle and labels the ref with the display name", async () => {

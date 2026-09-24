@@ -70,6 +70,13 @@ export interface FusionChatTurnInput {
   userMessage: UIMessage | null
   workspaceRoot: string | null
   settings: AppSettings | null | undefined
+  /**
+   * The branch stamp for the answer, claimed from the send that started this
+   * turn: a regenerate's sibling slot (which it also selects) and an edit's
+   * owner. Called once, with the answer's id, just before it is shown; a turn
+   * that ends without an answer never calls it.
+   */
+  claimReplyBranch?: (replyId: string) => Record<string, unknown>
   /** The turn settled; the controller drains its steer queue and records telemetry. */
   onSettled?: (result: FusionChatTurnResult) => void
 }
@@ -78,6 +85,8 @@ export interface FusionChatTurnDeps {
   runTurn: typeof runRouterFusionChatTurn
   cancelRun: typeof cancelRouterFusionChatRun
   commitUserMessage: (sessionId: string, message: UIMessage) => Promise<unknown>
+  /** Rewrites the answer the outbox already wrote, now carrying its branch stamp. */
+  commitAnswer: (sessionId: string, message: UIMessage) => Promise<unknown>
   refusalDiagnostic: (input: RouterFusionRefusalDiagnosticInput) => Promise<CogniaDiagnostic>
   now: () => number
 }
@@ -86,6 +95,7 @@ const defaultDeps: FusionChatTurnDeps = {
   runTurn: runRouterFusionChatTurn,
   cancelRun: cancelRouterFusionChatRun,
   commitUserMessage: (sessionId, message) => commitMessageDelta(sessionId, { upserts: [message] }),
+  commitAnswer: (sessionId, message) => commitMessageDelta(sessionId, { upserts: [message] }),
   refusalDiagnostic: routerFusionRefusalDiagnostic,
   now: () => Date.now(),
 }
@@ -215,11 +225,31 @@ export async function runFusionChatTurn(
       return settle("failed", await failureDiagnostic(error, sessionId, deps))
     }
     switch (outcome.kind) {
-      case "succeeded":
+      case "succeeded": {
         // The answer is already in the transcript table (the run's outbox);
         // the chat shows it now, stopped or not, because it is durable.
-        chat().upsertSessionMessages(sessionId, [outcome.answer as unknown as UIMessage])
+        const answer = outcome.answer as unknown as UIMessage
+        // It is this turn's reply: a regenerate files it as the next sibling,
+        // an edit as its variant's. The outbox wrote the run's row without
+        // that stamp, so the stamped row is written over it, or a reload would
+        // show both answers again. The outbox leaves it alone after that: its
+        // idempotence check reads only the parts and the `routerFusion` block.
+        const branch = input.claimReplyBranch?.(answer.id) ?? {}
+        const stamped = Object.keys(branch).length > 0
+        const shown: UIMessage = stamped
+          ? {
+              ...answer,
+              metadata: { ...((answer.metadata as Record<string, unknown>) ?? {}), ...branch },
+            }
+          : answer
+        chat().upsertSessionMessages(sessionId, [shown])
+        if (stamped) {
+          await deps.commitAnswer(sessionId, shown).catch((error: unknown) => {
+            console.error("[router-fusion] the answer's branch could not be saved", error)
+          })
+        }
         return settle("completed", null)
+      }
       case "cancelled":
         return settle("cancelled", null)
       case "refused":

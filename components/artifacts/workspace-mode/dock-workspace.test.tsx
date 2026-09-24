@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 
 let backendAvailable = true
 let session:
@@ -78,16 +78,24 @@ jest.mock("@/components/editor/project/editor-engine-toggle", () => ({
   EditorEngineToggle: ({
     onChange,
     proIdeSupport,
+    labelClassName,
   }: {
     onChange: (value: "codeserver") => void
     proIdeSupport: string
+    labelClassName?: string
   }) => (
     <button
       data-testid="mock-engine-toggle"
       data-support={proIdeSupport}
+      data-label-class={labelClassName}
       onClick={() => onChange("codeserver")}
     />
   ),
+}))
+// Task scope swaps the editor for the task's resources; only the switch
+// between the two is under test here.
+jest.mock("./task-resources-panel", () => ({
+  TaskResourcesPanel: () => <div data-testid="task-resources-panel" />,
 }))
 jest.mock("@/components/editor/project/code-server-pane", () => ({
   CodeServerPane: ({
@@ -151,11 +159,12 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
       treeRefreshToken: 0,
       selectRoot,
       openFile,
+      isPathOpen: (relPath: string) =>
+        openFiles.some((f) => f.relPath === relPath) || relPath === activePath,
       pinFile: jest.fn(),
       closeFile,
+      closeFiles: jest.fn(),
       moveOpenFile: jest.fn(),
-      closeOtherFiles: jest.fn(),
-      closeFilesToRight: jest.fn(),
       closeAllFiles: jest.fn(),
       reopenClosedFile: jest.fn(),
       setActivePath,
@@ -187,26 +196,20 @@ jest.mock("@/components/editor/project/project-root-switcher", () => ({
     </button>
   ),
 }))
+// The tab strips belong to the editor groups inside the workbench now; the
+// dock keeps only its toolbar (root, surface switch, engine, scope).
 jest.mock("@/components/editor/project/project-editor-tabs", () => ({
+  EDITOR_TAB_DRAG_MIME: "application/x-cognia-editor-tab",
   ProjectEditorTabs: ({
-    fixedTabs = [],
-    trailingContent,
     onSelect,
     onClose,
     onSaveAll,
   }: {
-    fixedTabs?: Array<{ id: string; onSelect: () => void }>
-    trailingContent?: React.ReactNode
     onSelect: (path: string) => void
     onClose: (path: string) => void
     onSaveAll: () => void
   }) => (
-    <div data-testid="editor-tabs" data-fixed={fixedTabs.map((tab) => tab.id).join(",")}>
-      {fixedTabs.map((tab) => (
-        <button key={tab.id} data-testid={`fixed-${tab.id}`} onClick={tab.onSelect}>
-          {tab.id}
-        </button>
-      ))}
+    <div data-testid="editor-tabs">
       <button data-testid="select-file" onClick={() => onSelect("src/a.ts")}>
         file
       </button>
@@ -216,7 +219,6 @@ jest.mock("@/components/editor/project/project-editor-tabs", () => ({
       <button data-testid="save-all" onClick={onSaveAll}>
         save all
       </button>
-      {trailingContent}
     </div>
   ),
 }))
@@ -318,6 +320,7 @@ jest.mock("@/components/source-control/diff-pane", () => ({
 import { DockWorkspace } from "./dock-workspace"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 beforeEach(() => {
@@ -360,6 +363,7 @@ beforeEach(() => {
   openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
   act(() => useProjectEditorSessionStore.setState({ sessions: {} }))
+  act(() => useTaskWorkspaceStore.setState({ activeBySession: {} }))
   useArtifactDockLayoutStore.setState({ clearWorkspaceRevealRequest: clearReveal })
 })
 
@@ -501,18 +505,134 @@ describe("DockWorkspace", () => {
     render(<DockWorkspace activeSessionId="session-1" />)
 
     expect(await screen.findByTestId("workspace-review-layout")).toBeInTheDocument()
-    expect(screen.getByTestId("editor-tabs")).toHaveAttribute("data-fixed", "file,review")
+    expect(screen.getByTestId("workspace-surface-review")).toHaveAttribute("data-state", "on")
+    expect(screen.getByTestId("workspace-surface-file")).toHaveAttribute("data-state", "off")
     expect(screen.getByTestId("review-changes")).toBeInTheDocument()
     expect(screen.getByTestId("review-diff")).toBeInTheDocument()
     expect(screen.getByTestId("file-tree")).not.toBeVisible()
   })
 
-  it("keeps the review tab and engine toggle on the same toolbar row", () => {
+  it("keeps the surface switch and engine toggle on the one toolbar row", () => {
     render(<DockWorkspace activeSessionId="session-1" />)
 
-    expect(screen.getByTestId("editor-tabs")).toContainElement(
-      screen.getByTestId("mock-engine-toggle")
+    const toolbar = screen.getByTestId("dock-workspace-toolbar")
+    expect(toolbar).toContainElement(screen.getByTestId("workspace-surface-switch"))
+    expect(toolbar).toContainElement(screen.getByTestId("mock-engine-toggle"))
+    // The editor's own tab strips live inside the workbench, not in the dock.
+    expect(toolbar).not.toContainElement(screen.getByTestId("editor-tabs"))
+  })
+
+  describe("one toolbar row across the dock's width range", () => {
+    const activateTask = () =>
+      act(() =>
+        useTaskWorkspaceStore.setState({
+          activeBySession: {
+            "session-1": {
+              taskId: "task-1",
+              runId: "run-1",
+              sessionId: "session-1",
+              workspaceRoot: "/repo",
+              executionRoot: "/repo",
+              state: "running",
+            },
+          },
+        })
+      )
+
+    it("folds the switch labels to icons by the dock's width instead of wrapping", () => {
+      activateTask()
+      render(<DockWorkspace activeSessionId="session-1" />)
+
+      // Container queries read the dock, not the window it sits in.
+      expect(screen.getByTestId("dock-workspace")).toHaveClass("@container/dock-ws")
+      const toolbar = screen.getByTestId("dock-workspace-toolbar")
+      expect(toolbar).toHaveClass("flex-nowrap")
+      expect(toolbar).not.toHaveClass("flex-wrap")
+
+      // The scope switch loses its words first (below 48rem)…
+      for (const [testId, label] of [
+        ["workspace-scope-task", "currentTask"],
+        ["workspace-scope-all", "allWorkspace"],
+      ]) {
+        const item = screen.getByTestId(testId)
+        expect(item).toHaveAttribute("aria-label", label)
+        expect(item).toHaveAttribute("title", label)
+        expect(item.querySelector("svg")).not.toBeNull()
+        expect(within(item).getByText(label)).toHaveClass("hidden", "@3xl/dock-ws:inline")
+      }
+
+      // …the Editor/Review switch last (below 42rem), keeping its count badge.
+      fireEvent.click(screen.getByTestId("workspace-scope-all"))
+      const fileItem = screen.getByTestId("workspace-surface-file")
+      expect(fileItem).toHaveAttribute("title", "editorTab")
+      expect(within(fileItem).getByText("editorTab")).toHaveClass("hidden", "@2xl/dock-ws:inline")
+      const reviewItem = screen.getByTestId("workspace-surface-review")
+      expect(reviewItem).toHaveAttribute("title", "review")
+      expect(within(reviewItem).getByText("review")).toHaveClass("hidden", "@2xl/dock-ws:inline")
+      // The engine switch folds with the scope switch.
+      expect(screen.getByTestId("mock-engine-toggle")).toHaveAttribute(
+        "data-label-class",
+        "hidden @3xl/dock-ws:inline"
+      )
+    })
+
+    it("keeps the words and wraps instead on a phone", () => {
+      activateTask()
+      render(<DockWorkspace activeSessionId="session-1" layout="mobile" />)
+
+      expect(screen.getByTestId("dock-workspace-toolbar")).toHaveClass("flex-wrap")
+      const task = screen.getByTestId("workspace-scope-task")
+      expect(task).not.toHaveAttribute("title")
+      expect(within(task).getByText("currentTask")).not.toHaveClass("hidden")
+    })
+  })
+
+  it("counts distinct changed files on the Review switch", () => {
+    gitState = {
+      ...gitState,
+      status: {
+        staged: [{ path: "src/a.ts" }],
+        changes: [{ path: "src/a.ts" }, { path: "src/b.ts" }],
+        merge: [],
+      },
+    }
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    expect(screen.getByTestId("workspace-review-count")).toHaveTextContent("2")
+    expect(screen.getByTestId("workspace-surface-review")).toHaveAttribute(
+      "aria-label",
+      "reviewWithCount"
     )
+  })
+
+  it("hides the dock toolbar while the editor is in zen mode", () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    const layout = screen.getByTestId("workspace-file-layout")
+    fireEvent.keyDown(layout, { key: "k", metaKey: true })
+    fireEvent.keyDown(layout, { key: "z" })
+    expect(screen.getByTestId("dock-workspace-toolbar")).not.toBeVisible()
+    // Esc Esc brings the chrome back.
+    fireEvent.keyDown(layout, { key: "Escape" })
+    fireEvent.keyDown(layout, { key: "Escape" })
+    expect(screen.getByTestId("dock-workspace-toolbar")).toBeVisible()
+  })
+
+  it("keeps editor chords off the Review surface", async () => {
+    act(() => {
+      useArtifactDockLayoutStore.getState().revealWorkspaceReview({
+        sessionId: "session-1",
+        rootPath: "/repo",
+      })
+    })
+    render(<DockWorkspace activeSessionId="session-1" />)
+    await screen.findByTestId("workspace-review-layout")
+
+    fireEvent.keyDown(screen.getByTestId("workspace-review-layout"), {
+      key: "s",
+      metaKey: true,
+    })
+    expect(saveFile).not.toHaveBeenCalled()
   })
 
   it("preselects a requested working-tree file in the review surface", async () => {
@@ -573,7 +693,7 @@ describe("DockWorkspace", () => {
     gitState = { ...gitState, repoState: { isRepo: false } }
     render(<DockWorkspace activeSessionId="session-1" />)
 
-    expect(screen.getByTestId("editor-tabs")).toHaveAttribute("data-fixed", "")
+    expect(screen.queryByTestId("workspace-surface-switch")).not.toBeInTheDocument()
     expect(screen.getByTestId("workspace-file-layout")).toBeInTheDocument()
     expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
   })
@@ -661,17 +781,21 @@ describe("DockWorkspace", () => {
 
     render(<DockWorkspace activeSessionId="session-1" />)
 
-    expect(screen.queryByTestId("project-context-workbench")).not.toBeInTheDocument()
+    // The file context workbench is the editor's secondary sidebar in the dock.
+    expect(screen.getByTestId("project-context-workbench")).toBeInTheDocument()
 
     const fileLayout = screen.getByTestId("workspace-file-layout")
     const treeNode = screen.getByTestId("file-tree")
     fireEvent.click(screen.getByTestId("root-switcher"))
-    fireEvent.click(screen.getByTestId("fixed-review"))
+    fireEvent.click(screen.getByTestId("workspace-surface-review"))
     expect(fileLayout).toBeInTheDocument()
     expect(fileLayout).not.toBeVisible()
+    // The file tabs live inside the (hidden) editor surface now; the
+    // toolbar's Editor switch is the way back from Review.
+    fireEvent.click(screen.getByTestId("workspace-surface-file"))
+    expect(fileLayout).toBeVisible()
     fireEvent.click(screen.getByTestId("select-file"))
     expect(screen.getByTestId("file-tree")).toBe(treeNode)
-    expect(fileLayout).toBeVisible()
     fireEvent.click(screen.getByTestId("close-file"))
     fireEvent.click(screen.getByTestId("save-all"))
     expect(selectRoot).toHaveBeenCalledWith("/other")
@@ -679,7 +803,7 @@ describe("DockWorkspace", () => {
     expect(closeFile).toHaveBeenCalledWith("src/a.ts")
 
     fireEvent.click(screen.getByTestId("file-tree"))
-    expect(openFile).toHaveBeenCalledWith("src/tree.ts", undefined)
+    expect(openFile).toHaveBeenCalledWith("src/tree.ts")
     fireEvent.click(screen.getByTestId("left-tab-search"))
     fireEvent.click(screen.getByTestId("search-panel"))
     expect(openFile).toHaveBeenCalledWith("src/search.ts")
@@ -693,8 +817,8 @@ describe("DockWorkspace", () => {
 
     fireEvent.click(screen.getByText("change"))
     expect(setDraft).toHaveBeenCalledWith("src/a.ts", "updated")
-    fireEvent.keyDown(screen.getByTestId("dock-workspace"), { key: "s", metaKey: true })
-    fireEvent.keyDown(screen.getByTestId("dock-workspace"), {
+    fireEvent.keyDown(screen.getByTestId("workspace-file-layout"), { key: "s", metaKey: true })
+    fireEvent.keyDown(screen.getByTestId("workspace-file-layout"), {
       key: "s",
       ctrlKey: true,
       shiftKey: true,
@@ -794,7 +918,7 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("mock-code-server")).toBeInTheDocument()
     expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "false")
 
-    fireEvent.click(screen.getByTestId("fixed-file"))
+    fireEvent.click(screen.getByTestId("workspace-surface-file"))
 
     expect(screen.queryByTestId("workspace-review-layout")).not.toBeInTheDocument()
     expect(screen.getByTestId("workspace-code-server-host")).toHaveAttribute("data-active", "true")

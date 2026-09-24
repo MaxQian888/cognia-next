@@ -209,6 +209,9 @@ async function issueRetry(
     ...(cached.options.routerFusion
       ? { routerFusionReroutes: (cached.routerFusionReroutes ?? 0) + 1 }
       : {}),
+    // An addressed turn stays addressed across a provider fallback: the seal
+    // still names the route the user typed.
+    ...(cached.routeStamp ? { routeStamp: cached.routeStamp } : {}),
   })
 
   try {

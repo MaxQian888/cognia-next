@@ -8,6 +8,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -126,7 +127,8 @@ export function AppCard({
         <Button
           size="icon"
           variant="secondary"
-          className="absolute bottom-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+          className={cn("absolute bottom-2 right-2 h-7 w-7", HOVER_REVEAL_CONTROL_CLASS)}
+          aria-label={t("refreshThumbnail")}
           onClick={(e) => {
             e.stopPropagation()
             handleGenerateThumbnail()
@@ -265,7 +267,14 @@ export function AppCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 touch-manipulation"
+                aria-label={t("moreActions")}
+                className={cn(
+                  "h-8 w-8 shrink-0 touch-manipulation",
+                  HOVER_REVEAL_CONTROL_CLASS,
+                  // Keep the Button's own `transition-all` (hover background)
+                  // and the always-visible narrow layout it had before.
+                  "transition-all max-sm:opacity-100"
+                )}
               >
                 <MoreVertical className="h-4 w-4" />
               </Button>

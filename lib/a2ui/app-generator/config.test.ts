@@ -18,6 +18,8 @@ describe("A2UI generator configuration", () => {
   it.each([
     ["build a calculator", "calculator"],
     ["创建一个倒计时", "timer"],
+    ["番茄钟", "timer"],
+    ["Pomodoro", "timer"],
     ["weather forecast", "weather"],
     ["unmatched experience", null],
   ])("detects an app family from %s", (description, expected) => {

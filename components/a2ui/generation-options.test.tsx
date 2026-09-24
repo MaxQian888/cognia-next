@@ -11,7 +11,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { Character } from "@cognia/agent-config-types"
 import enMessages from "@/i18n/messages/en.json"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 const CHARACTERS: Character[] = [
   { id: "char_1", name: "Builder", isBuiltIn: true } as Character,

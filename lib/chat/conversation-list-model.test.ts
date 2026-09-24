@@ -6,6 +6,8 @@ import {
   dateBucketFor,
   dedupeSessionsById,
   DATE_BUCKET_ORDER,
+  folderAcceptsSession,
+  shareUnchangedSessions,
   UNGROUPED_ID,
   type BuildSectionsOptions,
 } from "./conversation-list-model"
@@ -604,6 +606,119 @@ describe("dateBucketFor", () => {
     const earlyToday = new Date(2026, 5, 25, 1, 0, 0).getTime()
     const lateYesterday = new Date(2026, 5, 24, 23, 0, 0).getTime()
     expect(dateBucketFor(earlyToday, lateYesterday)).toBe("yesterday")
+  })
+
+  it("cuts the day in the zone it is given — the one the rows print in", () => {
+    // 06:30 UTC on Aug 15 is 14:30 in Shanghai; 17:00 UTC the day before is
+    // 01:00 on Aug 15 there. Same day in Shanghai, yesterday in UTC.
+    const now = Date.UTC(2026, 7, 15, 6, 30)
+    const at = Date.UTC(2026, 7, 14, 17, 0)
+    expect(dateBucketFor(now, at, "Asia/Shanghai")).toBe("today")
+    expect(dateBucketFor(now, at, "UTC")).toBe("yesterday")
+  })
+})
+
+describe("buildConversationSections time zone", () => {
+  it("buckets by the zone it is handed", () => {
+    const now = Date.UTC(2026, 7, 15, 6, 30)
+    const rows = [session("late", { updatedAt: Date.UTC(2026, 7, 14, 17, 0) })]
+    const bucketIn = (timeZone: string) =>
+      buildConversationSections(rows, [], opts({ now, timeZone, groupBy: "date" })).sections.map(
+        (section) => section.kind === "date" && section.bucket
+      )
+    expect(bucketIn("Asia/Shanghai")).toEqual(["today"])
+    expect(bucketIn("UTC")).toEqual(["yesterday"])
+  })
+})
+
+describe("folderAcceptsSession", () => {
+  it("rejects only a known workspace mismatch", () => {
+    expect(folderAcceptsSession({ projectId: "p1" }, { projectId: "p1" })).toBe(true)
+    expect(folderAcceptsSession({ projectId: "p1" }, { projectId: "p2" })).toBe(false)
+    // Either side may predate workspace isolation.
+    expect(folderAcceptsSession({}, { projectId: "p2" })).toBe(true)
+    expect(folderAcceptsSession({ projectId: "p1" }, {})).toBe(true)
+  })
+})
+
+describe("shareUnchangedSessions", () => {
+  it("takes the new read as-is when there is nothing to share with", () => {
+    const next = [session("a")]
+    expect(shareUnchangedSessions(undefined, next)).toBe(next)
+    expect(shareUnchangedSessions([], next)).toBe(next)
+  })
+
+  it("returns the previous array when only list-inert fields moved", () => {
+    const previous = [
+      session("a", { transcriptRevision: 1 }),
+      session("b", { transcriptRevision: 4 }),
+    ]
+    const next = [session("a", { transcriptRevision: 2 }), session("b", { transcriptRevision: 4 })]
+    expect(shareUnchangedSessions(previous, next)).toBe(previous)
+  })
+
+  it("keeps each unchanged row and takes the changed one", () => {
+    const previous = [session("a"), session("b"), session("c")]
+    const next = [session("a"), session("b", { title: "renamed" }), session("c")]
+    const shared = shareUnchangedSessions(previous, next)
+    expect(shared).not.toBe(previous)
+    expect(shared[0]).toBe(previous[0])
+    expect(shared[1]).toBe(next[1])
+    expect(shared[2]).toBe(previous[2])
+  })
+
+  it("compares nested values structurally and key order does not matter", () => {
+    const branchSeed = { content: "seed", messageIds: ["m1", "m2"] }
+    const previous = [
+      session("a", {
+        activeBranchByGroup: { g: "x" },
+        branchSeed,
+      } as unknown as Partial<ChatSession>),
+    ]
+    const reordered = {
+      branchSeed: { messageIds: ["m1", "m2"], content: "seed" },
+      activeBranchByGroup: { g: "x" },
+      ...session("a"),
+    } as unknown as ChatSession
+    expect(shareUnchangedSessions(previous, [reordered])).toBe(previous)
+    const changed = {
+      ...reordered,
+      branchSeed: { messageIds: ["m1", "m3"], content: "seed" },
+    } as unknown as ChatSession
+    expect(shareUnchangedSessions(previous, [changed])[0]).toBe(changed)
+  })
+
+  it("counts an added or dropped field as a change", () => {
+    const previous = [session("a", { pinned: true })]
+    const dropped = [session("a")]
+    expect(shareUnchangedSessions(previous, dropped)[0]).toBe(dropped[0])
+    const added = [session("a", { pinned: true, folderId: "f1" })]
+    expect(shareUnchangedSessions(previous, added)[0]).toBe(added[0])
+  })
+
+  it("follows removals, arrivals and a new order", () => {
+    const previous = [session("a"), session("b")]
+    const next = [session("c"), session("b"), session("a")]
+    const shared = shareUnchangedSessions(previous, next)
+    expect(shared).toHaveLength(3)
+    expect(shared[0]).toBe(next[0])
+    expect(shared[1]).toBe(previous[1])
+    expect(shared[2]).toBe(previous[0])
+    const shrunk = shareUnchangedSessions(shared, [session("a")])
+    expect(shrunk).toEqual([previous[0]])
+    expect(shrunk[0]).toBe(previous[0])
+  })
+
+  it("matches dates by time and never shares an opaque value it cannot compare", () => {
+    const previous = [session("a", { stampedAt: new Date(5) } as Partial<ChatSession>)]
+    expect(
+      shareUnchangedSessions(previous, [
+        session("a", { stampedAt: new Date(5) } as Partial<ChatSession>),
+      ])
+    ).toBe(previous)
+    const blobbed = [session("a", { payload: new Uint8Array([1]) } as Partial<ChatSession>)]
+    const again = [session("a", { payload: new Uint8Array([1]) } as Partial<ChatSession>)]
+    expect(shareUnchangedSessions(blobbed, again)[0]).toBe(again[0])
   })
 })
 

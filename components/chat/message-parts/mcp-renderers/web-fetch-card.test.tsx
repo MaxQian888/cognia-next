@@ -5,6 +5,11 @@ import * as ReactForMocks from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
+
 import { WebFetchCard } from "./web-fetch-card"
 
 // The body hands its prose to the heavy MarkdownRenderer and JSON payloads to
@@ -22,8 +27,9 @@ jest.mock("@/components/chat/renderers/code-block", () => ({
       code
     ),
 }))
+const mockCopy = jest.fn(async () => true)
 jest.mock("@/hooks/ui", () => ({
-  useCopy: () => ({ copied: false, copy: jest.fn(async () => true) }),
+  useCopy: () => ({ copied: false, copy: mockCopy }),
 }))
 
 const part = (input?: unknown, output?: unknown): ToolUIPart =>
@@ -200,6 +206,28 @@ describe("WebFetchCard", () => {
       />
     )
     expect(screen.getByTestId("mcp-webfetch-copy")).toBeInTheDocument()
+  })
+
+  it("keeps the copy affordance reachable without a hover", () => {
+    mockCopy.mockClear()
+    render(
+      <WebFetchCard
+        part={part({ url: "https://example.com" }, { ok: true, status: 200, body: "copy me" })}
+      />
+    )
+    const button = screen.getByTestId("mcp-webfetch-copy")
+    const wrapper = button.parentElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).toHaveClass("group-hover/wf:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    expect(mockCopy).toHaveBeenCalledWith("copy me")
   })
 
   it("renders a structured Cognia error", () => {

@@ -43,7 +43,7 @@
 // rule with it (the rule is a `::before`, which `:empty` does not count), so a
 // default install never shows a rule with nothing on one side of it.
 
-import { WebSessionStatus } from "@/components/shell/web-status"
+import { WebGlobalStatusInline, WebSessionStatus } from "@/components/shell/web-status"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
@@ -52,7 +52,6 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useElementWidth } from "@/hooks/use-element-width"
-import { usePlatform } from "@/hooks/use-platform"
 import { cn } from "@/lib/utils"
 import { ContextUsageIndicator } from "@/components/chat/context-usage-indicator"
 import { useSdkContextUsage } from "@/hooks/chat/use-sdk-context-usage"
@@ -72,10 +71,11 @@ import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-ext
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
 import {
-  resolveToolbarFoldTier,
+  COMPOSER_TOOLBAR_CHIP,
   resolveToolbarLayout,
   type ComposerToolbarLayout,
 } from "@/lib/chat/composer-skin"
+import { useFittedFoldTier } from "./use-fitted-fold-tier"
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -92,7 +92,6 @@ interface BottomToolbarProps {
    * `"detached"` and is what a caller that has no opinion still passes.
    */
   variant?: "default" | ComposerToolbarLayout
-  leading?: ReactNode
   /** Where the "No API key" badge sends the user — provider settings. */
   onOpenProviderSettings?: () => void
 }
@@ -101,7 +100,6 @@ export function BottomToolbar({
   session,
   status,
   variant = "default",
-  leading,
   onOpenProviderSettings,
 }: BottomToolbarProps) {
   // The workflow-editor session is the same discriminator that
@@ -126,7 +124,6 @@ export function BottomToolbar({
       session={session}
       status={status}
       variant={variant}
-      leading={leading}
       onOpenProviderSettings={onOpenProviderSettings}
     />
   )
@@ -136,7 +133,6 @@ function GenericBottomToolbar({
   session,
   status: paneStatus,
   variant = "default",
-  leading,
   onOpenProviderSettings,
 }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
@@ -186,8 +182,22 @@ function GenericBottomToolbar({
   // form. `resolveToolbarFoldTier`'s doc lists the rungs; these booleans are
   // only their spellings for this row. What folds always lands in the same
   // "⋯" disclosure, in its full labelled form.
-  const tier = resolveToolbarFoldTier(toolbarWidth)
+  //
+  // The thresholds only PROPOSE a rung: `useFittedFoldTier` measures the row it
+  // produced and keeps stepping down while any label is still being shaved, so
+  // a roster wider than the thresholds assumed (the web status pill, a missing
+  // key, a plugin dial, a long locale) folds instead of ellipsizing. The
+  // signature names what decides the roster's width, so a different session,
+  // model or runtime is judged afresh rather than inheriting extra rungs.
   const onBuiltinRuntime = runtimeRef.kind === "builtin"
+  const foldSignature = [
+    session?.id ?? "",
+    modelId,
+    providerId,
+    JSON.stringify(runtimeRef),
+    executor.squadId ?? "",
+  ].join("|")
+  const tier = useFittedFoldTier(rootRef, toolbarWidth, foldSignature)
   const tierActive = !onBuiltinRuntime
 
   /** The per-turn chips run icon-only — the words cost more than they teach. */
@@ -420,17 +430,24 @@ function GenericBottomToolbar({
   // has cost, and the one credential state that would stop the next send. The
   // badge's short form is the tier's doing, not a media query — the viewport
   // knows nothing about how wide this pane is.
-  const costBadge = (compactForm: boolean) =>
+  // `onRow` puts the badge in the row's chip; inside the "⋯" panel and on the
+  // ambient rail it keeps its own quieter form.
+  const costBadge = (compactForm: boolean, onRow = false) =>
     session ? (
       <SessionCostBadgeLive
         sessionId={session.id}
         tokensLabel={(input, output) => tHeader("tokensLabel", { input, output })}
         compact={compactForm}
+        triggerClassName={onRow ? cn(TOOLBAR_CHIP, "shrink-0") : undefined}
       />
     ) : null
-  const credentialBadge = session ? (
-    <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} />
-  ) : null
+  // Folds to the key glyph with the per-turn chips (tier 2): at 91px its words
+  // were what squeezed the model chip on a phone. The accessible name and the
+  // tooltip keep saying what is wrong.
+  const credentialBadge = (glyphForm: boolean) =>
+    session && onBuiltinRuntime ? (
+      <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} glyph={glyphForm} />
+    ) : null
 
   const contextChip = (ringOnlyForm: boolean) => (
     <ContextUsageIndicator
@@ -438,7 +455,7 @@ function GenericBottomToolbar({
       providerId={providerId}
       sdkUsage={sdkUsage}
       ringOnly={ringOnlyForm}
-      triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5")}
+      triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5 has-[>svg]:px-1.5")}
     />
   )
 
@@ -482,7 +499,7 @@ function GenericBottomToolbar({
   // their full labelled forms.
   const foldedMenu = (
     <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
-      <div className="flex w-64 flex-col gap-0.5">
+      <div className="flex flex-col gap-0.5">
         {executor.squadId ? (
           menuRow(tComposition("label"), squadSummary)
         ) : (
@@ -498,7 +515,7 @@ function GenericBottomToolbar({
         {menuRow(t("moreMenu.preset"), presetControl)}
         {menuRow(t("moreMenu.sandbox"), sandboxIndicator)}
         {menuRow(t("moreMenu.cost"), costBadge(false))}
-        {menuRow(t("moreMenu.credential"), credentialBadge)}
+        {menuRow(t("moreMenu.credential"), credentialBadge(false))}
         {menuRow(t("moreMenu.context"), contextChip(false))}
         {menuRow(t("moreMenu.plugins"), pluginSlots)}
       </div>
@@ -515,13 +532,15 @@ function GenericBottomToolbar({
         data-testid="composer-toolbar-embedded"
         data-toolbar-layout="folded"
       >
-        {leading}
         <ModelPicker
           session={session}
           disabled={isStreaming}
           className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
         />
-        <span className="ml-auto flex shrink-0 items-center pl-2">{foldedMenu}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+          <WebGlobalStatusInline />
+          {foldedMenu}
+        </span>
       </div>
     )
   }
@@ -553,7 +572,6 @@ function GenericBottomToolbar({
         data-toolbar-layout={layout}
         data-toolbar-tier={tier}
       >
-        {leading}
         {runConfigGroup}
         <ToolbarDivider />
         {shapeInline && modeChip(false)}
@@ -571,8 +589,9 @@ function GenericBottomToolbar({
           className={cn("ms-auto flex shrink-0 items-center gap-0.5 ps-2", ZONE_RULE)}
           data-testid="composer-status-cluster"
         >
-          {!costFolded && costBadge(costShort)}
-          {credentialBadge}
+          <WebGlobalStatusInline />
+          {!costFolded && costBadge(costShort, true)}
+          {credentialBadge(glyphChips)}
           {contextChip(ringOnly)}
           {!sessionFolded && sandboxIndicator}
           {sessionFolded && overflowMenu(false)}
@@ -597,7 +616,6 @@ function GenericBottomToolbar({
       data-toolbar-layout="detached"
       data-toolbar-tier={tier}
     >
-      {leading}
       {runConfigGroup}
       {/* Session shape — how the agent is composed, where it executes, and
           which system prompt it carries. Set once per conversation rather
@@ -643,9 +661,12 @@ function GenericBottomToolbar({
         data-testid="composer-status-cluster"
       >
         <WebSessionStatus host="composer" />
+        {/* The shell's global status, taken off the corner pill that would
+            otherwise sit on top of this row's "⋯" (see the component). */}
+        <WebGlobalStatusInline />
         {!shapeInline && runtimeChip(true)}
-        {!ambientOnRail && !costFolded && costBadge(costShort)}
-        {!ambientOnRail && credentialBadge}
+        {!ambientOnRail && !costFolded && costBadge(costShort, true)}
+        {!ambientOnRail && credentialBadge(glyphChips)}
         {!ambientOnRail && contextChip(ringOnly)}
         {!sessionFolded && sandboxIndicator}
         {sessionFolded && overflowMenu(ambientOnRail)}
@@ -667,7 +688,7 @@ function GenericBottomToolbar({
         data-testid="composer-ambient-rail"
       >
         {costBadge(false)}
-        {credentialBadge}
+        {credentialBadge(false)}
         {contextChip(false)}
       </div>
     </div>
@@ -675,19 +696,11 @@ function GenericBottomToolbar({
 }
 
 /**
- * The one chip style every toolbar control wears. Overrides each control's
- * own default (outline / muted fill / rounded-lg) so the row reads as a single
- * quiet strip: same height, same radius, hover-only affordance, no fills or
- * borders competing with the composer frame above it.
- *
- * `min-w-0 shrink` is load-bearing, not tidiness: the shadcn button base is
- * `shrink-0`, so a chip inside a `min-w-0` group kept its full intrinsic width
- * while the group compressed — and the surplus rendered OUTSIDE the group, on
- * top of whatever followed it (the "No preset" chip printing through the
- * runtime chip). Shrinkable chips ellipsize their own label instead.
+ * The one chip style every toolbar control wears — see
+ * {@link COMPOSER_TOOLBAR_CHIP}. Re-exported under its historic name because
+ * the template editor's chips import it from here.
  */
-export const TOOLBAR_CHIP =
-  "h-7 min-w-0 shrink rounded-md border-transparent bg-transparent px-2 text-[11px] font-normal text-muted-foreground shadow-none hover:border-transparent hover:bg-muted/60 hover:text-foreground dark:border-transparent dark:bg-transparent dark:hover:bg-muted/60"
+export const TOOLBAR_CHIP = COMPOSER_TOOLBAR_CHIP
 
 /**
  * The hairline between zones. `bg-border` at full strength: at `/50` the rule
@@ -753,7 +766,6 @@ function ToolbarMoreMenu({
   disabled: boolean
   children: ReactNode
 }) {
-  const isMobile = usePlatform() === "mobile"
   return (
     <Popover>
       <Tooltip>
@@ -766,10 +778,11 @@ function ToolbarMoreMenu({
               aria-label={label}
               disabled={disabled}
               data-testid="composer-toolbar-more"
-              className={cn(
-                "relative size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60",
-                isMobile && "touch-target"
-              )}
+              // `touch-hit`, not `touch-target`: the 44px box made this one
+              // control twice the height of every chip beside it and stretched
+              // the whole row to 44px on a phone. The hit slop gives the thumb
+              // the same floor and leaves the row painting at 28px.
+              className="touch-hit relative size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
             >
               <MoreHorizontalIcon className="size-3.5" />
               {active && (

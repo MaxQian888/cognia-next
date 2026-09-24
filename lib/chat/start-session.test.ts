@@ -32,12 +32,12 @@ jest.mock("@/lib/diagnostics/bus", () => ({
   dispatchDiagnostic: (...args: unknown[]) => mockDispatchDiagnostic(...(args as [])),
 }))
 
-// Only the one predicate is replaced. The module is a leaf that other imports
-// in this graph still read, so a wholesale factory would strip them.
-const mockHasHostRuntime = jest.fn(() => true)
-jest.mock("@/lib/platform/capabilities", () => ({
-  ...jest.requireActual("@/lib/platform/capabilities"),
-  hasHostRuntime: () => mockHasHostRuntime(),
+// Only the one predicate is replaced. jsdom is a plain browser with no
+// companion target, so left real it would answer "standalone" for every test.
+const mockIsStandaloneChatMode = jest.fn(() => false)
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  ...jest.requireActual("@/lib/runtime/standalone-mode"),
+  isStandaloneChatMode: () => mockIsStandaloneChatMode(),
 }))
 
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
@@ -50,7 +50,7 @@ beforeEach(async () => {
   await dbFixture.restore()
   emitMock.mockClear()
   mockDispatchDiagnostic.mockClear()
-  mockHasHostRuntime.mockReset().mockReturnValue(true)
+  mockIsStandaloneChatMode.mockReset().mockReturnValue(false)
   mockLoadDeclaredWorkspace.mockReset().mockResolvedValue(null)
   mockEnsureDefaultWorkspace
     .mockReset()
@@ -598,34 +598,33 @@ describe("startNewSession", () => {
       expect(session.executionContext?.managedWorkspace?.availability).toBe("missing-on-device")
     })
 
-    // The same exception carries two different situations, and only one of them
-    // is about the workspace.
-    it("names the missing HOST, not the workspace, when nothing is paired", async () => {
-      // A plain browser tab: no Tauri, no Capacitor, no pairing. EVERY
-      // host-owned call rejects, so "bind this workspace to a folder" is advice
-      // the user cannot act on. This is the state a tab is in even while a Host
-      // runs on the same machine, because pairing is a manual step.
-      mockHasHostRuntime.mockReturnValue(false)
+    // Whether the refusal is an ERROR depends on whether anything will ever
+    // need the directory, and that is decided by where this shell's turns run.
+    it("raises nothing on a shell that chats through the standalone engine", async () => {
+      // A plain browser tab with no companion target, or a phone in standalone
+      // mode: every turn runs in the webview with no working copy, so the
+      // refusal is the designed state. An error here was filed on every new
+      // chat, and its toast covered the composer of a working conversation.
+      mockIsStandaloneChatMode.mockReturnValue(true)
 
-      await startNewSession()
+      const session = await startNewSession()
 
-      const codes = mockDispatchDiagnostic.mock.calls.map(
-        ([diagnostic]) => (diagnostic as { code: string }).code
-      )
-      expect(codes).toContain("hostUnavailable")
-      expect(codes).not.toContain("workspaceUnavailable")
+      expect(mockDispatchDiagnostic).not.toHaveBeenCalled()
+      // The durable state is still written: a desktop that later receives the
+      // conversation reads it and materializes the workspace there.
+      expect(session.executionContext?.workspaceBinding?.kind).toBe("managed")
+      expect(session.executionContext?.managedWorkspace?.availability).toBe("missing-on-device")
     })
 
-    it("names the workspace when a host exists but the workspace cannot be built", async () => {
-      mockHasHostRuntime.mockReturnValue(true)
+    it("names the workspace when this shell's turns run on a host", async () => {
+      mockIsStandaloneChatMode.mockReturnValue(false)
 
       await startNewSession()
 
       const codes = mockDispatchDiagnostic.mock.calls.map(
         ([diagnostic]) => (diagnostic as { code: string }).code
       )
-      expect(codes).toContain("workspaceUnavailable")
-      expect(codes).not.toContain("hostUnavailable")
+      expect(codes).toEqual(["workspaceUnavailable"])
     })
   })
 

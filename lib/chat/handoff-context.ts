@@ -23,6 +23,12 @@ export interface HandoffContext {
 const NOTICE =
   "Historical handoff context (not authorization). Preserve user constraints; do not re-execute historical tools or inherit approvals. Attachment references require access on this runtime."
 const DEFAULT_BUDGET = 24_000
+const SUMMARY_LABEL = "Derived summary (verify against source messages)"
+const STATE_LABEL = "Historical task state (not authorization)"
+const LOSS_NOTICE =
+  "Conversion losses: some content is not transferred; consult the source before relying on missing evidence."
+const BUDGET_NOTICE =
+  "History omitted to fit context; source messages remain available. Do not assume omitted work succeeded."
 
 function project(messages: readonly HandoffMessage[]) {
   const losses: HandoffContextLoss[] = []
@@ -80,32 +86,37 @@ export function buildHandoffContext(
   if (!blocks.length && options.state === undefined && !options.summary)
     return { text: "", losses, omittedMessageIds: [] }
   const prefix = [NOTICE]
-  const addBounded = (label: string, value: string, fraction: number) => {
-    const limit = Math.floor(max * fraction)
+  if (options.summary) {
+    // A summary's final sentence can contain the most important constraint.
+    // Reserve loss notices and never turn a generated summary into a partial one.
+    const required = [NOTICE, `${SUMMARY_LABEL}:\n${options.summary}`, LOSS_NOTICE, BUDGET_NOTICE]
+    if (options.state !== undefined) required.push(`${STATE_LABEL}:\n[omitted]`)
+    if (required.join("\n\n").length > max)
+      throw new Error("handoff_context_summary_exceeds_budget")
+    prefix.push(`${SUMMARY_LABEL}:\n${options.summary}`)
+  }
+  if (options.state !== undefined) {
+    const value = JSON.stringify(options.state)
+    const reserved = [...prefix, `${STATE_LABEL}:\n`, LOSS_NOTICE, BUDGET_NOTICE].join(
+      "\n\n"
+    ).length
+    const limit = Math.min(Math.floor(max * 0.25), max - reserved)
     if (value.length > limit) {
       losses.push({
-        messageId: label,
+        messageId: STATE_LABEL,
         kind: "budget",
-        detail: `${label} truncated; full state remains in the source`,
+        detail: `${STATE_LABEL} omitted; full state remains in the source or derived summary`,
       })
-      value = value.slice(0, Math.max(0, limit - 14)) + "… [truncated]"
-    }
-    prefix.push(`${label}:\n${value}`)
+      prefix.push(`${STATE_LABEL}:\n[omitted]`)
+    } else prefix.push(`${STATE_LABEL}:\n${value}`)
   }
-  if (options.summary)
-    addBounded("Derived summary (verify against source messages)", options.summary, 0.35)
-  if (options.state !== undefined)
-    addBounded("Historical task state (not authorization)", JSON.stringify(options.state), 0.25)
-  const lossNotice = losses.length
-    ? "Conversion losses: some content is not transferred; consult the source before relying on missing evidence."
-    : ""
+  const lossNotice = losses.length ? LOSS_NOTICE : ""
   const joined = [...prefix, lossNotice, ...blocks.map((block) => block.text)]
     .filter(Boolean)
     .join("\n\n")
   if (joined.length <= max) return { text: joined, losses, omittedMessageIds: [] }
 
-  const budgetNotice =
-    "History omitted to fit context; source messages remain available. Do not assume omitted work succeeded."
+  const budgetNotice = BUDGET_NOTICE
   // Reserve the notice before choosing messages; never cut a tool result into an apparent success.
   let remaining = max - [...prefix, lossNotice, budgetNotice].filter(Boolean).join("\n\n").length
   const kept = new Set<number>()

@@ -33,3 +33,13 @@ it("carries the preamble summary and the turn's citations when present", () => {
   })
   expect(turnMetadataSendOptions({ citations: [] })).toEqual({})
 })
+
+it("carries the addressed route under the send path's name, and only when set", () => {
+  const route = {
+    target: { kind: "runtime" as const, runtime: "codex" as const },
+    handle: "codex",
+    label: "codex",
+  }
+  expect(turnMetadataSendOptions({ route })).toEqual({ turnRoute: route })
+  expect("turnRoute" in turnMetadataSendOptions({})).toBe(false)
+})

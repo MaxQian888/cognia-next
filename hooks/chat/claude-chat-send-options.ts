@@ -25,7 +25,8 @@ import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
+import type { Character, ChatSession, SendOptions } from "@cognia/agent-config-types"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { selectComposerEphemeralSkillIds, useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
@@ -40,6 +41,28 @@ export interface ChatTurnSkillIdentity {
   runId: string
   turnId: string
   attemptId: string
+}
+
+/**
+ * What an addressed turn (`lib/chat/turn-route/`) changes about THIS turn only.
+ * Nothing here is written back to the session.
+ */
+export interface TurnSendOverrides {
+  /** The lane the turn runs on, instead of the one the session names. */
+  runtimeRef: AgentRuntimeRef
+  /**
+   * Answer as this character — a Squad member's persona, synthesized by
+   * `teammateToCharacter`. It replaces the session's own character, and its
+   * system prompt replaces the session's for the turn: a persona that the
+   * conversation's standing prompt could override would not be the member.
+   */
+  character?: Character
+  /**
+   * The character's own model wins this turn: the session's model and provider
+   * pick step aside, and the model is handed down as the member override so no
+   * agent-mode model can shadow it either.
+   */
+  clearSessionModel?: boolean
 }
 
 export function buildWorkingSetPostCompaction(
@@ -111,10 +134,12 @@ export async function buildSendOptions(
    * `sendPrompt` must leave this unset, or its turn would ask the ledger about a
    * run nobody created.
    */
-  dispatch?: { routerFusionSurface?: "chat" }
+  dispatch?: { routerFusionSurface?: "chat" },
+  /** An addressed turn's lane and persona. See {@link TurnSendOverrides}. */
+  overrides?: TurnSendOverrides
 ): Promise<SendOptions> {
   const appSettings = useSettingsStore.getState().settings
-  const runtimeRef = runtimeRefForSession(session?.id)
+  const runtimeRef = overrides?.runtimeRef ?? runtimeRefForSession(session?.id)
   const externalRuntimeId =
     runtimeRef.kind === "external"
       ? runtimeRef.agentId
@@ -178,9 +203,23 @@ export async function buildSendOptions(
   // plugin-overlay pack registry for a synthetic `cognia-pack:` id, which is
   // the same reader `resolveSendOptions` uses. The plain Dexie read answered
   // nothing for a pack-bound session, so the pin saw no character tier at all.
-  const turnCharacter = session?.characterId
-    ? ((await resolveCharacterById(session.characterId).catch(() => undefined)) ?? null)
-    : null
+  const turnCharacter =
+    overrides?.character ??
+    (session?.characterId
+      ? ((await resolveCharacterById(session.characterId).catch(() => undefined)) ?? null)
+      : null)
+  // The session as THIS turn sees it. A persona turn drops the session's own
+  // system prompt (it outranks the character's in `resolveSendOptions`), and a
+  // member with its own model drops the session's model and provider pick.
+  // A copy: the row itself is never touched.
+  const turnSession: ChatSession | null | undefined =
+    session && overrides?.character
+      ? {
+          ...session,
+          systemPrompt: undefined,
+          ...(overrides.clearSessionModel ? { model: undefined, providerOverride: undefined } : {}),
+        }
+      : session
 
   // Freeze the sandbox tier onto the session the first time it runs sandboxed.
   // The ladder is re-read every send and nothing else writes the session's own
@@ -190,7 +229,11 @@ export async function buildSendOptions(
   // for the switch and `resolveSandboxSessionBinding` for the tier — so this
   // cannot drift from what `resolveSendOptions` binds with. Best-effort: a
   // failed pin must never block a send.
-  if (session?.id) {
+  //
+  // Not for a persona turn: the pin is a durable write to the conversation, and
+  // one turn answered as a Squad member must not freeze the conversation to
+  // that member's sandbox settings.
+  if (session?.id && !overrides?.character) {
     try {
       const pin = decideSessionTierPin({
         sandboxEnabled: resolveSandboxEnabled({
@@ -352,8 +395,11 @@ export async function buildSendOptions(
 
   return resolveSendOptions({
     postCompaction,
-    session,
+    session: turnSession,
     character: turnCharacter,
+    ...(overrides?.clearSessionModel && turnCharacter?.model
+      ? { memberOverride: { characterId: turnCharacter.id, modelOverride: turnCharacter.model } }
+      : {}),
     appSettings,
     activeProject: turnProject,
     workspaceRestricted: workspaceTrust.restricted,
@@ -423,9 +469,9 @@ export async function buildSendOptions(
     onResolvedExecutionSpec,
     // The lane this turn will actually take, so the frozen execution spec and
     // the agent trace stop naming a sidecar runtime for a turn dispatched to an
-    // external agent. Read here rather than threaded in because the send path
-    // resolves it from the same store a few steps later, and two reads of one
-    // value are exactly how they drift.
+    // external agent. An addressed turn hands its lane in (`overrides`) — the
+    // same value the send path dispatches on; every other turn reads the
+    // session's lane from the store, which is what the send path takes too.
     ...(externalRuntimeId ? { externalRuntimeId } : {}),
   })
 }

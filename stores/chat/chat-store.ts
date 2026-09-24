@@ -85,6 +85,13 @@ export interface LastSendCacheEntry {
    * at `MAX_LEDGERED_REROUTES`. Absent on every other turn.
    */
   routerFusionReroutes?: number
+  /**
+   * Who answers a turn addressed with a leading `@handle`
+   * (`lib/chat/turn-route/`). The builtin lane seals its reply from the event
+   * stream, long after the send path returned, so the stamp waits here and the
+   * seal copies it onto the reply's run metadata. Absent on unaddressed turns.
+   */
+  routeStamp?: import("@/lib/chat/message-run-metadata").MessageRunRouteStamp
 }
 
 /**
@@ -184,6 +191,18 @@ export interface SessionChatSlice {
    * bubble renders. The run panel shows only the pending count.
    */
   steerQueue: SteerEntry[]
+  /**
+   * The user message whose turn is WAITING for admission — the execution slot
+   * for its working tree is held (a plan step, another conversation) or the
+   * shared ceiling is full — or null when nothing is waiting.
+   *
+   * The message itself carries `metadata.turnAdmission` (what it waits for),
+   * persisted so the row survives a reload. This field is the live half: a row
+   * marked queued whose id is not here is a wait the app no longer holds (the
+   * window reloaded mid-wait), and renders as not sent instead of as waiting
+   * forever. Slice-only (not projected). See `lib/chat/turn-admission.ts`.
+   */
+  queuedTurnMessageId: string | null
   /** Active-work clock for the run-status bar's elapsed timer. */
   runTiming: RunTiming
   /**
@@ -255,6 +274,7 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     messagesLoadError: null,
     messagesReloadNonce: 0,
     steerQueue: [],
+    queuedTurnMessageId: null,
     runTiming: IDLE_TIMING,
     runId: 0,
     toolTimestamps: {},
@@ -454,6 +474,7 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       // projected onto the top-level active mirror), so seed them from defaults
       // when materialising a slice for the active session before its first write.
       steerQueue: [],
+      queuedTurnMessageId: null,
       runTiming: IDLE_TIMING,
       runId: 0,
       toolTimestamps: {},
@@ -759,6 +780,8 @@ interface ChatState {
   moveSteerEntry: (id: string, entryId: string, delta: number) => void
   /** Drop all queued steer messages for a session. */
   clearSteerQueue: (id: string) => void
+  /** Record (or clear, with null) the user message waiting for admission. */
+  setSessionQueuedTurn: (id: string, messageId: string | null) => void
   /** Fold a session's latest messages into its per-tool timing map (Run Panel). */
   syncToolTimestamps: (id: string, messages: readonly UIMessage[]) => void
   setSessionActiveBranch: (id: string, branchGroupId: string, messageId: string) => void
@@ -1097,6 +1120,12 @@ export const useChatStore = create<ChatState>((set) => ({
   clearSteerQueue: (id) =>
     set((s) =>
       sliceForId(s, id).steerQueue.length === 0 ? s : patchSliceState(s, id, { steerQueue: [] })
+    ),
+  setSessionQueuedTurn: (id, messageId) =>
+    set((s) =>
+      sliceForId(s, id).queuedTurnMessageId === messageId
+        ? s
+        : patchSliceState(s, id, { queuedTurnMessageId: messageId })
     ),
   syncToolTimestamps: (id, messages) =>
     set((s) => {
@@ -1589,6 +1618,13 @@ const EMPTY_STEER: SteerEntry[] = []
 export function useSessionSteerQueue(sessionId: string | null): SteerEntry[] {
   return useChatStore((s) =>
     sessionId ? (s.sessions[sessionId]?.steerQueue ?? EMPTY_STEER) : EMPTY_STEER
+  )
+}
+
+/** The user message in `sessionId` whose turn is waiting for admission, if any. */
+export function useSessionQueuedTurnMessageId(sessionId: string | null): string | null {
+  return useChatStore((s) =>
+    sessionId ? (s.sessions[sessionId]?.queuedTurnMessageId ?? null) : null
   )
 }
 

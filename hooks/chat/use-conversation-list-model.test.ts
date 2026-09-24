@@ -1,8 +1,8 @@
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 
-import { useConversationListModel } from "./use-conversation-list-model"
+import { useConversationDayClock, useConversationListModel } from "./use-conversation-list-model"
 
 const NOW = new Date(2026, 5, 25, 12, 0, 0).getTime()
 
@@ -118,5 +118,79 @@ describe("useConversationListModel", () => {
       .filter((s) => s.kind === "group")
       .map((s) => (s.kind === "group" ? s.group.id : ""))
     expect(keys).toEqual(["__ungrouped__", "t1", "t2"])
+  })
+})
+
+describe("useConversationListModel time zone", () => {
+  it("buckets in the zone it is given", () => {
+    const now = Date.UTC(2026, 7, 15, 6, 30)
+    const sessions = [session("late", { updatedAt: Date.UTC(2026, 7, 14, 17, 0) })]
+    const bucketIn = (timeZone: string) =>
+      renderHook(() =>
+        useConversationListModel({ sessions, query: "", now, timeZone, groupBy: "date" })
+      ).result.current.sections.map((section) => section.kind === "date" && section.bucket)
+    expect(bucketIn("Asia/Shanghai")).toEqual(["today"])
+    expect(bucketIn("UTC")).toEqual(["yesterday"])
+  })
+})
+
+describe("useConversationDayClock", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it("holds one value through the day and moves exactly when the day turns", () => {
+    jest.useFakeTimers()
+    // 23:59:00 UTC — one minute before midnight in the zone asked for.
+    jest.setSystemTime(Date.UTC(2026, 7, 14, 23, 59, 0))
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useConversationDayClock("UTC")
+    })
+    const start = result.current
+    const rendersAtMount = renders
+    // The mount check and 30 seconds of ordinary time: same day, no render.
+    act(() => {
+      jest.advanceTimersByTime(30_000)
+    })
+    expect(result.current).toBe(start)
+    expect(renders).toBe(rendersAtMount)
+    // Past midnight: the clock moves once, to a moment in the new day.
+    act(() => {
+      jest.advanceTimersByTime(31_000)
+    })
+    expect(result.current).toBeGreaterThanOrEqual(Date.UTC(2026, 7, 15, 0, 0, 0))
+    expect(renders).toBe(rendersAtMount + 1)
+  })
+
+  it("catches up on the day when the window wakes, without waiting for the timer", () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(Date.UTC(2026, 7, 14, 12, 0, 0))
+    const { result } = renderHook(() => useConversationDayClock("UTC"))
+    act(() => {
+      jest.advanceTimersByTime(0)
+    })
+    const before = result.current
+    // A laptop lid opened the next morning: the clock jumped, no timer fired.
+    jest.setSystemTime(Date.UTC(2026, 7, 15, 8, 0, 0))
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+    })
+    expect(result.current).not.toBe(before)
+    expect(result.current).toBe(Date.UTC(2026, 7, 15, 8, 0, 0))
+  })
+
+  it("stops its timer and listeners on unmount", () => {
+    jest.useFakeTimers()
+    const removeWindow = jest.spyOn(window, "removeEventListener")
+    const removeDocument = jest.spyOn(document, "removeEventListener")
+    const { unmount } = renderHook(() => useConversationDayClock("UTC"))
+    unmount()
+    expect(removeWindow).toHaveBeenCalledWith("focus", expect.any(Function))
+    expect(removeDocument).toHaveBeenCalledWith("visibilitychange", expect.any(Function))
+    expect(jest.getTimerCount()).toBe(0)
+    removeWindow.mockRestore()
+    removeDocument.mockRestore()
   })
 })

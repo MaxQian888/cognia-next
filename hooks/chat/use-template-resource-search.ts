@@ -39,8 +39,12 @@ export interface TemplateResourceSources {
   cwd: string | null | undefined
   /** Subagents mentionable in this composer (general chat `@`). */
   chatAgents?: readonly SubagentMentionTarget[]
-  /** Team runtime targets (team composer `@`). */
-  mentionables?: readonly MentionTarget[]
+  /**
+   * Route targets (`@claude`, `@codex`, Squad members) — the candidates of an
+   * `agent` parameter. Empty wherever this composer does not route, which is
+   * every surface but a direct chat and the new-chat composer.
+   */
+  routeTargets?: readonly MentionTarget[]
   /** The people in this team room (the `@` panel's Members section). */
   teamMembers?: readonly Character[]
 }
@@ -68,7 +72,7 @@ function toOptions(items: readonly PopoverItem[]): ResourceOption[] {
 export function useTemplateResourceSearch({
   cwd,
   chatAgents,
-  mentionables,
+  routeTargets,
   teamMembers,
 }: TemplateResourceSources): TemplateResourceSearch {
   return useCallback(
@@ -107,11 +111,11 @@ export function useTemplateResourceSearch({
         )
       }
       return toOptions(
-        filterMentionables(mentionables ?? [], query)
+        filterMentionables(routeTargets ?? [], query)
           .slice(0, LIMIT)
           .map((target) => ({ kind: "agent" as const, target }))
       )
     },
-    [cwd, chatAgents, mentionables, teamMembers]
+    [cwd, chatAgents, routeTargets, teamMembers]
   )
 }

@@ -1532,8 +1532,11 @@ export function ConversationFilterChips({
           <Button
             size="xs"
             variant="ghost"
-            className="h-5 px-1.5 text-[10px] text-muted-foreground"
+            // `touch-hit` gives the 20px link the 44px thumb floor on a coarse
+            // pointer without growing the chip row; a mouse sees no change.
+            className="touch-hit h-5 px-1.5 text-[10px] text-muted-foreground"
             onClick={actions.reset}
+            data-testid={`${testId}-clear`}
           >
             {t("clearAll")}
           </Button>
@@ -1573,8 +1576,16 @@ function FilterChip({
     >
       {Icon ? <Icon className="size-2.5 shrink-0" aria-hidden /> : null}
       {onClick ? (
-        <button type="button" onClick={onClick} title={title} className="truncate hover:underline">
-          {label}
+        <button
+          type="button"
+          onClick={onClick}
+          title={title}
+          // The ellipsis lives on the inner span: `truncate` clips overflow, and
+          // on the button itself it clipped the `touch-hit` ::after that gives
+          // this label its 44px thumb target.
+          className="touch-hit min-w-0 hover:underline"
+        >
+          <span className="block truncate">{label}</span>
         </button>
       ) : (
         <span className="truncate">{label}</span>
@@ -1583,7 +1594,10 @@ function FilterChip({
         type="button"
         onClick={onRemove}
         aria-label={removeLabel}
-        className="flex size-3.5 shrink-0 items-center justify-center rounded-full hover:bg-primary/25"
+        // 14px paints; on a coarse pointer the × widens to 24px and `touch-hit`
+        // stretches its hit area to 44px tall, so a thumb can remove a chip
+        // without opening its neighbour. Unchanged under a mouse.
+        className="touch-hit flex size-3.5 shrink-0 items-center justify-center rounded-full hover:bg-primary/25 pointer-coarse:size-6"
       >
         <XIcon className="size-2.5" />
       </button>

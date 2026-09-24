@@ -100,19 +100,27 @@ let mockSurfaces: Record<
   }
 > = {}
 
-jest.mock("@/stores/a2ui", () => ({
-  useA2UIStore: jest.fn((selector) => {
-    const state = {
-      surfaces: mockSurfaces,
-      deleteSurface: mockDeleteSurface,
-      restoreSurface: mockRestoreSurface,
-    }
-    if (typeof selector === "function") {
-      return selector(state)
-    }
-    return state
-  }),
-}))
+jest.mock("@/stores/a2ui", () => {
+  const readState = () => ({
+    surfaces: mockSurfaces,
+    deleteSurface: mockDeleteSurface,
+    restoreSurface: mockRestoreSurface,
+  })
+  // `getState` mirrors zustand: the builder's `getAppData` reads live state
+  // through it instead of the render-time `surfaces` selector.
+  return {
+    useA2UIStore: Object.assign(
+      jest.fn((selector) => {
+        const state = readState()
+        if (typeof selector === "function") {
+          return selector(state)
+        }
+        return state
+      }),
+      { getState: readState }
+    ),
+  }
+})
 
 // Mock templates
 jest.mock("@/lib/a2ui/templates", () => ({

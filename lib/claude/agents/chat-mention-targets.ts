@@ -25,6 +25,15 @@ import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
 import { slugify } from "@/lib/claude/subagent-importers/_parse-helpers"
 import { parseMentions } from "@/lib/claude/team-router"
 import type { MentionResolvers } from "@/lib/chat/mentions/resolve-mentions"
+import { RESERVED_MENTION_NAMES } from "@/types/agent/agent-team"
+import { findTargetByHandle, type MentionTarget } from "@/lib/agent-team/runtime-targets"
+
+/**
+ * `@claude` / `@codex` belong to the route targets (`lib/chat/turn-route/`),
+ * which win every collision: a subagent called "Codex" must not answer a turn
+ * the user addressed to the Codex runtime.
+ */
+const RESERVED_HANDLES: ReadonlySet<string> = new Set(RESERVED_MENTION_NAMES)
 
 export interface SubagentMentionTarget {
   /** Projected dispatcher id — the key that must exist in `SendOptions.agents`. */
@@ -75,7 +84,8 @@ export function buildChatMentionTargets(): SubagentMentionTarget[] {
     model: def.model,
     // Collision → use the unique (already no-whitespace) id as the handle so
     // picker insertion and send-time parsing stay 1:1 with the agent map key.
-    handle: (handleCounts.get(handle) ?? 0) > 1 ? id : handle,
+    // A reserved route name counts as a collision too.
+    handle: (handleCounts.get(handle) ?? 0) > 1 || RESERVED_HANDLES.has(handle) ? id : handle,
   }))
 }
 
@@ -103,10 +113,22 @@ export function resolveTargetAgentId(
  * `resolveMentions`/`resolveTurnContextRefs`, built over the same target list
  * the picker offered. Centralised so a direct send, a steer, and a room turn
  * all resolve a handle to the identical `subagent` ref instead of drifting.
+ *
+ * Route handles resolve to an `agent` ref: `@claude` and `@codex` always, and
+ * a Squad member's handle when the caller passes the conversation's route
+ * targets (member handles depend on which Squads the conversation can see, so
+ * only a caller that knows the conversation can spell them). Without this a
+ * `@codex` was recorded as a FILE mention.
  */
-export function chatMentionResolvers(): MentionResolvers {
+export function chatMentionResolvers(routeTargets?: readonly MentionTarget[]): MentionResolvers {
   return {
     resolveAgentHandle: (name) => {
+      const route = routeTargets
+        ? findTargetByHandle(routeTargets, name)
+        : RESERVED_HANDLES.has(name.toLowerCase())
+          ? { handle: name.toLowerCase(), name: name.toLowerCase() }
+          : null
+      if (route) return { kind: "agent", id: route.handle, label: route.name }
       const hit = buildChatMentionTargets().find((t) => t.handle === name)
       return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
     },

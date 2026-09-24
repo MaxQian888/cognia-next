@@ -12,6 +12,8 @@ import type { RemoteDocSearchState } from "@/hooks/chat/use-remote-doc-search"
 import { isWorkspaceSearchReachable, searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import { useEntityMentionSearch } from "@/hooks/chat/use-entity-mention-search"
+import { buildRouteTargets } from "@/lib/agent-team/runtime-targets"
+import type { RouteOption } from "@/hooks/chat/use-route-targets"
 
 jest.mock("@/hooks/chat/use-entity-mention-search", () => ({ useEntityMentionSearch: jest.fn() }))
 
@@ -215,7 +217,7 @@ describe("ComposerPopover — reference modes", () => {
     expect(view.onPick).toHaveBeenCalledWith({ kind: "subagent", target })
   })
 
-  it.each(["skill", "preset", "agent", "subagent", "wfNode", "wfEdge"] as const)(
+  it.each(["skill", "preset", "subagent", "wfNode", "wfEdge"] as const)(
     "shows an empty state for %s without intercepting confirm",
     (kind) => {
       const view = mount(kind)
@@ -1022,6 +1024,113 @@ describe("ComposerPopover — team members in the combined @ panel", () => {
       />
     )
     expect(screen.queryByText("Ana")).not.toBeInTheDocument()
+  })
+})
+
+describe("ComposerPopover — route targets at the leading @", () => {
+  const routeTargets = buildRouteTargets({
+    squads: [
+      {
+        team: { id: "s1", name: "Platform" },
+        teammates: [
+          {
+            id: "tm-1",
+            teamId: "s1",
+            name: "Critic",
+            description: "Pokes holes",
+            config: {},
+          } as never,
+        ],
+      },
+    ],
+  })
+  const routeOptions: RouteOption[] = [
+    { target: routeTargets[0], lane: { ok: true, runtimeRef: { kind: "builtin" } } },
+    { target: routeTargets[1], lane: { ok: false, reason: "not-configured", runtime: "codex" } },
+    { target: routeTargets[2], lane: { ok: true, runtimeRef: { kind: "builtin" } } },
+  ]
+
+  function setupRoutes(
+    trigger: ComposerTrigger,
+    extra: Partial<ComponentProps<typeof ComposerPopover>> = {}
+  ) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    const onPick = jest.fn()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={trigger}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        routeOptions={routeOptions}
+        chatAgents={[
+          { id: "sub_1", name: "Workflow Designer", description: "d", handle: "workflow-designer" },
+        ]}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+        {...extra}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  const at = (query: string): ComposerTrigger => ({
+    kind: "file",
+    tokenStart: 0,
+    tokenEnd: query.length + 1,
+    query,
+  })
+
+  it("leads with the runtimes and the Squad members, each under its own header", () => {
+    setupRoutes(at(""))
+    // Headers are aria-hidden, so read every `li` rather than the listitem role.
+    const texts = Array.from(document.body.querySelectorAll("li")).map((li) => li.textContent)
+    expect(texts[0]).toBe("runtimesSection")
+    expect(texts[1]).toContain("@claude")
+    expect(texts[2]).toContain("@codex")
+    expect(texts[3]).toBe("squadMembersSection")
+    expect(texts[4]).toContain("@critic")
+    expect(texts[4]).toContain("Platform")
+    expect(texts[5]).toBe("agentsSection")
+    expect(screen.getByTestId("subagent-mention-row-sub_1")).toBeInTheDocument()
+  })
+
+  it("dims a runtime that cannot run here and keeps the others ready", () => {
+    setupRoutes(at(""))
+    expect(screen.getByTestId("agent-mention-row-__virtual_codex__")).toHaveAttribute(
+      "data-unavailable",
+      "true"
+    )
+    expect(screen.getByTestId("agent-mention-row-__virtual_claude__")).not.toHaveAttribute(
+      "data-unavailable"
+    )
+  })
+
+  it("filters by the handle being typed and picks the route with its lane", () => {
+    const { ref, onPick } = setupRoutes(at("cod"))
+    expect(screen.queryByTestId("agent-mention-row-__virtual_claude__")).toBeNull()
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "agent",
+      target: expect.objectContaining({ handle: "codex" }),
+      lane: { ok: false, reason: "not-configured", runtime: "codex" },
+    })
+  })
+
+  it("offers no routes under the explicit @file: namespace", () => {
+    setupRoutes({ kind: "file", tokenStart: 0, tokenEnd: 6, query: "", namespace: "file:" })
+    expect(screen.queryByTestId("agent-mention-row-__virtual_claude__")).toBeNull()
+  })
+
+  it("offers no routes when the composer passes none (a mid-sentence @)", () => {
+    setupRoutes(at(""), { routeOptions: undefined })
+    expect(screen.queryByText("runtimesSection")).toBeNull()
+    expect(screen.queryByTestId("agent-mention-row-__virtual_codex__")).toBeNull()
   })
 })
 

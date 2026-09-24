@@ -5,6 +5,11 @@ import {
   useAppActionHandlers,
 } from "./action-handlers"
 import { renderHook, act } from "@testing-library/react"
+import { setValueByPath } from "@/lib/a2ui/data-model"
+import { surfaceTimers } from "@/lib/a2ui/surface-timer"
+import { appTemplates } from "@/lib/a2ui/templates"
+import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
+import type { A2UIComponent } from "@/types/a2ui/schema"
 
 // ========== Helper ==========
 
@@ -29,7 +34,11 @@ function createMockDeps(
     appData.set(appId, data)
   })
   const resetAppData = jest.fn((appId: string) => appData.delete(appId))
-  const setDataValue = jest.fn()
+  // Writes land in the same live map `getAppData` reads, like the real store.
+  const setDataValue = jest.fn((appId: string, path: string, value: unknown) => {
+    const data = appData.get(appId)
+    if (data) appData.set(appId, setValueByPath(data, path, value))
+  })
   const onAction = jest.fn()
   const getAppLocale = jest.fn(() => locale)
 
@@ -37,7 +46,6 @@ function createMockDeps(
     getAppData,
     setAppData,
     resetAppData,
-    surfaces: {},
     setDataValue,
     onAction,
     getAppLocale,
@@ -563,6 +571,204 @@ describe("useAppActionHandlers", () => {
         expect.stringMatching(/^¥\d+\.\d{2}$/)
       )
     })
+  })
+
+  // ---------- Timer actions (surface timer runtime) ----------
+
+  describe("timer actions", () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => {
+      surfaceTimers.stopAll()
+      jest.useRealTimers()
+    })
+
+    const pomodoro = () => ({
+      [SURFACE]: {
+        display: "25:00",
+        seconds: 0,
+        totalSeconds: 1500,
+        progress: 0,
+        isRunning: false,
+        mode: "pomodoro",
+      },
+    })
+
+    it("start counts down on the live data model (the stale-snapshot regression)", () => {
+      const { result, deps } = renderWithDeps(pomodoro())
+
+      act(() => result.current.handleAppAction(createAction("start")))
+      act(() => {
+        jest.advanceTimersByTime(8_000)
+      })
+
+      expect(deps.getAppData(SURFACE)).toMatchObject({
+        isRunning: true,
+        seconds: 8,
+        display: "24:52",
+      })
+    })
+
+    it("start ignores a persisted run flag with no live ticker", () => {
+      const initial = pomodoro()
+      initial[SURFACE].isRunning = true
+      const { result, deps } = renderWithDeps(initial)
+
+      act(() => result.current.handleAppAction(createAction("start_timer")))
+      act(() => {
+        jest.advanceTimersByTime(2_000)
+      })
+
+      expect(deps.getAppData(SURFACE)).toMatchObject({ seconds: 2, display: "24:58" })
+    })
+
+    it("pause freezes and reset rewinds to the loaded length", () => {
+      const { result, deps } = renderWithDeps(pomodoro())
+
+      act(() => result.current.handleAppAction(createAction("start")))
+      act(() => {
+        jest.advanceTimersByTime(3_000)
+      })
+      act(() => result.current.handleAppAction(createAction("pause_timer")))
+      act(() => {
+        jest.advanceTimersByTime(4_000)
+      })
+      expect(deps.getAppData(SURFACE)).toMatchObject({
+        isRunning: false,
+        seconds: 3,
+        display: "24:57",
+      })
+
+      act(() => result.current.handleAppAction(createAction("reset")))
+      expect(deps.getAppData(SURFACE)).toMatchObject({
+        isRunning: false,
+        seconds: 0,
+        display: "25:00",
+        progress: 0,
+      })
+      expect(surfaceTimers.isActive(SURFACE)).toBe(false)
+    })
+
+    it.each([
+      ["set_1", 60, "01:00"],
+      ["set_1min", 60, "01:00"],
+      ["set_5", 300, "05:00"],
+      ["set_5min", 300, "05:00"],
+      ["set_10", 600, "10:00"],
+      ["set_10min", 600, "10:00"],
+      ["set_15", 900, "15:00"],
+      ["set_25", 1500, "25:00"],
+      ["set_25min", 1500, "25:00"],
+    ])("%s loads a %i-second countdown", (action, totalSeconds, display) => {
+      const { result, deps } = renderWithDeps(pomodoro())
+      act(() => result.current.handleAppAction(createAction(action)))
+      expect(deps.getAppData(SURFACE)).toMatchObject({ totalSeconds, display, isRunning: false })
+    })
+
+    it("the catalog timer counts DOWN after a preset (it used to count up from 00:00)", () => {
+      const template = appTemplates.find((t) => t.id === "timer")
+      expect(template).toBeDefined()
+      const { result, deps } = renderWithDeps({
+        [SURFACE]: structuredClone(template!.dataModel),
+      })
+
+      act(() => result.current.handleAppAction(createAction("set_5min")))
+      act(() => result.current.handleAppAction(createAction("start_timer")))
+      act(() => {
+        jest.advanceTimersByTime(2_000)
+      })
+
+      expect(deps.getAppData(SURFACE)).toMatchObject({ seconds: 2, display: "04:58" })
+    })
+
+    it("the catalog timer without a preset runs as a stopwatch", () => {
+      const template = appTemplates.find((t) => t.id === "timer")
+      const { result, deps } = renderWithDeps({
+        [SURFACE]: structuredClone(template!.dataModel),
+      })
+
+      act(() => result.current.handleAppAction(createAction("start_timer")))
+      act(() => {
+        jest.advanceTimersByTime(3_000)
+      })
+
+      expect(deps.getAppData(SURFACE)).toMatchObject({ seconds: 3, display: "00:03" })
+    })
+  })
+
+  // ---------- Every built-in mini-app button reaches a handler ----------
+
+  describe("built-in mini-app action coverage (real handler)", () => {
+    // Actions the built-in handler deliberately escalates to the host.
+    const ESCALATED = new Set(["follow", "message", "view_activity"])
+    // Handled here AND forwarded so the host can observe the submission.
+    const HANDLED_AND_FORWARDED = new Set(["submit", "submit_form", "submit_contact", "execute"])
+
+    const GENERATOR_PROMPTS = [
+      "calculator",
+      "tip calculator",
+      "bmi calculator",
+      "age calculator",
+      "loan calculator",
+      "Pomodoro Timer",
+      "countdown timer",
+      "todo list with category priority due date",
+      "notes",
+      "survey",
+      "contact form",
+      "dashboard",
+      "weather",
+      "unit convert",
+      "habit track",
+      "expense track",
+      "health track",
+    ]
+
+    function actionsOf(components: A2UIComponent[]): string[] {
+      const actions = new Set<string>()
+      for (const component of components as unknown as Array<Record<string, unknown>>) {
+        for (const key of ["action", "itemClickAction", "rowClickAction"]) {
+          const value = component[key]
+          if (typeof value === "string" && value) actions.add(value)
+        }
+      }
+      return [...actions]
+    }
+
+    const apps = [
+      ...appTemplates.map((t) => ({
+        label: `template:${t.id}`,
+        components: t.components,
+        dataModel: t.dataModel,
+      })),
+      ...GENERATOR_PROMPTS.map((prompt) => {
+        const app = generateAppFromDescription({ description: prompt, language: "en" })
+        return {
+          label: `generated:${prompt}`,
+          components: app.components,
+          dataModel: app.dataModel,
+        }
+      }),
+    ]
+
+    it.each(apps.map((app) => [app.label, app]))(
+      "%s: no button falls through to the unhandled default",
+      (_label, app) => {
+        const unhandled: string[] = []
+        for (const actionName of actionsOf(app.components)) {
+          const { result, deps } = renderWithDeps({ [SURFACE]: structuredClone(app.dataModel) })
+          act(() => result.current.handleAppAction(createAction(actionName, { index: 0 })))
+          if (
+            deps.onAction.mock.calls.length > 0 &&
+            !ESCALATED.has(actionName) &&
+            !HANDLED_AND_FORWARDED.has(actionName)
+          ) {
+            unhandled.push(actionName)
+          }
+          surfaceTimers.stopAll()
+        }
+        expect(unhandled).toEqual([])
+      }
+    )
   })
 
   // ---------- Default case ----------

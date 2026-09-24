@@ -11,7 +11,7 @@ import type {
 } from "@/types/execution-context"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
-import { hasHostRuntime } from "@/lib/platform/capabilities"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import {
   defaultEnsureDefaultWorkspaceDeps,
   ensureDefaultWorkspace,
@@ -261,26 +261,29 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
         }
         await updateSession(session.id, { executionContext: unavailable })
         session = { ...session, executionContext: unavailable }
-        // Two different failures arrive here wearing the same exception, and
-        // they need different remedies. A shell with no host AT ALL
-        // (`web-standalone`: a browser that has never been paired with one)
-        // cannot run any host-owned work, so naming the workspace sends the
-        // user to a folder picker that cannot help them. That is the state a
-        // plain browser tab is in even when a Host is running on the same
-        // machine and has already allowlisted the tab's origin, because
-        // pairing is a manual trip through Settings.
+        // Only a shell whose turns run on a host needs this directory, so
+        // only there is its absence worth an error. A shell that chats through
+        // the in-webview standalone (BYOK) engine -- a browser with no
+        // companion target, a phone in standalone mode -- runs every turn
+        // without a working copy (the send path skips the working-copy plane
+        // for exactly that engine), so for it the refusal above is the
+        // designed state, not a failure. Raising it there filed a persistent
+        // error on every new chat, and its toast sat over the composer of a
+        // conversation that worked.
         //
-        // `hasHostRuntime` is this repo's single predicate for the question,
-        // and `hostUnavailable` already carries the action that does help:
-        // open Settings > Remote hosts. The message stays the raw error, which
-        // is what `CreateDiagnosticInit.message` is for: the code owns the
-        // user-facing label, so this needs no new translated copy.
-        dispatchDiagnostic(
-          createDiagnostic(hasHostRuntime() ? "workspaceUnavailable" : "hostUnavailable", {
-            source: "chat",
-            message: error instanceof Error ? error.message : String(error),
-          })
-        )
+        // That also retires the `hostUnavailable` variant this used to pick
+        // through `hasHostRuntime()`: a `web-standalone` profile has no
+        // companion target, so it always chats standalone and never reaches
+        // this dispatch. The message stays the raw error, which is what
+        // `CreateDiagnosticInit.message` is for: the code owns the label.
+        if (!isStandaloneChatMode()) {
+          dispatchDiagnostic(
+            createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: error instanceof Error ? error.message : String(error),
+            })
+          )
+        }
       }
     }
   } else if (ownerProjectId) {

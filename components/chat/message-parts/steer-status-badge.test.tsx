@@ -25,6 +25,10 @@ jest.mock("@/lib/db/messages", () => ({
 import { SteerStatusBadge } from "./steer-status-badge"
 import { useChatStore, makeSessionSlice, type SessionChatSlice } from "@/stores/chat"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 const SID = "s1"
 
@@ -111,6 +115,30 @@ describe("SteerStatusBadge", () => {
     })
     render(<SteerStatusBadge message={steerMessage("e1", "queued")} sessionId={SID} />)
     expect(screen.getByTestId("steer-queue-position")).toBeInTheDocument()
+  })
+
+  it("keeps the pending edit / remove controls reachable without a hover", () => {
+    const msg = steerMessage("e1", "queued")
+    seed({
+      status: "streaming",
+      steerQueue: [{ id: "e1", text: "use TypeScript" }],
+      messages: [msg],
+    })
+    render(<SteerStatusBadge message={msg} sessionId={SID} />)
+    for (const label of ["ariaEdit", "ariaRemove"]) {
+      const control = screen.getByLabelText(label)
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+        expect(control).toHaveClass(variant)
+      }
+      expect(control).toHaveClass("group-hover/steer:opacity-100", "hover:text-foreground")
+      for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+        expect(control).not.toHaveClass(forbidden)
+      }
+      control.focus()
+      expect(control).toHaveFocus()
+    }
+    fireEvent.click(screen.getByLabelText("ariaRemove"))
+    expect(useChatStore.getState().sessions[SID]?.steerQueue).toEqual([])
   })
 
   it("removes both the queue entry and the bubble on discard", () => {

@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import {
   buildConversationSections,
@@ -7,6 +7,7 @@ import {
   type ConversationTitleScorer,
 } from "@/lib/chat/conversation-list-model"
 import type { ConversationFilterContext } from "@/lib/chat/conversation-filters"
+import { calendarDayKey, msUntilNextCalendarDay } from "@/lib/chat/conversation-timestamp"
 import { scoreTitleMatch } from "@/lib/global-search/scoring"
 import type {
   ChatSession,
@@ -81,8 +82,17 @@ export interface UseConversationListModelParams {
   unreadIds?: ReadonlySet<string>
   /** Model / provider fallback chain for the model + provider facets. */
   filterContext?: Pick<ConversationFilterContext, "modelOf" | "providerOf">
-  /** Override the injected clock (tests only); defaults to `Date.now()`. */
+  /**
+   * The clock the buckets are cut against; defaults to `Date.now()` at compute
+   * time. Pass {@link useConversationDayClock}'s value to re-bucket exactly
+   * when the calendar day turns (and keep the memo stable through the day).
+   */
   now?: number
+  /**
+   * Zone the date buckets are cut in — the one the rows print their times in
+   * (next-intl's `useTimeZone()`). Omitted = the device's local zone.
+   */
+  timeZone?: string
   /**
    * Override the title ranker (tests only); defaults to the ⌘K-shared scorer.
    * Pass `null` to fall back to the model's plain substring rank.
@@ -116,6 +126,7 @@ export function useConversationListModel({
   unreadIds,
   filterContext,
   now,
+  timeZone,
   scoreTitle = scoreConversationTitle,
 }: UseConversationListModelParams): ConversationListModel {
   return useMemo(
@@ -124,6 +135,7 @@ export function useConversationListModel({
         query,
         view,
         now: resolveNow(now),
+        timeZone,
         collapsedFolderIds,
         groupBy,
         workspaces,
@@ -160,7 +172,71 @@ export function useConversationListModel({
       unreadIds,
       filterContext,
       now,
+      timeZone,
       scoreTitle,
     ]
   )
+}
+
+/**
+ * Longest single wait of {@link useConversationDayClock}. The wait to midnight
+ * is read off the wall clock, which a DST switch can put an hour out; capping
+ * it (and re-checking the day on every wake) bounds that to one early wake-up.
+ */
+const DAY_CLOCK_MAX_WAIT_MS = 60 * 60 * 1000
+/** Land just past midnight, never a hair before it. */
+const DAY_CLOCK_SLACK_MS = 250
+
+/**
+ * One clock for a whole conversation list, ticking only when the calendar day
+ * turns in `timeZone`.
+ *
+ * Everything time-shaped in the list is day-granular — the "Today / Yesterday"
+ * buckets, the activity filter, a row's "14:32 / Mon / Aug 3" stamp — so a
+ * finer clock would re-render the list for nothing, and none at all (a
+ * `useNow()` read once per row at mount) left "14:32" standing after midnight
+ * when it should have become "Mon". The value is a timestamp inside the current
+ * day (the mount time, then the moment each new day was noticed); pass it as
+ * the list model's `now` and down to the rows as a plain number.
+ *
+ * Re-checks when the window becomes visible or focused again: timers stall
+ * while the machine sleeps, and a lid opened the next morning must not wait
+ * out the rest of a stale timeout to show the new day.
+ */
+export function useConversationDayClock(timeZone?: string): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    function check() {
+      const current = Date.now()
+      setNow((previous) =>
+        calendarDayKey(previous, timeZone) === calendarDayKey(current, timeZone)
+          ? previous
+          : current
+      )
+      schedule(current)
+    }
+    function schedule(from: number) {
+      if (timer !== undefined) clearTimeout(timer)
+      const wait = Math.min(
+        msUntilNextCalendarDay(from, timeZone) + DAY_CLOCK_SLACK_MS,
+        DAY_CLOCK_MAX_WAIT_MS
+      )
+      timer = setTimeout(check, wait)
+    }
+    function onWake() {
+      if (document.visibilityState === "visible") check()
+    }
+    // First check on the next task rather than now: the zone may just have
+    // changed, and the day the last reading fell on may not be today there.
+    timer = setTimeout(check, 0)
+    document.addEventListener("visibilitychange", onWake)
+    window.addEventListener("focus", onWake)
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      document.removeEventListener("visibilitychange", onWake)
+      window.removeEventListener("focus", onWake)
+    }
+  }, [timeZone])
+  return now
 }

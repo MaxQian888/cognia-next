@@ -5,7 +5,12 @@
 import * as ReactForMocks from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import { InlineCopyButton, ToolRowBlock, ToolStatusDot } from "./tool-row"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
+
+import { InlineCopyButton, ToolRowBlock, ToolRowShell, ToolStatusDot } from "./tool-row"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -57,6 +62,34 @@ describe("InlineCopyButton", () => {
     fireEvent.click(screen.getByTestId("copy-btn"))
     expect(copyMock).toHaveBeenCalledWith("pnpm test")
     expect(onRowClick).not.toHaveBeenCalled()
+  })
+})
+
+describe("ToolRowShell", () => {
+  it("keeps the row actions reachable without a hover", () => {
+    copyMock.mockClear()
+    render(
+      <ToolRowShell
+        status="output-available"
+        ariaLabel="row"
+        testId="row"
+        lead={<span>$</span>}
+        actions={<InlineCopyButton value="ls -la" label="copy command" testId="row-copy" />}
+      />
+    )
+    const button = screen.getByTestId("row-copy")
+    const wrapper = button.parentElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).toHaveClass("group-hover/trow:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    expect(copyMock).toHaveBeenCalledWith("ls -la")
   })
 })
 

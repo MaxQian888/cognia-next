@@ -29,12 +29,24 @@ const DIFF_TOOLS = new Set(["edit", "write", "multiedit", "multi_edit", "str_rep
 /** Count lines in a block of text; an empty string is zero lines (not one). */
 function countLines(text: string): number {
   if (text.length === 0) return 0
-  return text.split("\n").length
+  let lines = 1
+  for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
+    lines++
+  }
+  return lines
 }
 
 /** Count non-blank lines — the natural "how many results" measure. */
 function countNonBlankLines(text: string): number {
-  return text.split("\n").filter((l) => l.trim().length > 0).length
+  const nonWhitespace = /\S/g
+  let lines = 0
+  while (nonWhitespace.test(text)) {
+    lines++
+    const newline = text.indexOf("\n", nonWhitespace.lastIndex)
+    if (newline === -1) break
+    nonWhitespace.lastIndex = newline + 1
+  }
+  return lines
 }
 
 /**
@@ -97,11 +109,10 @@ export function diffCounts(
 /** A one-line preview of an (error) result, trimmed to `max` chars. */
 export function resultErrorPreview(result: unknown, max = 80): string {
   const text = coerceResultText(result)
-  const line =
-    text
-      .split("\n")
-      .find((l) => l.trim().length > 0)
-      ?.trim() ?? ""
+  const start = text.search(/\S/)
+  if (start === -1) return ""
+  const newline = text.indexOf("\n", start)
+  const line = text.slice(start, newline === -1 ? undefined : newline).trim()
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 

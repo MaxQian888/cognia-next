@@ -2,6 +2,7 @@
 // Returns `null` when the file is missing rather than throwing — most callers
 // want to merge present scopes and fall through silently when none exist.
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
@@ -141,5 +142,8 @@ export interface ClaudeSettingsChangedEvent {
 export async function subscribeClaudeSettings(
   handler: (evt: ClaudeSettingsChangedEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ClaudeSettingsChangedEvent>("claude-settings-changed", (e) => handler(e.payload))
+  const off = await listen<ClaudeSettingsChangedEvent>("claude-settings-changed", (e) =>
+    handler(e.payload)
+  )
+  return () => safeUnlisten(off)
 }

@@ -1,12 +1,12 @@
 "use client"
 
-import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/preset-identity"
+import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { useTranslations } from "next-intl"
 import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
-import { isCogniaProjectedTool } from "@/lib/ai/agent/external/tool-preapproval"
+import { isCogniaProjectedTool } from "@/lib/ai/agent/external/policy/tool-preapproval"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { persistMessageSessionAssets } from "@/lib/db/session-assets"
 import { makeUserMessage } from "@/lib/claude/adapter"
@@ -26,11 +26,11 @@ import {
 } from "@/lib/chat/prompt-preamble"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
-import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
+import { resolveTurnSquad } from "@/lib/ai/agent/team/squad/resolve-turn-squad"
 import {
   resolveExternalAgentModelAxis,
   resolveExternalAgentCogniaModelAxis,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
@@ -67,6 +67,7 @@ import {
 import { expireSessionPeerMessages } from "@/lib/db/session-peer-messages"
 import { markAttachedSessionRunning } from "@/lib/chat/attached-session"
 import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
+import { recordExternalAgentUsage } from "@/lib/db/session-usage"
 import {
   attachRunMetadataToLastAssistant,
   attachUsageToLastAssistant,
@@ -78,7 +79,7 @@ import {
   maybeDrainBackgroundResults,
   registerBackgroundReplaySend,
 } from "./background-result-runtime"
-import { registerChatSendBridge } from "./chat-send-bridge"
+import { registerChatRetryBridge, registerChatSendBridge } from "./chat-send-bridge"
 import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
@@ -109,6 +110,7 @@ import {
   clearBranchSeed,
   freezeImportedSession,
 } from "@/lib/db/sessions"
+import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useInFlightStore } from "@/stores/settings/in-flight-store"
 import { endSpan, recordEvent, startSpan } from "@cognia/agent-trace/emitter"
@@ -176,6 +178,25 @@ import { useAgentExecutionHandleDirectory } from "@/components/providers/agent-e
 import { useGitStore } from "@/stores/git/git-store"
 import { refreshGitStatus } from "@/lib/git/load"
 import { chatMentionResolvers } from "@/lib/claude/agents/chat-mention-targets"
+import {
+  routeTargetsFromStores,
+  snapshotRouteContext,
+  type RouteContextSnapshot,
+} from "@/lib/chat/turn-route/snapshot"
+import { buildRouteStamp, resolveRouteLane, routeCharacter } from "@/lib/chat/turn-route/resolve"
+import { parseLeadingRoute, stripLeadingRouteToken } from "@/lib/chat/turn-route/parse"
+import {
+  foreignTurnsHandoffText,
+  prefixForeignTurnsContext,
+  unseenForeignTurns,
+} from "@/lib/chat/turn-route/history"
+import {
+  isRoutableSession,
+  readTurnRoute,
+  type RouteLane,
+  type TurnRoute,
+} from "@/lib/chat/turn-route/types"
+import type { MessageRunRouteStamp } from "@/lib/chat/message-run-metadata"
 import { resolveTurnContextRefs } from "@/lib/chat/mentions/resolve-mentions"
 import { isTranscriptEntityRefId } from "@/lib/collab/shared-reference-scan"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
@@ -199,12 +220,29 @@ import {
   selectComposerCitedRefs,
   selectComposerEphemeralSkillIds,
   selectComposerPendingCommandOverrides,
+  selectVisibleMessages,
   useChatStore,
 } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { slotKeyForTurn } from "@/lib/execution/slot-key"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
-import { acquireChatLease } from "@/lib/execution/chat-lease"
+import {
+  acquireChatLease,
+  isChatTurnQueued,
+  isQueuedChatTurnCancellation,
+} from "@/lib/execution/chat-lease"
+import { workingCopyConflict } from "@/lib/execution/lease-conflict"
+import {
+  markTurnAdmission,
+  turnMessageId,
+  waitFromBlocker,
+  type TurnAdmissionMeta,
+} from "@/lib/chat/turn-admission"
+import {
+  classifyExternalTurnFailure,
+  planHaltCauseForCode,
+} from "@/lib/ai/agent/external/turn-failure"
+import { driveInSessionPlanAfterTurn, haltInSessionPlanOnTurnFailure } from "./plan-turn-settle"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
   selectSessionSubagents,
@@ -216,6 +254,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useExternalAgentStore } from "@/stores/agent"
 import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
+import { isSameRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -232,7 +271,11 @@ import {
   finishBehaviorTurn,
   isComputerUsePluginToolName,
 } from "./claude-chat-tool-hooks"
-import { applyInstantTitle, clearPendingLoopContinuation } from "./claude-chat-turn-tasks"
+import {
+  applyInstantTitle,
+  clearPendingLoopContinuation,
+  extractAssistantText,
+} from "./claude-chat-turn-tasks"
 import type { SendFn } from "./claude-chat-turn-tasks"
 import { buildSendOptions } from "./claude-chat-send-options"
 import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
@@ -273,6 +316,76 @@ export function rewriteUserPromptText(
   )
 }
 
+/**
+ * What an external agent (Codex, ACP, a paired host's agent) is sent for a turn.
+ *
+ * Both external executors take one prompt string, so that string is the only
+ * way a turn's attachments reach the agent. This lane used to send the payload's
+ * FIRST text block, which is the extracted document or OCR text whenever one is
+ * attached (`buildSendContent` puts attachment blocks first), so the agent got
+ * the file and never the question.
+ *
+ * - `request` is what the user typed: the first text block past the
+ *   attachments, read at the offset `userPromptText` uses. Delegation rules
+ *   match on it, not on a file's contents.
+ * - `prompt` is what the agent reads: the text blocks in front of the request
+ *   (the provider lines put ahead of the turn, then the attachments' text),
+ *   then the request, in the order the builtin lane sends them. Non-text blocks
+ *   (images, native video) cannot ride a string. Blocks after the request
+ *   (fetched link context) were never part of this lane's prompt and still
+ *   are not.
+ * - `omitted` is what `prompt` leaves out, so the lane can say so instead of
+ *   dropping it silently: the manifest indexes of attachment blocks that are
+ *   not text, any other non-text block (no manifest names it), and the
+ *   non-empty text blocks after the request.
+ *
+ * `leadingCount` is how many blocks the provider pipeline put in front of the
+ * turn's own blocks (the reply line, the resource context); the attachments
+ * start right after them. A plain-string payload is sent whole, as before.
+ */
+export function externalTurnPrompt(
+  content: SendContent,
+  attachmentCount = 0,
+  leadingCount = 0
+): { request: string; prompt: string; omitted: ExternalTurnOmissions } {
+  const omitted: ExternalTurnOmissions = { attachments: [], unnamed: 0, trailingText: 0 }
+  if (typeof content === "string") return { request: content, prompt: content, omitted }
+  const request = userPromptText(content.slice(leadingCount), attachmentCount)
+  const attachmentsEnd = leadingCount + attachmentCount
+  const ahead = content
+    .slice(0, attachmentsEnd)
+    .flatMap((block) => (block.type === "text" && block.text.trim() ? [block.text] : []))
+  const requestIndex = content.findIndex(
+    (block, index) => index >= attachmentsEnd && block.type === "text"
+  )
+  content.forEach((block, index) => {
+    if (block.type !== "text") {
+      if (index >= leadingCount && index < attachmentsEnd) {
+        omitted.attachments.push(index - leadingCount)
+      } else {
+        omitted.unnamed += 1
+      }
+    } else if (requestIndex >= 0 && index > requestIndex && block.text.trim()) {
+      omitted.trailingText += 1
+    }
+  })
+  return {
+    request,
+    prompt: [...ahead, ...(request.trim() ? [request] : [])].join("\n\n"),
+    omitted,
+  }
+}
+
+/** What an external agent's one-string prompt could not carry of a turn. */
+export interface ExternalTurnOmissions {
+  /** Manifest indexes of attachment blocks that are not text (an image, a native video). */
+  attachments: number[]
+  /** Non-text blocks outside the attachments, which no manifest names. */
+  unnamed: number
+  /** Non-empty text blocks after the typed request: fetched link context. */
+  trailingText: number
+}
+
 export function resolveChatTurnAttemptIdentity(input: {
   sessionId: string
   runId: string
@@ -299,8 +412,52 @@ export function useClaudeChat() {
   const store = useChatStore
   const tRouting = useTranslations("providers.routingView")
   const tInlineErr = useTranslations("chat.inlineError")
+  const tDiagnostics = useTranslations("diagnostics")
   const tVideo = useTranslations("chat.composer.attachments.video")
+  const tAttachments = useTranslations("chat.composer.attachments")
   const tCollab = useTranslations("chatCollaboration")
+  /**
+   * Name what a text-only recipient could not be handed of a turn: the
+   * attached files whose images or native video were left out (any text
+   * extracted from them was sent), and the fetched pages after the question.
+   * An external agent takes one prompt string; a Squad takes one goal string.
+   */
+  const warnTextOnlyOmissions = useCallback(
+    (
+      recipient: "external" | "squad",
+      omitted: ExternalTurnOmissions,
+      manifest: readonly AttachmentManifestEntry[] | undefined
+    ) => {
+      const names = [
+        ...new Set([
+          ...omitted.attachments.map(
+            (index) => manifest?.[index]?.filename || tAttachments("fallbackName")
+          ),
+          ...(omitted.unnamed > 0 ? [tAttachments("fallbackName")] : []),
+        ]),
+      ]
+      const files = { count: names.length, names: names.join(", ") }
+      const links = { count: omitted.trailingText }
+      const lines = [
+        ...(names.length > 0
+          ? [
+              recipient === "squad"
+                ? tAttachments("squadOmitted.files", files)
+                : tAttachments("externalOmitted.files", files),
+            ]
+          : []),
+        ...(omitted.trailingText > 0
+          ? [
+              recipient === "squad"
+                ? tAttachments("squadOmitted.links", links)
+                : tAttachments("externalOmitted.links", links),
+            ]
+          : []),
+      ]
+      if (lines.length > 0) toast.warning(lines.join(" "))
+    },
+    [tAttachments]
+  )
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -389,10 +546,21 @@ export function useClaudeChat() {
     return unsub
   }, [])
 
-  // Track the last user content per session so we can regenerate without
-  // re-deriving from message parts (which lose the original SendContent shape
-  // when they include attachments).
-  const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
+  // Track the last user content per session so a regenerate resends exactly
+  // what was sent: a natively sent video's file is not in the row. The
+  // manifest travels with it (an attachment's text reads as the question
+  // without it), and the row id says which turn it was, so a regenerate of
+  // any other turn rebuilds from that turn's own row instead.
+  const lastUserContentRef = useRef<
+    Map<
+      string,
+      {
+        messageId: string
+        content: SendContent
+        manifest: readonly AttachmentManifestEntry[] | undefined
+      }
+    >
+  >(new Map())
   // Private resource context is kept outside the message log. It is reused for
   // regenerate/edit-resend, but is only attached after plugin prompt hooks.
   const lastResourceContextRef = useRef<Map<string, string>>(new Map())
@@ -457,7 +625,7 @@ export function useClaudeChat() {
       string,
       {
         host: ReturnType<
-          typeof import("@/lib/ai/agent/external/renderer-tool-host").createRendererToolHost
+          typeof import("@/lib/ai/agent/external/session/renderer-tool-host").createRendererToolHost
         >
         agentId: string
         nativeSessionId?: string
@@ -781,6 +949,25 @@ export function useClaudeChat() {
          *  until an SDK event arrives, which is only necessary when the target
          *  is an assistant message that does not exist yet. */
         branchTag?: { groupId: string; index: number }
+        /** Own this turn's replies by an edit's replacement row that is
+         *  already in the transcript (set by the external-delegation fallback
+         *  when it re-issues an `editAndResend`, alongside `skipUserAppend`).
+         *
+         *  Only the owner half of `branchTag`: the send that appended the row
+         *  already stamped it into its group and selected it. Re-running
+         *  `branchTag` here would stamp and select the fresh user message this
+         *  send builds but never appends, and own the reply by that id — a row
+         *  that does not exist, so the reply shows under every sibling. */
+        branchOwnerId?: string
+        /** Re-issue the thread's last user turn as a new branch (set by
+         *  `regenerate`, alongside `skipUserAppend`).
+         *
+         *  The replies under `anchorId` become siblings in its branch group
+         *  and the reply this turn produces is armed to take the next slot.
+         *  Applied here, past every gate that can refuse the turn before it
+         *  starts, rather than by `regenerate` up front: a tag armed for a turn
+         *  that never runs is consumed by the NEXT turn's first reply. */
+        regenerateBranch?: { anchorId: string }
         /**
          * The message this turn answers (ADR-0177 batch 2). Persisted as
          * `metadata.replyTo` on the user row, and read to the model as one
@@ -810,10 +997,79 @@ export function useClaudeChat() {
          *  the durable binding is `ChatSession.squadId`. */
         compositionOverride?:
           import("@cognia/agent-config-types/agent-composition").AgentCompositionSelectionV1 | null
+        /**
+         * The runtime this turn is addressed to by its leading `@claude` /
+         * `@codex` / `@<Squad member>` (`lib/chat/turn-route/`).
+         *
+         * Re-resolved here against the stores at commit time: a lane that
+         * cannot run refuses the turn before anything is written, and it NEVER
+         * falls back to the conversation's own runtime. Persisted as
+         * `metadata.turnRoute` on the user row so a regenerate re-runs the turn
+         * where it was addressed. Nothing about the session changes.
+         */
+        turnRoute?: TurnRoute | null
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
+      // Branch bookkeeping this send arms for the turn it starts: a
+      // regenerate's pending reply tag, and an edit's owner entry plus the
+      // navigator pick that shows the edit. Every refusal goes through
+      // `rejectSend`, which disarms whatever is still armed — `handleEvent`
+      // only drops these on `session_ended`, which a turn that never ran does
+      // not produce, so a leftover would stamp the NEXT turn's reply.
+      let armedTag: { groupId: string; index: number } | null = null
+      let armedOwner: string | null = null
+      let armedPick: { groupId: string; messageId: string; previous: string | undefined } | null =
+        null
+      const disarmBranch = (): void => {
+        if (!sessionId) return
+        if (armedTag && pendingBranchTagRef.current.get(sessionId) === armedTag) {
+          pendingBranchTagRef.current.delete(sessionId)
+        }
+        armedTag = null
+        if (armedOwner && pendingBranchOwnerRef.current.get(sessionId) === armedOwner) {
+          pendingBranchOwnerRef.current.delete(sessionId)
+        }
+        armedOwner = null
+        const pick = armedPick
+        armedPick = null
+        if (!pick) return
+        const slice = store.getState().sessions[sessionId]
+        // A refusal that kept the edited row (it is marked failed, with its own
+        // retry) keeps it selected. One that never appended it, or rolled it
+        // back, returns the navigator to the variant it showed before.
+        if (slice?.messages.some((message) => message.id === pick.messageId)) return
+        const picks = slice?.activeBranchByGroup ?? {}
+        if (picks[pick.groupId] !== pick.messageId) return
+        const restored = { ...picks }
+        if (pick.previous === undefined) delete restored[pick.groupId]
+        else restored[pick.groupId] = pick.previous
+        store.getState().hydrateSessionActiveBranches(sessionId, restored)
+      }
+      // The reply half of the same bookkeeping, for the lanes that write their
+      // own assistant message instead of streaming it through `handleEvent`
+      // (the external agent, a Squad handoff). Stamps `replyId` the way
+      // `handleEvent` stamps a sidecar reply — a regenerate's armed slot, which
+      // is also selected so the new answer is the one shown, and an edit's
+      // owner — and consumes both, so neither outlives this turn. Only entries
+      // this send armed and that are still pending: a later send's are its own.
+      const claimReplyBranch = (replyId: string): Record<string, unknown> => {
+        const stamp: Record<string, unknown> = {}
+        if (!sessionId) return stamp
+        if (armedTag && pendingBranchTagRef.current.get(sessionId) === armedTag) {
+          pendingBranchTagRef.current.delete(sessionId)
+          stamp.branchGroupId = armedTag.groupId
+          stamp.branchIndex = armedTag.index
+          store.getState().setSessionActiveBranch(sessionId, armedTag.groupId, replyId)
+        }
+        if (armedOwner && pendingBranchOwnerRef.current.get(sessionId) === armedOwner) {
+          pendingBranchOwnerRef.current.delete(sessionId)
+          stamp.branchOwnerId = armedOwner
+        }
+        return stamp
+      }
       const rejectSend = (error?: unknown): void => {
+        disarmBranch()
         if (!callOptions?.throwOnError) return
         const diagnostic = sessionId
           ? useChatStore.getState().sessions[sessionId]?.errorDiagnostic
@@ -855,6 +1111,30 @@ export function useClaudeChat() {
       }
 
       const sharedTarget = await getSession(sessionId)
+      const turnRoute = callOptions?.turnRoute ?? null
+      // An addressed turn that cannot run: refused with the reason, before
+      // anything reaches the transcript.
+      const refuseRoute = (route: TurnRoute, reason: string, detail?: string): void => {
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("turnRouteUnavailable", {
+            source: "chat",
+            ...(detail ? { message: detail } : {}),
+            meta: { sessionId, extra: { handle: route.handle, reason } },
+          })
+        )
+        rejectSend(`turn_route_unavailable:${reason}`)
+      }
+      // Only a direct chat has a lane of its own to leave for one turn. The
+      // composer never offers a route anywhere else; a programmatic send that
+      // carries one is refused rather than run unrouted.
+      if (turnRoute && !isRoutableSession(sharedTarget)) {
+        refuseRoute(turnRoute, "unroutable-session")
+        return
+      }
+      // Route handles resolve to `agent` mentions over THIS conversation's
+      // targets, the same list its `@` panel offered.
+      const routeMentionTargets = routeTargetsFromStores(sharedTarget)
       // Only a NEW user turn is published to the shared transcript. The
       // internal re-entries (regenerate / routing fallback pass
       // `skipUserAppend`, the queue's replay passes `steerDrain`) already have
@@ -918,7 +1198,7 @@ export function useClaudeChat() {
         // included — ever gets a backlink.
         const sharedMentions = resolveTurnContextRefs(
           shared.content,
-          chatMentionResolvers(),
+          chatMentionResolvers(routeMentionTargets),
           callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
         )
         const sharedMetadata = {
@@ -967,7 +1247,27 @@ export function useClaudeChat() {
       // bypass this.
       if (!callOptions?.skipUserAppend && !callOptions?.steerDrain) {
         const st = sessionStatusOf(sessionId)
-        if (st === "streaming" || st === "awaiting_approval") {
+        // A turn still waiting for its working tree has not started, but it is
+        // this session's next turn all the same. A second send is a follow-up
+        // to it, not a rival: sent through the normal path it would wait on the
+        // same tree and then run with a transcript that predates the first
+        // turn's reply.
+        const turnQueued = isChatTurnQueued(sessionId)
+        if (st === "streaming" || st === "awaiting_approval" || turnQueued) {
+          if (turnRoute) {
+            // A live follow-up can only reach the runtime already answering, and
+            // queued follow-ups merge into one payload — neither can move a turn
+            // to another runtime. Refused, not demoted to an unaddressed steer.
+            // On the bus, not the session: the running turn keeps its status.
+            dispatchDiagnostic(
+              createDiagnostic("turnRouteWhileBusy", {
+                source: "chat",
+                meta: { sessionId, extra: { handle: turnRoute.handle } },
+              })
+            )
+            rejectSend("turn_route_while_busy")
+            return
+          }
           const text = steerTextOf(content, callOptions?.attachmentManifest?.length ?? 0)
           const blocks = steerBlocksOf(content, callOptions?.attachmentManifest?.length ?? 0)
           if (!text && blocks.length === 0) return
@@ -1003,7 +1303,7 @@ export function useClaudeChat() {
           // live, replayed from the queue, or never delivered at all.
           const steerMentions = resolveTurnContextRefs(
             content,
-            chatMentionResolvers(),
+            chatMentionResolvers(routeMentionTargets),
             callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
           )
           ;(optimistic as { metadata?: Record<string, unknown> }).metadata = {
@@ -1019,6 +1319,7 @@ export function useClaudeChat() {
           const fusionTurn = fusionChatTurnActive(sessionId)
           if (
             !fusionTurn &&
+            !turnQueued &&
             !externalAgentId &&
             text &&
             blocks.length === 0 &&
@@ -1071,8 +1372,9 @@ export function useClaudeChat() {
           // The lane comes from what THIS session dispatched
           // (`sessionExternalLane`), not the composer's global runtime pick,
           // which in split view describes whichever pane happens to be focused.
-          if (fusionTurn) {
-            // Queued below.
+          if (fusionTurn || turnQueued) {
+            // Queued below: a verified run has no live input, and a turn that
+            // has not been admitted has no input open at all.
           } else if (externalAgentId) {
             // Adapter steering carries text only (`turn/steer` takes a string),
             // so an attachment-only follow-up has to queue on this lane.
@@ -1133,6 +1435,36 @@ export function useClaudeChat() {
         }
       }
 
+      let session = await getSession(sessionId)
+      assertSessionWritable(session, "send-message")
+      // The lane THIS turn runs on, decided once. An addressed turn resolves
+      // its route against the stores as they are now — a Codex disabled since
+      // the pick refuses here, not mid-dispatch; every other turn runs on the
+      // session's own lane. Every "which runtime" question below reads
+      // `turnLane`, never the store again.
+      const sessionLane = runtimeRefForSession(sessionId)
+      let routeSnapshot: RouteContextSnapshot | null = null
+      let routeLane: Extract<RouteLane, { ok: true }> | null = null
+      if (turnRoute) {
+        routeSnapshot = await snapshotRouteContext(sessionId, { session: session ?? null })
+        const lane = resolveRouteLane(turnRoute.target, routeSnapshot)
+        if (!lane.ok) {
+          refuseRoute(turnRoute, lane.reason, lane.detail)
+          return
+        }
+        routeLane = lane
+      }
+      const turnLane: AgentRuntimeRef = routeLane?.runtimeRef ?? sessionLane
+      // The session's model pick belongs to the session's own lane. A turn
+      // addressed to a DIFFERENT lane must not carry it there — a builtin
+      // conversation's Claude model is not a choice made for Codex.
+      const laneOwnsSessionModel = !routeLane || isSameRuntimeRef(turnLane, sessionLane)
+      // Claim imported history before summary generation or editor writes, so a
+      // concurrent source watcher cannot replace the snapshot being continued.
+      if (sessionId.startsWith("import:") && session?.importOwnership !== "native-bound") {
+        await freezeImportedSession(sessionId)
+      }
+
       // The turn is definitely running now, so make disk honest before the agent's
       // file tools read it. Those tools go straight to the filesystem, so a buffer
       // the user edited but never saved is invisible to them: the agent would
@@ -1150,11 +1482,15 @@ export function useClaudeChat() {
         )
       }
 
-      let session = await getSession(sessionId)
       let builtinHandoffContext: string | undefined
       if (
-        session?.importOwnership === "native-bound" &&
-        runtimeRefForSession(sessionId).kind === "builtin"
+        session &&
+        turnLane.kind === "builtin" &&
+        (session.importOwnership === "native-bound" ||
+          (session.branchSeed?.kind === "transcript" &&
+            (sessionId.startsWith("import:") ||
+              session.handoffSource === "cli" ||
+              session.handoffSource === "thread-handoff")))
       ) {
         const { buildHandoffContext, prepareHandoffContext } =
           await import("@/lib/chat/handoff-context")
@@ -1166,6 +1502,7 @@ export function useClaudeChat() {
               plans: imported.plans,
               goals: imported.goals,
               checkpoints: imported.checkpoints,
+              history: imported.history,
               interAgentMessages: imported.interAgentMessages,
             }
           : undefined
@@ -1240,17 +1577,28 @@ export function useClaudeChat() {
       }
 
       // Extract a plain-text version of the user message for twin RAG. The
-      // multimodal path (array of blocks) finds the first text block; if
-      // none we leave userMessage undefined and the runtime falls back to
-      // the no-context path.
+      // multimodal path (array of blocks) reads the block the user typed, past
+      // the attachments: an extracted document or an image's OCR is a text
+      // block too, and `buildSendContent` puts them first. A turn with nothing
+      // typed leaves userMessage undefined and the runtime falls back to the
+      // no-context path.
       // The composer's context envelope is stripped: recall, routing and skill
       // intent must key off what the user ASKED, not off a referenced document
       // or a page of web results the app put in front of it.
-      const firstText =
+      const sentAttachmentCount = callOptions?.attachmentManifest?.length ?? 0
+      const rawTypedText =
         typeof content === "string"
           ? content
-          : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
-      const userMessageText = firstText === undefined ? undefined : stripPromptPreamble(firstText)
+          : content.some((block, index) => index >= sentAttachmentCount && block.type === "text")
+            ? userPromptText(content, sentAttachmentCount)
+            : undefined
+      const typedText = rawTypedText === undefined ? undefined : stripPromptPreamble(rawTypedText)
+      // An addressed turn's `@codex` is an instruction to Cognia, not part of
+      // the question the recall and routing legs key off.
+      const userMessageText =
+        typedText !== undefined && turnRoute
+          ? (stripLeadingRouteToken(typedText, turnRoute.handle) as string)
+          : typedText
       // Attachment kinds for the routing classifier: an image block implies a
       // vision requirement; a document block discriminates audio/video by its
       // declared media type. Text blocks never contribute a kind.
@@ -1294,7 +1642,23 @@ export function useClaudeChat() {
               ? { attachmentKinds: routingAttachmentKinds }
               : undefined,
             // This controller creates the Router + Fusion run before dispatch.
-            { routerFusionSurface: "chat" }
+            // An addressed turn runs exactly where it was addressed, so it is
+            // never turned into a cascade or panel run.
+            turnRoute ? {} : { routerFusionSurface: "chat" },
+            routeLane
+              ? routeLane.member
+                ? (() => {
+                    // Answered AS the member: its persona, and its own model
+                    // when it has one — for this turn only.
+                    const character = routeCharacter(routeLane.member)
+                    return {
+                      runtimeRef: routeLane.runtimeRef,
+                      character,
+                      clearSessionModel: Boolean(character.model),
+                    }
+                  })()
+                : { runtimeRef: routeLane.runtimeRef }
+              : undefined
           ))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
@@ -1342,6 +1706,15 @@ export function useClaudeChat() {
               },
             }
           : {}),
+      }
+
+      // A deny-all tool surface keeps every external agent off the turn (the
+      // external lane cannot run without its tools, so an unaddressed turn
+      // quietly stays builtin). An addressed turn must not: it asked for that
+      // runtime, and answering it elsewhere is exactly what routing refuses.
+      if (turnRoute && turnLane.kind !== "builtin" && sendOptions.toolSurface === "none") {
+        refuseRoute(turnRoute, "no-tool-surface")
+        return
       }
 
       // Second half of the cap backstop above, run here because the provider is
@@ -1525,6 +1898,51 @@ export function useClaudeChat() {
       registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
 
+      // Regenerate re-parents the replies it replaces here, past every gate
+      // above that can refuse the turn (the concurrency caps, an unroutable
+      // lane, the plugin prompt guard), so a refused regenerate leaves the
+      // thread exactly as it was. Every sibling after the anchor joins one
+      // group (direct chat is one reply per turn) and stays reachable through
+      // the BranchNavigator; the reply this turn produces takes the next slot.
+      if (callOptions?.regenerateBranch) {
+        const current = store.getState().sessions[sessionId]?.messages ?? []
+        let anchorIdx = -1
+        for (let i = current.length - 1; i >= 0; i--) {
+          if (current[i].role === "user") {
+            anchorIdx = i
+            break
+          }
+        }
+        // The thread moved on while the gates ran (another surface added a
+        // turn, or the anchor was deleted). Tagging now would drop whatever
+        // follows the anchor, and the re-issued content answers a question
+        // that is no longer the last one.
+        if (current[anchorIdx]?.id !== callOptions.regenerateBranch.anchorId) {
+          rejectSend("regenerate_anchor_moved")
+          return
+        }
+        const groupId = current[anchorIdx].id
+        const { merged: tagged, nextIndexByGroup } = tagBranchSiblings(
+          current,
+          anchorIdx,
+          () => groupId
+        )
+        // Re-running the turn is the retry of whatever the row recorded — a
+        // failure, or a wait the app was closed during — so the mark goes. A
+        // new failure writes its own.
+        const merged = markTurnAdmission(tagged, groupId, null)
+        store.getState().replaceSessionMessages(sessionId, merged)
+        await persistMessages(sessionId, merged)
+        // `handleEvent` stamps the first assistant message that arrives with
+        // this tag, and selects it.
+        armedTag = { groupId, index: nextIndexByGroup.get(groupId) ?? 0 }
+        pendingBranchTagRef.current.set(sessionId, armedTag)
+      } else {
+        // Any other turn never answers into a regenerate's group, whatever
+        // path left a tag behind.
+        pendingBranchTagRef.current.delete(sessionId)
+      }
+
       // Optimistic user-message append. Skipped during regenerate so the
       // existing user anchor stays the single source of truth for that turn.
       // Base off this session's own slice — never the focused projection.
@@ -1549,7 +1967,7 @@ export function useClaudeChat() {
         callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
       const mentionRefs = resolveTurnContextRefs(
         effectiveContent,
-        chatMentionResolvers(),
+        chatMentionResolvers(routeSnapshot?.targets ?? routeMentionTargets),
         citedRefs
       )
       if (mentionRefs.length > 0) {
@@ -1570,6 +1988,12 @@ export function useClaudeChat() {
           templateRun: callOptions.templateRun,
         }
       }
+      if (turnRoute) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          turnRoute,
+        }
+      }
       if (callOptions?.replyTo) {
         ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
           ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
@@ -1585,12 +2009,26 @@ export function useClaudeChat() {
           branchGroupId: callOptions.branchTag.groupId,
           branchIndex: callOptions.branchTag.index,
         }
+        armedPick = {
+          groupId: callOptions.branchTag.groupId,
+          messageId: userMsg.id,
+          previous:
+            store.getState().sessions[sessionId]?.activeBranchByGroup[
+              callOptions.branchTag.groupId
+            ],
+        }
         store
           .getState()
           .setSessionActiveBranch(sessionId, callOptions.branchTag.groupId, userMsg.id)
         // Everything this turn appends belongs to the replacement variant —
         // stamp it as the owner so the other sibling keeps its own tail.
+        armedOwner = userMsg.id
         pendingBranchOwnerRef.current.set(sessionId, userMsg.id)
+      } else if (callOptions?.branchOwnerId) {
+        // A re-issued edit: the replacement row, its stamp and its pick are
+        // already in place; only its replies still need the owner.
+        armedOwner = callOptions.branchOwnerId
+        pendingBranchOwnerRef.current.set(sessionId, callOptions.branchOwnerId)
       } else {
         // A normal send must never inherit the previous turn's owner.
         pendingBranchOwnerRef.current.delete(sessionId)
@@ -1601,21 +2039,78 @@ export function useClaudeChat() {
       // them. They diverge only on the *other* effects of a user turn — see
       // `steerDrain`'s doc on the option type.
       const skipAppend = callOptions?.skipUserAppend === true || callOptions?.steerDrain === true
-      // Claim imported history before the first write or dispatch. Otherwise a
-      // file-watch refresh can replace the user's continuation while it runs.
-      if (sessionId.startsWith("import:") && session?.importOwnership !== "native-bound") {
-        await freezeImportedSession(sessionId)
-      }
       const persistedUserMessage = await persistAttachments(userMsg)
       if (!persistedUserMessage) return
       userMsg = persistedUserMessage
       const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
       const displayContent = effectiveContent
+      // The addressed runtime reads the question without the `@handle` that
+      // addressed it; the transcript row above keeps what the user typed.
+      // Past the attachments: an extracted document is a text block too, and
+      // the handle is only ever in what the user typed.
+      const routedContent = turnRoute
+        ? stripLeadingRouteToken(displayContent, turnRoute.handle, turnManifest?.length ?? 0)
+        : displayContent
+      // Mixed-runtime history (`lib/chat/turn-route/history.ts`): the builtin
+      // lane resumes its own SDK session, which never saw what another runtime
+      // answered since its last reply. That part of the thread rides this turn,
+      // in its content, so the SDK session keeps it on every later resume.
+      // Not for a re-issued turn (its history is the one it already had), and
+      // not for the standalone engine, which reads the whole transcript anyway.
+      let foreignTurnsContext = ""
+      if (
+        turnLane.kind === "builtin" &&
+        builtinHandoffContext === undefined &&
+        !callOptions?.skipUserAppend &&
+        !callOptions?.sharedRequest &&
+        !isStandaloneChatMode()
+      ) {
+        const unseen = unseenForeignTurns(
+          selectVisibleMessages(
+            previousMessages,
+            store.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
+          ),
+          "builtin"
+        )
+        if (unseen.length > 0) {
+          try {
+            foreignTurnsContext = await foreignTurnsHandoffText(unseen, {
+              client: async () => {
+                const { buildAgentBackedLlmClient } =
+                  await import("@/lib/ai/generation/agent-backed-client")
+                return buildAgentBackedLlmClient({
+                  session,
+                  appSettings: useSettingsStore.getState().settings,
+                  featureId: "handoff",
+                  label: "Summarize task handoff",
+                })
+              },
+            })
+          } catch (error) {
+            // The handoff could not be made — a PII refusal above all — and the
+            // turn fails with the reason, as a lane switch's handoff fails it.
+            // The user row has not been added to the transcript yet.
+            store
+              .getState()
+              .setSessionDiagnostic(
+                sessionId,
+                toDiagnostic(error, { source: "chat", meta: { sessionId } })
+              )
+            rejectSend(error)
+            return
+          }
+        }
+      }
       // The reply line goes to the provider only. The transcript row above
       // keeps the typed text and carries the reference in its metadata.
-      const providerContent = callOptions?.replyTo
-        ? prefixReplyContext(displayContent, callOptions.replyTo)
-        : displayContent
+      const providerContent = prefixForeignTurnsContext(
+        callOptions?.replyTo
+          ? prefixReplyContext(routedContent, callOptions.replyTo)
+          : routedContent,
+        foreignTurnsContext,
+        // A reply line leads the turn ahead of any files; the handoff joins it.
+        callOptions?.replyTo ? 0 : (turnManifest?.length ?? 0)
+      )
       const shouldGateWorkbenchPayload =
         callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
       // The transcript a provider reads whole (the standalone engine) gets every
@@ -1640,20 +2135,40 @@ export function useClaudeChat() {
       }
       effectiveContent = providerPayload.content
       sendOptions = providerPayload.sendOptions
-      const providerText =
-        typeof effectiveContent === "string"
-          ? effectiveContent
-          : ((
-              effectiveContent.find((block) => block.type === "text") as
-                { text?: string } | undefined
-            )?.text ?? "")
+      // The turn as one string, read past the attachments rather than off the
+      // first text block (see `externalTurnPrompt`), which is the extracted
+      // document or OCR text whenever a file is attached. Every reader below
+      // that takes a string picks one of the two: `request` where it wants
+      // what the user asked (a label, a preview, the verifier's brief),
+      // `prompt` where it is the only way the turn reaches whoever works on it
+      // (the external lane, a Squad). A plain-string turn is both, whole.
+      // Every provider step above only PREPENDS blocks to the turn's own (the
+      // reply line, the resource context) or folds text into one, so the
+      // difference in length is what sits in front of the attachments.
+      const providerSourceContent = callOptions?.sharedRequest ? turnContent : routedContent
+      const externalTurn = externalTurnPrompt(
+        effectiveContent,
+        turnManifest?.length ?? 0,
+        Array.isArray(effectiveContent) && Array.isArray(providerSourceContent)
+          ? effectiveContent.length - providerSourceContent.length
+          : 0
+      )
       const hostStateEligible =
         !sendOptions.routerFusionRun &&
         !skipAppend &&
         typeof effectiveContent === "string" &&
         callOptions?.resourceContext === undefined &&
         (turnManifest?.length ?? 0) === 0 &&
-        runtimeRefForSession(sessionId).kind === "builtin" &&
+        turnLane.kind === "builtin" &&
+        // The host runs a queued intent on the SESSION's lane with the
+        // session's own character, and writes the intent's `text` as the user
+        // row. An addressed turn would lose its `@handle` and its
+        // `metadata.turnRoute` there (so a later regenerate would no longer
+        // know where it was addressed), and a handed-over stretch of another
+        // runtime's replies would be recorded as if the user had typed it.
+        // Both take the direct path, which keeps the typed row.
+        !turnRoute &&
+        !foreignTurnsContext &&
         !session?.collaboration &&
         !isStandaloneChatMode()
       if (hostStateEligible) {
@@ -1663,7 +2178,8 @@ export function useClaudeChat() {
             action: {
               kind: "message.enqueue",
               messageId: userMsg.id,
-              text: providerText,
+              // Only a plain-string turn is eligible: this is the whole of it.
+              text: externalTurn.request,
               attachments: [],
               ...(mentionRefs.length > 0 ? { mentions: mentionRefs } : {}),
               ...(callOptions?.promptPreamble
@@ -1676,9 +2192,13 @@ export function useClaudeChat() {
             // Runtime dispatch, transcript persistence and authoritative title
             // updates now belong to HostStateService on every attached surface.
             store.getState().replaceSessionMessages(sessionId, next)
-            store.getState().setSessionStatus(sessionId, "streaming")
             store.getState().setSessionError(sessionId, null)
-            lastUserContentRef.current.set(sessionId, displayContent)
+            store.getState().setSessionStatus(sessionId, "streaming")
+            lastUserContentRef.current.set(sessionId, {
+              messageId: userMsg.id,
+              content: displayContent,
+              manifest: turnManifest,
+            })
             emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
             emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
             behaviorTurnStartedAt.set(sessionId, Date.now())
@@ -1714,6 +2234,10 @@ export function useClaudeChat() {
       // actually writes into. Best-effort: an unresolvable cwd means no slot,
       // which is what it was before any of this existed.
       const turnCwd = await resolveEffectiveCwdForSession(session).catch(() => null)
+      // The user message this turn belongs to — appended above, or already in
+      // the transcript for a re-issued turn.
+      const turnMessage = skipAppend ? turnMessageId(previousMessages) : userMsg.id
+      let queuedTurnWrite: Promise<void> | null = null
       try {
         await acquireChatLease({
           sessionId,
@@ -1734,10 +2258,58 @@ export function useClaudeChat() {
           }),
           providerId: sendOptions.provider,
           providerLimit: sendOptions.providerConcurrencyLimit,
+          // The broker is about to park this turn behind whatever holds its
+          // working tree. Say so on the message itself, and write it through
+          // now: a session switch or reload rehydrates from Dexie, and a
+          // store-only message is exactly what vanished for minutes before.
+          onQueued: (blocker) => {
+            const queuedMeta: TurnAdmissionMeta = {
+              state: "queued",
+              waitingFor: waitFromBlocker(blocker),
+              since: Date.now(),
+            }
+            const current = store.getState().sessions[sessionId]?.messages ?? next
+            const marked = markTurnAdmission(current, turnMessage, queuedMeta)
+            store.getState().replaceSessionMessages(sessionId, marked)
+            queuedTurnWrite = persistMessages(sessionId, marked).catch((error: unknown) =>
+              console.warn("queued turn persist failed", error)
+            )
+          },
         })
       } catch (leaseErr) {
+        if (isQueuedChatTurnCancellation(leaseErr)) {
+          // The user withdrew the message while it waited: the turn never ran,
+          // so the message leaves the transcript (a re-issued turn keeps its
+          // message and loses only the queued mark).
+          await queuedTurnWrite
+          const current = store.getState().sessions[sessionId]?.messages ?? next
+          const withdrawn = skipAppend
+            ? markTurnAdmission(current, turnMessage, null)
+            : current.filter((message) => message.id !== userMsg.id)
+          store.getState().replaceSessionMessages(sessionId, withdrawn)
+          await persistMessages(sessionId, withdrawn).catch((error: unknown) =>
+            console.warn("withdrawn turn persist failed", error)
+          )
+          // Follow-ups typed while it waited were queued behind it; with it
+          // gone they are the next turn.
+          drainSteerVia(sessionId, sendRef)
+          rejectSend("chat_turn_withdrawn")
+          return
+        }
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
       }
+      if (queuedTurnWrite) {
+        // Admitted. Settle the queued write first so it cannot land after the
+        // turn's own transcript writes, then drop the mark from the row.
+        await queuedTurnWrite
+        const current = store.getState().sessions[sessionId]?.messages ?? next
+        store
+          .getState()
+          .replaceSessionMessages(sessionId, markTurnAdmission(current, turnMessage, null))
+      }
+      // Clearing an error also sets idle. Do it before entering the active
+      // state so workspace/broker settle subscribers see the actual turn end.
+      store.getState().setSessionError(sessionId, null)
       store.getState().setSessionStatus(sessionId, "streaming")
       if (session?.attachedChild) {
         void markAttachedSessionRunning(sessionId).catch((error) =>
@@ -1745,8 +2317,11 @@ export function useClaudeChat() {
         )
       }
       chatTurnPerformance.begin(sessionId)
-      store.getState().setSessionError(sessionId, null)
-      lastUserContentRef.current.set(sessionId, displayContent)
+      lastUserContentRef.current.set(sessionId, {
+        messageId: userMsg.id,
+        content: displayContent,
+        manifest: turnManifest,
+      })
       if (callOptions?.resourceContext !== undefined) {
         lastResourceContextRef.current.set(sessionId, callOptions.resourceContext)
       }
@@ -1759,9 +2334,7 @@ export function useClaudeChat() {
         behaviorTurnStartedAt.set(sessionId, Date.now())
         void trackEvent("chat.message.sent", {
           sessionId,
-          provider:
-            sendOptions.provider ??
-            (runtimeRefForSession(sessionId).kind === "builtin" ? "unknown" : "external"),
+          provider: sendOptions.provider ?? (turnLane.kind === "builtin" ? "unknown" : "external"),
           surface: "chat",
         })
       }
@@ -1783,20 +2356,32 @@ export function useClaudeChat() {
       // `use-team-chat` takes for a multi-member turn. That is what makes a
       // follow-up typed mid-run queue as steering instead of starting a second
       // Squad over the top of the first.
+      //
+      // An addressed turn is one direct turn by definition, so it opts out of
+      // the Squad binding (`resolveTurnSquad`: any non-team orchestration on
+      // the turn override beats the session's Squad).
+      const turnComposition = turnRoute
+        ? {
+            ...(callOptions?.compositionOverride ?? compositionForSession(sessionId)),
+            orchestration: "direct" as const,
+          }
+        : (callOptions?.compositionOverride ?? null)
       const squadDecision = resolveTurnSquad({
-        turnOverride: callOptions?.compositionOverride ?? null,
+        turnOverride: turnComposition,
         session,
       })
       if (squadDecision.squadId) {
         const squadId = squadDecision.squadId
         try {
           const [{ startSquadRun }, { agentTeamExecutionRunId }] = await Promise.all([
-            import("@/lib/ai/agent/team/start-squad-run"),
+            import("@/lib/ai/agent/team/squad/start-squad-run"),
             import("@/lib/execution/agent-team-bridge"),
           ])
           const result = await startSquadRun({
             squadId,
-            goal: providerText,
+            // The goal is all the Squad is handed, so the whole turn: the
+            // attached files' text, then the question.
+            goal: externalTurn.prompt,
             origin: "chat",
             triggeredFrom: { source: "chat", sessionId },
             ...(session ? { session } : {}),
@@ -1835,14 +2420,24 @@ export function useClaudeChat() {
             rejectSend(result.reason || "squad_dispatch_failed")
             return
           }
+          // The goal is one string: images, a native video and fetched pages
+          // did not reach the Squad. Said once the run takes it, and not for a
+          // run that already existed, whose goal this turn did not set.
+          if (!result.duplicate) {
+            warnTextOnlyOmissions("squad", externalTurn.omitted, turnManifest)
+          }
           // Leave the conversation's own record of the handoff, now rather
           // than when the run finishes. A Squad run takes minutes, and a
           // conversation that shows nothing for that long reads as broken.
           // The part carries identity only; everything else is live-queried
           // from the run, so this stays true after a reload instead of
           // freezing at whatever was known at dispatch.
+          const squadMessageId = crypto.randomUUID()
+          // The card is this turn's reply: a regenerate files it as the next
+          // sibling, an edit as its variant's (`claimReplyBranch`).
+          const squadBranch = claimReplyBranch(squadMessageId)
           const squadMessage: UIMessage = {
-            id: crypto.randomUUID(),
+            id: squadMessageId,
             role: "assistant",
             parts: [
               {
@@ -1850,9 +2445,11 @@ export function useClaudeChat() {
                 runId: agentTeamExecutionRunId(result.runId),
                 squadId,
                 squadName: result.squadName ?? squadId,
-                objective: providerText,
+                // What the card names is what the user asked, not a file.
+                objective: externalTurn.request,
               },
             ] as unknown as UIMessage["parts"],
+            ...(Object.keys(squadBranch).length > 0 ? { metadata: squadBranch } : {}),
           }
           // Committed directly rather than through the per-session coalescer:
           // that exists to batch streaming deltas, and there is exactly one
@@ -1864,7 +2461,8 @@ export function useClaudeChat() {
 
           // Release the hold when the run ends, however it ends. Without this
           // the conversation would queue follow-ups forever.
-          const { watchSquadRunSettlement } = await import("@/lib/ai/agent/team/watch-squad-run")
+          const { watchSquadRunSettlement } =
+            await import("@/lib/ai/agent/team/squad/watch-squad-run")
           const stopWatching = watchSquadRunSettlement({
             executionRunId: agentTeamExecutionRunId(result.runId),
             onSettled: (status) => {
@@ -1907,7 +2505,14 @@ export function useClaudeChat() {
           userMessage: skipAppend ? null : userMsg,
           workspaceRoot: turnCwd,
           settings: useSettingsStore.getState().settings,
+          // The answer is this turn's reply, written by the run rather than
+          // streamed through `handleEvent`: it takes the armed slot here.
+          claimReplyBranch,
           onSettled: (result) => {
+            // A run that ended without an answer (refused, failed, stopped
+            // before its seal) never claimed its regenerate slot or edit
+            // owner, and no `session_ended` drops them on this lane.
+            disarmBranch()
             const durationMs = finishBehaviorTurn(sessionId)
             if (durationMs !== undefined && result !== "cancelled") {
               void trackEvent(result === "completed" ? "chat.turn.completed" : "chat.turn.failed", {
@@ -1938,14 +2543,14 @@ export function useClaudeChat() {
       // turn's context. A companion shell is refused with a reason rather
       // than left to hang, and the picker shows the same reason.
       const turnOrchestration =
-        callOptions?.compositionOverride?.orchestration ??
-        compositionForSession(sessionId).orchestration
+        turnComposition?.orchestration ?? compositionForSession(sessionId).orchestration
       if (turnOrchestration === "verified-fresh-agent") {
         void import("@/lib/agent/composition/verified-fresh-agent")
           .then(({ armVerifiedFreshAgentFollowup }) =>
             armVerifiedFreshAgentFollowup({
               sessionId,
-              request: providerText,
+              // Its contract: the user's request, without attachments.
+              request: externalTurn.request,
               cwd: turnCwd,
               ...(session?.projectId ? { projectId: session.projectId } : {}),
               ...(session?.title ? { mainSessionTitle: session.title } : {}),
@@ -1975,8 +2580,17 @@ export function useClaudeChat() {
       // Read ONCE for the whole send. The store used to be consulted at three
       // separate points below, so a runtime switch part-way through a send
       // could be observed differently by each of them.
-      const composerRuntimeRef = runtimeRefForSession(sessionId)
+      const composerRuntimeRef = turnLane
       const manualExternal = !hasNoToolSurface && composerRuntimeRef.kind !== "builtin"
+      // Who answers an addressed turn, stamped on the reply at seal (the
+      // external seal below, and the builtin one through `setLastSend`).
+      const routeStamp: MessageRunRouteStamp | undefined =
+        turnRoute && routeLane
+          ? buildRouteStamp(turnRoute, routeLane, {
+              runtimes: routeSnapshot?.runtimes ?? [],
+              ...(sendOptions.provider ? { providerId: sendOptions.provider } : {}),
+            })
+          : undefined
 
       // Resolve rule-based delegation before opening the Task Workspace and
       // adoption windows so their durable agent identity reflects the runtime
@@ -1987,7 +2601,10 @@ export function useClaudeChat() {
         !hasNoToolSurface &&
         !manualExternal &&
         !callOptions?.skipUserAppend &&
-        !callOptions?.bypassDelegation
+        !callOptions?.bypassDelegation &&
+        // An addressed turn already names who answers; a delegation rule
+        // re-routing it would override the user's own choice.
+        !turnRoute
       ) {
         try {
           const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
@@ -1998,8 +2615,13 @@ export function useClaudeChat() {
               import("@/lib/ai/agent/external/delegation-router"),
               import("@cognia/redact"),
             ])
+            // Rules route on the question; the agent is handed the whole turn.
             const decision = routeDelegation(
-              { prompt: providerText, context: { sessionId } },
+              {
+                prompt: externalTurn.request,
+                payload: externalTurn.prompt,
+                context: { sessionId },
+              },
               {
                 checkDelegation: (t, c) => mgr.checkDelegation(t, c),
                 redact: (text) => redactText(text),
@@ -2035,6 +2657,25 @@ export function useClaudeChat() {
             ? turnRuntimeRef.agentId
             : undefined
       const adoptionAgentKind = routedExternalAgentId ? "external" : "in-app"
+      // Whether this turn runs in THIS webview's standalone (BYOK) engine: no
+      // sidecar, no host, and a tool catalog in which nothing opens a file
+      // (`lib/ai/chat/standalone-tools.ts`). Read once, and the built-in
+      // dispatch below branches on this same value, so the working-copy gate
+      // and the executor it guards cannot disagree.
+      //
+      // `isStandaloneChatMode()` and not `hasHostRuntime()`: the question is
+      // where the turn executes, and the host profile answers
+      // "mobile-companion" for a phone in standalone mode, paired or not.
+      const standaloneEngineTurn = !manualExternal && !delegation && isStandaloneChatMode()
+      // A working copy exists for an executor that opens files in it. A
+      // zero-tool turn has none, and neither has a standalone engine turn, so
+      // for both the managed bundle, the turn lease and the project environment
+      // below have no consumer. Demanding them anyway refused every rootless
+      // chat in a plain browser or a standalone phone before its first token:
+      // the managed workspace cannot be materialized there, and nothing would
+      // have opened it. The durable `managed` identity is left untouched, so a
+      // desktop that later receives the conversation materializes it as usual.
+      const turnUsesWorkingCopy = !hasNoToolSurface && !standaloneEngineTurn
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
@@ -2143,6 +2784,28 @@ export function useClaudeChat() {
        * `chat.turn.failed` rather than a new event name: the turn was accepted
        * and then failed, which is exactly what that event already means.
        */
+      const markTurnFailed = async (diagnostic: CogniaDiagnostic): Promise<void> => {
+        const current = store.getState().sessions[sessionId]?.messages ?? []
+        const target = skipAppend
+          ? turnMessageId(current)
+          : current.some((message) => message.id === userMsg.id)
+            ? userMsg.id
+            : null
+        if (!target) return
+        const marked = markTurnAdmission(current, target, {
+          state: "failed",
+          code: diagnostic.code,
+          ...(diagnostic.detail || diagnostic.message
+            ? { detail: diagnostic.detail || diagnostic.message }
+            : {}),
+          at: Date.now(),
+        })
+        if (marked === current) return
+        store.getState().replaceSessionMessages(sessionId, marked)
+        await persistMessages(sessionId, marked).catch((error: unknown) =>
+          console.warn("failed turn persist failed", error)
+        )
+      }
       const refuseTurn = async (input: {
         diagnostic: CogniaDiagnostic
         /** Stable, low-cardinality reason. Doubles as the telemetry `errorType`. */
@@ -2170,6 +2833,22 @@ export function useClaudeChat() {
             ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
           })
         }
+        // The turn never ran. When its message is still in the transcript (a
+        // refusal that rolled it back has nothing to mark), the row itself says
+        // so — and keeps saying so after the banner is dismissed or the app is
+        // reloaded — with its own retry.
+        await markTurnFailed(input.diagnostic)
+        // A plan step's turn is always dispatched with `skipUserAppend` (the
+        // plan runtime wrote its message). A refused one halts the plan on the
+        // step now, instead of leaving it `in_progress` for the watchdog; a
+        // manual message's refusal never touches the plan.
+        if (callOptions?.skipUserAppend) {
+          await haltInSessionPlanOnTurnFailure({
+            sessionId,
+            cause: planHaltCauseForCode(input.diagnostic.code),
+            detail: `${input.diagnostic.code}: ${input.diagnostic.detail || input.diagnostic.message || input.errorCode}`,
+          })
+        }
         rejectSend(input.diagnostic.message || input.errorCode)
       }
       let abortStaleLocalRuntime = () => {}
@@ -2192,7 +2871,7 @@ export function useClaudeChat() {
       }
       let bundlePrimaryRootId: string | undefined
       let managedBundle: SessionBundleBinding["bundle"] | undefined
-      if (!hasNoToolSurface && executionContext?.location === "managedWorktree") {
+      if (turnUsesWorkingCopy && executionContext?.location === "managedWorktree") {
         const project = useProjectStore
           .getState()
           .projects.find((candidate) => candidate.id === executionContext?.projectId)
@@ -2278,7 +2957,10 @@ export function useClaudeChat() {
         await startDirectChatExecutionRun({
           sessionId,
           runId: executionRunId,
-          ...(providerText ? { prompt: providerText } : {}),
+          // The canonical log's `user-input` event, clipped from the front: the
+          // question, which the files ahead of it would push out. The files
+          // are on the user row in `messages`.
+          ...(externalTurn.request ? { prompt: externalTurn.request } : {}),
           ...(session?.projectId ? { projectId: session.projectId } : {}),
           ...((boundWorkspaceRoot ?? sendOptions.cwd)
             ? { workspaceRoot: boundWorkspaceRoot ?? sendOptions.cwd }
@@ -2294,7 +2976,7 @@ export function useClaudeChat() {
       }
       const legacyWorkspaceEnabled = !executionContext && Boolean(sendOptions.cwd)
       if (
-        !hasNoToolSurface &&
+        turnUsesWorkingCopy &&
         (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
       ) {
         if (executionContext?.location === "managedWorktree" && !boundWorkspaceRoot) {
@@ -2385,6 +3067,9 @@ export function useClaudeChat() {
           // `isWorkspaceBusyRefusal`, is precisely the live turn that caused it.
           markTurnUnowned()
           const leaseFailure = error instanceof Error ? error.message : String(error)
+          // Typed once, where the host's sentence enters: from here on the
+          // refusal is a lease conflict on the working copy, with its holder.
+          const conflict = isWorkspaceBusyRefusal(error) ? workingCopyConflict(error) : null
           await refuseTurn({
             errorCode: "task_workspace_unavailable",
             finishRun: true,
@@ -2392,7 +3077,7 @@ export function useClaudeChat() {
             // `workspaceUnavailable` tells the reader to bind a folder, which
             // is exactly wrong for a binding that is already correct and merely
             // held by a turn that has not finished.
-            diagnostic: isWorkspaceBusyRefusal(error)
+            diagnostic: conflict
               ? createDiagnostic("workspaceBusy", {
                   source: "chat",
                   // The host's own sentence names an internal workspace key and
@@ -2403,7 +3088,13 @@ export function useClaudeChat() {
                   // `detail`, under the card's raw disclosure.
                   message: tInlineErr("workspaceBusy"),
                   detail: leaseFailure,
-                  meta: { sessionId },
+                  meta: {
+                    sessionId,
+                    extra: {
+                      leaseResource: conflict.resource,
+                      ...(conflict.holder ? { leaseHolder: conflict.holder } : {}),
+                    },
+                  },
                 })
               : createDiagnostic("workspaceUnavailable", {
                   source: "chat",
@@ -2474,7 +3165,7 @@ export function useClaudeChat() {
         }
       }
 
-      if (!hasNoToolSurface && executionContext?.environmentId) {
+      if (turnUsesWorkingCopy && executionContext?.environmentId) {
         const environment = await getProjectEnvironment(executionContext.environmentId)
         if (!environment || environment.projectId !== executionContext.projectId) {
           await refuseTurn({
@@ -2590,8 +3281,8 @@ export function useClaudeChat() {
         // store for it would answer `unknown-agent` for a perfectly good agent.
         const cogniaModel = resolveExternalAgentCogniaModelAxis({
           agentId: extAgentId,
-          sessionModel: session?.model,
-          sessionProviderOverride: session?.providerOverride,
+          sessionModel: laneOwnsSessionModel ? session?.model : undefined,
+          sessionProviderOverride: laneOwnsSessionModel ? session?.providerOverride : undefined,
           accountId: session?.accountId ?? undefined,
         })
         const managedGatewayTask =
@@ -2644,8 +3335,9 @@ export function useClaudeChat() {
           }
         }
         // The text sent to the external agent: the PII-filtered prompt when
-        // delegated by rule, else the raw composer text.
-        const externalSendText = delegation ? delegation.filteredPrompt : providerText
+        // delegated by rule, else the turn as `externalTurnPrompt` reads it —
+        // the typed question, behind any attachment text, never the file alone.
+        const externalSendText = delegation ? delegation.filteredPrompt : externalTurn.prompt
         // Badge metadata so the assistant bubble can show "delegated to <rule>".
         const delegatedMeta = delegation
           ? {
@@ -2674,7 +3366,7 @@ export function useClaudeChat() {
          */
         const releaseExternalDecisionSurfaces = async (): Promise<void> => {
           const { releaseExternalApprovals, elicitationCancelResponse } =
-            await import("@/lib/ai/agent/external/chat-decision-bridge")
+            await import("@/lib/ai/agent/external/session/chat-decision-bridge")
           for (const requestId of releaseExternalApprovals(sessionId)) {
             store.getState().clearApproval(requestId, sessionId)
           }
@@ -2722,10 +3414,21 @@ export function useClaudeChat() {
             // re-match the same rule and loop).
             store.getState().replaceSessionMessages(sessionId, next)
             store.getState().setSessionError(sessionId, null)
+            // An edit's bookkeeping already ran on THIS send, for the row it
+            // appended: carrying `branchTag` into the re-issue would stamp and
+            // select the user message the fallback builds but never appends,
+            // and own its reply by that phantom id. The fallback takes only
+            // the owner, and this send lets go of its entry first — the
+            // `finally` below disarms what this send still holds, and the
+            // fallback's entry names the same row.
+            const { branchTag: _editTag, ...fallbackCallOptions } = callOptions ?? {}
+            const editOwner = callOptions?.branchTag ? armedOwner : null
+            if (editOwner) armedOwner = null
             await sendRef.current?.(displayContent, opts, {
-              ...callOptions,
+              ...fallbackCallOptions,
               skipUserAppend: true,
               bypassDelegation: true,
+              ...(editOwner ? { branchOwnerId: editOwner } : {}),
             })
             // Disclose the substitution. The user routed this turn to a specific
             // external agent; it ran on the built-in one instead, which changes
@@ -2752,20 +3455,65 @@ export function useClaudeChat() {
             })
           }
           chatTurnPerformance.finish(sessionId, "failed")
-          store.getState().replaceSessionMessages(sessionId, previousMessages)
-          store.getState().setSessionDiagnostic(
-            sessionId,
-            toDiagnostic(error ?? message, {
-              source: "external-agent",
-              meta: { sessionId, agentId: extAgentId },
-            })
+          // Classified from the error's TYPE first: a Pi process that exited
+          // during startup, a handshake that never arrived, an agent process id
+          // still held by another process. Each has a code whose localized hint
+          // says what happened and what to do; the runtime's English sentence
+          // moves to `detail`. Anything untyped keeps the text classifier.
+          const typedCode = error ? classifyExternalTurnFailure(error) : null
+          const diagnostic = typedCode
+            ? createDiagnostic(typedCode, {
+                source: "external-agent",
+                message: tDiagnostics(`code.${typedCode}.hint`),
+                detail: message,
+                meta: { sessionId, agentId: extAgentId },
+              })
+            : toDiagnostic(error ?? message, {
+                source: "external-agent",
+                meta: { sessionId, agentId: extAgentId },
+              })
+          // The user's message STAYS, marked as a turn that did not run. It
+          // used to be pulled out of the store while the copy persisted above
+          // stayed in Dexie, so the row showed no failure now and reappeared
+          // unmarked after a reload — and Retry regenerated the PREVIOUS turn,
+          // because the failed one was no longer the last user message.
+          const failedTurn = turnMessageId(next, skipAppend ? null : userMsg.id)
+          const failedList = markTurnAdmission(
+            store.getState().sessions[sessionId]?.messages ?? next,
+            failedTurn,
+            {
+              state: "failed",
+              code: diagnostic.code,
+              detail: message,
+              at: Date.now(),
+            }
           )
+          store.getState().replaceSessionMessages(sessionId, failedList)
+          await persistMessages(sessionId, failedList).catch((persistError: unknown) =>
+            console.warn("failed external turn persist failed", persistError)
+          )
+          store.getState().setSessionDiagnostic(sessionId, diagnostic)
           store.getState().setSessionStatus(sessionId, "idle")
+          // Follow-ups queued behind this turn cannot ride a turn that never
+          // ran; the same rule the sidecar applies to an errored settle.
+          markPendingSteersFailed(sessionId, diagnostic.message)
+          // The same in-session plan contract the sidecar lane has: a step whose
+          // turn failed halts the plan on it with the classified cause — a lease
+          // conflict or a start-up death is `not_started`, anything later
+          // `turn_failed` — rather than waiting for the step watchdog.
+          if (callOptions?.skipUserAppend) {
+            await haltInSessionPlanOnTurnFailure({
+              sessionId,
+              cause: planHaltCauseForCode(diagnostic.code),
+              detail: `${diagnostic.code}: ${message}`,
+            })
+          }
           if (error) dispatchPluginChatError(sessionId, error)
         }
 
         const gatewayController = !hostSelection ? new AbortController() : undefined
         if (gatewayController) externalGatewayAbortRef.current.set(sessionId, gatewayController)
+        let externalTurnCompleted = false
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
@@ -2773,7 +3521,7 @@ export function useClaudeChat() {
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
           const { executeOnRemoteHostAgent, remoteApprovalDecisionId } = hostSelection
-            ? await import("@/lib/ai/agent/external/remote-execute")
+            ? await import("@/lib/ai/agent/external/runtimes/remote/remote-execute")
             : { executeOnRemoteHostAgent: null, remoteApprovalDecisionId: null }
           // The run id a host turn is addressed by. Captured here so the
           // decision ids the event handler mints below refer to the same run
@@ -2782,13 +3530,13 @@ export function useClaudeChat() {
             ? `rer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
             : null
           const { applyExternalAgentEventToParts } =
-            await import("@/lib/ai/agent/external/event-to-parts")
+            await import("@/lib/ai/agent/external/session/event-to-parts")
           const {
             registerExternalApproval,
             registerExternalElicitation,
             registerExternalQuestionTarget,
             toPermissionResponse,
-          } = await import("@/lib/ai/agent/external/chat-decision-bridge")
+          } = await import("@/lib/ai/agent/external/session/chat-decision-bridge")
           const { useExternalElicitationStore } =
             await import("@/stores/agent/external-elicitation-store")
 
@@ -2806,7 +3554,12 @@ export function useClaudeChat() {
           // `replaceSessionMessages` per delta and a Dexie write only at the
           // end (which lost the partial on a mid-turn crash).
           const coalesce = registry.get(sessionId)
+          // The branch stamp is claimed by the first write of the reply (the
+          // point `handleEvent` claims it for a sidecar reply) and carried by
+          // every rewrite of the same message after it.
+          let replyBranch: Record<string, unknown> | null = null
           const writeAssistant = () => {
+            replyBranch ??= claimReplyBranch(assistantId)
             // Write into this session's *own* slice — a mid-run focus switch is
             // safe because the slice is keyed by session, so the in-flight
             // external turn lands in its pane (live in background or focused),
@@ -2817,6 +3570,7 @@ export function useClaudeChat() {
               parts: assistantParts,
               metadata: {
                 ...(delegatedMeta ?? {}),
+                ...replyBranch,
                 run: {
                   providerId: "external",
                   startedAt: externalStartedAt,
@@ -3050,7 +3804,7 @@ export function useClaudeChat() {
           }
 
           const { resolvedMcpServerMapToAcpConfigs } =
-            await import("@/lib/ai/agent/external/resolve-acp-mcp-servers")
+            await import("@/lib/ai/agent/external/runtimes/acp/resolve-acp-mcp-servers")
           const externalMcpServers = resolvedMcpServerMapToAcpConfigs(sendOptions.mcpServers)
           let externalContinuationContext: string | undefined
           let resetExternalSession = false
@@ -3076,7 +3830,7 @@ export function useClaudeChat() {
               session?.importRuntimeBinding?.presetId === externalAgentPresetIdOf(agentConfig)
             )
             const { buildDeclaredCapabilityProfile } =
-              await import("@/lib/ai/agent/external/capability-profile")
+              await import("@/lib/ai/agent/external/capability/capability-profile")
             const profile =
               manager.getAgentCapabilityProfile(extAgentId, sessionId) ??
               (agentConfig
@@ -3095,7 +3849,7 @@ export function useClaudeChat() {
             const mcpLevel = profile?.effective.mcp.level
             if (mcpLevel === "native" || mcpLevel === "equivalent") {
               const { createRendererToolHost } =
-                await import("@/lib/ai/agent/external/renderer-tool-host")
+                await import("@/lib/ai/agent/external/session/renderer-tool-host")
               let entry = externalToolHostsRef.current.get(sessionId)
               if (entry && entry.agentId !== extAgentId) {
                 await releaseExternalToolHost(sessionId)
@@ -3235,12 +3989,43 @@ export function useClaudeChat() {
             } else {
               externalContinuationContext = projected.text || undefined
             }
+          } else if (!verifiedNativeResume) {
+            // The agent resumes its own session, which never saw what the
+            // builtin lane answered since this agent last did — an `@claude`
+            // turn, or a stretch of the conversation on its own lane between
+            // two `@codex` turns. Only that part of the thread is handed over.
+            const unseen = unseenForeignTurns(
+              selectVisibleMessages(
+                (await listMessages(sessionId)).filter((message) => message.id !== userMsg.id),
+                store.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
+              ),
+              "external"
+            )
+            if (unseen.length > 0) {
+              externalContinuationContext =
+                (await foreignTurnsHandoffText(unseen, {
+                  client: async () => {
+                    const { buildAgentBackedLlmClient } =
+                      await import("@/lib/ai/generation/agent-backed-client")
+                    return buildAgentBackedLlmClient({
+                      session,
+                      appSettings,
+                      featureId: "handoff",
+                      label: "Summarize task handoff",
+                    })
+                  },
+                  ...(gatewayController ? { signal: gatewayController.signal } : {}),
+                })) || undefined
+            }
           }
           // All adapters consume prompt text. The custom context field alone
           // is only understood by some runtimes and cannot carry the handoff.
           const externalExecutionPrompt = externalContinuationContext
             ? `${externalContinuationContext}\n\nCurrent user request:\n${externalSendText}`
             : externalSendText
+          // The prompt is one string: images, a native video and fetched pages
+          // cannot ride it. Say so instead of dropping them silently.
+          warnTextOnlyOmissions("external", externalTurn.omitted, turnManifest)
           // Reuse the completed instruction pipeline, including selected skills,
           // project context and per-turn additions, on the external lane too.
           const externalSystemPrompt = [sendOptions.systemPrompt, sendOptions.appendSystemPrompt]
@@ -3359,6 +4144,7 @@ export function useClaudeChat() {
             parts: assistantParts,
             metadata: {
               ...(delegatedMeta ?? {}),
+              ...(replyBranch ??= claimReplyBranch(assistantId)),
               run: { providerId: "external", startedAt: externalStartedAt },
             },
           }
@@ -3372,6 +4158,7 @@ export function useClaudeChat() {
               reportedDurationMs: result.duration,
               routing: buildRoutingRunMetadata(sendOptions),
               agent: turnAgentStamp(sessionId),
+              ...(routeStamp ? { route: routeStamp } : {}),
             })
           )
           // The agent's own token accounting — including the context occupancy
@@ -3391,6 +4178,16 @@ export function useClaudeChat() {
           store.getState().replaceSessionMessages(sessionId, finalMessages)
           chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
+          if (result.tokenUsage) {
+            await recordExternalAgentUsage({
+              sessionId,
+              messageId: assistantId,
+              usage: result.tokenUsage,
+              model: externalModel ?? cogniaModel?.modelId,
+              durationMs: result.duration,
+              at: completedAt,
+            }).catch((error) => console.warn("recordExternalAgentUsage failed", error))
+          }
           chatTurnPerformance.endFinalPersistence(sessionId)
           if (session?.branchSeed) {
             void clearBranchSeed(sessionId).catch((error) =>
@@ -3418,11 +4215,17 @@ export function useClaudeChat() {
           // Plugin bus: external-agent run finished (ids only).
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
+          externalTurnCompleted = true
         } catch (err) {
           if (gatewayController?.signal.aborted) return
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
         } finally {
+          // A turn that wrote no reply (stopped, or failed before its first
+          // frame) still has its regenerate slot and edit owner armed, and no
+          // `session_ended` drops them on this lane. A sidecar fallback has
+          // already armed its own by now, which this leaves alone.
+          disarmBranch()
           const hosted = externalToolHostsRef.current.get(sessionId)
           if (hosted) {
             const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
@@ -3441,6 +4244,28 @@ export function useClaudeChat() {
           // closing it would orphan a live promise. Released here rather than
           // on each exit path so a throw between them cannot skip it.
           await releaseExternalDecisionSurfaces()
+        }
+        // A clean end replays what the user queued behind this turn — the
+        // sidecar does this on `session_ended`, and without it a follow-up
+        // typed on an external lane with no live steering sat queued forever.
+        // After the `finally`, so the next turn cannot race this one's
+        // teardown of its decision surfaces.
+        if (externalTurnCompleted) {
+          // Drive an in-session plan exactly as the sidecar's settle does
+          // (`plan-turn-settle.ts`): mark the step done and send the next one.
+          const lastAssistant = [...(store.getState().sessions[sessionId]?.messages ?? [])]
+            .reverse()
+            .find((message) => message.role === "assistant")
+          const dispatchedNextStep = await driveInSessionPlanAfterTurn({
+            sessionId,
+            lastResponse: extractAssistantText(lastAssistant),
+            isActiveSession: () => sessionId === activeRef.current,
+            dispatchNextStep: (userMessage) =>
+              void sendRef.current?.(userMessage, undefined, { skipUserAppend: true }),
+          })
+          // Follow-ups queued behind this turn wait for the next settle when a
+          // plan step was just dispatched; two turns must never start at once.
+          if (!dispatchedNextStep) drainSteerVia(sessionId, sendRef)
         }
         if (store.getState().sessions[sessionId]?.errorDiagnostic) rejectSend()
         return
@@ -3479,7 +4304,9 @@ export function useClaudeChat() {
             requestModel: sendOptions.model,
             agentId: session?.characterId,
             metadata: sendOptions.provider ? { provider: sendOptions.provider } : undefined,
-            inputPreview: providerText || undefined,
+            // The question, as `buildSendOptions`' root span previews it: an
+            // eval promoted from this trace takes the preview as its input.
+            inputPreview: externalTurn.request || undefined,
           })
           sendOptions = {
             ...sendOptions,
@@ -3619,6 +4446,7 @@ export function useClaudeChat() {
           options: sendOptions,
           attemptIndex: 0,
           routingCommitted: false,
+          ...(routeStamp ? { routeStamp } : {}),
         })
         // Armed BEFORE the dispatch, not after it. `sendPrompt` is awaited, and
         // a turn can settle inside that await (the host rejects the prompt, an
@@ -3629,7 +4457,7 @@ export function useClaudeChat() {
         // later on a conversation that had finished. Arming first puts the
         // session in `armed()` before any frame can arrive.
         silenceWatchdogRef.current?.arm(sessionId)
-        if (isStandaloneChatMode()) {
+        if (standaloneEngineTurn) {
           // Standalone (BYOK): run the turn in-renderer against the user's own
           // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
           // store via the same event queue; the engine emits `session_ended`.
@@ -3751,8 +4579,10 @@ export function useClaudeChat() {
       store,
       tRouting,
       tInlineErr,
+      tDiagnostics,
       tVideo,
       tCollab,
+      warnTextOnlyOmissions,
       registry,
       releaseExternalToolHost,
       enqueueClaudeEvent,
@@ -3923,6 +4753,17 @@ export function useClaudeChat() {
   useEffect(() => {
     return registerChatSendBridge((text, targetSessionId) => {
       void sendRef.current?.(text, undefined, { sessionId: targetSessionId })
+    })
+  }, [])
+
+  // Retry for a transcript row that records a turn which never ran (see
+  // `lib/chat/turn-admission.ts`). The row's turn is the session's last user
+  // message, which is exactly what `regenerate` re-issues.
+  const regenerateRef = useRef<((sessionId: string) => Promise<void>) | null>(null)
+  useEffect(() => {
+    return registerChatRetryBridge((targetSessionId) => {
+      useChatStore.getState().setSessionError(targetSessionId, null)
+      void regenerateRef.current?.(targetSessionId)
     })
   }, [])
 
@@ -4129,7 +4970,7 @@ export function useClaudeChat() {
         approval.suppressAlwaysAllowRule && authorized === "allow_always" ? "allow" : authorized
       {
         const { RENDERER_TOOL_HOST_APPROVAL_PREFIX } =
-          await import("@/lib/ai/agent/external/renderer-tool-host")
+          await import("@/lib/ai/agent/external/session/renderer-tool-host")
         if (approval.requestId.startsWith(RENDERER_TOOL_HOST_APPROVAL_PREFIX)) {
           const { resolveApproval, grantSessionBypass } =
             await import("@/lib/connectors/hitl/approval-registry")
@@ -4206,7 +5047,7 @@ export function useClaudeChat() {
           isExternalAgentApprovalRequestId,
           resolveExternalApproval,
           getExternalApprovalTarget,
-        } = await import("@/lib/ai/agent/external/chat-decision-bridge")
+        } = await import("@/lib/ai/agent/external/session/chat-decision-bridge")
         if (isExternalAgentApprovalRequestId(approval.requestId)) {
           try {
             // Where the agent actually is decides how the answer travels. A
@@ -4217,7 +5058,7 @@ export function useClaudeChat() {
             const respond = remoteDecisionId
               ? async () => {
                   const { resolveRemotePermission } =
-                    await import("@/lib/ai/agent/external/remote-run-client")
+                    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-client")
                   const outcome = await resolveRemotePermission(remoteDecisionId, decision)
                   // `wrong-device` cannot happen for the client that started
                   // the run, and `unknown` means the host already decided (the
@@ -4446,6 +5287,17 @@ export function useClaudeChat() {
     [getExecutionHandle]
   )
 
+  /** Name the files an edit or a regenerate could not send again. */
+  const warnNotResent = useCallback(
+    (filenames: readonly string[]) => {
+      if (filenames.length === 0) return
+      toast.warning(
+        tAttachments("notResent", { count: filenames.length, names: filenames.join(", ") })
+      )
+    },
+    [tAttachments]
+  )
+
   /**
    * Resend a user message with edited content, keeping the original as a
    * sibling branch.
@@ -4462,22 +5314,38 @@ export function useClaudeChat() {
    *
    * Users who genuinely want the old behaviour have the explicit "delete this
    * message and everything after it" action, which still truncates.
+   *
+   * The edit resends the original's files, as other chat apps keep a message's
+   * attachments when it is edited. Every edit surface drafts the typed text
+   * alone, so plain-text `newContent` takes the files from the original row
+   * (`resendableAttachments`). No edit surface offers to remove them. A file
+   * the row cannot send again is named to the user rather than dropped
+   * silently.
+   *
+   * A caller that builds the blocks itself passes `attachmentManifest` for the
+   * leading attachment blocks of `newContent`, as `send`'s option of the same
+   * name, and decides the files itself. Without the manifest, the first file's
+   * extracted text would be read as the question: its `@handle`, the envelope
+   * carried onto it, and everything `send` reads from the typed block.
    */
   const editAndResend = useCallback(
     async (
       messageId: string,
       newContent: SendContent,
       targetSessionId?: string,
-      resourceContext?: string
+      resourceContext?: string,
+      attachmentManifest?: readonly AttachmentManifestEntry[]
     ) => {
       const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
       // Mid-turn this send would land as a steer — and a steer never consumes
       // `branchTag`, leaving the group `tagEditSibling` is about to persist
       // with no replacement variant. Surfaces disable the affordance; this is
-      // the backstop for draft submits racing a turn start.
+      // the backstop for draft submits racing a turn start. A turn still
+      // waiting for admission counts as live too: it has not flipped the
+      // status yet, and re-issuing it would queue the same turn twice.
       const st = sessionStatusOf(sessionId)
-      if (st === "streaming" || st === "awaiting_approval") return
+      if (st === "streaming" || st === "awaiting_approval" || isChatTurnQueued(sessionId)) return
       // Rebuilding the branch base invalidates this session's streaming mirror;
       // drop it (and pending coalescing work) so the rebuilt base wins.
       registry.release(sessionId)
@@ -4488,6 +5356,51 @@ export function useClaudeChat() {
       if (editedIdx < 0) return
 
       const edited = messages[editedIdx]
+      // The original's files go with a plain-text edit, read from its row
+      // before anything is tagged.
+      let editedContent: SendContent = newContent
+      let editedManifest = attachmentManifest
+      let notResent: string[] = []
+      if (typeof newContent === "string" && !attachmentManifest?.length) {
+        const { resendableAttachments } = await import("@/lib/chat/attachments/resend")
+        const carried = await resendableAttachments(edited.parts)
+        notResent = carried.unavailable
+        if (carried.blocks.length > 0) {
+          editedContent = newContent.trim()
+            ? [...carried.blocks, { type: "text", text: newContent }]
+            : carried.blocks
+          editedManifest = carried.manifest
+        }
+      }
+      // The edit is the question again, so its leading `@handle` is read again:
+      // adding, changing or removing it re-routes the resend. Resolved BEFORE
+      // the original is tagged as a sibling, so a route that cannot run leaves
+      // the thread exactly as it was.
+      let turnRoute: TurnRoute | null = null
+      const attachmentCount = editedManifest?.length ?? 0
+      const editedTyped = stripPromptPreamble(userPromptText(editedContent, attachmentCount))
+      if (/^\s*@/.test(editedTyped)) {
+        const editedSession = await getSession(sessionId)
+        if (isRoutableSession(editedSession)) {
+          const snapshot = await snapshotRouteContext(sessionId, { session: editedSession ?? null })
+          const parsed = parseLeadingRoute(editedTyped, snapshot.targets)
+          if (parsed) {
+            const lane = resolveRouteLane(parsed.route.target, snapshot)
+            if (!lane.ok) {
+              store.getState().setSessionDiagnostic(
+                sessionId,
+                createDiagnostic("turnRouteUnavailable", {
+                  source: "chat",
+                  ...(lane.detail ? { message: lane.detail } : {}),
+                  meta: { sessionId, extra: { handle: parsed.route.handle, reason: lane.reason } },
+                })
+              )
+              return
+            }
+            turnRoute = parsed.route
+          }
+        }
+      }
       const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
       store.getState().replaceSessionMessages(sessionId, merged)
       await persistMessages(sessionId, merged)
@@ -4498,8 +5411,10 @@ export function useClaudeChat() {
       // an empty list) also stops the send path from reading whatever chips
       // happen to be staged in the composer right now.
       const promptPreamble = readPromptPreambleSummary(edited.metadata)
-      await send(carryPromptPreamble(edited.parts, newContent), undefined, {
+      warnNotResent(notResent)
+      await send(carryPromptPreamble(edited.parts, editedContent, attachmentCount), undefined, {
         sessionId,
+        ...(editedManifest?.length ? { attachmentManifest: editedManifest } : {}),
         citations: chipCitationsOf(edited.metadata),
         ...(promptPreamble ? { promptPreamble } : {}),
         resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
@@ -4507,9 +5422,10 @@ export function useClaudeChat() {
         // so it is tagged there rather than through the assistant-event path
         // `regenerate` uses.
         branchTag: { groupId, index: nextIndex },
+        ...(turnRoute ? { turnRoute } : {}),
       })
     },
-    [send, store, registry]
+    [send, store, registry, warnNotResent]
   )
 
   /**
@@ -4524,9 +5440,11 @@ export function useClaudeChat() {
       // Regenerate bypasses the steer gate via `skipUserAppend`, so mid-turn
       // it would re-enter the normal send path — restarting the sidecar and
       // silently dropping the live turn's context (see the send-gate comment).
-      // Surfaces disable the affordance; this is the backstop.
+      // Surfaces disable the affordance; this is the backstop. A turn parked
+      // waiting for admission is live as well (its status is still idle):
+      // regenerating it would queue a second copy of the same turn.
       const st = sessionStatusOf(sessionId)
-      if (st === "streaming" || st === "awaiting_approval") return
+      if (st === "streaming" || st === "awaiting_approval" || isChatTurnQueued(sessionId)) return
 
       // Rebuilding the branch base invalidates this session's streaming mirror;
       // drop it (and pending coalescing work).
@@ -4544,42 +5462,46 @@ export function useClaudeChat() {
       if (lastUserIdx < 0) return
 
       const anchor = messages[lastUserIdx]
-      // Existing assistant siblings — every assistant message after the anchor
-      // belongs to the same branch group (direct chat = one reply per turn).
-      // We retain them with branchGroupId metadata so the user can switch back
-      // via the BranchNavigator.
-      const groupId = anchor.id
-      const { merged, nextIndexByGroup } = tagBranchSiblings(messages, lastUserIdx, () => groupId)
+      // A turn addressed with `@codex` is regenerated on Codex again, not on
+      // whatever the conversation is on now. A route that can no longer run
+      // (the agent disabled since, the member removed) is refused by `send`
+      // like every other refusal: before `regenerateBranch` touches the thread.
+      const turnRoute = readTurnRoute(anchor.metadata)
 
-      // Persist the tagged siblings (and untouched prefix) before the new send.
-      store.getState().replaceSessionMessages(sessionId, merged)
-      await persistMessages(sessionId, merged)
-
-      // Stash the next-branch tag in a ref so handleEvent can stamp the
-      // freshly-arrived assistant message with branchGroupId + the next index.
-      const nextIndex = nextIndexByGroup.get(groupId) ?? 0
-      pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
-
-      // Prefer the original SendContent if we have it (preserves attachments);
-      // fall back to reconstructing from text parts.
+      // The turn goes again as it was sent. The cache holds exactly that for
+      // the turn this controller last sent; any other (one sent before a
+      // reload, or from another surface) is rebuilt from its own row, files
+      // included, with the manifest that keeps them from reading as the
+      // question.
       const cached = lastUserContentRef.current.get(sessionId)
-      const content: SendContent =
-        cached ??
-        anchor.parts
-          .filter((p): p is { type: "text"; text: string } => {
-            const t = (p as { type?: string }).type
-            return t === "text"
-          })
-          .map((p) => p.text)
-          .join("")
+      let content: SendContent
+      let manifest: readonly AttachmentManifestEntry[] | undefined
+      if (cached?.messageId === anchor.id) {
+        content = cached.content
+        manifest = cached.manifest
+      } else {
+        const { resendableUserTurn } = await import("@/lib/chat/attachments/resend")
+        const rebuilt = await resendableUserTurn(anchor.parts)
+        content = rebuilt.content
+        manifest = rebuilt.manifest
+        warnNotResent(rebuilt.unavailable)
+      }
       await send(content, undefined, {
         skipUserAppend: true,
         sessionId,
+        ...(manifest?.length ? { attachmentManifest: manifest } : {}),
         resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+        // The replies become siblings, and the next one's slot is armed, only
+        // once the send has passed every gate that can refuse it.
+        regenerateBranch: { anchorId: anchor.id },
+        ...(turnRoute ? { turnRoute } : {}),
       })
     },
-    [send, store, registry]
+    [send, registry, warnNotResent]
   )
+  useEffect(() => {
+    regenerateRef.current = regenerate
+  }, [regenerate])
 
   return {
     send,

@@ -10,6 +10,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import { __resetBreakerForTesting } from "@/lib/router-fusion/gate/breaker"
 import { useChatFusionModeStore } from "@/stores/chat/fusion-mode-store"
 
+import { COMPOSER_TOOLBAR_CHIP } from "@/lib/chat/composer-skin"
 import { FusionModeChip } from "./fusion-mode-chip"
 
 let mockTauri = true
@@ -106,7 +107,7 @@ describe("FusionModeChip", () => {
     useChatFusionModeStore.getState().setMode("s1", "cascade")
     renderChip(<FusionModeChip session={session} builtinRuntime />)
     const chip = screen.getByTestId("fusion-mode-chip")
-    expect(chip.className).toContain("text-amber-600")
+    expect(chip.className).toContain("text-warning")
     await user.click(chip)
     expect(await screen.findByTestId("fusion-mode-paused")).toHaveTextContent(
       "Cascade and Panel turns are refused until you re-arm it"
@@ -123,6 +124,18 @@ describe("FusionModeChip", () => {
     expect(chip).not.toHaveTextContent("Cascade")
     expect(chip).toHaveAccessibleName("Router + Fusion run mode: Cascade")
     expect(chip.className).toContain("w-7")
+  })
+
+  it("keeps the paused flag's tint under the toolbar's chip class", () => {
+    mockSettings = PAUSED
+    useChatFusionModeStore.getState().setMode("s1", "cascade")
+    renderChip(
+      <FusionModeChip session={session} builtinRuntime glyph className={COMPOSER_TOOLBAR_CHIP} />
+    )
+    const chip = screen.getByTestId("fusion-mode-chip")
+    expect(chip.className).toContain("text-warning")
+    expect(chip.className).not.toMatch(/(^|\s)text-muted-foreground(\s|$)/)
+    expect(chip.className).toMatch(/(^|\s)px-0(\s|$)/)
   })
 
   it("cannot be opened while a turn is in flight", () => {

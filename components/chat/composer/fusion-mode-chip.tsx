@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { routerFusionGate } from "@/lib/router-fusion/gate/feature-gate"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
+import { COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 import {
   CHAT_FUSION_MODES,
   isChatFusionMode,
@@ -86,11 +87,14 @@ export function FusionModeChip({
               aria-label={t("aria", { mode: label })}
               data-testid="fusion-mode-chip"
               data-mode={mode}
+              // Tone and glyph geometry after the host's chip class, which
+              // would otherwise mute the tripped warning (it survived only in
+              // dark mode, through `dark:`) and re-pad the glyph square.
               className={cn(
                 "gap-1",
-                tripped && mode !== "auto" && "text-amber-600 dark:text-amber-400",
-                glyph && "w-7 justify-center px-0",
-                className
+                className,
+                tripped && mode !== "auto" && "text-warning hover:text-warning",
+                glyph && COMPOSER_TOOLBAR_GLYPH
               )}
             >
               {tripped && mode !== "auto" ? (
@@ -130,10 +134,7 @@ export function FusionModeChip({
         <DropdownMenuSeparator />
         <p className="px-2 py-1 text-[11px] text-muted-foreground">{t("buffered")}</p>
         {tripped ? (
-          <p
-            className="px-2 pb-1 text-[11px] text-amber-600 dark:text-amber-400"
-            data-testid="fusion-mode-paused"
-          >
+          <p className="px-2 pb-1 text-[11px] text-warning" data-testid="fusion-mode-paused">
             {t("paused")}
           </p>
         ) : null}

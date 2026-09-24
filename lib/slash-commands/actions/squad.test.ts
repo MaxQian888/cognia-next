@@ -12,14 +12,14 @@ jest.mock("@/stores/agent/agent-team-store", () => ({ useAgentTeamStore: { getSt
 jest.mock("@/stores/project/project-store", () => ({ useProjectStore: { getState: jest.fn() } }))
 
 const startSquadRun = jest.fn()
-jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: (...a: unknown[]) => startSquadRun(...(a as [])),
 }))
 
 const managerPause = jest.fn()
 const managerResume = jest.fn()
 const managerShutdown = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     pause: (...a: unknown[]) => managerPause(...(a as [])),
     resume: (...a: unknown[]) => managerResume(...(a as [])),

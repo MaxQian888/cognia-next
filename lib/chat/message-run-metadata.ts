@@ -45,6 +45,28 @@ export interface MessageRunMetadata {
    * the turn down the original path unledgered. Absent while the switch is off.
    */
   routerFusion?: RouterFusionRunMetadata
+  /**
+   * Who answered a turn the user addressed with a leading `@handle`
+   * (`lib/chat/turn-route/`). Stamped at seal, like `agent`, so the bubble
+   * keeps naming Codex — or the Squad member — after the conversation goes back
+   * to its own runtime. Absent on every unaddressed turn.
+   */
+  route?: MessageRunRouteStamp
+}
+
+/** The route a turn ran on, as the transcript remembers it. */
+export interface MessageRunRouteStamp {
+  /** The handle the user typed, without the `@`. */
+  handle: string
+  /** Display name: the runtime, or the Squad member the turn ran as. */
+  label: string
+  /** Which lane actually answered. */
+  runtimeKind: "builtin" | "external" | "host"
+  /** Brand glyph id for the answering engine (a preset id or a provider id). */
+  brandId?: string
+  /** Set when the turn ran as a Squad member. */
+  teammateId?: string
+  squadId?: string
 }
 
 /** Plain-data copy of a Router + Fusion turn for the transcript and the run card. */
@@ -93,6 +115,7 @@ export interface CompletedRunMetadataInput {
   routing?: MessageRunMetadata["routing"]
   routerFusion?: RouterFusionRunMetadata
   agent?: MessageRunMetadata["agent"]
+  route?: MessageRunRouteStamp
 }
 
 /**
@@ -172,6 +195,7 @@ export function buildCompletedRunMetadata({
   routing,
   routerFusion,
   agent,
+  route,
 }: CompletedRunMetadataInput): MessageRunMetadata {
   return {
     providerId,
@@ -188,6 +212,7 @@ export function buildCompletedRunMetadata({
     ...(routing ? { routing } : {}),
     ...(routerFusion ? { routerFusion } : {}),
     ...(agent ? { agent } : {}),
+    ...(route ? { route: { ...route } } : {}),
   }
 }
 

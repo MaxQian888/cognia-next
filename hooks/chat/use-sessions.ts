@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import {
@@ -12,7 +12,7 @@ import {
   bulkUnarchiveSessions,
   deleteSession,
   getSession,
-  listScopedSessions,
+  listWorkspaceSessions,
   listSessions,
   unarchiveSession,
   updateSession,
@@ -36,7 +36,7 @@ import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { isTauri } from "@/lib/tauri"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { filterExposedSessions } from "@/lib/chat/session-exposure"
-import { dedupeSessionsById } from "@/lib/chat/conversation-list-model"
+import { dedupeSessionsById, shareUnchangedSessions } from "@/lib/chat/conversation-list-model"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import {
@@ -55,6 +55,14 @@ import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queu
  * deleted for a render.
  */
 export type ActiveSessionState = "pending" | "absent" | "present"
+
+/**
+ * Stable empties. A fresh `[]` per render would hand every consumer a new
+ * identity on each render until the first read lands — the sidebar forwards
+ * `folders` to every memoized row, so that alone busted all of them.
+ */
+const EMPTY_SESSIONS: readonly ChatSession[] = []
+const EMPTY_FOLDERS: SessionFolder[] = []
 
 export interface UseSessionsOptions {
   /**
@@ -98,12 +106,28 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const projectStoreLoaded = useProjectStore((s) => s.loaded)
 
+  // The previous emission, so the next one can keep the rows that did not
+  // change (`shareUnchangedSessions`). Only the querier below touches it, and
+  // Dexie runs the querier outside render.
+  const sharedSessionsRef = useRef<readonly ChatSession[] | undefined>(undefined)
   // Live-bind the session list to Dexie so other tabs / quick deletes update.
-  const sessions = useLiveQuery<ChatSession[]>(() => {
-    if (typeof window === "undefined") return Promise.resolve([])
-    if (!enabled) return Promise.resolve([])
-    if (!projectStoreLoaded || !activeProjectId) return Promise.resolve([])
-    return crossWorkspace ? listSessions() : listScopedSessions(activeProjectId)
+  //
+  // Structurally shared: a streaming reply rewrites its session row several
+  // times a second (`transcriptRevision`), and a fresh clone of every row on
+  // each of those writes re-rendered the whole sidebar — every row, every
+  // derived map — for a change nothing on screen shows. Unchanged rows keep
+  // their identity; a write that changed nothing listable hands back the
+  // previous array, which `useLiveQuery` skips without rendering at all.
+  const sessions = useLiveQuery<readonly ChatSession[]>(async () => {
+    if (typeof window === "undefined") return EMPTY_SESSIONS
+    if (!enabled) return EMPTY_SESSIONS
+    if (!projectStoreLoaded || !activeProjectId) return EMPTY_SESSIONS
+    // Scoped reads keep the conversations of NO workspace (a paired client's
+    // host-synced history, pre-workspace chats) — see `listWorkspaceSessions`.
+    const rows = await (crossWorkspace ? listSessions() : listWorkspaceSessions(activeProjectId))
+    const shared = shareUnchangedSessions(sharedSessionsRef.current, rows)
+    sharedSessionsRef.current = shared
+    return shared
   }, [activeProjectId, projectStoreLoaded, crossWorkspace, enabled])
   const exposedSessions = useMemo(() => {
     if (!Array.isArray(sessions)) return []
@@ -458,13 +482,38 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     (sessionId: string, folderId: string | null) => assignSessionToFolder(sessionId, folderId),
     []
   )
+  // File a whole selection at once. One transaction, so the list's live query
+  // re-emits once for the batch rather than once per row, and a row that
+  // refuses the write (a handoff-locked conversation) rolls the whole move
+  // back instead of leaving the selection half-filed. The single-row writer
+  // joins the ambient transaction — it reads and writes through the same db.
+  const bulkAssignToFolder = useCallback(
+    async (ids: readonly string[], folderId: string | null) => {
+      if (ids.length === 0) return
+      const uniqueIds = [...new Set(ids)]
+      const db = getDb()
+      await db.transaction("rw", db.sessions, () =>
+        Promise.all(uniqueIds.map((id) => assignSessionToFolder(id, folderId)))
+      )
+    },
+    []
+  )
 
   return {
+    /**
+     * The listable conversations. Structurally shared across live-query
+     * emissions (see `shareUnchangedSessions`): a row that did not change keeps
+     * its identity, and a kept row carries the list-inert fields
+     * (`transcriptRevision`) of the read it came from — read those from Dexie.
+     */
     sessions: exposedSessions,
     // `useLiveQuery` returns `undefined` until the first Dexie read resolves;
     // distinguishing that from a genuinely empty list lets the session list
-    // show a skeleton instead of flashing the empty state on cold start.
-    isLoadingSessions: sessions === undefined,
+    // show a skeleton instead of flashing the empty state on cold start. The
+    // query also answers `[]` while the project store is still hydrating (it
+    // has no workspace to scope to yet), so that counts as loading too — that
+    // `[]` is "not asked yet", not "you have no conversations".
+    isLoadingSessions: sessions === undefined || (enabled && !projectStoreLoaded),
     activeSessionId,
     /** The active session's row, or null while pending / absent. */
     activeSession: activeSessionResolution.session,
@@ -480,12 +529,13 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     unarchive,
     bulkArchive,
     bulkUnarchive,
-    folders: folders ?? [],
+    folders: folders ?? EMPTY_FOLDERS,
     createFolder,
     renameFolder,
     deleteFolder,
     reorderFolders,
     assignToFolder,
+    bulkAssignToFolder,
     db: typeof window === "undefined" ? null : getDb(),
   }
 }

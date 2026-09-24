@@ -700,7 +700,13 @@ describe("ConversationFilterChips", () => {
     // Drifted → the facets are shown again, because they are no longer the
     // view's own and the user has to be able to see what moved.
     expect(root).toHaveTextContent("filters.options.pinned")
-    await user.click(screen.getByRole("button", { name: 'views.modifiedChip:{"name":"Focus"}' }))
+    const revert = screen.getByRole("button", { name: 'views.modifiedChip:{"name":"Focus"}' })
+    // The ellipsis sits inside: on the button, `truncate`'s overflow clip cut
+    // off the `touch-hit` area that makes this label a thumb target.
+    expect(revert).toHaveClass("touch-hit")
+    expect(revert).not.toHaveClass("truncate")
+    expect(revert.firstElementChild).toHaveClass("truncate")
+    await user.click(revert)
     expect(actions.revertView).toHaveBeenCalled()
   })
 
@@ -715,6 +721,17 @@ describe("ConversationFilterChips", () => {
     )
     await user.click(screen.getByRole("button", { name: "clearAll" }))
     expect(actions.reset).toHaveBeenCalled()
+  })
+
+  it("gives the chip controls a thumb-sized hit area on touch, and only on touch", () => {
+    // `touch-hit` is gated on `(pointer: coarse)` in globals.css and the ×
+    // widens only under `pointer-coarse:`, so a mouse sees the same 14px/20px
+    // controls the desktop sidebar always had.
+    chips({ filters: { ...EMPTY_CONVERSATION_FILTERS, pinned: true }, activeFilters: 1 })
+    const remove = screen.getByRole("button", { name: 'remove:{"name":"filters.options.pinned"}' })
+    expect(remove).toHaveClass("touch-hit", "size-3.5", "pointer-coarse:size-6")
+    const clear = screen.getByTestId("conversation-filter-chips-clear")
+    expect(clear).toHaveClass("touch-hit", "h-5")
   })
 })
 

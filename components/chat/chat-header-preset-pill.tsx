@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 import { groupPresets } from "@/lib/presets/group-presets"
 import { cn } from "@/lib/utils"
+import { COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 
 export interface ChatHeaderPresetPillProps {
   session: Pick<ChatSession, "activePresetId" | "systemPrompt">
@@ -121,7 +122,7 @@ export function ChatHeaderPresetPill({
                 // ~90px of the composer's status line saying nothing — and it was
                 // the chip that overflowed its group and printed through its
                 // neighbour. A preset the user actually picked earns its name.
-                !activePreset && "w-7 justify-center px-0"
+                !activePreset && COMPOSER_TOOLBAR_GLYPH
               )}
               // The accessible name carries the state the glyph drops.
               aria-label={`${t("ariaLabel")} — ${activePreset?.name ?? t("none")}`}
@@ -129,7 +130,7 @@ export function ChatHeaderPresetPill({
               data-active-preset={activePreset?.id}
               disabled={disabled}
             >
-              <SparklesIcon className="size-3 shrink-0" />
+              <SparklesIcon className="size-3.5 shrink-0" />
               {activePreset ? (
                 <span className="min-w-0 max-w-[14ch] truncate">{activePreset.name}</span>
               ) : null}

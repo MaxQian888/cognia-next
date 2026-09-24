@@ -64,7 +64,8 @@ export async function prepareInboundThreadHandoff(
 async function importCanonicalSession(
   envelope: CanonicalSession,
   sessionId: string,
-  handoffLock: import("@cognia/agent-config-types").ChatSession["handoffLock"]
+  handoffLock: import("@cognia/agent-config-types").ChatSession["handoffLock"],
+  continuation: ThreadHandoffTicket["continuation"]
 ): Promise<void> {
   // The marker is written by the import itself, not patched on afterwards:
   // a retry (the first accept crashed between the import and the ticket
@@ -74,6 +75,10 @@ async function importCanonicalSession(
     sessionId,
     title: envelope.header.title,
     messages: envelope.turns.map(canonicalTurnToHandoffMessage),
+    historicalState: envelope,
+    // Preflight validates these target capabilities. Source machine paths and
+    // permission modes must not become target execution authority.
+    meta: { model: continuation.model, provider: continuation.providerOverride },
     handoffSource: "thread-handoff",
     handoffLock,
   })
@@ -105,13 +110,18 @@ export async function completeInboundThreadHandoff(
       importSession:
         dependencies.importSession ??
         ((envelope, sessionId) =>
-          importCanonicalSession(envelope, sessionId, {
-            ticketId: prepared.ticket.ticketId,
-            state: "frozen",
-            targetHostRef: prepared.ticket.target.hostRef,
-            targetSessionId: sessionId,
-            at: now,
-          })),
+          importCanonicalSession(
+            envelope,
+            sessionId,
+            {
+              ticketId: prepared.ticket.ticketId,
+              state: "frozen",
+              targetHostRef: prepared.ticket.target.hostRef,
+              targetSessionId: sessionId,
+              at: now,
+            },
+            prepared.ticket.continuation
+          )),
     }
   )
   const lease = await (dependencies.issueLease ?? ((ops) => issueHostAdminLease(ops)))([

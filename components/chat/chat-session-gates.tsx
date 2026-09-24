@@ -57,7 +57,7 @@ export function ChatSessionGates({
         onRespond={async (response) => {
           if (!pending) return
           const { deliverExternalElicitation } =
-            await import("@/lib/ai/agent/external/chat-decision-bridge")
+            await import("@/lib/ai/agent/external/session/chat-decision-bridge")
           await deliverExternalElicitation(pending, response, { strict: true })
           useExternalElicitationStore.getState().remove(sessionId, pending.request.id)
         }}

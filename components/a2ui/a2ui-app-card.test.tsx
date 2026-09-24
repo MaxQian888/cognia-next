@@ -7,6 +7,11 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppCard, type AppCardProps } from "./a2ui-app-card"
 import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
+import { captureSurfaceThumbnail } from "@/lib/a2ui/thumbnail"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 // Mock thumbnail functions
 jest.mock("@/lib/a2ui/thumbnail", () => ({
@@ -141,6 +146,47 @@ describe("AppCard", () => {
       renderAppCard({ showThumbnail: false })
 
       expect(screen.queryByRole("img")).not.toBeInTheDocument()
+    })
+  })
+
+  describe("hover-revealed controls", () => {
+    const expectReachable = (control: HTMLElement) => {
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+        expect(control).toHaveClass(variant)
+      }
+      for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+        expect(control).not.toHaveClass(forbidden)
+      }
+      control.focus()
+      expect(control).toHaveFocus()
+    }
+
+    it("keeps the thumbnail refresh button reachable without a hover", async () => {
+      const onSelect = jest.fn()
+      const onThumbnailGenerated = jest.fn()
+      renderAppCard({ onSelect, onThumbnailGenerated, showThumbnail: true })
+
+      const refresh = screen.getByRole("button", { name: "Refresh Thumbnail" })
+      expectReachable(refresh)
+      fireEvent.click(refresh)
+
+      expect(captureSurfaceThumbnail).toHaveBeenCalledWith("test-app-1")
+      await waitFor(() =>
+        expect(onThumbnailGenerated).toHaveBeenCalledWith(
+          "test-app-1",
+          "data:image/png;base64,captured"
+        )
+      )
+      expect(onSelect).not.toHaveBeenCalled()
+    })
+
+    it("keeps the actions trigger reachable without a hover and always shown below sm", () => {
+      renderAppCard()
+
+      const trigger = screen.getByRole("button", { name: "More actions" })
+      expectReachable(trigger)
+      expect(trigger).toHaveClass("max-sm:opacity-100")
+      expect(trigger).toBeEnabled()
     })
   })
 

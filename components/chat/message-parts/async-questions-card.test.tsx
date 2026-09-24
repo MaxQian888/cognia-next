@@ -3,7 +3,7 @@ import type { UIMessage } from "ai"
 
 import { AsyncQuestionsCard, formatAsyncQuestionAnswer } from "./async-questions-card"
 import { sendChatMessage } from "@/hooks/chat/chat-send-bridge"
-import { resolveExternalQuestion } from "@/lib/ai/agent/external/chat-decision-bridge"
+import { resolveExternalQuestion } from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import { useChatStore } from "@/stores/chat"
 import { persistMessages } from "@/lib/db/messages"
 
@@ -11,7 +11,7 @@ jest.mock("@/hooks/chat/chat-send-bridge", () => ({
   sendChatMessage: jest.fn(() => true),
 }))
 
-jest.mock("@/lib/ai/agent/external/chat-decision-bridge", () => ({
+jest.mock("@/lib/ai/agent/external/session/chat-decision-bridge", () => ({
   resolveExternalQuestion: jest.fn(() => Promise.resolve(true)),
 }))
 
