@@ -14,6 +14,12 @@ jest.mock("ai", () => ({
 
 import * as sdk from "ai"
 
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
 import { ProviderOperationPiiGateError } from "../failure"
 import {
   embedGated,
@@ -86,5 +92,80 @@ describe("ai-sdk-surface", () => {
       ProviderOperationPiiGateError
     )
     expect(mocked.streamText).not.toHaveBeenCalled()
+  })
+
+  // `streamTextGated` forwards the caller's whole argument object, so the
+  // webview-safe telemetry default must merge with a caller's own option.
+  describe("streamTextGated in the webview runtime", () => {
+    const actualAi = jest.requireActual<typeof import("ai")>("ai")
+    let restoreRuntime: () => void
+    beforeEach(() => {
+      restoreRuntime = simulateWebviewRuntime()
+    })
+    afterEach(() => restoreRuntime())
+
+    it("opts telemetry out when the caller set none", () => {
+      streamTextGated({ model, prompt: "hi" })
+      expect(mocked.streamText).toHaveBeenCalledWith(
+        expect.objectContaining({ telemetry: { isEnabled: false } })
+      )
+    })
+
+    it("merges the opt-out over the caller's telemetry fields", () => {
+      streamTextGated({ model, prompt: "hi", telemetry: { functionId: "op", recordInputs: false } })
+      expect(mocked.streamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          telemetry: { functionId: "op", recordInputs: false, isEnabled: false },
+        })
+      )
+    })
+
+    it("keeps a caller's explicit telemetry choice", () => {
+      const telemetry = { isEnabled: true, functionId: "op" }
+      streamTextGated({ model, prompt: "hi", telemetry })
+      expect(mocked.streamText.mock.calls[0][0].telemetry).toBe(telemetry)
+    })
+
+    describe("with the real AI SDK stream", () => {
+      beforeEach(() => {
+        mocked.streamText.mockImplementation(actualAi.streamText)
+      })
+      afterEach(() => {
+        mocked.streamText.mockImplementation(() => ({ textStream: [] }))
+      })
+
+      it("surfaces a stream cut off mid-response without leaking an unhandled rejection", async () => {
+        // The SDK's default `onError` logs the stream error.
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+        const result = streamTextGated({ model: truncatedStreamModel(), prompt: "hi" })
+
+        let text = ""
+        for await (const delta of result.textStream) text += delta
+        await expect(Promise.resolve(result.finishReason)).rejects.toThrow("No output generated")
+        await drainRejectionReports()
+
+        expect(text).toBe("")
+        consoleError.mockRestore()
+      })
+
+      it("surfaces a mid-stream abort without leaking an unhandled rejection", async () => {
+        const abort = new AbortController()
+        const result = streamTextGated({
+          model: abortableStreamModel(),
+          prompt: "hi",
+          abortSignal: abort.signal,
+        })
+
+        let text = ""
+        for await (const delta of result.textStream) {
+          text += delta
+          abort.abort()
+        }
+        await expect(Promise.resolve(result.totalUsage)).rejects.toBe(abort.signal.reason)
+        await drainRejectionReports()
+
+        expect(text).toBe("partial answer")
+      })
+    })
   })
 })

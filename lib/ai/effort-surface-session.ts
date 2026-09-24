@@ -16,7 +16,7 @@ import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import {
   cachedConversationSurface,
   subscribeAgentModelSurface,
-} from "@/lib/ai/agent/external/model-surface-cache"
+} from "@/lib/ai/agent/external/capability/model-surface-cache"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 /** The agent a lane dispatches to: its id, or the host configuration's. */

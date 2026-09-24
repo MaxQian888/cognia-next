@@ -26,8 +26,8 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     }),
   },
 }))
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({ runTeamLifecycle }))
-jest.mock("@/lib/ai/agent/agent-team-runtime-deps", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({ runTeamLifecycle }))
+jest.mock("@/lib/ai/agent/team/agent-team-runtime-deps", () => ({
   buildAgentTeamRuntimeDeps: () => ({ runLeadPlanning: undefined, notifierDeps: undefined }),
 }))
 jest.mock("@/lib/db/agent-traces", () => ({ queryByTrace: jest.fn(async () => []) }))

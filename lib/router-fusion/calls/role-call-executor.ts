@@ -31,6 +31,7 @@ import type {
 } from "@cognia/router-fusion"
 import type { ModelMessage } from "ai"
 import { partitionPrompt } from "@/lib/ai/prompt-partition"
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import { resolveDeploymentLlmConfig } from "@/lib/ai/renderer-llm-client"
 import { createTwinLanguageModel, readUsageDelta, type LlmConfig } from "@/lib/twin/distill/llm"
 
@@ -280,7 +281,13 @@ export function createRoleCallExecutor(deps: RoleCallExecutorDeps): RoleCallExec
         }
         if (request.onDelta) {
           const streamText = deps.stream ?? sdk.streamText
-          const result = streamText({ ...common, model } as Parameters<StreamText>[0])
+          const result = streamText({
+            ...common,
+            model,
+            // A failed or stopped stream must not leak the SDK's tracing
+            // promise in the webview (see webview-safe-telemetry).
+            telemetry: webviewSafeTelemetry(),
+          } as Parameters<StreamText>[0])
           let text = ""
           for await (const delta of result.textStream) {
             text += delta

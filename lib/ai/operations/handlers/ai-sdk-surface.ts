@@ -26,6 +26,8 @@ import {
 } from "ai"
 import { hasNoLeakingPii } from "@cognia/redact"
 
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
+
 import { ProviderOperationPiiGateError } from "../failure"
 
 function gateText(...values: Array<string | readonly string[] | undefined>): void {
@@ -128,7 +130,9 @@ export function generateTextGated(args: GenerateTextArgs): ReturnType<typeof gen
 
 export function streamTextGated(args: StreamTextArgs): ReturnType<typeof streamText> {
   gateText(promptTexts(args))
-  return streamText(args)
+  // Merged with the caller's own option: a failed or stopped stream must not
+  // leak the SDK's tracing promise in the webview (see webview-safe-telemetry).
+  return streamText({ ...args, telemetry: webviewSafeTelemetry(args.telemetry) })
 }
 
 export function generateObjectGated(args: GenerateObjectArgs) {

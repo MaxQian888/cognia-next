@@ -3,6 +3,8 @@ import { embedMany, streamText } from "ai"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { ProviderBenchmarkMetrics } from "@cognia/provider-types"
 
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
+
 export const PROVIDER_DIAGNOSTIC_TEXT_PROMPT_VERSION = "provider-diagnostics-text-v1"
 export const PROVIDER_DIAGNOSTIC_TEXT_PROMPT =
   "Reply with exactly the single uppercase word PONG and no other text."
@@ -113,7 +115,13 @@ export async function runProviderTextBenchmark(
   }
   const result = dependencies.streamTextImpl
     ? dependencies.streamTextImpl({ ...commonOptions, model: input.model })
-    : (streamText({ ...commonOptions, model: input.model! }) as unknown as StreamResult)
+    : (streamText({
+        ...commonOptions,
+        model: input.model!,
+        // A failed or cancelled probe must not leak the SDK's tracing promise
+        // in the webview (see webview-safe-telemetry).
+        telemetry: webviewSafeTelemetry(),
+      }) as unknown as StreamResult)
 
   let firstTextAt: number | undefined
   let output = ""

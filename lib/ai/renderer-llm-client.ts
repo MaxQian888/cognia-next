@@ -27,7 +27,7 @@ import {
   type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
 import { resolveAppDefaultModel } from "./app-default-model"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { isRoutingPlaceholderModel } from "./routing/auto-model-resolution"
 
 export interface BuildRendererLlmClientArgs {

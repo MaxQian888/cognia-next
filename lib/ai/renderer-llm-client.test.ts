@@ -6,7 +6,7 @@ jest.mock("@/lib/twin/distill/llm", () => ({
 
 import { buildRendererLlmClient } from "./renderer-llm-client"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 /**
  * Exercises the real provider-resolution chain

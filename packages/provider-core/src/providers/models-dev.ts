@@ -14,7 +14,7 @@
  * (baseURL, OAuth, adapter defaults, quick-add).
  *
  * Mirrors opencode's `fromModelsDevModel` + `ProviderTransform.variants`
- * (`lib/ai/agent/external/opencode-client.ts` is the external-backend client),
+ * (`lib/ai/agent/external/runtimes/opencode/opencode-client.ts` is the external-backend client),
  * adapted to our `ProviderModelDiscoveryEntry`.
  */
 

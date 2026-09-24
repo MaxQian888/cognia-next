@@ -2,7 +2,10 @@ import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
 import type { RoutingPlan } from "@cognia/provider-types/auto-router"
 
-import { streamText } from "ai"
+import { streamText, type UIMessage } from "ai"
+import { MockLanguageModelV4 } from "ai/test"
+
+import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
 
 import { resolveStandaloneProvider } from "./resolve-standalone-provider"
 import { runStandaloneTurn } from "./standalone-engine"
@@ -567,5 +570,115 @@ describe("runStandaloneTurn", () => {
     expect(impl).toHaveBeenCalledTimes(6)
     const ended = events.at(-1)
     expect((ended as { error?: string }).error).toContain("network_error")
+  })
+})
+
+// === Real AI SDK result promises in the webview runtime ======================
+//
+// These drive the REAL `streamText` against a mock language model. In a
+// browser/Capacitor webview the SDK's `isNodeRuntime()` is false, and on that
+// path it opens no tracing-channel context yet never observes the `completion`
+// promise it derived from the result's usage. A failed or aborted stream then
+// rejects that orphan (NoOutputGeneratedError / the abort reason) as an
+// unhandled rejection. Jest 30's circus fails the running test on any
+// unhandled rejection Node reports while it runs, so each test drains one
+// macrotask after the turn to let Node report before the test ends.
+describe("runStandaloneTurn with the real AI SDK stream (webview runtime)", () => {
+  const actualAi = jest.requireActual<typeof import("ai")>("ai")
+  const mockModel = createFeatureProviderModel as jest.MockedFunction<
+    typeof createFeatureProviderModel
+  >
+  // `convertToModelMessages` is identity-mocked above, so the history is
+  // handed to `streamText` as-is and must already be model-message shaped.
+  const history = [
+    { role: "user", content: [{ type: "text", text: "hello" }] },
+  ] as unknown as UIMessage[]
+
+  let releaseDescriptor: PropertyDescriptor | undefined
+  beforeEach(() => {
+    // The webview `process` polyfill carries no `release`, which is exactly
+    // what the SDK's `isNodeRuntime()` probes.
+    releaseDescriptor = Object.getOwnPropertyDescriptor(process, "release")
+    Object.defineProperty(process, "release", { configurable: true, value: undefined })
+  })
+  afterEach(() => {
+    if (releaseDescriptor) Object.defineProperty(process, "release", releaseDescriptor)
+  })
+
+  const drainRejectionReports = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+  it("reports a provider auth failure without leaking an unhandled rejection", async () => {
+    // The SDK's default `onError` logs the provider error; the turn reports it.
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    mockModel.mockReturnValueOnce(
+      new MockLanguageModelV4({
+        doStream: async () => {
+          throw new actualAi.APICallError({
+            message: "invalid api key",
+            url: "https://api.anthropic.test/v1/messages",
+            requestBodyValues: {},
+            statusCode: 401,
+            isRetryable: false,
+          })
+        },
+      }) as never
+    )
+
+    const { events, promise } = run({
+      messages: history,
+      streamTextImpl: actualAi.streamText,
+    })
+    await promise
+    await drainRejectionReports()
+
+    expect(events.at(-1)).toEqual({
+      type: "session_ended",
+      sessionId: "s1",
+      error: "invalid api key",
+    })
+    consoleError.mockRestore()
+  })
+
+  it("seals a mid-stream abort cleanly without leaking an unhandled rejection", async () => {
+    mockModel.mockReturnValueOnce(
+      new MockLanguageModelV4({
+        doStream: async ({ abortSignal }) => ({
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] })
+              controller.enqueue({ type: "text-start", id: "t1" })
+              controller.enqueue({ type: "text-delta", id: "t1", delta: "partial answer" })
+              // Like a fetch body, the live stream errors with the abort reason.
+              abortSignal?.addEventListener("abort", () => controller.error(abortSignal.reason), {
+                once: true,
+              })
+            },
+          }),
+        }),
+      }) as never
+    )
+
+    const abort = new AbortController()
+    const events: ClaudeEvent[] = []
+    await runStandaloneTurn({
+      sessionId: "s1",
+      messages: history,
+      sendOptions: {} as SendOptions,
+      emit: (event) => {
+        events.push(event)
+        // The user presses Stop as soon as the first streamed text reaches the
+        // renderer (a `stream_event` text delta, not yet a sealed snapshot).
+        if (!abort.signal.aborted && JSON.stringify(event).includes("partial answer")) {
+          abort.abort()
+        }
+      },
+      signal: abort.signal,
+      streamTextImpl: actualAi.streamText,
+    })
+    await drainRejectionReports()
+
+    expect(abort.signal.aborted).toBe(true)
+    expect(JSON.stringify(events)).toContain("partial answer")
+    expect(events.at(-1)).toEqual({ type: "session_ended", sessionId: "s1" })
   })
 })

@@ -33,7 +33,7 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import {
   externalAgentIdFromProviderId,
   isExternalAgentProviderId,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 
 /** The two fields this module reads, so a caller need not hold all of AppSettings. */
 export type AppDefaultModelSlice =

@@ -160,6 +160,16 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
           model,
           ...partitioned,
           abortSignal: signal,
+          // Telemetry off is what keeps a failed or stopped turn from leaking an
+          // unhandled rejection. With a dispatcher, `streamText` derives a
+          // tracing `completion` promise from the result's usage. On a
+          // non-Node runtime (this webview) ai@7 returns before it ever
+          // observes that promise. So a provider error (NoOutputGeneratedError)
+          // or a user Stop (the abort reason) rejects an orphan nobody can
+          // catch. Nothing is lost: the renderer registers no AI SDK telemetry
+          // integration, tracing channels are Node-only, and the failure still
+          // reaches the turn through the stream's error part / abort signal.
+          telemetry: { isEnabled: false },
           ...(resolvedTools
             ? { tools: resolvedTools.tools, stopWhen: isStepCount(STANDALONE_MAX_STEPS) }
             : {}),

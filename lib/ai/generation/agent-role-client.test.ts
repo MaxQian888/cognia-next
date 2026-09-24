@@ -13,7 +13,7 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
 }))
 
 import { buildAgentRoleLlmClient } from "./agent-role-client"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 beforeEach(() => jest.clearAllMocks())
 

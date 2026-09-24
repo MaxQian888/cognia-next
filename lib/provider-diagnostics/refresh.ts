@@ -346,16 +346,24 @@ export async function installProviderDiagnosticsRefreshSchedule(): Promise<void>
     output: await runProviderDiagnosticsRefreshClock(),
   }))
   const scheduler = getTaskScheduler()
-  const exists = (await scheduler.getAllTasks()).some(
+  const existing = (await scheduler.getAllTasks()).filter(
     (task) => task.type === PROVIDER_DIAGNOSTICS_REFRESH_TASK_TYPE
   )
-  if (!exists) {
+  for (const task of existing) {
+    if (task.notification.dueReminder === undefined) {
+      await scheduler.updateTask(task.id, {
+        notification: { ...task.notification, dueReminder: false },
+      })
+    }
+  }
+  if (existing.length === 0) {
     const task: CreateScheduledTaskInput = {
       name: "Provider diagnostics refresh",
       type: PROVIDER_DIAGNOSTICS_REFRESH_TASK_TYPE,
       trigger: { type: "interval", intervalMs: CLOCK_INTERVAL_MS },
       config: { runMissedOnStartup: true, catchupWindowMs: 24 * 60 * 60_000, maxMissedRuns: 1 },
       notification: {
+        dueReminder: false,
         onStart: false,
         onComplete: false,
         onError: true,

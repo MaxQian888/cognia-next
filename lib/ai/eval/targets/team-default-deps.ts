@@ -26,8 +26,8 @@ export function defaultTeamTargetDeps(): TeamTargetDeps {
       const [{ useAgentTeamStore }, { runTeamLifecycle }, { buildAgentTeamRuntimeDeps }] =
         await Promise.all([
           import("@/stores/agent/agent-team-store"),
-          import("@/lib/ai/agent/agent-team-runtime"),
-          import("@/lib/ai/agent/agent-team-runtime-deps"),
+          import("@/lib/ai/agent/team/agent-team-runtime"),
+          import("@/lib/ai/agent/team/agent-team-runtime-deps"),
         ])
       void timeoutMs // per-task timeouts are governed by team.config; reserved for parity
       const partial = buildAgentTeamRuntimeDeps()

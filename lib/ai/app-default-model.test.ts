@@ -3,7 +3,7 @@ import {
   externalAgentAppDefault,
   resolveAppDefaultModel,
 } from "./app-default-model"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 const PI = externalAgentProviderId("pi-rpc")
 const AGENT_MODEL = "commandcode/meta/muse-spark-1.3-contributor"

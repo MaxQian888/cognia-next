@@ -35,7 +35,7 @@ const cacheListeners = new Set<() => void>()
 const cachedConversationSurface = jest.fn((_agentId: string, _chatSessionId?: string) =>
   agentLevels ? { status: "ready", thinking: { levels: agentLevels } } : null
 )
-jest.mock("@/lib/ai/agent/external/model-surface-cache", () => ({
+jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
   cachedConversationSurface: (agentId: string, chatSessionId?: string) =>
     cachedConversationSurface(agentId, chatSessionId),
   subscribeAgentModelSurface: (listener: () => void) => subscriber(cacheListeners)(listener),
@@ -50,7 +50,7 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 }))
 
 import { effortSurfaceForSession, subscribeEffortSurface } from "./effort-surface-session"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 beforeEach(() => {
   settingsState.settings = {}

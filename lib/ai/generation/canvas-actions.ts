@@ -17,6 +17,7 @@ import { generateText, streamText } from "ai"
 import { getProviderModel, type ProviderName } from "@cognia/provider-core/core/client"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 import type { CanvasActionAttachment, CanvasWorkbenchActionType } from "@/types/artifact/artifact"
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { LanguageModel } from "ai"
 
@@ -272,6 +273,9 @@ export async function streamCanvasAction(
     prompt: userPrompt,
     temperature: temperatureFor(actionType),
     abortSignal: options?.abortSignal,
+    // A failed or stopped canvas stream must not leak the SDK's tracing
+    // promise in the webview (see webview-safe-telemetry).
+    telemetry: webviewSafeTelemetry(),
   })
 
   let full = ""

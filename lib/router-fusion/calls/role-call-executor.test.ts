@@ -5,6 +5,13 @@ import type { LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import { jsonSchema, tool } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
+
 const resolveDeploymentLlmConfigMock = jest.fn(
   (..._args: unknown[]) =>
     ({
@@ -517,5 +524,57 @@ describe("createRoleCallExecutor: tools", () => {
       finishReason: "tool_calls",
       toolCalls: [{ id: "call_2", name: "web_fetch", arguments: { url: "https://e.com" } }],
     })
+  })
+})
+
+// The REAL `streamText` (the executor's own lazy `import("ai")`) on the webview
+// runtime the renderer host runs in. A failed or stopped stream must not leak
+// the SDK's tracing `completion` promise as an unhandled rejection (see
+// `webview-safe-telemetry.ts`).
+describe("createRoleCallExecutor streaming with the real AI SDK (webview runtime)", () => {
+  let restoreRuntime: () => void
+  beforeEach(() => {
+    restoreRuntime = simulateWebviewRuntime()
+  })
+  afterEach(() => restoreRuntime())
+
+  it("settles a stream cut off mid-response without leaking an unhandled rejection", async () => {
+    // The SDK's default `onError` logs the stream error.
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    const deltas: string[] = []
+
+    const response = await executor({
+      languageModel: async () => truncatedStreamModel(),
+      stream: undefined,
+    }).call(request({ onDelta: (text) => deltas.push(text) }), new AbortController().signal)
+    await drainRejectionReports()
+
+    expect(response.outcome).toBeDefined()
+    expect(deltas).toEqual([])
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it("settles a mid-stream abort without leaking an unhandled rejection", async () => {
+    const abort = new AbortController()
+    const deltas: string[] = []
+
+    const response = await executor({
+      languageModel: async () => abortableStreamModel(),
+      stream: undefined,
+    }).call(
+      request({
+        onDelta: (text) => {
+          deltas.push(text)
+          abort.abort()
+        },
+      }),
+      abort.signal
+    )
+    await drainRejectionReports()
+
+    expect(response.outcome).toBeDefined()
+    expect(abort.signal.aborted).toBe(true)
+    expect(deltas).toEqual(["partial answer"])
   })
 })

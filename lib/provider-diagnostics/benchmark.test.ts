@@ -1,4 +1,10 @@
 import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
+import {
   runProviderEmbeddingBenchmark,
   runProviderTextBenchmark,
   PROVIDER_DIAGNOSTIC_EMBEDDING_PROMPT_VERSION,
@@ -72,6 +78,56 @@ describe("runProviderTextBenchmark", () => {
         }
       )
     ).rejects.toThrow("PII gate")
+  })
+
+  // The REAL `streamText` on the webview runtime the provider settings UI runs
+  // in. A failed or cancelled probe must not leak the SDK's tracing
+  // `completion` promise as an unhandled rejection (see
+  // `webview-safe-telemetry.ts`).
+  describe("with the real AI SDK stream (webview runtime)", () => {
+    let restoreRuntime: () => void
+    beforeEach(() => {
+      restoreRuntime = simulateWebviewRuntime()
+    })
+    afterEach(() => restoreRuntime())
+
+    it("measures a stream cut off mid-response without leaking an unhandled rejection", async () => {
+      // The SDK's default `onError` logs the stream error.
+      const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+
+      const result = await runProviderTextBenchmark({
+        model: truncatedStreamModel(),
+        maxOutputTokens: 64,
+      })
+      await drainRejectionReports()
+
+      expect(result.metrics).not.toHaveProperty("ttftMs")
+      expect(result.metrics.usageEstimated).toBe(true)
+      expect(consoleError).toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it("stops on a mid-stream cancel without leaking an unhandled rejection", async () => {
+      const abort = new AbortController()
+      // The benchmark reads the clock as each chunk lands; cancel right after
+      // the first one (the second reading, after the start time).
+      let readings = 0
+      const now = () => {
+        readings += 1
+        if (readings === 2) abort.abort()
+        return readings * 10
+      }
+
+      const result = await runProviderTextBenchmark(
+        { model: abortableStreamModel(), maxOutputTokens: 64, signal: abort.signal },
+        { now }
+      )
+      await drainRejectionReports()
+
+      expect(abort.signal.aborted).toBe(true)
+      expect(result.metrics.ttftMs).toBe(10)
+      expect(result.metrics.usageEstimated).toBe(true)
+    })
   })
 })
 

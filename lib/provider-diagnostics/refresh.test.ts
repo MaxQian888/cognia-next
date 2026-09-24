@@ -1,8 +1,17 @@
 /** @jest-environment jsdom */
 
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: jest.fn(async () => ({ providerSettings: {} })),
+}))
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  registerTaskExecutor: jest.fn(),
+  getTaskScheduler: jest.fn(),
+}))
+
 import type { ProviderDiagnosticsRefreshState } from "@cognia/provider-types"
 
 import {
+  installProviderDiagnosticsRefreshSchedule,
   nextProviderDiagnosticsRefreshState,
   providerDiagnosticsNotificationTransition,
   runProviderDiagnosticsRefreshClock,
@@ -137,5 +146,42 @@ describe("provider diagnostics refresh clock", () => {
       "zero-balance",
       expect.objectContaining({ lastNotificationAt: 1_000, lastObservedRemaining: 0 })
     )
+  })
+})
+
+describe("diagnostics schedule reminders", () => {
+  it("disables due reminders for new internal tasks", async () => {
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    const createTask = jest.fn().mockResolvedValue(undefined)
+    jest
+      .mocked(getTaskScheduler)
+      .mockReturnValue({ getAllTasks: async () => [], createTask } as never)
+    await installProviderDiagnosticsRefreshSchedule()
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notification: expect.objectContaining({ dueReminder: false, onError: true }),
+      })
+    )
+  })
+
+  it("migrates only an unspecified reminder while keeping failure preferences", async () => {
+    const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+    const updateTask = jest.fn().mockResolvedValue(undefined)
+    jest.mocked(getTaskScheduler).mockReturnValue({
+      getAllTasks: async () => [
+        { id: "legacy", type: "provider-diagnostics-refresh", notification: { onError: true } },
+        {
+          id: "opted-in",
+          type: "provider-diagnostics-refresh",
+          notification: { dueReminder: true },
+        },
+      ],
+      updateTask,
+    } as never)
+    await installProviderDiagnosticsRefreshSchedule()
+    expect(updateTask).toHaveBeenCalledTimes(1)
+    expect(updateTask).toHaveBeenCalledWith("legacy", {
+      notification: { onError: true, dueReminder: false },
+    })
   })
 })

@@ -23,6 +23,12 @@ import {
 } from "./canvas-actions"
 import { generateText, streamText } from "ai"
 import { getProviderModel } from "@cognia/provider-core/core/client"
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
 
 describe("ACTION_PROMPTS / getActionDescription", () => {
   it("includes prompts for every action type", () => {
@@ -393,5 +399,58 @@ describe("executeCanvasActionStreaming", () => {
       { onToken: () => {}, onComplete: () => {}, onError }
     )
     expect(onError).toHaveBeenCalledWith("Streaming action failed")
+  })
+})
+
+// The REAL `streamText` on the webview runtime the canvas UI runs in. A failed
+// or stopped stream must not leak the SDK's tracing `completion` promise as an
+// unhandled rejection (see `webview-safe-telemetry.ts`).
+describe("streamCanvasAction with the real AI SDK stream (webview runtime)", () => {
+  const actualAi = jest.requireActual<typeof import("ai")>("ai")
+  let restoreRuntime: () => void
+  beforeEach(() => {
+    restoreRuntime = simulateWebviewRuntime()
+    ;(streamText as jest.Mock).mockReset()
+    ;(streamText as jest.Mock).mockImplementation(actualAi.streamText)
+  })
+  afterEach(() => restoreRuntime())
+
+  it("ends a stream cut off mid-response without leaking an unhandled rejection", async () => {
+    // The SDK's default `onError` logs the stream error.
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    const deltas: string[] = []
+
+    // `textStream` ends normally here; the failure only reaches `onError` and
+    // the result promises, which this action does not read.
+    const full = await streamCanvasAction(truncatedStreamModel(), "improve", "doc", (d) =>
+      deltas.push(d)
+    )
+    await drainRejectionReports()
+
+    expect(full).toBe("")
+    expect(deltas).toEqual([])
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it("stops on a mid-stream abort without leaking an unhandled rejection", async () => {
+    const abort = new AbortController()
+    const deltas: string[] = []
+
+    const full = await streamCanvasAction(
+      abortableStreamModel(),
+      "improve",
+      "doc",
+      (d) => {
+        deltas.push(d)
+        abort.abort()
+      },
+      { abortSignal: abort.signal }
+    )
+    await drainRejectionReports()
+
+    expect(abort.signal.aborted).toBe(true)
+    expect(deltas).toEqual(["partial answer"])
+    expect(full).toBe("partial answer")
   })
 })
