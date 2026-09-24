@@ -52,7 +52,7 @@ const MANAGER_TS = "lib/ai/agent/external/manager.ts"
 const RUST_PRESETS = "crates/cognia-external-agent/src/presets.rs"
 const RUST_SANDBOX = "crates/cognia-external-agent/src/sandbox.rs"
 const ECOSYSTEM_TS = "lib/ai/agent/external/ecosystem-adapters.ts"
-const PRESETS_TS = "lib/ai/agent/external/presets.ts"
+const PRESETS_TS = "lib/ai/agent/external/config/presets.ts"
 
 const LEVELS = new Set(["native", "equivalent", "unsupported", "unknown"])
 

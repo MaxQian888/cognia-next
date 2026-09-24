@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   expect as tauriExpect,
+  TauriDebugRendererRestartedError,
   TauriDebugTimeoutError,
   TauriDebugUnsupportedError,
   TauriPage,
@@ -342,4 +343,180 @@ test("action-triggered SPA navigation settles against document identity and URL"
     calls.map((url) => new URL(url).pathname),
     ["/api/dev/agent/locator", "/api/dev/agent/evaluate"]
   )
+})
+
+// ---------------------------------------------------------------------------
+// Renderer (web content process) restarts
+// ---------------------------------------------------------------------------
+
+function health(renderers = {}) {
+  return jsonResponse({ ok: true, agentDebug: true, helper: null, renderers })
+}
+
+const evalTimeout = () =>
+  jsonResponse(
+    { ok: false, code: "webview_eval_timeout", error: "webview async evaluation timed out" },
+    422
+  )
+
+test("a bridge-reported renderer restart surfaces as a typed, retryable error", async () => {
+  const fetchImpl = async () =>
+    jsonResponse(
+      {
+        ok: false,
+        code: "webview_renderer_restarted",
+        error: "webview renderer restarted: the main web content process terminated",
+        window: "main",
+        rendererGeneration: 2,
+        retryable: true,
+      },
+      503
+    )
+  const page = new TauriPage({ endpoint, fetchImpl })
+
+  await assert.rejects(page.evaluate("1 + 1"), (error) => {
+    assert.ok(error instanceof TauriDebugRendererRestartedError)
+    assert.equal(error.code, "webview_renderer_restarted")
+    assert.equal(error.window, "main")
+    assert.equal(error.rendererGeneration, 2)
+    assert.equal(error.retryable, true)
+    assert.match(error.message, /renderer restarted/)
+    assert.equal(error.cause.status, 503)
+    return true
+  })
+})
+
+test("a restarting renderer keeps its own code", async () => {
+  const fetchImpl = async () =>
+    jsonResponse(
+      {
+        ok: false,
+        code: "webview_renderer_restarting",
+        error: "webview renderer is restarting",
+        window: "main",
+        rendererGeneration: 1,
+        retryable: true,
+      },
+      503
+    )
+  const page = new TauriPage({ endpoint, fetchImpl })
+  await assert.rejects(page.snapshot(), (error) => {
+    assert.ok(error instanceof TauriDebugRendererRestartedError)
+    assert.equal(error.code, "webview_renderer_restarting")
+    return true
+  })
+})
+
+test("an evaluation timeout during a renderer reload reports the restart, not the timeout", async () => {
+  const routes = []
+  const fetchImpl = async (url) => {
+    routes.push(new URL(url).pathname)
+    if (url.endsWith("/evaluate")) return evalTimeout()
+    if (url.endsWith("/health")) return health({ main: { generation: 1, awaitingLoad: true } })
+    throw new Error(`unexpected route: ${url}`)
+  }
+  const page = new TauriPage({ endpoint, fetchImpl })
+
+  await assert.rejects(page.evaluate("document.title"), (error) => {
+    assert.ok(error instanceof TauriDebugRendererRestartedError)
+    assert.equal(error.code, "webview_renderer_restarting")
+    assert.equal(error.rendererGeneration, 1)
+    assert.equal(error.cause.code, "webview_eval_timeout")
+    return true
+  })
+  assert.deepEqual(routes, ["/api/dev/agent/evaluate", "/api/dev/agent/health"])
+})
+
+test("an evaluation timeout after the renderer generation moved reports the restart", async () => {
+  let generation = 0
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/health")) return health({ main: { generation, awaitingLoad: false } })
+    if (url.endsWith("/evaluate")) return evalTimeout()
+    throw new Error(`unexpected route: ${url}`)
+  }
+  const page = new TauriPage({ endpoint, fetchImpl })
+  assert.deepEqual(await page.rendererState(), { generation: 0, awaitingLoad: false })
+
+  // The renderer was killed and already reloaded by the time we look.
+  generation = 1
+  await assert.rejects(page.evaluate("1"), (error) => {
+    assert.ok(error instanceof TauriDebugRendererRestartedError)
+    assert.equal(error.code, "webview_renderer_restarted")
+    assert.equal(error.rendererGeneration, 1)
+    return true
+  })
+})
+
+test("a plain evaluation timeout on a live renderer stays a timeout", async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/health")) return health({})
+    if (url.endsWith("/evaluate")) return evalTimeout()
+    throw new Error(`unexpected route: ${url}`)
+  }
+  const page = new TauriPage({ endpoint, fetchImpl })
+  await assert.rejects(page.evaluate("1"), (error) => {
+    assert.ok(!(error instanceof TauriDebugRendererRestartedError))
+    assert.equal(error.code, "webview_eval_timeout")
+    return true
+  })
+})
+
+test("a failing health probe keeps the original timeout error", async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/health")) throw new TypeError("fetch failed")
+    return evalTimeout()
+  }
+  const page = new TauriPage({ endpoint, fetchImpl })
+  await assert.rejects(page.evaluate("1"), (error) => {
+    assert.equal(error.code, "webview_eval_timeout")
+    return true
+  })
+})
+
+test("rebind path: after a restart, waitForRenderer waits for the reload and evaluate works again", async () => {
+  let phase = "dead"
+  let healthReads = 0
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith("/health")) {
+      healthReads += 1
+      if (healthReads >= 2) phase = "reloaded"
+      return health({ main: { generation: 1, awaitingLoad: phase !== "reloaded" } })
+    }
+    if (url.endsWith("/evaluate")) {
+      if (phase === "dead")
+        return jsonResponse(
+          {
+            ok: false,
+            code: "webview_renderer_restarted",
+            error: "webview renderer restarted",
+            window: "main",
+            rendererGeneration: 1,
+            retryable: true,
+          },
+          503
+        )
+      const { expression } = JSON.parse(init.body)
+      if (expression.includes("health"))
+        return jsonResponse({
+          ok: true,
+          value: { documentId: "new", readyState: "complete", url: "https://app.test/" },
+        })
+      return jsonResponse({ ok: true, value: 2 })
+    }
+    throw new Error(`unexpected route: ${url}`)
+  }
+  const page = new TauriPage({ endpoint, fetchImpl, defaultTimeout: 2_000 })
+
+  await assert.rejects(page.evaluate("1 + 1"), TauriDebugRendererRestartedError)
+  assert.deepEqual(await page.waitForRenderer(), { generation: 1, awaitingLoad: false })
+  assert.equal(await page.evaluate("1 + 1"), 2)
+})
+
+test("waitForRenderer gives up with a typed timeout while the renderer never reloads", async () => {
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/health")) return health({ main: { generation: 3, awaitingLoad: true } })
+    throw new Error(`unexpected route: ${url}`)
+  }
+  const page = new TauriPage({ endpoint, fetchImpl })
+  await assert.rejects(page.waitForRenderer({ timeout: 150 }), TauriDebugTimeoutError)
 })

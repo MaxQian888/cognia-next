@@ -11,8 +11,8 @@ import os from "node:os"
 import { spawnSync } from "node:child_process"
 
 import { selectCliAgentWorkspace } from "@/cli/src/runtime/external/host-branch"
-import { DevinAcpAdapter } from "@/lib/ai/agent/external/devin-acp-adapter"
-import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import { DevinAcpAdapter } from "@/lib/ai/agent/external/runtimes/acp/devin-acp-adapter"
+import { createAgentFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type {
   AcpMcpServerConfig,
   ExternalAgentExecutionOptions,

@@ -178,6 +178,14 @@ sidecar/codeserver-agent-ext/cognia-managed-broker.vsix
 /batch-final-verify-*.png
 /workflows-*.png
 dist
+# ...except the vendored Material Icon Theme mirror (built-in plugin
+# `cognia-material-icon-theme`). Upstream ships its theme JSON at
+# `dist/material-icons.json` and every `iconPath` in it is `../icons/*.svg`
+# relative to that directory, so the layout stays verbatim for re-syncs. The
+# unanchored `dist` above would otherwise silently drop the JSON from commits.
+# `.prettierignore` still skips it through its own `dist` rule, which keeps
+# lint-staged from reformatting the 450 KB upstream file.
+!/public/plugins/cognia-material-icon-theme/dist/
 
 # Scratch output of the author-facing declaration build; the checked-in artifact
 # is crates/cognia-cli/assets/author-types.json (pnpm author-types:bundle).

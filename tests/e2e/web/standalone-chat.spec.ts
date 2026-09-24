@@ -25,52 +25,17 @@ function anthropicMockBaseUrl(): string {
   return `${url.replace(/\/$/, "")}/v1`
 }
 
+/**
+ * The chat rows the account database durably holds, read through the app's
+ * own Dexie. The account database is encrypted at rest (`-encrypted-v1`), so a
+ * raw IndexedDB read sees only the content envelope, never a role or a text.
+ */
 async function readPersistedChatRows(page: Page) {
   return page.evaluate(async (): Promise<PersistedChatRow[]> => {
-    const databases = await indexedDB.databases()
-    const rows: PersistedChatRow[] = []
-    for (const descriptor of databases) {
-      const name = descriptor.name
-      if (!name?.startsWith("cognia-account-")) continue
-      const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open(name)
-        request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error)
-      })
-      if (!database.objectStoreNames.contains("messages")) {
-        database.close()
-        continue
-      }
-      const stored = await new Promise<Array<{ role?: string; parts?: unknown[] }>>(
-        (resolve, reject) => {
-          const request = database
-            .transaction("messages", "readonly")
-            .objectStore("messages")
-            .getAll()
-          request.onsuccess = () => resolve(request.result)
-          request.onerror = () => reject(request.error)
-        }
-      )
-      database.close()
-      for (const row of stored) {
-        rows.push({
-          database: name,
-          role: row.role ?? "",
-          text: (row.parts ?? [])
-            .filter((part): part is { type: "text"; text: string } =>
-              Boolean(
-                part &&
-                typeof part === "object" &&
-                (part as { type?: unknown }).type === "text" &&
-                typeof (part as { text?: unknown }).text === "string"
-              )
-            )
-            .map((part) => part.text)
-            .join(""),
-        })
-      }
-    }
-    return rows
+    const read = (window as { __cogniaReadMessages?: () => Promise<PersistedChatRow[]> })
+      .__cogniaReadMessages
+    if (typeof read !== "function") throw new Error("window.__cogniaReadMessages is not exposed")
+    return (await read()).map(({ database, role, text }) => ({ database, role, text }))
   })
 }
 
@@ -90,20 +55,31 @@ test.describe("web — standalone chat", () => {
           baseURL: anthropicMockBaseUrl(),
         },
       },
+      // ADR-0122: the seeded account has zero sessions, so the onboarding gate
+      // routes it into the first-run flow unless a settled record says the
+      // device has already been through it.
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
     })
   })
 
   test("@smoke @critical sends, streams, and restores a browser-native turn", async ({ page }) => {
+    // The gate's verdict latches per boot; re-boot so it reads the settled row.
     await page.goto("about:blank")
     await page.goto("/", { waitUntil: "domcontentloaded" })
 
-    await page.getByRole("button", { name: "New chat" }).first().click()
-    const picker = page.getByRole("dialog", { name: /pick a character/i })
-    await expect(picker).toBeVisible({ timeout: 10_000 })
-    await picker.getByRole("option").first().click()
-
+    // "New chat" lands on the welcome surface, whose live composer creates the
+    // conversation on its first send — no character pick in between.
+    await page.getByRole("button", { name: "New chat", exact: true }).first().click()
+    await expect(
+      page.getByTestId("welcome-composer").getByRole("textbox", { name: /message/i })
+    ).toBeVisible({ timeout: 30_000 })
+    // Not scoped to the welcome surface: once the first send lands, the
+    // conversation view replaces it and the docked composer takes the role.
     const composer = page.getByRole("textbox", { name: /message/i }).first()
-    await expect(composer).toBeVisible({ timeout: 30_000 })
 
     await composer.fill("ping from ordinary web standalone")
     await composer.press("Enter")
@@ -122,6 +98,7 @@ test.describe("web — standalone chat", () => {
       .toEqual(
         expect.arrayContaining([
           expect.objectContaining({
+            database: expect.stringMatching(/^cognia-account-/),
             role: "assistant",
             text: expect.stringMatching(/mock-anthropic-echo.*ping from ordinary web standalone/i),
           }),

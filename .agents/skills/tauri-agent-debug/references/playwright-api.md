@@ -38,6 +38,7 @@ Run a saved script with `rtk node <script>.mjs`. Start the bridge first with
 | Dialogs | `installDialogHandler`, `getDialogs`, `clearDialogs` | Install before triggering alert/confirm/prompt |
 | Network | `route`, `unroute`, `clearRoutes`, `getNetworkRequests`, `clearNetworkRequests` | Fetch can be mocked; fetch and XHR are captured; XHR mocking is not claimed |
 | Windows | `window`, `targetWindow`, `listWindows`, `waitForWindow` | Scoped pages share endpoint authentication but target a different label |
+| Renderer lifecycle | `rendererState`, `waitForRenderer`, `TauriDebugRendererRestartedError` | A web content process termination fails pending commands as restarted (codes `webview_renderer_restarted` / `webview_renderer_restarting`); `waitForRenderer` resolves once the reloaded renderer's helper answers |
 | Assertions | `expect(locator)` state/text/value/attribute/CSS/count assertions and `expect(page).toHaveURL/toHaveTitle` | Polls until the page default timeout; `.not` is supported |
 
 The assertion surface includes `toBeVisible`, `toBeHidden`, `toBeEnabled`,

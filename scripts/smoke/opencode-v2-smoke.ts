@@ -312,7 +312,7 @@ async function main() {
       const adapterModule = join(scratch, "adapter.mjs")
       await symlink(resolve("node_modules"), join(scratch, "node_modules"), "dir")
       await build({
-        entryPoints: [resolve("lib/ai/agent/external/opencode-v2-client.ts")],
+        entryPoints: [resolve("lib/ai/agent/external/runtimes/opencode/opencode-v2-client.ts")],
         outfile: adapterModule,
         bundle: true,
         platform: "node",

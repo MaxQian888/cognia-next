@@ -8,7 +8,7 @@ import { ACP_V1_CONTRACT, validateAcpV1Coverage } from "./lib/acp-v1-contract.mj
 const stableMetaPath = new URL("../../protocol/acp/v1/meta.json", import.meta.url)
 const previewMetaPath = new URL("../../protocol/acp/v1/meta.unstable.json", import.meta.url)
 const acpClientSource = readFileSync(
-  new URL("../../lib/ai/agent/external/acp-client.ts", import.meta.url),
+  new URL("../../lib/ai/agent/external/runtimes/acp/acp-client.ts", import.meta.url),
   "utf8"
 )
 const jsonRpcPeerSource = readFileSync(

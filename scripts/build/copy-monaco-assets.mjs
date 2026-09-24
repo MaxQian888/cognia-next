@@ -34,16 +34,28 @@ if (!fs.existsSync(SRC)) {
   process.exit(0)
 }
 
+// The staged copy must track the installed package: a `loader.js`-exists
+// check once left a pre-0.56 snapshot in place for months — the hashed
+// language workers (`ts.worker-*.js` et al.) never arrived and desktop
+// syntax checking silently produced zero diagnostics. Stamp the source
+// version alongside the assets and re-copy on any drift.
+const STAMP = path.join(DST, ".monaco-version")
+const srcVersion = JSON.parse(
+  fs.readFileSync(path.join(SRC, "..", "..", "package.json"), "utf8")
+).version
+
 if (fs.existsSync(DST)) {
-  // Cheap freshness check — if the destination already has loader.js,
-  // assume an earlier run completed. Re-copy on demand by deleting the
-  // directory.
-  if (fs.existsSync(path.join(DST, "loader.js"))) {
-    console.log(`[monaco] skip: ${DST} already populated`)
+  const staged = fs.existsSync(STAMP)
+    ? fs.readFileSync(STAMP, "utf8").trim()
+    : null
+  if (staged === srcVersion && fs.existsSync(path.join(DST, "loader.js"))) {
+    console.log(`[monaco] skip: ${DST} already populated (v${srcVersion})`)
     process.exit(0)
   }
+  fs.rmSync(DST, { recursive: true, force: true })
 }
 
-console.log(`[monaco] copy ${SRC} → ${DST}`)
+console.log(`[monaco] copy ${SRC} → ${DST} (v${srcVersion})`)
 copyRecursive(SRC, DST)
+fs.writeFileSync(STAMP, `${srcVersion}\n`)
 console.log(`[monaco] done`)

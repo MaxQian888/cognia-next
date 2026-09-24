@@ -648,9 +648,9 @@ const globalConfig: Config = {
     // subprocess. jsdom can stub the surface but can't drive the live
     // protocol — full coverage requires the Rust integration tests under
     // `src-tauri/`. Exclude here so they don't drag the lib/** gate down.
-    "!lib/ai/agent/external/acp-client.ts",
+    "!lib/ai/agent/external/runtimes/acp/acp-client.ts",
     "!lib/ai/agent/external/manager.ts",
-    "!lib/ai/agent/external/opencode-client.ts",
+    "!lib/ai/agent/external/runtimes/opencode/opencode-client.ts",
     // search-type-router.ts is a 40+ provider dispatch table. Each provider
     // has its own co-located test, but exercising every dispatch leg here
     // would just duplicate those — it's a routing surface with very low

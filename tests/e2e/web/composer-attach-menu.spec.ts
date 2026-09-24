@@ -78,15 +78,27 @@ test.describe("web — composer attach menu capability rows", () => {
     await expect(webRow.locator(".bg-primary")).toBeVisible()
   })
 
-  test("a disabled web row still shows its reason on hover", async ({ page }) => {
-    // No search provider configured → the row is disabled, and the "why" only
-    // exists as a tooltip — which a bare disabled button cannot deliver.
+  test("an unconfigured web row explains how to enable it", async ({ page }) => {
+    // Out of the box the master search switch is off and no provider is set,
+    // so web search cannot run. The row is not a dead disabled toggle: it
+    // names the blocker on hover and opens a setup card pointing at the
+    // settings section that fixes it.
+    const reason = "Web search is off — turn it on in Settings → Web search"
     await page.getByTestId("composer-attach-menu").click()
     const webRow = page.getByRole("button", { name: "Toggle web search" })
-    await expect(webRow).toBeDisabled()
+    await expect(webRow).toBeEnabled()
+    await expect(webRow).toHaveAttribute("aria-haspopup", "dialog")
+    // Not a toggle in this state — no pressed semantics, no armed dot.
+    await expect(webRow).not.toHaveAttribute("aria-pressed")
 
     await webRow.hover()
-    await expect(page.getByRole("tooltip").filter({ hasText: "Enable in Settings" })).toBeVisible()
+    await expect(page.getByRole("tooltip").filter({ hasText: reason })).toBeVisible()
+
+    await webRow.click()
+    await expect(webRow).toHaveAttribute("aria-expanded", "true")
+    const setupCard = page.getByRole("dialog").filter({ hasText: reason })
+    await expect(setupCard).toBeVisible()
+    await expect(setupCard.getByRole("button", { name: "Open settings" })).toBeVisible()
   })
 
   test("the rows stay full-width in a compact-width viewport", async ({ page }) => {

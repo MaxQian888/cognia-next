@@ -79,6 +79,33 @@ evaluation and therefore do not invalidate one another's snapshot generations.
 See the project skill at
 `.agents/skills/tauri-agent-debug` for the agent workflow and full API matrix.
 
+## Renderer restarts
+
+On macOS the WKWebView web content process can die (killed from Activity
+Monitor, OOM, a crash) while the app process stays alive. Cognia handles
+`webViewWebContentProcessDidTerminate` itself: it records a new renderer
+generation for that window and reloads it (the main window reloads to its
+last-known-good route and shows the existing "recovered" notice; after more
+than three terminations within two minutes it stops reloading).
+
+The bridge follows the replacement renderer instead of staying bound to the
+dead one:
+
+- a command in flight when the renderer dies fails immediately with
+  `503 webview_renderer_restarted` (with `window` and `rendererGeneration`)
+  instead of waiting out a 10 s `webview_eval_timeout`;
+- the next command waits up to 10 s for the replacement document, re-injects
+  the helper, and runs normally; if the reload never commits it fails with
+  `webview_renderer_restarting`;
+- `/api/dev/agent/health` reports `renderers` (per-window `generation` and
+  `awaitingLoad`) without blocking on a reload.
+
+The CLI prints `code`, `rendererGeneration`, and `rendererRestarted: true` for
+these failures. The client throws `TauriDebugRendererRestartedError`, also when
+an evaluation timeout straddled a termination; recover with
+`await page.waitForRenderer()` and take a fresh snapshot, because refs and
+in-page state from the old renderer are gone.
+
 ## Stop
 
 ```bash

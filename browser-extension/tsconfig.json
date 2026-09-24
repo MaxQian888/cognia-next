@@ -3,7 +3,7 @@
   // generated one carries WXT's own — the `#imports` virtual module, the
   // entrypoint globals, and the alias `paths` derived from wxt.config.ts.
   // Later wins, which is what makes `#imports` resolvable.
-  "extends": ["../tsconfig.json", "./.wxt/tsconfig.json"],
+  "extends": ["../tsconfig.json", ".wxt/tsconfig.json"],
   "compilerOptions": {
     // The root config narrows `types` to `["node"]`. This workspace needs the
     // Chrome extension globals and the Jest globals for its co-located tests,

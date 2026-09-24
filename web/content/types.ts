@@ -271,7 +271,7 @@ export interface ConnectionItem {
  * `id` selects the vendored brand mark in `content/generated/agent-icons.json`;
  * an id with no mark renders the site's own generic glyph rather than another
  * brand's. `run` and `import` are the two real capabilities — an external-agent
- * preset in `lib/ai/agent/external/presets.ts`, and a session-history adapter in
+ * preset in `lib/ai/agent/external/config/presets.ts`, and a session-history adapter in
  * `lib/session-import/adapters/` — and at least one is always true, or the row
  * would be claiming a connection that does not exist.
  */

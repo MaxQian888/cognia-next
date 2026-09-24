@@ -19,7 +19,7 @@
     "A:lib/a2ui/ipc.ts",
     "A:lib/accounts/password-client.ts",
     "A:lib/ai/agent/external/agent-hooks.ts",
-    "A:lib/ai/agent/team/tauri-worker-runtime.ts",
+    "A:lib/ai/agent/team/workers/tauri-worker-runtime.ts",
     "A:lib/appearance/wallpaper-storage.ts",
     "A:lib/automation/audit.ts",
     "A:lib/ccswitch/client.ts",

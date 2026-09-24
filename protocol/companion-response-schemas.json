@@ -6944,6 +6944,11 @@
         "accepted": {
           "type": "boolean",
           "description": "The host accepted the turn and runs it detached; the outcome arrives as member sub-session events."
+        },
+        "notResent": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "For a regenerate or an edit: the filenames of the turn's attachments the host could not send again (a natively sent video, an image whose bytes are gone). The rest were resent; absent when every file was."
         }
       },
       "additionalProperties": false

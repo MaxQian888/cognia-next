@@ -39,6 +39,15 @@ declare global {
         events: Array<Record<string, unknown>>
       }>
     >
+    /**
+     * Every persisted chat message as the app reads it back: through the
+     * active account database, so its at-rest content cipher is undone. A raw
+     * IndexedDB read of an `-encrypted-v1` database sees only the envelope, so
+     * a spec asserting what a turn durably wrote needs this.
+     */
+    __cogniaReadMessages?: () => Promise<
+      Array<{ database: string; sessionId: string; role: string; text: string }>
+    >
     __cogniaSeedCharacter?: (draft: {
       name: string
       role?: string
@@ -438,6 +447,17 @@ export function ExposeTestGlobals(): null {
         )
       }
 
+      window.__cogniaReadMessages = async () => {
+        const db = getDb()
+        const rows = await db.messages.toArray()
+        return rows.map((row) => ({
+          database: db.name,
+          sessionId: row.sessionId,
+          role: row.role,
+          text: (row.parts ?? []).map((part) => (part.type === "text" ? part.text : "")).join(""),
+        }))
+      }
+
       window.__cogniaSeedCharacter = async (draft) => {
         const { createCharacter } = await import("@/lib/db/characters")
         const c = await createCharacter({
@@ -568,7 +588,7 @@ export function ExposeTestGlobals(): null {
       window.__cogniaSeedSquadRun = async (draft) => {
         const [{ createSquadRunRecords }, { getDb }, { runEventJournal, semanticRunEvent }] =
           await Promise.all([
-            import("@/lib/ai/agent/team/squad-run-records"),
+            import("@/lib/ai/agent/team/squad/squad-run-records"),
             import("@/lib/db/schema"),
             import("@/lib/db/execution-runs"),
           ])
@@ -598,7 +618,7 @@ export function ExposeTestGlobals(): null {
           )
         }
         if (draft.review) {
-          const { armSquadReview } = await import("@/lib/ai/agent/team/squad-review-gate")
+          const { armSquadReview } = await import("@/lib/ai/agent/team/gates/squad-review-gate")
           await armSquadReview({
             runId,
             teamId: draft.teamId,
@@ -915,6 +935,7 @@ export function ExposeTestGlobals(): null {
       detachCompanionE2E()
       delete window.__cogniaResetDb
       delete window.__cogniaSeedWorkflow
+      delete window.__cogniaReadMessages
       delete window.__cogniaSeedCharacter
       delete window.__cogniaSeedConversation
       delete window.__cogniaSeedTeam

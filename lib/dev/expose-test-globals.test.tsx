@@ -19,6 +19,7 @@ const originalEnv = process.env.NEXT_PUBLIC_E2E
 const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaResetDb",
   "__cogniaSeedWorkflow",
+  "__cogniaReadMessages",
   "__cogniaSeedCharacter",
   "__cogniaSeedTeam",
   "__cogniaSeedSkill",
@@ -86,6 +87,7 @@ describe("ExposeTestGlobals", () => {
     })
     expect(typeof window.__cogniaResetDb).toBe("function")
     expect(typeof window.__cogniaSeedWorkflow).toBe("function")
+    expect(typeof window.__cogniaReadMessages).toBe("function")
     expect(typeof window.__cogniaSeedCharacter).toBe("function")
     expect(typeof window.__cogniaSeedTeam).toBe("function")
     expect(typeof window.__cogniaSeedSkill).toBe("function")
@@ -146,6 +148,67 @@ describe("ExposeTestGlobals", () => {
     // Settings writes go through the account content cipher — this is the
     // call that used to throw when the doubled name was activated instead.
     await window.__cogniaSetSettings!({ mobileRuntimeMode: "standalone" })
+  })
+
+  it("__cogniaReadMessages returns the text an encrypted account database stores", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    await provisionBrowserVault("acct_e2e_vault", "correct horse battery staple")
+    activateAccountDatabase("acct_e2e_vault")
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+    const [{ createSession }, { persistMessages }] = await Promise.all([
+      import("@/lib/db/sessions"),
+      import("@/lib/db/messages"),
+    ])
+    // A model skips the default-preset auto-apply, which is not under test.
+    const session = await createSession({ title: "Durable turn", model: "claude-sonnet-5" })
+    await persistMessages(session.id, [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "ping" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "not the reply" },
+          { type: "text", text: "po" },
+          { type: "text", text: "ng" },
+        ],
+      },
+    ])
+
+    // What a raw IndexedDB reader sees: the envelope, not the message.
+    const raw = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const open = indexedDB.open(getDb().name)
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => {
+        const request = open.result.transaction("messages").objectStore("messages").getAll()
+        request.onsuccess = () => {
+          open.result.close()
+          resolve(request.result)
+        }
+        request.onerror = () => reject(request.error)
+      }
+    })
+    expect(raw.length).toBeGreaterThan(0)
+    expect(raw.every((row) => row.parts === undefined)).toBe(true)
+
+    await expect(window.__cogniaReadMessages!()).resolves.toEqual(
+      expect.arrayContaining([
+        {
+          database: "cognia-account-acct_e2e_vault-encrypted-v1",
+          sessionId: session.id,
+          role: "user",
+          text: "ping",
+        },
+        {
+          database: "cognia-account-acct_e2e_vault-encrypted-v1",
+          sessionId: session.id,
+          role: "assistant",
+          text: "pong",
+        },
+      ])
+    )
   })
 
   it("__cogniaE2EWebRtc.getState returns 'idle' before connect and reconnectNow returns 'no-instance'", async () => {

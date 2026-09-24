@@ -37,7 +37,7 @@ const OUT_FILE = join(WEB_ROOT, "content/generated/agent-icons.json")
  * The marks to vendor, keyed by the id the website content uses.
  *
  * Only agents Cognia actually interoperates with — the external-agent presets
- * in `lib/ai/agent/external/presets.ts` and the session-import adapters in
+ * in `lib/ai/agent/external/config/presets.ts` and the session-import adapters in
  * `lib/session-import/adapters/`. An agent with no mark in the package renders
  * with the site's own generic icon rather than a stand-in from another brand.
  */

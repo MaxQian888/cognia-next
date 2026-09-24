@@ -75,12 +75,42 @@ const MAX_ANYDOC_WASM_BYTES = 8 * 1024 * 1024
 const ANYDOC_WASM_ASSET = /(?:^|\/)anydoc_wasm_bg(?:\.[a-f0-9]+)?\.wasm$/i
 const anyDocRolloutEnabled = process.env.NEXT_PUBLIC_ENABLE_ANYDOC_LEGACY_OFFICE === "true"
 
+/**
+ * Built-in plugin mirrors under `public/plugins/` that stay OUT of the precache.
+ *
+ * `@serwist/next` precaches every `public/` file by default (`**\/*`), and it
+ * adds them after `exclude` / `manifestTransforms` run, so neither can filter
+ * them — only `globPublicPatterns` can. `cognia-material-icon-theme` is 1,252
+ * files / 5.5 MB for a plugin that is off by default; precaching it would make
+ * every service-worker install download the whole set whether or not the user
+ * ever enables it. Once enabled, the icons a user actually sees land in the
+ * runtime `images` cache (app/sw.ts) like any other image.
+ */
+const PRECACHE_EXCLUDED_PLUGIN_MIRRORS = ["cognia-material-icon-theme"]
+
+/**
+ * `**\/*` minus the excluded mirrors, spelled with extglobs because glob's
+ * `ignore` option is not exposed. Verified set-equal to the default against
+ * `public/` (offline.html and every other mirror included).
+ */
+const PRECACHE_PUBLIC_PATTERNS = [
+  // Root-level public files (offline.html, …).
+  "!(plugins)",
+  // Every other top-level public directory.
+  "!(plugins)/**/*",
+  // Files directly under public/plugins.
+  "plugins/*",
+  // Every plugin mirror except the excluded ones.
+  `plugins/!(${PRECACHE_EXCLUDED_PLUGIN_MIRRORS.join("|")})/**/*`,
+]
+
 const withSerwist = withSerwistInit({
   swSrc: "app/sw.ts",
   swDest: "public/sw.js",
   cacheOnNavigation: true,
   reloadOnOnline: true,
   disable: disableSerwist,
+  globPublicPatterns: PRECACHE_PUBLIC_PATTERNS,
   // Keep the general 2 MiB budget for optional model runtimes while admitting
   // only AnyDoc's pinned ~6.8 MiB module to the PWA precache. Offline lifecycle
   // and quota behavior remain rollout gates outside this build-time filter.

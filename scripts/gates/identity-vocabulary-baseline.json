@@ -234,7 +234,7 @@
     "lib/accounts/password-client.ts": {
       "bareAccountId": 5
     },
-    "lib/ai/agent/external/env-builder.ts": {
+    "lib/ai/agent/external/config/env-builder.ts": {
       "bareAccountId": 2
     },
     "lib/ai/eval/artifact-crypto.ts": {

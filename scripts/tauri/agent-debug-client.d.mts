@@ -82,6 +82,33 @@ export class TauriDebugTimeoutError extends Error {
   constructor(message: string)
 }
 
+export type RendererRestartCode = "webview_renderer_restarted" | "webview_renderer_restarting"
+
+/** The window's web content process was replaced while a command was pending. */
+export class TauriDebugRendererRestartedError extends Error {
+  readonly code: RendererRestartCode
+  readonly window: string
+  readonly rendererGeneration?: number
+  readonly retryable: true
+  constructor(
+    message: string,
+    options?: {
+      window?: string
+      rendererGeneration?: number
+      code?: RendererRestartCode
+      cause?: unknown
+    }
+  )
+}
+
+/** Native renderer lifecycle of one webview window. */
+export interface RendererState {
+  /** Web content process terminations observed for this window. */
+  generation: number
+  /** True until the replacement renderer commits a document. */
+  awaitingLoad: boolean
+}
+
 export interface DiagnosticRead<T = unknown> {
   entries: T[]
   nextCursor: number
@@ -210,6 +237,8 @@ export class TauriPage {
   constructor(options?: TauriPageOptions)
   setDefaultTimeout(timeout: number): void
   capabilities(): Promise<TauriDebugCapabilities>
+  rendererState(): Promise<RendererState>
+  waitForRenderer(options?: TimeoutOption): Promise<RendererState>
   locator(selector: string): TauriLocator
   getByTestId(testId: string): TauriLocator
   getByPlaceholder(text: TextMatcher, options?: { exact?: boolean }): TauriLocator

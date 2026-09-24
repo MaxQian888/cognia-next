@@ -2,8 +2,13 @@
 rustflags = ["--cfg", "tokio_unstable"]
 
 # macOS local dev: sign the freshly-built `cognia-next` with a stable
-# self-signed identity so the login keychain (service com.cognia.platforms)
-# recognizes it across rebuilds and stops re-prompting for the password.
+# self-signed identity so the login keychain recognizes it across rebuilds and
+# stops re-prompting for the password. The app's own secret store no longer
+# needs this in a debug build: it keeps a file-based master key under
+# <data dir>/cognia/dev/ (crates/cognia-secrets, `COGNIA_DEV_KEYCHAIN=1` opts
+# back in). What still reads the keychain in dev is explicit, user-initiated
+# access to other apps' items (Claude/Codex credential discovery, browser
+# cookie import).
 # See src-tauri/scripts/dev-codesign.sh; one-time setup: `pnpm dev:sign:setup`.
 #
 # Cargo is Tauri's default development runner, so this covers both direct

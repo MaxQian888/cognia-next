@@ -109,7 +109,7 @@ Audits don't replace the real gates. Run these and paste the output verbatim:
 ```bash
 rtk tsc && rtk pnpm lint && rtk pnpm lint:i18n && pnpm i18n:sort:check
 rtk pnpm test -- <changed test files>                  # narrow first
-pnpm test:coverage                                     # full gate when claiming done (≥90%)
+pnpm test:coverage                                     # opt-in — only when the user explicitly requests a coverage check (≥90%)
 rtk cargo test --manifest-path src-tauri/Cargo.toml    # if src-tauri/ changed
 rtk pnpm docs:build                                    # if docs/ changed
 ```

@@ -40,21 +40,30 @@ test.describe("mobile — standalone chat", () => {
           baseURL: anthropicMockBaseUrl(),
         },
       },
+      // ADR-0122: a session-less account is routed into the first-run flow
+      // unless a settled record says the device has already been through it.
+      onboardingProgress: {
+        version: 2,
+        path: "completed",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      },
     })
   })
 
   test("@smoke @critical sending a message streams and restores the reply", async ({ page }) => {
     await page.goto("/")
-    // The chat tab lands on the quick-actions home — enter a session first.
+    // The chat tab lands on the quick-actions home. Its "New chat" door lands
+    // on the welcome surface (not a character picker); the live composer
+    // there creates the session on its first send.
     const newChat = page.getByTestId("mobile-quick-action-newChat")
     await expect(newChat).toBeVisible({ timeout: 20_000 })
     await newChat.click()
-    // New chat opens the character picker — take the first built-in.
-    const picker = page.getByRole("dialog", { name: /pick a character/i })
-    await expect(picker).toBeVisible({ timeout: 10_000 })
-    await picker.getByRole("option").first().click()
+    await expect(
+      page.getByTestId("welcome-composer").getByRole("textbox", { name: /message/i })
+    ).toBeVisible({ timeout: 20_000 })
+    // Not scoped to the welcome surface: after the first send the conversation
+    // view replaces it and the docked composer takes the role.
     const composer = page.getByRole("textbox", { name: /message/i }).first()
-    await expect(composer).toBeVisible({ timeout: 20_000 })
 
     await composer.fill("ping from standalone chat e2e")
     await composer.press("Enter")

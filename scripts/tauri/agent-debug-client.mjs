@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import { loadEndpoint, request } from "./agent-debug.mjs"
+import { isRendererRestartError, loadEndpoint, request } from "./agent-debug.mjs"
 
 const sleep = (milliseconds, signal) =>
   new Promise((resolve, reject) => {
@@ -66,6 +66,26 @@ export class TauriDebugTimeoutError extends Error {
   constructor(message) {
     super(message)
     this.name = "TauriDebugTimeoutError"
+  }
+}
+
+/**
+ * The webview's web content process was replaced (WKWebView renderer killed or
+ * crashed, then reloaded) while a command was pending. The page reloaded, so
+ * element refs, in-page state, and the command's effects are gone. Retryable:
+ * `await page.waitForRenderer()` and re-run the command.
+ */
+export class TauriDebugRendererRestartedError extends Error {
+  constructor(
+    message,
+    { window, rendererGeneration, code = "webview_renderer_restarted", cause } = {}
+  ) {
+    super(message, cause ? { cause } : undefined)
+    this.name = "TauriDebugRendererRestartedError"
+    this.code = code
+    this.window = window
+    this.rendererGeneration = rendererGeneration
+    this.retryable = true
   }
 }
 
@@ -649,12 +669,59 @@ export class TauriPage {
     this.defaultTimeout = defaultTimeout
     this._consoleCursor = 0
     this._networkCursor = 0
+    // Last renderer generation observed for this window (null until a health
+    // probe or restart error reports one).
+    this._rendererGeneration = null
     this.keyboard = new TauriKeyboard(this)
     this.mouse = new TauriMouse(this)
   }
 
-  _request(route, options = {}) {
+  _transport(route, options = {}) {
     return request(route, { ...options, endpoint: this.endpoint, fetchImpl: this.fetchImpl })
+  }
+  async _request(route, options = {}) {
+    try {
+      return await this._transport(route, options)
+    } catch (error) {
+      throw await this._explainBridgeError(error)
+    }
+  }
+  /**
+   * Turn renderer-replacement failures into `TauriDebugRendererRestartedError`.
+   * The bridge reports a termination it observed while a command was pending;
+   * an evaluation timeout is additionally checked against the renderer state,
+   * because the termination can land just after the bridge gave up waiting.
+   */
+  async _explainBridgeError(error) {
+    if (isRendererRestartError(error)) {
+      if (Number.isSafeInteger(error.rendererGeneration))
+        this._rendererGeneration = error.rendererGeneration
+      return new TauriDebugRendererRestartedError(error.message, {
+        window: error.window ?? this.windowLabel,
+        rendererGeneration: error.rendererGeneration,
+        code: error.code,
+        cause: error,
+      })
+    }
+    if (error?.code !== "webview_eval_timeout") return error
+    const previous = this._rendererGeneration
+    let renderer
+    try {
+      renderer = await this.rendererState()
+    } catch {
+      return error
+    }
+    const replaced = previous !== null && renderer.generation !== previous
+    if (!renderer.awaitingLoad && !replaced) return error
+    return new TauriDebugRendererRestartedError(
+      `webview renderer restarted: the ${this.windowLabel} web content process was replaced while the command was pending (renderer generation ${renderer.generation}); the page reloaded, so element refs and in-page state are gone — re-run the command`,
+      {
+        window: this.windowLabel,
+        rendererGeneration: renderer.generation,
+        code: renderer.awaitingLoad ? "webview_renderer_restarting" : "webview_renderer_restarted",
+        cause: error,
+      }
+    )
   }
   _post(route, body, options = {}) {
     return this._request(route, { ...options, method: "POST", body })
@@ -741,7 +808,57 @@ export class TauriPage {
 
   async capabilities() {
     const health = await this._request("/api/dev/agent/health")
+    this._noteRenderer(health)
     return health.helper?.capabilities || {}
+  }
+
+  _noteRenderer(health) {
+    const renderer = health?.renderers?.[this.windowLabel] ?? {
+      generation: 0,
+      awaitingLoad: false,
+    }
+    this._rendererGeneration = renderer.generation
+    return renderer
+  }
+
+  /**
+   * Native renderer lifecycle for this window: `generation` counts web content
+   * process terminations, `awaitingLoad` is true until the replacement
+   * renderer commits a document.
+   */
+  async rendererState() {
+    return this._noteRenderer(await this._transport("/api/dev/agent/health"))
+  }
+
+  /**
+   * Wait until the window has a live renderer whose helper answers — the
+   * recovery step after a `TauriDebugRendererRestartedError`.
+   */
+  async waitForRenderer(options = {}) {
+    const timeout = options.timeout ?? this.defaultTimeout
+    const deadline = Date.now() + timeout
+    let lastError = null
+    do {
+      const renderer = await this.rendererState()
+      if (!renderer.awaitingLoad) {
+        try {
+          await this._pageState()
+          return renderer
+        } catch (error) {
+          if (
+            !(error instanceof TauriDebugRendererRestartedError) &&
+            error?.code !== "webview_eval_timeout"
+          )
+            throw error
+          lastError = error
+        }
+      }
+      if (Date.now() >= deadline) break
+      await sleep(100, options.signal)
+    } while (true)
+    throw new TauriDebugTimeoutError(
+      `page.waitForRenderer timed out after ${timeout}ms${lastError ? `: ${lastError.message}` : ""}`
+    )
   }
 
   async snapshot(options = {}) {

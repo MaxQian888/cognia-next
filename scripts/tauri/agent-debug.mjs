@@ -186,9 +186,45 @@ export async function request(
     const error = new Error(`${route} failed (${response.status}): ${payload.error || text}`)
     error.status = response.status
     error.code = payload.code
+    // Renderer lifecycle failures (`webview_renderer_restarted` /
+    // `webview_renderer_restarting`) say which window's web content process
+    // was replaced and at which generation.
+    if (typeof payload.window === "string") error.window = payload.window
+    if (Number.isSafeInteger(payload.rendererGeneration))
+      error.rendererGeneration = payload.rendererGeneration
+    if (typeof payload.retryable === "boolean") error.retryable = payload.retryable
     throw error
   }
   return payload
+}
+
+/** Error codes the bridge uses when a webview's web content process was replaced. */
+export const RENDERER_RESTART_CODES = Object.freeze([
+  "webview_renderer_restarted",
+  "webview_renderer_restarting",
+])
+
+export function isRendererRestartError(error) {
+  return RENDERER_RESTART_CODES.includes(error?.code)
+}
+
+/** Machine-readable CLI failure payload; keeps bridge codes instead of a bare message. */
+export function cliErrorPayload(error) {
+  return {
+    ok: false,
+    error: error.message,
+    ...(error.code ? { code: error.code } : {}),
+    ...(error.window ? { window: error.window } : {}),
+    ...(Number.isSafeInteger(error.rendererGeneration)
+      ? { rendererGeneration: error.rendererGeneration }
+      : {}),
+    ...(isRendererRestartError(error)
+      ? {
+          rendererRestarted: true,
+          hint: "the webview's web content process was replaced and the page reloaded; element refs are stale — take a new snapshot and re-run the command",
+        }
+      : {}),
+  }
 }
 
 function processAlive(pid) {
@@ -541,7 +577,7 @@ async function run(parsed) {
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || "")) {
   run(parseArgs(process.argv.slice(2))).catch((error) => {
-    process.stderr.write(`${JSON.stringify({ ok: false, error: error.message }, null, 2)}\n`)
+    process.stderr.write(`${JSON.stringify(cliErrorPayload(error), null, 2)}\n`)
     process.exitCode = 1
   })
 }

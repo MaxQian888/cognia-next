@@ -2,7 +2,7 @@
 
 Recorded `session.event` / `session.status` notification streams, one JSON frame
 per line, in wire order. These drive the codec tests in
-`lib/ai/agent/external/dsh-session-event-codec.test.ts`.
+`lib/ai/agent/external/runtimes/dsh/dsh-session-event-codec.test.ts`.
 
 | File                                            | Provenance                                                                                                                                                                                                                            |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

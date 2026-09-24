@@ -34,7 +34,7 @@
  * What is NOT checked, and why: whether a version listed as certified actually
  * behaves. That is a runtime property no static gate can establish, and a check
  * claiming otherwise would read as coverage it does not have. It is pinned by
- * `lib/ai/agent/external/runtime-version.test.ts` at the policy level and by
+ * `lib/ai/agent/external/config/runtime-version.test.ts` at the policy level and by
  * the provider conformance tests at the install level.
  *
  * Usage: pnpm audit:external-agent-runtimes
@@ -52,7 +52,7 @@ const readJson = (rel) => JSON.parse(read(rel))
 
 const CATALOG = "protocol/external-agent-runtimes.json"
 const SECURITY_POLICY = "protocol/external-agent-security-policy.json"
-const PRESETS_TS = "lib/ai/agent/external/presets.ts"
+const PRESETS_TS = "lib/ai/agent/external/config/presets.ts"
 
 const KNOWN_PLATFORMS = new Set(["darwin", "linux", "win32"])
 const OWNERSHIP_MODES = new Set(["managed", "system", "remote"])

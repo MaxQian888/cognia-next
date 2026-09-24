@@ -44,6 +44,10 @@ test("@critical sidebar preserves natural title order across a large history", a
   })
   await page.reload()
   await waitForTestGlobals(page, 30_000)
+  // The default rail is the scope tree, whose Chats group previews the newest
+  // four rows. "Show all" is where the whole history renders — and, past 200
+  // rows, where it is windowed.
+  await page.getByTestId("sidebar-scope-more-chats").click()
   const list = page.getByTestId("channel-list-virtual-rows")
   await expect(list).toBeVisible()
   await expect(list.getByRole("button", { name: "History 0", exact: true })).toBeVisible()
@@ -250,15 +254,29 @@ test("@critical paired web sidebar receives complete recent-first history over H
     await expect
       .poll(() => responses.reduce((sum, response) => sum + response.rows, 0))
       .toBeGreaterThanOrEqual(1000)
-    // Receipt precedes the deliberately yielded 200-row apply slices. Wait
-    // for the complete visible history, rather than sampling only first paint.
+    // Receipt precedes the deliberately yielded 200-row apply slices. The
+    // Chats label counts its whole group, so it reaching 1000 — not first
+    // paint — is the proof every row landed.
+    await expect(page.getByTestId("sidebar-scope-label-chats")).toContainText("1000")
+    // The rail previews the newest few rows; "Show all" renders the whole
+    // history, windowed past 200 rows. Order and reach are read through it
+    // rather than by counting DOM rows a windowed list never all mounts.
+    await page.getByTestId("sidebar-scope-more-chats").click()
+    const list = page.getByTestId("channel-list-virtual-rows")
+    await expect(list).toBeVisible()
+    const remoteTitles = async () =>
+      (await list.locator("li button").allTextContents())
+        .map((title) => title.trim())
+        .filter((title) => /^Remote history \d+$/.test(title))
     await expect
-      .poll(async () =>
-        (await page.locator("li > button").allTextContents())
-          .map((title) => title.trim())
-          .filter((title) => /^Remote history \d+$/.test(title))
-      )
-      .toEqual(Array.from({ length: 1000 }, (_, index) => `Remote history ${999 - index}`))
+      .poll(async () => (await remoteTitles()).slice(0, 10))
+      .toEqual(Array.from({ length: 10 }, (_, index) => `Remote history ${999 - index}`))
+    // The oldest row is reachable, and it is last: End materializes the
+    // offscreen tail and lands on it.
+    await list.getByRole("button", { name: "Remote history 999", exact: true }).focus()
+    await page.keyboard.press("End")
+    await expect(list.getByRole("button", { name: "Remote history 0", exact: true })).toBeFocused()
+    expect((await remoteTitles()).at(-1)).toBe("Remote history 0")
     if (process.env.SIDEBAR_PERF_OUTPUT) {
       writeFileSync(
         `${process.env.SIDEBAR_PERF_OUTPUT}.http.json`,

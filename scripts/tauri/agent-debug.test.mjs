@@ -2,15 +2,19 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  cliErrorPayload,
   configDir,
   agentDebugEnvironment,
   AGENT_DEBUG_TAURI_CONFIG,
   DEFAULT_LAUNCH_TIMEOUT_MS,
   detectTerminalTauriFailure,
   endpointFilePath,
+  isRendererRestartError,
   launchTimeout,
   parseArgs,
   parseEndpoint,
+  RENDERER_RESTART_CODES,
+  request,
   tauriDevArgs,
 } from "./agent-debug.mjs"
 
@@ -93,4 +97,62 @@ test("parses positional action arguments and boolean flags", () => {
     }
   )
   assert.throws(() => parseArgs(["snapshot", "--window"]), /missing value/)
+})
+
+test("request() carries renderer restart details from the bridge error payload", async () => {
+  const endpoint = { baseUrl: "http://127.0.0.1:4317", devToken: "a".repeat(64) }
+  const fetchImpl = async () =>
+    new Response(
+      JSON.stringify({
+        ok: false,
+        code: "webview_renderer_restarted",
+        error: "webview renderer restarted: the main web content process terminated",
+        window: "main",
+        rendererGeneration: 4,
+        retryable: true,
+      }),
+      { status: 503 }
+    )
+
+  await assert.rejects(
+    request("/api/dev/agent/evaluate", { method: "POST", body: {}, endpoint, fetchImpl }),
+    (error) => {
+      assert.equal(error.status, 503)
+      assert.equal(error.code, "webview_renderer_restarted")
+      assert.equal(error.window, "main")
+      assert.equal(error.rendererGeneration, 4)
+      assert.equal(error.retryable, true)
+      assert.equal(isRendererRestartError(error), true)
+      return true
+    }
+  )
+})
+
+test("CLI failures keep bridge codes and flag renderer restarts", () => {
+  assert.deepEqual(RENDERER_RESTART_CODES, [
+    "webview_renderer_restarted",
+    "webview_renderer_restarting",
+  ])
+
+  const restart = Object.assign(new Error("webview renderer restarted"), {
+    code: "webview_renderer_restarted",
+    window: "main",
+    rendererGeneration: 2,
+  })
+  const payload = cliErrorPayload(restart)
+  assert.equal(payload.ok, false)
+  assert.equal(payload.code, "webview_renderer_restarted")
+  assert.equal(payload.window, "main")
+  assert.equal(payload.rendererGeneration, 2)
+  assert.equal(payload.rendererRestarted, true)
+  assert.match(payload.hint, /snapshot/)
+
+  const timeout = Object.assign(new Error("timed out"), { code: "webview_eval_timeout" })
+  assert.deepEqual(cliErrorPayload(timeout), {
+    ok: false,
+    error: "timed out",
+    code: "webview_eval_timeout",
+  })
+  assert.deepEqual(cliErrorPayload(new Error("plain")), { ok: false, error: "plain" })
+  assert.equal(isRendererRestartError(timeout), false)
 })

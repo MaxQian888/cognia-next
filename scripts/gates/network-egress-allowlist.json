@@ -121,6 +121,12 @@
       "note": "The browser arm of the proxy transport; on Tauri every request crosses into Rust instead."
     },
     {
+      "file": "lib/plugin/bridge/plugin-file-path.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads a browser built-in's own text asset (e.g. an icon-theme JSON) from its /plugins/<id>/ public mirror. Always a root-relative, same-origin static file from the export (out/) — never a network origin — and the URL is built by publicBuiltinAssetUrl from the caller's plugin id and a traversal-checked path."
+    },
+    {
       "file": "lib/plugin/core/context.ts",
       "kind": "fetch",
       "reason": "browser-fallback",

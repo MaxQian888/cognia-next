@@ -6,7 +6,7 @@ These project rules override any default behavior to the contrary.
 
 1. **Research before implementing.** Before writing new code, grep `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. New files require justification that no existing module can be extended.
 2. **No simplifications.** Implement the full behavior the task requires. No stubs, `// TODO later`, abbreviated happy paths, or stripped error handling/validation/edge cases. If you genuinely can't finish, stop and surface the blocker instead of silently shipping less.
-3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. Coverage stays ≥90% — verify with `pnpm test:coverage` before claiming done.
+3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. **Coverage is opt-in**: do not run `pnpm test:coverage` or enforce any coverage threshold unless the user explicitly asks for it.
 4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`) and add keys to the matching split source files under **both** `i18n/messages/en/**` and `i18n/messages/zh-CN/**`. **Never edit `i18n/messages/en.json` or `i18n/messages/zh-CN.json` directly** — they are generated artifacts. Run `pnpm i18n:build` after editing split sources, then run `pnpm i18n:build:check` and `pnpm lint:i18n` to confirm freshness and parity. Aria labels, placeholders, toasts, and error messages count.
 5. **Language convention.** Internal narration (status updates, commit messages, code comments, plans) is in **English**. Clarifying questions to the user are in **Chinese** — identifiers, paths, and Conventional Commit prefixes stay English even inside Chinese sentences.
 
@@ -96,11 +96,11 @@ pnpm dlx shadcn@latest add <component-name>
 
 ## Testing Guidelines
 
-- **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Run `pnpm test:coverage` to verify before opening a PR.
+- **Coverage is opt-in**: do **not** run `pnpm test:coverage` or enforce a coverage threshold by default. Only when the user explicitly requests a coverage check does the ≥90% target (lines, branches, functions) apply.
 - **TypeScript / TSX tests**: co-locate next to the source file as `xxx.test.ts` or `xxx.test.tsx` (e.g., `lib/avatar.ts` → `lib/avatar.test.ts`, `components/chat/message.tsx` → `components/chat/message.test.tsx`). Do **not** place unit tests in a separate `__tests__/` or `tests/` directory.
 - **Rust tests**: write unit tests inside the same `.rs` file using a `#[cfg(test)] mod tests { ... }` block. Integration tests may still live in `src-tauri/tests/`.
 - Test runner: Jest is configured (`pnpm test`, `pnpm test:watch`, `pnpm test:coverage`). For e2e, prefer Playwright.
-- Prioritize `lib/`, `hooks/`, `stores/`, and `src-tauri/src/` for full coverage.
+- When coverage is requested, prioritize `lib/`, `hooks/`, `stores/`, and `src-tauri/src/` for full coverage.
 - **Never add test files inside `components/ui/` or `components/ai-elements/`** — those are vendored components (shadcn/ui and ai-elements respectively) and are excluded from coverage thresholds.
 
 ## Commit & Pull Request Guidelines

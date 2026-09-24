@@ -80,6 +80,16 @@ trusted input, video, or response interception. Unsupported behavior must raise
   on macOS, then relaunch so `xcap` can capture the real window.
 - Native build failure: distinguish errors in touched files from pre-existing
   workspace dependency failures. Do not repair unrelated dirty dependency work.
+- `webview_renderer_restarted` / `webview_renderer_restarting` (client:
+  `TauriDebugRendererRestartedError`): the window's web content process died
+  and the app reloaded it. Do not relaunch the app. Run
+  `await page.waitForRenderer()` (CLI: poll `status`/`health` until
+  `renderers.<window>.awaitingLoad` is false), take a new snapshot, and re-run
+  the command. Its effects did not survive the old renderer.
+- Repeated `webview_eval_timeout` with `awaitingLoad: false` and an unchanged
+  generation: the renderer is alive but not answering (a JS spin or a
+  suspended hidden webview). Sample the WebContent process before killing it;
+  after a kill the bridge rebinds on its own.
 
 ## Evidence report
 
