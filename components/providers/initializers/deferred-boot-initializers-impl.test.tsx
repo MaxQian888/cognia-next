@@ -21,6 +21,10 @@ const recoverDirectRuns = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/execution/direct-chat-run", () => ({
   recoverStaleDirectChatExecutionRuns: () => recoverDirectRuns(),
 }))
+const recoverPlanSteps = jest.fn().mockResolvedValue(0)
+jest.mock("@/lib/agent/plan/step-recovery", () => ({
+  ensurePlanStepRecovery: () => recoverPlanSteps(),
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -49,6 +53,12 @@ describe("DeferredBootInitializersImpl", () => {
     ])
     expect(mockMarkReady).toHaveBeenCalledWith("core-chat")
     expect(recoverDirectRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it("sweeps orphaned in-session plan steps at boot, not only when a chat surface mounts", () => {
+    recoverPlanSteps.mockClear()
+    render(<DeferredBootInitializersImpl />)
+    expect(recoverPlanSteps).toHaveBeenCalledTimes(1)
   })
 
   /**

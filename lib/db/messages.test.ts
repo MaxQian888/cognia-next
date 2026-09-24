@@ -28,7 +28,17 @@ import {
   type ImageEditVersionV1,
 } from "@/lib/chat/image-edit/version"
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
-import { putSessionAsset, getSessionAsset } from "./session-assets"
+import { putSessionAsset, getSessionAsset, persistMessageSessionAssets } from "./session-assets"
+
+jest.mock("./session-assets", () => {
+  const actual = jest.requireActual("./session-assets")
+  return { ...actual, persistMessageSessionAssets: jest.fn(actual.persistMessageSessionAssets) }
+})
+
+jest.mock("./schema", () => {
+  const actual = jest.requireActual("./schema")
+  return { ...actual, getDb: jest.fn(actual.getDb) }
+})
 
 jest.setTimeout(30_000)
 
@@ -73,6 +83,272 @@ function msg(
 }
 
 describe("persistMessages + listMessages", () => {
+  it("rejects an account switch between attachment preparation stages", async () => {
+    const db = getDb()
+    const mockDb = jest.mocked(getDb)
+    jest.mocked(persistMessageSessionAssets).mockImplementationOnce(async (_id, message) => {
+      mockDb.mockReturnValue({ name: "another-account" } as ReturnType<typeof getDb>)
+      return message
+    })
+    try {
+      await expect(
+        persistMessages("scope", [msg("private", "assistant", "private")])
+      ).rejects.toThrow("database scope changed")
+    } finally {
+      mockDb.mockImplementation(jest.requireActual("./schema").getDb)
+    }
+    expect(await db.messages.get("private")).toBeUndefined()
+  })
+
+  it("keeps the streaming path bounded with nine concurrently retained sessions", async () => {
+    const lists = Array.from({ length: 9 }, (_, index) => [
+      msg(`first-${index}`, "user", "prompt"),
+      msg(`last-${index}`, "assistant", "partial"),
+    ])
+    for (const [index, list] of lists.entries()) await persistMessages(`parallel-${index}`, list)
+    const spy = jest.spyOn(getDb().messages, "where")
+    try {
+      await Promise.all(
+        lists.map((list, index) =>
+          persistStreamingMessages(`parallel-${index}`, [
+            list[0],
+            msg(`last-${index}`, "assistant", "finished"),
+          ])
+        )
+      )
+      expect(spy).not.toHaveBeenCalledWith("sessionId")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("preserves a single-message deletion queued behind a stalled checkpoint", async () => {
+    const initial = msg("deleted-reply", "assistant", "initial")
+    await persistMessages("delete-pending", [initial])
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    jest.mocked(persistMessageSessionAssets).mockImplementationOnce(async (_id, message) => {
+      entered()
+      await gate
+      return message
+    })
+    const checkpoint = persistStreamingMessages("delete-pending", [
+      msg("deleted-reply", "assistant", "partial"),
+    ])
+    await started
+    const deleted = deleteStoredMessage("deleted-reply")
+    release()
+    await Promise.all([checkpoint, deleted])
+    expect(await listMessages("delete-pending")).toEqual([])
+  })
+
+  it("rejects duplicate delta ids without modifying durable rows", async () => {
+    await expect(
+      commitMessageDelta("duplicates", {
+        upserts: [msg("same", "assistant", "a"), msg("same", "assistant", "b")],
+      })
+    ).rejects.toThrow("duplicate upsert ids")
+    expect(await listMessages("duplicates")).toEqual([])
+  })
+
+  it("recovers a streaming row deleted out of band and persists its media ledger", async () => {
+    const original = msg("missing-tail", "assistant", "partial")
+    await persistMessages("missing-stream", [original])
+    await getDb().messages.delete(original.id)
+    await persistStreamingMessages("missing-stream", [msg(original.id, "assistant", "recovered")])
+    expect((await listMessages("missing-stream"))[0]?.parts).toEqual([
+      { type: "text", text: "recovered" },
+    ])
+  })
+
+  it("changes streaming media ownership only when hashes change", async () => {
+    const file = (hash: string): UIMessage => ({
+      id: "media-tail",
+      role: "assistant",
+      parts: [{ type: "file", mediaType: "image/png", url: `cognia-media:${hash}` }],
+    })
+    await persistMessages("refs-stream", [file("old")])
+    await persistStreamingMessages("refs-stream", [file("new")])
+    expect((await listMessageMediaRefsForSession("refs-stream")).map((row) => row.hash)).toEqual([
+      "new",
+    ])
+    await persistStreamingMessages("refs-stream", [msg("media-tail", "assistant", "text only")])
+    expect(await listMessageMediaRefsForSession("refs-stream")).toEqual([])
+  })
+
+  it("restores cold streams, empty streams and hoisted sender metadata", async () => {
+    await persistStreamingMessages("cold", [msg("cold-message", "assistant", "initial")])
+    await persistStreamingMessages("cold", [
+      msg("cold-message", "assistant", "updated", {
+        senderId: "agent",
+        senderKind: "assistant",
+        turnKey: "turn-1",
+      }),
+    ])
+    expect(await getDb().messages.get("cold-message")).toMatchObject({
+      senderId: "agent",
+      senderKind: "assistant",
+      turnKey: "turn-1",
+    })
+    await persistStreamingMessages("cold", [])
+    expect(await listMessages("cold")).toEqual([])
+  })
+
+  it("refuses a streaming row reassigned out of band to another session", async () => {
+    const message = msg("moved", "assistant", "initial")
+    await persistMessages("source", [message])
+    await getDb().messages.update("moved", { sessionId: "other" })
+    await expect(
+      persistStreamingMessages("source", [msg("moved", "assistant", "changed")])
+    ).rejects.toThrow("cannot move")
+    expect((await getDb().messages.get("moved"))?.sessionId).toBe("other")
+  })
+
+  it("keeps delta metadata, revisions and media ownership atomic", async () => {
+    await putSession("delta-media")
+    const message: UIMessage = {
+      id: "delta-image",
+      role: "assistant",
+      metadata: { senderId: "agent", senderKind: "system", turnKey: "turn-1" },
+      parts: [{ type: "file", mediaType: "image/png", url: "cognia-media:delta-old" }],
+    }
+    await commitMessageDelta("delta-media", { upserts: [message], deleteIds: [message.id] })
+    expect(await getDb().messages.get(message.id)).toMatchObject({
+      senderId: "agent",
+      senderKind: "system",
+      turnKey: "turn-1",
+    })
+    await commitMessageDelta("delta-media", { upserts: [msg(message.id, "assistant", "text")] })
+    expect(await listMessageMediaRefsForSession("delta-media")).toEqual([])
+    expect((await getDb().sessions.get("delta-media"))?.transcriptRevision).toBe(2)
+    await commitMessageDelta("delta-media", { deleteIds: ["absent"] })
+    expect((await getDb().sessions.get("delta-media"))?.transcriptRevision).toBe(2)
+  })
+
+  it("falls back to durable state when weak message references have been collected", async () => {
+    const message = msg("weak", "assistant", "preserved")
+    await persistMessages("weak-session", [message])
+    const spy = jest.spyOn(WeakRef.prototype, "deref").mockReturnValue(undefined)
+    try {
+      await persistMessages("weak-session", [message])
+      await persistMessages("new-session", [msg("new", "assistant", "new")])
+    } finally {
+      spy.mockRestore()
+    }
+    expect((await listMessages("weak-session"))[0]?.parts).toEqual(message.parts)
+  })
+
+  it("clears after a pending checkpoint without resurrecting it", async () => {
+    const checkpoint = persistMessages("clear-pending", [msg("reply", "assistant", "partial")])
+    const cleared = clearMessages("clear-pending")
+    await Promise.all([checkpoint, cleared])
+    expect(await listMessages("clear-pending")).toEqual([])
+  })
+
+  it("truncates after a pending checkpoint without restoring its trailing rows", async () => {
+    const checkpoint = persistMessages("truncate-pending", [
+      msg("anchor", "user", "prompt"),
+      msg("reply", "assistant", "partial"),
+    ])
+    const truncated = truncateAfter("truncate-pending", "anchor")
+    await Promise.all([checkpoint, truncated])
+    expect((await listMessages("truncate-pending")).map((message) => message.id)).toEqual([
+      "anchor",
+    ])
+  })
+
+  it("coalesces pending checkpoints under backpressure without crossing a final-write barrier", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const normalize = jest.mocked(persistMessageSessionAssets)
+    normalize.mockClear()
+    normalize.mockImplementationOnce(async (_sessionId, message) => {
+      entered()
+      await gate
+      return message
+    })
+    const first = persistMessages("pressure", [msg("reply", "assistant", "initial")])
+    await started
+    const pending = Array.from({ length: 1000 }, (_, index) =>
+      persistStreamingMessages("pressure", [msg("reply", "assistant", `partial-${index}`)])
+    )
+    expect(new Set(pending).size).toBe(1)
+    const final = persistMessages("pressure", [msg("reply", "assistant", "sealed")])
+    const next = persistStreamingMessages("pressure", [msg("reply", "assistant", "next turn")])
+    expect(next).not.toBe(pending[0])
+    release()
+    await Promise.all([first, ...pending, final, next])
+    expect(normalize).toHaveBeenCalledTimes(4)
+    expect(normalize.mock.calls.map((call) => call[1].parts[0])).toEqual([
+      { type: "text", text: "initial" },
+      { type: "text", text: "partial-999" },
+      { type: "text", text: "sealed" },
+      { type: "text", text: "next turn" },
+    ])
+    expect((await listMessages("pressure"))[0]?.parts).toEqual([
+      { type: "text", text: "next turn" },
+    ])
+  })
+
+  it("allows a later checkpoint to retry after a failed write", async () => {
+    jest.mocked(persistMessageSessionAssets).mockRejectedValueOnce(new Error("quota exceeded"))
+    const failed = persistMessages("retry", [msg("reply", "assistant", "partial")])
+    const retry = persistMessages("retry", [msg("reply", "assistant", "recovered")])
+    await expect(failed).rejects.toThrow("quota exceeded")
+    await retry
+    expect((await listMessages("retry"))[0]?.parts).toEqual([{ type: "text", text: "recovered" }])
+  })
+
+  it("orders a final write behind an in-flight checkpoint even when normalization stalls", async () => {
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const normalize = jest.mocked(persistMessageSessionAssets)
+    normalize.mockClear()
+    normalize.mockImplementationOnce(async (_sessionId, message) => {
+      entered()
+      await gate
+      return message
+    })
+    const checkpoint = persistMessages("ordered", [msg("reply", "assistant", "partial")])
+    await started
+    const final = persistMessages("ordered", [msg("reply", "assistant", "complete")])
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(normalize).toHaveBeenCalledTimes(1)
+    } finally {
+      release()
+      await Promise.all([checkpoint, final])
+    }
+    expect((await listMessages("ordered"))[0]?.parts).toEqual([{ type: "text", text: "complete" }])
+  })
+
+  it("atomically claims message ownership across concurrent session deltas", async () => {
+    const results = await Promise.allSettled([
+      commitMessageDelta("owner-a", { upserts: [msg("collision", "assistant", "a")] }),
+      commitMessageDelta("owner-b", { upserts: [msg("collision", "assistant", "b")] }),
+    ])
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+  })
+
   it("preserves session-owned source files when clearing the transcript", async () => {
     await putSession("s-asset")
     await putSessionAsset({

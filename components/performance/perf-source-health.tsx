@@ -4,7 +4,13 @@ import { useTranslations } from "next-intl"
 import { AlertCircleIcon, CheckCircle2Icon, Clock3Icon, MinusCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { PerfConnectionState, PerfGap, PerfSourceDescriptor } from "@/lib/perf/backend/types"
+import type {
+  PerfConnectionState,
+  PerfGap,
+  PerfLeaseRejectionCode,
+  PerfSourceDescriptor,
+} from "@/lib/perf/backend/types"
+import type { PerfHostIssue } from "@/lib/perf/host-live-lease"
 
 const stateIcons: Record<PerfConnectionState, typeof CheckCircle2Icon> = {
   connecting: Clock3Icon,
@@ -14,22 +20,52 @@ const stateIcons: Record<PerfConnectionState, typeof CheckCircle2Icon> = {
   unsupported: MinusCircleIcon,
 }
 
+/** Which sentence names the holder of a contended lease. */
+const CONTENDED_KEY: Partial<Record<PerfLeaseRejectionCode, string>> = {
+  "device-purpose-limit": "issue.contended.deviceBusy",
+  "host-lease-limit": "issue.contended.hostBusy",
+  "rate-limited": "issue.contended.rateLimited",
+  "target-mismatch": "issue.contended.targetBusy",
+  "routing-generation-mismatch": "issue.contended.targetBusy",
+}
+
 export function PerfSourceHealth({
   sources,
   hostState,
   gaps,
   error,
+  issue = null,
   collectionDurationMs,
   actualIntervalMs,
 }: {
   sources: PerfSourceDescriptor[]
   hostState: PerfConnectionState
   gaps: PerfGap[]
+  /** Raw host wording, shown only when no typed {@link issue} explains it. */
   error: string | null
+  /** Why the host lease is not live (see `lib/perf/host-live-lease.ts`). */
+  issue?: PerfHostIssue | null
   collectionDurationMs?: number
   actualIntervalMs?: number
 }) {
   const t = useTranslations("performance.sourceHealth")
+  // A lease someone else holds is a wait, not a fault: it is explained in the
+  // status line below and retried on its own, so "Latest error" stays clear.
+  const contended = issue?.kind === "contended" ? issue : null
+  const issueMessage = (() => {
+    if (!issue) return null
+    switch (issue.kind) {
+      case "contended":
+        return t(CONTENDED_KEY[issue.code] ?? "issue.contended.hostBusy")
+      case "rejected":
+        return t("issue.rejected", { code: issue.code })
+      case "renew-failed":
+        return t("issue.renewFailed")
+      case "unreachable":
+        return t("issue.unreachable")
+    }
+  })()
+  const errorText = contended ? null : (issueMessage ?? error)
   const overhead =
     collectionDurationMs !== undefined && actualIntervalMs
       ? (collectionDurationMs / actualIntervalMs) * 100
@@ -81,9 +117,25 @@ export function PerfSourceHealth({
           </div>
           <div>
             <dt className="text-muted-foreground">{t("error")}</dt>
-            <dd className="truncate font-medium">{error ?? t("none")}</dd>
+            <dd
+              className="truncate font-medium"
+              title={errorText && issue ? t("issue.detail", { detail: issue.detail }) : undefined}
+              data-testid="perf-source-health-error"
+            >
+              {errorText ?? t("none")}
+            </dd>
           </div>
         </dl>
+        {contended && (
+          <div
+            role="status"
+            className="rounded-md border border-sky-500/30 bg-sky-500/5 p-2 text-xs"
+            title={t("issue.detail", { detail: contended.detail })}
+            data-testid="perf-source-health-contended"
+          >
+            {issueMessage}
+          </div>
+        )}
         {gaps.length > 0 && (
           <div
             role="status"

@@ -94,6 +94,19 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+let activeRemoteTransport: {
+  call: typeof transportCall
+  subscribe: typeof transportSubscribe
+} | null = null
+const remoteTransportListeners = new Set<() => void>()
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: () => activeRemoteTransport,
+  subscribeActiveRemoteTransport: (listener: () => void) => {
+    remoteTransportListeners.add(listener)
+    return () => remoteTransportListeners.delete(listener)
+  },
+}))
+
 const stopHostStateSync = jest.fn()
 const resyncHostState = jest.fn().mockResolvedValue(undefined)
 const installHostStateSync = jest.fn().mockResolvedValue({
@@ -177,6 +190,8 @@ beforeEach(() => {
   mockHasReporter = false
   approvalListeners.clear()
   runtimeTarget = null
+  activeRemoteTransport = null
+  remoteTransportListeners.clear()
   transitionParticipant = null
   transportCall.mockResolvedValue({
     schemaVersion: 2,
@@ -461,7 +476,21 @@ it("stops and unsubscribes on target deactivation", () => {
   expect(runner.stop).toHaveBeenCalledTimes(1)
 })
 
-it("runs and installs HostState synchronization on the Tauri host", async () => {
+it("runs the local queue without invoking companion-only HostState RPCs on Tauri", async () => {
+  render(
+    <CompanionOutboundRunnerProvider
+      dispatcher={dispatcher}
+      platformOverride="tauri"
+      scopeOverride={scope}
+    />
+  )
+  await act(async () => {})
+  expect(createRunner).toHaveBeenCalled()
+  expect(transportCall).not.toHaveBeenCalledWith("host_feature_manifest", {})
+  expect(installHostStateSync).not.toHaveBeenCalled()
+})
+
+it("installs HostState synchronization when Tauri switches to a remote host and stops on return", async () => {
   const { unmount } = render(
     <CompanionOutboundRunnerProvider
       dispatcher={dispatcher}
@@ -477,11 +506,24 @@ it("runs and installs HostState synchronization on the Tauri host", async () => 
       canDispatch: expect.any(Function),
     })
   )
+  act(() => {
+    activeRemoteTransport = { call: transportCall, subscribe: transportSubscribe }
+    remoteTransportListeners.forEach((listener) => listener())
+  })
   await waitFor(() =>
     expect(installHostStateSync).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: scope.accountId, runtimeTargetId: scope.targetId })
+      expect.objectContaining({
+        accountId: scope.accountId,
+        runtimeTargetId: scope.targetId,
+        transport: activeRemoteTransport,
+      })
     )
   )
+  act(() => {
+    activeRemoteTransport = null
+    remoteTransportListeners.forEach((listener) => listener())
+  })
+  expect(stopHostStateSync).toHaveBeenCalledTimes(1)
   unmount()
   expect(stopHostStateSync).toHaveBeenCalledTimes(1)
   expect(unregisterResync).toHaveBeenCalledTimes(1)

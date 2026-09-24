@@ -56,6 +56,7 @@ jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: () => ({ accountId: "account-a", targetId: "target-a" }),
 }))
 
+import { __resetPerfHostLiveLeaseForTesting } from "@/lib/perf/host-live-lease"
 import { resetPreferredInterval, usePerfStream } from "./use-perf-stream"
 
 function frame(sequence: number, overrides: Partial<PerfFrame> = {}): PerfFrame {
@@ -108,6 +109,7 @@ const hostSource: PerfSourceDescriptor = {
 
 beforeEach(() => {
   resetPreferredInterval()
+  __resetPerfHostLiveLeaseForTesting()
   openLease.mockReset()
   closeLease.mockClear()
   renewLease.mockClear()
@@ -147,6 +149,7 @@ describe("usePerfStream", () => {
     expect(result.current.available).toBe(true)
     expect(result.current.hostState).toBe("unsupported")
     expect(result.current.error).toBe("unsupported host")
+    expect(result.current.hostIssue).toEqual({ kind: "unreachable", detail: "unsupported host" })
   })
 
   it("subscribes before opening, merges an early event with snapshot, and exposes gaps", async () => {
@@ -185,13 +188,48 @@ describe("usePerfStream", () => {
     expect(closeLease).toHaveBeenCalledWith("lease-a")
   })
 
-  it("closes host and Renderer demand immediately on normal unmount", async () => {
-    const { unmount } = renderHook(() => usePerfStream())
-    await waitFor(() => expect(openLease).toHaveBeenCalled())
+  it("closes host and Renderer demand on normal unmount", async () => {
+    const { result, unmount } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.hostState).toBe("live"))
     unmount()
-    expect(unsubscribeHost).toHaveBeenCalled()
-    expect(closeLease).toHaveBeenCalledWith("lease-a")
     expect(closeDemand).toHaveBeenCalledWith("renderer-demand")
+    // The host lease is released one macrotask later, so a remount in the same
+    // commit (StrictMode) keeps it instead of racing a close against a reopen.
+    await waitFor(() => expect(closeLease).toHaveBeenCalledWith("lease-a"))
+    expect(unsubscribeHost).toHaveBeenCalled()
+  })
+
+  it("shares ONE host lease between the status bar and the dashboard", async () => {
+    const statusBar = renderHook(() => usePerfStream())
+    const dashboard = renderHook(() => usePerfStream())
+    await waitFor(() => expect(dashboard.result.current.hostState).toBe("live"))
+    await waitFor(() => expect(statusBar.result.current.hostState).toBe("live"))
+    expect(openLease).toHaveBeenCalledTimes(1)
+    act(() => hostHandler!(frame(2, { leaseId: "lease-a" })))
+    expect(statusBar.result.current.hostHistory.map((item) => item.sequence)).toEqual([1, 2])
+    expect(dashboard.result.current.hostHistory.map((item) => item.sequence)).toEqual([1, 2])
+    expect(dashboard.result.current.error).toBeNull()
+  })
+
+  it("surfaces a lease held by another window as a typed, non-error state", async () => {
+    openLease.mockResolvedValueOnce({
+      accepted: false,
+      code: "device-purpose-limit",
+      detail: "device already owns a lease for this purpose",
+    })
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.hostIssue?.kind).toBe("contended"))
+    expect(result.current.hostState).toBe("connecting")
+    expect(result.current.hostIssue).toMatchObject({ code: "device-purpose-limit" })
+  })
+
+  it("keeps the connection state current while the graphs are paused", async () => {
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.hostHistory).toHaveLength(1))
+    act(() => result.current.setPaused(true))
+    act(() => hostHandler!(frame(2, { leaseId: "lease-a" })))
+    expect(result.current.hostHistory.map((item) => item.sequence)).toEqual([1])
+    expect(result.current.hostState).toBe("live")
   })
 
   it("uses a local panel baseline reset without resetting the process-wide hotspot registry", async () => {

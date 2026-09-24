@@ -4,6 +4,7 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Suspense, useState } from "react"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
@@ -163,6 +164,53 @@ describe("SidebarRow", () => {
 })
 
 describe("SidebarNavSection", () => {
+  it.each(["inbox", "logs"])(
+    "keeps loading feedback visible while %s navigation is suspended",
+    async (destination) => {
+      const user = userEvent.setup()
+      let ready = false
+      let resolve!: () => void
+      const load = new Promise<void>((done) => {
+        resolve = done
+      })
+      function Route({ route }: { route: string }) {
+        if (route !== "/" && !ready) throw load
+        return <span>{route}</span>
+      }
+      function Navigation() {
+        const [route, setRoute] = useState("/")
+        routerPush.mockImplementation(setRoute)
+        return (
+          <>
+            <SidebarNavSection />
+            <Suspense fallback={null}>
+              <Route route={route} />
+            </Suspense>
+          </>
+        )
+      }
+      render(<Navigation />)
+      if (destination === "logs") {
+        await user.click(screen.getByRole("button", { name: "more" }))
+        await user.click(screen.getByTestId("sidebar-nav-more-item-logs"))
+      } else {
+        await user.click(screen.getByRole("button", { name: "inbox" }))
+      }
+      const trigger = screen.getByRole("button", {
+        name: destination === "logs" ? "more" : "inbox",
+      })
+      expect(trigger).toHaveAttribute("aria-busy", "true")
+      expect(trigger.querySelector(".animate-spin")).toBeInTheDocument()
+      expect(screen.getByRole("status")).toHaveTextContent("loading")
+      await act(async () => {
+        ready = true
+        resolve()
+      })
+      expect(trigger).toHaveAttribute("aria-busy", "false")
+      expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    }
+  )
+
   it("renders Canvas, every pinned feature as a labelled row, and More", () => {
     render(<SidebarNavSection />)
     expect(screen.getByRole("navigation", { name: "navigation" })).toBeInTheDocument()

@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from "react"
 import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import { AnimatePresence, motion } from "motion/react"
 
+import { folderAcceptsSession } from "@/lib/chat/conversation-list-model"
 import { trackConversationRowAction } from "@/lib/telemetry/conversation-list-events"
 import { useReducedMotionVariants } from "@/lib/ui/motion"
 import { ChannelListBulkToolbar } from "./channel-list-bulk-toolbar"
@@ -33,7 +34,11 @@ export interface ChannelListBulkActionsProps {
   onSetPinned?: (ids: string[], pinned: boolean) => void | Promise<void>
   onArchive?: (ids: string[]) => void | Promise<void>
   onUnarchive?: (ids: string[]) => void | Promise<void>
-  /** Folders the selection can be filed into (active view only). */
+  /**
+   * The workspace's folders. Offered to the selection only where the folder
+   * can hold *every* selected conversation (a folder is workspace-scoped; see
+   * `folderAcceptsSession`) — the others are shown disabled.
+   */
   folders?: readonly SessionFolder[]
   onMoveToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
   onClear: () => void
@@ -64,6 +69,20 @@ export function ChannelListBulkActions({
       return session ? [session] : []
     })
   }, [orderedIds, selected, sessions])
+  // A folder the list model would refuse for even one of the selected rows
+  // (another workspace's folder under a cross-workspace list) is not a place
+  // the selection can go: filing it there would show the move and then undo
+  // it on screen. Only the rows actually selected decide.
+  const blockedFolderIds = useMemo(() => {
+    const blocked = new Set<string>()
+    const selectedSessions = sessions.filter((session) => selected.has(session.id))
+    for (const folder of folders ?? []) {
+      if (!selectedSessions.every((session) => folderAcceptsSession(folder, session))) {
+        blocked.add(folder.id)
+      }
+    }
+    return blocked
+  }, [folders, selected, sessions])
 
   const runAndClear = useCallback(
     async (action: (() => void | Promise<void>) | undefined) => {
@@ -110,6 +129,7 @@ export function ChannelListBulkActions({
                 runAndClear(onUnarchive ? () => onUnarchive(selectedIds) : undefined)
               }
               folders={folders}
+              blockedFolderIds={blockedFolderIds}
               onMoveToFolder={
                 onMoveToFolder
                   ? (folderId) => runAndClear(() => onMoveToFolder(selectedIds, folderId))

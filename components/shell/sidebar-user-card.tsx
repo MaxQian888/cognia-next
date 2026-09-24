@@ -41,6 +41,7 @@ import { Separator } from "@/components/ui/separator"
 import { Kbd } from "@/components/ui/kbd"
 import { AccountManageDialog } from "@/components/account/account-manage-dialog"
 import { RuntimeTargetMenuSection } from "@/components/account/runtime-target-menu-section"
+import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { useSidebarIdentity } from "@/hooks/shell/use-sidebar-identity"
 import { toggleDesktopPetWindow } from "@/lib/pet/commands"
 import { avatarColor } from "@/lib/ui/avatar"
@@ -261,12 +262,14 @@ export function SidebarUserCard({ className }: { className?: string }) {
               goes with it. Signing out of the cloud identity alone would leave
               the local data open, which is the opposite of what the gesture
               means here. */}
-          <MenuRow
-            icon={<LockKeyholeIcon className="size-4" />}
-            label={t("lock")}
-            onClick={lockVault}
-            testId="sidebar-user-lock"
-          />
+          {!unlocksWithoutPrompt(activeAccount) && (
+            <MenuRow
+              icon={<LockKeyholeIcon className="size-4" />}
+              label={t("lock")}
+              onClick={lockVault}
+              testId="sidebar-user-lock"
+            />
+          )}
         </PopoverContent>
       </Popover>
       <AccountManageDialog open={manageOpen} onOpenChange={setManageOpen} />

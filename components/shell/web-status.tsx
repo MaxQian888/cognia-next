@@ -28,7 +28,7 @@ const SESSION_CLASSES: Record<SessionHost, string> = {
   context:
     "flex items-center gap-0.5 empty:hidden [&_button]:h-7 [&_button]:px-2 [&_button]:rounded-md [&_button]:text-xs [&_svg]:size-3.5",
   composer:
-    "flex items-center gap-0.5 empty:hidden [&_button]:h-6 [&_button]:px-1.5 [&_button]:rounded-md [&_button]:text-[11px] [&_svg]:size-3.5",
+    "flex items-center gap-0.5 empty:hidden [&_button]:h-7 [&_button]:px-2 [&_button]:rounded-md [&_button]:text-[11px] [&_svg]:size-3.5",
   header:
     "flex items-center gap-0.5 border-l border-border/50 ps-1.5 ms-1 empty:hidden [&_button]:h-7 [&_button]:rounded-md [&_button]:px-1.5 [&_button]:text-[11px] [&_svg]:size-3.5",
 }
@@ -44,6 +44,9 @@ interface WebStatusContextValue {
   scopes: ReturnType<typeof splitStatusBarScopes>
   owner: string | undefined
   register: (id: string, host: SessionHost) => () => void
+  /** The inline host that has taken the global scope from the corner pill. */
+  globalOwner: string | undefined
+  registerGlobal: (id: string) => () => void
 }
 const WebStatusContext = createContext<WebStatusContextValue | null>(null)
 
@@ -72,7 +75,18 @@ function EnabledWebStatusProvider({ children }: { children: ReactNode }) {
     return () => setHosts((previous) => previous.filter((entry) => entry.id !== id))
   }, [])
   const owner = [...hosts].sort((a, b) => HOST_PRIORITY[a.host] - HOST_PRIORITY[b.host])[0]?.id
-  const value = useMemo(() => ({ scopes, owner, register }), [scopes, owner, register])
+  // Inline hosts for the GLOBAL scope, in mount order. The first one takes it;
+  // with none mounted it falls back to the corner pill.
+  const [globalHosts, setGlobalHosts] = useState<string[]>([])
+  const registerGlobal = useCallback((id: string) => {
+    setGlobalHosts((previous) => [...previous, id])
+    return () => setGlobalHosts((previous) => previous.filter((entry) => entry !== id))
+  }, [])
+  const globalOwner = globalHosts[0]
+  const value = useMemo(
+    () => ({ scopes, owner, register, globalOwner, registerGlobal }),
+    [scopes, owner, register, globalOwner, registerGlobal]
+  )
   return <WebStatusContext.Provider value={value}>{children}</WebStatusContext.Provider>
 }
 
@@ -119,13 +133,50 @@ function useBottomDockClearance() {
   return (open ? height : 0) + 10
 }
 
-/** On web, statusBarCollapsed hides only this fallback, never host chrome. */
-export function WebGlobalStatusPill() {
-  const context = useContext(WebStatusContext)
+/**
+ * Whether the global scope needs a home outside the rail: the rail is folded
+ * away (or the sidebar hosts navigation instead), and the user has not
+ * collapsed the status bar. On web, statusBarCollapsed hides only this
+ * fallback, never host chrome.
+ */
+function useGlobalScopeUnhoused(): boolean {
   const railCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
   const collapsed = useUIStore((s) => s.statusBarCollapsed)
-  return context && (railCollapsed || sidebarHostsNav) && !collapsed ? (
+  return (railCollapsed || sidebarHostsNav) && !collapsed
+}
+
+/**
+ * The global scope, carried by a docked host — the chat composer's status
+ * line — instead of the corner pill.
+ *
+ * The pill is `fixed` to the viewport's bottom corner, which is exactly where
+ * a docked composer puts its toolbar's "⋯": in the default web layout, on any
+ * window short of ~1400px, the pill sat on top of that button (and every
+ * control folded behind it), and lifting the pill would only have moved it
+ * onto the send button. So a surface that owns that corner takes the global
+ * items into its own row and the pill stands down while it is mounted — same
+ * items, same condition, one place.
+ */
+export function WebGlobalStatusInline({ className }: { className?: string }) {
+  const context = useContext(WebStatusContext)
+  const registerGlobal = context?.registerGlobal
+  const id = useId()
+  const unhoused = useGlobalScopeUnhoused()
+  useIsomorphicLayoutEffect(() => registerGlobal?.(id), [registerGlobal, id])
+  if (!context || context.globalOwner !== id || !unhoused) return null
+  return (
+    <div className={cn(SESSION_CLASSES.composer, className)} data-testid="web-status-global-inline">
+      <StatusBarZone items={context.scopes.global} />
+    </div>
+  )
+}
+
+/** Fallback home of the global scope when neither the rail nor an inline host has it. */
+export function WebGlobalStatusPill() {
+  const context = useContext(WebStatusContext)
+  const unhoused = useGlobalScopeUnhoused()
+  return context && unhoused && !context.globalOwner ? (
     <CornerPill items={context.scopes.global} />
   ) : null
 }

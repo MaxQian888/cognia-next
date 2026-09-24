@@ -85,7 +85,7 @@ export function isHeadlessHost(): boolean {
  * runtime to fix one gate would change all of them at once. What the CLI
  * actually needs said about it is narrower — it owns a process table — and
  * that is asked and answered where it matters
- * (`lib/ai/agent/external/process-plane.ts`).
+ * (`lib/ai/agent/external/capability/process-plane.ts`).
  */
 export function isCliHost(): boolean {
   return (globalThis as Record<string, unknown>).__COGNIA_CLI__ === true

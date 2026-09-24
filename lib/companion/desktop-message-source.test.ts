@@ -1348,3 +1348,26 @@ describe("transcript bridge projections", () => {
     expect(answer.error).toBe("MEDIA_NOT_FOUND")
   })
 })
+
+it("contains native unregister rejections for all message-source channels", async () => {
+  const failures: Promise<void>[] = []
+  const spies: jest.SpyInstance[] = []
+  const off = jest.fn(() => {
+    const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    failures.push(failure)
+    spies.push(jest.spyOn(failure, "catch"))
+    return failure
+  })
+  const stop = await installDesktopMessageSource({
+    forceReinstall: true,
+    bridge: {
+      listen: async () => off,
+      invoke: jest.fn().mockResolvedValue(undefined),
+      respondMedia,
+    },
+  })
+  stop()
+  const attached = spies.map((spy) => spy.mock.calls.length)
+  await Promise.all(failures.map((failure) => failure.catch(() => {})))
+  expect(attached).toEqual(Array(9).fill(1))
+})

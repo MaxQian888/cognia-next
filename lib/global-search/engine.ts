@@ -7,15 +7,19 @@
  * errored group, never a failed run — one broken store must not blank the
  * dialog for every other kind.
  *
- * Group order in the *All* scope: kind priority (`KIND_PRIORITY`) nudged by
- * each group's best score, so a strong conversation hit still beats a weak
- * command even though commands come first by default. Scoped tabs keep the
- * static order — the user chose the tab, the ranking inside a group is enough.
+ * Group order in the *All* scope: the best item's match TIER first (exact
+ * title, exact keyword, prefix, … — see `lib/global-search/scoring.ts`), then
+ * kind priority (`KIND_PRIORITY`) nudged by that best score, so inside one tier
+ * a strong conversation hit still beats a weak command even though commands
+ * come first by default. Tier-first is what keeps an exact "Memory" page above
+ * a fresh chat or message that merely mentions memory: priority and score
+ * alone let those win on kind order plus recency. Scoped tabs keep the static
+ * order — the user chose the tab, the ranking inside a group is enough.
  */
 
 import { kindsToRun, effectiveScope } from "./query-parser"
 import { providersForKinds } from "./registry"
-import { compareByScore } from "./scoring"
+import { compareByScore, matchTierOfScore, matchTierRank } from "./scoring"
 import {
   KIND_PRIORITY,
   type GlobalSearchContext,
@@ -105,13 +109,23 @@ function errorGroup(provider: GlobalSearchProvider, cause: unknown): GlobalSearc
 }
 
 /**
- * Static kind priority, nudged by best score when `ranked` (the *All* scope
- * with a query). Suggestions and scoped tabs keep the static order.
+ * Static kind priority when not `ranked`. When `ranked` (the *All* scope with a
+ * query): the best item's match tier first, then kind priority nudged by the
+ * best score. An errored group has no best item and sorts by kind priority
+ * behind every group that answered.
  */
 export function orderGroups(groups: GlobalSearchGroup[], ranked: boolean): GlobalSearchGroup[] {
+  const tier = (g: GlobalSearchGroup) =>
+    ranked && g.items.length > 0
+      ? matchTierRank(matchTierOfScore(g.bestScore))
+      : ranked
+        ? Number.MAX_SAFE_INTEGER
+        : 0
   const key = (g: GlobalSearchGroup) =>
     ranked ? KIND_PRIORITY[g.kind] - g.bestScore * SCORE_PULL : KIND_PRIORITY[g.kind]
-  return [...groups].sort((a, b) => key(a) - key(b) || a.providerId.localeCompare(b.providerId))
+  return [...groups].sort(
+    (a, b) => tier(a) - tier(b) || key(a) - key(b) || a.providerId.localeCompare(b.providerId)
+  )
 }
 
 /**

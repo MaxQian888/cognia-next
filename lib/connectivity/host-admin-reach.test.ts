@@ -49,6 +49,12 @@ describe("hostAdminRequirementFor", () => {
 })
 
 describe("resolveHostAdminReach", () => {
+  it("does not grant a headless host access to desktop-only processes", () => {
+    expect(resolveHostAdminReach("desktop-shell", { profile: "headless" })).toEqual({
+      available: false,
+      block: "needs-desktop-shell",
+    })
+  })
   it("is always available on the Host itself", () => {
     expect(resolveHostAdminReach("desktop-shell", { profile: "desktop" })).toEqual({
       available: true,

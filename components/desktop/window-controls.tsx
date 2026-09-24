@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.shell.child("window-controls")
@@ -82,20 +83,33 @@ export function WindowControls({ className }: { className?: string }) {
   useEffect(() => {
     if (mode !== "buttons") return
     let unlisten: (() => void) | undefined
+    let cancelled = false
     void (async () => {
       try {
         const win = await getWin()
-        setMaximized(await win.isMaximized())
-        unlisten = await win.onResized(async () => {
-          setMaximized(await win.isMaximized())
+        const initiallyMaximized = await win.isMaximized()
+        if (cancelled) return
+        setMaximized(initiallyMaximized)
+        const dispose = await win.onResized(async () => {
+          const next = await win.isMaximized()
+          if (!cancelled) setMaximized(next)
         })
+        // Unmounted while the registration was in flight: release it now.
+        if (cancelled) {
+          safeUnlisten(dispose)
+          return
+        }
+        unlisten = dispose
       } catch (err) {
         log.warn("window setup failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }
     })()
-    return () => unlisten?.()
+    return () => {
+      cancelled = true
+      safeUnlisten(unlisten)
+    }
   }, [mode])
 
   if (mode !== "buttons") return null

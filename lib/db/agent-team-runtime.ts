@@ -582,7 +582,7 @@ export async function purgeManagedChildSessions(children: AgentTeamChildRun[]): 
   )
   if (sessions.length === 0) return
   const [{ parseGatewaySessionId }, { agentInvoke }] = await Promise.all([
-    import("@/lib/ai/agent/external/gateway-task"),
+    import("@/lib/ai/agent/external/config/gateway-task"),
     import("@/lib/ai/agent/external/agent-transport"),
   ])
   const tasks = new Set(sessions.map((sessionId) => parseGatewaySessionId(sessionId)!.taskId))

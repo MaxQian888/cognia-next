@@ -112,9 +112,17 @@ describe("settings provider", () => {
    * above would have traded one wrong order for another.
    */
   it("still lets a control beat a section it matches better than", async () => {
-    const out = await settingsProvider.search(
-      makeProviderInput("language", { ctx: ctxAll(), limit: 100 })
-    )
+    // Real label, not the i18n key: "Language" IS the query (an exact title),
+    // while the Appearance section only carries "language" as a keyword. With
+    // the key as its title the control would only be a word-start hit, which
+    // an exact section keyword rightly outranks.
+    const base = ctxAll()
+    const ctx = {
+      ...base,
+      t: (key: string, values?: Record<string, string | number | Date>) =>
+        key === "settings.finder.controls.language" ? "Language" : base.t(key, values),
+    }
+    const out = await settingsProvider.search(makeProviderInput("language", { ctx, limit: 100 }))
     const control = out.items.findIndex((i) => i.id === "settings:control:language")
     expect(control).toBe(0)
   })

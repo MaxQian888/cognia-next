@@ -3,11 +3,42 @@
 import * as React from "react"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
+import { useControllableState } from "@radix-ui/react-use-controllable-state"
 
+import { useClickActivationFallback } from "@/hooks/ui/use-click-activation-fallback"
 import { cn } from "@/lib/utils"
 
-function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+/**
+ * Toggles the nearest `DropdownMenu`. Radix's trigger only opens on
+ * `pointerdown` / `keydown`, so the root owns its open state here and hands the
+ * trigger a toggle for click-only activation (see `useClickActivationFallback`).
+ * `null` outside a `DropdownMenu`, which disables the fallback.
+ */
+const DropdownMenuToggleContext = React.createContext<(() => void) | null>(null)
+
+function DropdownMenu({
+  open: openProp,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const [open, setOpen] = useControllableState({
+    prop: openProp,
+    defaultProp: defaultOpen ?? false,
+    onChange: onOpenChange,
+    caller: "DropdownMenu",
+  })
+  const toggle = React.useCallback(() => setOpen((prev) => !prev), [setOpen])
+  return (
+    <DropdownMenuToggleContext.Provider value={toggle}>
+      <DropdownMenuPrimitive.Root
+        data-slot="dropdown-menu"
+        open={open}
+        onOpenChange={setOpen}
+        {...props}
+      />
+    </DropdownMenuToggleContext.Provider>
+  )
 }
 
 function DropdownMenuPortal({
@@ -17,9 +48,39 @@ function DropdownMenuPortal({
 }
 
 function DropdownMenuTrigger({
+  onPointerDown,
+  onPointerCancel,
+  onKeyDown,
+  onClick,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
-  return <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
+  const toggle = React.useContext(DropdownMenuToggleContext)
+  const fallback = useClickActivationFallback<HTMLButtonElement>(toggle)
+  return (
+    <DropdownMenuPrimitive.Trigger
+      data-slot="dropdown-menu-trigger"
+      // The guard arms even when the caller prevents the pointerdown: the
+      // caller asked Radix not to open, and the click ending that same press
+      // must not open it through the fallback either.
+      onPointerDown={(event) => {
+        onPointerDown?.(event)
+        fallback.onPointerDown(event)
+      }}
+      onPointerCancel={(event) => {
+        onPointerCancel?.(event)
+        fallback.onPointerCancel(event)
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event)
+        fallback.onKeyDown(event)
+      }}
+      onClick={(event) => {
+        onClick?.(event)
+        fallback.onClick(event)
+      }}
+      {...props}
+    />
+  )
 }
 
 function DropdownMenuContent({

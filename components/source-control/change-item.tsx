@@ -15,6 +15,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { GitFileChange } from "@/types/git"
 import { splitPath, statusDecoration } from "./status-decoration"
@@ -92,7 +93,8 @@ export function ChangeItem({
 
           <span
             className={cn(
-              "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100",
+              "flex shrink-0 items-center",
+              HOVER_REVEAL_GROUP_CLASS,
               density === "touch" && "opacity-100"
             )}
           >

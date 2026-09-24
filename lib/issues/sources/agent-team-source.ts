@@ -10,7 +10,7 @@
  * carrying no `projectId` are backfilled by the store's persist migration).
  *
  * Every capability is off. The team runtime owns these rows
- * (`lib/ai/agent/team/task-move-guard.ts`); moving them lives on the team
+ * (`lib/ai/agent/team/gates/task-move-guard.ts`); moving them lives on the team
  * board, and the card deep-links there.
  */
 

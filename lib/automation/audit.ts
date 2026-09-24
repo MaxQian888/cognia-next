@@ -14,6 +14,7 @@
  *     fire, but the function returns safely so call sites don't need to gate.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import type { Event } from "@tauri-apps/api/event"
 
 import { getDb } from "@/lib/db/schema"
@@ -64,7 +65,7 @@ export async function startAutomationAuditMirror(): Promise<Unsubscribe> {
       console.warn("automation:event Dexie persist failed", err)
     }
   })
-  return unlisten
+  return () => safeUnlisten(unlisten)
 }
 
 /**

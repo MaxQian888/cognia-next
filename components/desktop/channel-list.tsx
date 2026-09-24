@@ -52,7 +52,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { useIsNarrow, useMediaQuery, useRangeSelection, useEdgeResize } from "@/hooks/ui"
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
-import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import {
+  useConversationDayClock,
+  useConversationListModel,
+} from "@/hooks/chat/use-conversation-list-model"
 import { useConversationOrderFreeze } from "@/hooks/chat/use-conversation-order-freeze"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
@@ -68,6 +71,7 @@ import { listSessionStates } from "@/lib/db/session-state"
 import { loggers } from "@cognia/logging"
 import { avatarColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import {
   useUIStore,
@@ -101,7 +105,7 @@ import {
   activeGuildKey,
   guildSectionRows,
 } from "@/components/shell/sidebar-guild-sections"
-import { useGuildUnread } from "@/hooks/shell/use-guild-unread"
+import { aggregateGuildUnread } from "@/hooks/shell/use-guild-unread"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { SidebarFooter } from "@/components/shell/sidebar-footer"
 import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
@@ -195,7 +199,7 @@ import {
 import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
 import type { Character, ChatSession, SessionFolder, Team } from "@cognia/agent-config-types"
-import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { filterExposedSessions, isSessionExposed } from "@/lib/chat/session-exposure"
 import {
   ArchiveIcon,
   ArrowDownIcon,
@@ -218,10 +222,11 @@ import {
   UsersIcon,
   XIcon,
 } from "lucide-react"
-import { useTranslations } from "next-intl"
+import { useTimeZone, useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -236,15 +241,16 @@ import {
 } from "react"
 import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 import { useChannelListActions } from "./channel-list/use-channel-list-actions"
-import { SessionRow, type SessionRowMetadataItem } from "./session-row"
+import { createRowDecorations } from "./channel-list/row-decorations"
+import { SessionRow, sessionRowPropsEqual, type SessionRowMetadataItem } from "./session-row"
 
 const log = loggers.ui
 
 /**
  * Stable empty-folders identity. Passing an inline `folders ?? []` would mint a
  * fresh array every render and, since it's forwarded to every memoized
- * <SessionRow>, bust their memo on any sidebar re-render (cf. the `onSelect`
- * note below). Hoisting the fallback keeps the reference constant.
+ * <SessionRow>, bust their memo on any sidebar re-render. Hoisting the
+ * fallback keeps the reference constant.
  */
 const EMPTY_FOLDERS: SessionFolder[] = []
 
@@ -262,7 +268,6 @@ const CONVERSATION_DROP_ANIMATION: DropAnimation = {
   easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
   sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: "0.35" } } }),
 }
-const EMPTY_SESSION_METADATA: SessionRowMetadataItem[] = []
 
 /**
  * Flipping a display switch is not firing a command — the user is usually
@@ -276,18 +281,30 @@ const keepMenuOpen = (event: Event) => event.preventDefault()
  * list's — the two are nested, and dnd-kit hands `id` straight to its own
  * accessibility ids as well.
  */
-export const TEAM_DND_CONTEXT_ID = "sidebar-team-order"
+const TEAM_DND_CONTEXT_ID = "sidebar-team-order"
+
+/**
+ * CSS custom property holding the height of whatever is pinned to the top of
+ * the list's scroll viewport — the merged rail's search row and its chrome
+ * (see `useStickyChromeOffset`). Section headers stick *below* it, and the
+ * viewport's scroll padding reserves it, so a row scrolled into view by the
+ * keyboard never lands underneath. Unset (the compact surfaces, whose chrome
+ * sits outside the scroll) it falls back to 0.
+ */
+const STICKY_TOP_VAR = "--channel-list-sticky-top"
 
 /**
  * Sticky treatment shared by every section header (date bucket, folder, group).
  *
- * Opaque enough that rows scrolling underneath don't bleed through, translucent
- * enough that a wallpaper still reads. A `background-color` and not a gradient —
- * the tonality rules only swap colors, so a gradient would paint over the
- * wallpaper the chat pane beside it is showing (globals.css §4d).
+ * A near-opaque `background-color`: rows scrolling underneath must not bleed
+ * through, and a wallpaper still tints it faintly. No `backdrop-filter` — a
+ * blur makes every stuck header its own compositor layer, one per group, for a
+ * 28px strip whose job is to hide what is under it anyway. And a colour, not a
+ * gradient: the tonality rules only swap colors, so a gradient would paint
+ * over the wallpaper the chat pane beside it is showing (globals.css §4d).
  */
 const STICKY_SECTION_HEADER =
-  "sticky top-0 z-10 bg-background/85 supports-[backdrop-filter]:bg-background/60 supports-[backdrop-filter]:backdrop-blur-sm"
+  "sticky top-[var(--channel-list-sticky-top,0px)] z-10 bg-background/95"
 
 /**
  * Collapsible section trigger (workspace / agent group, folder). The whole
@@ -316,45 +333,85 @@ function SectionChevron({ collapsed }: { collapsed: boolean }) {
   )
 }
 
-/** Maps a date bucket to its `desktop.channelList` label key. */
 /**
- * Rows past which a flat section switches to windowed rendering.
+ * Rows past which a section switches to windowed rendering — any section: a
+ * date bucket, a workspace / agent / squad group, a folder, the flat list.
  *
  * High enough that an ordinary profile never pays for the machinery, low
  * enough that the lists which genuinely explode — a search across every
- * workspace, an alphabetical sort over years of conversations — do not paint
+ * workspace, "Show all" on years of chats, one workspace group holding the
+ * whole history — do not paint (and wire a sortable and a live query for)
  * thousands of rows to show twenty.
  */
 const VIRTUAL_ROW_THRESHOLD = 200
 
-/** Row height used to place windowed rows before they have been measured. */
-const VIRTUAL_ROW_ESTIMATE = 44
+/** The vertical gap between rows — `gap-0.5` in the flow lists, `gap` when windowed. */
+const ROW_GAP_PX = 2
 
 /**
- * A windowed list of conversation rows.
+ * Height of a stuck section header (`h-7`). The windowed list keeps a row it
+ * scrolls to clear of it; the viewport's scroll padding does the same for the
+ * rows' own `scrollIntoView`.
+ */
+const SECTION_HEADER_PX = 28
+
+/**
+ * Where a windowed list places its rows before they have measured themselves:
+ * the row's padding and text line for its density, plus the optional preview
+ * and metadata lines. Measurement corrects every row as it mounts; a close
+ * estimate is what keeps the scrollbar from jumping while that happens.
+ */
+function estimateRowHeight(
+  density: ConversationSidebarDensity,
+  showPreview: boolean,
+  hasMetadata: boolean
+): number {
+  const line = 18 // one 16px secondary line + the 2px column gap
+  return (density === "compact" ? 28 : 36) + (showPreview ? line : 0) + (hasMetadata ? line : 0)
+}
+
+/** What the windowed list hands a row so it can place and measure itself. */
+interface RowPositioning {
+  nodeRef: (el: HTMLElement | null) => void
+  nodeStyle: CSSProperties
+  virtualIndex: number
+}
+
+/**
+ * A windowed list of conversation rows, used by any section past
+ * {@link VIRTUAL_ROW_THRESHOLD} (see `SectionRows`).
  *
- * Only used for flat, un-draggable sections (see the call site): a sortable
- * context whose items leave the DOM would break dragging, and a sticky group
- * header cannot survive its section being windowed away. Rows measure
- * themselves, so density and the optional preview line still decide their real
- * height.
+ * The section's sticky header is not part of the window — it stays in the
+ * section above this list — so it keeps sticking while the rows under it are
+ * windowed. What windowing does take away is dragging: dnd-kit's sortable
+ * context needs every item of it in the DOM, so a windowed section's rows are
+ * plain rows (no grip, not a drop target) until the section is back under the
+ * threshold. Rows measure themselves, so density and the optional lines still
+ * decide their real height.
  */
 function VirtualRows({
   sessions,
   renderRow,
   focusedId,
+  estimateSize,
+  scrollPaddingStart,
+  className,
 }: {
-  sessions: ChatSession[]
+  sessions: readonly ChatSession[]
   focusedId: string | null
+  /** Pre-measurement row height (`estimateRowHeight`). */
+  estimateSize: number
+  /** Space kept clear above a row this list scrolls to (a stuck header). */
+  scrollPaddingStart: number
+  /** Indentation etc. — on the wrapper, since the rows are absolutely placed. */
+  className?: string
   /**
    * Renders one row, given the positioning the virtualizer needs on its `<li>`.
-   * `SessionRow` already accepts both (`nodeRef` / `nodeStyle`) because a drag
-   * positions the same element the same way.
+   * `SessionRow` already accepts `nodeRef` / `nodeStyle` because a drag
+   * positions the same element the same way, and writes `virtualIndex` as the
+   * `data-index` the measurer reads.
    */
-  renderRow: (
-    session: ChatSession,
-    positioning: { nodeRef: (el: HTMLElement | null) => void; nodeStyle: CSSProperties }
-  ) => ReactNode
+  renderRow: (session: ChatSession, positioning: RowPositioning) => ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
@@ -362,8 +419,9 @@ function VirtualRows({
     const element = scrollRef.current
     const viewport = element?.closest<HTMLElement>("[data-slot=scroll-area-viewport]")
     if (!element || !viewport) return
-    // Section headings and pinned rows precede this list in the shared
-    // viewport. Virtual offsets must use that same coordinate system.
+    // Section headings, other sections and the pinned block precede this list
+    // in the shared viewport. Virtual offsets must use that same coordinate
+    // system.
     const measure = () =>
       setScrollMargin(
         element.getBoundingClientRect().top -
@@ -371,14 +429,18 @@ function VirtualRows({
           viewport.scrollTop
       )
     measure()
+    // Anything above this list changing height moves it, and every such change
+    // resizes the viewport's content box — Radix's one child of the viewport.
+    // The viewport itself covers the rail being resized.
     const observer = new ResizeObserver(measure)
     observer.observe(viewport)
-    if (element.parentElement) observer.observe(element.parentElement)
-    if (element.parentElement?.parentElement) observer.observe(element.parentElement.parentElement)
+    const content = viewport.firstElementChild
+    if (content) observer.observe(content)
     return () => observer.disconnect()
   }, [])
-  // TanStack Virtual returns non-memoizable functions; the React Compiler
-  // correctly skips it. Nothing to fix on our side.
+  // TanStack Virtual returns functions that are not safe to memoize; that is
+  // what this lint flags. No React Compiler runs on this code (it is not
+  // enabled), so the memoization here is the manual kind throughout.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: sessions.length,
@@ -386,9 +448,11 @@ function VirtualRows({
     // this element's nearest scrollable ancestor.
     getScrollElement: () =>
       scrollRef.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]") ?? null,
-    estimateSize: () => VIRTUAL_ROW_ESTIMATE,
+    estimateSize: () => estimateSize,
+    gap: ROW_GAP_PX,
     overscan: 8,
     scrollMargin,
+    scrollPaddingStart,
     getItemKey: (index) => sessions[index]!.id,
   })
   const focusedIndex = focusedId ? sessions.findIndex((session) => session.id === focusedId) : -1
@@ -399,19 +463,17 @@ function VirtualRows({
   }, [focusedIndex, virtualizer])
   const items = virtualizer.getVirtualItems()
   return (
-    <div ref={scrollRef} data-testid="channel-list-virtual-rows">
+    <div ref={scrollRef} className={className} data-testid="channel-list-virtual-rows">
       {/* The rows position themselves: wrapping each one would nest an `<li>`
           inside an `<li>`, and the row already takes a ref and a style for
-          exactly this reason. */}
+          exactly this reason. `measureElement` goes in as-is — it is stable,
+          and reads the row's `data-index` — so a re-render never detaches and
+          re-attaches it (each re-attach is a forced layout read). */}
       <ul className="relative flex flex-col" style={{ height: virtualizer.getTotalSize() }}>
         {items.map((item) =>
           renderRow(sessions[item.index]!, {
-            nodeRef: (el) => {
-              if (el) {
-                el.dataset.index = String(item.index)
-                virtualizer.measureElement(el)
-              }
-            },
+            nodeRef: virtualizer.measureElement,
+            virtualIndex: item.index,
             nodeStyle: {
               position: "absolute",
               top: 0,
@@ -425,6 +487,90 @@ function VirtualRows({
     </div>
   )
 }
+
+/** Whether two id lists hold the same ids in the same order. */
+function sameIdList(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/**
+ * A section's row ids, keeping the previous array while the ids are the same.
+ *
+ * The list model rebuilds every section whenever any session changes, so a
+ * `sessions.map(...)` here was a new array per section per change — and a new
+ * `items` array is a new `SortableContext` value, which re-renders every
+ * sortable row in that section. The adjust-during-render swap costs one extra
+ * render of this section only when its ids really changed.
+ */
+function useStableIdList(sessions: readonly ChatSession[]): string[] {
+  const ids = useMemo(() => sessions.map((session) => session.id), [sessions])
+  const [stable, setStable] = useState(ids)
+  if (stable !== ids && !sameIdList(stable, ids)) {
+    setStable(ids)
+    return ids
+  }
+  return stable
+}
+
+/**
+ * One section's rows: windowed past {@link VIRTUAL_ROW_THRESHOLD}, otherwise a
+ * plain list, inside a sortable context when its rows can be dragged.
+ */
+function SectionRows({
+  sectionKey,
+  sessions,
+  sortable,
+  renderRow,
+  renderPositionedRow,
+  focusedId,
+  estimateSize,
+  scrollPaddingStart,
+  className,
+  empty,
+}: {
+  sectionKey: string
+  sessions: readonly ChatSession[]
+  /** The rows are drag-reorderable here (recency sort, not a search). */
+  sortable: boolean
+  renderRow: (session: ChatSession) => ReactNode
+  renderPositionedRow: (session: ChatSession, positioning: RowPositioning) => ReactNode
+  focusedId: string | null
+  estimateSize: number
+  scrollPaddingStart: number
+  className?: string
+  /** Rendered inside the list when the section holds no rows. */
+  empty?: ReactNode
+}) {
+  const ids = useStableIdList(sessions)
+  if (sessions.length > VIRTUAL_ROW_THRESHOLD) {
+    return (
+      <VirtualRows
+        sessions={sessions}
+        renderRow={renderPositionedRow}
+        focusedId={focusedId}
+        estimateSize={estimateSize}
+        scrollPaddingStart={scrollPaddingStart}
+        className={className}
+      />
+    )
+  }
+  const list = (
+    <ul className={cn("flex flex-col gap-0.5", className)}>
+      {sessions.length === 0 ? empty : sessions.map(renderRow)}
+    </ul>
+  )
+  return sortable ? (
+    <SortableContext id={sectionKey} items={ids} strategy={verticalListSortingStrategy}>
+      {list}
+    </SortableContext>
+  ) : (
+    list
+  )
+}
+
+/** Maps a date bucket to its `desktop.channelList` label key. */
 
 const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
   today: "bucketToday",
@@ -473,10 +619,24 @@ interface Props {
   onReorderFolders?: (ids: string[]) => void | Promise<void>
   onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
   /**
+   * File a whole multi-selection into a folder (or out of one, `null`) in one
+   * write. Without it the bulk bar falls back to `onAssignToFolder` per row.
+   */
+  onBulkAssignToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
+  /**
    * Persist a manual ordering of one conversation section (drag-reorder).
    * `sectionKey` is the `conversationSectionKey` of the section dragged in.
    */
   onReorderSessions?: (ids: string[], sectionKey: string) => void | Promise<void>
+  /**
+   * Reports the grouping the list is actually drawn with — the merged rail is
+   * always the team axis (the scope tree), whatever the stored preference says
+   * — and `null` once no list is mounted. The owner of the session query reads
+   * it to decide whether every workspace's conversations need loading: the
+   * stored `groupBy: "workspace"` alone used to pull them into a scope tree
+   * that never groups by workspace.
+   */
+  onEffectiveGroupByChange?: (groupBy: ConversationGroupBy | null) => void
 }
 
 /**
@@ -571,11 +731,11 @@ export function ChannelList(props: Props) {
     setSidebarCollapsed(false)
   }, [closePeek, setSidebarCollapsed])
 
-  // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
-  // (a useCallback that lists it as a dep). An inline function here changed
-  // every render → busted EVERY memoized <SessionRow> on any sidebar
-  // re-render (a full history-list re-render). useCallback keeps the rows'
-  // memo effective so a re-render touches only the rows that actually changed.
+  // Passed down as `onSelect`, this feeds `handleSessionSelect` and from there
+  // every memoized <SessionRow>, so its identity is the rows' identity. It is
+  // only as stable as its inputs: the owner's `onSelect` must itself be stable
+  // (the workspace reads its session list through a ref for exactly this), and
+  // `isNarrow` flips only on a breakpoint.
   const { onSelect } = props
   const handleSelect = useCallback(
     (id: string) => {
@@ -811,7 +971,9 @@ function ChannelListBody({
   onDeleteFolder,
   onReorderFolders,
   onAssignToFolder,
+  onBulkAssignToFolder,
   onReorderSessions,
+  onEffectiveGroupByChange,
 }: Props & {
   /**
    * Title-bar outlet for the header, or `null` to draw it inline. Only the
@@ -952,10 +1114,6 @@ function ChannelListBody({
   const { teams, teamIds, reorderTeams, moveTeam } = useOrderedTeams()
   const teamById = useMemo(() => new Map((teams ?? []).map((item) => [item.id, item])), [teams])
   const team = chatGuild.kind === "team" ? teamById.get(chatGuild.teamId) : undefined
-  // Per-scope unread aggregates — what the merged rail's scope-tree group
-  // headers count. The same aggregate the compact band and the icon column
-  // draw, so all three always agree.
-  const guildUnread = useGuildUnread()
 
   // `merged` deliberately survives the collapse animation — the projected
   // header stays in the bar while the outlet clips it — so the nav claim has
@@ -979,7 +1137,11 @@ function ChannelListBody({
   // sessions (ADR-0062) are hidden inner transcripts reachable only by
   // drilling in from a parent turn's SubagentPart.
   const filtered = useMemo(() => {
-    const visible = filterExposedSessions(sessions, "main-list")
+    // The owner usually hands over an already-exposed list (`useSessions`
+    // filters it), so keep its identity rather than copy it on every emit.
+    const visible = sessions.every((s) => isSessionExposed(s, "main-list"))
+      ? sessions
+      : filterExposedSessions(sessions, "main-list")
     if (merged) return visible
     if (chatGuild.kind === "team") {
       return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
@@ -1047,7 +1209,15 @@ function ChannelListBody({
   // meaningful on the compact surfaces, whose scoped list keeps its own
   // grouping; the ⋯ menu's Group-by submenu hides itself in the compact layout
   // for the same reason.
-  const effectiveGroupBy = merged ? "team" : groupBy
+  const effectiveGroupBy: ConversationGroupBy = merged ? "team" : groupBy
+  // Tell the session query's owner which grouping is on screen (see the prop).
+  // A layout effect, so a switch to or from the merged rail re-scopes the
+  // query before the frame that would show the other scope's rows.
+  useLayoutEffect(() => {
+    if (!onEffectiveGroupByChange) return
+    onEffectiveGroupByChange(effectiveGroupBy)
+    return () => onEffectiveGroupByChange(null)
+  }, [effectiveGroupBy, onEffectiveGroupByChange])
   // Which workspaces the *content* index is asked about — the same reach the
   // session list is loaded with, so title hits and message hits never disagree
   // about which conversations exist.
@@ -1136,6 +1306,12 @@ function ChannelListBody({
   const { filters, activeFilters, filterContext } = filterController
   const resetConversationFilters = filterController.actions.reset
 
+  // One clock for the whole list, in the zone the rows print their times in:
+  // it moves only when that calendar day turns, which is exactly when the
+  // "Today / Yesterday" buckets and the rows' "14:32 → Mon" stamps must.
+  const timeZone = useTimeZone()
+  const dayNow = useConversationDayClock(timeZone)
+
   // Grouping/filtering/sorting/search now live in the shared headless model
   // (pinned → folders → the chosen axis, or a flat result list while searching).
   const { sections, total, filteredCount, contentOnlyIds, activeFilterCount } =
@@ -1143,6 +1319,8 @@ function ChannelListBody({
       sessions: filtered,
       folders: modelFolders,
       query,
+      now: dayNow,
+      timeZone,
       view,
       collapsedFolderIds,
       groupBy: effectiveGroupBy,
@@ -1312,85 +1490,43 @@ function ChannelListBody({
     })
   }, [query, searchOptions, contentPending, filteredCount, contentTruncated])
 
-  // Per-row accent: team sessions inherit the team color, DM sessions inherit
-  // their character color. Replaces the old per-character group accent.
-  const accentFor = useCallback(
-    (s: ChatSession): string | undefined => {
-      if (s.kind === "team") {
-        const sessionTeam = s.teamId ? teamById.get(s.teamId) : undefined
-        return sessionTeam ? avatarColor(sessionTeam) : undefined
-      }
-      const character = s.characterId ? characterById.get(s.characterId) : null
-      return character ? avatarColor(character) : undefined
-    },
-    [teamById, characterById]
-  )
-
-  const iconFor = useCallback(
-    (s: ChatSession): AvatarSubject | undefined => {
-      if (!showCustomIcons) return undefined
-      const subject =
-        s.kind === "team"
-          ? s.teamId
-            ? teamById.get(s.teamId)
-            : undefined
-          : s.characterId
-            ? characterById.get(s.characterId)
-            : undefined
-      if (!subject) return undefined
-      return {
-        name: subject.name,
-        avatarColor: subject.avatarColor,
-        avatarEmoji: subject.avatarEmoji,
-        avatarImageUrl: "avatarImage" in subject ? subject.avatarImage?.webDataUrl : undefined,
-      }
-    },
-    [characterById, showCustomIcons, teamById]
-  )
-
-  const metadataBySessionId = useMemo(() => {
-    const result = new Map<string, SessionRowMetadataItem[]>()
-    for (const session of filtered) {
-      const character = session.characterId ? characterById.get(session.characterId) : undefined
-      const values: Record<ConversationSidebarMetadata, string | undefined> = {
-        agent:
-          session.kind === "team"
-            ? session.teamId
-              ? teamById.get(session.teamId)?.name
-              : undefined
-            : character?.name,
-        model: getModelDisplayName(
-          session.model ?? character?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
-        ),
-        provider: getProviderDisplayName(
-          session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
-        ),
-        workspace: session.projectId ? workspaceById.get(session.projectId) : undefined,
-      }
-      const metadata = metadataFields.flatMap((kind) => {
+  // Per-row decorations: the avatar (team sessions wear their team, direct
+  // ones their character), the accent colour, and the metadata line. One
+  // resolver per set of inputs, so every call inside its lifetime hands back
+  // the same objects for the same answer — see `row-decorations.ts` for why
+  // that is what keeps the memoized rows from re-rendering. Computed lazily,
+  // per rendered row: a collapsed group or a windowed-away row costs nothing.
+  const decorations = useMemo(
+    () =>
+      createRowDecorations({
+        characterById,
+        teamById,
+        workspaceNameById: workspaceById,
+        metadataFields,
+        showCustomIcons,
         // In the merged rail a team session already sits under its squad's
-        // section header and wears the squad's avatar — printing the squad's
-        // name a third time on the row's detail line is noise.
-        if (merged && kind === "agent" && session.kind === "team") return []
-        const value = values[kind]
-        return value ? [{ kind, value }] : []
-      })
-      result.set(session.id, metadata)
-    }
-    return result
-  }, [
-    characterById,
-    defaultModel,
-    defaultProvider,
-    filtered,
-    merged,
-    metadataFields,
-    teamById,
-    workspaceById,
-  ])
-  const metadataFor = useCallback(
-    (session: ChatSession) => metadataBySessionId.get(session.id) ?? EMPTY_SESSION_METADATA,
-    [metadataBySessionId]
+        // section header, which carries the squad's avatar and name —
+        // printing the name again on the row's detail line is noise.
+        merged,
+        defaultModel,
+        defaultProvider,
+        // The same last resorts the filter controller's model / provider
+        // facets use, so a filter matches exactly the rows naming it.
+        fallbackModel: ANTHROPIC_DEFAULT_MODEL,
+        fallbackProvider: "anthropic",
+        labelModel: getModelDisplayName,
+        labelProvider: getProviderDisplayName,
+      }),
+    [
+      characterById,
+      teamById,
+      workspaceById,
+      metadataFields,
+      showCustomIcons,
+      merged,
+      defaultModel,
+      defaultProvider,
+    ]
   )
 
   const selection = useRangeSelection(renderedOrderedIds)
@@ -1435,6 +1571,7 @@ function ChannelListBody({
     onCreateFolder,
     onReorderFolders,
     onAssignToFolder,
+    onBulkAssignToFolder,
   })
 
   const handleSessionSelect = useCallback(
@@ -1636,16 +1773,18 @@ function ChannelListBody({
     () => projectPendingReorder(cappedSections, pendingReorder),
     [cappedSections, pendingReorder]
   )
-  // Hold the order still while the pointer is in the list — the one moment a
-  // moving row costs something. Read from the DOM rather than derived: whether
-  // the pointer is over the list is a fact about the surface, not the model.
-  const [pointerInList, setPointerInList] = useState(false)
   // Whether the unified scroll region is off the top — drives the hairline
   // under the pinned New chat row in the merged rail.
   const [listScrolled, setListScrolled] = useState(false)
-  const displaySections = useConversationOrderFreeze({
+  // Hold the order still while the pointer is in the list — the one moment a
+  // moving row costs something. Read from the DOM rather than derived: whether
+  // the pointer is over the list is a fact about the surface, not the model.
+  const {
+    sections: displaySections,
+    onPointerEnter: holdOrder,
+    onPointerLeave: releaseOrder,
+  } = useConversationOrderFreeze({
     sections: projectedReorder.sections,
-    hovering: pointerInList,
     // Search results are ranked by relevance and a drag already owns the order
     // it is previewing; a freeze on top of either would be a third story about
     // where a row is.
@@ -1653,6 +1792,9 @@ function ChannelListBody({
     // In the scope tree an emptied squad group is still its header — fold
     // handle, context menu, "+" — so the freeze must not drop it.
     preserveEmptyGroups: merged,
+    // Picking a grouping or sort from the menu inside this list is the reader
+    // re-arranging it on purpose; the hold must follow, not pin the old order.
+    orderKey: `${effectiveGroupBy}:${sortBy}`,
   })
   // Drop the projection the moment it stops being needed: `settled` means the
   // store now carries the dropped order; `stale` means the store moved
@@ -1689,6 +1831,11 @@ function ChannelListBody({
     flashNonce: settledNonce,
     holdMs: settleHoldMs,
   } = useJumpFlash()
+  // One object per landing, not per render: it is a prop of the memoized list.
+  const settled = useMemo(
+    () => (settledId ? { id: settledId, nonce: settledNonce, holdMs: settleHoldMs } : null),
+    [settledId, settledNonce, settleHoldMs]
+  )
   const handleDragStart = useCallback((e: DragStartEvent) => {
     setActiveDragId(String(e.active.id))
   }, [])
@@ -1814,6 +1961,67 @@ function ChannelListBody({
   const secondaryChromeVisible =
     view === "archived" || chipsVisible || toolbarVisible || searchStatusVisible
 
+  // A closed section's context menu can start a conversation there without
+  // opening it first; `null` is the Direct Messages row.
+  const handleGuildNewConversation = useCallback(
+    (teamId: string | null) => {
+      if (teamId) handleNewTeamConversation(teamId)
+      else handleNewDirect()
+    },
+    [handleNewDirect, handleNewTeamConversation]
+  )
+  // Per-scope unread counts for the scope tree's group headers, aggregated from
+  // the unread read the rows already hold — the headers used to run a second
+  // live query over the same table (`useGuildUnread`). Over *this* list, too:
+  // a header now counts exactly the unread conversations that sit under it,
+  // never one from a workspace the tree is not showing.
+  const scopeUnread = useMemo(
+    () => (merged ? aggregateGuildUnread(filtered, unreadById) : null),
+    [merged, filtered, unreadById]
+  )
+  // One object per change, not per render — it is a prop of the memoized list.
+  const scopeTree = useMemo<ScopeTreeConfig | undefined>(
+    () =>
+      merged && scopeUnread
+        ? {
+            archived: view === "archived",
+            teamById,
+            unreadDm: scopeUnread.dm,
+            unreadTeams: scopeUnread.teams,
+            teamOrderIds: teamIds,
+            squadCount: teamById.size,
+            previewExpanded: expandedGroupPreviews,
+            onTogglePreview: toggleGroupPreview,
+            onNewConversation: handleGuildNewConversation,
+            onMoveTeam: moveTeam,
+          }
+        : undefined,
+    [
+      merged,
+      scopeUnread,
+      view,
+      teamById,
+      teamIds,
+      expandedGroupPreviews,
+      toggleGroupPreview,
+      handleGuildNewConversation,
+      moveTeam,
+    ]
+  )
+  // Rows are placed at this height before they measure themselves (windowed
+  // sections only).
+  const rowEstimate = estimateRowHeight(density, showPreview, metadataFields.length > 0)
+  // The merged rail pins its search row (and the chrome under it) to the top
+  // of the scroll viewport; section headers stick below it.
+  const stickyChromeRef = useStickyChromeOffset()
+  const handleListScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement
+    // Only the viewport's own scroll — a nested scroller (a long menu) must
+    // not flip the hairline.
+    if (target.dataset.slot !== "scroll-area-viewport") return
+    setListScrolled(target.scrollTop > 0)
+  }, [])
+
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
   if (selectedGuild.kind === "canvas") {
@@ -1853,12 +2061,6 @@ function ChannelListBody({
   // not move the search field or the list (`sidebar-guild-sections.tsx`).
   const guildRows = guildSectionRows(teams ?? [])
   const activeGuild = activeGuildKey(chatGuild)
-  // A closed section's context menu can start a conversation there without
-  // opening it first; `null` is the Direct Messages row.
-  const handleGuildNewConversation = (teamId: string | null) => {
-    if (teamId) handleNewTeamConversation(teamId)
-    else handleNewDirect()
-  }
 
   // The one field instance, wherever it is drawn: the rail row morph keeps it
   // mounted (hidden) so closing is the opening played backwards — unmounting
@@ -2000,7 +2202,7 @@ function ChannelListBody({
         onArchive={rowActions.onBulkArchive}
         onUnarchive={rowActions.onBulkUnarchive}
         folders={modelFolders}
-        onMoveToFolder={rowActions.onBulkAssignToFolder}
+        onMoveToFolder={view === "active" ? rowActions.onBulkAssignToFolder : undefined}
         onClear={clear}
       />
       {contentBelowMinQuery ? (
@@ -2040,7 +2242,10 @@ function ChannelListBody({
         // over the wallpaper the chat pane beside it was showing (the same
         // defect as the composer bar, see globals.css §4d). One flat surface
         // also matches the chat header, which is on this same tier.
-        className="flex h-full flex-col bg-background/70 outline-none"
+        // The container is a tab stop (the arrow keys drive the rows from it),
+        // so it has to show when it holds focus; inset, because the rail's
+        // edges clip anything drawn outside it.
+        className="flex h-full flex-col bg-background/70 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
         data-tonality="translucent"
         tabIndex={0}
         onKeyDown={handleContainerKeyDown}
@@ -2064,6 +2269,8 @@ function ChannelListBody({
               "shrink-0 transition-shadow duration-150",
               listScrolled && "shadow-[0_1px_0_0_var(--border)]"
             )}
+            data-testid="channel-list-pinned-strip"
+            data-scrolled={listScrolled || undefined}
           >
             <SidebarNewConversationButton onNewDirect={handleNewDirect} />
           </div>
@@ -2077,27 +2284,46 @@ function ChannelListBody({
           // never moves the chrome — the motion stays inside this viewport,
           // which is the whole reason the scope tree works where the old
           // accordion did not.
-          className="min-h-[30%] flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
-          // React delegates `scroll`, so the viewport's scrolling reaches the
-          // root here without a ref on Radix's internals.
-          onScroll={(event) => setListScrolled((event.target as HTMLElement).scrollTop > 0)}
-          onMouseEnter={() => setPointerInList(true)}
-          onMouseLeave={() => setPointerInList(false)}
+          className={cn(
+            "min-h-[30%] flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block",
+            // A thin scrollbar that shows while scrolling or hovering (Radix's
+            // default `hover` type) — hidden outright, a long history gave no
+            // sign of where in it you were.
+            "[&_[data-slot=scroll-area-scrollbar]]:w-1.5",
+            // Keyboard-scrolled rows stop clear of whatever is stuck to the top:
+            // the pinned search block and one section header.
+            "[&_[data-slot=scroll-area-viewport]]:scroll-pt-[calc(var(--channel-list-sticky-top,0px)+1.75rem)]"
+          )}
+          // `scroll` does not bubble, and React delegates it to the element
+          // that scrolled — the Radix viewport inside, not this root. The
+          // capture phase does reach the root, which is what the hairline
+          // under the pinned strip needs.
+          onScrollCapture={handleListScroll}
+          onMouseEnter={holdOrder}
+          onMouseLeave={releaseOrder}
         >
           {merged ? (
             // Nav rows → search row → scope tree, all in the same scroll.
             // The search row heads the conversation list it narrows; the
             // secondary chrome it can surface (archived chip, filter chips,
             // the bulk bar, status hints) slides open right under it instead
-            // of shoving rows down in a single frame.
+            // of shoving rows down in a single frame. Both stick to the top of
+            // the viewport once the nav rows have scrolled away, so the field
+            // and a live bulk selection's bar never scroll out of reach.
             <>
               <SidebarNavSection className="pt-1" />
-              {railSearchRow}
-              <Collapsible open={secondaryChromeVisible}>
-                <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
-                  {secondaryChrome}
-                </CollapsibleContent>
-              </Collapsible>
+              <div
+                ref={stickyChromeRef}
+                className="sticky top-0 z-20 bg-background/95"
+                data-testid="channel-list-sticky-chrome"
+              >
+                {railSearchRow}
+                <Collapsible open={secondaryChromeVisible}>
+                  <CollapsibleContent className="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up motion-reduce:animate-none">
+                    {secondaryChrome}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
             </>
           ) : null}
           {loading && total === 0 ? (
@@ -2162,42 +2388,27 @@ function ChannelListBody({
             >
               <ConversationSections
                 sections={displaySections}
-                scopeTree={
-                  merged
-                    ? {
-                        archived: view === "archived",
-                        teamById,
-                        unreadDm: guildUnread.dm,
-                        unreadTeams: guildUnread.teams,
-                        teamOrderIds: teamIds,
-                        squadCount: teamById.size,
-                        previewExpanded: expandedGroupPreviews,
-                        onTogglePreview: toggleGroupPreview,
-                        onNewConversation: handleGuildNewConversation,
-                        onMoveTeam: moveTeam,
-                      }
-                    : undefined
-                }
+                scopeTree={scopeTree}
                 dropPreview={dropPreview}
                 activeDragId={activeDragId}
-                settled={
-                  settledId ? { id: settledId, nonce: settledNonce, holdMs: settleHoldMs } : null
-                }
+                settled={settled}
                 activeSessionId={activeSessionId}
                 focusedId={focusedId}
                 density={density}
                 showPreview={showPreview}
                 showTimestamps={showTimestamps}
+                now={dayNow}
+                rowEstimate={rowEstimate}
                 searchQuery={query.trim()}
                 contentOnlyIds={contentOnlyIds}
                 reorderable={reorderable}
-                metadataFor={metadataFor}
+                metadataFor={decorations.metadataFor}
                 titleMotion={titleMotion}
                 unreadById={unreadById}
                 isSelected={isSelected}
                 onToggleSelection={handleToggleSelection}
-                accentFor={accentFor}
-                iconFor={iconFor}
+                accentFor={decorations.accentFor}
+                iconFor={decorations.iconFor}
                 folders={folders ?? EMPTY_FOLDERS}
                 onSelect={handleSessionSelect}
                 onDelete={rowActions.onDelete}
@@ -2274,6 +2485,28 @@ function ChannelListBody({
   // rather than adding a wrapper, which would break the flex column the layout
   // depends on.
   return merged ? <SidebarRowsScope containerRef={containerRef}>{rows}</SidebarRowsScope> : rows
+}
+
+/**
+ * Measures the block pinned to the top of the list's scroll viewport and
+ * publishes its height as {@link STICKY_TOP_VAR} on the viewport, where the
+ * section headers (`top`) and the scroll padding read it. A callback ref with
+ * a cleanup (React 19), so it follows the block in and out of the tree — the
+ * merged rail mounts it, the compact surfaces never do.
+ */
+function useStickyChromeOffset() {
+  return useCallback((chrome: HTMLDivElement | null) => {
+    const viewport = chrome?.closest<HTMLElement>("[data-slot=scroll-area-viewport]")
+    if (!chrome || !viewport) return
+    const apply = () => viewport.style.setProperty(STICKY_TOP_VAR, `${chrome.offsetHeight}px`)
+    apply()
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(apply)
+    observer?.observe(chrome)
+    return () => {
+      observer?.disconnect()
+      viewport.style.removeProperty(STICKY_TOP_VAR)
+    }
+  }, [])
 }
 
 function ChannelListSearch({
@@ -2650,12 +2883,6 @@ interface HeaderActionsProps {
    * full-width search field and one button beside it.
    */
   layout?: "row" | "compact"
-  /**
-   * Where the menu opens. Compact inside the rail used to fly `right`, over
-   * the chat pane; in the title bar (where it now lives) it drops `bottom`,
-   * like every other menu up there.
-   */
-  menuSide?: "right" | "bottom"
   selectedGuild: { kind: "dm" } | { kind: "team"; teamId: string }
   team: Team | null
   view: "active" | "archived"
@@ -2680,7 +2907,6 @@ interface HeaderActionsProps {
 function HeaderActions({
   className,
   layout = "row",
-  menuSide,
   selectedGuild,
   view,
   density,
@@ -2780,11 +3006,10 @@ function HeaderActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        // Compact inside the rail flew `right`, off the rail and over the
-        // chat, so a long menu was not clipped by the rail's edge; in the
-        // title bar it drops downward like the bar's own menus. Inline (the
-        // Sheet's title row): a plain drop-down, as before.
-        side={menuSide ?? (compact ? "right" : "bottom")}
+        // Compact (the merged rail's search row) flies `right`, off the rail
+        // and over the chat, so a long menu is never clipped by the rail's
+        // edge. Inline (the Sheet's title row): a plain drop-down.
+        side={compact ? "right" : "bottom"}
         align={compact ? "start" : "end"}
         className="w-60"
       >
@@ -3006,7 +3231,7 @@ interface ScopeTreeConfig {
   onMoveTeam: (teamId: string, delta: number) => void
 }
 
-function ConversationSections({
+function ConversationSectionsImpl({
   sections,
   scopeTree,
   dropPreview,
@@ -3017,6 +3242,8 @@ function ConversationSections({
   density,
   showPreview,
   showTimestamps,
+  now,
+  rowEstimate,
   searchQuery,
   contentOnlyIds,
   reorderable,
@@ -3061,6 +3288,10 @@ function ConversationSections({
   density: ConversationSidebarDensity
   showPreview: boolean
   showTimestamps: boolean
+  /** The list's day clock — rows format their stamp against it. */
+  now: number
+  /** Pre-measurement row height for windowed sections. */
+  rowEstimate: number
   /** Trimmed active query — emphasized inside matching titles. */
   searchQuery: string
   /** Hits that matched message content only; they get an explanatory marker. */
@@ -3096,6 +3327,25 @@ function ConversationSections({
 }) {
   const t = useTranslations("desktop.channelList")
 
+  // Rows nested inside a named squad's scope group sit under a collapsible
+  // header that already wears the squad's avatar — repeating the same badge
+  // on every row is the same duplication the `agent` metadata line drops.
+  // Rows without that header over them keep the icon: search results, the
+  // pinned section, foldered rows, and every row on the compact surfaces
+  // where the scope tree never renders. `kind` gates it because a session
+  // filed under a squad but not *of* it wears its character, not the squad.
+  const scopeTreeOn = scopeTree != null
+  const squadScopedIds = useMemo(() => {
+    if (!scopeTreeOn) return null
+    const ids = new Set<string>()
+    for (const section of sections) {
+      if (section.kind === "group" && section.axis === "team" && !isChatsScopeGroup(section)) {
+        for (const session of section.sessions) ids.add(session.id)
+      }
+    }
+    return ids
+  }, [scopeTreeOn, sections])
+
   const rowProps = (s: ChatSession): ComponentProps<typeof SessionRow> => ({
     session: s,
     active: s.id === activeSessionId,
@@ -3104,12 +3354,13 @@ function ConversationSections({
     density,
     showPreview,
     showTimestamp: showTimestamps,
+    now,
     searchQuery: searchQuery || undefined,
     contentMatch: contentOnlyIds.has(s.id),
     metadata: metadataFor(s),
     titleMotion,
     accentColor: accentFor(s),
-    iconSubject: iconFor(s),
+    iconSubject: s.kind === "team" && squadScopedIds?.has(s.id) ? undefined : iconFor(s),
     unread: unreadById.get(s.id),
     settleFlash:
       settled?.id === s.id ? { nonce: settled.nonce, holdMs: settled.holdMs } : undefined,
@@ -3138,12 +3389,19 @@ function ConversationSections({
   /**
    * A row the virtualizer places itself. Never a `SortableSessionRow`: dragging
    * needs every item of its sortable context in the DOM, which is precisely
-   * what windowing takes away — hence the `!sortable` guard at the call site.
+   * what windowing takes away (see `SectionRows`).
    */
-  const renderPositionedRow = (
-    s: ChatSession,
-    positioning: { nodeRef: (el: HTMLElement | null) => void; nodeStyle: CSSProperties }
-  ) => <SessionRow key={s.id} {...rowProps(s)} {...positioning} />
+  const renderPositionedRow = (s: ChatSession, positioning: RowPositioning) => (
+    <SessionRow key={s.id} {...rowProps(s)} {...positioning} />
+  )
+  // Shared by every section: what a windowed list needs besides its rows.
+  const rowsProps = {
+    renderPositionedRow,
+    focusedId,
+    estimateSize: rowEstimate,
+    // A row the list scrolls to stops below its stuck section header.
+    scrollPaddingStart: SECTION_HEADER_PX,
+  }
 
   // The pointer-following clone. The source row stays in the list as a
   // dimmed placeholder (see `SortableSessionRow`) and shifts into the target
@@ -3166,6 +3424,10 @@ function ConversationSections({
     (section) => section.kind === "group" && section.axis === "team" && !isChatsScopeGroup(section)
   )
   const searching = searchQuery.length > 0
+  // `SortableContext` wants a mutable array; copying the readonly order inline
+  // made a new one — a new context value for every squad header — per render.
+  const teamOrderIds = scopeTree?.teamOrderIds
+  const teamOrderItems = useMemo(() => (teamOrderIds ? [...teamOrderIds] : []), [teamOrderIds])
 
   const body = (
     <>
@@ -3186,7 +3448,9 @@ function ConversationSections({
               last={folderIds[folderIds.length - 1] === folder.id}
               autoRename={renamingFolderId === folder.id}
               onRenameSettled={onFolderRenameSettled}
+              sortable={reorderable}
               renderRow={renderSortableRow}
+              rowsProps={rowsProps}
             />
           )
         }
@@ -3229,7 +3493,9 @@ function ConversationSections({
                 onTogglePreview={() => scopeTree.onTogglePreview(key)}
                 onNewConversation={scopeTree.onNewConversation}
                 onMoveTeam={scopeTree.onMoveTeam}
+                sortable={reorderable}
                 renderRow={renderSortableRow}
+                rowsProps={rowsProps}
               />
             )
             return squadsLabel ? (
@@ -3254,7 +3520,9 @@ function ConversationSections({
               collapsed={section.collapsed}
               sessions={section.sessions}
               onToggle={() => onToggleGroup(key, !section.collapsed)}
+              sortable={reorderable}
               renderRow={renderSortableRow}
+              rowsProps={rowsProps}
             />
           )
           return squadsLabel ? (
@@ -3274,49 +3542,21 @@ function ConversationSections({
               ? t("sectionRecent")
               : section.kind === "date"
                 ? t(BUCKET_LABEL_KEY[section.bucket])
-                : null
-        const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
-        const sortable = section.kind !== "search" && reorderable
-        // Virtualize only a long, flat, un-draggable list. That is exactly
-        // where the rows pile up — a search across every workspace, or a
-        // title / unread sort, both of which the model already renders as one
-        // section — and it is the one place where windowing costs nothing:
-        // no sticky group header to keep pinned, and no dnd-kit sortable
-        // context whose items would vanish from the DOM mid-drag.
-        const virtualize =
-          !sortable &&
-          (section.kind === "search" || section.kind === "recent") &&
-          section.sessions.length > VIRTUAL_ROW_THRESHOLD
-        const renderRow = section.kind === "search" ? renderStaticRow : renderSortableRow
-        const rows = virtualize ? (
-          <VirtualRows
-            sessions={section.sessions}
-            renderRow={renderPositionedRow}
-            focusedId={focusedId}
-          />
-        ) : (
-          <ul className="flex flex-col gap-0.5">
-            {section.sessions.map((session) => renderRow(session))}
-          </ul>
-        )
+                : t("sectionResults")
+        const key = conversationSectionKey(section)
+        const searchSection = section.kind === "search"
         return (
-          <section key={key} aria-label={label ?? t("searchAria")}>
-            {label ? (
-              <SectionHeading label={label} count={section.sessions.length} />
-            ) : section.kind === "search" ? (
-              <SectionHeading label={t("sectionResults")} count={section.sessions.length} />
-            ) : null}
-            {sortable ? (
-              <SortableContext
-                id={key}
-                items={section.sessions.map((session) => session.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                {rows}
-              </SortableContext>
-            ) : (
-              rows
-            )}
+          <section key={key} aria-label={searchSection ? t("searchAria") : label}>
+            <SectionHeading label={label} count={section.sessions.length} />
+            <SectionRows
+              sectionKey={key}
+              sessions={section.sessions}
+              // Search results are ranked by relevance, not an order a drag
+              // could keep.
+              sortable={!searchSection && reorderable}
+              renderRow={searchSection ? renderStaticRow : renderSortableRow}
+              {...rowsProps}
+            />
           </section>
         )
       })}
@@ -3342,7 +3582,7 @@ function ConversationSections({
       {scopeTree ? (
         <SortableContext
           id="scope-tree-teams"
-          items={[...scopeTree.teamOrderIds]}
+          items={teamOrderItems}
           strategy={verticalListSortingStrategy}
         >
           {body}
@@ -3353,6 +3593,15 @@ function ConversationSections({
     </div>
   )
 }
+
+/**
+ * Memoized: the body re-renders for reasons the list does not care about —
+ * the search field waking and resting, the pointer entering the rail, a drag
+ * overlay's own state — and every one of them used to walk every section and
+ * row. Every prop is held stable upstream (memoized maps and configs,
+ * `useCallback`'d handlers), so it now re-renders only when the list does.
+ */
+const ConversationSections = memo(ConversationSectionsImpl)
 
 /**
  * Pointer-following clone of the dragged conversation row, portaled to the
@@ -3416,12 +3665,25 @@ function SectionHeading({ label, count }: { label: string; count: number }) {
   )
 }
 
+/** The props every section component hands its rows through. */
+type SectionRowsProps = Pick<
+  ComponentProps<typeof SectionRows>,
+  "renderPositionedRow" | "focusedId" | "estimateSize" | "scrollPaddingStart"
+>
+
 /**
  * A conversation row wired for @dnd-kit sorting: draggable (grip handle) and a
  * drop target so pinned rows can be reordered. Dropping onto a folder header is
  * handled by that header's own droppable — see {@link FolderSection}.
+ *
+ * Memoized with the row's own comparison: this wrapper re-renders with the
+ * list, and every pass through `useSortable` costs a context read and a
+ * listener rebuild. Its style is memoized too — a fresh `{ transform,
+ * transition }` object per render used to bust the row's memo on its own.
  */
-function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
+const SortableSessionRow = memo(SortableSessionRowImpl, sessionRowPropsEqual)
+
+function SortableSessionRowImpl(props: ComponentProps<typeof SessionRow>) {
   const {
     attributes,
     listeners,
@@ -3440,10 +3702,11 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
       projectId: props.session.projectId ?? null,
     },
   })
-  const style: CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  }
+  const transformCss = CSS.Transform.toString(transform)
+  const style = useMemo<CSSProperties>(
+    () => ({ transform: transformCss, transition }),
+    [transformCss, transition]
+  )
   return (
     <SessionRow
       {...props}
@@ -3469,7 +3732,9 @@ function GroupSection({
   collapsed,
   sessions,
   onToggle,
+  sortable,
   renderRow,
+  rowsProps,
 }: {
   sectionKey: string
   axis: ConversationGroupAxis
@@ -3477,7 +3742,9 @@ function GroupSection({
   collapsed: boolean
   sessions: ChatSession[]
   onToggle: () => void
+  sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
+  rowsProps: SectionRowsProps
 }) {
   const Icon = CONVERSATION_GROUP_AXIS_ICON[axis]
   return (
@@ -3505,13 +3772,13 @@ function GroupSection({
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent className="overflow-hidden pt-0.5 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
-          <SortableContext
-            id={sectionKey}
-            items={sessions.map((session) => session.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <ul className="flex flex-col gap-0.5">{sessions.map(renderRow)}</ul>
-          </SortableContext>
+          <SectionRows
+            sectionKey={sectionKey}
+            sessions={sessions}
+            sortable={sortable}
+            renderRow={renderRow}
+            {...rowsProps}
+          />
         </CollapsibleContent>
       </section>
     </Collapsible>
@@ -3542,7 +3809,11 @@ function SquadsGroupLabel({ count }: { count: number }) {
         aria-label={railT("createTeam")}
         title={railT("createTeam")}
         data-testid="sidebar-squads-create-team"
-        className="ml-auto grid size-5 place-items-center rounded-sm opacity-0 transition-opacity group-hover/squads-label:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100"
+        className={cn(
+          "ml-auto grid size-5 place-items-center rounded-sm hover:bg-accent hover:text-foreground",
+          HOVER_REVEAL_CONTROL_BASE_CLASS,
+          "group-hover/squads-label:opacity-100"
+        )}
       >
         <PlusIcon className="size-3.5" />
       </button>
@@ -3583,7 +3854,9 @@ function ScopeTreeGroupSection({
   onTogglePreview,
   onNewConversation,
   onMoveTeam,
+  sortable,
   renderRow,
+  rowsProps,
 }: {
   sectionKey: string
   /** The group this header acts on; `null` = the Chats bucket. */
@@ -3602,7 +3875,9 @@ function ScopeTreeGroupSection({
   onTogglePreview: () => void
   onNewConversation: (teamId: string | null) => void
   onMoveTeam: (teamId: string, delta: number) => void
+  sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
+  rowsProps: SectionRowsProps
 }) {
   const t = useTranslations("desktop.channelList")
   const scopeKey = scopeTeamId ?? "chats"
@@ -3649,13 +3924,14 @@ function ScopeTreeGroupSection({
         </button>
       )
     ) : (
-      <SortableContext
-        id={sectionKey}
-        items={sessions.map((session) => session.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        <ul className={cn("flex flex-col gap-0.5", nested && "pl-4")}>{sessions.map(renderRow)}</ul>
-      </SortableContext>
+      <SectionRows
+        sectionKey={sectionKey}
+        sessions={sessions}
+        sortable={sortable}
+        renderRow={renderRow}
+        className={nested ? "pl-4" : undefined}
+        {...rowsProps}
+      />
     )
   const moreRow =
     previewHidden > 0 || previewExpanded ? (
@@ -3681,15 +3957,40 @@ function ScopeTreeGroupSection({
   // The Chats bucket is the tree's fixed first section: a plain label, not a
   // group header — there is nothing to fold into (the rail's own chrome is
   // the fold) and no scope menu a label could serve.
+  //
+  // It still sticks, like every other section label: "Show all" opens the
+  // whole direct-message history under it, and a few screens into that the
+  // label was the only thing saying which group the rows belong to — gone
+  // with the first scroll. And while it is expanded, "Show less" rides in the
+  // label instead of waiting at the bottom of a list that may be hundreds of
+  // rows long.
   if (!nested) {
     return (
       <section aria-label={name} data-testid={`sidebar-scope-${scopeKey}`}>
-        <div className="flex h-6 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground">
+        <div
+          className={cn(
+            "flex h-7 items-center gap-1.5 px-2.5 pt-1 text-muted-foreground",
+            STICKY_SECTION_HEADER
+          )}
+          data-testid={`sidebar-scope-label-${scopeKey}`}
+        >
           <span className={SECTION_LABEL_CLASS}>{name}</span>
           {total > 0 ? <span className={SECTION_COUNT_CLASS}>{total}</span> : null}
+          {previewExpanded ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={onTogglePreview}
+              data-testid={`sidebar-scope-more-${scopeKey}`}
+              className="ms-auto h-6 px-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            >
+              {t("groupShowLess")}
+            </Button>
+          ) : null}
         </div>
         {rowsList}
-        {moreRow}
+        {previewExpanded ? null : moreRow}
       </section>
     )
   }
@@ -3752,7 +4053,11 @@ function ScopeTreeGroupSection({
                 aria-label={newLabel}
                 title={newLabel}
                 data-testid={`sidebar-scope-new-${scopeKey}`}
-                className="size-5 shrink-0 rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover/scope-head:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground"
+                className={cn(
+                  "size-5 shrink-0 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground",
+                  HOVER_REVEAL_CONTROL_BASE_CLASS,
+                  "group-hover/scope-head:opacity-100"
+                )}
               >
                 <PlusIcon className="size-3.5" />
               </Button>
@@ -3813,7 +4118,9 @@ function FolderSection({
   last,
   autoRename,
   onRenameSettled,
+  sortable,
   renderRow,
+  rowsProps,
 }: {
   folder: SessionFolder
   collapsed: boolean
@@ -3828,7 +4135,9 @@ function FolderSection({
   /** Open the name for editing right away (a folder just created here). */
   autoRename?: boolean
   onRenameSettled?: (id: string) => void
+  sortable: boolean
   renderRow: (s: ChatSession) => ReactNode
+  rowsProps: SectionRowsProps
 }) {
   const t = useTranslations("desktop.channelList")
   const { setNodeRef, isOver } = useDroppable({
@@ -3841,37 +4150,35 @@ function FolderSection({
         aria-label={folder.name}
         className="rounded-md transition-colors duration-200 data-[state=open]:bg-muted/10"
       >
-        <div
-          ref={setNodeRef}
-          className={cn("rounded-md", isOver && "bg-primary/10 ring-1 ring-primary/40")}
-        >
-          <FolderSectionHeader
-            folder={folder}
-            collapsed={collapsed}
-            count={sessions.length}
-            onRename={onRename}
-            onDelete={onDelete}
-            onMove={onMove}
-            first={first}
-            last={last}
-            autoRename={autoRename}
-            onRenameSettled={onRenameSettled}
-          />
-        </div>
+        {/* The header is the drop target itself, not a wrapper around it: a
+            sticky element sticks only within its parent, and a wrapper exactly
+            the header's height left it nowhere to stick — folder headers were
+            the only section headers that scrolled away. */}
+        <FolderSectionHeader
+          nodeRef={setNodeRef}
+          dropActive={isOver}
+          folder={folder}
+          collapsed={collapsed}
+          count={sessions.length}
+          onRename={onRename}
+          onDelete={onDelete}
+          onMove={onMove}
+          first={first}
+          last={last}
+          autoRename={autoRename}
+          onRenameSettled={onRenameSettled}
+        />
         <CollapsibleContent className="overflow-hidden pt-0.5 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
-          <SortableContext
-            id={`folder:${folder.id}`}
-            items={sessions.map((session) => session.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <ul className="flex flex-col gap-0.5">
-              {sessions.length === 0 ? (
-                <li className="px-3 py-1 text-[11px] text-muted-foreground">{t("emptyFolder")}</li>
-              ) : (
-                sessions.map(renderRow)
-              )}
-            </ul>
-          </SortableContext>
+          <SectionRows
+            sectionKey={`folder:${folder.id}`}
+            sessions={sessions}
+            sortable={sortable}
+            renderRow={renderRow}
+            empty={
+              <li className="px-3 py-1 text-[11px] text-muted-foreground">{t("emptyFolder")}</li>
+            }
+            {...rowsProps}
+          />
         </CollapsibleContent>
       </section>
     </Collapsible>
@@ -3879,6 +4186,8 @@ function FolderSection({
 }
 
 function FolderSectionHeader({
+  nodeRef,
+  dropActive = false,
   folder,
   collapsed,
   count,
@@ -3890,6 +4199,10 @@ function FolderSectionHeader({
   autoRename = false,
   onRenameSettled,
 }: {
+  /** The folder's drop target (`useDroppable`) — this header is it. */
+  nodeRef?: (el: HTMLElement | null) => void
+  /** A conversation is being dragged over the header. */
+  dropActive?: boolean
   folder: SessionFolder
   collapsed: boolean
   count: number
@@ -3920,10 +4233,16 @@ function FolderSectionHeader({
 
   return (
     <div
+      ref={nodeRef}
       className={cn(
-        "group/folder flex h-7 items-center gap-0.5 px-1 pb-0.5",
-        STICKY_SECTION_HEADER
+        "group/folder flex h-7 items-center gap-0.5 rounded-md px-1 pb-0.5",
+        STICKY_SECTION_HEADER,
+        // The drop cue as an opaque tint of the sticky ground — a translucent
+        // wash would let the rows scrolling under the stuck header show.
+        dropActive &&
+          "bg-[color-mix(in_oklab,var(--primary)_10%,var(--background))] ring-1 ring-primary/40 ring-inset"
       )}
+      data-drop-active={dropActive || undefined}
     >
       {editing ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 text-muted-foreground">
@@ -3972,7 +4291,11 @@ function FolderSectionHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+              className={cn(
+                "size-6 shrink-0 text-muted-foreground",
+                HOVER_REVEAL_CONTROL_BASE_CLASS,
+                "group-hover/folder:opacity-100"
+              )}
               aria-label={t("folderActions")}
             >
               <MoreHorizontalIcon className="size-3.5" />

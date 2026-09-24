@@ -20,6 +20,7 @@
  * guard, same bridge-injection pattern for tests.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
 import { MAX_MEDIA_RESPONSE_BYTES, type RuntimeBridge } from "@/lib/headless/types"
@@ -221,15 +222,15 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
 
   return () => {
     installed = false
-    offUpdate()
-    offDelete()
-    offList()
-    offGetBySession()
-    offSend()
-    offTranscriptCapabilities()
-    offSessionTimeline()
-    offSessionTurnMessages()
-    offSessionMedia()
+    safeUnlisten(offUpdate)
+    safeUnlisten(offDelete)
+    safeUnlisten(offList)
+    safeUnlisten(offGetBySession)
+    safeUnlisten(offSend)
+    safeUnlisten(offTranscriptCapabilities)
+    safeUnlisten(offSessionTimeline)
+    safeUnlisten(offSessionTurnMessages)
+    safeUnlisten(offSessionMedia)
   }
 }
 

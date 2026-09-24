@@ -4,7 +4,20 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { MobileInboxBody } from "./mobile-inbox-body"
+import { countPendingDraftsForBadge, MobileInboxBody } from "./mobile-inbox-body"
+import { listAllPendingDrafts } from "@/lib/db/connector-drafts"
+
+const logWarn = jest.fn()
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    ui: {
+      warn: (...args: unknown[]) => logWarn(...args),
+      error: jest.fn(),
+      info: jest.fn(),
+      debug: jest.fn(),
+    },
+  },
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => {
@@ -23,8 +36,25 @@ jest.mock("@/components/inbox/inbox-shell", () => ({
   InboxShell: () => <div data-testid="stub-inbox-shell" />,
 }))
 
+let mockDraftPanelError: Error | null = null
 jest.mock("@/components/mobile/connector/draft-approval-panel", () => ({
-  DraftApprovalPanel: () => <div data-testid="stub-draft-panel" />,
+  DraftApprovalPanel: () => {
+    if (mockDraftPanelError) throw mockDraftPanelError
+    return <div data-testid="stub-draft-panel" />
+  },
+}))
+
+jest.mock("@/components/inbox/state/state-card", () => ({
+  StateCard: {
+    Error: ({ description, onRetry }: { description?: string; onRetry?: () => void }) => (
+      <div data-testid="stub-state-card-error">
+        <span>{description}</span>
+        <button type="button" onClick={onRetry}>
+          retry
+        </button>
+      </div>
+    ),
+  },
 }))
 
 let mockDraftCount = 0
@@ -38,6 +68,27 @@ jest.mock("@/lib/db/connector-drafts", () => ({
 
 beforeEach(() => {
   mockDraftCount = 0
+  mockDraftPanelError = null
+  logWarn.mockReset()
+  ;(listAllPendingDrafts as jest.Mock).mockReset().mockResolvedValue([])
+})
+
+describe("countPendingDraftsForBadge", () => {
+  it("counts pending drafts", async () => {
+    ;(listAllPendingDrafts as jest.Mock).mockResolvedValue([{ id: "d1" }, { id: "d2" }])
+    await expect(countPendingDraftsForBadge()).resolves.toBe(2)
+    expect(logWarn).not.toHaveBeenCalled()
+  })
+
+  it("degrades a failed drafts read to no badge instead of throwing into the route boundary", async () => {
+    ;(listAllPendingDrafts as jest.Mock).mockRejectedValue(
+      new Error("TransactionInactiveError: transaction is not active")
+    )
+    await expect(countPendingDraftsForBadge()).resolves.toBe(0)
+    expect(logWarn).toHaveBeenCalledWith("mobile inbox: pending-draft count unavailable", {
+      error: "TransactionInactiveError: transaction is not active",
+    })
+  })
 })
 
 describe("<MobileInboxBody />", () => {
@@ -92,5 +143,30 @@ describe("<MobileInboxBody />", () => {
     mockDraftCount = 150
     render(<MobileInboxBody />)
     expect(screen.getByTestId("mobile-inbox-tab-drafts-badge")).toHaveTextContent("99+")
+  })
+
+  it("contains a failed Drafts pane so the Messages tab keeps working, and retries it", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      mockDraftPanelError = new Error("drafts table unavailable")
+      const user = userEvent.setup()
+      render(<MobileInboxBody initialTab="drafts" />)
+
+      // Pane-level fallback, not the route-wide boundary: the tab header is intact.
+      expect(screen.getByTestId("stub-state-card-error")).toHaveTextContent(
+        "drafts table unavailable"
+      )
+      expect(screen.getByTestId("mobile-inbox-body")).toBeInTheDocument()
+
+      await user.click(screen.getByTestId("mobile-inbox-tab-messages"))
+      expect(screen.getByTestId("stub-inbox-shell")).toBeInTheDocument()
+
+      await user.click(screen.getByTestId("mobile-inbox-tab-drafts"))
+      mockDraftPanelError = null
+      await user.click(screen.getByRole("button", { name: "retry" }))
+      expect(screen.getByTestId("stub-draft-panel")).toBeInTheDocument()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

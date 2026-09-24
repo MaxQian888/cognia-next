@@ -37,12 +37,16 @@ jest.mock("./log-panel-stats-bar", () => ({
     </button>
   ),
 }))
+const mockVirtualizedListProps: { filteredLogs?: { id: string }[] } = {}
 jest.mock("./log-virtualized-list", () => ({
-  VirtualizedLogList: ({ onRetry }: { onRetry?: () => void }) => (
-    <div data-testid="stub-virtualized-list" onClick={onRetry}>
-      virtualized-list
-    </div>
-  ),
+  VirtualizedLogList: (props: { onRetry?: () => void; filteredLogs?: { id: string }[] }) => {
+    mockVirtualizedListProps.filteredLogs = props.filteredLogs
+    return (
+      <div data-testid="stub-virtualized-list" onClick={props.onRetry}>
+        virtualized-list
+      </div>
+    )
+  },
 }))
 jest.mock("./log-stats-dashboard", () => ({
   LogStatsDashboard: () => <div data-testid="stub-dashboard" />,
@@ -483,6 +487,51 @@ describe("LogPanel — when log set has logs", () => {
   it("respects groupByTraceId prop", () => {
     render(<LogPanel groupByTraceId />)
     expect(screen.getByTestId("stub-virtualized-list")).toBeInTheDocument()
+  })
+
+  it("dedupes entries that appear in both the log stream and the agent-trace stream", () => {
+    // The trace transport double-persists spans: once into the unified log
+    // store (→ useLogStream) and once into the agentTraces Dexie table
+    // (→ useAgentTraceAsLogs), both keyed by span.id. The merge must emit
+    // each id once or React hits duplicate-key warnings every refresh.
+    const ts = new Date("2026-01-01T12:00:00Z").toISOString()
+    mockUseLogStream.mockReturnValue({
+      logs: [
+        { id: "shared-span", timestamp: ts, level: "error", module: "agent.trace", message: "m" },
+        {
+          id: "plain",
+          timestamp: new Date("2026-01-01T11:59:00Z").toISOString(),
+          level: "info",
+          module: "m",
+          message: "m2",
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refresh: jest.fn(),
+      clearLogs: jest.fn(),
+      logRate: 0,
+      stats: {
+        total: 2,
+        byLevel: { trace: 0, debug: 0, info: 1, warn: 0, error: 1, fatal: 0 },
+      },
+    })
+    mockUseAgentTraceAsLogs.mockReturnValue({
+      logs: [
+        { id: "shared-span", timestamp: ts, level: "error", module: "agent.trace", message: "m" },
+        {
+          id: "span-only",
+          timestamp: new Date("2026-01-01T11:58:00Z").toISOString(),
+          level: "info",
+          module: "agent.trace",
+          message: "m3",
+        },
+      ],
+      isStreaming: false,
+    })
+    render(<LogPanel />)
+    const ids = (mockVirtualizedListProps.filteredLogs ?? []).map((l) => l.id)
+    expect(ids).toEqual(["shared-span", "plain", "span-only"])
   })
 })
 

@@ -189,6 +189,7 @@ const toggleSidebar = jest.fn()
 const toggleGuildRail = jest.fn()
 const toggleStatusBar = jest.fn()
 const requestCreate = jest.fn()
+const requestChatHome = jest.fn()
 const openFind = jest.fn()
 const uiStateRef = {
   sidebarCollapsed: false,
@@ -218,6 +219,7 @@ jest.mock("@/stores/ui/ui-store", () => {
     toggleGuildRail,
     toggleStatusBar,
     requestCreate,
+    requestChatHome,
     openFind,
     barItems: {},
     sidebarCollapsed: uiStateRef.sidebarCollapsed,
@@ -394,6 +396,7 @@ beforeEach(() => {
   openExternal.mockClear().mockResolvedValue(undefined)
   chatClear.mockClear()
   setActiveSession.mockClear()
+  requestChatHome.mockReset()
   setSelectedGuild.mockReset()
   toggleSidebar.mockReset()
   toggleGuildRail.mockReset()
@@ -674,7 +677,7 @@ test("command-center recent session opens that conversation", async () => {
 
 // Delegates to newChatAction so this menu and the native menu bar stay in
 // lockstep — it starts a real conversation rather than clearing to the welcome.
-test("File > New Chat starts a conversation and resets guild", async () => {
+test("File > New Chat routes to the DM chat home without creating a session", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
@@ -682,8 +685,10 @@ test("File > New Chat starts a conversation and resets guild", async () => {
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.newChat"))
-  await waitFor(() => expect(startNewSessionMock).toHaveBeenCalled())
-  expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  // `newChatAction` lands on the welcome scope; the conversation is created
+  // only when the user sends from there (lib/desktop/menu-actions.ts).
+  await waitFor(() => expect(requestChatHome).toHaveBeenCalledWith({ kind: "dm" }))
+  expect(startNewSessionMock).not.toHaveBeenCalled()
   // The old behavior nuked every open pane; it must not come back.
   expect(chatClear).not.toHaveBeenCalled()
 })
@@ -1244,6 +1249,51 @@ test("a resize event refreshes the maximized state", async () => {
   })
   // Maximized → the button offers Restore rather than Maximize.
   await waitFor(() => expect(screen.getByLabelText("desktop.titleBar.restore")).toBeInTheDocument())
+})
+
+test("a rejecting resize disposer never surfaces as an unhandled rejection", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const unlisten = jest
+    .fn()
+    .mockRejectedValue(
+      new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+    )
+  onResized.mockResolvedValue(unlisten)
+  const unhandled = jest.fn()
+  process.on("unhandledRejection", unhandled)
+  try {
+    const { unmount } = render(<TitleBar />)
+    await waitFor(() => expect(onResized).toHaveBeenCalled())
+    await act(async () => {})
+    expect(() => unmount()).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(unhandled).not.toHaveBeenCalled()
+  } finally {
+    process.off("unhandledRejection", unhandled)
+  }
+})
+
+test("releases a resize listener whose registration resolves after unmount", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const unlisten = jest.fn()
+  let resolveRegistration: ((fn: () => void) => void) | undefined
+  onResized.mockImplementation(
+    () =>
+      new Promise<() => void>((resolve) => {
+        resolveRegistration = resolve
+      })
+  )
+  const { unmount } = render(<TitleBar />)
+  await waitFor(() => expect(onResized).toHaveBeenCalled())
+  unmount()
+  expect(unlisten).not.toHaveBeenCalled()
+  await act(async () => {
+    resolveRegistration?.(unlisten)
+  })
+  expect(unlisten).toHaveBeenCalledTimes(1)
 })
 
 test.each([["dms"], ["logs"], ["settings"]])(

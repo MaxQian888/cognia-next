@@ -2478,6 +2478,28 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
     min-height: 44px;
     min-width: 44px;
   }
+  /* Touch hit-slop — the same 44px floor for a control that must keep its
+     painted size. `.touch-target` grows the box, which is right for a lone
+     button but turns a dense row of 28px chips into a 44px band where one
+     control is tall and its neighbours are not. This draws an invisible
+     `::after` that extends the HIT AREA vertically instead, so every chip on
+     the row answers a thumb at the floor while the row still paints at 28px.
+     Vertical only: the gap between chips on a row is 2-4px, and a horizontal
+     slop would hand a neighbour's taps to whichever chip paints last. A fine
+     pointer (mouse, trackpad) gets nothing. */
+  @media (pointer: coarse) {
+    .touch-hit {
+      position: relative;
+    }
+    .touch-hit::after {
+      content: "";
+      position: absolute;
+      inset-inline: 0;
+      top: 50%;
+      height: max(100%, 44px);
+      transform: translateY(-50%);
+    }
+  }
   /* Horizontally-scrollable code blocks: on touch devices a bare
      `overflow-x-auto` gives no hint that the block scrolls (the scroll happens
      inside a vertically-scrolling list, an awkward gesture). Add momentum
@@ -2499,6 +2521,37 @@ html[data-reduce-motion="true"]::view-transition-group(cognia-shell-outlet-end) 
       background: var(--border);
       border-radius: 9999px;
     }
+  }
+  /* Project workbench scroll surfaces (file tree, problems, outline,
+     search, quick open). These lists keep right-edge indicators — git
+     badges, marker counts, line:col columns — exactly where a platform
+     overlay scrollbar floats, so on macOS the zero-width thumb covers
+     them mid-scroll. WebKit-styled scrollbars render as classic ones
+     that take real layout space — do NOT set `scrollbar-width`/
+     `scrollbar-color` here: the standard properties win over the webkit
+     rules on Chrome ≥121 and drop it back to an overlay thumb. The
+     `scrollbar-gutter` keeps the reserved edge stable across scroll
+     on/off, and the right padding is the backstop for engines whose
+     scrollbars stay overlay regardless (Firefox on macOS). */
+  .workbench-scroll {
+    padding-right: 6px;
+    scrollbar-gutter: stable;
+  }
+  .workbench-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .workbench-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .workbench-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+  .workbench-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 36%, transparent);
   }
   /* Workflow editor — mobile/touch canvas. The mobile editor roots the React
      Flow surface in `.wf-touch-canvas`; there, source handles drive

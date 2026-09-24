@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { XIcon } from "lucide-react"
 
 import { MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { tabColorBorderClass } from "@/lib/terminal/tab-appearance"
 import { TAB_ICON_COMPONENTS } from "@/lib/terminal/tab-icon-map"
@@ -145,8 +146,9 @@ export function TerminalTab({
           onClose(row.id)
         }}
         className={cn(
-          "ml-1 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted",
-          "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
+          "ml-1 rounded p-0.5 hover:bg-muted",
+          HOVER_REVEAL_CONTROL_CLASS,
+          "group-focus-within:opacity-100",
           active && "opacity-60"
         )}
       >

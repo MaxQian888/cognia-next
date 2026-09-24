@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 
 import { useRecoveryGate } from "@/hooks/recovery/use-recovery-gate"
 import { SafeModeShell } from "@/components/recovery/safe-mode-shell"
+import { SecretStoreLockedNotice } from "@/components/recovery/secret-store-locked-notice"
 import { PageLoading } from "@/components/ui/loading-states"
 
 /**
@@ -19,7 +20,27 @@ import { PageLoading } from "@/components/ui/loading-states"
  * mount their children on the first render with no added latency and no flash.
  */
 export function RecoveryBootGate({ children }: { children: ReactNode }) {
-  const { status, state, probing, retry } = useRecoveryGate()
+  const {
+    status,
+    state,
+    probing,
+    retry,
+    secretStore,
+    unlockingSecretStore,
+    secretStoreUnlockFailed,
+    unlockSecretStore,
+  } = useRecoveryGate()
+  // A locked keychain is surfaced here in both modes, with the explicit
+  // Unlock that is the only renderer path allowed to prompt the OS.
+  const secretStoreNotice = (className?: string) => (
+    <SecretStoreLockedNotice
+      readiness={secretStore}
+      unlocking={unlockingSecretStore}
+      failed={secretStoreUnlockFailed}
+      onUnlock={() => void unlockSecretStore()}
+      className={className}
+    />
+  )
 
   if (status === "checking") {
     // A sub-frame IPC round trip on the desktop, never rendered elsewhere.
@@ -33,8 +54,22 @@ export function RecoveryBootGate({ children }: { children: ReactNode }) {
   }
 
   if (status === "safe") {
-    return <SafeModeShell state={state} probing={probing} onRetry={retry} />
+    return (
+      <SafeModeShell
+        state={state}
+        probing={probing}
+        onRetry={retry}
+        secretStoreNotice={secretStoreNotice()}
+      />
+    )
   }
 
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      {secretStoreNotice(
+        "fixed inset-x-4 bottom-4 z-50 mx-auto max-w-xl shadow-lg sm:inset-x-auto sm:right-4"
+      )}
+    </>
+  )
 }

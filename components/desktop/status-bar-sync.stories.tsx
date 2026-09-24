@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 
 import { StatusBarSync } from "./status-bar-sync"
 
-// Compact companion-sync segment. In Storybook the sync module returns its
-// default (never-synced) in-memory state, so it renders the "not synced" face.
+// Compact device-sync segment. Storybook has no paired devices, so it renders
+// the "Sync not set up" face; clicking it opens the sync popover.
 const meta = {
   title: "Desktop/StatusBar/Sync",
   component: StatusBarSync,

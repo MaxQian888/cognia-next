@@ -4,7 +4,7 @@ import {
   pushConfigToCli,
   type ConfigSettingsSlice,
 } from "./push-config"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 const FULL: ConfigSettingsSlice = {
   defaultProvider: "anthropic",

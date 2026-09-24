@@ -15,6 +15,10 @@ jest.mock("./diff-viewer", () => ({
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { gitCommitFiles, gitDiffCommit } from "@/lib/git/commands"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { CommitDetail } from "./commit-detail"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitCommit } from "@/types/git"
@@ -139,6 +143,24 @@ describe("CommitDetail", () => {
     const blameBtn = await screen.findByTestId("commit-blame-a.ts")
     fireEvent.click(blameBtn)
     expect(onViewBlame).toHaveBeenCalledWith("a.ts", commit.hash)
+  })
+
+  it("keeps the per-file blame button reachable without a hover", async () => {
+    const onViewBlame = jest.fn()
+    render(<CommitDetail rootDir="/r" commit={commit} onViewBlame={onViewBlame} />)
+    const blameBtn = await screen.findByTestId("commit-blame-a.ts")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(blameBtn).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(blameBtn).not.toHaveClass(forbidden)
+    }
+    // The file row is the nearest unnamed `group`, so its hover still reveals the button.
+    expect(blameBtn.closest(".group")?.tagName).toBe("LI")
+    blameBtn.focus()
+    expect(blameBtn).toHaveFocus()
+    fireEvent.click(blameBtn)
+    expect(onViewBlame).toHaveBeenCalledTimes(1)
   })
 
   it("performs a soft reset to the commit", async () => {

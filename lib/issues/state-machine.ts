@@ -10,7 +10,7 @@
  *   - the run adapter's write-back.
  *
  * Ownership model — deliberately identical to
- * `lib/ai/agent/team/task-move-guard.ts`, so the two boards never disagree:
+ * `lib/ai/agent/team/gates/task-move-guard.ts`, so the two boards never disagree:
  *   - Federated rows (GitHub mirrors, agent-team tasks) are read-only here;
  *     their own surface owns them. The board must grey them out, not fail on
  *     write.

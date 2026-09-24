@@ -5,6 +5,10 @@
 import { render, waitFor } from "@testing-library/react"
 
 import { SubscriptionInitializer } from "./subscription-initializer"
+import {
+  __resetSecretStoreReadinessForTesting,
+  setSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 let accountState = {
   unlockedAccountId: "local_acct_a" as string | null,
@@ -36,6 +40,7 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(() => {
+  __resetSecretStoreReadinessForTesting()
   mInitOnce.mockClear()
   mNotifyChanged.mockClear()
   accountState = {
@@ -114,5 +119,45 @@ describe("SubscriptionInitializer", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mInitOnce).not.toHaveBeenCalled()
+  })
+
+  it("re-runs the whole init after the secret store unlocks", async () => {
+    mInitOnce.mockResolvedValueOnce({
+      outcomes: [],
+      migratedCount: 0,
+      toastShown: false,
+      error: "SECRET_STORE_LOCKED: denied",
+      secretStoreUnavailable: true,
+    })
+    setSecretStoreReadiness("locked")
+    render(<SubscriptionInitializer />)
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(1))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mInitOnce).toHaveBeenCalledTimes(1)
+
+    setSecretStoreReadiness("ready")
+
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(2))
+    // Each run tells subscribers (limits, chat header) to reload.
+    await waitFor(() => expect(mNotifyChanged).toHaveBeenCalledTimes(2))
+  })
+
+  it("does not replay a deferred init for an account that is no longer active", async () => {
+    mInitOnce.mockResolvedValueOnce({
+      outcomes: [],
+      migratedCount: 0,
+      toastShown: false,
+      secretStoreUnavailable: true,
+    })
+    setSecretStoreReadiness("locked")
+    const { rerender } = render(<SubscriptionInitializer />)
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(1))
+    accountState = { unlockedAccountId: "local_acct_b", accountRevision: 1 }
+    rerender(<SubscriptionInitializer />)
+    await waitFor(() => expect(mInitOnce).toHaveBeenCalledTimes(2))
+
+    setSecretStoreReadiness("ready")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mInitOnce).toHaveBeenCalledTimes(2)
   })
 })

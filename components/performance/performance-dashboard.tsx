@@ -39,6 +39,7 @@ export function PerformanceDashboard() {
     gaps,
     hostState,
     error,
+    hostIssue,
     paused,
     intervalMs,
     setPaused,
@@ -106,6 +107,7 @@ export function PerformanceDashboard() {
                   hostState={hostState}
                   gaps={gaps}
                   error={error}
+                  issue={hostIssue}
                   collectionDurationMs={latest?.collectionDurationMs}
                   actualIntervalMs={latest?.actualIntervalMs}
                 />

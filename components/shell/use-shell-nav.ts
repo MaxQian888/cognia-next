@@ -14,7 +14,7 @@
  * Log lines are stable strings — tests on both surfaces pin them.
  */
 
-import { useCallback, useSyncExternalStore } from "react"
+import { useCallback, useState, useSyncExternalStore, useTransition } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { loggers } from "@cognia/logging"
 import { useUIStore } from "@/stores/ui"
@@ -35,6 +35,8 @@ const log = loggers.ui
 
 export interface ShellNav {
   pathname: string
+  /** Destination awaiting a route commit, including a cold dev compilation. */
+  pendingRoute: string | null
   /** `/` — the only route where a chat guild counts as "where you are". */
   onHomeRoute: boolean
   selected: SelectedGuild
@@ -59,6 +61,8 @@ export interface ShellNav {
 export function useShellNav(): ShellNav {
   const router = useRouter()
   const pathname = usePathname() ?? "/"
+  const [isPending, startTransition] = useTransition()
+  const [requestedRoute, setRequestedRoute] = useState<string | null>(null)
   const selected = useUIStore((s) => s.selectedGuild)
   const setSelected = useUIStore((s) => s.setSelectedGuild)
   // Plugin-contributed view containers (B1). Re-render on registry mutation
@@ -92,9 +96,17 @@ export function useShellNav(): ShellNav {
   )
   const overflowActive = layout.resolved.overflow.some((item) => isFeatureActive(item.route))
 
+  const navigate = useCallback(
+    (route: string) => {
+      setRequestedRoute(route)
+      startTransition(() => router.push(route))
+    },
+    [router]
+  )
+
   const goHome = useCallback(() => {
-    if (!onHomeRoute) router.push("/")
-  }, [onHomeRoute, router])
+    if (!onHomeRoute) navigate("/")
+  }, [onHomeRoute, navigate])
 
   const switchToDm = useCallback(() => {
     log.info("guild switch dm")
@@ -125,13 +137,14 @@ export function useShellNav(): ShellNav {
   const goToFeature = useCallback(
     (route: string) => {
       log.info("guild navigate feature", { route })
-      router.push(route)
+      navigate(route)
     },
-    [router]
+    [navigate]
   )
 
   return {
     pathname,
+    pendingRoute: isPending ? requestedRoute : null,
     onHomeRoute,
     selected,
     isDmActive,

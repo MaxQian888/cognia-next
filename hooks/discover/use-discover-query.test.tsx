@@ -132,7 +132,7 @@ jest.mock("@/types/agent/agent-team", () => ({
 jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
   listAgentTeamTemplateEntries: jest.fn(() => []),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   getAvailablePresets: jest.fn(() => ["codex", "claude-code"]),
   getPresetDisplayInfo: jest.fn((id: string) => ({
     name: id === "codex" ? "Codex" : "Claude Code",

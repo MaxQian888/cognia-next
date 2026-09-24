@@ -23,6 +23,7 @@ import { CopyIcon, MessageSquareIcon, PlayIcon } from "lucide-react"
 import { MotionPopover } from "@/components/chat/motion/motion-reveal"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -181,7 +182,7 @@ export function TerminalHistoryPanel({
                       <span className="text-[10px] text-muted-foreground">
                         {relativeTime(rec.endedAt, now)}
                       </span>
-                      <div className="hidden gap-0.5 group-hover:flex">
+                      <div className={cn("flex gap-0.5", HOVER_REVEAL_GROUP_CLASS)}>
                         <Button
                           size="icon"
                           variant="ghost"

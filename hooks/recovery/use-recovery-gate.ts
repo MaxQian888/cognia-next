@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
 import type { RecoveryBoot, RecoveryStateV1, RecoverySubsystem } from "@cognia/logging"
 import { ensureSidecarReady } from "@/lib/claude/ipc"
@@ -13,10 +13,23 @@ import {
   recordRecoveryCheckpoint,
   retryRecoverySubsystem,
   sendRecoveryHeartbeat,
+  unlockSecretStore as unlockSecretStoreNative,
   type RecoveryRetryAction,
 } from "@/lib/tauri/recovery"
+import {
+  getSecretStoreReadiness,
+  onSecretStoreRecovered,
+  reportSecretStoreFailure,
+  setSecretStoreReadiness,
+  subscribeSecretStoreReadiness,
+  type SecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 import { createDefaultRecoveryProbes } from "@/lib/recovery/default-probes"
-import { runRecoverySequence, type RecoveryProbeSet } from "@/lib/recovery/probes"
+import {
+  runRecoverySequence,
+  type RecoveryProbeResult,
+  type RecoveryProbeSet,
+} from "@/lib/recovery/probes"
 
 /**
  * `checking` blocks the app tree: mounting plugin and background initializers
@@ -33,6 +46,14 @@ export interface RecoveryGate {
   probing: boolean
   retry: (subsystem: RecoverySubsystem, action?: RecoveryRetryAction) => Promise<void>
   refresh: () => Promise<void>
+  /** The encrypted secret store's state, settled natively at cold boot. */
+  secretStore: SecretStoreReadiness
+  /** True while an explicit keychain unlock is in flight. */
+  unlockingSecretStore: boolean
+  /** True when the last explicit unlock attempt failed (cancelled or denied). */
+  secretStoreUnlockFailed: boolean
+  /** Explicit, possibly interactive, retry of the secret store (user click). */
+  unlockSecretStore: () => Promise<void>
 }
 
 /** How often the renderer reports alive. The native healthy timer needs this. */
@@ -65,7 +86,7 @@ async function waitForSettingsHydration(): Promise<void> {
   })
 }
 
-async function startSidecarForRecovery(): Promise<void> {
+async function startSidecarForRecovery(): Promise<RecoveryProbeResult> {
   try {
     // The native network policy is deliberately fail-closed until the
     // account-scoped settings row is hydrated. Recovery runs before ordinary
@@ -73,13 +94,42 @@ async function startSidecarForRecovery(): Promise<void> {
     // the process proxy environment.
     await waitForSettingsHydration()
     await applyProxyToRust()
-    await ensureSidecarReady()
   } catch (error) {
-    // The following read-only probe records the stable `sidecar.not_ready` or
-    // `sidecar.probe_threw` checkpoint. Recovery persistence deliberately does
-    // not store the raw IPC error because it may contain a local path.
-    console.warn("[recovery] sidecar startup failed", error)
+    // Only recognize the stable credential code. Never persist or log raw
+    // IPC errors, which may contain proxy URLs or credentials.
+    const credentialUnavailable =
+      error === "PROXY_CREDENTIAL_UNAVAILABLE" ||
+      (error instanceof Error && error.message === "PROXY_CREDENTIAL_UNAVAILABLE") ||
+      (typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "PROXY_CREDENTIAL_UNAVAILABLE")
+    return {
+      ok: false,
+      reasonCode: credentialUnavailable ? "proxy.credential_unavailable" : "proxy.apply_failed",
+    }
   }
+  try {
+    return (await ensureSidecarReady()).ready
+      ? { ok: true }
+      : { ok: false, reasonCode: "sidecar.not_ready" }
+  } catch {
+    return { ok: false, reasonCode: "sidecar.start_failed" }
+  }
+}
+
+/**
+ * Native policy that depends on stored credentials, re-applied after the
+ * secret store unlocks. Both are idempotent: the proxy push is deduped by its
+ * serialized payload (a failed push is not recorded) and provider keys only
+ * load when an earlier load did not complete.
+ */
+async function reapplyProxyAfterUnlock(): Promise<void> {
+  await applyProxyToRust()
+}
+
+async function reloadSpeechKeysAfterUnlock(): Promise<void> {
+  await useSettingsStore.getState().ensureProviderKeys()
 }
 
 /**
@@ -105,6 +155,14 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
   const [state, setState] = useState<RecoveryStateV1 | null>(null)
   const [probing, setProbing] = useState(false)
   const sequenceRunning = useRef(false)
+  const secretStore = useSyncExternalStore(
+    subscribeSecretStoreReadiness,
+    getSecretStoreReadiness,
+    getSecretStoreReadiness
+  )
+  const [unlockingSecretStore, setUnlockingSecretStore] = useState(false)
+  const [secretStoreUnlockFailed, setSecretStoreUnlockFailed] = useState(false)
+  const unlockRunning = useRef(false)
   // Captured once, never reassigned. Callers pass an options object literal,
   // so its identity changes every render; depending on it would make
   // `runSequence` unstable, which re-subscribes the mount effect on each
@@ -118,32 +176,66 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
     if (next) setState(next)
   }, [])
 
-  const runSequence = useCallback(async (current: RecoveryStateV1 | null) => {
-    // One sequence at a time. A second concurrent run would race the native
-    // controller's persisted checkpoint order.
-    if (sequenceRunning.current) return
-    sequenceRunning.current = true
-    setProbing(true)
-    try {
-      const probes = await (createProbesRef.current ?? createDefaultRecoveryProbes)()
-      let latest = current
-      await runRecoverySequence(
-        probes,
-        async (subsystem, result) => {
-          const next = await recordRecoveryCheckpoint(subsystem, result.ok, result.reasonCode)
-          if (next) {
-            latest = next
-            setState(next)
-          }
-        },
-        { skip: current?.disabledSubsystems ?? [] }
-      )
-      if (latest) setState(latest)
-    } finally {
-      sequenceRunning.current = false
-      setProbing(false)
-    }
-  }, [])
+  const runSequence = useCallback(
+    async (
+      current: RecoveryStateV1 | null,
+      retryRequest?: { subsystem: RecoverySubsystem; action: RecoveryRetryAction }
+    ) => {
+      // Include the retry IPC and startup wait in the same lock. Otherwise two
+      // clicks can reset checkpoints while the first startup is still pending.
+      if (sequenceRunning.current) return
+      sequenceRunning.current = true
+      setProbing(true)
+      try {
+        if (retryRequest) {
+          current = await retryRecoverySubsystem(retryRequest.subsystem, retryRequest.action)
+          if (!current) return
+          setState(current)
+        }
+        // Settings are mounted above the gate. Finish their database reads
+        // before exposing initializers that can change the active Dexie schema.
+        await waitForSettingsHydration()
+        const probes = await (createProbesRef.current ?? createDefaultRecoveryProbes)()
+        const preparedProbes: RecoveryProbeSet = {
+          ...probes,
+          sidecar: async () => {
+            // Start only when earlier checkpoints passed, including when a
+            // renderer failure brought a cold process into safe mode. The
+            // underlying health probe remains read-only.
+            const startup = await startSidecarForRecovery()
+            if (!startup.ok) return startup
+            return probes.sidecar()
+          },
+        }
+        let latest = current
+        const steps = await runRecoverySequence(
+          preparedProbes,
+          async (subsystem, result) => {
+            const next = await recordRecoveryCheckpoint(subsystem, result.ok, result.reasonCode)
+            if (next) {
+              latest = next
+              setState(next)
+            }
+          },
+          { skip: current?.disabledSubsystems ?? [] }
+        )
+        if (latest) setState(latest)
+        // Do not mount the application after only one successful checkpoint.
+        // Recovering is usable once the full sequence succeeds; the native
+        // controller keeps its crash budgets until the healthy dwell completes.
+        setStatus(
+          steps.every((step) => step.result.ok) && latest?.mode !== "safe" ? "normal" : "safe"
+        )
+      } catch {
+        console.warn("[recovery] checkpoint sequence failed")
+        setStatus("safe")
+      } finally {
+        sequenceRunning.current = false
+        setProbing(false)
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     if (!desktop) return
@@ -160,24 +252,24 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
         return
       }
       setBoot(decision)
+      // Publish the settled store state before any initializer mounts, so a
+      // locked keychain is surfaced once here rather than rediscovered (and
+      // logged) by every credential consumer.
+      if (decision.secretStore !== "uninitialized") setSecretStoreReadiness(decision.secretStore)
       if (decision.requiresSafeShell) setStatus("safe")
 
       const current = await getRecoveryState()
       if (cancelled) return
       if (current) setState(current)
-      if (!decision.requiresSafeShell) {
-        if (current?.disabledSubsystems.includes("sidecar") ?? false) {
-          // Settings hydration is mounted above this gate. Do not expose
-          // plugin/background initializers until its account-scoped database
-          // read has completed; dynamic plugin schema adoption may otherwise
-          // close the active Dexie connection underneath that read.
-          await waitForSettingsHydration()
-        } else {
-          await startSidecarForRecovery()
-        }
-        if (cancelled) return
-        setStatus("normal")
-      }
+      // Preserve a known failure until the operator retries it. Re-running
+      // read-only probes against a deliberately stopped sidecar would replace
+      // the original cause with a misleading not-ready failure.
+      if (
+        decision.requiresSafeShell &&
+        current?.suspectSubsystem &&
+        !current.disabledSubsystems.includes(current.suspectSubsystem)
+      )
+        return
       if (cancelled) return
       void runSequence(current)
     })()
@@ -209,18 +301,55 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
 
   const retry = useCallback(
     async (subsystem: RecoverySubsystem, action: RecoveryRetryAction = "retry") => {
-      const next = await retryRecoverySubsystem(subsystem, action)
-      if (!next) return
-      setState(next)
-      if (subsystem === "sidecar" && action === "retry") {
-        await startSidecarForRecovery()
-      }
-      // Re-run from the reopened point so the operator sees the outcome of
-      // their decision rather than a stale board.
-      void runSequence(next)
+      await runSequence(null, { subsystem, action })
     },
     [runSequence]
   )
 
-  return { status, boot, state, probing, retry, refresh }
+  // Consumers of stored credentials that live above/beside the app tree and
+  // are not re-mounted by an unlock: re-apply them when the store recovers.
+  useEffect(() => {
+    if (!desktop) return
+    const offProxy = onSecretStoreRecovered(reapplyProxyAfterUnlock)
+    const offSpeech = onSecretStoreRecovered(reloadSpeechKeysAfterUnlock)
+    return () => {
+      offProxy()
+      offSpeech()
+    }
+  }, [desktop])
+
+  const unlockSecretStore = useCallback(async () => {
+    if (unlockRunning.current) return
+    unlockRunning.current = true
+    setUnlockingSecretStore(true)
+    setSecretStoreUnlockFailed(false)
+    try {
+      await unlockSecretStoreNative()
+      // Only a successful native retry flips the state; this re-runs every
+      // deferred consumer (subscription init, proxy, speech keys, plugins).
+      setSecretStoreReadiness("ready")
+    } catch (error) {
+      if (!reportSecretStoreFailure(error, "recovery.unlock")) {
+        // Timeout / worker failure: the native error is not persisted or shown.
+        console.warn("[recovery] secure storage unlock failed")
+      }
+      setSecretStoreUnlockFailed(true)
+    } finally {
+      unlockRunning.current = false
+      setUnlockingSecretStore(false)
+    }
+  }, [])
+
+  return {
+    status,
+    boot,
+    state,
+    probing,
+    retry,
+    refresh,
+    secretStore,
+    unlockingSecretStore,
+    secretStoreUnlockFailed,
+    unlockSecretStore,
+  }
 }

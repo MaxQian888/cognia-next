@@ -1,7 +1,7 @@
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { ExternalAgentInstance } from "@/types/agent/external-agent"
 
-import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/preset-identity"
+import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 import { bindImportedSessionToNativeRuntime } from "@/lib/db/sessions"
 import { realSessionFs } from "./fs"
 

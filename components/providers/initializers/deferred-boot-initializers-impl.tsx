@@ -13,6 +13,7 @@ import { RemoteNotificationInitializer } from "./remote-notification-initializer
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
+import { ensurePlanStepRecovery } from "@/lib/agent/plan/step-recovery"
 import { recoverStaleDirectChatExecutionRuns } from "@/lib/execution/direct-chat-run"
 import { startRendererWorkOutbox } from "@/lib/work-submission/bootstrap"
 
@@ -38,6 +39,11 @@ export function DeferredBootInitializersImpl() {
   useEffect(() => {
     markBootCapabilityReady("core-chat")
     void recoverStaleDirectChatExecutionRuns()
+    // In-session plan steps whose turn died with the previous renderer load
+    // halt on their step (retry / skip / mark done / cancel) at boot, not only
+    // once a chat surface happens to mount the tracker dock. Once-per-load and
+    // non-rejecting, so the dock's own call is a no-op after this one.
+    void ensurePlanStepRecovery()
     // Work stranded by a crash is picked up here (ADR-0123). A no-op while the
     // feature flag is off, so mounting it is safe ahead of the rollout.
     return startRendererWorkOutbox()

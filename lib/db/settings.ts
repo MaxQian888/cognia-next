@@ -214,9 +214,13 @@ export const DEFAULTS: AppSettings = {
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 
-  // Browser/desktop Vault locks after 30 minutes of inactivity by default.
-  // Active local turns pause the timer; users may override or disable it.
-  accountAutoLockMinutes: 30,
+  // Idle auto-lock is opt-in (Never). It only ever applies to a profile that
+  // asks for its password at launch, and an unasked-for lock in the middle of
+  // work is the friction ADR-0054's device unlock exists to remove. Rows that
+  // already persisted a value keep it: `save()` writes the whole merged row,
+  // so a stored 30 cannot be told apart from a deliberate choice. Active local
+  // turns pause the timer when it is on.
+  accountAutoLockMinutes: 0,
 
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.

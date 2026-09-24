@@ -29,20 +29,37 @@ jest.mock("@/hooks/ui", () => ({
   useBreakpoint: () => "desktop",
 }))
 
-// Capture URL state in a module-level var so router.replace updates flow
-// back through useSearchParams on re-render.
+// Capture URL state in a module-level var so router updates flow back through
+// useSearchParams on re-render. A small history stack makes push / replace /
+// back behave like the browser's, which is what the item sheet relies on.
 let currentSearch = ""
 let cachedKey = ""
 let cachedParams = new URLSearchParams("")
-const replaceMock = jest.fn((href: string) => {
+let history: string[] = [""]
+let historyIndex = 0
+function searchOf(href: string): string {
   const qIdx = href.indexOf("?")
-  currentSearch = qIdx >= 0 ? href.slice(qIdx) : ""
+  return qIdx >= 0 ? href.slice(qIdx) : ""
+}
+const replaceMock = jest.fn((href: string) => {
+  currentSearch = searchOf(href)
+  history[historyIndex] = currentSearch
+})
+const pushMock = jest.fn((href: string) => {
+  currentSearch = searchOf(href)
+  history = [...history.slice(0, historyIndex + 1), currentSearch]
+  historyIndex = history.length - 1
+})
+const backMock = jest.fn(() => {
+  if (historyIndex === 0) return
+  historyIndex -= 1
+  currentSearch = history[historyIndex] ?? ""
 })
 jest.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: replaceMock,
-    push: jest.fn(),
-    back: jest.fn(),
+    push: pushMock,
+    back: backMock,
     prefetch: jest.fn(),
   }),
   usePathname: () => "/discover",
@@ -93,15 +110,37 @@ jest.mock("@/lib/db/schema", () => ({
     mcpServers: { update: jest.fn() },
   }),
 }))
-jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+// The character detail's "Start chat" path creates sessions; not under test here.
+jest.mock("@/lib/shell/start-guild-conversation", () => ({
+  openCharacterChat: jest.fn(),
+  startGuildConversation: jest.fn(),
+}))
+jest.mock("@/components/shell/use-shell-nav", () => ({
+  useShellNav: () => ({ switchToTeam: jest.fn() }),
+}))
+// The saved landing preference; `null` keeps the For You default.
+let landingPreference: string | null = null
+jest.mock("@/hooks/discover/use-discover-preferences", () => ({
+  useDiscoverPreferences: () => ({ preferences: { landingCategory: landingPreference } }),
+}))
 
 import { DiscoverDesktopBody } from "./discover-desktop-body"
 
+function startAt(search: string): void {
+  currentSearch = search
+  history = [search]
+  historyIndex = 0
+}
+
 beforeEach(() => {
-  currentSearch = ""
+  startAt("")
   cachedKey = ""
   cachedParams = new URLSearchParams("")
+  landingPreference = null
   replaceMock.mockClear()
+  pushMock.mockClear()
+  backMock.mockClear()
 })
 
 describe("<DiscoverDesktopBody />", () => {
@@ -142,19 +181,107 @@ describe("<DiscoverDesktopBody />", () => {
     )
   })
 
-  it("clicking an item card writes ?item= to the URL", async () => {
+  it("clicking an item card pushes ?item= and opens the detail sheet", async () => {
     const user = userEvent.setup()
-    render(<DiscoverDesktopBody />)
+    const { rerender } = render(<DiscoverDesktopBody />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     await act(async () => {
       await user.click(screen.getByTestId("discover-item-character-c1"))
     })
-    expect(replaceMock).toHaveBeenCalledWith(expect.stringContaining("item=c1"), expect.any(Object))
+    // A history entry, so the browser's Back button closes the detail again.
+    expect(pushMock).toHaveBeenCalledWith(expect.stringContaining("item=c1"), expect.any(Object))
+    rerender(<DiscoverDesktopBody />)
+    const sheet = screen.getByRole("dialog", { name: "Alpha" })
+    expect(sheet).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-character-c1")).toBeInTheDocument()
+    // The primary actions are there, not just a heading.
+    expect(screen.getByTestId("discover-inspector-start-chat")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-favorite")).toBeInTheDocument()
   })
 
-  it("hydrates the inspector with the item named by ?item=", () => {
-    currentSearch = "?category=characters&item=c1"
+  it("closing a detail it opened pops the entry, so Back and close agree", async () => {
+    const user = userEvent.setup()
+    startAt("?category=characters")
+    const { rerender } = render(<DiscoverDesktopBody />)
+    await act(async () => {
+      await user.click(screen.getByTestId("discover-item-character-c1"))
+    })
+    rerender(<DiscoverDesktopBody />)
+    await act(async () => {
+      await user.click(screen.getByTestId("discover-inspector-close"))
+    })
+    expect(backMock).toHaveBeenCalledTimes(1)
+    rerender(<DiscoverDesktopBody />)
+    expect(currentSearch).toBe("?category=characters")
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("browser Back and Forward close and re-open the sheet", async () => {
+    const user = userEvent.setup()
+    startAt("?category=characters")
+    const { rerender } = render(<DiscoverDesktopBody />)
+    await act(async () => {
+      await user.click(screen.getByTestId("discover-item-character-c1"))
+    })
+    rerender(<DiscoverDesktopBody />)
+    expect(screen.getByRole("dialog", { name: "Alpha" })).toBeInTheDocument()
+
+    act(() => backMock())
+    rerender(<DiscoverDesktopBody />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+
+    // Forward: the history still holds the item entry.
+    act(() => {
+      historyIndex += 1
+      currentSearch = history[historyIndex] ?? ""
+    })
+    rerender(<DiscoverDesktopBody />)
+    expect(screen.getByRole("dialog", { name: "Alpha" })).toBeInTheDocument()
+  })
+
+  it("opens the sheet on a cold deep link and keeps the rail on the overview", () => {
+    startAt("?category=characters&item=c1")
     render(<DiscoverDesktopBody />)
+    expect(screen.getByRole("dialog", { name: "Alpha" })).toBeInTheDocument()
     expect(screen.getByTestId("discover-inspector-character-c1")).toBeInTheDocument()
-    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Alpha")
+    // The rail is the category overview; the detail is not rendered twice.
+    expect(screen.getByTestId("discover-inspector-empty")).toBeInTheDocument()
+  })
+
+  it("closing a cold deep-linked detail clears ?item= in place", async () => {
+    const user = userEvent.setup()
+    startAt("?category=characters&item=c1")
+    const { rerender } = render(<DiscoverDesktopBody />)
+    await act(async () => {
+      await user.click(screen.getByTestId("discover-inspector-close"))
+    })
+    expect(backMock).not.toHaveBeenCalled()
+    expect(replaceMock).toHaveBeenCalledWith("/discover?category=characters", expect.any(Object))
+    rerender(<DiscoverDesktopBody />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps a category-less ?item= link instead of redirecting to the landing category", () => {
+    // A saved landing category used to fire `setCategory`, which drops
+    // `?item=`, before the detail could open.
+    landingPreference = "skills"
+    startAt("?item=c1")
+    render(<DiscoverDesktopBody />)
+    expect(replaceMock).not.toHaveBeenCalled()
+    expect(screen.getByRole("dialog", { name: "Alpha" })).toBeInTheDocument()
+  })
+
+  it("applies the landing category once no item is open", () => {
+    landingPreference = "skills"
+    startAt("")
+    render(<DiscoverDesktopBody />)
+    expect(replaceMock).toHaveBeenCalledWith("/discover?category=skills", expect.any(Object))
+  })
+
+  it("says so when the deep-linked item does not exist", () => {
+    startAt("?category=characters&item=ghost")
+    render(<DiscoverDesktopBody />)
+    expect(screen.getByTestId("discover-item-sheet-missing")).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: "inspector.missingTitle" })).toBeInTheDocument()
   })
 })

@@ -3,14 +3,23 @@ import { render, act, waitFor } from "@testing-library/react"
 // Capture what messages/locale the gate feeds NextIntlClientProvider. The
 // array name is `mock`-prefixed so babel-plugin-jest-hoist allows the factory
 // to reference it.
-const mockProviderCalls: Array<{ locale: string; messages: Record<string, unknown> }> = []
+const mockProviderCalls: Array<{
+  locale: string
+  messages: Record<string, unknown>
+  timeZone?: string
+}> = []
 jest.mock("next-intl", () => ({
   NextIntlClientProvider: (props: {
     locale: string
     messages: Record<string, unknown>
+    timeZone?: string
     children: React.ReactNode
   }) => {
-    mockProviderCalls.push({ locale: props.locale, messages: props.messages })
+    mockProviderCalls.push({
+      locale: props.locale,
+      messages: props.messages,
+      timeZone: props.timeZone,
+    })
     return props.children
   },
 }))
@@ -24,7 +33,10 @@ jest.mock("@/i18n/messages", () => ({
 
 jest.mock("@/i18n/config", () => ({ defaultLocale: "en" }))
 
-let mockSettingsState: { settings?: { language?: string }; loaded: boolean }
+let mockSettingsState: {
+  settings?: { language?: string; profile?: { timezone?: string } }
+  loaded: boolean
+}
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) => selector(mockSettingsState),
 }))
@@ -135,5 +147,40 @@ describe("LocaleGate", () => {
     expect(messages.pluginNs).toEqual({ greeting: "Hello from plugin" })
     // Host namespaces are preserved alongside the plugin contribution.
     expect(messages.common).toBe((defaultMessages as { common: unknown }).common)
+  })
+
+  describe("time zone", () => {
+    it("formats in UTC until settings hydrate, so the static render is reproducible", () => {
+      mockSettingsState = { settings: undefined, loaded: false }
+      render(<LocaleGate>child</LocaleGate>)
+      expect(latest().timeZone).toBe("UTC")
+    })
+
+    it("formats in the device zone once hydrated — not UTC", () => {
+      // Pinned to UTC, a conversation stamped 14:32 in Shanghai read 06:32.
+      mockSettingsState = { settings: { language: "en" }, loaded: true }
+      render(<LocaleGate>child</LocaleGate>)
+      expect(latest().timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    })
+
+    it("prefers the profile's own zone", () => {
+      mockSettingsState = {
+        settings: { language: "en", profile: { timezone: "Asia/Tokyo" } },
+        loaded: true,
+      }
+      render(<LocaleGate>child</LocaleGate>)
+      expect(latest().timeZone).toBe("Asia/Tokyo")
+    })
+
+    it("falls back to the device zone when the profile names one the runtime rejects", () => {
+      // An unknown zone makes every `Intl.DateTimeFormat` throw — it must not
+      // take every formatted date in the app with it.
+      mockSettingsState = {
+        settings: { language: "en", profile: { timezone: "Mars/Olympus_Mons" } },
+        loaded: true,
+      }
+      render(<LocaleGate>child</LocaleGate>)
+      expect(latest().timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    })
   })
 })

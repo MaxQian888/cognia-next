@@ -1,4 +1,4 @@
-import { EXTERNAL_AGENT_PRESETS, getRunnablePresets } from "@/lib/ai/agent/external/presets"
+import { EXTERNAL_AGENT_PRESETS, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import { presetIdsForSessionSource } from "@/lib/agent-ecosystem/runtime-link"
 
 import { getSessionSources } from "./registry"

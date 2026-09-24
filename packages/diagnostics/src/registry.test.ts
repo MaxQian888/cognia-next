@@ -106,6 +106,23 @@ describe("DIAGNOSTIC_CODES", () => {
     expect(unavailable.icon).toBe("settings")
   })
 
+  it("refuses an addressed turn with a way to set its runtime up, never a retry", () => {
+    // Re-sending `@codex` to an agent that is not configured fails identically;
+    // the settings action is the remedy. A busy conversation is an event that
+    // ends on its own, so it offers nothing but dismissal.
+    const unavailable = DIAGNOSTIC_CODES.turnRouteUnavailable
+    expect(unavailable.retryable).toBe(false)
+    expect(unavailable.actions).toContainEqual({ kind: "open-settings", section: "agents" })
+    expect(unavailable.persistent).toBe(false)
+
+    const busy = DIAGNOSTIC_CODES.turnRouteWhileBusy
+    expect(busy.retryable).toBe(false)
+    expect(busy.actions).toEqual([{ kind: "dismiss" }])
+    expect(busy.icon).toBe("clock")
+    expect(isDiagnosticCode("turnRouteUnavailable")).toBe(true)
+    expect(isDiagnosticCode("turnRouteWhileBusy")).toBe(true)
+  })
+
   it("keeps the 23 parser category ids so their translations still resolve", () => {
     const inherited: DiagnosticCode[] = [
       "connectionRefused",

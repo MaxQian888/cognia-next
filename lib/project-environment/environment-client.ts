@@ -467,8 +467,9 @@ export function declarationReader(
     if (!file) throw new Error(`${relPath}: no such file`)
     // The Host enforces its own ceiling; this one is the caller's, and a file
     // over it must refuse rather than be silently truncated.
-    if (file.contents.length > maxBytes) {
-      throw new Error(`${relPath} is ${file.contents.length} bytes, over the ${maxBytes} limit`)
+    const byteLength = new TextEncoder().encode(file.contents).byteLength
+    if (byteLength > maxBytes) {
+      throw new Error(`${relPath} is ${byteLength} bytes, over the ${maxBytes} limit`)
     }
     return file.contents
   }

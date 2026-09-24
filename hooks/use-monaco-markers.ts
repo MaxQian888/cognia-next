@@ -25,6 +25,8 @@ export interface RawMarker {
   startColumn: number
   endLineNumber: number
   endColumn: number
+  /** Owning model's URI — present on real monaco markers, optional in fakes. */
+  resource?: { toString(): string }
 }
 
 export interface EditorMarker extends RawMarker {

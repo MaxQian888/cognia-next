@@ -15,6 +15,7 @@ import {
   listAllPlans,
   listPlanEvents,
   listPlansBySession,
+  listPlansByStatus,
   updatePlan,
 } from "./plans"
 
@@ -108,6 +109,45 @@ describe("agentPlans CRUD", () => {
     await createPlan(buildPlan({ id: "p1" }))
     await updatePlan("p1", { status: "executing" })
     expect((await getPlan("p1"))?.endedAt).toBeUndefined()
+  })
+
+  it("updatePlan treats a rejection as terminal and back-fills endedAt", async () => {
+    await createPlan(buildPlan({ id: "p1", status: "awaiting_approval" }))
+    await updatePlan("p1", { status: "rejected" })
+    const row = await getPlan("p1")
+    expect(row?.status).toBe("rejected")
+    expect(row?.endedAt).toBeGreaterThan(0)
+    // A rejected plan no longer holds the session's open-plan slot.
+    expect(await getOpenPlanForSession("ses_a")).toBeUndefined()
+  })
+
+  it("updatePlan writes and then clears the in-session halt + dispatch stamp", async () => {
+    await createPlan(buildPlan({ id: "p1", status: "executing" }))
+    await updatePlan("p1", {
+      status: "paused",
+      stepHalt: { stepId: "s1", cause: "turn_failed", detail: "boom", at: 5 },
+      turnDispatch: { stepId: "s1", bootId: "boot-a", dispatchedAt: 4 },
+    })
+    expect((await getPlan("p1"))?.stepHalt).toEqual({
+      stepId: "s1",
+      cause: "turn_failed",
+      detail: "boom",
+      at: 5,
+    })
+    // `undefined` in the patch deletes the property rather than storing it.
+    await updatePlan("p1", { status: "executing", stepHalt: undefined, turnDispatch: undefined })
+    const row = await getPlan("p1")
+    expect(row).not.toHaveProperty("stepHalt")
+    expect(row).not.toHaveProperty("turnDispatch")
+  })
+
+  it("listPlansByStatus spans sessions and matches only the asked status", async () => {
+    await createPlan(buildPlan({ id: "p_a", sessionId: "ses_a", status: "executing" }))
+    await createPlan(buildPlan({ id: "p_b", sessionId: "ses_b", status: "executing" }))
+    await createPlan(buildPlan({ id: "p_c", sessionId: "ses_c", status: "paused" }))
+    const ids = (await listPlansByStatus("executing")).map((p) => p.id).sort()
+    expect(ids).toEqual(["p_a", "p_b"])
+    expect(await listPlansByStatus("rejected")).toEqual([])
   })
 })
 

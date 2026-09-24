@@ -29,6 +29,7 @@ import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { getHostRoomRunner } from "@/lib/chat/room/runner-host"
 import type { RoomRunner, RoomSendOptions } from "@/lib/chat/room/runner"
+import type { RoomSendResponse } from "./room-send-client"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { readHostPerson } from "@/lib/identity/host-person"
 import { getPairedDevice } from "@/lib/db/paired-devices"
@@ -89,16 +90,31 @@ export async function resolveRoomAuthor(
   }
 }
 
-/** Report admission separately from the potentially minutes-long generation. */
+/**
+ * Report admission separately from the potentially minutes-long generation.
+ *
+ * A regenerate or an edit rebuilds the turn's files before it is accepted, and
+ * names the ones it could not send again through `onNotResent`. They ride the
+ * acceptance, so the companion that asked can tell its user.
+ */
 function awaitRoomAdmission(
-  start: (onAccepted: () => void) => Promise<void>
-): Promise<{ accepted: boolean }> {
+  start: (
+    onAccepted: () => void,
+    onNotResent: (filenames: readonly string[]) => void
+  ) => Promise<void>
+): Promise<RoomSendResponse> {
   return new Promise((resolve, reject) => {
     let accepted = false
-    const completion = start(() => {
-      accepted = true
-      resolve({ accepted: true })
-    })
+    let notResent: string[] = []
+    const completion = start(
+      () => {
+        accepted = true
+        resolve({ accepted: true, ...(notResent.length > 0 ? { notResent } : {}) })
+      },
+      (filenames) => {
+        notResent = [...filenames]
+      }
+    )
     void completion.then(
       () => resolve({ accepted: false }),
       (error) => {
@@ -112,14 +128,16 @@ function awaitRoomAdmission(
 export async function roomSend(
   payload: Record<string, unknown>,
   deps: RoomWriteHandlerDeps = {}
-): Promise<{ accepted: boolean }> {
+): Promise<RoomSendResponse> {
   const sessionId = requireString(payload, "sessionId", "room_send")
   const callerDeviceId = requireString(payload, "callerDeviceId", "room_send")
   const runner = (deps.runner ?? defaultDeps.runner)()
   const author = await resolveRoomAuthor(callerDeviceId, deps)
 
   if (payload.regenerate === true) {
-    return awaitRoomAdmission((onAccepted) => runner.regenerate(sessionId, onAccepted))
+    return awaitRoomAdmission((onAccepted, onNotResent) =>
+      runner.regenerate(sessionId, onAccepted, onNotResent)
+    )
   }
 
   const content = payload.content
@@ -129,8 +147,8 @@ export async function roomSend(
     throw new Error("room_send.editMessageId must be a string when present")
   }
   if (typeof editMessageId === "string") {
-    return awaitRoomAdmission((onAccepted) =>
-      runner.editAndResend(sessionId, editMessageId, content, { author, onAccepted })
+    return awaitRoomAdmission((onAccepted, onNotResent) =>
+      runner.editAndResend(sessionId, editMessageId, content, { author, onAccepted, onNotResent })
     )
   }
 

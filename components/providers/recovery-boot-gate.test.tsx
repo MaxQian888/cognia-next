@@ -1,5 +1,9 @@
 /** @jest-environment jsdom */
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { NextIntlClientProvider } from "next-intl"
+
+import messages from "@/i18n/messages/en.json"
 
 import { RecoveryBootGate } from "./recovery-boot-gate"
 
@@ -10,8 +14,17 @@ jest.mock("@/components/ui/loading-states", () => ({
   ),
 }))
 jest.mock("@/components/recovery/safe-mode-shell", () => ({
-  SafeModeShell: ({ probing }: { probing: boolean }) => (
-    <div data-testid="safe-shell">{probing ? "probing" : "idle"}</div>
+  SafeModeShell: ({
+    probing,
+    secretStoreNotice,
+  }: {
+    probing: boolean
+    secretStoreNotice?: React.ReactNode
+  }) => (
+    <div data-testid="safe-shell">
+      {probing ? "probing" : "idle"}
+      {secretStoreNotice}
+    </div>
   ),
 }))
 
@@ -27,6 +40,10 @@ function gate(overrides: Record<string, unknown> = {}) {
     probing: false,
     retry: jest.fn(),
     refresh: jest.fn(),
+    secretStore: "ready",
+    unlockingSecretStore: false,
+    secretStoreUnlockFailed: false,
+    unlockSecretStore: jest.fn(async () => undefined),
     ...overrides,
   }
 }
@@ -79,5 +96,50 @@ describe("RecoveryBootGate", () => {
       </RecoveryBootGate>
     )
     expect(screen.getByTestId("safe-shell")).toHaveTextContent("probing")
+  })
+
+  it("pins the Unlock notice above a normally booted app when the store is locked", async () => {
+    const user = userEvent.setup()
+    const unlockSecretStore = jest.fn(async () => undefined)
+    useRecoveryGate.mockReturnValue(gate({ secretStore: "locked", unlockSecretStore }))
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <RecoveryBootGate>
+          <div data-testid="app">app</div>
+        </RecoveryBootGate>
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByTestId("app")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Unlock" }))
+    expect(unlockSecretStore).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers the same Unlock inside the diagnostics shell", () => {
+    useRecoveryGate.mockReturnValue(
+      gate({ status: "safe", secretStore: "locked", secretStoreUnlockFailed: true })
+    )
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <RecoveryBootGate>
+          <div data-testid="app">app</div>
+        </RecoveryBootGate>
+      </NextIntlClientProvider>
+    )
+    const shell = screen.getByTestId("safe-shell")
+    expect(shell).toHaveTextContent("Secure storage is locked")
+    expect(shell).toHaveTextContent("Unlock did not succeed")
+    expect(screen.queryByTestId("app")).not.toBeInTheDocument()
+  })
+
+  it("renders no notice when the store is ready", () => {
+    useRecoveryGate.mockReturnValue(gate())
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <RecoveryBootGate>
+          <div data-testid="app">app</div>
+        </RecoveryBootGate>
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByRole("button", { name: "Unlock" })).not.toBeInTheDocument()
   })
 })

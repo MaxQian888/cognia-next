@@ -19,7 +19,7 @@ import { listTemplateOwners } from "@/lib/db/template-platform"
 import { byProjectId } from "../workspace-scope"
 import { excerptAround, highlightPositions } from "./helpers"
 import { createListProvider } from "./list-provider"
-import type { GlobalSearchContext } from "../types"
+import type { GlobalSearchContext, GlobalSearchKind } from "../types"
 
 export const WORKFLOWS_PROVIDER_ID = "builtin.workflows"
 export const SKILLS_PROVIDER_ID = "builtin.skills"
@@ -117,6 +117,16 @@ export function createSkillsProvider(deps: Pick<LibraryProviderDeps, "listSkills
   })
 }
 
+/**
+ * Words that name the memory kind: the stable kind id (what the `/memory`
+ * route and page keywords use in every locale) and the localized kind label.
+ */
+export function memoryKindKeywords(ctx: Pick<GlobalSearchContext, "t">): string[] {
+  const label = ctx.t("globalSearch.kinds.memory")
+  const kind: GlobalSearchKind = "memory"
+  return label && label !== "globalSearch.kinds.memory" ? [kind, label] : [kind]
+}
+
 export function createMemoriesProvider(deps: Pick<LibraryProviderDeps, "listMemories">) {
   return createListProvider<Memory>({
     id: MEMORIES_PROVIDER_ID,
@@ -130,11 +140,16 @@ export function createMemoriesProvider(deps: Pick<LibraryProviderDeps, "listMemo
     // a paragraph is noise.
     fuzzy: false,
     getTitle: (m) => m.text.slice(0, MEMORY_SCAN_CHARS),
-    getKeywords: (m) => [m.key ?? "", ...m.tags],
+    // The kind's own name is a keyword, so "memory" (or the localized kind
+    // label, "Memories" / "记忆") lists your memories instead of only the rare
+    // ones whose text happens to contain the word. An exact keyword is a strong
+    // tier, so these rank with the /memory page rather than below every chat.
+    getKeywords: (m, ctx) => [m.key ?? "", ...m.tags, ...memoryKindKeywords(ctx)],
     getTimestamp: (m) => m.updatedAt,
     toItem: ({ row, match }, ctx, query) => {
-      // Highlight only when the body matched (a tag hit has nothing to mark).
-      const needle = match.field === "title" ? query.needle : ""
+      // Highlight only when the body itself contains the query (a tag or kind
+      // hit has nothing to mark in the text).
+      const needle = match.positions.length > 0 ? query.needle : ""
       const title = excerptAround(row.text, needle)
       return {
         id: `memory:${row.id}`,

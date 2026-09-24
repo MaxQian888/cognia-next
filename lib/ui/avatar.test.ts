@@ -51,6 +51,28 @@ describe("deterministicColor", () => {
   })
 })
 
+describe("initials — what counts as the name", () => {
+  // A title's trailing "#399" made the glyph "D#".
+  it.each([
+    ["Document mobile tab bar #399", "DB"],
+    ["(draft) plan", "DP"],
+    ["🚀 Launch plan", "LP"],
+    ["Refactor: the sync layer", "RL"],
+    ["#399", "39"],
+    ["2026 roadmap", "RO"],
+    ["修复移动端标签栏", "修复"],
+    ["中文 标题", "中标"],
+    ["!!!", "!!"],
+    ["🚀", "🚀"],
+  ])("%s → %s", (name, glyph) => {
+    expect(initials(name)).toBe(glyph)
+  })
+
+  it("never splits a character outside the BMP", () => {
+    expect(initials("𝒜lice 𝒞arter")).toBe("𝒜𝒞")
+  })
+})
+
 describe("avatarGlyph", () => {
   it("prefers explicit emoji", () => {
     expect(avatarGlyph({ name: "Coder", avatarEmoji: "💻" })).toBe("💻")

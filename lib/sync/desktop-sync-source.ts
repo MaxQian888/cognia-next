@@ -44,6 +44,7 @@ import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials
 import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import Dexie from "dexie"
 
@@ -111,7 +112,7 @@ export async function installDesktopSyncSource(opts: InstallOptions = {}): Promi
 
   return () => {
     installed = false
-    unlisten()
+    safeUnlisten(unlisten)
   }
 }
 

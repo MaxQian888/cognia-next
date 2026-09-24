@@ -6,7 +6,7 @@ const attachTauriWorkerRuntime = jest.fn()
 const getActiveAccountId = jest.fn(() => "local_acct_a")
 const accountState = { accountRevision: 0 }
 
-jest.mock("@/lib/ai/agent/team/tauri-worker-runtime", () => ({
+jest.mock("@/lib/ai/agent/team/workers/tauri-worker-runtime", () => ({
   attachTauriWorkerRuntime: (...args: unknown[]) => attachTauriWorkerRuntime(...args),
 }))
 jest.mock("@/lib/accounts/active-account-id", () => ({

@@ -1,4 +1,4 @@
-import { setTransport, transport } from "./tauri/transport-instance"
+import { localTransport, setTransport, transport } from "./tauri/transport-instance"
 import type { LiveVoiceDeployment, LiveVoiceProviderId } from "@cognia/agent-config-types"
 
 // Runtime detection delegates to the canonical, framework-free source of truth
@@ -14,7 +14,7 @@ export { isCapacitor, isTauri } from "@/lib/platform/detect"
 // The actual instance lives in `lib/tauri/transport-instance.ts` to stay out
 // of the circular import chain that runs through this barrel. `setTransport`
 // lets non-browser hosts (the agent CLI) install a custom implementation.
-export { transport, setTransport }
+export { transport, localTransport, setTransport }
 
 // Type-safe wrappers for Rust commands defined in src-tauri/src/commands.rs.
 // Keep this file as the SOLE authoritative seam — business code imports named

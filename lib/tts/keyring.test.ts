@@ -26,6 +26,11 @@ import {
   setProviderKey,
 } from "./keyring"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import {
+  SecretStoreUnavailableError,
+  __resetSecretStoreReadinessForTesting,
+  getSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 const mockIsTauri = isTauri as jest.Mock
 const mockInvoke = core.invoke as unknown as jest.Mock
@@ -163,6 +168,20 @@ describe("loadAllProviderKeys", () => {
     expect(map).toEqual({ openai: HOST_KEY_PRESENT, hume: HOST_KEY_PRESENT })
     expect(mockInvoke).toHaveBeenCalledWith("tts_keyring_list_providers")
     expect(mockInvoke).not.toHaveBeenCalledWith("tts_keyring_get", expect.anything())
+  })
+
+  it("turns a locked secret store into one typed failure instead of an empty key set", async () => {
+    __resetSecretStoreReadinessForTesting()
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockRejectedValueOnce("SECRET_STORE_LOCKED: master key read: denied")
+    await expect(loadAllProviderKeys()).rejects.toBeInstanceOf(SecretStoreUnavailableError)
+    expect(getSecretStoreReadiness()).toBe("locked")
+  })
+
+  it("rethrows unrelated failures unchanged", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockRejectedValueOnce("tauri bridge unavailable")
+    await expect(loadAllProviderKeys()).rejects.toBe("tauri bridge unavailable")
   })
 })
 

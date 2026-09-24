@@ -24,7 +24,7 @@ import { PlugZapIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { planRuntimeConnection } from "@/lib/agent-migration/connect-runtime"
-import { getPresetDisplayInfo } from "@/lib/ai/agent/external/presets"
+import { getPresetDisplayInfo } from "@/lib/ai/agent/external/config/presets"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type { MigrationResult, MigrationVendor } from "@/lib/agent-migration/types"
 

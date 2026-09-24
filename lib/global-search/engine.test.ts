@@ -9,6 +9,7 @@ import {
   worstCoverage,
 } from "./engine"
 import { parseGlobalSearchQuery } from "./query-parser"
+import { normalizeMessageScore, scoreTitleMatch } from "./scoring"
 import { __resetGlobalSearchRegistryForTesting, registerGlobalSearchProvider } from "./registry"
 import type {
   GlobalSearchContext,
@@ -236,6 +237,58 @@ describe("runGlobalSearch", () => {
         true
       ).map((x) => x.providerId)
     ).toEqual(["a", "b"])
+  })
+
+  it('orders groups by their best match tier before kind priority (⌘K "memory")', async () => {
+    const page = scoreTitleMatch("memory", "Memory", { now: 0 })!.score
+    const memories = scoreTitleMatch("memory", "User prefers TS", {
+      keywords: ["memory", "Memories"],
+      timestamp: 0,
+      now: 0,
+    })!.score
+    const freshChat = scoreTitleMatch("memory", "Memory leak in worker", {
+      timestamp: 1_000,
+      now: 1_000,
+    })!.score
+    const fuzzyScheduler = scoreTitleMatch("memory", "Scheduler", { now: 0 })
+    expect(fuzzyScheduler).toBeNull()
+    const out = await runGlobalSearch(parseGlobalSearchQuery("memory"), ctx(), {
+      providers: [
+        provider("session", [item("session", "chat", freshChat)]),
+        // A message from today that mentions memory twice: the chat engine's
+        // biggest term is recency, which is how these used to lead.
+        provider("message", [item("message", "msg", normalizeMessageScore(2.47))]),
+        provider("navigation", [item("navigation", "page", page)]),
+        provider("memory", [item("memory", "mem", memories)]),
+      ],
+    })
+    expect(out.groups.map((g) => g.kind)).toEqual(["navigation", "memory", "session", "message"])
+  })
+
+  it("keeps kind priority within one tier and puts errored groups last", () => {
+    const g = (kind: GlobalSearchKind, best: number, items = 1): GlobalSearchGroup => ({
+      kind,
+      providerId: kind,
+      items: Array.from({ length: items }, (_, i) => item(kind, `${kind}-${i}`, best)),
+      bestScore: best,
+      total: items,
+      truncated: false,
+      coverage: "complete",
+    })
+    const exactSettings = g("settings", 0.97)
+    const exactPage = g("navigation", 0.97)
+    const broken = { ...g("action", 0, 0), error: "boom" }
+    expect(orderGroups([broken, exactSettings, exactPage], true).map((x) => x.kind)).toEqual([
+      "navigation",
+      "settings",
+      "action",
+    ])
+    // Scoped tabs keep the static order.
+    expect(orderGroups([exactSettings, broken, exactPage], false).map((x) => x.kind)).toEqual([
+      "action",
+      "navigation",
+      "settings",
+    ])
   })
 
   it("worstCoverage picks the weaker of two", () => {

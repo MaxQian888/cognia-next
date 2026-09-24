@@ -22,7 +22,7 @@ import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
   attachTauriWorkerRuntime,
   type TauriWorkerRuntimeHandle,
-} from "@/lib/ai/agent/team/tauri-worker-runtime"
+} from "@/lib/ai/agent/team/workers/tauri-worker-runtime"
 import { useAccountStore } from "@/stores/account/account-store"
 
 export function WorkerRuntimeInitializer() {

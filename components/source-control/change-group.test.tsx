@@ -1,4 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { ChangeGroup } from "./change-group"
 
 describe("ChangeGroup", () => {
@@ -47,6 +51,34 @@ describe("ChangeGroup", () => {
     )
     fireEvent.click(screen.getByTestId("group-action-changes-stage-all"))
     expect(onClick).toHaveBeenCalled()
+  })
+
+  it("keeps group actions reachable without a hover", () => {
+    const onClick = jest.fn()
+    render(
+      <ChangeGroup
+        group="changes"
+        count={2}
+        expanded
+        onToggle={() => {}}
+        actions={[{ key: "stage-all", label: "Stage All", icon: <span>+</span>, onClick }]}
+      >
+        <div />
+      </ChangeGroup>
+    )
+    const action = screen.getByRole("button", { name: "Stage All" })
+    const wrapper = action.parentElement!
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).toHaveClass("group-hover/header:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    action.focus()
+    expect(action).toHaveFocus()
+    fireEvent.click(action)
+    expect(onClick).toHaveBeenCalledTimes(1)
   })
 
   it("disables an unavailable group action", () => {

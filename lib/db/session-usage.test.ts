@@ -6,6 +6,7 @@ import {
   pruneSessionUsageOlderThan,
   isLocalSpend,
   recordConnectorUsage,
+  recordExternalAgentUsage,
   recordGoalUsage,
   recordImportedUsage,
   recordSurfaceUsage,
@@ -73,6 +74,57 @@ describe("upsertSessionUsage", () => {
     await upsertSessionUsage(row("m1", ""))
     const all = await getDb().sessionUsage.toArray()
     expect(all).toHaveLength(0)
+  })
+})
+
+describe("recordExternalAgentUsage", () => {
+  it("persists Pi accounting under the chat session and overwrites the same turn", async () => {
+    const args = {
+      sessionId: "pi-chat",
+      messageId: "assistant-1",
+      model: "commandcode/model",
+      durationMs: 2000,
+      usage: {
+        promptTokens: 267000,
+        completionTokens: 11,
+        totalTokens: 267011,
+        cacheReadTokens: 42,
+        cacheWriteTokens: 6,
+        reasoningTokens: 3,
+        providerCost: { amount: 0.25, currency: "USD" },
+      },
+    }
+    await recordExternalAgentUsage(args)
+    await recordExternalAgentUsage(args)
+    expect(await listUsageForSession("pi-chat")).toEqual([
+      expect.objectContaining({
+        messageId: "assistant-1",
+        model: "commandcode/model",
+        inputTokens: 267000,
+        outputTokens: 11,
+        cacheReadTokens: 42,
+        cacheCreationTokens: 6,
+        reasoningTokens: 3,
+        costUsd: 0.25,
+        costSource: "sdk",
+        costKnown: true,
+        durationMs: 2000,
+        surface: "chat",
+      }),
+    ])
+  })
+
+  it("does not turn unlabelled provider currency into dollars", async () => {
+    await recordExternalAgentUsage({
+      sessionId: "s",
+      messageId: "m",
+      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3, providerCost: { amount: 19 } },
+    })
+    expect((await listUsageForSession("s"))[0]).toMatchObject({
+      costUsd: 0,
+      costKnown: false,
+      costSource: "unknown",
+    })
   })
 })
 

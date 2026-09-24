@@ -25,6 +25,65 @@ function completed(turnKey: string, revision: number, startedAt: number): Transc
 }
 
 describe("chat transcript index", () => {
+  it("keeps a completed watermark when a newer page of the same revision arrives", async () => {
+    await commitTranscriptIndexPage({
+      sessionId: "s1",
+      revision: 2,
+      items: [completed("old", 2, 10)],
+      complete: true,
+    })
+    await commitTranscriptIndexPage({
+      sessionId: "s1",
+      revision: 2,
+      items: [completed("recent", 2, 20)],
+      complete: false,
+    })
+    expect(await getDb().chatTranscriptIndexState.get("s1")).toMatchObject({
+      revision: 2,
+      indexedBeforeCreatedAt: 10,
+      complete: true,
+    })
+  })
+
+  it("ignores an old revision arriving after a newer checkpoint", async () => {
+    await commitTranscriptIndexPage({
+      sessionId: "s1",
+      revision: 2,
+      items: [completed("fresh", 2, 20)],
+      complete: true,
+    })
+    await commitTranscriptIndexPage({
+      sessionId: "s1",
+      revision: 1,
+      items: [completed("stale", 1, 10)],
+      complete: false,
+    })
+    expect(await getDb().chatTranscriptIndexState.get("s1")).toMatchObject({ revision: 2 })
+    expect((await getDb().chatTurnSummaries.toArray()).map((row) => row.turnKey)).toEqual(["fresh"])
+  })
+
+  it("merges concurrent pages without losing the oldest watermark", async () => {
+    await Promise.all([
+      commitTranscriptIndexPage({
+        sessionId: "s1",
+        revision: 1,
+        items: [completed("old", 1, 10)],
+        complete: true,
+      }),
+      commitTranscriptIndexPage({
+        sessionId: "s1",
+        revision: 1,
+        items: [completed("new", 1, 20)],
+        complete: false,
+      }),
+    ])
+    expect(await getDb().chatTranscriptIndexState.get("s1")).toMatchObject({
+      indexedBeforeCreatedAt: 10,
+      complete: true,
+    })
+    expect(await getDb().chatTurnSummaries.count()).toBe(2)
+  })
+
   it("persists bounded pages and advances the resumable watermark", async () => {
     await commitTranscriptIndexPage({
       sessionId: "s1",

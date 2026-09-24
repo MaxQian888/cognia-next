@@ -1,11 +1,15 @@
 "use client"
 
 /**
- * Desktop Discover body — wraps the shared sidebar / grid / inspector in
+ * Desktop Discover body — wraps the shared sidebar / grid / overview rail in
  * the canonical `FeaturePageShell` 3-pane layout. Tab state lives in the
- * URL via `useDiscoverRouteState` so `/discover?category=…&item=…` deep
- * links land directly on the right pane. The per-category view mode, the
- * category layout, and the default landing category all come from settings
+ * URL via `useDiscoverRouteState`, and `?item=` opens `DiscoverItemSheet`, so
+ * `/discover?category=…&item=…` deep links land directly on the item's detail
+ * on every window width. The detail used to live in the right rail only, which
+ * below `lg` folds into an overlay Sheet this body never opened: a card click
+ * updated the URL and nothing appeared. The rail now carries the category
+ * overview and its marketplace CTAs. The per-category view mode, the category
+ * layout, and the default landing category all come from settings
  * (`useDiscoverView` / `useDiscoverLayout` / `useDiscoverPreferences`).
  */
 
@@ -18,6 +22,7 @@ import { DiscoverCategorySidebar } from "@/components/discover/discover-category
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverHome } from "@/components/discover/discover-home"
 import { DiscoverInspector } from "@/components/discover/discover-inspector"
+import { DiscoverItemSheet } from "@/components/discover/discover-item-sheet"
 import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { SortFilterSheet } from "@/components/discover/sort-filter-sheet"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
@@ -59,21 +64,25 @@ export function DiscoverDesktopBody() {
   // On the aggregated landing the inspector reads the home hook's flat list; a
   // real category reads its own query result.
   const inspectorItems = isHome ? home.items : items
+  const inspectorLoading = isHome ? home.loading : loading
 
   // Press "/" anywhere on the page to jump to the search box.
   useSearchHotkey(searchRef)
 
   // When the URL carries no explicit category, land on the user's preferred
   // category (Settings → Discover), falling back to their first visible one.
+  // Not while an item is open: switching category clears `?item=`, so a cold
+  // `/discover?item=char_…` link would otherwise be wiped before its sheet
+  // could open. The redirect runs once the sheet is closed.
   const landing = useMemo(
     () => resolveLandingCategory(preferences.landingCategory, layout),
     [preferences.landingCategory, layout]
   )
   useEffect(() => {
-    if (!categoryExplicit && category !== landing) {
+    if (!categoryExplicit && item === null && category !== landing) {
       setCategory(landing)
     }
-  }, [categoryExplicit, category, landing, setCategory])
+  }, [categoryExplicit, item, category, landing, setCategory])
 
   return (
     <FeaturePageShell
@@ -125,10 +134,11 @@ export function DiscoverDesktopBody() {
         label: t("groups.aria"),
       }}
       rightPane={{
+        // Overview only: the selected item opens in `DiscoverItemSheet` below.
         content: (
           <DiscoverInspector
             category={category}
-            itemId={item}
+            itemId={null}
             items={inspectorItems}
             onClose={clearItem}
           />
@@ -136,6 +146,13 @@ export function DiscoverDesktopBody() {
         label: t("inspector.aria"),
       }}
     >
+      <DiscoverItemSheet
+        itemId={item}
+        items={inspectorItems}
+        loading={inspectorLoading}
+        category={category}
+        onClose={clearItem}
+      />
       {isHome ? (
         <DiscoverHome
           home={home}

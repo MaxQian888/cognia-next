@@ -30,6 +30,10 @@ jest.mock("next-themes", () => ({
 import { useSettingsStore } from "@/stores/settings"
 import { CustomThemeApplier } from "./custom-theme-applier"
 import { CSS_VAR_KEYS } from "./css-var"
+import {
+  __resetIconThemeHighContrastForTesting,
+  isIconThemeHighContrast,
+} from "@/lib/plugin/bridge/icon-theme-high-contrast"
 
 function buildTokens(overrides: Partial<ThemeColors> = {}): ThemeColors {
   return {
@@ -366,6 +370,33 @@ describe("CustomThemeApplier — a11y layers", () => {
       expect(html.style.getPropertyValue("--background")).toBe("oklch(0 0 0)")
     })
     expect(html.style.getPropertyValue("--foreground")).toBe("oklch(1 0 0)")
+  })
+
+  it("tells file-icon themes when a high-contrast palette is painted, and when it stops", async () => {
+    __resetIconThemeHighContrastForTesting()
+    setA11y({ highContrast: "light" })
+    const { rerender } = render(<CustomThemeApplier />)
+    await waitFor(() => expect(isIconThemeHighContrast()).toBe(true))
+
+    await act(async () => {
+      setA11y({ highContrast: "off" })
+      rerender(<CustomThemeApplier />)
+    })
+    expect(isIconThemeHighContrast()).toBe(false)
+  })
+
+  it("reports no high contrast under a plugin colour theme, which paints none", async () => {
+    __resetIconThemeHighContrastForTesting()
+    setA11y({ highContrast: "dark" })
+    const { rerender } = render(<CustomThemeApplier />)
+    await waitFor(() => expect(isIconThemeHighContrast()).toBe(true))
+
+    await act(async () => {
+      useSettingsStore.setState({ activePluginThemeId: "plugin-theme-1" })
+      rerender(<CustomThemeApplier />)
+    })
+    expect(isIconThemeHighContrast()).toBe(false)
+    act(() => useSettingsStore.setState({ activePluginThemeId: null }))
   })
 
   it("stands down and clears everything when a plugin theme takes over", async () => {

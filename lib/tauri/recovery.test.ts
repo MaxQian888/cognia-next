@@ -10,6 +10,7 @@ import {
   recordRecoveryCheckpoint,
   retryRecoverySubsystem,
   sendRecoveryHeartbeat,
+  unlockSecretStore,
 } from "./recovery"
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
@@ -46,6 +47,37 @@ describe("recovery IPC client", () => {
     invoke.mockResolvedValue({ requiresSafeShell: true, mode: "safe", buildId: "b" })
     await expect(getRecoveryBoot()).resolves.toMatchObject({ requiresSafeShell: true })
     expect(invoke).toHaveBeenCalledWith(RECOVERY_BOOT_COMMAND, undefined)
+  })
+
+  it("carries the settled secret-store state on the boot answer", async () => {
+    invoke.mockResolvedValue({
+      requiresSafeShell: false,
+      mode: "normal",
+      buildId: "b",
+      previousSessionUnhealthy: false,
+      secretStore: "locked",
+    })
+    await expect(getRecoveryBoot()).resolves.toMatchObject({ secretStore: "locked" })
+  })
+
+  it("reads an older host's boot answer without a store state as unknown", async () => {
+    invoke.mockResolvedValue({ requiresSafeShell: false, mode: "normal", buildId: "b" })
+    await expect(getRecoveryBoot()).resolves.toMatchObject({ secretStore: "uninitialized" })
+    invoke.mockResolvedValue({ requiresSafeShell: false, mode: "normal", secretStore: "bogus" })
+    await expect(getRecoveryBoot()).resolves.toMatchObject({ secretStore: "uninitialized" })
+  })
+
+  it("unlocks the secret store through the sidecar-scoped retry action and rejects on failure", async () => {
+    invoke.mockResolvedValueOnce(STATE)
+    await expect(unlockSecretStore()).resolves.toEqual(STATE)
+    expect(invoke).toHaveBeenCalledWith(RECOVERY_RETRY_COMMAND, {
+      subsystem: "sidecar",
+      action: "unlock-secret-store",
+    })
+    invoke.mockRejectedValueOnce("SECRET_STORE_LOCKED: User canceled")
+    await expect(unlockSecretStore()).rejects.toBe("SECRET_STORE_LOCKED: User canceled")
+    isTauri.mockReturnValue(false)
+    await expect(unlockSecretStore()).resolves.toBeNull()
   })
 
   it("reads the full state over the registered command", async () => {

@@ -15,6 +15,7 @@ jest.mock("@/lib/platform/web-companion", () => ({
 }))
 
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import type { Transport } from "./transport-types"
 
 const isTauriMock = isTauri as jest.Mock
@@ -45,6 +46,7 @@ describe("transport-instance selection", () => {
   beforeEach(() => {
     isTauriMock.mockReset().mockReturnValue(false)
     isCapacitorMock.mockReset().mockReturnValue(false)
+    ;(hasWebCompanionTarget as jest.Mock).mockReset().mockReturnValue(false)
   })
 
   it("wraps the local transport in a RoutingTransport on desktop", () => {
@@ -59,6 +61,27 @@ describe("transport-instance selection", () => {
     expect(mod.transport).not.toBeInstanceOf(Routing)
   })
 
+  it.each([
+    [true, false, false, "RoutingTransport"],
+    [true, false, true, "RoutingTransport"],
+    [false, true, false, "CompanionTransport"],
+    [false, false, true, "CompanionTransport"],
+    [false, false, false, "WebStubTransport"],
+  ])(
+    "selects the correct transport for Tauri=%s Capacitor=%s pairedWeb=%s",
+    (tauri, mobile, pairedWeb, expected) => {
+      isTauriMock.mockReturnValue(tauri)
+      isCapacitorMock.mockReturnValue(mobile)
+      ;(hasWebCompanionTarget as jest.Mock).mockReturnValue(pairedWeb)
+      const { mod } = loadInstance()
+      expect(mod.transport.constructor.name).toBe(expected)
+      expect(mod.localTransport.constructor.name).toBe(
+        tauri ? "TauriTransport" : "WebStubTransport"
+      )
+      mod.setTransport({ call: jest.fn(), subscribe: jest.fn(() => () => {}) })
+    }
+  )
+
   it("setTransport fully replaces the binding", () => {
     isTauriMock.mockReturnValue(true)
     const { mod, Routing } = loadInstance()
@@ -67,6 +90,35 @@ describe("transport-instance selection", () => {
     const fake: Transport = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
     mod.setTransport(fake)
     expect(mod.transport).toBe(fake)
+  })
+
+  it("keeps explicit local administration on this desktop when a remote host is selected", async () => {
+    isTauriMock.mockReturnValue(true)
+    await jest.isolateModulesAsync(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require("./transport-instance") as typeof import("./transport-instance")
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const routing = require("./transport-routing") as typeof import("./transport-routing")
+      const localCall = jest.spyOn(mod.localTransport, "call").mockResolvedValue({ running: true })
+      const remote = { call: jest.fn(), subscribe: jest.fn(() => () => {}) }
+      try {
+        await expect(mod.transport.call("companion_server_status")).resolves.toEqual({
+          running: true,
+        })
+        routing.setActiveRemoteTransport(remote)
+        await expect(mod.transport.call("companion_server_status")).rejects.toThrow(
+          "explicit host-admin"
+        )
+        await expect(mod.localTransport.call("companion_server_status")).resolves.toEqual({
+          running: true,
+        })
+        expect(localCall).toHaveBeenCalledTimes(2)
+        expect(remote.call).not.toHaveBeenCalled()
+      } finally {
+        routing.setActiveRemoteTransport(null)
+        localCall.mockRestore()
+      }
+    })
   })
 
   it("destroys the previous managed transport when switching targets", () => {

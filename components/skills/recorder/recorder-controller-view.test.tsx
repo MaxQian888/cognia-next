@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import "@testing-library/jest-dom"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const recordStatus = jest.fn()
@@ -24,7 +24,9 @@ jest.mock("@/lib/skills/recording/recorder-client", () => ({
   recorderControllerSetCollapsed: (v: boolean) => setCollapsed(v),
   recorderControllerBeginDrag: () => beginDrag(),
 }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
+import { isTauri } from "@/lib/tauri"
+import { listen } from "@tauri-apps/api/event"
 
 import { RecorderControllerView } from "./recorder-controller-view"
 
@@ -53,7 +55,7 @@ describe("RecorderControllerView", () => {
   it("shows elapsed time and the live step count", async () => {
     render(<RecorderControllerView />)
     await waitFor(() => expect(screen.getByTestId("recorder-controller")).toBeInTheDocument())
-    expect(screen.getByText("1:05")).toBeInTheDocument()
+    expect(await screen.findByText("1:05")).toBeInTheDocument()
     expect(screen.getByText(/3/)).toBeInTheDocument()
   })
 
@@ -120,3 +122,32 @@ describe("RecorderControllerView", () => {
     expect(screen.getByText("1:05")).toBeInTheDocument()
   })
 })
+
+it.each([false, true])(
+  "safely tears down controller listener, late registration: %s",
+  async (late) => {
+    jest.mocked(isTauri).mockReturnValue(true)
+    let release!: (off: () => void) => void
+    jest.mocked(listen).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const { unmount } = render(<RecorderControllerView />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    if (late) unmount()
+    const rejected = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    const catchSpy = jest.spyOn(rejected, "catch")
+    release(() => rejected)
+    await Promise.resolve()
+    await Promise.resolve()
+    if (!late) unmount()
+    const attached = catchSpy.mock.calls.length
+    await rejected.catch(() => {})
+    jest.mocked(isTauri).mockReturnValue(false)
+    expect(attached).toBe(1)
+  }
+)

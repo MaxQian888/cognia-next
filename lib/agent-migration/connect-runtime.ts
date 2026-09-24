@@ -15,7 +15,7 @@
  */
 
 import { primaryPresetIdForMigrationVendor } from "@/lib/agent-ecosystem/runtime-link"
-import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/preset-identity"
+import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 
 export interface RuntimeConnectionPlan {

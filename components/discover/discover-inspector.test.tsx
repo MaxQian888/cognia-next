@@ -11,9 +11,13 @@ import type { TwinDraft, TwinProfile, TwinSource } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    if (vars && Object.keys(vars).length > 0) return key + ":" + JSON.stringify(vars)
-    return key
+  useTranslations: () => {
+    const t = (key: string, vars?: Record<string, unknown>) => {
+      if (vars && Object.keys(vars).length > 0) return key + ":" + JSON.stringify(vars)
+      return key
+    }
+    // `characterChatTitle` asks the bundle whether `chatTitle` exists.
+    return Object.assign(t, { has: () => true })
   },
   useLocale: () => "en",
 }))
@@ -26,6 +30,28 @@ jest.mock("next/link", () => ({
 }))
 
 jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: jest.fn(() => "desktop") }))
+
+const openCharacterChatMock = jest.fn(async (..._args: unknown[]) => ({ id: "s1" }))
+const startGuildConversationMock = jest.fn(async (..._args: unknown[]) => ({ id: "s2" }))
+jest.mock("@/lib/shell/start-guild-conversation", () => ({
+  openCharacterChat: (...args: unknown[]) => openCharacterChatMock(...args),
+  startGuildConversation: (...args: unknown[]) => startGuildConversationMock(...args),
+}))
+
+const switchToTeamMock = jest.fn()
+jest.mock("@/components/shell/use-shell-nav", () => ({
+  useShellNav: () => ({ switchToTeam: (id: string) => switchToTeamMock(id) }),
+}))
+
+let favoriteKeysState = new Set<string>()
+const toggleFavoriteMock = jest.fn(async (_kind: string, _id: string) => undefined)
+jest.mock("@/hooks/discover/use-discover-favorites", () => ({
+  useDiscoverFavorites: () => ({
+    favoriteKeys: favoriteKeysState,
+    isFavorite: (kind: string, id: string) => favoriteKeysState.has(`${kind}:${id}`),
+    toggleFavorite: (kind: string, id: string) => toggleFavoriteMock(kind, id),
+  }),
+}))
 
 jest.mock("@/components/mobile/discover/character-detail-sheet", () => ({
   CharacterDetailSheet: ({ open }: { open: boolean }) =>
@@ -220,6 +246,11 @@ beforeEach(() => {
   setPluginEnabledForHostMock.mockReset().mockResolvedValue({ ok: true, queued: false })
   toastErrorMock.mockReset()
   toastSuccessMock.mockReset()
+  openCharacterChatMock.mockClear()
+  startGuildConversationMock.mockClear()
+  switchToTeamMock.mockClear()
+  toggleFavoriteMock.mockClear()
+  favoriteKeysState = new Set()
   marketInstallMock.mockReset().mockResolvedValue(undefined)
   marketUninstallMock.mockReset().mockResolvedValue(undefined)
   mockLiveQuery.mockReset()
@@ -257,14 +288,103 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByTestId("character-detail-sheet")).toBeInTheDocument()
   })
 
-  it("renders the team detail with a link to the squad", () => {
+  it("starts (or resumes) the character's chat through the shared opener", async () => {
+    const user = userEvent.setup()
+    render(
+      <DiscoverInspector
+        category="characters"
+        itemId={character.id}
+        items={[characterItem]}
+        onClose={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("discover-inspector-start-chat"))
+    expect(openCharacterChatMock).toHaveBeenCalledTimes(1)
+    const [target, options] = openCharacterChatMock.mock.calls[0] as [
+      { id: string; name: string },
+      { newChatTitle: string; pathname: string; navigate: (route: string) => void },
+    ]
+    expect(target.id).toBe(character.id)
+    expect(options.pathname).toBe("/")
+    expect(typeof options.navigate).toBe("function")
+    expect(options.newChatTitle.length).toBeGreaterThan(0)
+  })
+
+  it("reports a failed chat start instead of swallowing it", async () => {
+    const user = userEvent.setup()
+    openCharacterChatMock.mockRejectedValueOnce(new Error("db closed"))
+    render(
+      <DiscoverInspector
+        category="characters"
+        itemId={character.id}
+        items={[characterItem]}
+        onClose={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("discover-inspector-start-chat"))
+    expect(toastErrorMock).toHaveBeenCalledWith('inspector.startChatFailed:{"name":"Alpha"}')
+    // The button is usable again after the failure.
+    expect(screen.getByTestId("discover-inspector-start-chat")).not.toBeDisabled()
+  })
+
+  it("opens a Team's own scope instead of the Squad page, which cannot render a Team", async () => {
+    const user = userEvent.setup()
     render(
       <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
     )
-    // `<Button asChild>` flattens into the child `<a>` from next/link, so
-    // the testid lands on the anchor itself — no nested querySelector needed.
-    const link = screen.getByTestId("discover-inspector-open-team")
-    expect(link).toHaveAttribute("href", "/squads?id=t1")
+    await user.click(screen.getByTestId("discover-inspector-open-team"))
+    expect(switchToTeamMock).toHaveBeenCalledWith("t1")
+    expect(screen.getByTestId("discover-inspector-manage-teams")).toHaveAttribute(
+      "href",
+      "/settings?section=teams"
+    )
+    expect(document.querySelector('a[href^="/squads"]')).toBeNull()
+  })
+
+  it("starts a new conversation in the Team", async () => {
+    const user = userEvent.setup()
+    render(
+      <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
+    )
+    await user.click(screen.getByTestId("discover-inspector-new-team-conversation"))
+    expect(startGuildConversationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: "t1", teamTitle: "newConversation", pathname: "/" })
+    )
+  })
+
+  it("toggles the item's favorite from the detail header", async () => {
+    const user = userEvent.setup()
+    favoriteKeysState = new Set(["skill:" + skill.id])
+    const { rerender } = render(
+      <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
+    )
+    const star = screen.getByTestId("discover-inspector-favorite")
+    expect(star).toHaveAttribute("aria-pressed", "false")
+    expect(star).toHaveAccessibleName("favorite.add")
+    await user.click(star)
+    expect(toggleFavoriteMock).toHaveBeenCalledWith("team", "t1")
+
+    favoriteKeysState = new Set(["team:t1"])
+    rerender(
+      <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
+    )
+    expect(screen.getByTestId("discover-inspector-favorite")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("discover-inspector-favorite")).toHaveAccessibleName(
+      "favorite.remove"
+    )
+  })
+
+  it("surfaces a failed favorite write", async () => {
+    const user = userEvent.setup()
+    toggleFavoriteMock.mockRejectedValueOnce(new Error("quota"))
+    render(
+      <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
+    )
+    await user.click(screen.getByTestId("discover-inspector-favorite"))
+    expect(toastErrorMock).toHaveBeenCalledWith("favorite.failed")
   })
 
   it("calls setSkillStatus + enqueue when toggling a skill", async () => {

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
-import { greet, isCapacitor, isTauri, transport, voiceLiveWsOpen } from "./tauri"
+import { greet, isCapacitor, isTauri, localTransport, transport, voiceLiveWsOpen } from "./tauri"
+import { localTransport as instanceLocalTransport } from "./tauri/transport-instance"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 const CAPACITOR_KEY = "Capacitor"
@@ -21,6 +22,10 @@ function setCapacitor(state: "native" | "web" | "absent") {
 }
 
 describe("lib/tauri", () => {
+  it("exports the explicit local transport from the shared instance module", () => {
+    expect(localTransport).toBe(instanceLocalTransport)
+    expect(localTransport).toBeDefined()
+  })
   beforeEach(() => {
     setTauri(false)
     setCapacitor("absent")

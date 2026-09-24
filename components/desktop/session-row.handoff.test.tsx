@@ -16,6 +16,7 @@ jest.mock("next-intl", () => ({
   // the handoff menu, so a stub formatter is enough.
   useFormatter: () => ({ dateTime: (value: Date) => String(value.getTime()) }),
   useNow: () => new Date(1_750_000_000_000),
+  useTimeZone: () => "UTC",
 }))
 jest.mock("@cognia/logging", () => ({ loggers: { ui: { info: jest.fn(), warn: jest.fn() } } }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))

@@ -8,8 +8,18 @@ import { StrictMode } from "react"
 const mockLoad = jest.fn(async () => undefined)
 const mockWarn = jest.fn()
 
+function makeStore(load: () => Promise<undefined>) {
+  return { getState: () => ({ load }) }
+}
+
+let mockStore = makeStore(mockLoad)
+
+// A getter, so a test can swap the instance the way a hot update re-evaluating
+// `account-store.ts` does.
 jest.mock("@/stores/account/account-store", () => ({
-  useAccountStore: { getState: () => ({ load: mockLoad }) },
+  get useAccountStore() {
+    return mockStore
+  },
 }))
 
 jest.mock("@cognia/logging", () => ({
@@ -25,6 +35,7 @@ beforeAll(async () => {
 beforeEach(() => {
   mockLoad.mockClear()
   mockWarn.mockClear()
+  mockStore = makeStore(mockLoad)
 })
 
 describe("AccountStoreInitializer", () => {
@@ -45,6 +56,18 @@ describe("AccountStoreInitializer", () => {
         <AccountStoreInitializer />
       </StrictMode>
     )
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+  })
+
+  it("loads a replaced store instance, so a hot update cannot strand the gate", () => {
+    const { rerender } = render(<AccountStoreInitializer />)
+    expect(mockLoad).toHaveBeenCalledTimes(1)
+    const replacementLoad = jest.fn(async () => undefined)
+    mockStore = makeStore(replacementLoad)
+    rerender(<AccountStoreInitializer />)
+    expect(replacementLoad).toHaveBeenCalledTimes(1)
+    rerender(<AccountStoreInitializer />)
+    expect(replacementLoad).toHaveBeenCalledTimes(1)
     expect(mockLoad).toHaveBeenCalledTimes(1)
   })
 

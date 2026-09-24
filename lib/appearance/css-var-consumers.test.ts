@@ -157,6 +157,8 @@ describe("appearance custom properties have a consumer", () => {
     "components/chat/message-list.tsx",
     "components/chat/message-renderer.tsx",
     "components/desktop/channel-list.tsx",
+    // The sidebar row reads `--density-row-padding` for its own vertical rhythm.
+    "components/desktop/session-row.tsx",
     "components/ui/table.tsx"
   )
   const isReadAnywhere = (property: string) =>

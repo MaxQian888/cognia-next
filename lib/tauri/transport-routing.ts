@@ -6,7 +6,8 @@
  * machine — the desktop transport is a {@link RoutingTransport}. Only commands
  * explicitly classified as `execution` in the shared command manifest follow
  * the active remote host. Client and unclassified commands stay local;
- * host-admin and service commands require separate explicit entry points.
+ * host-admin and service commands stay local unless a remote host is selected;
+ * remote administration requires a separate explicit entry point.
  *
  * Switching the active host is a single pointer swap on the module-level holder
  * below; the ~480 `transport.call` sites and the `subscribe` event stream
@@ -179,6 +180,9 @@ export class RoutingTransport implements Transport {
       return (activeRemote ?? this.local).call<T>(name, args, options)
     }
     if (descriptor.target === "host-admin") {
+      // This renderer owns its local Tauri host. The explicit-context guard
+      // prevents ambiguous remote administration, not local desktop IPC.
+      if (!activeRemote) return this.local.call<T>(name, args, options)
       return Promise.reject(
         new Error(`Command "${name}" requires an explicit host-admin execution context`)
       )

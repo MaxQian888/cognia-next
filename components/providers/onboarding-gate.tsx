@@ -5,6 +5,7 @@ import { useEffect, type ReactNode } from "react"
 
 import { PageLoading } from "@/components/ui/loading-states"
 import { isDevLocalAccount } from "@/lib/accounts/dev-auto-unlock"
+import { isDevDesktopWorkspace } from "@/lib/accounts/desktop-local-account"
 import { ONBOARDING_ROUTE } from "@/lib/onboarding/route"
 import { useOnboardingGate } from "@/hooks/onboarding/use-onboarding-gate"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -47,10 +48,12 @@ export function OnboardingGate({ children }: { children: ReactNode }) {
   // front of every new browser, which is the cost this account exists to
   // remove. Scoped to that one account id rather than to development at
   // large, so an account created by hand still gets the real first run, and
-  // `/onboarding` itself stays reachable below for a deliberate visit.
-  const devLocalAccount = useAccountStore((state) =>
-    isDevLocalAccount(state.unlockedAccountId ?? state.activeAccountId)
-  )
+  // `/onboarding` itself stays reachable below for a deliberate visit. The
+  // workspace `pnpm tauri dev` provisions is the desktop twin of that account.
+  const devLocalAccount = useAccountStore((state) => {
+    const accountId = state.unlockedAccountId ?? state.activeAccountId
+    return isDevLocalAccount(accountId) || isDevDesktopWorkspace(accountId)
+  })
 
   useEffect(() => {
     if (devLocalAccount) return

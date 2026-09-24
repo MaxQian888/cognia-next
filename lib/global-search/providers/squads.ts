@@ -186,7 +186,7 @@ function controlItem(
       type: "callback" as const,
       run: async () => {
         // Lazily, so ⌘K does not pull the orchestration graph on every open.
-        const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+        const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
         await agentTeamManager[MANAGER_VERB[verb]](row.id)
       },
     },

@@ -2,6 +2,7 @@
 
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useEffect } from "react"
 
 const log = loggers.ui
@@ -36,9 +37,16 @@ export function WindowFocusTracker() {
         const focused = await win.isFocused()
         if (cancelled) return
         document.documentElement.setAttribute(ATTR, focused ? "true" : "false")
-        unlisten = await win.onFocusChanged(({ payload }) => {
+        const dispose = await win.onFocusChanged(({ payload }) => {
           document.documentElement.setAttribute(ATTR, payload ? "true" : "false")
         })
+        // Unmounted while the registration was in flight (StrictMode's
+        // mount→unmount→mount): release it now or it leaks for the session.
+        if (cancelled) {
+          safeUnlisten(dispose)
+          return
+        }
+        unlisten = dispose
       } catch (err) {
         log.warn("focus-tracker setup failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -48,7 +56,7 @@ export function WindowFocusTracker() {
 
     return () => {
       cancelled = true
-      unlisten?.()
+      safeUnlisten(unlisten)
     }
   }, [])
 

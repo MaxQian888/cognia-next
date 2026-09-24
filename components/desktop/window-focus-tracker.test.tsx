@@ -103,3 +103,46 @@ test("calls the unlisten function on unmount", async () => {
   unmount()
   await waitFor(() => expect(unlisten).toHaveBeenCalled())
 })
+
+test("a rejecting Tauri disposer never surfaces as an unhandled rejection", async () => {
+  isTauriMock.mockReturnValue(true)
+  const unlisten = jest
+    .fn()
+    .mockRejectedValue(
+      new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+    )
+  onFocusChanged.mockResolvedValue(unlisten)
+  const unhandled = jest.fn()
+  process.on("unhandledRejection", unhandled)
+  try {
+    const { unmount } = render(<WindowFocusTracker />)
+    await waitFor(() => expect(onFocusChanged).toHaveBeenCalled())
+    await act(async () => {})
+    expect(() => unmount()).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(unlisten).toHaveBeenCalledTimes(1)
+    expect(unhandled).not.toHaveBeenCalled()
+  } finally {
+    process.off("unhandledRejection", unhandled)
+  }
+})
+
+test("releases a listener whose registration resolves after unmount", async () => {
+  isTauriMock.mockReturnValue(true)
+  const unlisten = jest.fn()
+  let resolveRegistration: ((fn: () => void) => void) | undefined
+  onFocusChanged.mockImplementation(
+    () =>
+      new Promise<() => void>((resolve) => {
+        resolveRegistration = resolve
+      })
+  )
+  const { unmount } = render(<WindowFocusTracker />)
+  await waitFor(() => expect(onFocusChanged).toHaveBeenCalled())
+  unmount()
+  expect(unlisten).not.toHaveBeenCalled()
+  await act(async () => {
+    resolveRegistration?.(unlisten)
+  })
+  expect(unlisten).toHaveBeenCalledTimes(1)
+})

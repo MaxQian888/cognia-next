@@ -13,7 +13,8 @@
  *    behind a confirmation.
  *  - **Actions are revealed, not resident.** Three ghost buttons on every row of
  *    a virtualized list is a lot of ink for controls that apply to one row at a
- *    time. They fade in on hover and on keyboard focus.
+ *    time. They fade in on hover, on keyboard focus and while the overflow menu
+ *    is open, and stay visible on touch (`lib/ui/hover-reveal.ts`).
  *  - **Governance badges only render when they say something.** Painting
  *    "supported" on every healthy row trains the eye to skip the badge that
  *    matters (conflict / awaiting review / archived).
@@ -38,6 +39,7 @@ import {
 
 import type { Memory } from "@/types/memory/memory"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -281,13 +283,20 @@ function MemoryRowImpl({
       </div>
 
       <div
+        data-testid="memory-row-actions"
         className={cn(
           "flex shrink-0 items-center gap-0.5",
           // Resident while editing (the confirm/cancel pair is the only way
-          // out) and while this row is the open one; otherwise revealed.
+          // out) and while this row is the open one; otherwise revealed on
+          // row hover, on focus anywhere in the row, while the overflow menu
+          // is open, and always on touch (the shared reveal policy). Only the
+          // opacity fades, so every action stays focusable and clickable.
           !editing &&
             !active &&
-            "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 motion-safe:transition-opacity"
+            cn(
+              HOVER_REVEAL_GROUP_BASE_CLASS,
+              "group-hover/row:opacity-100 group-focus-within/row:opacity-100 motion-reduce:transition-none"
+            )
         )}
       >
         {editing ? (

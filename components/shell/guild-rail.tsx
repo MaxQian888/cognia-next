@@ -5,6 +5,7 @@ import { createContext, useContext, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/spinner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -157,11 +158,14 @@ export function GuildRail({
   const t = useTranslations("desktop.guildRail")
   const listT = useTranslations("desktop.channelList")
   const pluginT = useTranslations()
+  const commonT = useTranslations("common")
   // Same order the expanded sidebar's accordion shows — the rail is that
   // sidebar folded up, so a team dragged there is in the same slot here.
   const { teams } = useOrderedTeams()
   const {
     pathname,
+    pendingRoute,
+    selected,
     isDmActive,
     isCanvasActive,
     isTeamActive,
@@ -178,6 +182,7 @@ export function GuildRail({
   } = useShellNav()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  const overflowPending = resolved.overflow.some((item) => item.route === pendingRoute)
   // An icon column has no room for the conversation rows, so each guild button
   // carries the count its section holds — the same aggregate the expanded
   // sidebar's closed rows show (`hooks/shell/use-guild-unread.ts`).
@@ -280,6 +285,11 @@ export function GuildRail({
         aria-hidden={railCollapsed || undefined}
         inert={railCollapsed || undefined}
       >
+        {pendingRoute ? (
+          <span role="status" className="sr-only">
+            {commonT("loading")}
+          </span>
+        ) : null}
         {/* Fixed-width column: keeps the icons from being squeezed toward each
             other as the aside's width animates — they are clipped, not
             crushed. Mirrors the conversation sidebar's inner layer. */}
@@ -299,6 +309,7 @@ export function GuildRail({
               >
                 <RailButton
                   active={isDmActive}
+                  pending={pendingRoute === "/" && selected.kind === "dm"}
                   ariaLabel={t("directMessages")}
                   tooltip={t("directMessages")}
                   onClick={switchToDm}
@@ -312,6 +323,7 @@ export function GuildRail({
 
               <RailButton
                 active={isCanvasActive}
+                pending={pendingRoute === "/" && selected.kind === "canvas"}
                 ariaLabel={t("canvas")}
                 tooltip={t("canvas")}
                 onClick={switchToCanvas}
@@ -330,6 +342,11 @@ export function GuildRail({
                   <RailButton
                     key={c.fullId}
                     active={isViewContainerActive(c.fullId)}
+                    pending={
+                      pendingRoute === "/" &&
+                      selected.kind === "plugin-view" &&
+                      selected.containerId === c.fullId
+                    }
                     ariaLabel={title}
                     tooltip={title}
                     onClick={() => switchToViewContainer(c.fullId)}
@@ -347,6 +364,7 @@ export function GuildRail({
                   key={item.id}
                   item={item}
                   active={isFeatureActive(item.route)}
+                  pending={pendingRoute === item.route}
                   label={t(item.i18nKey)}
                   moveToMoreLabel={t("customize.moveToMore")}
                   hideLabel={t("customize.hideItem")}
@@ -365,6 +383,7 @@ export function GuildRail({
                       variant="ghost"
                       size="icon"
                       aria-label={t("more")}
+                      aria-busy={overflowPending}
                       data-testid="guild-more"
                       className={cn(
                         "relative",
@@ -386,7 +405,11 @@ export function GuildRail({
                           style={railEdgeStyle(overlaySide)}
                         />
                       ) : null}
-                      <EllipsisIcon className="relative size-[18px]" />
+                      {overflowPending ? (
+                        <Spinner className="relative size-[18px]" />
+                      ) : (
+                        <EllipsisIcon className="relative size-[18px]" />
+                      )}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent
@@ -420,6 +443,11 @@ export function GuildRail({
                       <TeamButton
                         team={team}
                         active={isTeamActive(team.id)}
+                        pending={
+                          pendingRoute === "/" &&
+                          selected.kind === "team" &&
+                          selected.teamId === team.id
+                        }
                         onSelect={() => switchToTeam(team.id)}
                         unread={unread.teams.get(team.id) ?? 0}
                         unreadLabel={unreadLabel}
@@ -470,6 +498,7 @@ export function GuildRail({
 interface NavRailButtonProps {
   item: SidebarCatalogItem
   active: boolean
+  pending: boolean
   label: string
   moveToMoreLabel: string
   hideLabel: string
@@ -489,6 +518,7 @@ interface NavRailButtonProps {
 function NavRailButton({
   item,
   active,
+  pending,
   label,
   moveToMoreLabel,
   hideLabel,
@@ -504,6 +534,7 @@ function NavRailButton({
         <div>
           <RailButton
             active={active}
+            pending={pending}
             ariaLabel={label}
             tooltip={label}
             onClick={onNavigate}
@@ -534,6 +565,7 @@ function NavRailButton({
 
 interface RailButtonProps {
   active?: boolean
+  pending?: boolean
   ariaLabel: string
   tooltip: string
   onClick: () => void
@@ -552,6 +584,7 @@ interface RailButtonProps {
 
 function RailButton({
   active,
+  pending = false,
   ariaLabel,
   tooltip,
   onClick,
@@ -572,6 +605,7 @@ function RailButton({
           size="icon"
           aria-label={showBadge && badgeLabel ? `${ariaLabel}, ${badgeLabel(badge)}` : ariaLabel}
           aria-current={active ? "page" : undefined}
+          aria-busy={pending}
           onClick={onClick}
           style={style}
           data-testid={testId}
@@ -597,7 +631,9 @@ function RailButton({
               style={railEdgeStyle(overlaySide)}
             />
           ) : null}
-          <span className="relative flex items-center justify-center">{children}</span>
+          <span className="relative flex items-center justify-center">
+            {pending ? <Spinner className={RAIL_ICON_CLASS} /> : children}
+          </span>
           {showBadge ? (
             // Corner pill, outside the icon's optical square so it never sits
             // over the avatar's initial. `aria-hidden`: the count is already
@@ -620,12 +656,14 @@ function RailButton({
 function TeamButton({
   team,
   active,
+  pending,
   onSelect,
   unread = 0,
   unreadLabel,
 }: {
   team: Team
   active: boolean
+  pending?: boolean
   onSelect: () => void
   unread?: number
   unreadLabel?: (count: number) => string
@@ -633,6 +671,7 @@ function TeamButton({
   return (
     <RailButton
       active={active}
+      pending={pending}
       ariaLabel={team.name}
       tooltip={team.name}
       onClick={onSelect}

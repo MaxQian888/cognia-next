@@ -28,12 +28,34 @@ export function deterministicColor(seed: string): string {
   return `oklch(0.7 0.14 ${hue})`
 }
 
-/** Two-letter glyph used as the fallback when no emoji is set. */
+/**
+ * Two-letter glyph used as the fallback when no emoji is set.
+ *
+ * Built from the words a person reads as the name. A glyph is two characters,
+ * so every one of them has to carry the name: it used to take the first
+ * character of the first and last word whatever they were, which turned a
+ * conversation titled "Document mobile tab bar #399" into "D#" and "(draft)
+ * plan" into "(P". So:
+ *
+ *  - words with a letter in them are the name; digit-only words ("#399",
+ *    "2026") are the fallback when there is nothing else, and a word of pure
+ *    punctuation or emoji never contributes;
+ *  - within a word, only letters and digits count, so "(draft)" reads as "d";
+ *  - characters are taken by code point, so a letter outside the BMP is never
+ *    split in half.
+ *
+ * A name with no letter or digit at all keeps its first two characters, which
+ * is what an emoji-only name should show.
+ */
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return "?"
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return "?"
+  const alnum = (word: string) => Array.from(word).filter((ch) => /[\p{L}\p{N}]/u.test(ch))
+  const lettered = words.filter((word) => /\p{L}/u.test(word))
+  const pool = lettered.length > 0 ? lettered : words.filter((word) => /\p{N}/u.test(word))
+  if (pool.length === 0) return Array.from(words[0]).slice(0, 2).join("").toUpperCase()
+  if (pool.length === 1) return alnum(pool[0]).slice(0, 2).join("").toUpperCase()
+  return (alnum(pool[0])[0] + alnum(pool[pool.length - 1])[0]).toUpperCase()
 }
 
 export function avatarGlyph(subject: AvatarSubject): string {

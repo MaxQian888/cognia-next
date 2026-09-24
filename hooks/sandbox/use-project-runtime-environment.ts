@@ -148,6 +148,7 @@ export function useProjectRuntimeEnvironment(
     portsAvailable: isTauri(),
   })
   const [preview, setPreview] = useState<SandboxPlacementOutcome | undefined>(undefined)
+  const [loadError, setLoadError] = useState<string | undefined>(undefined)
 
   const portOwners = useRef(new Map<string, string>())
   const portEpoch = useRef(0)
@@ -208,7 +209,10 @@ export function useProjectRuntimeEnvironment(
     // nothing can be admitted, and the driver answers for itself.
     const [files, driver, approvals, ports] = await Promise.all([
       current.executionRoot
-        ? environmentDeclarationRead(current.executionRoot).catch(() => undefined)
+        ? environmentDeclarationRead(current.executionRoot).catch((cause) => {
+            if (!isPoolDisabled(cause)) error ??= messageOf(cause)
+            return undefined
+          })
         : undefined,
       poolEnabled ? environmentDriverStatus().catch(() => undefined) : undefined,
       poolEnabled
@@ -219,16 +223,20 @@ export function useProjectRuntimeEnvironment(
 
     let declaration: EnvironmentDeclarationVerdict = { kind: "absent" }
     if (files) {
-      const request = panelRequest(current)
-      const readFile = declarationReader(files)
-      declaration = await readEnvironmentDeclaration(
-        {
-          root: current.executionRoot,
-          workspaceConfig: await from.workspaceConfig(request, readFile),
-          restricted: await from.restricted(request),
-        },
-        { readFile }
-      )
+      try {
+        const request = panelRequest(current)
+        const readFile = declarationReader(files)
+        declaration = await readEnvironmentDeclaration(
+          {
+            root: current.executionRoot,
+            workspaceConfig: await from.workspaceConfig(request, readFile),
+            restricted: await from.restricted(request),
+          },
+          { readFile }
+        )
+      } catch (cause) {
+        error ??= messageOf(cause)
+      }
     }
 
     let approvedBuild: EnvironmentBuildStatus | undefined
@@ -254,13 +262,14 @@ export function useProjectRuntimeEnvironment(
       }
     }
     if (reloadEpoch.current !== epoch) return
+    setLoadError(error)
     setState((prev) => ({
       ...prev,
       loading: false,
       poolEnabled,
-      ...(catalog ? { catalog } : {}),
-      ...(driver ? { driver } : {}),
-      ...(files ? { files } : {}),
+      catalog,
+      driver,
+      files,
       declaration,
       approvals,
       ports,
@@ -274,7 +283,7 @@ export function useProjectRuntimeEnvironment(
             prev.build.record.declarationDigest === declaration.digest))
           ? prev.build
           : undefined),
-      ...(error ? { error } : {}),
+      error,
       busy: false,
     }))
   }, [])
@@ -291,7 +300,12 @@ export function useProjectRuntimeEnvironment(
   // reused rather than repeated on every keystroke.
   const { loading, catalog, files, approvals } = state
   useEffect(() => {
-    if (loading) return
+    // A failed read cannot stand in for an empty checkout or keep a previous
+    // Host's preview alive. Action errors (for example save) are independent.
+    if (loading || loadError !== undefined) {
+      setPreview(undefined)
+      return
+    }
     let cancelled = false
     const previewSources: RunEnvironmentSources = {
       ...sourcesRef.current,
@@ -313,7 +327,7 @@ export function useProjectRuntimeEnvironment(
     return () => {
       cancelled = true
     }
-  }, [draft, policy, loading, catalog, files, approvals])
+  }, [draft, policy, loading, loadError, catalog, files, approvals])
 
   const run = useCallback(async (action: () => Promise<void>) => {
     setState((prev) => ({ ...prev, busy: true, error: undefined }))

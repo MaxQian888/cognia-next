@@ -16,23 +16,32 @@ function touchList(points: Point[]): TouchList {
   }) as unknown as TouchList
 }
 
-function fire(type: string, touches: Point[], changed: Point[] = touches) {
+function fire(
+  type: string,
+  touches: Point[],
+  changed: Point[] = touches,
+  target: EventTarget = window
+) {
   const event = new Event(type, { bubbles: true }) as TouchEvent
   Object.defineProperty(event, "touches", { value: touchList(touches) })
   Object.defineProperty(event, "changedTouches", { value: touchList(changed) })
   act(() => {
-    window.dispatchEvent(event)
+    target.dispatchEvent(event)
   })
 }
 
-function swipe(from: Point, to: Point) {
-  fire("touchstart", [from])
-  fire("touchmove", [to])
-  fire("touchend", [to])
+function swipe(from: Point, to: Point, target: EventTarget = window) {
+  fire("touchstart", [from], [from], target)
+  fire("touchmove", [to], [to], target)
+  fire("touchend", [], [to], target)
 }
 
 beforeEach(() => {
   Object.defineProperty(window, "innerWidth", { value: 400, configurable: true })
+})
+
+afterEach(() => {
+  document.body.innerHTML = ""
 })
 
 describe("useEdgeSwipe", () => {
@@ -92,6 +101,91 @@ describe("useEdgeSwipe", () => {
     renderHook(() => useEdgeSwipe({ edge: "left", onOpen, threshold: 120 }))
     swipe({ x: 6, y: 300 }, { x: 100, y: 300 })
     expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it("leaves a drag that starts on a swipeable row to the row", () => {
+    // The row's own reveal commits at ~108px; the drawer's close threshold is
+    // 56px. Reading this drag as a close shut the drawer mid-swipe.
+    const onClose = jest.fn()
+    renderHook(() => useEdgeSwipe({ edge: "left", onClose }))
+    const row = document.createElement("div")
+    row.setAttribute("data-swipe-row", "")
+    const label = document.createElement("span")
+    row.appendChild(label)
+    document.body.appendChild(row)
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, label)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("honors the explicit opt-out for other sideways-panning surfaces", () => {
+    const onOpen = jest.fn()
+    renderHook(() => useEdgeSwipe({ edge: "left", onOpen }))
+    const carousel = document.createElement("div")
+    carousel.setAttribute("data-edge-swipe-ignore", "")
+    document.body.appendChild(carousel)
+    swipe({ x: 6, y: 300 }, { x: 140, y: 300 }, carousel)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it("still closes from a drag that starts beside the row", () => {
+    const onClose = jest.fn()
+    renderHook(() => useEdgeSwipe({ edge: "left", onClose }))
+    const row = document.createElement("div")
+    row.setAttribute("data-swipe-row", "")
+    document.body.appendChild(row)
+    const header = document.createElement("header")
+    document.body.appendChild(header)
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, header)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets the caller veto where a gesture may start", () => {
+    const onClose = jest.fn()
+    const outside = document.createElement("div")
+    const inside = document.createElement("div")
+    inside.setAttribute("data-drawer", "")
+    document.body.append(outside, inside)
+    renderHook(() =>
+      useEdgeSwipe({
+        edge: "left",
+        onClose,
+        ignore: (target) => target.closest("[data-drawer]") === null,
+      })
+    )
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, outside)
+    expect(onClose).not.toHaveBeenCalled()
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, inside)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads the latest veto without re-attaching", () => {
+    const onClose = jest.fn()
+    const el = document.createElement("div")
+    document.body.appendChild(el)
+    const { rerender } = renderHook(
+      ({ blocked }: { blocked: boolean }) =>
+        useEdgeSwipe({ edge: "left", onClose, ignore: () => blocked }),
+      { initialProps: { blocked: true } }
+    )
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, el)
+    expect(onClose).not.toHaveBeenCalled()
+    rerender({ blocked: false })
+    swipe({ x: 240, y: 200 }, { x: 100, y: 204 }, el)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not carry an ignored touch into the next gesture", () => {
+    // The ignored start must clear any tracking, or a later touchend without
+    // its own start would be read against stale coordinates.
+    const onClose = jest.fn()
+    renderHook(() => useEdgeSwipe({ edge: "left", onClose }))
+    const row = document.createElement("div")
+    row.setAttribute("data-swipe-row", "")
+    document.body.appendChild(row)
+    fire("touchstart", [{ x: 240, y: 200 }], [{ x: 240, y: 200 }], window)
+    fire("touchstart", [{ x: 240, y: 200 }], [{ x: 240, y: 200 }], row)
+    fire("touchend", [], [{ x: 100, y: 200 }], window)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it("detaches every listener when disabled", () => {

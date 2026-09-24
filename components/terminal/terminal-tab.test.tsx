@@ -3,6 +3,10 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -178,6 +182,32 @@ describe("TerminalTab", () => {
     // group-focus-within bring it back for keyboard/touch users.
     expect(closeBtn.className).toContain("focus-visible:opacity-100")
     expect(closeBtn.className).toContain("group-focus-within:opacity-100")
+  })
+
+  it("keeps the close button reachable without a hover", () => {
+    const onSelect = jest.fn()
+    const onClose = jest.fn()
+    render(<TerminalTab row={row()} active={false} onSelect={onSelect} onClose={onClose} />)
+    const closeBtn = screen.getByRole("button", { name: "close" })
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(closeBtn).toHaveClass(variant)
+    }
+    expect(closeBtn).toHaveClass("group-focus-within:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(closeBtn).not.toHaveClass(forbidden)
+    }
+    closeBtn.focus()
+    expect(closeBtn).toHaveFocus()
+    fireEvent.click(closeBtn)
+    expect(onClose).toHaveBeenCalledWith("s-1")
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("keeps the active tab's close button dimmed-visible at rest", () => {
+    render(<TerminalTab row={row()} active onSelect={jest.fn()} onClose={jest.fn()} />)
+    const closeBtn = screen.getByRole("button", { name: "close" })
+    expect(closeBtn).toHaveClass("opacity-60")
+    expect(closeBtn).not.toHaveClass("opacity-0")
   })
 
   it("calls onContextMenu when right-clicked", () => {

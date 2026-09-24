@@ -25,6 +25,12 @@ describe("isLightweightRoute", () => {
     expect(isLightweightRoute("/tray-panel")).toBe(true)
   })
 
+  it("keeps the recorder strip out of the account gate, so it never paints a lock screen", () => {
+    expect(isLightweightRoute("/recorder-controller")).toBe(true)
+    expect(isLightweightRoute("/recorder-controller.html")).toBe(true)
+    expect(isLightweightRoute("/recorder-controller-settings")).toBe(false)
+  })
+
   it("accepts nested and trailing-slash forms without matching look-alike prefixes", () => {
     expect(isLightweightRoute("/status/")).toBe(true)
     expect(isLightweightRoute("/pet-overlay/avatar")).toBe(true)

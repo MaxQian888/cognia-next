@@ -21,13 +21,16 @@ import { TauriTransport } from "./transport-tauri"
 import type { Transport } from "./transport-types"
 import { WebStubTransport } from "./transport-web"
 
+/** This desktop's IPC, independent of the selected remote host. Unavailable off desktop. */
+export const localTransport: Transport = isTauri() ? new TauriTransport() : new WebStubTransport()
+
 function pickTransport(): Transport {
   // Desktop wraps the local transport in a RoutingTransport (ADR-0082) so the
   // app can drive a remote Cognia host once one is activated. With no remote
   // host active it delegates straight through to the local `TauriTransport`
   // (zero behaviour change); the remote-host store installs/clears the active
   // remote via `setActiveRemoteTransport`.
-  if (isTauri()) return new RoutingTransport(new TauriTransport())
+  if (isTauri()) return new RoutingTransport(localTransport)
   if (isCapacitor()) return new CompanionTransport()
   // Cloud companion (ADR-0059 C1): a plain browser with a cognia-server —
   // build-time NEXT_PUBLIC_COGNIA_SERVER_URL or an existing pairing — talks

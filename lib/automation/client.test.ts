@@ -60,7 +60,9 @@ describe("UIA event client", () => {
     )
     const handler = jest.fn()
 
-    await expect(listenUiaEvents(handler)).resolves.toBe(unlisten)
+    const stop = await listenUiaEvents(handler)
+    stop()
+    expect(unlisten).toHaveBeenCalledTimes(1)
     expect(mockUiaListen).toHaveBeenCalledWith(UIA_EVENT_NAME, expect.any(Function))
     expect(handler).toHaveBeenCalledWith(payload)
   })
@@ -413,4 +415,21 @@ describe("defaultAutomationSettings", () => {
     expect(s.pasteThresholdChars).toBe(200)
     expect(s.consentTimeoutMs).toBe(90_000)
   })
+})
+
+it("contains native unregister rejections", async () => {
+  const failures: Promise<void>[] = []
+  const spies: jest.SpyInstance[] = []
+  const off = jest.fn(() => {
+    const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    failures.push(failure)
+    spies.push(jest.spyOn(failure, "catch"))
+    return failure
+  })
+  mockUiaListen.mockResolvedValue(off)
+  const stop = await listenUiaEvents(() => {})
+  stop()
+  const attached = spies.map((spy) => spy.mock.calls.length)
+  await Promise.all(failures.map((failure) => failure.catch(() => {})))
+  expect(attached).toEqual([1])
 })

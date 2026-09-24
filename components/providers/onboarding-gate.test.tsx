@@ -26,6 +26,7 @@ jest.mock("@/stores/account/account-store", () => ({
 }))
 
 import { DEV_LOCAL_ACCOUNT_ID } from "@/lib/accounts/dev-auto-unlock"
+import { DESKTOP_LOCAL_ACCOUNT_ID } from "@/lib/accounts/desktop-local-account"
 
 import { OnboardingGate } from "./onboarding-gate"
 
@@ -45,7 +46,12 @@ beforeEach(() => {
 
 afterEach(() => {
   setNodeEnv(ORIGINAL_NODE_ENV)
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 })
+
+function enterTauri(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
 
 describe("OnboardingGate", () => {
   it.each(["/lark/workbench", "/lark/workbench/", "/lark/workbench.html"])(
@@ -178,6 +184,45 @@ describe("OnboardingGate", () => {
   it("still routes an account the developer created into the flow", () => {
     setNodeEnv("development")
     unlockedAccountId = "acct_mine"
+    gate.mockReturnValue({ status: "enter", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).toHaveBeenCalledWith("/onboarding")
+  })
+
+  it("passes the app through for the workspace `pnpm tauri dev` provisions", () => {
+    setNodeEnv("development")
+    enterTauri()
+    unlockedAccountId = DESKTOP_LOCAL_ACCOUNT_ID
+    gate.mockReturnValue({ status: "enter", shell: "desktop" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).not.toHaveBeenCalled()
+    expect(screen.getByText("app")).toBeInTheDocument()
+  })
+
+  it("routes the desktop workspace into the flow in a release build", () => {
+    setNodeEnv("production")
+    enterTauri()
+    unlockedAccountId = DESKTOP_LOCAL_ACCOUNT_ID
+    gate.mockReturnValue({ status: "enter", shell: "desktop" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).toHaveBeenCalledWith("/onboarding")
+  })
+
+  it("does not treat the desktop workspace id as a bypass outside the desktop shell", () => {
+    setNodeEnv("development")
+    unlockedAccountId = DESKTOP_LOCAL_ACCOUNT_ID
     gate.mockReturnValue({ status: "enter", shell: "web" })
     render(
       <OnboardingGate>

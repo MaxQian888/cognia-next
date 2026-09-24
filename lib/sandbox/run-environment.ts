@@ -16,11 +16,11 @@
  *
  * # Why the outcome is remembered
  *
- * `registerSpawnPlacement` is consumed by the spawn, once, by design. But the
- * *reason* a run was not placed outlives the spawn: the manager has to refuse
+ * `registerSpawnPlacement` persists across spawns until the next resolution.
+ * The *reason* a run was not placed also outlives the spawn: the manager has to refuse
  * a connect whose environment was refused, and the UI has to say why a run
  * that did start is running unsandboxed. So the outcome is recorded per agent
- * and read back by both, and only the placement itself is consumable.
+ * and read back by both.
  *
  * # Which approval counts
  *
@@ -235,10 +235,10 @@ export async function prepareRunEnvironment(
   const root = request.executionRoot?.trim()
   let declaration: EnvironmentDeclarationVerdict = { kind: "absent" }
   let approvedWorkspaceConfigDigest: string | undefined
-  if (root) {
-    const files = await sources
-      .declarationFiles(root)
-      .catch((): DeclarationReadResult => ({ files: [], searched: [] }))
+  if (root && catalog.poolEnabled) {
+    // An unreadable checkout is not an empty declaration. Propagate the Host
+    // error so readiness cannot silently start the deployment's default image.
+    const files = await sources.declarationFiles(root)
     const readFile = declarationReader(files)
     const workspaceConfig = await sources.workspaceConfig(request, readFile)
     const restricted = await sources.restricted(request)
@@ -275,11 +275,11 @@ export async function prepareRunEnvironment(
 /**
  * The last outcome per agent id.
  *
- * Separate from the pending-placement registry because the two have different
- * lifetimes: a placement is consumed by exactly one spawn, and the reason a
- * run was not placed has to stay readable for as long as the agent is around.
+ * Separate from the placement registry because off, fallback and refused
+ * outcomes also need to remain readable without granting a spawn placement.
  */
 const outcomes = new Map<string, SandboxPlacementOutcome>()
+const preparations = new Map<string, symbol>()
 const listeners = new Set<(agentId: string, outcome: SandboxPlacementOutcome) => void>()
 
 export function recordRunEnvironmentOutcome(
@@ -295,6 +295,7 @@ export function runEnvironmentOutcome(agentId: string): SandboxPlacementOutcome 
 }
 
 export function forgetRunEnvironmentOutcome(agentId: string): void {
+  preparations.delete(agentId)
   outcomes.delete(agentId)
   clearSpawnPlacement(agentId)
 }
@@ -308,6 +309,7 @@ export function onRunEnvironmentOutcome(
 }
 
 export function __resetRunEnvironmentForTests(): void {
+  preparations.clear()
   outcomes.clear()
   listeners.clear()
 }
@@ -324,11 +326,30 @@ export async function placeAgentRun(
   request: RunEnvironmentRequest,
   sources: RunEnvironmentSources = defaultRunEnvironmentSources()
 ): Promise<SandboxPlacementOutcome> {
-  const outcome = await prepareRunEnvironment(request, sources)
-  if (outcome.kind === "placed") registerSpawnPlacement(request.agentId, outcome.placement)
-  else clearSpawnPlacement(request.agentId)
-  recordRunEnvironmentOutcome(request.agentId, outcome)
-  return outcome
+  const { agentId } = request
+  const preparation = Symbol(agentId)
+  preparations.set(agentId, preparation)
+  try {
+    const outcome = await prepareRunEnvironment(request, sources)
+    if (preparations.get(agentId) !== preparation) {
+      throw new DOMException("Environment preparation was superseded", "AbortError")
+    }
+    if (outcome.kind === "placed") registerSpawnPlacement(agentId, outcome.placement)
+    else clearSpawnPlacement(agentId)
+    recordRunEnvironmentOutcome(agentId, outcome)
+    return outcome
+  } catch (cause) {
+    // An old failure must not remove a newer run's placement, and the caller
+    // must not continue connecting with a superseded resolution.
+    if (preparations.get(agentId) !== preparation) {
+      throw new DOMException("Environment preparation was superseded", "AbortError")
+    }
+    outcomes.delete(agentId)
+    clearSpawnPlacement(agentId)
+    throw cause
+  } finally {
+    if (preparations.get(agentId) === preparation) preparations.delete(agentId)
+  }
 }
 
 /**

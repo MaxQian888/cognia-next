@@ -40,11 +40,17 @@ const replaceMock = jest.fn((href: string) => {
   // Bust the cached URLSearchParams object so the next render picks up changes.
   cachedKey = ""
 })
+// Opening an item is a history push (Back closes it again).
+const pushMock = jest.fn((href: string) => {
+  const qIdx = href.indexOf("?")
+  currentSearch = qIdx >= 0 ? href.slice(qIdx) : ""
+  cachedKey = ""
+})
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: replaceMock,
-    push: jest.fn(),
+    push: pushMock,
     back: jest.fn(),
     prefetch: jest.fn(),
   }),
@@ -247,16 +253,32 @@ jest.mock("@/components/discover/sort-filter-sheet", () => ({
   SortFilterSheet: () => <div data-testid="stub-sort-filter-sheet" />,
 }))
 
-// DiscoverInspector renders item details inside the bottom Sheet.
-// Stub it to a div that exposes the itemId prop so we can assert it is set.
-jest.mock("@/components/discover/discover-inspector", () => ({
-  DiscoverInspector: ({ itemId, onClose }: { itemId: string | null; onClose: () => void }) => (
-    <div data-testid="stub-discover-inspector" data-item-id={itemId ?? ""}>
-      <button onClick={onClose} data-testid="stub-inspector-close">
-        close
-      </button>
-    </div>
-  ),
+// DiscoverItemSheet renders the item detail docked to the bottom. Stub it to a
+// div that exposes what it was asked to open so we can assert it is set.
+jest.mock("@/components/discover/discover-item-sheet", () => ({
+  DiscoverItemSheet: ({
+    itemId,
+    items,
+    side,
+    onClose,
+  }: {
+    itemId: string | null
+    items: Array<{ id: string }>
+    side: string
+    onClose: () => void
+  }) =>
+    itemId === null ? null : (
+      <div
+        data-testid="stub-discover-inspector"
+        data-item-id={itemId}
+        data-side={side}
+        data-resolvable={items.some((item) => item.id === itemId) ? "yes" : "no"}
+      >
+        <button onClick={onClose} data-testid="stub-inspector-close">
+          close
+        </button>
+      </div>
+    ),
 }))
 
 // PullToRefresh — the actual implementation uses pointer events + CSS
@@ -349,8 +371,16 @@ jest.mock("@/components/mobile/discover/character-card", () => ({
 }))
 
 jest.mock("@/components/mobile/discover/team-card", () => ({
-  TeamCard: ({ team }: { team: { id: string; name: string } }) => (
-    <div data-testid={`stub-team-card-${team.id}`}>{team.name}</div>
+  TeamCard: ({
+    team,
+    onSelect,
+  }: {
+    team: { id: string; name: string }
+    onSelect: (t: { id: string; name: string }) => void
+  }) => (
+    <button data-testid={`stub-team-card-${team.id}`} onClick={() => onSelect(team)}>
+      {team.name}
+    </button>
   ),
 }))
 
@@ -396,6 +426,7 @@ function resetNav() {
   cachedKey = ""
   cachedParams = new URLSearchParams("")
   replaceMock.mockClear()
+  pushMock.mockClear()
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -553,11 +584,45 @@ describe("<DiscoverMobileBody />", () => {
       )
     })
 
-    it("inspector Sheet is NOT opened for legacy category 'characters' even with ?item=", () => {
-      // characters is not in GRID_CATEGORIES — the Sheet should stay closed.
+    it("opens the item sheet for a legacy category deep link too (?item=char_…)", () => {
+      // It used to open only for the grid categories, so a character link did
+      // nothing on the compact body.
       currentSearch = "?category=characters&item=char-1"
       render(<DiscoverMobileBody />)
-      expect(screen.queryByTestId("stub-discover-inspector")).not.toBeInTheDocument()
+      const inspector = screen.getByTestId("stub-discover-inspector")
+      expect(inspector).toHaveAttribute("data-item-id", "char-1")
+      expect(inspector).toHaveAttribute("data-side", "bottom")
+      expect(inspector).toHaveAttribute("data-resolvable", "yes")
+    })
+
+    // `fireEvent`, like the long-press suite below: the cards sit inside the
+    // real <LongPress> wrapper, whose pointer bookkeeping swallows the
+    // synthetic pointer sequence userEvent emits in jsdom.
+    it("tapping a character card opens its detail instead of the editor", () => {
+      currentSearch = "?category=characters"
+      const { rerender } = render(<DiscoverMobileBody />)
+      fireEvent.click(screen.getByTestId("stub-character-card-char-1"))
+      expect(pushMock).toHaveBeenCalledWith(
+        expect.stringContaining("item=char-1"),
+        expect.any(Object)
+      )
+      rerender(<DiscoverMobileBody />)
+      expect(screen.getByTestId("stub-discover-inspector")).toHaveAttribute(
+        "data-item-id",
+        "char-1"
+      )
+      expect(screen.queryByTestId("stub-character-detail-sheet")).not.toBeInTheDocument()
+    })
+
+    it("tapping a team card opens its detail", () => {
+      currentSearch = "?category=teams"
+      const { rerender } = render(<DiscoverMobileBody />)
+      fireEvent.click(screen.getByTestId("stub-team-card-team-1"))
+      rerender(<DiscoverMobileBody />)
+      expect(screen.getByTestId("stub-discover-inspector")).toHaveAttribute(
+        "data-item-id",
+        "team-1"
+      )
     })
   })
 

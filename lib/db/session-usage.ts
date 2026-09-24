@@ -15,6 +15,8 @@ import { extractUsage, type UsageInfo } from "@/lib/claude/adapter"
 import type { SDKResultMessage } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 import { commitUsageRow } from "@/lib/usage/usage-ledger"
+import { externalTokenUsageToUsageInfo } from "@/lib/claude/usage"
+import type { ExternalAgentTokenUsage } from "@/types/agent/external-agent"
 
 /**
  * Which surface produced a usage row. Lets the Subscription → Usage tab show
@@ -267,6 +269,36 @@ export interface SessionUsageRow {
  */
 export async function upsertSessionUsage(row: SessionUsageRow): Promise<void> {
   await commitUsageRow(row)
+}
+
+/** Persist the same reported accounting attached to an external assistant turn. */
+export async function recordExternalAgentUsage(args: {
+  sessionId: string
+  messageId: string
+  usage: ExternalAgentTokenUsage
+  model?: string
+  durationMs?: number
+  at?: number
+}): Promise<void> {
+  const usage = externalTokenUsageToUsageInfo(args.usage)
+  const costKnown = usage.totalCostUsd !== undefined
+  await upsertSessionUsage({
+    sessionId: args.sessionId,
+    messageId: args.messageId,
+    model: args.model,
+    at: args.at ?? Date.now(),
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
+    cacheReadTokens: usage.cacheReadInputTokens ?? 0,
+    cacheCreationTokens: usage.cacheCreationInputTokens ?? 0,
+    reasoningTokens: usage.reasoningTokens,
+    costUsd: usage.totalCostUsd ?? 0,
+    costKnown,
+    costSource: costKnown ? "sdk" : "unknown",
+    durationMs: args.durationMs ?? 0,
+    surface: "chat",
+    usageBasis: "provider-reported",
+  })
 }
 
 /**

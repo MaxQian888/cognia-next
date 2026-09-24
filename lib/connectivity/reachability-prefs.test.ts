@@ -9,7 +9,12 @@ jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => mockIsTauri(),
 }))
 jest.mock("@/lib/tauri", () => ({
-  transport: { call: (...args: unknown[]) => mockCall(...args) },
+  localTransport: { call: (...args: unknown[]) => mockCall(...args) },
+  transport: {
+    call: () => {
+      throw new Error("Must use local IPC")
+    },
+  },
 }))
 
 import {
@@ -91,6 +96,48 @@ describe("saveReachabilityPrefs", () => {
 })
 
 describe("patchReachabilityPrefs", () => {
+  it("rejects a failed write so the control cannot report it as saved", async () => {
+    mockCall
+      .mockResolvedValueOnce(DEFAULT_REACHABILITY_PREFS)
+      .mockRejectedValueOnce(new Error("read-only fs"))
+    await expect(patchReachabilityPrefs({ mdnsEnabled: true })).rejects.toThrow("read-only fs")
+  })
+
+  it("does not overwrite the existing configuration when its read fails", async () => {
+    mockCall.mockRejectedValue(new Error("read failed"))
+    await expect(patchReachabilityPrefs({ mdnsEnabled: true })).rejects.toThrow("read failed")
+    expect(mockCall).toHaveBeenCalledTimes(1)
+    expect(mockCall).toHaveBeenCalledWith("companion_reachability_get")
+  })
+
+  it("preserves independent fields when two controls save concurrently", async () => {
+    let stored = { ...DEFAULT_REACHABILITY_PREFS }
+    mockCall.mockImplementation(async (name, args) => {
+      if (name === "companion_reachability_get") return { ...stored }
+      stored = (args as { config: typeof stored }).config
+    })
+    await Promise.all([
+      patchReachabilityPrefs({ serverEnabled: true }),
+      patchReachabilityPrefs({ mdnsEnabled: true }),
+    ])
+    expect(stored).toEqual({
+      ...DEFAULT_REACHABILITY_PREFS,
+      serverEnabled: true,
+      mdnsEnabled: true,
+    })
+  })
+
+  it("allows a later patch to succeed after an earlier write failed", async () => {
+    mockCall
+      .mockResolvedValueOnce(DEFAULT_REACHABILITY_PREFS)
+      .mockRejectedValueOnce(new Error("write failed"))
+    await expect(patchReachabilityPrefs({ serverEnabled: true })).rejects.toThrow("write failed")
+    mockCall.mockResolvedValue(DEFAULT_REACHABILITY_PREFS)
+    await expect(patchReachabilityPrefs({ mdnsEnabled: true })).resolves.toEqual({
+      ...DEFAULT_REACHABILITY_PREFS,
+      mdnsEnabled: true,
+    })
+  })
   it("merges onto the stored record instead of overwriting it", async () => {
     // The Rust side stores one record: writing only the changed key would
     // reset every other preference to its default.

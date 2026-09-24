@@ -30,7 +30,6 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   InboxIcon,
-  KeyRoundIcon,
   LayoutGridIcon,
   MenuIcon,
   MoreVerticalIcon,
@@ -40,7 +39,6 @@ import {
   Settings2Icon,
   Share2Icon,
   UserPlusIcon,
-  UserRoundIcon,
   UsersIcon,
   XIcon,
 } from "lucide-react"
@@ -56,6 +54,9 @@ import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
+import { MobileChannelListSourceProvider } from "@/components/mobile/shell/mobile-channel-list-source"
+import { MobileChatRuntimeNotice } from "@/components/mobile/shell/mobile-chat-runtime-notice"
+import { MobileCredentialWarning } from "@/components/mobile/shell/mobile-credential-warning"
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { useMediaQuery } from "@/hooks/ui/use-media-query"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -70,8 +71,14 @@ import { MobileHomeLayoutSheet } from "@/components/mobile/home/mobile-home-layo
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,8 +91,8 @@ import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
-import { useTeamMembers } from "@/hooks/use-team-members"
-import { useClientLiveQuery } from "@/hooks/data"
+import { useChatRuntimeGate } from "@/hooks/chat/use-chat-runtime-gate"
+import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
@@ -129,21 +136,47 @@ const log = loggers.shell
  */
 const APPBAR_INBOX_QUERY = "(min-width: 26rem)"
 const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
+/**
+ * The missing-credential warning's text label. Below this the warning is a key
+ * icon (see `MobileCredentialWarning`): at 375px a shrinkable label pill was
+ * clipped to "o API k", and a blocking warning that cannot be read is worse
+ * than an icon that can.
+ */
+const APPBAR_KEY_LABEL_QUERY = "(min-width: 36rem)"
+
+/**
+ * While the drawer is open it answers only to gestures that start on it or on
+ * its own overlay. A sheet or dialog opened from inside it (a row's action
+ * sheet, the delete confirm, the filter drawer) is portaled outside, and a
+ * sideways drag there is not a request to put the drawer away underneath it.
+ */
+const NAV_DRAWER_GESTURE_SURFACE = '[data-mobile-nav-sheet], [data-slot="sheet-overlay"]'
 
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
-  const tChat = useTranslations("chat")
   const router = useRouter()
   // Same reach contract as the desktop sidebar: grouping by workspace, or a
   // search told to reach every workspace, loads the cross-workspace list.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
   const sidebarGroupBy = resolveConversationGroupBy(sidebarSettings)
   const sidebarSearch = resolveConversationSearchOptions(sidebarSettings)
-  const { sessions, activeSessionId, select, create, remove, rename, archive, unarchive, folders } =
-    useSessions({
-      crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
-    })
+  const {
+    sessions,
+    isLoadingSessions,
+    activeSessionId,
+    select,
+    create,
+    remove,
+    rename,
+    archive,
+    unarchive,
+    bulkSetPinned,
+    assignToFolder,
+    folders,
+  } = useSessions({
+    crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
+  })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -163,6 +196,9 @@ export function AppShellMobile() {
   const { isSectionHidden } = useMobileHomeLayout()
 
   const { keyOk } = useCredentialStatus()
+  // Same send gate as the desktop workspace: a paired phone whose host is
+  // offline, unpaired or missing the chat grant must not offer a composer.
+  const chatRuntime = useChatRuntimeGate()
 
   const [navOpen, setNavOpen] = useState(false)
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
@@ -179,6 +215,7 @@ export function AppShellMobile() {
   // direction that would flash an overflowing row.
   const inboxInBar = useMediaQuery(APPBAR_INBOX_QUERY)
   const artifactsInBar = useMediaQuery(APPBAR_ARTIFACTS_QUERY)
+  const keyLabelInBar = useMediaQuery(APPBAR_KEY_LABEL_QUERY)
   const toggleArtifactDock = useArtifactDockLayoutStore((s) => s.toggleDock)
   const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
   const unreadArtifact = useArtifactDockLayoutStore((s) => s.unreadArtifact) && dockCollapsed
@@ -299,10 +336,10 @@ export function AppShellMobile() {
     onClose: () => {
       if (navOpen) setNavOpen(false)
     },
+    ignore: (target) => navOpen && target.closest(NAV_DRAWER_GESTURE_SURFACE) === null,
   })
 
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
-  const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 
   // Was a count of `inboundLedger` rows newer than `lastInboxViewedAt`. That
   // ledger is host-only and never syncs, so the dot was permanently dark on a
@@ -321,7 +358,16 @@ export function AppShellMobile() {
   const foldedAttention =
     (!inboxInBar && (inboxUnread ?? 0) > 0) || (!artifactsInBar && unreadArtifact)
 
-  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
+  // Dexie-first, with the one sync kick for the table, and shared with the
+  // drawer's conversation list through its source provider below — which is
+  // mounted outside the drawer, so opening it no longer re-reads and re-syncs
+  // characters every time.
+  const { data: characters } = useDexieFirstQuery<Character[]>({
+    query: () => listCharacters(),
+    deps: [],
+    initial: [],
+    table: "characters",
+  })
   const activeCharacter = useMemo(() => {
     if (!activeSession || activeSession.kind === "team" || !activeSession.characterId) return null
     return (characters ?? []).find((c) => c.id === activeSession.characterId) ?? null
@@ -495,63 +541,103 @@ export function AppShellMobile() {
         className="flex h-14 shrink-0 items-center gap-2 overflow-hidden border-b border-border px-2"
         data-app-chrome
       >
-        <Sheet open={navOpen} onOpenChange={setNavOpen}>
-          <SheetTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="touch-target"
-              aria-label={tShell("openNav")}
-              data-testid="mobile-nav-trigger"
-            >
-              <MenuIcon className="size-5" />
-            </Button>
-          </SheetTrigger>
+        {/* The list's long-lived state (characters, teams, unread, search,
+            scroll position) lives here, outside the drawer: Radix unmounts
+            closed SheetContent, and the list used to rebuild all of it on
+            every open. */}
+        <MobileChannelListSourceProvider characters={characters}>
+          <Sheet open={navOpen} onOpenChange={setNavOpen}>
+            <SheetTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="touch-target"
+                aria-label={tShell("openNav")}
+                data-testid="mobile-nav-trigger"
+              >
+                <MenuIcon className="size-5" />
+              </Button>
+            </SheetTrigger>
 
-          <SheetContent
-            side="left"
-            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md md:max-w-lg"
-            data-testid="mobile-nav-sheet"
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
-            </SheetHeader>
-            <SharedSessionJoin />
-            <div className="flex flex-1 overflow-hidden">
-              {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
+            <SheetContent
+              side="left"
+              // No corner close button: it sat on top of the list's New chat
+              // "+" (the overlay, Escape and the edge swipe all close the
+              // drawer). The drawer is portaled out of the shell, so the shell's
+              // own safe-area padding never reached it — it reserves the notch,
+              // the home indicator and a landscape left inset itself.
+              showCloseButton={false}
+              className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] sm:max-w-md md:max-w-lg"
+              data-testid="mobile-nav-sheet"
+              data-mobile-nav-sheet=""
+            >
+              <SheetHeader className="sr-only">
+                <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
+              </SheetHeader>
+              {/* The overlay, Escape and the edge swipe are gestures a screen
+                reader cannot always reach, so the drawer still owns an
+                explicit close control — just not one painted over the list's
+                "+". Hidden until keyboard focus lands on it, then shown in
+                the corner the old button used. */}
+              <SheetClose asChild>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-[calc(env(safe-area-inset-top)+0.5rem)] focus-visible:right-2 focus-visible:z-10"
+                  data-testid="mobile-nav-close"
+                >
+                  {tShell("closeNav")}
+                </Button>
+              </SheetClose>
+              <SharedSessionJoin />
+              <div className="flex flex-1 overflow-hidden">
+                {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
                   phone viewport never reaches `md`, so the default rail variant
                   rendered this whole column — workspace switcher, DM/Canvas,
                   pinned destinations, "More", teams, Settings — as
                   `display:none`, leaving the drawer with only the session
                   list. */}
-              <GuildRail
-                variant="sheet"
-                onCreateTeam={handleCreateTeam}
-                onOpenSettings={() => {
-                  setNavOpen(false)
-                  openSettings()
-                }}
-              />
-              <div className="flex flex-1 overflow-hidden">
-                <MobileChannelList
-                  sessions={sessions}
-                  activeSessionId={activeSessionId}
-                  onSelect={handleSwitchToSession}
-                  onNewDirect={() => {
+                <GuildRail
+                  variant="sheet"
+                  onCreateTeam={handleCreateTeam}
+                  onOpenSettings={() => {
                     setNavOpen(false)
-                    handleNewDirect()
+                    openSettings()
                   }}
-                  onDelete={(id) => void remove(id)}
-                  onRename={(id, title) => void rename(id, title)}
-                  onArchive={(id) => void archive(id)}
-                  onUnarchive={(id) => void unarchive(id)}
-                  folders={folders}
                 />
+                {/* `min-w-0`: without it this flex item's minimum width is
+                  its content's, and a nowrap title stretched the list to
+                  842px inside a 262px slot. */}
+                <div
+                  className="flex min-w-0 flex-1 overflow-hidden"
+                  data-testid="mobile-nav-list-slot"
+                >
+                  {/* The list surfaces its own failures; the writers are
+                    handed over un-voided so it can await them. */}
+                  <MobileChannelList
+                    sessions={sessions}
+                    isLoadingSessions={isLoadingSessions}
+                    activeSessionId={activeSessionId}
+                    onSelect={handleSwitchToSession}
+                    onNewDirect={() => {
+                      setNavOpen(false)
+                      handleNewDirect()
+                    }}
+                    onDelete={remove}
+                    onRename={rename}
+                    onArchive={archive}
+                    onUnarchive={unarchive}
+                    onSetPinned={bulkSetPinned}
+                    onAssignToFolder={assignToFolder}
+                    folders={folders}
+                  />
+                </div>
               </div>
-            </div>
-          </SheetContent>
-        </Sheet>
+            </SheetContent>
+          </Sheet>
+        </MobileChannelListSourceProvider>
 
         <CharacterHeader
           subject={headerSubject}
@@ -573,17 +659,14 @@ export function AppShellMobile() {
 
         {/* Missing-credential warning stays visible (blocking issue): a tap
             opens the session sheet whose Account section resolves it. Never
-            buried in the overflow menu. */}
+            buried in the overflow menu, and never shrunk — it is a fixed
+            icon button that grows a label only when the bar has room. */}
         {keyOk === false && activeSession ? (
-          <Badge
-            variant="destructive"
-            className="ml-2 min-w-0 shrink cursor-pointer gap-1"
-            onClick={() => setSessionSettingsOpen(true)}
-            data-testid="mobile-no-api-key"
-          >
-            <KeyRoundIcon className="size-3" />
-            {tShell("noApiKey")}
-          </Badge>
+          <MobileCredentialWarning
+            showLabel={keyLabelInBar}
+            onResolve={() => setSessionSettingsOpen(true)}
+            className="ml-1"
+          />
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
@@ -841,11 +924,24 @@ export function AppShellMobile() {
               onCreate={handleNewDirect}
               onUseSample={(text) => void handleFirstTurn(text)}
               onHeroSend={handleFirstTurn}
+              // `handleFirstTurn` sends into an active team room through its
+              // own router, which carries no runtime route; with no session it
+              // always creates a direct chat, which does.
+              heroRouting={!isTeamSession}
               onOpenSettings={openSettings}
               recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
               onResumeSession={handleSwitchToSession}
               composerRef={composerRef}
-              mobileMentionMembers={isTeamSession ? teamMembers : undefined}
+              runtimeNotice={
+                chatRuntime.composerDisabled ? (
+                  <MobileChatRuntimeNotice
+                    gate={chatRuntime}
+                    onNavigate={(href) => router.push(href)}
+                    onOpenSettings={openSettings}
+                  />
+                ) : null
+              }
+              composerDisabled={chatRuntime.composerDisabled}
               // Same guard as the desktop: only offered when the workspace has
               // a directory, because "Local" means nothing without one.
               newChatExecutionControls={

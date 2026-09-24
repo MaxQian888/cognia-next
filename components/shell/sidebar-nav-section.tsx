@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/spinner"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -143,7 +144,10 @@ export function SidebarRow({
 export function SidebarNavSection({ className }: { className?: string }) {
   const t = useTranslations("desktop.guildRail")
   const pluginT = useTranslations()
+  const commonT = useTranslations("common")
   const {
+    pendingRoute,
+    selected,
     isCanvasActive,
     isViewContainerActive,
     isFeatureActive,
@@ -156,6 +160,7 @@ export function SidebarNavSection({ className }: { className?: string }) {
   } = useShellNav()
   const [moreOpen, setMoreOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
+  const overflowPending = resolved.overflow.some((item) => item.route === pendingRoute)
 
   const openOverflowItem = (route: string) => {
     setMoreOpen(false)
@@ -172,6 +177,11 @@ export function SidebarNavSection({ className }: { className?: string }) {
       data-testid="sidebar-nav"
       className={cn("flex shrink-0 flex-col gap-px px-2 py-1", className)}
     >
+      {pendingRoute ? (
+        <span role="status" className="sr-only">
+          {commonT("loading")}
+        </span>
+      ) : null}
       {/* Declared form factor is `icon` (`lib/plugin/contracts/plugin-points.ts`)
           — square controls with no room for a label — so contributions get an
           icon strip here too, not a column of label rows they never sized for. */}
@@ -182,7 +192,9 @@ export function SidebarNavSection({ className }: { className?: string }) {
       <SidebarRow
         active={isCanvasActive}
         onClick={switchToCanvas}
-        icon={<PencilRulerIcon />}
+        icon={
+          pendingRoute === "/" && selected.kind === "canvas" ? <Spinner /> : <PencilRulerIcon />
+        }
         label={t("canvas")}
         testId="sidebar-nav-canvas"
       />
@@ -193,7 +205,15 @@ export function SidebarNavSection({ className }: { className?: string }) {
             key={c.fullId}
             active={isViewContainerActive(c.fullId)}
             onClick={() => switchToViewContainer(c.fullId)}
-            icon={<ResolvedRailIcon name={c.def.icon} className="size-4" />}
+            icon={
+              pendingRoute === "/" &&
+              selected.kind === "plugin-view" &&
+              selected.containerId === c.fullId ? (
+                <Spinner />
+              ) : (
+                <ResolvedRailIcon name={c.def.icon} className="size-4" />
+              )
+            }
             label={title}
             testId={`sidebar-nav-view-container-${c.fullId}`}
           />
@@ -211,7 +231,8 @@ export function SidebarNavSection({ className }: { className?: string }) {
               <SidebarRow
                 active={isFeatureActive(item.route)}
                 onClick={() => goToFeature(item.route)}
-                icon={<item.Icon />}
+                aria-busy={pendingRoute === item.route}
+                icon={pendingRoute === item.route ? <Spinner /> : <item.Icon />}
                 label={t(item.i18nKey)}
                 testId={`sidebar-nav-feature-${item.id}`}
               />
@@ -240,7 +261,8 @@ export function SidebarNavSection({ className }: { className?: string }) {
           <PopoverTrigger asChild>
             <SidebarRow
               active={overflowActive}
-              icon={<EllipsisIcon />}
+              aria-busy={overflowPending}
+              icon={overflowPending ? <Spinner /> : <EllipsisIcon />}
               label={t("more")}
               trailing={<ChevronRightIcon className="size-3.5 text-muted-foreground/70" />}
               current={false}

@@ -11,6 +11,7 @@ import {
   WebSessionStatus,
   WebGlobalStatusRail,
   WebGlobalStatusPill,
+  WebGlobalStatusInline,
 } from "./web-status"
 
 let hidden: string[] = []
@@ -161,6 +162,74 @@ it.each(["guildRailCollapsed", "sidebarHostsNav"])(
     expect(screen.getByTestId("web-status-rail")).toBeInTheDocument()
   }
 )
+
+// The pill is fixed to the corner a docked composer's toolbar puts its "⋯"
+// in, and sat on top of it. A composer takes the global items instead.
+describe("an inline host for the global scope", () => {
+  function Shell({ inline = true, second = false }: { inline?: boolean; second?: boolean }) {
+    const collapsed = useUIStore((s) => s.guildRailCollapsed)
+    const sidebarHostsNav = useShellColumnsStore((s) => s.sidebarHostsNav)
+    return (
+      <WebStatusProvider enabled>
+        {inline && (
+          <div data-testid="composer-a">
+            <WebGlobalStatusInline />
+          </div>
+        )}
+        {second && (
+          <div data-testid="composer-b">
+            <WebGlobalStatusInline />
+          </div>
+        )}
+        <WebGlobalStatusRail collapsed={collapsed || sidebarHostsNav} />
+        <WebGlobalStatusPill />
+      </WebStatusProvider>
+    )
+  }
+
+  it("takes the global items off the corner pill while it is mounted", () => {
+    useShellColumnsStore.setState({ sidebarHostsNav: true })
+    const { rerender } = render(<Shell />)
+    expect(screen.queryByTestId("web-status-corner-pill")).toBeNull()
+    expect(
+      within(screen.getByTestId("composer-a")).getByRole("button", { name: "runStatus" })
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "runStatus" })).toHaveLength(1)
+
+    rerender(<Shell inline={false} />)
+    expect(
+      within(screen.getByTestId("web-status-corner-pill")).getByRole("button", {
+        name: "runStatus",
+      })
+    ).toBeInTheDocument()
+  })
+
+  it("renders in one place only, with two composers mounted", () => {
+    useShellColumnsStore.setState({ sidebarHostsNav: true })
+    render(<Shell second />)
+    expect(screen.getAllByRole("button", { name: "runStatus" })).toHaveLength(1)
+    expect(screen.getByTestId("composer-b")).toBeEmptyDOMElement()
+  })
+
+  it("stays empty while the rail hosts the global scope, or the status bar is collapsed", () => {
+    render(<Shell />)
+    expect(screen.getByTestId("composer-a")).toBeEmptyDOMElement()
+    expect(
+      within(screen.getByTestId("web-status-rail")).getByRole("button", { name: "runStatus" })
+    ).toBeInTheDocument()
+
+    act(() => {
+      useUIStore.setState({ guildRailCollapsed: true, statusBarCollapsed: true })
+    })
+    expect(screen.getByTestId("composer-a")).toBeEmptyDOMElement()
+    expect(screen.queryByTestId("web-status-corner-pill")).toBeNull()
+  })
+
+  it("renders nothing outside the web provider", () => {
+    render(<WebGlobalStatusInline />)
+    expect(screen.queryByTestId("web-status-global-inline")).toBeNull()
+  })
+})
 
 it("keeps the pill empty when all segments self-hide", () => {
   selfHide = true

@@ -2,6 +2,7 @@
 
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
 
@@ -88,9 +89,15 @@ export function WindowResizeEdges() {
           setActive(!maxed && !full)
         }
         await refresh()
-        unResize = await win.onResized(() => {
+        const dispose = await win.onResized(() => {
           void refresh()
         })
+        // Unmounted while the registration was in flight: release it now.
+        if (cancelled) {
+          safeUnlisten(dispose)
+          return
+        }
+        unResize = dispose
       } catch (err) {
         log.warn("resize-edges setup failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -99,7 +106,7 @@ export function WindowResizeEdges() {
     })()
     return () => {
       cancelled = true
-      unResize?.()
+      safeUnlisten(unResize)
     }
   }, [])
 

@@ -1,7 +1,7 @@
 /**
  * Ordering a set of nodes so nothing is visited before what it depends on.
  *
- * Lifted out of `lib/ai/agent/team/delivery-graph`, where it was the only piece
+ * Lifted out of `lib/ai/agent/team/delivery/delivery-graph`, where it was the only piece
  * of that file with no Agent Team in it. A stack is a dependency chain, a
  * multi-repository delivery graph is a dependency DAG, and the ordering rule —
  * dependencies first, ties broken deterministically — is the same in both.

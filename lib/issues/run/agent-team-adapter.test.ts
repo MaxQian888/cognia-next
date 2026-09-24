@@ -38,7 +38,7 @@ const mockStartSquadRun = jest.fn(
       reason?: string
     }
 )
-jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => mockStartSquadRun(...(args as [])),
   mintSquadRunId: () => "run_team_minted",
 }))
@@ -56,10 +56,10 @@ const mockMakeDelegate = jest.fn((_ctx: unknown) => async (request: unknown) => 
 jest.mock("@/lib/connectors/hitl/plan-approval", () => ({
   makeImPlanApprovalDelegate: (ctx: unknown) => mockMakeDelegate(ctx),
 }))
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: { start: (...args: unknown[]) => mockStart(...(args as [])) },
 }))
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({
   abortTeam: (...args: unknown[]) => mockAbort(...args),
 }))
 const fakeStoreState = {

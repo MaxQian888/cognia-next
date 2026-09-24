@@ -52,6 +52,7 @@ import {
 } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
 import { DiffViewer } from "./diff-viewer"
@@ -389,7 +390,7 @@ export function CommitDetail({
                       variant="ghost"
                       size="icon-xs"
                       onClick={() => onViewBlame(f.path, commit.hash)}
-                      className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                      className={cn("shrink-0 text-muted-foreground", HOVER_REVEAL_CONTROL_CLASS)}
                       aria-label={t("actions.viewBlame")}
                       title={t("actions.viewBlame")}
                       data-testid={`commit-blame-${f.path}`}

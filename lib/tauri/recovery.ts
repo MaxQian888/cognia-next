@@ -9,6 +9,10 @@ import {
   type RecoverySubsystem,
 } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
+import {
+  isSecretStoreReadiness,
+  type SecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 /**
  * Typed IPC for diagnostics-first safe mode (ADR-0102 §4).
@@ -31,6 +35,19 @@ export const RECOVERY_HEARTBEAT_COMMAND = "recovery_heartbeat"
 
 export type RecoveryRetryAction = "retry" | "keep-disabled"
 
+/**
+ * The boot answer: the controller's decision plus the encrypted secret store's
+ * settled state. The native side settles the store's *passive* initialization
+ * (never a prompt) before answering, so a locked keychain is known at cold
+ * boot instead of being discovered by the first credential consumer to fail.
+ */
+export interface RecoveryBootAnswer extends RecoveryBoot {
+  secretStore: SecretStoreReadiness
+}
+
+/** Explicit, possibly interactive, secret-store retry on the sidecar group. */
+const UNLOCK_SECRET_STORE_ACTION = "unlock-secret-store"
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!isTauri()) return null
   try {
@@ -48,8 +65,15 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
  * This session's boot decision. Read once, before plugin and background
  * initializers mount.
  */
-export function getRecoveryBoot(): Promise<RecoveryBoot | null> {
-  return call<RecoveryBoot>(RECOVERY_BOOT_COMMAND)
+export async function getRecoveryBoot(): Promise<RecoveryBootAnswer | null> {
+  const answer = await call<RecoveryBoot & { secretStore?: unknown }>(RECOVERY_BOOT_COMMAND)
+  if (!answer) return null
+  return {
+    ...answer,
+    // An older native host omits the field; "uninitialized" means "unknown"
+    // and never shows the locked notice.
+    secretStore: isSecretStoreReadiness(answer.secretStore) ? answer.secretStore : "uninitialized",
+  }
 }
 
 /** The full recovery state: checkpoints, suspect, budgets and audit history. */
@@ -88,6 +112,21 @@ export function retryRecoverySubsystem(
     return Promise.resolve(null)
   }
   return call<RecoveryStateV1>(RECOVERY_RETRY_COMMAND, { subsystem, action })
+}
+
+/**
+ * Explicitly retry the secret store's initialization. This is the only
+ * renderer path that may show the OS keychain dialog, so it is reserved for a
+ * user's Retry click. Unlike {@link retryRecoverySubsystem} it leaves every
+ * checkpoint untouched and **rejects** on failure: the caller must be able to
+ * tell "still locked" from "unlocked" to decide whether to re-run consumers.
+ */
+export async function unlockSecretStore(): Promise<RecoveryStateV1 | null> {
+  if (!isTauri()) return null
+  return invoke<RecoveryStateV1>(RECOVERY_RETRY_COMMAND, {
+    subsystem: "sidecar",
+    action: UNLOCK_SECRET_STORE_ACTION,
+  })
 }
 
 /**

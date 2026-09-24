@@ -228,7 +228,17 @@ describe("createOpsEventStream", () => {
 
   it("closes the native stream when the consumer aborts", async () => {
     mockDetectPlatform.mockReturnValue("tauri")
-    const unlisten = jest.fn()
+    let caught = 0
+    const failures: Promise<void>[] = []
+    const unlisten = jest.fn(() => {
+      const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+      const catchSpy = jest.spyOn(failure, "catch")
+      failures.push(failure)
+      queueMicrotask(() => {
+        caught = catchSpy.mock.calls.length
+      })
+      return failure
+    })
     mockListen.mockResolvedValue(unlisten)
     const stream = createOpsEventStream(streamOptions)
     if (!stream) throw new Error("expected a desktop stream")
@@ -244,6 +254,8 @@ describe("createOpsEventStream", () => {
     controller.abort()
     await consumed
 
+    await Promise.all(failures.map((failure) => failure.catch(() => {})))
+    expect(caught).toBe(1)
     expect(unlisten).toHaveBeenCalled()
     expect(mockInvoke).toHaveBeenCalledWith("server_ops_events_close", expect.anything())
   })

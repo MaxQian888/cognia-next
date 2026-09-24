@@ -608,3 +608,25 @@ describe("the spawn request contract accepts every field the config carries", ()
     ).toEqual(["line", "raw"])
   })
 })
+
+describe("native listener cleanup", () => {
+  it.each([
+    onExternalAgentSpawn,
+    onExternalAgentStdout,
+    onExternalAgentExit,
+    onExternalAgentStateChange,
+    onExternalAgentStderr,
+  ])("safely disposes %p after a Tauri unregister race", async (subscribe) => {
+    const rejected = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    const catchSpy = jest.spyOn(rejected, "catch")
+    const unlisten = jest.fn(() => rejected)
+    listenMock.mockResolvedValue(unlisten)
+    const off = await subscribe(() => {})
+    off()
+    off()
+    const attached = catchSpy.mock.calls.length
+    await rejected.catch(() => {})
+    expect(attached).toBe(1)
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+})

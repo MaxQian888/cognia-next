@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/presets"
+import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/config/presets"
 import { resolveCapabilities, shellHasImageSource } from "@/lib/onboarding/capabilities"
 import { probeVendors } from "@/lib/agent-migration/probe"
 import {

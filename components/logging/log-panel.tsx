@@ -267,19 +267,29 @@ export function LogPanel({
     const a = logs
     const b = agentTraceLogs.logs
     const limit = Math.min(1000, a.length + b.length)
-    const out: StructuredLogEntry[] = new Array(limit)
+    // Span-shaped entries are persisted twice: the trace transport writes
+    // them into the unified log store (→ `logs`) and into the agentTraces
+    // Dexie table (→ `agentTraceLogs`), both keyed by `span.id`. Dedup on
+    // `id` so each span renders once — otherwise React hits duplicate-key
+    // warnings on every refresh tick.
+    const out: StructuredLogEntry[] = []
+    const seen = new Set<string>()
     let ai = 0
     let bi = 0
-    for (let i = 0; i < limit; i++) {
+    while (out.length < limit && (ai < a.length || bi < b.length)) {
+      let next: StructuredLogEntry
       if (ai >= a.length) {
-        out[i] = b[bi++]
+        next = b[bi++]
       } else if (bi >= b.length) {
-        out[i] = a[ai++]
+        next = a[ai++]
       } else if (a[ai].timestamp >= b[bi].timestamp) {
-        out[i] = a[ai++]
+        next = a[ai++]
       } else {
-        out[i] = b[bi++]
+        next = b[bi++]
       }
+      if (seen.has(next.id)) continue
+      seen.add(next.id)
+      out.push(next)
     }
     return out
   }, [logs, agentTraceLogs.logs, includeAgentTrace])

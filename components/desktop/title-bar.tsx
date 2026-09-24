@@ -55,6 +55,7 @@ import { SHELL_DOCK_TIMING_CLASS } from "@/lib/ui/shell-dock-motion"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import {
   automationKillSwitchAction,
   clearCacheAction,
@@ -302,21 +303,35 @@ export function TitleBar() {
     if (!isTauri()) return
 
     let unlisten: (() => void) | undefined
+    let cancelled = false
     void (async () => {
       try {
         const win = await getWin()
-        setMaximized(await win.isMaximized())
+        const initiallyMaximized = await win.isMaximized()
+        if (cancelled) return
+        setMaximized(initiallyMaximized)
         try {
-          if (win.isAlwaysOnTop) setAlwaysOnTopState(await win.isAlwaysOnTop())
+          if (win.isAlwaysOnTop) {
+            const onTop = await win.isAlwaysOnTop()
+            if (!cancelled) setAlwaysOnTopState(onTop)
+          }
         } catch {
           /* not all platforms support isAlwaysOnTop in older Tauri builds */
         }
+        if (cancelled) return
         if (typeof navigator !== "undefined") {
           setPlatform(navigator.platform.toLowerCase())
         }
-        unlisten = await win.onResized(async () => {
-          setMaximized(await win.isMaximized())
+        const dispose = await win.onResized(async () => {
+          const next = await win.isMaximized()
+          if (!cancelled) setMaximized(next)
         })
+        // Unmounted while the registration was in flight: release it now.
+        if (cancelled) {
+          safeUnlisten(dispose)
+          return
+        }
+        unlisten = dispose
       } catch (err) {
         log.warn("title-bar window setup failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -324,7 +339,8 @@ export function TitleBar() {
       }
     })()
     return () => {
-      unlisten?.()
+      cancelled = true
+      safeUnlisten(unlisten)
     }
   }, [])
 

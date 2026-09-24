@@ -1,16 +1,16 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-dynamic-mcp-controller"
-import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-client"
+import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/runtimes/acp/acp-client"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
-import { rehydrateExternalAgent } from "@/lib/ai/agent/external/rehydrate"
+import { rehydrateExternalAgent } from "@/lib/ai/agent/external/session/rehydrate"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 /**
  * Binds external-agent rehydration to the desktop webview lifecycle. The
- * per-agent orchestration lives in `lib/ai/agent/external/rehydrate` so the
+ * per-agent orchestration lives in `lib/ai/agent/external/session/rehydrate` so the
  * headless brain runs the identical logic (ADR-0059 T-A10); this component only
  * adds the React StrictMode-safe once-guard and the mount/unmount subscription.
  *

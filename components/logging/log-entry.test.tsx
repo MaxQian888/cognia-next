@@ -6,6 +6,7 @@ import React from "react"
 import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { useTranslations } from "next-intl"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
@@ -308,6 +309,37 @@ describe("LogEntry interactions", () => {
     expect(bookmarkBtn).not.toBeNull()
     fireEvent.click(bookmarkBtn!)
     expect(onToggleBookmark).toHaveBeenCalledWith("log-1")
+  })
+
+  it("keeps the row actions reachable without a hover", () => {
+    const onToggleBookmark = jest.fn()
+    const onSelect = jest.fn()
+    renderWithTooltip(
+      <LogHarness log={makeLog()} onToggleBookmark={onToggleBookmark} onSelect={onSelect} />
+    )
+    const actions = screen.getByTestId("log-entry-actions")
+    // Focus, an open popup and touch reveal the cluster too; it only fades.
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(actions).toHaveClass(variant)
+    }
+    expect(actions).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+
+    // The cluster is the only gate: the bookmark button no longer fades a
+    // second time on hover, which hid it under keyboard focus.
+    const bookmark = screen.getByTestId("log-entry-bookmark")
+    expect(bookmark).not.toHaveClass("opacity-0")
+    expect(bookmark.querySelector(".lucide-bookmark")).not.toHaveClass("opacity-0")
+    expect(bookmark).toHaveAccessibleName()
+    bookmark.focus()
+    expect(bookmark).toHaveFocus()
+    fireEvent.click(bookmark)
+    expect(onToggleBookmark).toHaveBeenCalledWith("log-1")
+
+    const details = screen.getByTestId("log-entry-open-details")
+    details.focus()
+    expect(details).toHaveFocus()
+    fireEvent.click(details)
+    expect(onSelect).toHaveBeenCalledTimes(1)
   })
 
   it("uses BookmarkCheck icon when isBookmarked=true", () => {

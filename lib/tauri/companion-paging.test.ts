@@ -1,6 +1,22 @@
 import { collectPages, isOperation, isPage, type Page } from "./companion-paging"
 
 describe("companion paging (ADR-0175 B3)", () => {
+  it("preserves an empty opaque token and refuses truncation at an item bound", async () => {
+    const fetchPage = jest.fn(async (token?: string): Promise<Page<number>> =>
+      token === undefined ? { items: [1], nextPageToken: "" } : { items: [2] }
+    )
+    await expect(collectPages(fetchPage, { requireComplete: true })).resolves.toEqual([1, 2])
+    expect(fetchPage.mock.calls).toEqual([[undefined], [""]])
+    await expect(collectPages(fetchPage, { maxItems: 1, requireComplete: true })).rejects.toThrow(
+      "item limit"
+    )
+    const repeated = jest.fn(async () => ({ items: [], nextPageToken: "" }))
+    await expect(collectPages(repeated, { requireComplete: true })).rejects.toThrow(
+      "repeated page token"
+    )
+    expect(repeated).toHaveBeenCalledTimes(2)
+  })
+
   it("refuses incomplete authority data and stops repeated tokens immediately", async () => {
     const fetchPage = jest.fn(async () => ({ items: [1], nextPageToken: "same" }))
     await expect(collectPages(fetchPage, { requireComplete: true })).rejects.toThrow(

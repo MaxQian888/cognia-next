@@ -9,6 +9,7 @@
  * receive or resolve this bridge request.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { runOrchestrationExec } from "@/lib/external-bridge/handlers/orchestration"
@@ -46,9 +47,10 @@ export async function subscribeOrchestrationExec(
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
     return () => {}
   }
-  return listen<OrchestrationExecRequest>(ORCHESTRATION_EXEC_EVENT, ({ payload }) =>
+  const off = await listen<OrchestrationExecRequest>(ORCHESTRATION_EXEC_EVENT, ({ payload }) =>
     handler(payload)
   )
+  return () => safeUnlisten(off)
 }
 
 /** Post the renderer's reply back to the Rust proxy, resolving the round-trip. */
@@ -104,7 +106,11 @@ export async function installOrchestrationDispatchSource(
 ): Promise<() => void> {
   const bridge = options.bridge ?? localBridge()
   if (!bridge) return () => undefined
-  return bridge.listen<OrchestrationExecRequest>(ORCHESTRATION_EXEC_EVENT, ({ payload }) => {
-    void dispatchRequest(payload, bridge).catch((error) => options.onError?.(error))
-  })
+  const off = await bridge.listen<OrchestrationExecRequest>(
+    ORCHESTRATION_EXEC_EVENT,
+    ({ payload }) => {
+      void dispatchRequest(payload, bridge).catch((error) => options.onError?.(error))
+    }
+  )
+  return () => safeUnlisten(off)
 }

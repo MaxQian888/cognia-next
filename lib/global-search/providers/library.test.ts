@@ -6,8 +6,10 @@ import type { WorkflowRow } from "@/types/workflow/visual"
 
 import { __resetGlobalSearchCachesForTesting } from "../cache"
 import { makeProviderInput, makeTestContext, TEST_NOW } from "../testing"
+import { matchTierOfScore } from "../scoring"
 import {
   createMemoriesProvider,
+  memoryKindKeywords,
   createSkillsProvider,
   createTemplatesProvider,
   createWorkflowsProvider,
@@ -148,6 +150,33 @@ describe("library providers", () => {
     // Fuzzy is off for prose.
     const fuzzy = await provider.search(makeProviderInput("dpky"))
     expect(fuzzy.items).toEqual([])
+  })
+
+  /**
+   * ⌘K "memory" regression: memories only matched when their own text happened
+   * to contain the word, so searching the kind's name listed none of them.
+   */
+  it("memories: the kind's name lists every active memory, as a strong keyword hit", async () => {
+    const provider = createMemoriesProvider({ listMemories: async () => memories })
+    const out = await provider.search(makeProviderInput("memory"))
+    expect(out.items.map((i) => i.id).sort()).toEqual(["memory:m1", "memory:m3"])
+    for (const hit of out.items) {
+      expect(matchTierOfScore(hit.score)).toBe("keyword-exact")
+      // Nothing in the text to mark.
+      expect(hit.titlePositions).toEqual([])
+    }
+    // The localized kind label is a keyword too ("Memories" / "记忆").
+    const zh = makeTestContext({
+      locale: "zh-CN",
+      t: (key) => (key === "globalSearch.kinds.memory" ? "记忆" : key),
+    })
+    const localized = await provider.search(makeProviderInput("记忆", { ctx: zh }))
+    expect(localized.items).toHaveLength(2)
+  })
+
+  it("memories: kind keywords fall back to the kind id when the label is missing", () => {
+    expect(memoryKindKeywords({ t: (key) => key })).toEqual(["memory"])
+    expect(memoryKindKeywords({ t: () => "Memories" })).toEqual(["memory", "Memories"])
   })
 
   it("memories: hides another workspace's, keeps the shared ones", async () => {

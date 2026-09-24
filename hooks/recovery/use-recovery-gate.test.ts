@@ -5,6 +5,11 @@ import { RECOVERY_ORDER, type RecoveryStateV1 } from "@cognia/logging"
 
 import { useRecoveryGate } from "./use-recovery-gate"
 import type { RecoveryProbeSet } from "@/lib/recovery/probes"
+import {
+  __resetSecretStoreReadinessForTesting,
+  deferUntilSecretStoreReady,
+  getSecretStoreReadiness,
+} from "@/lib/credentials/secret-store-readiness"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 jest.mock("@/lib/tauri/recovery", () => ({
@@ -13,6 +18,7 @@ jest.mock("@/lib/tauri/recovery", () => ({
   recordRecoveryCheckpoint: jest.fn(),
   retryRecoverySubsystem: jest.fn(),
   sendRecoveryHeartbeat: jest.fn(),
+  unlockSecretStore: jest.fn(),
 }))
 jest.mock("@/lib/recovery/default-probes", () => ({
   createDefaultRecoveryProbes: jest.fn(),
@@ -70,6 +76,7 @@ function failingProbes(at: (typeof RECOVERY_ORDER)[number], reasonCode: string):
 describe("useRecoveryGate", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    __resetSecretStoreReadinessForTesting()
     isTauri.mockReturnValue(true)
     recovery.getRecoveryBoot.mockResolvedValue({
       requiresSafeShell: false,
@@ -80,8 +87,14 @@ describe("useRecoveryGate", () => {
     recovery.getRecoveryState.mockResolvedValue(state())
     recovery.recordRecoveryCheckpoint.mockResolvedValue(state())
     recovery.retryRecoverySubsystem.mockResolvedValue(state())
-    recovery.sendRecoveryHeartbeat.mockResolvedValue(state({ rendererAlive: true }))
-    useSettingsStore.getState.mockReset().mockReturnValue({ loaded: true })
+    recovery.sendRecoveryHeartbeat.mockImplementation(async () => ({
+      ...(await recovery.getRecoveryState()),
+      rendererAlive: true,
+    }))
+    useSettingsStore.getState.mockReset().mockReturnValue({
+      loaded: true,
+      ensureProviderKeys: jest.fn(async () => undefined),
+    })
     useSettingsStore.subscribe.mockReset().mockReturnValue(jest.fn())
     applyProxyToRust.mockResolvedValue(undefined)
     ensureSidecarReady.mockResolvedValue({ ready: true })
@@ -138,7 +151,9 @@ describe("useRecoveryGate", () => {
       buildId: "build-1",
       previousSessionUnhealthy: true,
     })
-    recovery.getRecoveryState.mockResolvedValue(state({ mode: "safe" }))
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "sidecar" })
+    )
     const { result } = renderHook(() =>
       useRecoveryGate({ createProbes: async () => healthyProbes() })
     )
@@ -240,7 +255,9 @@ describe("useRecoveryGate", () => {
       buildId: "build-1",
       previousSessionUnhealthy: true,
     })
-    recovery.getRecoveryState.mockResolvedValue(state({ mode: "safe" }))
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "sidecar" })
+    )
 
     const { result } = renderHook(() =>
       useRecoveryGate({ createProbes: async () => healthyProbes() })
@@ -265,7 +282,7 @@ describe("useRecoveryGate", () => {
 
     renderHook(() =>
       useRecoveryGate({
-        createProbes: async () => failingProbes("sidecar", "sidecar.not_ready"),
+        createProbes: async () => failingProbes("sidecar", "sidecar.start_failed"),
       })
     )
 
@@ -273,7 +290,7 @@ describe("useRecoveryGate", () => {
       expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith(
         "sidecar",
         false,
-        "sidecar.not_ready"
+        "sidecar.start_failed"
       )
     )
   })
@@ -356,7 +373,9 @@ describe("useRecoveryGate", () => {
       buildId: "build-1",
       previousSessionUnhealthy: true,
     })
-    recovery.getRecoveryState.mockResolvedValue(state({ mode: "safe" }))
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "sidecar" })
+    )
     const probes = healthyProbes()
     const sidecarProbe = jest.fn(async () => ({ ok: true }))
     probes.sidecar = sidecarProbe
@@ -377,6 +396,7 @@ describe("useRecoveryGate", () => {
   })
 
   it("passes keep-disabled through to the controller", async () => {
+    recovery.retryRecoverySubsystem.mockResolvedValue(state({ disabledSubsystems: ["sidecar"] }))
     const { result } = renderHook(() =>
       useRecoveryGate({ createProbes: async () => healthyProbes() })
     )
@@ -417,5 +437,269 @@ describe("useRecoveryGate", () => {
       await result.current.refresh()
     })
     expect(result.current.state?.mode).toBe("recovering")
+  })
+
+  it("keeps retry usable after native retry fails", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "sidecar" })
+    )
+    recovery.retryRecoverySubsystem.mockRejectedValueOnce(new Error("keychain timeout"))
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.state?.suspectSubsystem).toBe("sidecar"))
+    await act(async () => {
+      await result.current.retry("sidecar")
+    })
+    expect(result.current.probing).toBe(false)
+    expect(result.current.status).toBe("safe")
+    expect(result.current.state?.suspectSubsystem).toBe("sidecar")
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.retry("sidecar")
+    })
+    expect(result.current.status).toBe("normal")
+  })
+  it("starts a cold sidecar after upstream checks when recovering from a renderer failure", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(state({ mode: "safe" }))
+    const order: string[] = []
+    let ready = false
+    ensureSidecarReady.mockImplementation(async () => {
+      order.push("start")
+      ready = true
+      return { ready: true }
+    })
+    const probes = healthyProbes()
+    probes.database = async () => {
+      order.push("database")
+      return { ok: true }
+    }
+    probes.plugins = async () => {
+      order.push("plugins")
+      return { ok: true }
+    }
+    probes.sidecar = async () => {
+      order.push("sidecar")
+      return { ok: ready, reasonCode: ready ? undefined : "sidecar.not_ready" }
+    }
+
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+    await waitFor(() => expect(result.current.status).toBe("normal"))
+    expect(order).toEqual(["database", "plugins", "start", "sidecar"])
+    expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith("sidecar", true, undefined)
+  })
+
+  it("does not start the sidecar when an earlier prerequisite fails", async () => {
+    const { result } = renderHook(() =>
+      useRecoveryGate({
+        createProbes: async () => failingProbes("database", "database.unreadable"),
+      })
+    )
+    await waitFor(() => expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalled())
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+    expect(result.current.status).toBe("safe")
+  })
+
+  it("preserves a suspected sidecar failure until an explicit retry then leaves the safe shell", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "sidecar" })
+    )
+    const probes = healthyProbes()
+    const sidecarProbe = jest.fn(async () => ({ ok: true }))
+    probes.sidecar = sidecarProbe
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+    await waitFor(() => expect(result.current.state?.suspectSubsystem).toBe("sidecar"))
+    expect(sidecarProbe).not.toHaveBeenCalled()
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+
+    let finishStart!: (value: { ready: boolean }) => void
+    ensureSidecarReady.mockReturnValue(
+      new Promise((resolve) => {
+        finishStart = resolve
+      })
+    )
+    let retry!: Promise<void>
+    act(() => {
+      retry = result.current.retry("sidecar")
+    })
+    await waitFor(() => expect(ensureSidecarReady).toHaveBeenCalledTimes(1))
+    expect(result.current.probing).toBe(true)
+    expect(result.current.status).toBe("safe")
+    await act(async () => {
+      await result.current.retry("sidecar")
+      finishStart({ ready: true })
+      await retry
+    })
+    expect(recovery.retryRecoverySubsystem).toHaveBeenCalledTimes(1)
+    expect(result.current.status).toBe("normal")
+  })
+
+  it("does not mark a rejected startup healthy even if a stale readiness probe passes", async () => {
+    ensureSidecarReady.mockRejectedValue(new Error("startup failed"))
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.probing).toBe(false))
+    await waitFor(() =>
+      expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith(
+        "sidecar",
+        false,
+        "sidecar.start_failed"
+      )
+    )
+    expect(result.current.status).toBe("safe")
+  })
+  it("starts a cold sidecar after retrying an upstream failure", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(
+      state({ mode: "safe", suspectSubsystem: "plugins" })
+    )
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.state?.suspectSubsystem).toBe("plugins"))
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.retry("plugins")
+    })
+    expect(ensureSidecarReady).toHaveBeenCalledTimes(1)
+    expect(result.current.status).toBe("normal")
+  })
+
+  it("keeps the safe shell until downstream checks finish even when the controller is recovering", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({ requiresSafeShell: true, mode: "safe" })
+    recovery.getRecoveryState.mockResolvedValue(state({ mode: "safe" }))
+    recovery.recordRecoveryCheckpoint.mockResolvedValue(state({ mode: "recovering" }))
+    const probes = healthyProbes()
+    let finish!: (value: { ok: boolean }) => void
+    probes["external-agent"] = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+    await waitFor(() => expect(probes["external-agent"]).toHaveBeenCalled())
+    expect(result.current.status).toBe("safe")
+    expect(result.current.probing).toBe(true)
+    await act(async () => {
+      finish({ ok: true })
+    })
+    await waitFor(() => expect(result.current.status).toBe("normal"))
+  })
+
+  it("rejects a startup response that did not confirm readiness", async () => {
+    ensureSidecarReady.mockResolvedValue({ ready: false })
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() =>
+      expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith(
+        "sidecar",
+        false,
+        "sidecar.not_ready"
+      )
+    )
+    expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledTimes(3)
+    expect(result.current.status).toBe("safe")
+  })
+  it.each([
+    [new Error("proxy://user:secret@example.com"), "proxy.apply_failed"],
+    [{ code: "PROXY_CREDENTIAL_UNAVAILABLE", message: "secret" }, "proxy.credential_unavailable"],
+    [new Error("PROXY_CREDENTIAL_UNAVAILABLE"), "proxy.credential_unavailable"],
+  ])("reports proxy failure separately and allows explicit retry", async (error, reasonCode) => {
+    applyProxyToRust.mockRejectedValueOnce(error)
+    const probes = healthyProbes()
+    const sidecarProbe = jest.fn(async () => ({ ok: true }))
+    probes.sidecar = sidecarProbe
+    const { result } = renderHook(() => useRecoveryGate({ createProbes: async () => probes }))
+    await waitFor(() => expect(result.current.status).toBe("safe"))
+    expect(recovery.recordRecoveryCheckpoint).toHaveBeenCalledWith("sidecar", false, reasonCode)
+    expect(ensureSidecarReady).not.toHaveBeenCalled()
+    expect(sidecarProbe).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.retry("sidecar")
+    })
+    expect(result.current.status).toBe("normal")
+    expect(ensureSidecarReady).toHaveBeenCalledTimes(1)
+    expect(sidecarProbe).toHaveBeenCalledTimes(1)
+  })
+
+  it("publishes a locked store from the boot answer without entering safe mode", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({
+      requiresSafeShell: false,
+      mode: "normal",
+      buildId: "build-1",
+      previousSessionUnhealthy: false,
+      secretStore: "locked",
+    })
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.status).toBe("normal"))
+    expect(result.current.secretStore).toBe("locked")
+    expect(getSecretStoreReadiness()).toBe("locked")
+  })
+
+  it("unlocks explicitly, then re-runs deferred consumers, the proxy and speech keys", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({
+      requiresSafeShell: false,
+      mode: "normal",
+      buildId: "build-1",
+      previousSessionUnhealthy: false,
+      secretStore: "locked",
+    })
+    const ensureProviderKeys = jest.fn(async () => undefined)
+    useSettingsStore.getState.mockReturnValue({ loaded: true, ensureProviderKeys })
+    recovery.unlockSecretStore.mockResolvedValue(state())
+    const deferred = jest.fn()
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.secretStore).toBe("locked"))
+    deferUntilSecretStoreReady("subscription-init", deferred)
+    applyProxyToRust.mockClear()
+
+    await act(async () => {
+      await result.current.unlockSecretStore()
+    })
+
+    expect(recovery.unlockSecretStore).toHaveBeenCalledTimes(1)
+    expect(result.current.secretStore).toBe("ready")
+    expect(result.current.secretStoreUnlockFailed).toBe(false)
+    await waitFor(() => expect(deferred).toHaveBeenCalledTimes(1))
+    expect(applyProxyToRust).toHaveBeenCalledTimes(1)
+    expect(ensureProviderKeys).toHaveBeenCalledTimes(1)
+    // The unlock is not a recovery retry: checkpoints stay untouched.
+    expect(recovery.retryRecoverySubsystem).not.toHaveBeenCalled()
+  })
+
+  it("keeps the store locked and flags the failure when the unlock is cancelled", async () => {
+    recovery.getRecoveryBoot.mockResolvedValue({
+      requiresSafeShell: false,
+      mode: "normal",
+      buildId: "build-1",
+      previousSessionUnhealthy: false,
+      secretStore: "locked",
+    })
+    recovery.unlockSecretStore.mockRejectedValue("SECRET_STORE_LOCKED: User canceled")
+    const deferred = jest.fn()
+    const { result } = renderHook(() =>
+      useRecoveryGate({ createProbes: async () => healthyProbes() })
+    )
+    await waitFor(() => expect(result.current.secretStore).toBe("locked"))
+    deferUntilSecretStoreReady("subscription-init", deferred)
+
+    await act(async () => {
+      await result.current.unlockSecretStore()
+    })
+
+    expect(result.current.secretStore).toBe("locked")
+    expect(result.current.secretStoreUnlockFailed).toBe(true)
+    expect(result.current.unlockingSecretStore).toBe(false)
+    expect(deferred).not.toHaveBeenCalled()
   })
 })

@@ -9,16 +9,34 @@ import { act, renderHook } from "@testing-library/react"
 let currentSearch = ""
 let cachedSearchKey = ""
 let cachedSearchParams = new URLSearchParams("")
-const replaceMock = jest.fn((href: string) => {
+// A tiny history stack so push / replace / back behave like the browser's:
+// `history[index]` is the current entry's search string.
+let history: string[] = [""]
+let historyIndex = 0
+function applySearch(href: string): string {
   const qIdx = href.indexOf("?")
-  currentSearch = qIdx >= 0 ? href.slice(qIdx) : ""
+  return qIdx >= 0 ? href.slice(qIdx) : ""
+}
+const replaceMock = jest.fn((href: string) => {
+  currentSearch = applySearch(href)
+  history[historyIndex] = currentSearch
+})
+const pushMock = jest.fn((href: string) => {
+  currentSearch = applySearch(href)
+  history = [...history.slice(0, historyIndex + 1), currentSearch]
+  historyIndex = history.length - 1
+})
+const backMock = jest.fn(() => {
+  if (historyIndex === 0) return
+  historyIndex -= 1
+  currentSearch = history[historyIndex] ?? ""
 })
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({
-    push: jest.fn(),
+    push: (href: string) => pushMock(href),
     replace: (href: string) => replaceMock(href),
-    back: jest.fn(),
+    back: () => backMock(),
     prefetch: jest.fn(),
   }),
   usePathname: () => "/discover",
@@ -35,11 +53,19 @@ jest.mock("next/navigation", () => ({
 import { useDiscoverRouteState } from "./use-discover-route-state"
 import { DEFAULT_DISCOVER_CATEGORY, FORYOU_CATEGORY } from "@/lib/discover/categories"
 
+function startAt(search: string): void {
+  currentSearch = search
+  history = [search]
+  historyIndex = 0
+}
+
 beforeEach(() => {
-  currentSearch = ""
+  startAt("")
   cachedSearchKey = ""
   cachedSearchParams = new URLSearchParams("")
   replaceMock.mockClear()
+  pushMock.mockClear()
+  backMock.mockClear()
 })
 
 describe("useDiscoverRouteState", () => {
@@ -102,35 +128,89 @@ describe("useDiscoverRouteState", () => {
     expect(result.current.item).toBeNull()
   })
 
-  it("setItem appends ?item= and preserves the category", () => {
-    currentSearch = "?category=plugins"
+  it("setItem pushes ?item= as a history entry and preserves the category", () => {
+    startAt("?category=plugins")
     const { result, rerender } = renderHook(() => useDiscoverRouteState())
 
     act(() => {
       result.current.setItem("plug_99")
     })
 
-    expect(replaceMock).toHaveBeenCalledWith("/discover?category=plugins&item=plug_99")
+    expect(pushMock).toHaveBeenCalledWith("/discover?category=plugins&item=plug_99")
+    expect(replaceMock).not.toHaveBeenCalled()
     rerender()
     expect(result.current.item).toBe("plug_99")
     expect(result.current.category).toBe("plugins")
   })
 
-  it("setItem(null) drops the item param", () => {
-    currentSearch = "?category=skills&item=sk_1"
+  it("switching the open item replaces instead of stacking entries", () => {
+    startAt("?category=plugins")
+    const { result, rerender } = renderHook(() => useDiscoverRouteState())
+
+    act(() => result.current.setItem("plug_1"))
+    rerender()
+    act(() => result.current.setItem("plug_2"))
+    rerender()
+
+    expect(pushMock).toHaveBeenCalledTimes(1)
+    expect(replaceMock).toHaveBeenCalledWith("/discover?category=plugins&item=plug_2")
+    expect(result.current.item).toBe("plug_2")
+    // Re-selecting the open item is a no-op, not another navigation.
+    act(() => result.current.setItem("plug_2"))
+    expect(replaceMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("closing an item it opened pops the pushed entry (Back and close agree)", () => {
+    startAt("?category=teams")
+    const { result, rerender } = renderHook(() => useDiscoverRouteState())
+
+    act(() => result.current.setItem("team_a"))
+    rerender()
+    expect(result.current.item).toBe("team_a")
+
+    act(() => result.current.clearItem())
+    rerender()
+
+    expect(backMock).toHaveBeenCalledTimes(1)
+    expect(replaceMock).not.toHaveBeenCalled()
+    expect(result.current.item).toBeNull()
+    expect(result.current.category).toBe("teams")
+    // Forward re-opens the same detail.
+    expect(history).toEqual(["?category=teams", "?category=teams&item=team_a"])
+  })
+
+  it("browser Back closes an opened item and a later close does not navigate again", () => {
+    startAt("?category=teams")
+    const { result, rerender } = renderHook(() => useDiscoverRouteState())
+
+    act(() => result.current.setItem("team_a"))
+    rerender()
+    // The user presses the browser Back button.
+    act(() => backMock())
+    rerender()
+    expect(result.current.item).toBeNull()
+
+    act(() => result.current.clearItem())
+    expect(backMock).toHaveBeenCalledTimes(1)
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("closing a cold deep-linked item replaces the entry instead of leaving the page", () => {
+    startAt("?category=skills&item=sk_1")
     const { result, rerender } = renderHook(() => useDiscoverRouteState())
 
     act(() => {
       result.current.setItem(null)
     })
 
+    expect(backMock).not.toHaveBeenCalled()
     expect(replaceMock).toHaveBeenCalledWith("/discover?category=skills")
     rerender()
     expect(result.current.item).toBeNull()
   })
 
   it("clearItem is equivalent to setItem(null)", () => {
-    currentSearch = "?category=teams&item=team_a"
+    startAt("?category=teams&item=team_a")
     const { result, rerender } = renderHook(() => useDiscoverRouteState())
 
     act(() => {
@@ -140,6 +220,17 @@ describe("useDiscoverRouteState", () => {
     expect(replaceMock).toHaveBeenCalledWith("/discover?category=teams")
     rerender()
     expect(result.current.item).toBeNull()
+  })
+
+  it("clearItem with nothing open does not navigate", () => {
+    startAt("?category=teams")
+    const { result } = renderHook(() => useDiscoverRouteState())
+
+    act(() => result.current.clearItem())
+
+    expect(replaceMock).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(backMock).not.toHaveBeenCalled()
   })
 
   it("when called with no query, replace omits the trailing '?'", () => {

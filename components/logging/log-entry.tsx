@@ -21,6 +21,7 @@ import {
   PanelRightOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -258,17 +259,26 @@ export function LogEntry({
               </span>
             </div>
 
-            <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* Row actions: revealed on row hover, on keyboard focus inside the
+                cluster, while a popup from it is open, and always on touch. The
+                cluster is the only gate (the bookmark button used to fade a
+                second time on hover, which left it invisible under keyboard
+                focus); only the opacity fades, so every action stays focusable
+                and clickable. */}
+            <div
+              data-testid="log-entry-actions"
+              className={cn("flex items-center gap-0.5 shrink-0", HOVER_REVEAL_GROUP_CLASS)}
+            >
               {onToggleBookmark && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn(
-                        "h-6 w-6",
-                        !isBookmarked && "opacity-0 group-hover:opacity-100 transition-opacity"
-                      )}
+                      className="h-6 w-6"
+                      data-testid="log-entry-bookmark"
+                      aria-label={isBookmarked ? t("panel.removeBookmark") : t("panel.addBookmark")}
+                      aria-pressed={isBookmarked}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleToggleBookmark()
@@ -277,7 +287,7 @@ export function LogEntry({
                       {isBookmarked ? (
                         <BookmarkCheck className="h-3 w-3 text-warning" />
                       ) : (
-                        <Bookmark className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <Bookmark className="h-3 w-3" />
                       )}
                     </Button>
                   </TooltipTrigger>

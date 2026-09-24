@@ -29,7 +29,7 @@ const remoteRunStartMock = jest.fn(async (_request: unknown) => ({
   runId: "run",
   agentId: "agent",
 }))
-jest.mock("@/lib/ai/agent/external/remote-run-service", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/remote/remote-run-service", () => ({
   startRemoteExternalRun: (...args: unknown[]) => remoteRunStartMock(args[0]),
 }))
 
@@ -2534,4 +2534,23 @@ it("serializes successful undefined command results as explicit JSON null", asyn
     })
   )
   stop()
+})
+
+it("handles rejected native unregister promises during source teardown", async () => {
+  const failures: Promise<void>[] = []
+  const catchSpies: jest.SpyInstance[] = []
+  const unlisten = jest.fn(() => {
+    const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    catchSpies.push(jest.spyOn(failure, "catch"))
+    failures.push(failure)
+    return failure
+  })
+  const stop = await installDesktopWriteSource({
+    forceReinstall: true,
+    bridge: { listen: async () => unlisten, invoke: jest.fn().mockResolvedValue(undefined) },
+  })
+  stop()
+  const attached = catchSpies.map((spy) => spy.mock.calls.length)
+  await Promise.all(failures.map((failure) => failure.catch(() => {})))
+  expect(attached).toEqual([1])
 })

@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
@@ -124,6 +124,51 @@ describe("WindowControls", () => {
     )
     // Still rendered: the buttons are the only way to close a frameless window.
     expect(screen.getByLabelText("close")).toBeInTheDocument()
+  })
+
+  it("routes a rejecting Tauri disposer through safeUnlisten on unmount", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    const unlisten = jest
+      .fn()
+      .mockRejectedValue(
+        new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+      )
+    onResized.mockResolvedValueOnce(unlisten)
+    const unhandled = jest.fn()
+    process.on("unhandledRejection", unhandled)
+    try {
+      const { unmount } = render(<WindowControls />)
+      await waitFor(() => expect(onResized).toHaveBeenCalled())
+      await act(async () => {})
+      expect(() => unmount()).not.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unlisten).toHaveBeenCalledTimes(1)
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off("unhandledRejection", unhandled)
+    }
+  })
+
+  it("releases a resize listener whose registration resolves after unmount", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    const unlisten = jest.fn()
+    let resolveRegistration: ((fn: () => void) => void) | undefined
+    onResized.mockImplementationOnce(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveRegistration = resolve
+        })
+    )
+    const { unmount } = render(<WindowControls />)
+    await waitFor(() => expect(onResized).toHaveBeenCalled())
+    unmount()
+    expect(unlisten).not.toHaveBeenCalled()
+    await act(async () => {
+      resolveRegistration?.(unlisten)
+    })
+    expect(unlisten).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the buttons square — a radius would let the page show through the window corner", async () => {

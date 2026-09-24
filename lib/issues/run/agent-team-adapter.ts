@@ -24,7 +24,7 @@ import type { ConversationReference } from "@/types/connectors/event"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { IssueRun, IssueRunArtifact } from "@/types/issues"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
-import type { SquadPlanApprovalDelegate } from "@/lib/ai/agent/team/start-squad-run"
+import type { SquadPlanApprovalDelegate } from "@/lib/ai/agent/team/squad/start-squad-run"
 import { createIssueRun } from "@/lib/db/issue-runs"
 import {
   getAgentTeamDeliveryGraph,
@@ -189,7 +189,8 @@ export function createDefaultAgentTeamRunAdapterDeps(): AgentTeamRunAdapterDeps 
       // implies. An IM card press is the exception: it names the thread, so
       // the run is minted up front (the approval delegate closes over its id)
       // and the Squad gets somewhere to ask.
-      const { startSquadRun, mintSquadRunId } = await import("@/lib/ai/agent/team/start-squad-run")
+      const { startSquadRun, mintSquadRunId } =
+        await import("@/lib/ai/agent/team/squad/start-squad-run")
       const objective = goal ?? ""
       const runId = origin === "im" && conversation ? mintSquadRunId() : undefined
       const im =
@@ -210,7 +211,7 @@ export function createDefaultAgentTeamRunAdapterDeps(): AgentTeamRunAdapterDeps 
       }
     },
     abortTeam: (teamId, reason) => {
-      void import("@/lib/ai/agent/agent-team-runtime").then(({ abortTeam }) =>
+      void import("@/lib/ai/agent/team/agent-team-runtime").then(({ abortTeam }) =>
         abortTeam(teamId, new Error(reason))
       )
     },

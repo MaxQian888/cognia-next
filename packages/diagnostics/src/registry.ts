@@ -80,6 +80,16 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "retry" }],
     icon: "clock",
   },
+  agentProcessBusy: {
+    severity: "error",
+    retryable: true,
+    // Ends with the turn that holds it, exactly like `workspaceBusy`.
+    persistent: false,
+    // Retry is the remedy once the holder finishes; the log records which
+    // process id collided. Nothing in settings would change the outcome.
+    actions: [{ kind: "retry" }, { kind: "view-logs" }],
+    icon: "clock",
+  },
   workspaceBundleFailed: {
     severity: "error",
     retryable: true,
@@ -716,6 +726,24 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     persistent: false,
     actions: [{ kind: "open-settings", section: "plugins" }, { kind: "dismiss" }],
     icon: "plug",
+  },
+  // An addressed turn whose runtime cannot take it. Not retryable: re-sending
+  // hits the same missing or blocked agent until it is set up, which is what
+  // the settings action is for.
+  turnRouteUnavailable: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "agents" }, { kind: "dismiss" }],
+    icon: "plug",
+  },
+  // Transient by nature: the running turn ends, and the same send then works.
+  turnRouteWhileBusy: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "clock",
   },
 
   // ------------------------------------------------------ Cognia internals

@@ -71,6 +71,15 @@ export async function getExecutingPlanForSession(
   return getDb().agentPlans.where("[sessionId+status]").equals([sessionId, "executing"]).first()
 }
 
+/**
+ * Every plan currently in `status`, across all sessions. Backed by the plain
+ * `status` index — the in-session step recovery sweep asks for `executing`
+ * rows once per renderer boot, a handful of rows at most.
+ */
+export async function listPlansByStatus(status: PlanStatus): Promise<AgentPlan[]> {
+  return getDb().agentPlans.where("status").equals(status).toArray()
+}
+
 /** Newest-first list of all plans for a session (open and terminal). */
 export async function listPlansBySession(sessionId: string): Promise<AgentPlan[]> {
   return getDb().agentPlans.where("sessionId").equals(sessionId).reverse().sortBy("createdAt")
@@ -104,6 +113,13 @@ export interface PlanUpdatePatch {
   refinementCount?: number
   generationId?: string
   endedAt?: number
+  /**
+   * In-session halt record. Pass `undefined` explicitly to clear it: Dexie's
+   * `update` deletes a property whose new value is `undefined`.
+   */
+  stepHalt?: AgentPlan["stepHalt"]
+  /** In-flight in-session step stamp; `undefined` clears it (see `stepHalt`). */
+  turnDispatch?: AgentPlan["turnDispatch"]
   metadata?: AgentPlan["metadata"]
 }
 

@@ -2,13 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import {
-  perfCloseLease,
-  perfLeaseSnapshot,
-  perfOpenLease,
-  perfRenewLease,
-  subscribePerfFrame,
-} from "@/lib/perf/backend/commands"
 import type {
   PerfConnectionState,
   PerfFrame,
@@ -16,14 +9,18 @@ import type {
   PerfSample,
   PerfSourceDescriptor,
 } from "@/lib/perf/backend/types"
-import { mergePerfFrames } from "@/lib/perf/frame-merge"
+import {
+  getPerfHostLiveLease,
+  type PerfHostIssue,
+  type PerfHostLeaseSubscription,
+  type PerfHostLeaseView,
+} from "@/lib/perf/host-live-lease"
 import { getRendererPerformanceCollector } from "@/lib/perf/renderer-collector"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 
 export const PERF_HISTORY_LIMIT = 120
 export const PERF_INTERVAL_OPTIONS = [500, 1000, 2000, 4000] as const
 export const DEFAULT_PERF_INTERVAL = 1000
-const LEASE_HEARTBEAT_MS = 5000
 
 let preferredIntervalMs = DEFAULT_PERF_INTERVAL
 
@@ -49,6 +46,14 @@ function appendBounded(previous: PerfFrame[], frame: PerfFrame): PerfFrame[] {
   return next.slice(-PERF_HISTORY_LIMIT)
 }
 
+const INITIAL_HOST_VIEW: PerfHostLeaseView = {
+  state: "connecting",
+  issue: null,
+  source: null,
+  frames: [],
+  gaps: [],
+}
+
 export interface UsePerfStreamResult {
   history: PerfFrame[]
   latest: PerfFrame | null
@@ -58,7 +63,10 @@ export interface UsePerfStreamResult {
   gaps: PerfGap[]
   available: boolean
   hostState: PerfConnectionState
+  /** Raw host wording of {@link hostIssue}, for logs and exports. */
   error: string | null
+  /** Why the host lease is not live, typed so the panel can localize it. */
+  hostIssue: PerfHostIssue | null
   paused: boolean
   intervalMs: number
   setPaused: (paused: boolean) => void
@@ -68,22 +76,14 @@ export interface UsePerfStreamResult {
 
 export function usePerfStream(): UsePerfStreamResult {
   const [rendererHistory, setRendererHistory] = useState<PerfFrame[]>([])
-  const [hostHistory, setHostHistory] = useState<PerfFrame[]>([])
-  const [sources, setSources] = useState<PerfSourceDescriptor[]>(() => [
-    getRendererPerformanceCollector().source,
-  ])
-  const [gaps, setGaps] = useState<PerfGap[]>([])
-  const [hostState, setHostState] = useState<PerfConnectionState>("connecting")
-  const [error, setError] = useState<string | null>(null)
+  const [hostView, setHostView] = useState<PerfHostLeaseView>(INITIAL_HOST_VIEW)
   const [paused, setPausedState] = useState(false)
   const [intervalMs, setIntervalState] = useState(preferredIntervalMs)
   const pausedRef = useRef(false)
+  const hostSubscriptionRef = useRef<PerfHostLeaseSubscription | null>(null)
 
   const appendRenderer = useCallback((frame: PerfFrame) => {
     if (!pausedRef.current) setRendererHistory((previous) => appendBounded(previous, frame))
-  }, [])
-  const appendHost = useCallback((frame: PerfFrame) => {
-    if (!pausedRef.current) setHostHistory((previous) => appendBounded(previous, frame))
   }, [])
 
   useEffect(() => {
@@ -101,83 +101,24 @@ export function usePerfStream(): UsePerfStreamResult {
     }
   }, [appendRenderer, intervalMs])
 
+  // Host frames come through the renderer's ONE shared lease. Every consumer
+  // opening its own was how the status-bar segment and this page refused each
+  // other with `device-purpose-limit`.
   useEffect(() => {
-    const scope = getActiveRuntimeTargetContext()
-    const targetId = scope?.targetId ?? "web-standalone"
-    const routingGeneration = scope?.routingGeneration ?? 0
-    const collector = getRendererPerformanceCollector()
-    let cancelled = false
-    let leaseId: string | null = null
-    let heartbeat: ReturnType<typeof setInterval> | null = null
-    const buffered: PerfFrame[] = []
-
-    // Subscribe before opening or snapshotting so no early frame can be lost.
-    const unsubscribe = subscribePerfFrame((frame) => {
-      if (frame.targetId !== targetId || frame.routingGeneration !== routingGeneration) return
-      if (!leaseId) buffered.push(frame)
-      else if (!frame.leaseId || frame.leaseId === leaseId) appendHost(frame)
+    const subscription = getPerfHostLiveLease().subscribe({
+      cadenceMs: intervalMs,
+      onChange: (view) =>
+        setHostView((previous) =>
+          // Paused freezes the graphs, not the connection state.
+          pausedRef.current ? { ...view, frames: previous.frames, gaps: previous.gaps } : view
+        ),
     })
-
-    void (async () => {
-      try {
-        const result = await perfOpenLease({
-          clientId: collector.source.sourceId,
-          deviceId: collector.source.hostInstanceId,
-          targetId,
-          routingGeneration,
-          purpose: "live",
-          requestedCadenceMs: intervalMs,
-          sourceId: collector.source.sourceId,
-        })
-        if (!result.accepted) {
-          if (!cancelled) {
-            setHostState(result.code === "unsupported" ? "unsupported" : "error")
-            setError(`${result.code}: ${result.detail}`)
-          }
-          return
-        }
-        leaseId = result.lease.leaseId
-        if (cancelled) {
-          await perfCloseLease(leaseId)
-          return
-        }
-        setSources((current) => [
-          ...current.filter((source) => source.kind !== "host"),
-          result.source,
-        ])
-        const snapshot = await perfLeaseSnapshot(leaseId)
-        if (cancelled) return
-        const merged = mergePerfFrames(
-          snapshot,
-          buffered.filter((frame) => !frame.leaseId || frame.leaseId === leaseId),
-          { targetId, routingGeneration }
-        )
-        setHostHistory(merged.frames.slice(-PERF_HISTORY_LIMIT))
-        setGaps(merged.gaps)
-        setHostState("live")
-        setError(null)
-        heartbeat = setInterval(() => {
-          if (!leaseId) return
-          void perfRenewLease(leaseId).catch((renewError: unknown) => {
-            if (cancelled) return
-            setHostState("stale")
-            setError(renewError instanceof Error ? renewError.message : String(renewError))
-          })
-        }, LEASE_HEARTBEAT_MS)
-      } catch (openError) {
-        if (cancelled) return
-        setHostState("unsupported")
-        setError(openError instanceof Error ? openError.message : String(openError))
-      }
-    })()
-
+    hostSubscriptionRef.current = subscription
     return () => {
-      cancelled = true
-      unsubscribe()
-      if (heartbeat) clearInterval(heartbeat)
-      if (leaseId) void perfCloseLease(leaseId)
+      if (hostSubscriptionRef.current === subscription) hostSubscriptionRef.current = null
+      subscription.unsubscribe()
     }
-  }, [appendHost, intervalMs])
+  }, [intervalMs])
 
   const setPaused = useCallback((next: boolean) => {
     pausedRef.current = next
@@ -188,19 +129,21 @@ export function usePerfStream(): UsePerfStreamResult {
     preferredIntervalMs = next
     setIntervalState(next)
     setRendererHistory([])
-    setHostHistory([])
-    setGaps([])
-    setHostState("connecting")
+    setHostView((previous) => ({ ...previous, state: "connecting", frames: [], gaps: [] }))
   }, [])
 
   const reset = useCallback(() => {
     // A panel reset establishes a new local visual baseline. Process-wide span
     // registries remain cumulative and captures keep their own baselines.
     setRendererHistory([])
-    setHostHistory([])
-    setGaps([])
+    hostSubscriptionRef.current?.resetHistory()
   }, [])
 
+  const hostHistory = hostView.frames
+  const sources = useMemo(
+    () => [getRendererPerformanceCollector().source, ...(hostView.source ? [hostView.source] : [])],
+    [hostView.source]
+  )
   const history = hostHistory.length > 0 ? hostHistory : rendererHistory
   const latest = history.at(-1) ?? null
 
@@ -211,10 +154,11 @@ export function usePerfStream(): UsePerfStreamResult {
       rendererHistory,
       hostHistory,
       sources,
-      gaps,
+      gaps: hostView.gaps,
       available: true,
-      hostState,
-      error,
+      hostState: hostView.state,
+      error: hostView.issue?.detail ?? null,
+      hostIssue: hostView.issue,
       paused,
       intervalMs,
       setPaused,
@@ -227,9 +171,9 @@ export function usePerfStream(): UsePerfStreamResult {
       rendererHistory,
       hostHistory,
       sources,
-      gaps,
-      hostState,
-      error,
+      hostView.gaps,
+      hostView.state,
+      hostView.issue,
       paused,
       intervalMs,
       setPaused,

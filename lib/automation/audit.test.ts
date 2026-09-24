@@ -7,7 +7,15 @@
 
 import "fake-indexeddb/auto"
 
-import { AUTOMATION_AUDIT_CAP, clearAuditLog, listAuditRows, recordAuditRow } from "./audit"
+import { isTauri } from "@/lib/tauri"
+import { listen } from "@tauri-apps/api/event"
+import {
+  startAutomationAuditMirror,
+  AUTOMATION_AUDIT_CAP,
+  clearAuditLog,
+  listAuditRows,
+  recordAuditRow,
+} from "./audit"
 import { __resetDbForTesting, getDb, type AutomationAuditLogRow } from "@/lib/db/schema"
 
 function row(overrides: Partial<AutomationAuditLogRow> = {}): AutomationAuditLogRow {
@@ -103,4 +111,21 @@ describe("clearAuditLog", () => {
     await clearAuditLog()
     expect((await listAuditRows()).length).toBe(0)
   })
+})
+
+jest.mock("@/lib/tauri", () => ({
+  ...jest.requireActual("@/lib/tauri"),
+  isTauri: jest.fn(() => false),
+}))
+
+it("contains native unregister rejections", async () => {
+  jest.mocked(isTauri).mockReturnValue(true)
+  const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+  const spy = jest.spyOn(failure, "catch")
+  jest.mocked(listen).mockResolvedValueOnce(() => failure)
+  const stop = await startAutomationAuditMirror()
+  stop()
+  const attached = spy.mock.calls.length
+  await failure.catch(() => {})
+  expect(attached).toBe(1)
 })

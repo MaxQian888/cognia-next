@@ -18,11 +18,11 @@ interface FakeInstance {
 
 const setAcpDynamicMcpHostControllerMock = jest.fn()
 const dynamicMcpController = { connect: jest.fn(), message: jest.fn(), disconnect: jest.fn() }
-jest.mock("@/lib/ai/agent/external/acp-client", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/acp/acp-client", () => ({
   setAcpDynamicMcpHostController: (...args: unknown[]) =>
     setAcpDynamicMcpHostControllerMock(...args),
 }))
-jest.mock("@/lib/ai/agent/external/acp-dynamic-mcp-controller", () => ({
+jest.mock("@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller", () => ({
   createAcpDynamicMcpHostController: () => dynamicMcpController,
 }))
 
@@ -62,7 +62,7 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
 const getBlockReasonMock = jest.fn<string | null, [ExternalAgentConfig]>(() => null)
 const isExecutableMock = jest.fn(() => true)
 const isSupportedMock = jest.fn((p: string) => p === "acp" || p === "opencode")
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentExecutionBlockReason: (c: ExternalAgentConfig) => getBlockReasonMock(c),
   isExternalAgentExecutable: () => isExecutableMock(),
   isSupportedExternalAgentProtocol: (p: string) => isSupportedMock(p),

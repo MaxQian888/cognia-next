@@ -9,7 +9,7 @@
  * ## Why USD and not tokens
  *
  * The existing budget authority counts TOKENS
- * (`lib/ai/agent/team/budget-guard.ts`). Tokens are the wrong unit for a
+ * (`lib/ai/agent/team/gates/budget-guard.ts`). Tokens are the wrong unit for a
  * spending limit: the same 100k tokens cost $0 on a local model, $0.30 on Haiku
  * and $2.50 on Opus, so a token cap either strangles cheap work or fails to
  * stop expensive work. This layer caps the thing the user actually cares about.

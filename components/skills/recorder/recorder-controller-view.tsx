@@ -14,6 +14,7 @@
  * and even collapsed it keeps the elapsed time and a way back to the controls.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CircleIcon, PauseIcon, PlayIcon, SquareIcon, Undo2Icon } from "lucide-react"
@@ -75,15 +76,20 @@ export function RecorderControllerView() {
   useEffect(() => {
     if (!isTauri()) return
     let dispose: (() => void) | undefined
+    let cancelled = false
     void import("@tauri-apps/api/event")
       .then(({ listen }) =>
         listen<boolean>(RECORDER_CONTROLLER_EVENT, (event) => setCollapsed(Boolean(event.payload)))
       )
       .then((unlisten) => {
-        dispose = unlisten
+        if (cancelled) safeUnlisten(unlisten)
+        else dispose = unlisten
       })
       .catch(() => {})
-    return () => dispose?.()
+    return () => {
+      cancelled = true
+      safeUnlisten(dispose)
+    }
   }, [])
 
   const run = useCallback(async (action: () => Promise<unknown>) => {

@@ -59,6 +59,31 @@ describe("RoutingTransport", () => {
     expect(local.calls).toEqual([{ name: "integration_ingress_poll", args: { limit: 100 } }])
   })
 
+  it.each(["companion_server_status", "companion_server_start", "host_admin_lease_issue"])(
+    "keeps %s on the local desktop when no remote is selected",
+    async (command) => {
+      const local = fakeTransport("local")
+      const routing = new RoutingTransport(local.transport)
+      const options = { idempotencyKey: "local-operation" }
+      await expect(routing.call(command, { test: true }, options)).resolves.toBe(`local:${command}`)
+      expect(local.transport.call).toHaveBeenCalledWith(command, { test: true }, options)
+    }
+  )
+
+  it("does not implicitly grant host administration to the selected remote", async () => {
+    const local = fakeTransport("local")
+    const remote = fakeTransport("remote")
+    const routing = new RoutingTransport(local.transport)
+    setActiveRemoteTransport(remote.transport)
+    await expect(routing.call("companion_server_status")).rejects.toThrow("explicit host-admin")
+    expect(local.calls).toHaveLength(0)
+    expect(remote.calls).toHaveLength(0)
+    setActiveRemoteTransport(null)
+    await expect(routing.call("companion_server_status")).resolves.toBe(
+      "local:companion_server_status"
+    )
+  })
+
   it("routes to the active remote transport once one is installed", async () => {
     const local = fakeTransport("local")
     const remote = fakeTransport("remote")

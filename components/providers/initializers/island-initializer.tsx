@@ -47,6 +47,7 @@ import type {
   IslandState,
 } from "@/lib/island/types"
 import { isTauri } from "@/lib/tauri"
+import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useUIStore } from "@/stores/ui/ui-store"
@@ -160,6 +161,15 @@ export function IslandInitializer() {
         if ((owner.kind === "chat" || owner.kind === "gate") && owner.sessionId) {
           useChatStore.getState().setActiveSession(owner.sessionId)
           useUIStore.getState().setSelectedGuild({ kind: "dm" })
+        }
+        if (owner.kind === "external") {
+          // An ACP session bound to a chat opens that conversation; otherwise
+          // the external-agents page shows the agent the row belongs to.
+          if (owner.chatSessionId) {
+            useChatStore.getState().setActiveSession(owner.chatSessionId)
+            useUIStore.getState().setSelectedGuild({ kind: "dm" })
+          }
+          if (owner.agentId) selectExternalAgent(owner.agentId)
         }
         router.push(path)
       },

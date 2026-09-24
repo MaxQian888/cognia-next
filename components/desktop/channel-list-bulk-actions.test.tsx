@@ -105,3 +105,60 @@ it("runs a bulk mutation with the selected ids and clears after it settles", asy
   expect(onSetPinned).toHaveBeenCalledWith(["second", "first"], true)
   expect(onClear).toHaveBeenCalledTimes(1)
 })
+
+it("offers only the folders every selected conversation can go into", async () => {
+  // A folder is workspace-scoped. With a cross-workspace selection, another
+  // workspace's folder would take the move and then drop it on screen.
+  const user = userEvent.setup()
+  const onMoveToFolder = jest.fn(async () => {})
+  const onClear = jest.fn()
+  const inP1 = { ...session("a", "A"), projectId: "p1" } as ChatSession
+  const inP2 = { ...session("b", "B"), projectId: "p2" } as ChatSession
+  const folders = [
+    { id: "f-p1", name: "P1 folder", projectId: "p1", order: 0 },
+    { id: "f-any", name: "Legacy folder", order: 1 },
+  ] as never
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["a", "b"])}
+      orderedIds={["a", "b"]}
+      sessions={[inP1, inP2]}
+      archived={false}
+      folders={folders}
+      onMoveToFolder={onMoveToFolder}
+      onClear={onClear}
+    />
+  )
+
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  expect(screen.getByTestId("channel-list-bulk-folder-f-p1")).toHaveAttribute("data-disabled")
+  expect(screen.getByTestId("channel-list-bulk-folder-f-any")).not.toHaveAttribute("data-disabled")
+  expect(screen.getByTestId("channel-list-bulk-folder-blocked-note")).toHaveTextContent(
+    "folderOtherWorkspace"
+  )
+  await user.click(screen.getByTestId("channel-list-bulk-folder-f-any"))
+  expect(onMoveToFolder).toHaveBeenCalledWith(["a", "b"], "f-any")
+  expect(onClear).toHaveBeenCalledTimes(1)
+})
+
+it("leaves every folder open when the selection shares its workspace", async () => {
+  const user = userEvent.setup()
+  const inP1 = { ...session("a", "A"), projectId: "p1" } as ChatSession
+  render(
+    <ChannelListBulkActions
+      visible
+      selected={new Set(["a"])}
+      orderedIds={["a"]}
+      sessions={[inP1, { ...session("z", "Z"), projectId: "p2" } as ChatSession]}
+      archived={false}
+      folders={[{ id: "f-p1", name: "P1 folder", projectId: "p1", order: 0 }] as never}
+      onMoveToFolder={jest.fn()}
+      onClear={jest.fn()}
+    />
+  )
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  // An unselected row in another workspace does not narrow anything.
+  expect(screen.getByTestId("channel-list-bulk-folder-f-p1")).not.toHaveAttribute("data-disabled")
+  expect(screen.queryByTestId("channel-list-bulk-folder-blocked-note")).toBeNull()
+})

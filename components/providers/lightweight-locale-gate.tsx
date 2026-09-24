@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { NextIntlClientProvider } from "next-intl"
 
 import { defaultLocale, locales, type Locale } from "@/i18n/config"
 import { defaultMessages, loadMessages, type Messages } from "@/i18n/messages"
 import { useSettingsStore } from "@/stores/settings"
 import { getPref } from "@/lib/tauri/store"
+import { resolveFormattingTimeZone } from "@/lib/profile/timezone"
 
 export const LIGHTWEIGHT_LOCALE_PREF = "appearance.locale"
 
@@ -25,6 +26,11 @@ function isLocale(value: unknown): value is Locale {
  *      otherwise be pinned to `defaultLocale` whatever the user chose), and
  *   2. the mirrored Tauri pref, which resolves before Dexie does and so keeps
  *      a desktop overlay from painting one frame of English first.
+ *
+ * The time zone follows `LocaleGate`: UTC until settings hydrate (the static
+ * export renders without them), then the user's own zone. The overlays this
+ * wraps — the tray panel, `/status`, the pet popup — print times too, and a
+ * pinned UTC put them hours away from the same timestamp in the main window.
  */
 export function LightweightLocaleGate({ children }: { children: React.ReactNode }) {
   const storedLanguage = useSettingsStore((s) => s.settings?.language)
@@ -33,6 +39,11 @@ export function LightweightLocaleGate({ children }: { children: React.ReactNode 
   const [messages, setMessages] = useState<Messages>(defaultMessages)
   const locale: Locale =
     settingsLoaded && isLocale(storedLanguage) ? storedLanguage : (mirroredLocale ?? defaultLocale)
+  const profileTimeZone = useSettingsStore((s) => s.settings?.profile?.timezone)
+  const timeZone = useMemo(
+    () => (settingsLoaded ? resolveFormattingTimeZone({ timezone: profileTimeZone }) : "UTC"),
+    [settingsLoaded, profileTimeZone]
+  )
 
   useEffect(() => {
     let alive = true
@@ -60,7 +71,7 @@ export function LightweightLocaleGate({ children }: { children: React.ReactNode 
   }, [locale])
 
   return (
-    <NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
       {children}
     </NextIntlClientProvider>
   )

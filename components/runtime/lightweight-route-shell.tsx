@@ -16,6 +16,12 @@ const LIGHTWEIGHT_ROUTE_PREFIXES = [
   "/island",
   "/selection-toolbar",
   "/tray-panel",
+  // The skill recorder's always-on-top strip (`src-tauri/src/recorder_window`).
+  // It drives the recorder over IPC and reads no account data, and as a gated
+  // route it painted its own lock screen into a 420x56 window.
+  "/recorder-controller",
+  // Throwaway UI prototypes must boot without the account/runtime stack.
+  "/prototype",
 ] as const
 
 /**

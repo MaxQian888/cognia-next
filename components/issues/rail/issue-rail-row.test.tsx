@@ -1,6 +1,10 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { IssueRailRow } from "./issue-rail-row"
 
 function renderRow(over: Partial<React.ComponentProps<typeof IssueRailRow>> = {}) {
@@ -58,5 +62,52 @@ describe("IssueRailRow", () => {
     renderRow({ trailing: <a data-testid="trailing" href="/x" /> })
     const trailing = screen.getByTestId("trailing")
     expect(screen.getByTestId("row").contains(trailing)).toBe(false)
+  })
+
+  // The trailing arrow used to reveal only on hover/focus of the row, so a
+  // touch screen could never reach it.
+  it("keeps the trailing control reachable without a hover", () => {
+    const onOpen = jest.fn()
+    renderRow({
+      count: 7,
+      trailing: (
+        <button type="button" data-testid="trailing" onClick={onOpen}>
+          open
+        </button>
+      ),
+    })
+    const trailing = screen.getByTestId("trailing")
+    const wrapper = trailing.parentElement as HTMLElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).toHaveClass(
+      "group-hover/rail-row:opacity-100",
+      "group-focus-within/rail-row:opacity-100"
+    )
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    trailing.focus()
+    expect(trailing).toHaveFocus()
+    fireEvent.click(trailing)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides the count wherever the trailing control is shown, so they never overlap", () => {
+    renderRow({ count: 7, trailing: <a data-testid="trailing" href="/x" /> })
+    expect(screen.getByText("7")).toHaveClass(
+      "group-hover/rail-row:invisible",
+      "group-focus-within/rail-row:invisible",
+      "group-has-[[data-state=open]]/rail-row:invisible",
+      "pointer-coarse:invisible"
+    )
+  })
+
+  it("leaves the count alone when there is no trailing control", () => {
+    renderRow({ count: 7 })
+    const count = screen.getByText("7")
+    expect(count).not.toHaveClass("group-hover/rail-row:invisible")
+    expect(count).not.toHaveClass("pointer-coarse:invisible")
   })
 })

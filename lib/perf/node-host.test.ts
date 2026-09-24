@@ -97,6 +97,51 @@ describe("NodePerformanceHost", () => {
     await host.stop()
   })
 
+  it("lets a client reclaim the purpose it already holds instead of refusing it", async () => {
+    const host = new NodePerformanceHost(provider, { emit: jest.fn() })
+    const first = await host.open(request())
+    if (!first.accepted) throw new Error("expected lease")
+    wall += 200
+    const reopened = await host.open({ ...request(), requestedCadenceMs: 1_000 })
+    expect(reopened.accepted).toBe(true)
+    if (!reopened.accepted) throw new Error("expected lease")
+    expect(reopened.lease.leaseId).not.toBe(first.lease.leaseId)
+    // Same scope, so the series continues rather than restarting.
+    expect(reopened.lease.samplingSessionId).toBe(first.lease.samplingSessionId)
+    await expect(host.renew(first.lease.leaseId, "device-a")).rejects.toThrow(/lease-expired/)
+    await host.stop()
+  })
+
+  it("still refuses a second client on the same device until the holder's TTL ends", async () => {
+    const host = new NodePerformanceHost(provider, { emit: jest.fn() })
+    const held = await host.open(request())
+    expect(held.accepted).toBe(true)
+    wall += 200
+    const otherWindow = { ...request(), clientId: "client-other-window" }
+    await expect(host.open(otherWindow)).resolves.toMatchObject({
+      accepted: false,
+      code: "device-purpose-limit",
+    })
+    // The holder never renews — a dead window — and the TTL frees the device.
+    wall += 15_000
+    await expect(host.open(otherWindow)).resolves.toMatchObject({ accepted: true })
+    await host.stop()
+  })
+
+  it("keeps the existing lease when a reclaiming re-open is refused", async () => {
+    const host = new NodePerformanceHost(provider, { emit: jest.fn() })
+    const own = await host.open(request())
+    const neighbour = await host.open(request("device-b"))
+    if (!own.accepted || !neighbour.accepted) throw new Error("expected leases")
+    wall += 200
+    await expect(host.open({ ...request(), targetId: "target-b" })).resolves.toMatchObject({
+      accepted: false,
+      code: "target-mismatch",
+    })
+    await expect(host.renew(own.lease.leaseId, "device-a")).resolves.toBeUndefined()
+    await host.stop()
+  })
+
   it("rate limits remote renewals without shortening the prior TTL", async () => {
     const host = new NodePerformanceHost(provider, { emit: jest.fn() })
     const opened = await host.open(request())

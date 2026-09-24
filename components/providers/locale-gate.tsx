@@ -12,6 +12,7 @@ import {
   subscribeToPluginI18n,
 } from "@/lib/i18n/plugin-i18n-registry"
 import { setPref } from "@/lib/tauri/store"
+import { resolveFormattingTimeZone } from "@/lib/profile/timezone"
 import { LIGHTWEIGHT_LOCALE_PREF } from "./lightweight-locale-gate"
 
 /**
@@ -35,11 +36,24 @@ import { LIGHTWEIGHT_LOCALE_PREF } from "./lightweight-locale-gate"
  * Until the settings store has hydrated we pin to the default locale to
  * avoid hydration mismatches against the server-rendered markup (which
  * uses the static-export default).
+ *
+ * The time zone follows the same rule. Every `format.dateTime` in the app
+ * prints in the provider's zone, so it has to be the user's own
+ * (`resolveUserTimeZone`: the profile override, else the device zone) — pinned
+ * to UTC, a conversation stamped 14:32 in Shanghai read "06:32", while the list
+ * decided "today" in local time. UTC stays only as the pre-hydration value: the
+ * static export renders without settings, and a zone read before hydration
+ * would differ between the build machine and the device.
  */
 export function LocaleGate({ children }: { children: React.ReactNode }) {
   const language = useSettingsStore((s) => s.settings?.language)
   const loaded = useSettingsStore((s) => s.loaded)
   const locale: Locale = loaded && language ? language : defaultLocale
+  const profileTimeZone = useSettingsStore((s) => s.settings?.profile?.timezone)
+  const timeZone = useMemo(
+    () => (loaded ? resolveFormattingTimeZone({ timezone: profileTimeZone }) : "UTC"),
+    [loaded, profileTimeZone]
+  )
 
   useEffect(() => {
     if (loaded && language) void setPref(LIGHTWEIGHT_LOCALE_PREF, language)
@@ -93,12 +107,7 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
   }, [host, locale, pluginVersion])
 
   return (
-    <NextIntlClientProvider
-      locale={locale}
-      messages={messages}
-      // App is offline-first; pinning the time zone keeps formatted dates stable.
-      timeZone="UTC"
-    >
+    <NextIntlClientProvider locale={locale} messages={messages} timeZone={timeZone}>
       {children}
     </NextIntlClientProvider>
   )

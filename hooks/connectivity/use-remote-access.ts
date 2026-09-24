@@ -23,7 +23,7 @@ import type { MeshStatus } from "@/lib/connectivity/mesh"
 import type { RelayRouteState } from "@/lib/connectivity/remote-access"
 import { probeRelay, type RelayProbeResult } from "@/lib/signaling/relay-probe"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
-import { transport } from "@/lib/tauri"
+import { isTauri, localTransport, transport } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
 
 export interface RelaySlice {
@@ -97,10 +97,12 @@ const DEFAULT_POLL_MS = 5_000
 const DEFAULT_MESH_POLL_MS = 60_000
 
 const defaultReadSignalingStatus = () =>
-  transport.call<SignalingStatusSnapshot>("companion_signaling_status")
+  (isTauri() ? localTransport : transport).call<SignalingStatusSnapshot>(
+    "companion_signaling_status"
+  )
 const defaultReadTunnel = () =>
-  transport.call<TunnelInfoSnapshot | null>("companion_tunnel_current")
-const defaultReadMesh = () => transport.call<MeshStatus>("companion_mesh_status")
+  localTransport.call<TunnelInfoSnapshot | null>("companion_tunnel_current")
+const defaultReadMesh = () => localTransport.call<MeshStatus>("companion_mesh_status")
 
 export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAccessState {
   const {

@@ -27,6 +27,7 @@
  * two shells fall back to polling — see [`supportsLiveOperationEvents`].
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -182,7 +183,7 @@ async function* nativeEventStream(options: {
       })
     }
   } finally {
-    unlisten()
+    safeUnlisten(unlisten)
     signal.removeEventListener("abort", onAbort)
     // Idempotent on the native side — a stream that already ended reports
     // `false` rather than failing, which is the normal shape of an effect

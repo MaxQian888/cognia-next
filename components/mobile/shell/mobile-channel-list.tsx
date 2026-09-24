@@ -1,62 +1,93 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { useFormatter, useNow, useTranslations } from "next-intl"
+/**
+ * The phone shell's conversation list — the navigation drawer's main column,
+ * also what a browser window narrower than 768px gets.
+ *
+ * Layout (a ~262px column at 375px, ~308px at 430px):
+ *
+ *   ┌───────────────────────────────┐
+ *   │ [🔍 Search chats…      ] [ + ] │  search owns the row; New chat beside it
+ *   │ [ Chats | Archived ] [🔭] [⚲] │  view, search reach, filter & sort
+ *   │ filter chips (only when set)  │
+ *   ├───────────────────────────────┤
+ *   │ PINNED                      2 │  windowed: headers + rows as one list
+ *   │ (◉) Title…            14:32 3 │
+ *   └───────────────────────────────┘
+ *
+ * Rendering contract:
+ *   - The column is `min-w-0`. Titles are `nowrap`, and without it the
+ *     column's min-content width was the longest title: the list measured
+ *     842px in a 262px slot, the header controls and the swipe strip sat off
+ *     screen, and titles clipped with no ellipsis.
+ *   - Rows are windowed (`@tanstack/react-virtual`) over a flat item model
+ *     (`mobile-channel-list-items.ts`) and memoized (`mobile-channel-row.tsx`).
+ *     Opening the drawer on a 400-conversation profile used to mount every
+ *     row in one ~700ms task; now it mounts a screenful.
+ *   - Everything that outlives the drawer — characters, teams, unread state,
+ *     the search, message-content search, scroll position — comes from
+ *     `MobileChannelListSourceProvider`, which the shell mounts outside the
+ *     drawer. Reopening does not refetch, re-sync or scroll back to the top.
+ *   - No per-row entrance animation. The drawer's own slide is the entrance;
+ *     the old uncapped stagger left row #200 of a search invisible for eight
+ *     seconds and replayed on every open. Motion that remains (the swipe
+ *     snap, chevrons) follows both the OS and the app's Reduce-motion setting
+ *     through the global rules in `app/globals.css`.
+ */
+
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { useTimeZone, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
-  ArchiveRestoreIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
-  PinIcon,
-  PinOffIcon,
+  MessagesSquareIcon,
   PlusIcon,
-  SearchIcon,
-  Trash2Icon,
-  XIcon,
 } from "lucide-react"
-import { motion, useReducedMotion } from "motion/react"
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual"
+import { toast } from "sonner"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
-import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
-import {
-  useConversationReveal,
-  type ConversationRevealStep,
-} from "@/hooks/chat/use-conversation-reveal"
-import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
-import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
-import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
-import { listCharacters } from "@/lib/db/characters"
-import { listSessionStates } from "@/lib/db/session-state"
-import { listTeams } from "@/lib/db/teams"
-import { bulkSetSessionsPinned } from "@/lib/db/sessions"
-import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import { cn } from "@/lib/utils"
-import { filterExposedSessions } from "@/lib/chat/session-exposure"
-import { useUIStore, type ChannelListView } from "@/stores/ui"
-import { useSettingsStore } from "@/stores/settings"
-import { useProjectStore } from "@/stores/project/project-store"
-import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { LoadingRegion } from "@/components/ui/loading-region"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   ConversationFilterChips,
   ConversationFilterMenu,
   ConversationSearchScopeControl,
 } from "@/components/chat/conversation-filter-controls"
-import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
-import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import { ThreadHandoffSourceDialog } from "@/components/thread-handoff/thread-handoff-source-dialog"
+import {
+  useConversationDayClock,
+  useConversationListModel,
+} from "@/hooks/chat/use-conversation-list-model"
+import {
+  useConversationReveal,
+  type ConversationRevealStep,
+} from "@/hooks/chat/use-conversation-reveal"
+import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 import {
   CONVERSATION_GROUP_AXIS_ICON,
   CONVERSATION_UNGROUPED_LABEL_KEY,
 } from "@/lib/chat/conversation-group-axis"
 import {
-  CONTENT_SEARCH_MIN_QUERY,
-  needsCrossWorkspaceSessions,
-  resolveConversationSearchOptions,
-} from "@/lib/chat/conversation-search-scope"
+  resolveConversationGroupBy,
+  resolveConversationSidebarMetadata,
+} from "@/lib/chat/conversation-grouping"
+import {
+  conversationSectionKey,
+  UNGROUPED_ID,
+  type ConversationGroupAxis,
+  type DateBucket,
+} from "@/lib/chat/conversation-list-model"
+import { resolveConversationSearchOptions } from "@/lib/chat/conversation-search-scope"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { SessionHandoffLockedError } from "@/lib/chat/session-write-guard"
+import { markSessionRead } from "@/lib/db/session-state"
+import { cn } from "@/lib/utils"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useSettingsStore } from "@/stores/settings"
+import { useUIStore, type ChannelListView } from "@/stores/ui"
+import { loggers } from "@cognia/logging"
 import type {
   Character,
   ChatSession,
@@ -66,11 +97,35 @@ import type {
   Team,
 } from "@cognia/agent-config-types"
 
-import { SwipeRow } from "@/components/interactions/swipe-row"
-import { LongPress } from "@/components/interactions/long-press"
+import {
+  MobileChannelListStandaloneSource,
+  useMobileChannelListSource,
+  useOptionalMobileChannelListSource,
+  type MobileChannelScrollMemory,
+} from "./mobile-channel-list-source"
+import {
+  buildMobileChannelListItems,
+  findRowIndex,
+  type MobileChannelListItem,
+} from "./mobile-channel-list-items"
+import {
+  MobileChannelRow,
+  type MobileChannelRowSettings,
+  type MobileChannelSwipeActionId,
+} from "./mobile-channel-row"
+import { MobileChannelRowActions } from "./mobile-channel-row-actions"
+import { MobileChannelDeleteConfirm } from "./mobile-channel-delete-confirm"
+import { MobileChannelSearchField } from "./mobile-channel-search-field"
+
+const log = loggers.ui
 
 export interface MobileChannelListProps {
-  sessions: ChatSession[]
+  sessions: readonly ChatSession[]
+  /**
+   * The session query has not answered yet (`useSessions().isLoadingSessions`).
+   * Without it a cold start flashed "No chats yet" before the list arrived.
+   */
+  isLoadingSessions?: boolean
   activeSessionId: string | null
   onSelect: (id: string) => void
   onNewDirect: () => void
@@ -78,15 +133,12 @@ export interface MobileChannelListProps {
   onRename: (id: string, title: string) => void | Promise<void>
   onArchive: (id: string) => void | Promise<void>
   onUnarchive: (id: string) => void | Promise<void>
-  /** Conversation folders (display + collapse only on mobile). */
-  folders?: SessionFolder[]
-}
-
-interface ResolvedSession {
-  session: ChatSession
-  unread: number
-  glyph: string
-  color: string
+  /** `useSessions().bulkSetPinned` — the one pin writer both shells use. */
+  onSetPinned: (ids: readonly string[], pinned: boolean) => void | Promise<void>
+  /** `useSessions().assignToFolder`; `null` takes the conversation out of its folder. */
+  onAssignToFolder: (sessionId: string, folderId: string | null) => void | Promise<void>
+  /** Conversation folders (display, collapse, and "Move to folder"). */
+  folders?: readonly SessionFolder[]
 }
 
 /** Maps a date bucket to its `mobile.home` label key. */
@@ -98,8 +150,38 @@ const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
   older: "bucketOlder",
 }
 
-export function MobileChannelList({
+type ActionFailure =
+  "rename" | "pin" | "unpin" | "archive" | "unarchive" | "delete" | "move" | "markRead"
+
+const NO_FOLDERS: readonly SessionFolder[] = []
+const SKELETON_ROWS = 6
+
+/** Refused by the session write guard because the row is mid-handoff. */
+export function isSessionHandoffLocked(error: unknown): boolean {
+  if (error instanceof SessionHandoffLockedError) return true
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "session_handoff_locked"
+  )
+}
+
+export function MobileChannelList(props: MobileChannelListProps) {
+  // The shell provides the source from outside the drawer so it survives the
+  // drawer closing. Rendered anywhere else (Storybook, an isolated test), the
+  // list brings its own.
+  const source = useOptionalMobileChannelListSource()
+  if (source) return <MobileChannelListBody {...props} />
+  return (
+    <MobileChannelListStandaloneSource>
+      <MobileChannelListBody {...props} />
+    </MobileChannelListStandaloneSource>
+  )
+}
+
+function MobileChannelListBody({
   sessions,
+  isLoadingSessions = false,
   activeSessionId,
   onSelect,
   onNewDirect,
@@ -107,71 +189,69 @@ export function MobileChannelList({
   onRename,
   onArchive,
   onUnarchive,
-  folders,
+  onSetPinned,
+  onAssignToFolder,
+  folders = NO_FOLDERS,
 }: MobileChannelListProps) {
-  const exposedSessions = useMemo(() => filterExposedSessions(sessions, "main-list"), [sessions])
   const t = useTranslations("mobile.home")
   const tShell = useTranslations("mobile.shell")
   // Filter vocabulary shared with the desktop sidebar.
   const tFilters = useTranslations("conversationFilters")
-  // Search box: keep the field value immediate but debounce the value fed to
-  // the grouping model so typing doesn't re-bucket on every keystroke (mirrors
-  // the desktop sidebar). buildConversationSections is O(n log n) over all
-  // sessions, so on a phone that work must not run per keystroke.
-  const [searchInput, setSearchInput] = useState("")
-  const [query, setQuery] = useState("")
-  const { call: debouncedSetQuery, cancel: cancelDebouncedQuery } = useDebouncedCallback(
-    (next: string) => setQuery(next),
-    150
+  // Success toasts shared with the desktop sidebar's row and bulk actions.
+  const tBulk = useTranslations("desktop.channelList.bulk")
+  const {
+    characters,
+    teams,
+    sessionStates,
+    query,
+    hasSearchText,
+    clearSearch,
+    contentSearch,
+    scrollMemory,
+  } = useMobileChannelListSource()
+
+  const exposedSessions = useMemo(() => filterExposedSessions(sessions, "main-list"), [sessions])
+  const timeZone = useTimeZone()
+  const dayNow = useConversationDayClock(timeZone)
+  const sessionsById = useMemo(
+    () => new Map(exposedSessions.map((session) => [session.id, session])),
+    [exposedSessions]
   )
-  const handleSearchChange = useCallback(
-    (next: string) => {
-      setSearchInput(next)
-      debouncedSetQuery(next)
-    },
-    [debouncedSetQuery]
-  )
-  const clearSearch = useCallback(() => {
-    setSearchInput("")
-    cancelDebouncedQuery()
-    setQuery("")
-  }, [cancelDebouncedQuery])
+
   // Active ⇄ Archived view + folder collapse — read straight from the persisted
   // UI store (shared with the desktop sidebar) so the choice survives reloads.
   // Straight, not mirrored: a local copy seeded once at mount could not see the
   // other surface — or the reveal ladder below — move the view, and wrote its
   // stale value back over theirs.
   const view = useUIStore((s) => s.channelListView)
-  const setPersistedView = useUIStore((s) => s.setChannelListView)
-  const setView = useCallback(
-    (next: ChannelListView) => {
-      setPersistedView(next)
-    },
-    [setPersistedView]
-  )
-
-  // Straight from the store, like the desktop sidebar (`channel-list.tsx`): a
-  // local mirror seeded once could not see the other surface collapse a
-  // folder, and wrote its stale copy back over it.
+  const setView = useUIStore((s) => s.setChannelListView)
   const persistedCollapsed = useUIStore((s) => s.collapsedFolderIds)
-  const toggleCollapsedFolder = useUIStore((s) => s.toggleCollapsedFolder)
+  const toggleFolder = useUIStore((s) => s.toggleCollapsedFolder)
   const collapsedFolderIds = useMemo<ReadonlySet<string>>(
     () => new Set(persistedCollapsed),
     [persistedCollapsed]
   )
-  const toggleFolder = toggleCollapsedFolder
+  const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
+  const setGroupCollapsed = useUIStore((s) => s.setGroupCollapsed)
 
   // Behavior preferences (Settings → Conversation → sidebar), shared with the
-  // desktop sidebar. Absent settings fall back to today's defaults.
+  // desktop sidebar. Absent settings fall back to the same defaults it uses.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
+  const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const saveSettings = useSettingsStore((s) => s.save)
   const density: ConversationSidebarDensity = sidebarSettings?.density ?? "comfortable"
   const showPreview = sidebarSettings?.showPreview ?? false
+  const showTimestamps = sidebarSettings?.showTimestamps ?? true
+  const showCustomIcons = sidebarSettings?.showCustomIcons ?? true
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
-  // Same resolved reach as the desktop sidebar — one object, three axes.
   const searchOptions = useMemo(
     () => resolveConversationSearchOptions(sidebarSettings),
+    [sidebarSettings]
+  )
+  const metadataFields = useMemo(
+    () => resolveConversationSidebarMetadata(sidebarSettings),
     [sidebarSettings]
   )
   // The mobile list has no optimistic save queue: merge the patch into the
@@ -182,81 +262,60 @@ export function MobileChannelList({
     [saveSettings, sidebarSettings]
   )
 
-  // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
-  // server drop; `table: "characters"` kicks the sync orchestrator on
-  // mount so an offline-then-online transition refreshes the chips.
-  const { data: characters } = useDexieFirstQuery<Character[]>({
-    query: () => listCharacters(),
-    deps: [],
-    initial: [],
-    table: "characters",
-  })
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()
-    for (const c of characters ?? []) map.set(c.id, c)
+    for (const character of characters) map.set(character.id, character)
     return map
   }, [characters])
-
-  // Teams, for the `team` grouping axis and the team filter facet. Without
-  // them the facet listed raw ids and the axis had no buckets to resolve —
-  // the two halves of "grouped by team" not actually being grouped by team.
-  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
-  const teamGroups = useMemo(
-    () => (teams ?? []).map((team) => ({ id: team.id, name: team.name })),
-    [teams]
-  )
-
-  const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
+  const teamById = useMemo(() => {
+    const map = new Map<string, Team>()
+    for (const team of teams) map.set(team.id, team)
+    return map
+  }, [teams])
   // `unreadIds` feeds the unread filter/sort and must stay independent of the
   // badge display setting — hiding a badge is a display choice, not a claim
   // that nothing is unread.
-  const unreadIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const s of sessionStates ?? []) if (s.unreadCount > 0) ids.add(s.sessionId)
-    return ids
-  }, [sessionStates])
-  const unreadById = useMemo(() => {
+  const unreadCountById = useMemo(() => {
     const map = new Map<string, number>()
-    if (!showUnreadBadges) return map
-    for (const s of sessionStates ?? []) {
-      if (s.unreadCount > 0) map.set(s.sessionId, s.unreadCount)
+    for (const state of sessionStates) {
+      if (state.unreadCount > 0) map.set(state.sessionId, state.unreadCount)
     }
     return map
-  }, [sessionStates, showUnreadBadges])
+  }, [sessionStates])
+  const unreadIds = useMemo<ReadonlySet<string>>(
+    () => new Set(unreadCountById.keys()),
+    [unreadCountById]
+  )
 
   // Group axes the pure model can't resolve on its own.
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
-  const contentSearch = useChatHistorySearch(query, {
-    enabled: searchOptions.content,
-    projectId: needsCrossWorkspaceSessions(groupBy, searchOptions)
-      ? undefined
-      : (activeProjectId ?? undefined),
-    includeArchived: searchOptions.includeArchived || view === "archived",
-    collapseBySession: true,
-    limit: 200,
-  })
-  const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
-    if (!searchOptions.content || query.trim().length < CONTENT_SEARCH_MIN_QUERY) return undefined
-    return new Set(contentSearch.results.map((result) => result.sessionId))
-  }, [searchOptions.content, query, contentSearch.results])
-  // A content query resolves a beat after the title hits; until it settles the
-  // result set is incomplete and the list must not claim there is nothing.
-  const contentPending = searchOptions.content && contentSearch.loading && query.trim().length > 0
-  const contentTruncated =
-    contentSearch.moreOlderHistory ||
-    contentSearch.indexIncomplete ||
-    contentSearch.error !== null
   const workspaceGroups = useMemo(
     () => projects.map((p) => ({ id: p.id, name: p.name })),
     [projects]
   )
+  const workspaceNameById = useMemo(
+    () => new Map(projects.map((p) => [p.id, p.name])),
+    [projects]
+  )
   const agentGroups = useMemo(
-    () => (characters ?? []).map((c) => ({ id: c.id, name: c.name })),
+    () => characters.map((c) => ({ id: c.id, name: c.name })),
     [characters]
   )
-  const groupCollapseOverrides = useUIStore((s) => s.groupCollapseOverrides)
-  const setGroupCollapsed = useUIStore((s) => s.setGroupCollapsed)
+  const teamGroups = useMemo(() => teams.map((team) => ({ id: team.id, name: team.name })), [teams])
+
+  const searching = query.trim().length > 0
+  const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!searchOptions.content || !searching) return undefined
+    return new Set(contentSearch.results.map((result) => result.sessionId))
+  }, [searchOptions.content, searching, contentSearch.results])
+  // A content query resolves a beat after the title hits; until it settles the
+  // result set is incomplete and the list must not claim there is nothing.
+  const contentPending = searchOptions.content && contentSearch.loading && searching
+  const contentTruncated =
+    contentSearch.moreOlderHistory ||
+    contentSearch.indexIncomplete ||
+    contentSearch.error !== null
 
   // Sort, quick filters and saved presets are shared with the desktop sidebar —
   // one controller over the same settings blob and UI-store slice — so a phone
@@ -273,7 +332,7 @@ export function MobileChannelList({
     sessions: viewSessions,
     workspaces: workspaceGroups,
     folders,
-    characters: characters ?? undefined,
+    characters,
     teams: teamGroups,
     sidebarSettings,
     saveSidebarSettings,
@@ -283,39 +342,47 @@ export function MobileChannelList({
 
   // Shared grouping model: pinned → folders → the chosen axis, or a flat result
   // list while searching (mirrors the desktop sidebar via the same headless hook).
-  const { sections, total, filteredCount, visibleCount, activeFilterCount, orderedIds } =
-    useConversationListModel({
-      sessions: exposedSessions,
-      folders: view === "archived" ? undefined : folders,
-      query,
-      view,
-      collapsedFolderIds,
-      groupBy,
-      sortBy,
-      filters,
-      unreadIds,
-      filterContext,
-      workspaces: workspaceGroups,
-      agents: agentGroups,
-      teams: teamGroups,
-      activeWorkspaceId: activeProjectId,
-      groupCollapseOverrides,
-      contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
-      searchIncludesArchived: searchOptions.includeArchived,
-    })
+  const {
+    sections,
+    total,
+    filteredCount,
+    visibleCount,
+    activeFilterCount,
+    orderedIds,
+    contentOnlyIds,
+  } = useConversationListModel({
+    // Date buckets and row stamps judged by one clock in the formatter's zone,
+    // as on the desktop sidebar: the list's "Today" and a row's clock face can
+    // never disagree, and both roll over at the user's midnight.
+    now: dayNow,
+    timeZone,
+    sessions: exposedSessions,
+    folders: view === "archived" ? undefined : folders,
+    query,
+    view,
+    collapsedFolderIds,
+    groupBy,
+    sortBy,
+    filters,
+    unreadIds,
+    filterContext,
+    workspaces: workspaceGroups,
+    agents: agentGroups,
+    teams: teamGroups,
+    activeWorkspaceId: activeProjectId,
+    groupCollapseOverrides,
+    contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
+    searchIncludesArchived: searchOptions.includeArchived,
+  })
+
   // Same contract as the desktop sidebar: a conversation that was just created
   // has to be visible here. The narrowing state (Archived view, the search
   // field, quick filters, a folded section) is persisted and would otherwise
   // leave the new chat open in the pane with no row to show for it.
-  const revealListed = useCallback(
-    (id: string) => exposedSessions.some((session) => session.id === id),
-    [exposedSessions]
-  )
+  const revealListed = useCallback((id: string) => sessionsById.has(id), [sessionsById])
   // `orderedIds` is the model's own flattened render order, already excluding
   // the members of a collapsed folder or group — the same array the desktop
-  // sidebar asks. Re-deriving it here would be a second copy of one visibility
-  // rule, and the two shells' reveal ladders would drift the first time it
-  // changed.
+  // sidebar asks.
   const revealVisible = useCallback((id: string) => orderedIds.includes(id), [orderedIds])
   const revealSteps = useCallback(
     (id: string): ConversationRevealStep[] => {
@@ -327,7 +394,7 @@ export function MobileChannelList({
       )
       return [
         { active: view !== "active", undo: () => setView("active") },
-        { active: query.length > 0 || searchInput.length > 0, undo: clearSearch },
+        { active: hasSearchText, undo: clearSearch },
         { active: activeFilterCount > 0, undo: resetConversationFilters },
         {
           active: holder != null,
@@ -343,8 +410,7 @@ export function MobileChannelList({
       sections,
       view,
       setView,
-      query,
-      searchInput,
+      hasSearchText,
       clearSearch,
       activeFilterCount,
       resetConversationFilters,
@@ -359,112 +425,355 @@ export function MobileChannelList({
     steps: revealSteps,
   })
 
-  const archived = view === "archived"
-
-  // Decorate a session with its avatar glyph/color + unread count for rendering.
-  const resolve = useCallback(
-    (s: ChatSession): ResolvedSession => {
-      const ch = s.characterId ? characterById.get(s.characterId) : undefined
-      const subject = ch ?? { name: s.title }
-      return {
-        session: s,
-        unread: unreadById.get(s.id) ?? 0,
-        glyph: avatarGlyph(subject),
-        color: avatarColor(subject),
-      }
-    },
-    [characterById, unreadById]
+  const items = useMemo(
+    () =>
+      buildMobileChannelListItems({
+        sections,
+        narrowed: searching || activeFilterCount > 0,
+        truncated: contentTruncated && searching,
+        pending: filteredCount === 0 && contentPending,
+        empty: filteredCount === 0 && !contentPending,
+      }),
+    [sections, searching, activeFilterCount, contentTruncated, filteredCount, contentPending]
   )
 
-  const togglePin = async (session: ChatSession) => {
-    await bulkSetSessionsPinned([session.id], !session.pinned).catch(() => undefined)
-  }
+  // ---- Row state and actions ---------------------------------------------
 
-  const renderRows = (list: ChatSession[]) =>
-    list.map((s) => {
-      const r = resolve(s)
-      return (
-        <ChannelRow
-          key={s.id}
-          resolved={r}
-          active={s.id === activeSessionId}
-          archived={archived}
-          density={density}
-          showPreview={showPreview}
-          onSelect={() => onSelect(s.id)}
-          onTogglePin={() => void togglePin(s)}
-          onDelete={() => void onDelete(s.id)}
-          onRename={(title) => void onRename(s.id, title)}
-          onArchive={() => void onArchive(s.id)}
-          onUnarchive={() => void onUnarchive(s.id)}
-          pinLabel={s.pinned ? t("swipeUnpin") : t("swipePin")}
-          deleteLabel={t("swipeDelete")}
-          renameLabel={t("renameAria")}
-          archiveLabel={archived ? t("swipeUnarchive") : t("swipeArchive")}
-          unreadLabel={t("unreadCount", { count: r.unread })}
-        />
-      )
-    })
+  const [actionsId, setActionsId] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [handoffId, setHandoffId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const actionsSession = actionsId ? (sessionsById.get(actionsId) ?? null) : null
+  const deleteSession = deleteId ? (sessionsById.get(deleteId) ?? null) : null
+  const handoffSession = handoffId ? (sessionsById.get(handoffId) ?? null) : null
+  const renaming = renamingId && sessionsById.has(renamingId) ? renamingId : null
+
+  /**
+   * Run one row write and surface its failure. Every one of these used to be
+   * fire-and-forget: a refused write (a handed-off conversation, a failed
+   * Dexie transaction) became an unhandled rejection and the row simply did
+   * not change.
+   */
+  const runWrite = useCallback(
+    async (
+      op: ActionFailure,
+      session: ChatSession,
+      write: () => void | Promise<void>
+    ): Promise<boolean> => {
+      if (session.handoffLock && op !== "markRead") {
+        toast.error(t("actionLocked"))
+        return false
+      }
+      try {
+        await write()
+        return true
+      } catch (error) {
+        const locked = isSessionHandoffLocked(error)
+        log.warn("mobile channel action failed", {
+          op,
+          sessionId: session.id,
+          locked,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        if (locked) toast.error(t("actionLocked"))
+        else
+          toast.error(t(`actionFailed.${op}`), {
+            description: error instanceof Error ? error.message : String(error),
+          })
+        return false
+      }
+    },
+    [t]
+  )
+
+  const togglePin = useCallback(
+    async (session: ChatSession) => {
+      const next = !session.pinned
+      if (await runWrite(next ? "pin" : "unpin", session, () => onSetPinned([session.id], next))) {
+        toast.success(tBulk(next ? "pinSuccess" : "unpinSuccess", { count: 1 }))
+      }
+    },
+    [runWrite, onSetPinned, tBulk]
+  )
+  const unarchive = useCallback(
+    async (session: ChatSession) => {
+      if (await runWrite("unarchive", session, () => onUnarchive(session.id))) {
+        toast.success(tBulk("unarchiveSuccess", { count: 1 }))
+      }
+    },
+    [runWrite, onUnarchive, tBulk]
+  )
+  const toggleArchive = useCallback(
+    async (session: ChatSession) => {
+      if (session.archivedAt != null) {
+        await unarchive(session)
+        return
+      }
+      if (await runWrite("archive", session, () => onArchive(session.id))) {
+        // The row leaves the active view, so the way back is offered right here.
+        toast.success(tBulk("archiveSuccess", { count: 1 }), {
+          action: { label: t("undo"), onClick: () => void unarchive(session) },
+        })
+      }
+    },
+    [runWrite, onArchive, unarchive, tBulk, t]
+  )
+  const moveToFolder = useCallback(
+    async (session: ChatSession, folderId: string | null) => {
+      if (await runWrite("move", session, () => onAssignToFolder(session.id, folderId))) {
+        toast.success(tBulk("moveSuccess", { count: 1 }))
+      }
+    },
+    [runWrite, onAssignToFolder, tBulk]
+  )
+  const markRead = useCallback(
+    (session: ChatSession) => void runWrite("markRead", session, () => markSessionRead(session.id)),
+    [runWrite]
+  )
+  const confirmDelete = useCallback(
+    (session: ChatSession) => {
+      setDeleteId(null)
+      void runWrite("delete", session, () => onDelete(session.id))
+    },
+    [runWrite, onDelete]
+  )
+  const commitRename = useCallback(
+    (id: string, title: string) => {
+      setRenamingId(null)
+      const session = sessionsById.get(id)
+      if (session) void runWrite("rename", session, () => onRename(id, title))
+    },
+    [sessionsById, runWrite, onRename]
+  )
+
+  // Rows get id-taking callbacks whose identity never changes, read through a
+  // ref that is refreshed after every commit. A callback that closed over the
+  // session map would change on every session write and re-render every
+  // memoized row on screen for a change to one of them.
+  const latest = useRef({ onSelect, sessionsById, togglePin, toggleArchive, commitRename })
+  useEffect(() => {
+    latest.current = { onSelect, sessionsById, togglePin, toggleArchive, commitRename }
+  })
+  const handleRowSelect = useCallback((id: string) => latest.current.onSelect(id), [])
+  const handleOpenActions = useCallback((id: string) => setActionsId(id), [])
+  const handleSwipeAction = useCallback((id: string, action: MobileChannelSwipeActionId) => {
+    const session = latest.current.sessionsById.get(id)
+    if (!session) return
+    if (action === "more") setActionsId(id)
+    else if (action === "delete") setDeleteId(id)
+    else if (action === "pin") void latest.current.togglePin(session)
+    else void latest.current.toggleArchive(session)
+  }, [])
+  const handleCommitRename = useCallback(
+    (id: string, title: string) => latest.current.commitRename(id, title),
+    []
+  )
+  const handleCancelRename = useCallback(
+    (id: string) => setRenamingId((current) => (current === id ? null : current)),
+    []
+  )
+
+  // ---- Rendering -----------------------------------------------------------
+
+  const groupAxis: ConversationGroupAxis | null =
+    !searching && (groupBy === "workspace" || groupBy === "agent" || groupBy === "team")
+      ? groupBy
+      : null
+  const rowSettings = useMemo<MobileChannelRowSettings>(
+    () => ({
+      density,
+      showPreview,
+      showTimestamps,
+      showCustomIcons,
+      metadataFields,
+      defaultModel,
+      defaultProvider,
+      groupAxis,
+    }),
+    [
+      density,
+      showPreview,
+      showTimestamps,
+      showCustomIcons,
+      metadataFields,
+      defaultModel,
+      defaultProvider,
+      groupAxis,
+    ]
+  )
+
+  const actionsHintId = useId()
+  const archived = view === "archived"
+
+  const renderItem = useCallback(
+    (item: MobileChannelListItem): ReactNode => {
+      switch (item.kind) {
+        case "notice":
+          if (item.notice === "truncated") {
+            return (
+              <p
+                className="px-4 pt-2 pb-1 text-center text-[11px] text-muted-foreground"
+                role="status"
+                data-testid="mobile-channel-search-truncated"
+              >
+                {t("searchTruncated")}
+              </p>
+            )
+          }
+          if (item.notice === "pending") {
+            // Message hits land a beat after the title hits. Saying "nothing
+            // matched" here and then filling the list contradicts itself.
+            return (
+              <p
+                className="px-4 py-8 text-center text-xs text-muted-foreground"
+                role="status"
+                data-testid="mobile-channel-search-pending"
+              >
+                {t("searchingMessages")}
+              </p>
+            )
+          }
+          return (
+            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground" data-testid="mobile-channel-empty">
+                {searching
+                  ? t("emptyFiltered", { query })
+                  : activeFilters > 0
+                    ? // Distinct from "you have no chats": the exit here is
+                      // dropping a filter, not starting a conversation.
+                      t("emptyFilters", { count: activeFilters })
+                    : archived
+                      ? t("emptyArchived")
+                      : t("emptyChats")}
+              </p>
+              {activeFilters > 0 && !searching ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  onClick={resetConversationFilters}
+                  data-testid="mobile-channel-clear-filters"
+                >
+                  {tFilters("clearAll")}
+                </Button>
+              ) : null}
+            </div>
+          )
+        case "folder-empty":
+          return (
+            <p
+              className="py-2 pr-3 pl-10 text-xs text-muted-foreground"
+              data-testid={`mobile-channel-folder-empty-${item.folderId}`}
+            >
+              {t("folderEmpty")}
+            </p>
+          )
+        case "header":
+          return (
+            <SectionHeader
+              item={item}
+              label={sectionLabel(item, t)}
+              countLabel={t("sectionCount", { count: item.count })}
+              onToggleFolder={toggleFolder}
+              onToggleGroup={setGroupCollapsed}
+            />
+          )
+        case "row": {
+          const session = item.session
+          return (
+            <MobileChannelRow
+              session={session}
+              active={session.id === activeSessionId}
+              unread={showUnreadBadges ? (unreadCountById.get(session.id) ?? 0) : 0}
+              contentMatch={contentOnlyIds.has(session.id)}
+              character={session.characterId ? characterById.get(session.characterId) : undefined}
+              team={session.teamId ? teamById.get(session.teamId) : undefined}
+              workspaceName={session.projectId ? workspaceNameById.get(session.projectId) : undefined}
+              settings={rowSettings}
+              renaming={renaming === session.id}
+              actionsHintId={actionsHintId}
+              onSelect={handleRowSelect}
+              onOpenActions={handleOpenActions}
+              onSwipeAction={handleSwipeAction}
+              onCommitRename={handleCommitRename}
+              onCancelRename={handleCancelRename}
+              now={dayNow}
+            />
+          )
+        }
+      }
+    },
+    [
+      t,
+      tFilters,
+      searching,
+      query,
+      activeFilters,
+      archived,
+      resetConversationFilters,
+      toggleFolder,
+      setGroupCollapsed,
+      activeSessionId,
+      showUnreadBadges,
+      unreadCountById,
+      contentOnlyIds,
+      characterById,
+      teamById,
+      workspaceNameById,
+      rowSettings,
+      renaming,
+      actionsHintId,
+      handleRowSelect,
+      handleOpenActions,
+      handleSwipeAction,
+      handleCommitRename,
+      handleCancelRename,
+      dayNow,
+    ]
+  )
+
+  const estimateSize = useCallback(
+    (item: MobileChannelListItem) => estimateItemSize(item, rowSettings),
+    [rowSettings]
+  )
 
   return (
-    <div className="flex h-full flex-col" data-testid="mobile-channel-list">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <div className="relative flex-1">
-          <SearchIcon
-            aria-hidden="true"
-            className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder={t("search")}
-            aria-label={t("searchAria")}
-            data-testid="mobile-channel-search"
-            className="h-9 pl-7 pr-8 text-sm"
-          />
-          {searchInput.length > 0 ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={tShell("clearSearch")}
-              data-testid="mobile-channel-search-clear"
-              onClick={clearSearch}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
-            >
-              <XIcon />
-            </Button>
-          ) : null}
+    <div
+      // `min-w-0` + `flex-1`: this column sits in a flex row beside the guild
+      // rail and must take the width it is given, not its content's.
+      className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col"
+      data-testid="mobile-channel-list"
+    >
+      <div className="flex shrink-0 flex-col gap-1 border-b border-border px-3 pt-2 pb-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <MobileChannelSearchField />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={onNewDirect}
+            aria-label={tShell("newChat")}
+            data-testid="mobile-channel-new"
+            className="size-11 shrink-0"
+          >
+            <PlusIcon className="size-5" />
+          </Button>
         </div>
-        {/* Same pair as the desktop sidebar, in the same order: reach, then
-            narrowing. */}
-        <ConversationSearchScopeControl
-          model={filterController}
-          testId="mobile-channel-search-scope"
-        />
-        <ConversationFilterMenu model={filterController} testId="mobile-channel-filter" />
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={() => setView(view === "active" ? "archived" : "active")}
-          aria-label={archived ? t("viewActive") : t("viewArchived")}
-          aria-pressed={archived}
-          data-testid="mobile-channel-view-toggle"
-          className={cn(archived && "text-primary")}
-        >
-          <ArchiveIcon />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={onNewDirect}
-          aria-label={tShell("newChat")}
-          data-testid="mobile-channel-new"
-        >
-          <PlusIcon />
-        </Button>
+        <div className="flex min-w-0 items-center gap-1">
+          <ViewTabs view={view} onChange={setView} />
+          {/* Same pair as the desktop sidebar, in the same order: reach, then
+              narrowing. */}
+          <ConversationSearchScopeControl
+            model={filterController}
+            triggerClassName="size-11 shrink-0"
+            testId="mobile-channel-search-scope"
+          />
+          <ConversationFilterMenu
+            model={filterController}
+            triggerClassName="size-11"
+            testId="mobile-channel-filter"
+          />
+        </div>
       </div>
 
       <ConversationFilterChips
@@ -473,355 +782,386 @@ export function MobileChannelList({
         // the desktop sidebar.
         shown={visibleCount}
         total={total}
-        className="border-b border-border px-3 py-1.5"
+        className="shrink-0 border-b border-border px-3 py-1.5"
         testId="mobile-channel-filter-chips"
       />
 
-      <div className="flex-1 overflow-y-auto">
-        {contentTruncated && query.trim().length > 0 ? (
-          <p
-            className="px-4 pt-2 text-center text-[11px] text-muted-foreground"
-            role="status"
-            data-testid="mobile-channel-search-truncated"
-          >
-            {t("searchTruncated")}
-          </p>
-        ) : null}
-        {filteredCount === 0 && contentPending ? (
-          // Message hits land a beat after the title hits. Saying "nothing
-          // matched" here and then filling the list contradicts itself.
-          <p
-            className="px-4 py-8 text-center text-xs text-muted-foreground"
-            role="status"
-            data-testid="mobile-channel-search-pending"
-          >
-            {t("searchingMessages")}
-          </p>
-        ) : filteredCount === 0 ? (
-          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-            <p className="text-xs text-muted-foreground" data-testid="mobile-channel-empty">
-              {query.trim().length > 0
-                ? t("emptyFiltered", { query })
-                : activeFilters > 0
-                  ? // Distinct from "you have no chats": the exit here is
-                    // dropping a filter, not starting a conversation.
-                    t("emptyFilters", { count: activeFilters })
-                  : archived
-                    ? t("emptyArchived")
-                    : t("emptyChats")}
-            </p>
-            {activeFilters > 0 && query.trim().length === 0 ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={resetConversationFilters}
-                data-testid="mobile-channel-clear-filters"
-              >
-                {tFilters("clearAll")}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
+      <p id={actionsHintId} className="sr-only">
+        {t("rowActionsHint")}
+      </p>
 
-        {sections.map((section) => {
-          switch (section.kind) {
-            case "pinned":
-              return (
-                <Section key="pinned" title={t("pinned")} testId="mobile-channel-pinned">
-                  {renderRows(section.sessions)}
-                </Section>
-              )
-            case "date":
-              return (
-                <Section
-                  key={`date:${section.bucket}`}
-                  title={t(BUCKET_LABEL_KEY[section.bucket])}
-                  testId={`mobile-channel-bucket-${section.bucket}`}
-                >
-                  {renderRows(section.sessions)}
-                </Section>
-              )
-            case "folder":
-              return (
-                <section
-                  key={`folder:${section.folder.id}`}
-                  data-testid={`mobile-channel-folder-${section.folder.id}`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleFolder(section.folder.id)}
-                    aria-expanded={!section.collapsed}
-                    aria-label={section.folder.name}
-                    className="flex w-full items-center gap-1.5 px-3 pb-1 pt-3 text-left"
-                  >
-                    {section.collapsed ? (
-                      <ChevronRightIcon className="size-3 text-muted-foreground" />
-                    ) : (
-                      <ChevronDownIcon className="size-3 text-muted-foreground" />
-                    )}
-                    <FolderIcon className="size-3 text-muted-foreground" aria-hidden="true" />
-                    <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {section.folder.name}
-                    </span>
-                  </button>
-                  {section.collapsed ? null : (
-                    <ul className="flex flex-col">{renderRows(section.sessions)}</ul>
-                  )}
-                </section>
-              )
-            case "recent":
-              return (
-                <Section key="recent" testId="mobile-channel-recent">
-                  {renderRows(section.sessions)}
-                </Section>
-              )
-            case "group": {
-              const key = conversationSectionKey(section)
-              const name =
-                section.group.id === UNGROUPED_ID
-                  ? t(CONVERSATION_UNGROUPED_LABEL_KEY[section.axis])
-                  : section.group.name
-              const AxisIcon = CONVERSATION_GROUP_AXIS_ICON[section.axis]
-              return (
-                <section key={key} data-testid={`mobile-channel-group-${key}`}>
-                  <button
-                    type="button"
-                    onClick={() => setGroupCollapsed(key, !section.collapsed)}
-                    aria-expanded={!section.collapsed}
-                    aria-label={name}
-                    className="flex w-full items-center gap-1.5 px-3 pb-1 pt-3 text-left"
-                  >
-                    {section.collapsed ? (
-                      <ChevronRightIcon className="size-3 text-muted-foreground" />
-                    ) : (
-                      <ChevronDownIcon className="size-3 text-muted-foreground" />
-                    )}
-                    <AxisIcon className="size-3 text-muted-foreground" aria-hidden="true" />
-                    <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {name}
-                    </span>
-                  </button>
-                  {section.collapsed ? null : (
-                    <ul className="flex flex-col">{renderRows(section.sessions)}</ul>
-                  )}
-                </section>
-              )
-            }
-            case "search":
-              return (
-                <Section key="search" testId="mobile-channel-results">
-                  {renderRows(section.sessions)}
-                </Section>
-              )
-          }
-        })}
-      </div>
+      <LoadingRegion
+        loading={isLoadingSessions}
+        label={t("loadingChats")}
+        className="flex min-h-0 flex-1 flex-col"
+        fallback={<ChannelListSkeleton density={density} />}
+      >
+        {isLoadingSessions ? null : (
+          <VirtualItems
+            items={items}
+            renderItem={renderItem}
+            estimateSize={estimateSize}
+            scrollMemory={scrollMemory}
+            activeSessionId={activeSessionId}
+            keepMountedId={renaming}
+          />
+        )}
+      </LoadingRegion>
+
+      <MobileChannelRowActions
+        session={actionsSession}
+        unread={actionsSession ? (unreadCountById.get(actionsSession.id) ?? 0) : 0}
+        folders={folders}
+        onClose={() => setActionsId(null)}
+        onRename={(session) => setRenamingId(session.id)}
+        onTogglePin={(session) => void togglePin(session)}
+        onMarkRead={markRead}
+        onToggleArchive={(session) => void toggleArchive(session)}
+        onMoveToFolder={(session, folderId) => void moveToFolder(session, folderId)}
+        onContinueOnDevice={(session) => setHandoffId(session.id)}
+        onDelete={(session) => setDeleteId(session.id)}
+      />
+      <MobileChannelDeleteConfirm
+        session={deleteSession}
+        onCancel={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+      />
+      {/* Mounted only while open: the dialog holds live queries over paired
+          devices, handoff tickets and the dispatch queue. */}
+      {handoffSession ? (
+        <ThreadHandoffSourceDialog
+          session={handoffSession}
+          open
+          onOpenChange={(open) => {
+            if (!open) setHandoffId(null)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function Section({
-  title,
-  testId,
-  children,
+function sectionLabel(
+  item: Extract<MobileChannelListItem, { kind: "header" }>,
+  t: (key: string) => string
+): string {
+  const section = item.section
+  switch (section.kind) {
+    case "pinned":
+      return t("pinned")
+    case "date":
+      return t(BUCKET_LABEL_KEY[section.bucket])
+    case "recent":
+      return t("recent")
+    case "search":
+      return t("results")
+    case "folder":
+      return section.folder.name
+    case "group":
+      return section.group.id === UNGROUPED_ID
+        ? t(CONVERSATION_UNGROUPED_LABEL_KEY[section.axis])
+        : section.group.name
+  }
+}
+
+/** Header test ids, kept from the sectioned list so the seams stay stable. */
+function headerTestId(item: Extract<MobileChannelListItem, { kind: "header" }>): string {
+  const section = item.section
+  switch (section.kind) {
+    case "pinned":
+      return "mobile-channel-pinned"
+    case "date":
+      return `mobile-channel-bucket-${section.bucket}`
+    case "recent":
+      return "mobile-channel-recent"
+    case "search":
+      return "mobile-channel-results"
+    case "folder":
+      return `mobile-channel-folder-${section.folder.id}`
+    case "group":
+      return `mobile-channel-group-${item.sectionKey}`
+  }
+}
+
+function SectionHeader({
+  item,
+  label,
+  countLabel,
+  onToggleFolder,
+  onToggleGroup,
 }: {
-  title?: string
-  testId: string
-  children: React.ReactNode
+  item: Extract<MobileChannelListItem, { kind: "header" }>
+  label: string
+  countLabel: string
+  onToggleFolder: (folderId: string) => void
+  onToggleGroup: (key: string, collapsed: boolean) => void
 }) {
-  const reduce = useReducedMotion()
-  return (
-    <section data-testid={testId}>
-      {title ? (
-        <h2 className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </h2>
-      ) : null}
-      <motion.ul
-        className="flex flex-col"
-        initial={reduce ? false : "initial"}
-        animate="animate"
-        variants={STAGGER_CONTAINER}
+  const section = item.section
+  const count = (
+    <>
+      <span className="ml-auto shrink-0 pl-2 text-[11px] text-muted-foreground tabular-nums" aria-hidden>
+        {item.count}
+      </span>
+      <span className="sr-only">{countLabel}</span>
+    </>
+  )
+  const text = (
+    <span className="min-w-0 truncate text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+      {label}
+    </span>
+  )
+
+  if (section.kind === "folder" || section.kind === "group") {
+    const Icon = section.kind === "folder" ? FolderIcon : CONVERSATION_GROUP_AXIS_ICON[section.axis]
+    const expanded = !section.collapsed
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          section.kind === "folder"
+            ? onToggleFolder(section.folder.id)
+            : onToggleGroup(item.sectionKey, !section.collapsed)
+        }
+        aria-expanded={expanded}
+        data-testid={headerTestId(item)}
+        className="flex min-h-11 w-full min-w-0 items-center gap-1.5 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset active:bg-accent/60"
       >
-        {children}
-      </motion.ul>
-    </section>
+        <ChevronRightIcon
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none",
+            expanded && "rotate-90"
+          )}
+        />
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        {text}
+        {count}
+      </button>
+    )
+  }
+  return (
+    <h2
+      className="flex h-8 min-w-0 items-end px-3 pb-1"
+      data-testid={headerTestId(item)}
+    >
+      {text}
+      {count}
+    </h2>
   )
 }
 
-function ChannelRow({
-  resolved,
-  active,
-  archived,
-  density,
-  showPreview,
-  onSelect,
-  onTogglePin,
-  onDelete,
-  onRename,
-  onArchive,
-  onUnarchive,
-  pinLabel,
-  deleteLabel,
-  renameLabel,
-  archiveLabel,
-  unreadLabel,
+function ViewTabs({
+  view,
+  onChange,
 }: {
-  resolved: ResolvedSession
-  active: boolean
-  archived: boolean
-  density: ConversationSidebarDensity
-  showPreview: boolean
-  onSelect: () => void
-  onTogglePin: () => void
-  onDelete: () => void
-  onRename: (title: string) => void
-  onArchive: () => void
-  onUnarchive: () => void
-  pinLabel: string
-  deleteLabel: string
-  renameLabel: string
-  archiveLabel: string
-  unreadLabel: string
+  view: ChannelListView
+  onChange: (next: ChannelListView) => void
 }) {
-  const { session, unread, glyph, color } = resolved
-  const preview = showPreview ? session.lastMessagePreview : undefined
-  // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
-  // helper rendered raw English abbreviations for zh-CN users.
-  const format = useFormatter()
-  const now = useNow()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(session.title)
-
-  const commitRename = () => {
-    const next = draft.trim()
-    if (next && next !== session.title) onRename(next)
-    setEditing(false)
-  }
-  const cancelRename = () => {
-    setDraft(session.title)
-    setEditing(false)
-  }
-
-  // Long-press opens inline rename (pin/delete stay on the swipe actions).
-  if (editing) {
-    return (
-      <motion.li variants={STAGGER_CHILD}>
-        <Input
-          autoFocus
-          value={draft}
-          aria-label={renameLabel}
-          data-testid={`mobile-channel-rename-${session.id}`}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              commitRename()
-            } else if (e.key === "Escape") {
-              e.preventDefault()
-              cancelRename()
-            }
-          }}
-          className="mx-3 my-1 h-9 w-[calc(100%-1.5rem)] text-sm"
-        />
-      </motion.li>
-    )
-  }
-
+  const t = useTranslations("mobile.home")
+  const options: { value: ChannelListView; label: string; hint: string; Icon: typeof ArchiveIcon }[] =
+    [
+      {
+        value: "active",
+        label: t("viewTabActive"),
+        hint: t("viewActive"),
+        Icon: MessagesSquareIcon,
+      },
+      {
+        value: "archived",
+        label: t("viewTabArchived"),
+        hint: t("viewArchived"),
+        Icon: ArchiveIcon,
+      },
+    ]
+  const refs = useRef<Record<ChannelListView, HTMLButtonElement | null>>({
+    active: null,
+    archived: null,
+  })
   return (
-    <motion.li variants={STAGGER_CHILD}>
-      <SwipeRow
-        rightActions={[
-          {
-            id: "pin",
-            label: pinLabel,
-            icon: session.pinned ? (
-              <PinOffIcon className="size-3.5" />
-            ) : (
-              <PinIcon className="size-3.5" />
-            ),
-            onSelect: onTogglePin,
-          },
-          {
-            id: "archive",
-            label: archiveLabel,
-            icon: archived ? (
-              <ArchiveRestoreIcon className="size-3.5" />
-            ) : (
-              <ArchiveIcon className="size-3.5" />
-            ),
-            onSelect: archived ? onUnarchive : onArchive,
-          },
-          {
-            id: "delete",
-            label: deleteLabel,
-            icon: <Trash2Icon className="size-3.5" />,
-            destructive: true,
-            onSelect: onDelete,
-          },
-        ]}
-      >
-        <LongPress
-          onLongPress={() => {
-            setDraft(session.title)
-            setEditing(true)
-          }}
-        >
-          <Button
+    <div
+      role="radiogroup"
+      aria-label={t("viewTabsLabel")}
+      className="flex h-10 min-w-0 flex-1 items-center gap-0.5 rounded-lg bg-muted p-0.5"
+      data-testid="mobile-channel-view-tabs"
+      onKeyDown={(e) => {
+        // Radio-group keys: the arrows move the choice and the focus together.
+        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return
+        e.preventDefault()
+        const next: ChannelListView = view === "active" ? "archived" : "active"
+        onChange(next)
+        refs.current[next]?.focus()
+      }}
+    >
+      {options.map(({ value, label, hint, Icon }) => {
+        const checked = view === value
+        return (
+          <button
+            key={value}
+            ref={(el) => {
+              refs.current[value] = el
+            }}
             type="button"
-            variant="ghost"
-            onClick={onSelect}
-            data-testid={`mobile-channel-row-${session.id}`}
-            data-active={active ? "true" : "false"}
+            role="radio"
+            aria-checked={checked}
+            tabIndex={checked ? 0 : -1}
+            title={hint}
+            onClick={() => onChange(value)}
+            data-testid={`mobile-channel-view-${value}`}
             className={cn(
-              "h-auto w-full justify-start gap-3 rounded-none px-3 text-left font-normal",
-              density === "compact" ? "py-1.5" : "py-2",
-              active && "bg-muted/60"
+              // Painted at 36px inside the 40px track; `touch-hit` extends the
+              // hit area to the 44px floor on a touch screen.
+              "touch-hit flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              checked
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground active:bg-background/60"
             )}
           >
-            <span className="relative shrink-0">
-              <Avatar className={density === "compact" ? "size-8" : "size-9"}>
-                <AvatarFallback
-                  style={{ backgroundColor: color }}
-                  className="text-xs"
-                  aria-hidden={glyph.length === 1 ? "true" : undefined}
-                >
-                  {glyph}
-                </AvatarFallback>
-              </Avatar>
-              {unread > 0 ? (
-                <span
-                  data-testid={`mobile-channel-unread-${session.id}`}
-                  aria-label={unreadLabel}
-                  className="absolute -right-0.5 -top-0.5 inline-flex size-2 rounded-full bg-destructive"
-                />
-              ) : null}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="flex items-center gap-1">
-                <span className="truncate text-sm font-medium">{session.title}</span>
-                {session.pinned ? (
-                  <PinIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                ) : null}
-                {preview ? (
-                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                    {format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt), now)}
-                  </span>
-                ) : null}
-              </span>
-              <span
-                className="truncate text-[11px] text-muted-foreground"
-                data-testid={`mobile-channel-subtitle-${session.id}`}
-              >
-                {preview ??
-                  format.relativeTime(new Date(session.lastMessageAt ?? session.updatedAt), now)}
-              </span>
-            </span>
-          </Button>
-        </LongPress>
-      </SwipeRow>
-    </motion.li>
+            <Icon className="size-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{label}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChannelListSkeleton({ density }: { density: ConversationSidebarDensity }) {
+  const compact = density === "compact"
+  return (
+    <div className="flex flex-col py-1" data-testid="mobile-channel-loading">
+      {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+        <div
+          key={index}
+          className={cn("flex items-center gap-3 px-3", compact ? "h-11" : "h-14")}
+        >
+          <Skeleton className={cn("shrink-0 rounded-full", compact ? "size-8" : "size-10")} />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-3/5" />
+            <Skeleton className="h-3 w-2/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** First-paint size guess per item; real sizes are measured once mounted. */
+function estimateItemSize(item: MobileChannelListItem, settings: MobileChannelRowSettings): number {
+  switch (item.kind) {
+    case "notice":
+      return item.notice === "truncated" ? 32 : 96
+    case "folder-empty":
+      return 32
+    case "header":
+      return item.section.kind === "folder" || item.section.kind === "group" ? 44 : 32
+    case "row": {
+      const compact = settings.density === "compact"
+      let size = compact ? 44 : 56
+      if (settings.metadataFields.length > 0) size += 16
+      if (settings.showPreview && item.session.lastMessagePreview) size += 16
+      return size
+    }
+  }
+}
+
+/**
+ * The windowed scroll area. Its own component so a scroll frame re-renders the
+ * positioned wrappers and nothing else: the rows inside are memoized, and the
+ * list above does not observe the virtualizer.
+ */
+function VirtualItems({
+  items,
+  renderItem,
+  estimateSize,
+  scrollMemory,
+  activeSessionId,
+  keepMountedId,
+}: {
+  items: MobileChannelListItem[]
+  renderItem: (item: MobileChannelListItem) => ReactNode
+  estimateSize: (item: MobileChannelListItem) => number
+  scrollMemory: MobileChannelScrollMemory
+  activeSessionId: string | null
+  /** A row that must stay mounted even when scrolled out of the window. */
+  keepMountedId: string | null
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Where the drawer was left, read once per open.
+  const [restored] = useState(() => scrollMemory.read())
+  const keepMountedIndex = keepMountedId ? findRowIndex(items, keepMountedId) : -1
+  // The row being renamed holds focus and an on-screen keyboard; unmounting it
+  // because the keyboard shrank the viewport would drop the edit.
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const indexes = defaultRangeExtractor(range)
+      if (keepMountedIndex < 0 || indexes.includes(keepMountedIndex)) return indexes
+      return [...indexes, keepMountedIndex].sort((a, b) => a - b)
+    },
+    [keepMountedIndex]
+  )
+  const getItemKey = useCallback((index: number) => items[index]!.key, [items])
+  const estimate = useCallback((index: number) => estimateSize(items[index]!), [items, estimateSize])
+  // TanStack Virtual returns non-memoizable functions; nothing to fix here.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: estimate,
+    getItemKey,
+    overscan: 8,
+    rangeExtractor,
+    initialOffset: restored.offset,
+    initialMeasurementsCache: restored.measurements,
+  })
+
+  // Keep the measurements for the next open so the restored offset lands on
+  // the same row rather than on an estimate of where it was.
+  useEffect(
+    () => () => scrollMemory.saveMeasurements(virtualizer.takeSnapshot()),
+    [virtualizer, scrollMemory]
+  )
+
+  // Bring the open conversation into view — on open, and whenever it changes
+  // while the drawer is up. `auto` alignment leaves a row that is already on
+  // screen where it is, so a restored scroll position is not overridden.
+  const activeIndex = activeSessionId ? findRowIndex(items, activeSessionId) : -1
+  const revealedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeSessionId || activeIndex < 0) return
+    if (revealedRef.current === activeSessionId) return
+    revealedRef.current = activeSessionId
+    virtualizer.scrollToIndex(activeIndex, { align: "auto" })
+  }, [activeSessionId, activeIndex, virtualizer])
+
+  const virtualItems = virtualizer.getVirtualItems()
+  return (
+    <div
+      ref={scrollRef}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      onScroll={(e) => scrollMemory.saveOffset(e.currentTarget.scrollTop)}
+      data-mobile-channel-scroll=""
+      data-testid="mobile-channel-scroll"
+    >
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualItems.map((virtualItem) => {
+          const item = items[virtualItem.index]!
+          return (
+            <div
+              key={virtualItem.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualItem.index}
+              data-item-kind={item.kind}
+              data-section={
+                item.kind === "row" || item.kind === "header" ? item.sectionKey : undefined
+              }
+              className="absolute inset-x-0 top-0"
+              style={{ transform: `translateY(${virtualItem.start}px)` }}
+            >
+              {renderItem(item)}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }

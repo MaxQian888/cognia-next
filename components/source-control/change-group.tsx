@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { GitStatusGroup } from "@/types/git"
 
@@ -70,7 +71,9 @@ export function ChangeGroup({
         </Button>
         <span
           className={cn(
-            "flex shrink-0 items-center opacity-0 transition-opacity group-hover/header:opacity-100",
+            "flex shrink-0 items-center",
+            HOVER_REVEAL_GROUP_BASE_CLASS,
+            "group-hover/header:opacity-100",
             density === "touch" && "opacity-100"
           )}
         >

@@ -117,6 +117,59 @@ describe("useChannelListActions", () => {
     expect(trackRowAction).toHaveBeenCalledWith("unassign-folder", 1)
   })
 
+  it("files a selection through the batch writer when the owner has one", async () => {
+    const handlers = callbacks()
+    const onBulkAssignToFolder = jest.fn(async () => {})
+    const { result } = renderHook(() =>
+      useChannelListActions({
+        ...handlers,
+        onBulkAssignToFolder,
+        folders: [folder("one")],
+        newFolderName: "New folder",
+      })
+    )
+    await result.current.rowActions.onBulkAssignToFolder?.(["one", "two"], "folder-a")
+    // One call for the whole selection, and no per-row writes beside it.
+    expect(onBulkAssignToFolder).toHaveBeenCalledTimes(1)
+    expect(onBulkAssignToFolder).toHaveBeenCalledWith(["one", "two"], "folder-a")
+    expect(handlers.onAssignToFolder).not.toHaveBeenCalled()
+    expect(trackRowAction).toHaveBeenCalledWith("assign-folder", 2)
+  })
+
+  it("offers the bulk move with only a batch writer, and stops a per-row move at a failure", async () => {
+    const onBulkAssignToFolder = jest.fn(async () => {})
+    const handlers = callbacks()
+    const { result: batchOnly } = renderHook(() =>
+      useChannelListActions({
+        onNewDirect: handlers.onNewDirect,
+        onNewTeamConversation: handlers.onNewTeamConversation,
+        onDelete: handlers.onDelete,
+        onRename: handlers.onRename,
+        onBulkAssignToFolder,
+        folders: [],
+        newFolderName: "New folder",
+      })
+    )
+    expect(batchOnly.current.rowActions.onBulkAssignToFolder).toBeDefined()
+
+    const onAssignToFolder = jest
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("locked"))
+    const { result: perRow } = renderHook(() =>
+      useChannelListActions({
+        ...handlers,
+        onAssignToFolder,
+        folders: [],
+        newFolderName: "New folder",
+      })
+    )
+    await expect(
+      perRow.current.rowActions.onBulkAssignToFolder?.(["a", "b", "c"], "f")
+    ).rejects.toThrow("locked")
+    expect(onAssignToFolder.mock.calls.map(([id]) => id)).toEqual(["a", "b"])
+  })
+
   it("keeps optional actions absent when their callbacks are absent", () => {
     const handlers = callbacks()
     const { result } = renderHook(() =>

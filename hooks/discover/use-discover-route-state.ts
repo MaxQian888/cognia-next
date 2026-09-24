@@ -14,7 +14,7 @@
  * (Next.js 16 App Router requirement).
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { FORYOU_CATEGORY, isValidView, type DiscoverView } from "@/lib/discover/categories"
@@ -52,7 +52,13 @@ export interface DiscoverRouteState {
   filter: DiscoverFilter
   /** Switches the active category (or the favorites pseudo-category). Always clears the selected item to avoid stale cross-category references. */
   setCategory: (id: DiscoverView) => void
-  /** Sets (or clears, via null) the selected item id within the current category. */
+  /**
+   * Sets (or clears, via null) the selected item id within the current
+   * category. Opening an item PUSHES a history entry (Back closes the detail,
+   * Forward re-opens it); switching between items replaces it; closing pops
+   * the entry this hook pushed, or replaces it when the item arrived by a cold
+   * deep link.
+   */
   setItem: (id: string | null) => void
   /** Convenience wrapper around setItem(null). */
   clearItem: () => void
@@ -93,15 +99,36 @@ export function useDiscoverRouteState(): DiscoverRouteState {
     return isValidFilter(raw) ? raw : DEFAULT_DISCOVER_FILTER
   }, [searchParams])
 
-  const replace = useCallback(
-    (mutator: (params: URLSearchParams) => void): void => {
+  const navigate = useCallback(
+    (mode: "push" | "replace", mutator: (params: URLSearchParams) => void): void => {
       const next = new URLSearchParams(searchParams?.toString() ?? "")
       mutator(next)
       const query = next.toString()
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+      const href = query ? `${pathname}?${query}` : pathname
+      if (mode === "push") router.push(href, { scroll: false })
+      else router.replace(href, { scroll: false })
     },
     [pathname, router, searchParams]
   )
+
+  const replace = useCallback(
+    (mutator: (params: URLSearchParams) => void): void => navigate("replace", mutator),
+    [navigate]
+  )
+
+  // True while the history entry on top of the stack is the one this hook
+  // pushed to open the current item. Closing then pops it with `router.back()`
+  // so the sheet's close button and the browser's Back button do the same
+  // thing, instead of close stacking a second "/discover" entry that Back
+  // would have to walk through. A cold deep link (or a Forward into an item)
+  // was not pushed by us, so closing it replaces the entry instead of leaving
+  // the page.
+  const pushedItemEntryRef = useRef(false)
+  useEffect(() => {
+    // Back/Forward or any external navigation that lands without an item
+    // retires the pushed entry.
+    if (item === null) pushedItemEntryRef.current = false
+  }, [item])
 
   const setCategory = useCallback(
     (id: DiscoverView): void => {
@@ -118,15 +145,28 @@ export function useDiscoverRouteState(): DiscoverRouteState {
 
   const setItem = useCallback(
     (id: string | null): void => {
-      replace((params) => {
-        if (id && id.length > 0) {
-          params.set("item", id)
-        } else {
-          params.delete("item")
+      if (id && id.length > 0) {
+        if (item === null) {
+          // Opening a detail is a history step: Back closes it again and
+          // Forward re-opens it.
+          pushedItemEntryRef.current = true
+          navigate("push", (params) => params.set("item", id))
+        } else if (item !== id) {
+          // Switching the open detail keeps ONE entry for "detail open", so a
+          // single Back still returns to the catalog.
+          navigate("replace", (params) => params.set("item", id))
         }
-      })
+        return
+      }
+      if (item === null) return
+      if (pushedItemEntryRef.current) {
+        pushedItemEntryRef.current = false
+        router.back()
+        return
+      }
+      replace((params) => params.delete("item"))
     },
-    [replace]
+    [item, navigate, replace, router]
   )
 
   const clearItem = useCallback((): void => setItem(null), [setItem])

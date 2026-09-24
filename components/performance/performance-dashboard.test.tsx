@@ -63,7 +63,9 @@ jest.mock("./perf-managed-processes", () => ({
   PerfManagedProcesses: () => <div data-testid="managed" />,
 }))
 jest.mock("./perf-source-health", () => ({
-  PerfSourceHealth: () => <div data-testid="source-health" />,
+  PerfSourceHealth: ({ issue }: { issue?: { kind: string } | null }) => (
+    <div data-testid="source-health" data-issue={issue?.kind ?? ""} />
+  ),
 }))
 jest.mock("./perf-captures-tab", () => ({ PerfCapturesTab: () => <div data-testid="captures" /> }))
 
@@ -78,6 +80,7 @@ const baseState = {
   gaps: [],
   hostState: "unsupported",
   error: null,
+  hostIssue: null,
   paused: false,
   intervalMs: 1000,
   setPaused: jest.fn(),
@@ -98,6 +101,22 @@ describe("PerformanceDashboard", () => {
     expect(screen.getByTestId("performance-dashboard")).toBeInTheDocument()
     expect(screen.getByTestId("source-health")).toBeInTheDocument()
     expect(screen.getByTestId("perf-tab-captures")).toBeInTheDocument()
+  })
+
+  it("hands the typed host issue to the source health card", () => {
+    usePerfStreamMock.mockReturnValue({
+      ...baseState,
+      available: true,
+      hostState: "connecting",
+      error: "device already owns a lease for this purpose",
+      hostIssue: {
+        kind: "contended",
+        code: "device-purpose-limit",
+        detail: "device already owns a lease for this purpose",
+      },
+    })
+    render(<PerformanceDashboard />)
+    expect(screen.getByTestId("source-health")).toHaveAttribute("data-issue", "contended")
   })
 
   it("renders the full dashboard with four tabs when available", () => {

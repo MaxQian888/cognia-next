@@ -4,6 +4,7 @@ import { useRef } from "react"
 import { useTheme } from "next-themes"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { useSettingsStore } from "@/stores/settings"
+import { setIconThemeHighContrast } from "@/lib/plugin/bridge/icon-theme-high-contrast"
 import type { ResolvedThemeColors } from "@/types/plugin/plugin"
 import { CSS_VAR_KEYS, applyCssVars, removeCssVars } from "./css-var"
 import { BOOT_MIRROR_KEYS } from "./boot-script"
@@ -54,6 +55,9 @@ export function CustomThemeApplier(): null {
     // clear ours and stand down while a plugin theme is active. When it is
     // deactivated, this effect re-runs (activePluginThemeId dep) and repaints.
     if (activePluginThemeId) {
+      // The plugin theme's palette is what shows; no high-contrast override
+      // is painted under it, so file icons use its light/dark sets.
+      setIconThemeHighContrast(false)
       if (lastApplied.current) {
         for (const cssVar of CSS_VAR_KEYS) root.style.removeProperty(cssVar)
         lastApplied.current = false
@@ -100,6 +104,9 @@ export function CustomThemeApplier(): null {
     })
     const tokens = resolved.colors
     const hcOverride = resolved.highContrast
+    // File-icon themes carry high-contrast association overrides (VS Code's
+    // `highContrast` section); they apply exactly while this palette does.
+    setIconThemeHighContrast(hcOverride)
 
     // Decide whether the inline `:root` write is necessary. When there is
     // no a11y override AND the base resolved to the default preset for the

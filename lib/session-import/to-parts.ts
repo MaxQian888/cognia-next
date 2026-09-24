@@ -1,7 +1,7 @@
 // Shared builders that turn parsed transcript blocks into the canonical
 // `StoredMessage` / `ChatSession` shapes. The emitted parts use ONLY the shapes
 // the chat `MessageRenderer` already handles — cross-checked against
-// `lib/ai/agent/external/event-to-parts.ts` (text / reasoning / tool-<name> /
+// `lib/ai/agent/external/session/event-to-parts.ts` (text / reasoning / tool-<name> /
 // file). Imports are fully resolved (not streaming), so terminal `state` is set
 // directly.
 

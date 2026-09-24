@@ -57,7 +57,7 @@ export async function agentTeamRun(payload: Record<string, unknown>): Promise<Ag
   const teamId = typeof payload.teamId === "string" ? payload.teamId : ""
   if (!teamId) return { ok: false, error: "agent_team_run requires a teamId" }
   try {
-    const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+    const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
     if (!agentTeamManager.get(teamId)) {
       return { ok: false, error: `team ${teamId} not found` }
     }

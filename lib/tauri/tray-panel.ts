@@ -10,6 +10,7 @@
  * so arguments are passed camelCased.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { emitTo, listen } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/tauri"
@@ -219,14 +220,14 @@ export async function sendTrayPanelState(snapshot: unknown): Promise<boolean> {
 export async function onTrayPanelState<T>(handler: (snapshot: T) => void): Promise<() => void> {
   if (!isTauri()) return () => {}
   const unlisten = await listen<T>(TRAY_PANEL_STATE_EVENT, (event) => handler(event.payload))
-  return unlisten
+  return () => safeUnlisten(unlisten)
 }
 
 /** Subscribe to snapshot requests (main window side). */
 export async function onTrayPanelStateRequest(handler: () => void): Promise<() => void> {
   if (!isTauri()) return () => {}
   const unlisten = await listen(TRAY_PANEL_STATE_REQUEST_EVENT, () => handler())
-  return unlisten
+  return () => safeUnlisten(unlisten)
 }
 
 /** Subscribe to run requests (main window side). */
@@ -237,7 +238,7 @@ export async function onTrayPanelRequest(
   const unlisten = await listen<TrayPanelRunRequest>(TRAY_PANEL_RUN_EVENT, (event) =>
     handler(event.payload)
   )
-  return unlisten
+  return () => safeUnlisten(unlisten)
 }
 
 /** Subscribe to run results (panel window side). */
@@ -248,7 +249,7 @@ export async function onTrayPanelResult(
   const unlisten = await listen<TrayPanelRunResult>(TRAY_PANEL_RESULT_EVENT, (event) =>
     handler(event.payload)
   )
-  return unlisten
+  return () => safeUnlisten(unlisten)
 }
 
 /** Subscribe to native hide/show notifications (panel window side). */
@@ -261,7 +262,7 @@ export async function onTrayPanelVisibility(
     listen(TRAY_PANEL_SHOWN_EVENT, () => handler(true)),
   ])
   return () => {
-    offHidden()
-    offShown()
+    safeUnlisten(offHidden)
+    safeUnlisten(offShown)
   }
 }

@@ -15,6 +15,7 @@ import { PinIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { SidebarCatalogItem } from "@/lib/shell/sidebar-nav"
 import { groupSidebarNavByCategory } from "@/types/shell/sidebar"
@@ -118,7 +119,11 @@ export function MoreMenuContent({
                     aria-label={t("customize.pinItem", { item: t(item.i18nKey) })}
                     data-testid={`${testIdPrefix}-pin-${item.id}`}
                     onClick={() => onPin(item.id)}
-                    className="mr-1 size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                    className={cn(
+                      "mr-1 size-7 shrink-0",
+                      HOVER_REVEAL_CONTROL_CLASS,
+                      "group-focus-within:opacity-100"
+                    )}
                   >
                     <PinIcon className="size-3.5" />
                   </Button>

@@ -3,6 +3,10 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -87,6 +91,30 @@ describe("TerminalHistoryPanel", () => {
     render(<TerminalHistoryPanel sessionId="s-1" />)
     fireEvent.click(screen.getByTestId("terminal-history-rerun"))
     expect(sessionWrite).toHaveBeenCalledWith("echo hi\r")
+  })
+
+  it("keeps the row copy / re-run buttons reachable without a hover", () => {
+    useTerminalStore.getState().registerSession(info())
+    useTerminalStore.getState().setHistoryOpen("s-1", true)
+    useTerminalStore.getState().pushCommand("s-1", { cmd: "git status", exitCode: 0, endedAt: 1 })
+    render(<TerminalHistoryPanel sessionId="s-1" />)
+    const rerun = screen.getByRole("button", { name: "rerun" })
+    const wrapper = rerun.parentElement!
+    expect(wrapper).toBe(screen.getByRole("button", { name: "copy" }).parentElement)
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    // Quiet state is opacity only: never display:none until hover.
+    expect(wrapper).toHaveClass("flex")
+    expect(wrapper).not.toHaveClass("group-hover:flex")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    expect(wrapper.closest(".group")).toBe(screen.getByTestId("terminal-history-row"))
+    rerun.focus()
+    expect(rerun).toHaveFocus()
+    fireEvent.click(rerun)
+    expect(sessionWrite).toHaveBeenCalledWith("git status\r")
   })
 
   it("shift-click on a row triggers re-run instead of copy", () => {

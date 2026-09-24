@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client"
 import { flushSync } from "react-dom"
 import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
 
 const logInfo = jest.fn()
@@ -98,7 +99,23 @@ jest.mock("next-intl", () => ({
     dateTime: (value: Date) => `dt(${value.getTime()})`,
   }),
   useNow: () => new Date(0),
+  useTimeZone: () => "UTC",
 }))
+
+// The real title component, wrapped to count renders per row: a row that
+// re-renders re-renders its title, so this is how a test sees the rows' memo.
+const mockTitleRenders = jest.fn<void, [string]>()
+jest.mock("@/components/chat/ui/hover-scroll-text", () => {
+  const actual = jest.requireActual<typeof import("@/components/chat/ui/hover-scroll-text")>(
+    "@/components/chat/ui/hover-scroll-text"
+  )
+  return {
+    HoverScrollText: (props: Parameters<typeof actual.HoverScrollText>[0]) => {
+      mockTitleRenders(props.text)
+      return <actual.HoverScrollText {...props} />
+    },
+  }
+})
 
 // Complete logger mock: the import chain (plugin-view-container-panel →
 // plugin-sdk → lsp-registry) reads `loggers.plugin.child(...)`, so the mock
@@ -131,7 +148,13 @@ let mockGuildUnread: { dm: number; teams: ReadonlyMap<string, number>; total: nu
   teams: new Map<string, number>(),
   total: 0,
 }
+// Partial: the compact band's own `useGuildUnread` is stubbed (it would drain
+// the live-query queue below), while the scope tree aggregates through the real
+// pure `aggregateGuildUnread` over the list's own unread read.
 jest.mock("@/hooks/shell/use-guild-unread", () => ({
+  ...jest.requireActual<typeof import("@/hooks/shell/use-guild-unread")>(
+    "@/hooks/shell/use-guild-unread"
+  ),
   useGuildUnread: () => mockGuildUnread,
   markGuildRead: jest.fn(async () => 0),
 }))
@@ -634,9 +657,11 @@ test("constrains long session titles to the history rail width", () => {
   expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
     "[&_[data-slot=scroll-area-viewport]>div]:!block"
   )
-  expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
-    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
-  )
+  // A thin scrollbar that shows on hover / while scrolling — it used to be
+  // hidden outright, leaving a long history with no sense of position.
+  const scrollAreaClass = container.querySelector('[data-slot="scroll-area"]')?.className
+  expect(scrollAreaClass).not.toContain("[&_[data-slot=scroll-area-scrollbar]]:hidden")
+  expect(scrollAreaClass).toContain("[&_[data-slot=scroll-area-scrollbar]]:w-1.5")
 })
 
 test("shows configured agent, model, and provider details using session precedence", () => {
@@ -2207,6 +2232,43 @@ test("folder header menu moves a folder through the manual order", async () => {
   expect(screen.getByTestId("folder-move-down-f1")).not.toHaveAttribute("aria-disabled", "true")
 })
 
+test("folder actions menu is reachable without a hover", () => {
+  const folders = [
+    { id: "f1", projectId: "p", name: "First", order: 0, createdAt: 0, updatedAt: 0 },
+    { id: "f2", projectId: "p", name: "Second", order: 1, createdAt: 0, updatedAt: 0 },
+  ]
+  callQueue.push(characters, [], undefined)
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("a", { title: "A", folderId: "f1" }),
+        baseSession("b", { title: "B", folderId: "f2" }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={folders}
+      onReorderFolders={jest.fn()}
+    />
+  )
+  const trigger = screen.getAllByRole("button", { name: "folderActions" })[1]
+  // Folder hover stays the mouse path; focus, the open menu and touch reveal
+  // it through the shared policy. It only ever fades.
+  for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+    expect(trigger).toHaveClass(variant)
+  }
+  expect(trigger).toHaveClass("opacity-0", "group-hover/folder:opacity-100")
+  expect(trigger).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+  trigger.focus()
+  expect(trigger).toHaveFocus()
+  // A bare click, with no pointerover or pointerdown first, opens the menu.
+  fireEvent.click(trigger)
+  expect(screen.getByTestId("folder-move-up-f2")).toBeInTheDocument()
+})
+
 test("folder move items stay hidden without a reorder handler", async () => {
   callQueue.push(characters, [], undefined)
   const user = userEvent.setup()
@@ -2687,6 +2749,33 @@ describe("order freeze", () => {
     expect(listOrder()).toEqual(["Bravo", "Alpha"])
   })
 
+  test("follows a sort chosen with the pointer still in the list", () => {
+    // The sort menu sits inside the hovered list, so a new sort always lands
+    // under a hold — and it is the reader's own re-arrangement, not a row
+    // sliding out from under them.
+    conversationSidebar = { groupBy: "none", sortBy: "title" }
+    const sessions = [
+      baseSession("s-a", { title: "Alpha", updatedAt: 20 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 30 }),
+    ]
+    const { container, rerender } = renderWith(sessions)
+    expect(listOrder()).toEqual(["Alpha", "Bravo"])
+    fireEvent.mouseEnter(container.querySelector("[data-slot=scroll-area]")!)
+    conversationSidebar = { groupBy: "none", sortBy: "recent" }
+    rerender(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(listOrder()).toEqual(["Bravo", "Alpha"])
+  })
+
   test("releases once the pointer leaves", () => {
     conversationSidebar = { groupBy: "none" }
     const { container, rerender } = renderWith([
@@ -2779,20 +2868,60 @@ describe("virtualized flat lists", () => {
   })
 
   test("windows a long flat list, painting a fraction of its rows", () => {
-    conversationSidebar = { groupBy: "none", sortBy: "title" }
+    conversationSidebar = { groupBy: "none", sortBy: "title", metadata: [] }
     renderWith(many(400, "Chat"))
     const container = screen.getByTestId("channel-list-virtual-rows")
     // jsdom gives every element a zero client height, so the window resolves to
     // nothing; what the test can prove is that the list is no longer painting
-    // 400 rows, and that it still reserves their full scroll height.
+    // 400 rows, and that it still reserves their full scroll height — at the
+    // comfortable row's real height (36px) plus the 2px gap the flow lists
+    // draw, not a flat 44px guess.
     expect(screen.queryAllByRole("listitem").length).toBeLessThan(400)
-    expect(container.querySelector("ul")).toHaveStyle({ height: "17600px" })
+    expect(container.querySelector("ul")).toHaveStyle({ height: `${400 * 36 + 399 * 2}px` })
   })
 
-  test("leaves a long grouped list alone — sticky headers and dragging live there", () => {
+  test("estimates windowed rows from the density and the lines they show", () => {
+    conversationSidebar = { groupBy: "none", sortBy: "title", density: "compact", metadata: [] }
+    const { unmount } = renderWith(many(300, "Chat"))
+    expect(screen.getByTestId("channel-list-virtual-rows").querySelector("ul")).toHaveStyle({
+      height: `${300 * 28 + 299 * 2}px`,
+    })
+    unmount()
+    conversationSidebar = {
+      groupBy: "none",
+      sortBy: "title",
+      showPreview: true,
+      metadata: ["model"],
+    }
+    renderWith(many(300, "Chat"))
+    expect(screen.getByTestId("channel-list-virtual-rows").querySelector("ul")).toHaveStyle({
+      height: `${300 * (36 + 18 + 18) + 299 * 2}px`,
+    })
+  })
+
+  test("windows a long grouped section too, keeping its sticky header and drag everywhere else", () => {
+    // Grouped lists — the default — used to never window, so "Show all" or a
+    // long history in one bucket painted every row with a sortable each.
     conversationSidebar = { groupBy: "date", sortBy: "recent" }
-    renderWith(many(400, "Chat"))
-    expect(screen.queryByTestId("channel-list-virtual-rows")).toBeNull()
+    mockSortableItems.length = 0
+    renderWith([
+      baseSession("pin-1", { title: "Pinned one", pinned: true }),
+      baseSession("pin-2", { title: "Pinned two", pinned: true }),
+      ...many(400, "Chat"),
+    ])
+    const windowed = screen.getByTestId("channel-list-virtual-rows")
+    // Every row is ancient, so they share one "Older" bucket — whose header is
+    // not part of the window and still sticks.
+    const section = windowed.closest("section")!
+    expect(within(section).getByText("bucketOlder").parentElement!.className).toContain("sticky")
+    expect(screen.queryAllByRole("listitem").length).toBeLessThan(400)
+    // Dragging is off only where the rows are windowed: the long bucket gets no
+    // sortable context and no grips; the small Pinned section keeps both.
+    expect(mockSortableItems.some((items) => items.includes("Chat-0"))).toBe(false)
+    expect(mockSortableItems.some((items) => items.includes("pin-1"))).toBe(true)
+    const pinnedRow = screen.getByText("Pinned one").closest("li")!
+    expect(within(pinnedRow).getByLabelText("dragHandle")).toBeInTheDocument()
+    expect(within(windowed).queryAllByLabelText("dragHandle")).toHaveLength(0)
   })
 
   test("requests scrolling when keyboard focus moves to an unmounted row", () => {
@@ -3855,6 +3984,19 @@ describe("title-bar projection", () => {
     const alphaSection = screen.getByRole("region", { name: "Alpha" })
     const plus = within(alphaSection).getByTestId("sidebar-scope-new-t-1")
     expect(plus).toHaveAccessibleName('newConversationIn:{"name":"Alpha"}')
+    // Reachable without a hover: the scope header's hover stays the mouse
+    // path, and focus / touch reveal it through the shared policy.
+    const squadsPlus = screen.getByTestId("sidebar-squads-create-team")
+    for (const control of [plus, squadsPlus]) {
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+        expect(control).toHaveClass(variant)
+      }
+      expect(control).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+      control.focus()
+      expect(control).toHaveFocus()
+    }
+    expect(plus).toHaveClass("group-hover/scope-head:opacity-100")
+    expect(squadsPlus).toHaveClass("group-hover/squads-label:opacity-100")
     await user.click(plus)
     expect(onNewTeamConversation).toHaveBeenCalledWith("t-1")
   })
@@ -4012,10 +4154,11 @@ describe("scope tree (merged rail)", () => {
   ]
   function renderMerged(
     sessions: ChatSession[],
-    overrides: Partial<Parameters<typeof ChannelList>[0]> = {}
+    overrides: Partial<Parameters<typeof ChannelList>[0]> = {},
+    squadList: unknown = squads
   ) {
     callQueue.length = 0
-    for (let i = 0; i < 6; i++) callQueue.push(characters, [], squads)
+    for (let i = 0; i < 6; i++) callQueue.push(characters, [], squadList)
     return render(
       <TitleBarOutletsProvider>
         <StartOutlet />
@@ -4051,14 +4194,37 @@ describe("scope tree (merged rail)", () => {
     conversationSidebar = { metadata: ["agent", "model"] }
     renderMerged([dmSession, baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" })])
     const teamRow = screen.getByText("A work").closest("li")!
-    // Three copies of "Alpha" on one row — the section header, the avatar and
-    // the detail line — is two too many.
+    // Three copies of "Alpha" — the section header, its avatar, and the
+    // row's detail line — is two too many.
     expect(teamRow.querySelector('[data-metadata-kind="agent"]')).toBeNull()
     expect(teamRow.querySelector('[data-metadata-kind="model"]')).not.toBeNull()
     // A direct row keeps its `agent` detail — the character's name lands
     // nowhere else.
     const dmRow = screen.getByText("Hi Alice").closest("li")!
     expect(dmRow.querySelector('[data-metadata-kind="agent"]')).not.toBeNull()
+  })
+
+  it("does not repeat the squad's avatar on rows nested under its scope header", () => {
+    renderMerged(
+      [
+        baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" }),
+        // Pinned floats the row out of the squad group into its own section —
+        // no header above it, so the avatar is the only place the identity
+        // shows and must stay.
+        baseSession("s-p", { kind: "team", teamId: "t-1", title: "Pinned work", pinned: true }),
+      ],
+      {},
+      [
+        { id: "t-1", name: "Alpha", avatarEmoji: "🧠" },
+        { id: "t-2", name: "Beta" },
+      ]
+    )
+    // Exactly one 🧠 in the group — the collapsible header's. The nested row
+    // dropped its copy.
+    const alpha = screen.getByTestId("sidebar-scope-t-1")
+    expect(within(alpha).getAllByText("🧠")).toHaveLength(1)
+    const pinnedRow = screen.getByText("Pinned work").closest("li")!
+    expect(within(pinnedRow).getByText("🧠")).toBeInTheDocument()
   })
 
   it("keeps an empty squad as a header with a quiet empty hint", () => {
@@ -4132,6 +4298,17 @@ describe("scope tree (merged rail)", () => {
     await user.click(within(chats).getByTestId("sidebar-scope-more-chats"))
     expect(within(chats).getByText("DM 0")).toBeInTheDocument()
     expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent("groupShowLess")
+    // Expanded, the collapse rides in the sticky label — one control, not a
+    // second one at the bottom of the whole history.
+    const label = within(chats).getByTestId("sidebar-scope-label-chats")
+    expect(label.className).toContain("sticky")
+    expect(within(label).getByTestId("sidebar-scope-more-chats")).toBeInTheDocument()
+    expect(within(chats).getAllByTestId("sidebar-scope-more-chats")).toHaveLength(1)
+    await user.click(within(label).getByTestId("sidebar-scope-more-chats"))
+    expect(within(chats).queryByText("DM 0")).toBeNull()
+    expect(within(chats).getByTestId("sidebar-scope-more-chats")).toHaveTextContent(
+      'groupShowAll:{"count":9}'
+    )
   })
 
   it("shows the tail instead of an expander when only a row or two would hide", () => {
@@ -4484,5 +4661,200 @@ describe("drop animation, settle mark and list telemetry", () => {
       })
     )
     expect(listTelemetry.trackConversationSearched).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("sidebar audit: render cost and wiring", () => {
+  // Stable live-query answers: in the app a live query hands back the same
+  // array until its table changes, and the rows' memo depends on that.
+  const NO_STATES: never[] = []
+  const NO_TEAMS: Team[] = []
+  const handlers = {
+    activeSessionId: null,
+    onSelect: jest.fn(),
+    onNewDirect: jest.fn(),
+    onNewTeamConversation: jest.fn(),
+    onDelete: jest.fn(),
+    onRename: jest.fn(),
+  }
+  function seed(states: unknown = NO_STATES, teams: unknown = NO_TEAMS) {
+    callQueue.length = 0
+    for (let i = 0; i < 40; i++) callQueue.push(characters, states, teams)
+  }
+  function renderMergedRail(
+    sessions: ChatSession[],
+    extra: Partial<Parameters<typeof ChannelList>[0]> = {},
+    states: unknown = NO_STATES,
+    teams: unknown = NO_TEAMS
+  ) {
+    seed(states, teams)
+    return render(
+      <TitleBarOutletsProvider>
+        <StartOutlet />
+        <TitleBarProjectionScope enabled>
+          <ChannelList sessions={sessions} {...handlers} {...extra} />
+        </TitleBarProjectionScope>
+      </TitleBarOutletsProvider>
+    )
+  }
+  const titlesRendered = () => new Set(mockTitleRenders.mock.calls.map(([title]) => title))
+
+  test("a session that changed re-renders its own row and no other", () => {
+    // What a streamed message does: one row gets a new object, the others keep
+    // theirs (`useSessions` shares them across emissions).
+    conversationSidebar = { groupBy: "none" }
+    seed()
+    const a = baseSession("s-a", { title: "Alpha", updatedAt: 30 })
+    const b = baseSession("s-b", { title: "Beta", updatedAt: 20 })
+    const c = baseSession("s-c", { title: "Gamma", updatedAt: 10 })
+    const { rerender } = render(<ChannelList sessions={[a, b, c]} {...handlers} />)
+    mockTitleRenders.mockClear()
+    const streamed = { ...b, lastMessageAt: 25, lastMessagePreview: "partial reply" }
+    rerender(<ChannelList sessions={[a, streamed, c]} {...handlers} />)
+    expect(titlesRendered()).toEqual(new Set(["Beta"]))
+  })
+
+  test("the pointer crossing the list and the search field waking re-render no row", () => {
+    conversationSidebar = { groupBy: "none" }
+    seed()
+    const { container } = render(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Beta", updatedAt: 20 }),
+        ]}
+        {...handlers}
+      />
+    )
+    mockTitleRenders.mockClear()
+    const scroller = container.querySelector("[data-slot=scroll-area]")!
+    fireEvent.mouseEnter(scroller)
+    fireEvent.mouseLeave(scroller)
+    act(() => screen.getByLabelText("searchAria").focus())
+    act(() => screen.getByLabelText("searchAria").blur())
+    expect(mockTitleRenders).not.toHaveBeenCalled()
+  })
+
+  test("the hairline under the pinned strip follows the viewport's scroll", () => {
+    // `scroll` does not bubble; the old `onScroll` on the ScrollArea root never
+    // fired, so the hairline never appeared.
+    const { container } = renderMergedRail([dmSession])
+    const strip = screen.getByTestId("channel-list-pinned-strip")
+    expect(strip).not.toHaveAttribute("data-scrolled")
+    const viewport = container.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]")!
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 40 })
+    fireEvent.scroll(viewport)
+    expect(strip).toHaveAttribute("data-scrolled", "true")
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 0 })
+    fireEvent.scroll(viewport)
+    expect(strip).not.toHaveAttribute("data-scrolled")
+  })
+
+  test("pins the merged rail's search row and bulk bar to the top of the scroll", () => {
+    renderMergedRail([
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Beta", updatedAt: 20 }),
+    ])
+    const sticky = screen.getByTestId("channel-list-sticky-chrome")
+    expect(sticky.className).toContain("sticky")
+    expect(sticky.className).toContain("top-0")
+    expect(sticky).toContainElement(screen.getByTestId("channel-list-search-row"))
+    // Still inside the one scrolling viewport, below the nav rows.
+    expect(sticky.closest("[data-slot=scroll-area-viewport]")).not.toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Beta/ }), { ctrlKey: true })
+    expect(sticky).toContainElement(screen.getByRole("toolbar"))
+  })
+
+  test("the folder header is itself the drop target, so it can stick", () => {
+    seed()
+    render(
+      <ChannelList
+        sessions={[baseSession("in-folder", { title: "Inside work", folderId: "f1" })]}
+        {...handlers}
+        folders={[workFolder]}
+        onAssignToFolder={jest.fn()}
+      />
+    )
+    const header = mockDroppableNodes.get("folder:f1")!
+    // A sticky element only sticks inside its parent; the drop target used to
+    // be a wrapper exactly the header's height around it.
+    expect(header.className).toContain("sticky")
+    expect(header).toContainElement(screen.getByRole("button", { name: "Work" }))
+    expect(header).not.toContainElement(screen.getByText("Inside work"))
+  })
+
+  test("reports the grouping it draws with, and lets go on unmount", () => {
+    conversationSidebar = { groupBy: "workspace" }
+    const onEffectiveGroupByChange = jest.fn()
+    seed()
+    const compact = render(
+      <ChannelList
+        sessions={[dmSession]}
+        {...handlers}
+        onEffectiveGroupByChange={onEffectiveGroupByChange}
+      />
+    )
+    expect(onEffectiveGroupByChange).toHaveBeenLastCalledWith("workspace")
+    compact.unmount()
+    expect(onEffectiveGroupByChange).toHaveBeenLastCalledWith(null)
+
+    // The merged rail is the scope tree — the team axis — whatever is stored.
+    onEffectiveGroupByChange.mockClear()
+    renderMergedRail([dmSession], { onEffectiveGroupByChange })
+    expect(onEffectiveGroupByChange).toHaveBeenLastCalledWith("team")
+  })
+
+  test("scope headers count the unread conversations under them, from the list's own read", () => {
+    const squads = [{ id: "t-1", name: "Alpha" }]
+    renderMergedRail(
+      [
+        baseSession("s-a", { kind: "team", teamId: "t-1", title: "A work" }),
+        baseSession("s-b", { kind: "team", teamId: "t-1", title: "B work" }),
+        baseSession("s-archived", {
+          kind: "team",
+          teamId: "t-1",
+          title: "Old",
+          archivedAt: 1,
+        } as Partial<ChatSession>),
+      ],
+      {},
+      [
+        { sessionId: "s-a", unreadCount: 3 },
+        { sessionId: "s-b", unreadCount: 1 },
+        { sessionId: "s-archived", unreadCount: 5 },
+      ],
+      squads
+    )
+    // Two unread conversations (archived ones never count), while the shared
+    // `useGuildUnread` stub says zero — the header no longer runs its own read.
+    expect(screen.getByTestId("sidebar-scope-unread-t-1")).toHaveTextContent("2")
+  })
+
+  test("files a multi-selection through the batch writer in one call", async () => {
+    const user = userEvent.setup()
+    const onBulkAssignToFolder = jest.fn(async () => {})
+    const onAssignToFolder = jest.fn()
+    conversationSidebar = { groupBy: "none" }
+    seed()
+    render(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30, projectId: "p" }),
+          baseSession("s-b", { title: "Beta", updatedAt: 20, projectId: "p" }),
+        ]}
+        {...handlers}
+        folders={[workFolder]}
+        onAssignToFolder={onAssignToFolder}
+        onBulkAssignToFolder={onBulkAssignToFolder}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole("button", { name: /Beta/ }), { ctrlKey: true })
+    await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+    await user.click(screen.getByTestId("channel-list-bulk-folder-f1"))
+    expect(onBulkAssignToFolder).toHaveBeenCalledTimes(1)
+    expect(onBulkAssignToFolder).toHaveBeenCalledWith(["s-a", "s-b"], "f1")
+    expect(onAssignToFolder).not.toHaveBeenCalled()
   })
 })

@@ -16,6 +16,13 @@
  * scroll inside the drawer is untouched and the listeners stay `passive`. A
  * gesture is rejected the moment its off-axis travel passes `slop`, so a
  * diagonal flick while scrolling a list cannot open anything.
+ *
+ * A touch that starts on a surface with a horizontal gesture of its own is not
+ * this hook's to read at all (see {@link EDGE_SWIPE_IGNORE_SELECTOR}). The
+ * listeners sit on `window`, so without that carve-out a leftward drag on a
+ * swipeable conversation row inside the drawer crossed the close threshold
+ * (56px) long before the row's own reveal committed (108px), and the drawer
+ * shut underneath the finger that was reaching for Delete.
  */
 
 import { useEffect, useRef } from "react"
@@ -37,11 +44,37 @@ export interface EdgeSwipeOptions {
   threshold?: number
   /** Off-axis travel that disqualifies the gesture, in px. */
   slop?: number
+  /**
+   * Caller veto on where a gesture may start, checked on touchstart against the
+   * touched element. `true` ignores the touch for both halves of the gesture.
+   * Read through a ref like the handlers, so an inline closure is free.
+   *
+   * The drawer uses it to answer only to touches that start on the drawer or
+   * its overlay while it is open: a sheet or dialog opened from inside the
+   * drawer is portaled outside it, and a sideways drag on that surface (a
+   * horizontally scrolling strip, a dismiss flick) is not a request to put the
+   * drawer away underneath it.
+   */
+  ignore?: (target: Element) => boolean
 }
 
 export const EDGE_SWIPE_ZONE = 24
 export const EDGE_SWIPE_THRESHOLD = 56
 export const EDGE_SWIPE_SLOP = 44
+
+/**
+ * Surfaces that own their horizontal drags. A touch that STARTS inside one is
+ * ignored for both halves of the gesture: `[data-swipe-row]` is stamped by
+ * `<SwipeRow>` on its wrapper, and `[data-edge-swipe-ignore]` is the opt-out
+ * for anything else that pans sideways (a carousel, a slider, a code block).
+ */
+export const EDGE_SWIPE_IGNORE_SELECTOR = "[data-swipe-row], [data-edge-swipe-ignore]"
+
+function startsOnOwnGesture(target: EventTarget | null): boolean {
+  // `Element`, not `HTMLElement`: a touch that lands on an SVG icon inside a
+  // row targets the `<svg>`/`<path>`, which is an Element but not an HTML one.
+  return target instanceof Element && target.closest(EDGE_SWIPE_IGNORE_SELECTOR) !== null
+}
 
 interface Tracked {
   x: number
@@ -60,15 +93,16 @@ export function useEdgeSwipe({
   edgeSize = EDGE_SWIPE_ZONE,
   threshold = EDGE_SWIPE_THRESHOLD,
   slop = EDGE_SWIPE_SLOP,
+  ignore,
 }: EdgeSwipeOptions): void {
   // Handlers are read through a ref so a caller passing inline arrows does not
   // re-attach four window listeners on every render of a list that repaints
   // constantly (which the conversation sidebar does). Written after commit
   // rather than during render: a ref is not render output, and a touch cannot
   // land between the two anyway.
-  const handlers = useRef({ onOpen, onClose })
+  const handlers = useRef({ onOpen, onClose, ignore })
   useEffect(() => {
-    handlers.current = { onOpen, onClose }
+    handlers.current = { onOpen, onClose, ignore }
   })
 
   useEffect(() => {
@@ -85,6 +119,14 @@ export function useEdgeSwipe({
       }
       const touch = event.touches[0]
       if (!touch) return
+      const target = event.target
+      if (
+        startsOnOwnGesture(target) ||
+        (target instanceof Element && handlers.current.ignore?.(target) === true)
+      ) {
+        tracked = null
+        return
+      }
       const fromLeft = touch.clientX <= edgeSize
       const fromRight = touch.clientX >= window.innerWidth - edgeSize
       tracked = {

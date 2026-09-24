@@ -17,6 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -49,9 +50,17 @@ export interface ChannelListBulkToolbarProps {
    * a selection is just several rows.
    */
   folders?: readonly SessionFolder[]
+  /**
+   * Folders that cannot hold every selected conversation (another workspace's).
+   * Listed but disabled, with a note saying why — dropping them silently would
+   * leave the user hunting for a folder they know exists.
+   */
+  blockedFolderIds?: ReadonlySet<string>
   onMoveToFolder?: (folderId: string | null) => void | Promise<void>
   onClear: () => void
 }
+
+const NO_BLOCKED_FOLDERS: ReadonlySet<string> = new Set()
 
 /**
  * Toolbar that appears above the channel list while a multi-selection is
@@ -69,6 +78,7 @@ export function ChannelListBulkToolbar({
   onUnarchive,
   onShare,
   folders = [],
+  blockedFolderIds = NO_BLOCKED_FOLDERS,
   onMoveToFolder,
   onClear,
 }: ChannelListBulkToolbarProps) {
@@ -116,10 +126,19 @@ export function ChannelListBulkToolbar({
                 <FolderInputIcon className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-56">
+              {folders.some((folder) => blockedFolderIds.has(folder.id)) ? (
+                <DropdownMenuLabel
+                  className="text-[11px] font-normal text-muted-foreground"
+                  data-testid="channel-list-bulk-folder-blocked-note"
+                >
+                  {t("folderOtherWorkspace")}
+                </DropdownMenuLabel>
+              ) : null}
               {folders.map((folder) => (
                 <DropdownMenuItem
                   key={folder.id}
+                  disabled={blockedFolderIds.has(folder.id)}
                   onSelect={() => void onMoveToFolder(folder.id)}
                   data-testid={`channel-list-bulk-folder-${folder.id}`}
                 >

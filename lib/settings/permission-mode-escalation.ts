@@ -16,7 +16,7 @@ export type PermissionMode =
  * This ranks the **autonomy / trust** axis for the biometric-gate decision:
  * `dontAsk` runs pre-approved tools without prompting, so it sits ABOVE
  * `default`/`acceptEdits` here. That is deliberately DIFFERENT from
- * `lib/ai/agent/external/permission-cascade.ts:MODE_RANK`, which ranks the
+ * `lib/ai/agent/external/policy/permission-cascade.ts:MODE_RANK`, which ranks the
  * orthogonal **restrictiveness-of-execution** axis (there `dontAsk` denies
  * everything un-preapproved, so it sits BELOW `default`). The two tables are
  * not drift — they measure different things and must not be merged.

@@ -15,6 +15,7 @@
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 
+import { deferUntilSecretStoreReady } from "@/lib/credentials/secret-store-readiness"
 import { subscriptionInitOnce } from "@/lib/subscription/core/migration"
 import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"
@@ -34,17 +35,25 @@ export function SubscriptionInitializer() {
     if (lastInitializedKey.current === initKey) return
     lastInitializedKey.current = initKey
 
-    void (async () => {
-      await subscriptionInitOnce({
+    const run = async (): Promise<void> => {
+      const result = await subscriptionInitOnce({
         translateToast: (key, params) => t(key, params as Parameters<typeof t>[1]),
       })
+      // A locked secret store is not a finished boot: run the whole init again
+      // once the user unlocks it, unless the account has changed since.
+      if (result.secretStoreUnavailable) {
+        deferUntilSecretStoreReady("subscription.init", async () => {
+          if (lastInitializedKey.current === initKey) await run()
+        })
+      }
       // The boot rebuild (subscription_init → apply_active_projection) may have
       // just pushed the OAuth bearer into ApiKeyState. Tell the chat header so
       // it drops the stale "No API key" badge without waiting for the user to
-      // poke the settings popover.
+      // poke the settings popover. This also re-fires every limits refresh.
       notifySubscriptionChanged()
       await maybeAutoUploadSubscription().catch(() => undefined)
-    })()
+    }
+    void run()
   }, [accountRevision, t, unlockedAccountId])
 
   return null

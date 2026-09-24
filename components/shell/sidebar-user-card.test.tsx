@@ -38,7 +38,13 @@ const toastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
 
 const lock = jest.fn(async () => {})
-let activeAccount: { id: string; displayName: string; avatarDataUrl?: string } | null = {
+let activeAccount: {
+  id: string
+  displayName: string
+  avatarDataUrl?: string
+  protection?: "device" | "password"
+  rememberOnDevice?: boolean
+} | null = {
   id: "a-1",
   displayName: "Irma Salazar",
 }
@@ -196,4 +202,28 @@ describe("SidebarUserCard", () => {
     render(<SidebarUserCard />)
     expect(screen.getByTestId("sidebar-user-card")).toHaveTextContent("noProfile")
   })
+})
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("does not offer vault lock for a device-managed workspace", () => {
+  activeAccount = { id: "acct_desktop_local_workspace", displayName: "Local", protection: "device" }
+  enterTauriShell()
+  render(<SidebarUserCard />)
+  fireEvent.click(screen.getByTestId("sidebar-user-card"))
+  expect(screen.queryByTestId("sidebar-user-lock")).not.toBeInTheDocument()
+})
+
+it("does not offer vault lock for a profile that unlocks automatically on this device", () => {
+  activeAccount = { id: "acct_remembered", displayName: "Max", rememberOnDevice: true }
+  enterTauriShell()
+  render(<SidebarUserCard />)
+  fireEvent.click(screen.getByTestId("sidebar-user-card"))
+  expect(screen.queryByTestId("sidebar-user-lock")).not.toBeInTheDocument()
 })

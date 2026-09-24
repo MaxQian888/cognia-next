@@ -69,7 +69,7 @@ import {
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { BUILT_IN_TEAM_TEMPLATES } from "@/types/agent/agent-team"
 import { listAgentTeamTemplateEntries } from "@/lib/plugin/registries/agent-team-template-registry"
-import { getAvailablePresets, getPresetDisplayInfo } from "@/lib/ai/agent/external/presets"
+import { getAvailablePresets, getPresetDisplayInfo } from "@/lib/ai/agent/external/config/presets"
 import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"
 import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"

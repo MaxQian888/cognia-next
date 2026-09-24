@@ -25,6 +25,8 @@ interface ChannelListActionCallbacks {
   onCreateFolder?: (name: string) => void | Promise<SessionFolder | unknown>
   onReorderFolders?: (ids: string[]) => void | Promise<void>
   onAssignToFolder?: (sessionId: string, folderId: string | null) => void | Promise<void>
+  /** Batched folder assignment for a multi-selection (one write for all of it). */
+  onBulkAssignToFolder?: (ids: string[], folderId: string | null) => void | Promise<void>
 }
 
 interface UseChannelListActionsOptions extends ChannelListActionCallbacks {
@@ -54,6 +56,7 @@ export function useChannelListActions({
   onCreateFolder,
   onReorderFolders,
   onAssignToFolder,
+  onBulkAssignToFolder,
 }: UseChannelListActionsOptions) {
   const handleNewDirect = useCallback(() => {
     log.info("channel-list new-direct")
@@ -128,15 +131,21 @@ export function useChannelListActions({
             return onBulkUnarchive(ids)
           }
         : undefined,
-      onBulkAssignToFolder: onAssignToFolder
-        ? async (ids: string[], folderId: string | null) => {
-            void trackConversationRowAction(
-              folderId ? "assign-folder" : "unassign-folder",
-              ids.length
-            )
-            for (const id of ids) await onAssignToFolder(id, folderId)
-          }
-        : undefined,
+      onBulkAssignToFolder:
+        onBulkAssignToFolder || onAssignToFolder
+          ? async (ids: string[], folderId: string | null) => {
+              void trackConversationRowAction(
+                folderId ? "assign-folder" : "unassign-folder",
+                ids.length
+              )
+              // The batch writer files the whole selection in one transaction
+              // (one live-query emit, all-or-nothing). An owner that only has
+              // the per-row writer still works — one write per row, in order,
+              // so a failure stops the move where it happened.
+              if (onBulkAssignToFolder) return onBulkAssignToFolder(ids, folderId)
+              for (const id of ids) await onAssignToFolder!(id, folderId)
+            }
+          : undefined,
     }),
     [
       onDelete,
@@ -149,6 +158,7 @@ export function useChannelListActions({
       onBulkSetPinned,
       onBulkArchive,
       onBulkUnarchive,
+      onBulkAssignToFolder,
     ]
   )
 

@@ -164,7 +164,7 @@ import type {
   ImportOptions,
   ImportMergeStrategy,
 } from "@/lib/data/types"
-import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/policy/permission-modes"
 import { createProfileDekStore } from "@/lib/rag/profile-dek-store"
 import type {
   AcpPermissionMode,
@@ -172,6 +172,7 @@ import type {
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { transport } from "@/lib/tauri"
@@ -252,7 +253,7 @@ export async function installDesktopWriteSource(opts: InstallOptions = {}): Prom
 
   return () => {
     installed = false
-    unlisten()
+    safeUnlisten(unlisten)
     unsubscribeAgentEvents()
   }
 }
@@ -3146,13 +3147,14 @@ function toConfigWire(record: {
 
 /** Resolve the service's host dependencies once per call. */
 async function hostConfigDeps() {
-  const { defaultReadinessAssessor } = await import("@/lib/ai/agent/external/host-config-service")
+  const { defaultReadinessAssessor } =
+    await import("@/lib/ai/agent/external/config/host-config-service")
   return { assessReadiness: await defaultReadinessAssessor() }
 }
 
 async function externalAgentConfigList(): Promise<{ configs: ExternalAgentConfigWire[] }> {
   const { listHostExternalAgentConfigs } =
-    await import("@/lib/ai/agent/external/host-config-service")
+    await import("@/lib/ai/agent/external/config/host-config-service")
   return { configs: (await listHostExternalAgentConfigs()).map(toConfigWire) }
 }
 
@@ -3161,7 +3163,8 @@ async function externalAgentConfigGet(
 ): Promise<{ config: ExternalAgentConfigWire | null }> {
   const configId = payload.configId as string | undefined
   if (!configId) throw new Error("external_agent_config_get.configId is required")
-  const { getHostExternalAgentConfig } = await import("@/lib/ai/agent/external/host-config-service")
+  const { getHostExternalAgentConfig } =
+    await import("@/lib/ai/agent/external/config/host-config-service")
   const record = await getHostExternalAgentConfig(configId)
   return { config: record ? toConfigWire(record) : null }
 }
@@ -3183,7 +3186,7 @@ async function externalAgentConfigCreate(
     throw new Error("external_agent_config_create.config is required")
   }
   const { createHostExternalAgentConfig } =
-    await import("@/lib/ai/agent/external/host-config-service")
+    await import("@/lib/ai/agent/external/config/host-config-service")
   const record = await createHostExternalAgentConfig(
     {
       config: config as never,
@@ -3214,7 +3217,7 @@ async function externalAgentConfigUpdate(
     throw new Error("external_agent_config_update.patch is required")
   }
   const { updateHostExternalAgentConfig } =
-    await import("@/lib/ai/agent/external/host-config-service")
+    await import("@/lib/ai/agent/external/config/host-config-service")
   const record = await updateHostExternalAgentConfig(
     { configId, expectedRevision, patch: patch as never },
     await hostConfigDeps()
@@ -3228,7 +3231,7 @@ async function externalAgentConfigDelete(
   const configId = payload.configId as string | undefined
   if (!configId) throw new Error("external_agent_config_delete.configId is required")
   const { deleteHostExternalAgentConfig } =
-    await import("@/lib/ai/agent/external/host-config-service")
+    await import("@/lib/ai/agent/external/config/host-config-service")
   // No `hostConfigDeps()`: a tombstone assesses nothing, and resolving the
   // readiness assessor here would boot the keyring, the manager and the
   // adapter registry for a write that only needs the clock.
@@ -3247,7 +3250,7 @@ async function externalAgentConfigReconcile(): Promise<{
   outcomes: Array<{ configId: string; from: string; to: string; changed: boolean }>
 }> {
   const { reconcileHostExternalAgentConfigs } =
-    await import("@/lib/ai/agent/external/host-config-service")
+    await import("@/lib/ai/agent/external/config/host-config-service")
   return { outcomes: await reconcileHostExternalAgentConfigs(await hostConfigDeps()) }
 }
 
@@ -3287,7 +3290,7 @@ async function externalAgentAdmitRun(payload: Record<string, unknown>): Promise<
       "external_agent_admit_run.stamp requires configId, revision and lifecycleGeneration"
     )
   }
-  const { admitExternalAgentRun } = await import("@/lib/ai/agent/external/run-admission")
+  const { admitExternalAgentRun } = await import("@/lib/ai/agent/external/policy/run-admission")
   const result = await admitExternalAgentRun(runId, {
     configId: stamp.configId,
     revision: stamp.revision,
@@ -3321,7 +3324,7 @@ async function externalAgentReleaseRun(
 ): Promise<{ released: boolean }> {
   const runId = payload.runId as string | undefined
   if (!runId) throw new Error("external_agent_release_run.runId is required")
-  const { releaseExternalAgentRun } = await import("@/lib/ai/agent/external/run-admission")
+  const { releaseExternalAgentRun } = await import("@/lib/ai/agent/external/policy/run-admission")
   await releaseExternalAgentRun(runId)
   return { released: true }
 }
@@ -3358,7 +3361,8 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
       "external_agent_run_turn.stamp requires configId, revision and lifecycleGeneration"
     )
   }
-  const { startRemoteExternalRun } = await import("@/lib/ai/agent/external/remote-run-service")
+  const { startRemoteExternalRun } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
   const result = await startRemoteExternalRun({
     runId,
     chatSessionId,
@@ -3390,7 +3394,8 @@ async function externalAgentCancelRun(
 ): Promise<{ cancelled: boolean }> {
   const runId = payload.runId as string | undefined
   if (!runId) throw new Error("external_agent_cancel_run.runId is required")
-  const { cancelRemoteExternalRun } = await import("@/lib/ai/agent/external/remote-run-service")
+  const { cancelRemoteExternalRun } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
   return {
     cancelled: await cancelRemoteExternalRun(runId, payload.callerDeviceId as string | undefined),
   }
@@ -3409,7 +3414,8 @@ async function externalAgentResolveDecision(
 ): Promise<{ resolved: boolean; reason?: string }> {
   const decisionId = payload.decisionId as string | undefined
   if (!decisionId) throw new Error("external_agent_resolve_decision.decisionId is required")
-  const { resolveRemoteDecision } = await import("@/lib/ai/agent/external/remote-run-service")
+  const { resolveRemoteDecision } =
+    await import("@/lib/ai/agent/external/runtimes/remote/remote-run-service")
   const outcome = await resolveRemoteDecision({
     decisionId,
     callerDeviceId: payload.callerDeviceId as string | undefined,

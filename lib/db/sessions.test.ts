@@ -16,6 +16,7 @@ import {
   assignSessionToFolder,
   listAgentThreadSessions,
   listScopedSessions,
+  listWorkspaceSessions,
   deleteSession,
   listSessionBranches,
   countBranchesAtMessage,
@@ -1273,6 +1274,44 @@ describe("workspace (project) scoping", () => {
     expect((await listScopedSessions()).map((s) => s.id)).toEqual([a2.id, a1.id])
     // The unscoped escape hatch still sees every workspace.
     expect((await listSessions()).map((s) => s.id).sort()).toEqual([a1.id, a2.id, b1.id].sort())
+  })
+
+  // A paired client's history arrives from the host with no workspace at all,
+  // and so does every conversation older than workspaces. Scoped by index
+  // alone, the list showed a paired client nothing.
+  it("listWorkspaceSessions adds the sessions of no workspace, newest-first", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const a1 = await createSession({ title: "a1" })
+    const b1 = await createSession({ title: "b1", projectId: "proj-B" })
+    const legacy = await createSession({ title: "legacy" })
+    await getDb().sessions.update(legacy.id, { projectId: undefined, updatedAt: a1.updatedAt + 5 })
+    const hostRow = await createSession({ title: "from host" })
+    await getDb().sessions.update(hostRow.id, { projectId: undefined, updatedAt: a1.updatedAt - 5 })
+
+    const rows = await listWorkspaceSessions("proj-A")
+    expect(rows.map((s) => s.id)).toEqual([legacy.id, a1.id, hostRow.id])
+    expect(rows.some((s) => s.id === b1.id)).toBe(false)
+    // Another workspace sees the same workspace-less rows, and only its own.
+    expect((await listWorkspaceSessions("proj-B")).map((s) => s.id)).toEqual([
+      legacy.id,
+      b1.id,
+      hostRow.id,
+    ])
+  })
+
+  it("listWorkspaceSessions re-emits in a liveQuery when a workspace-less row changes", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const legacy = await createSession({ title: "legacy" })
+    await getDb().sessions.update(legacy.id, { projectId: undefined })
+    const emissions: string[][] = []
+    const sub = Dexie.liveQuery(() => listWorkspaceSessions("proj-A")).subscribe({
+      next: (rows) => emissions.push(rows.map((r) => r.title)),
+    })
+    await waitUntil(() => emissions.length >= 1)
+    await getDb().sessions.update(legacy.id, { title: "renamed" })
+    await waitUntil(() => emissions.at(-1)?.[0] === "renamed")
+    sub.unsubscribe()
+    expect(emissions.at(-1)).toEqual(["renamed"])
   })
 })
 

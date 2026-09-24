@@ -9,6 +9,7 @@ import {
   createMcpServersProvider,
   createPluginsProvider,
   createScheduledTasksProvider,
+  withSharedNames,
 } from "./system"
 
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn(async () => []) }))
@@ -75,6 +76,47 @@ describe("system providers", () => {
     const expired = await provider.search(makeProviderInput("sweep"))
     expect(expired.items[0]!.extra?.archived).toBe(true)
     expect(expired.items[0]!.timestamp).toBeUndefined()
+  })
+
+  /**
+   * Two `demo-heartbeat` tasks ("Paused 18 hours ago" / "Paused Jul 13, 2026")
+   * were identical rows in the palette. Same identity line as the scheduler
+   * list: kind label + stable source id, only for the shared name.
+   */
+  it("scheduled tasks: tells same-named tasks apart by kind and source id", async () => {
+    const heartbeats = [
+      { id: "hb-a", name: "demo-heartbeat", type: "custom", status: "paused" },
+      {
+        id: "hb-b",
+        name: "demo-heartbeat",
+        description: "legacy",
+        type: "custom",
+        status: "paused",
+      },
+      { id: "solo", name: "demo-report", type: "custom", status: "paused" },
+    ] as unknown as ScheduledTask[]
+    const provider = createScheduledTasksProvider({ listTasks: async () => heartbeats })
+    const out = await provider.search(makeProviderInput("demo"))
+    const byId = new Map(out.items.map((item) => [item.id, item]))
+    expect(byId.get("scheduled-task:hb-a")!.subtitle).toBe("scheduler.kindFilter.app · hb-a")
+    expect(byId.get("scheduled-task:hb-b")!.subtitle).toBe(
+      "scheduler.kindFilter.app · hb-b · legacy"
+    )
+    // A unique name keeps the plain row.
+    expect(byId.get("scheduled-task:solo")!.subtitle).toBeUndefined()
+    // Shared across the whole list, not just the matched slice.
+    const one = await provider.search(makeProviderInput("hb-b"))
+    expect(one.items.map((i) => i.id)).toEqual(["scheduled-task:hb-b"])
+    expect(one.items[0]!.subtitle).toBe("scheduler.kindFilter.app · hb-b · legacy")
+  })
+
+  it("withSharedNames flags only the shared names", () => {
+    const rows = withSharedNames([
+      { id: "1", name: "a" },
+      { id: "2", name: "a" },
+      { id: "3", name: "b" },
+    ] as unknown as ScheduledTask[])
+    expect(rows.map((row) => row.sharesName)).toEqual([true, true, false])
   })
 
   it("plugins: enabled label, source keyword", async () => {

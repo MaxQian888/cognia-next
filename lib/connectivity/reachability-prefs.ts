@@ -22,7 +22,7 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.sync
@@ -56,6 +56,18 @@ export const DEFAULT_REACHABILITY_PREFS: ReachabilityPrefs = {
   mdnsEnabled: false,
 }
 
+// Serialize writes from this renderer so different settings blocks cannot
+// read the same record and overwrite each other's changes.
+let pendingWrite: Promise<void> = Promise.resolve()
+function enqueueWrite<T>(write: () => Promise<T>): Promise<T> {
+  const next = pendingWrite.then(write)
+  pendingWrite = next.then(
+    () => undefined,
+    () => undefined
+  )
+  return next
+}
+
 export async function loadReachabilityPrefs(): Promise<ReachabilityPrefs> {
   if (!isTauri()) return { ...DEFAULT_REACHABILITY_PREFS }
   try {
@@ -76,7 +88,7 @@ export async function loadReachabilityPrefs(): Promise<ReachabilityPrefs> {
 export async function saveReachabilityPrefs(prefs: ReachabilityPrefs): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await transport.call<void>("companion_reachability_set", { config: prefs })
+    await enqueueWrite(() => transport.call<void>("companion_reachability_set", { config: prefs }))
     return true
   } catch (err) {
     log.warn("reachability prefs write failed", { err })
@@ -90,13 +102,17 @@ export async function saveReachabilityPrefs(prefs: ReachabilityPrefs): Promise<b
  * Read-modify-write rather than a partial write because the Rust side stores
  * one record: sending only the changed key would reset every other preference
  * to its default. Returns the merged value that was written (or would have
- * been, off-desktop).
+ * been, off-desktop). On desktop, read and write failures reject: the display
+ * fallback from `loadReachabilityPrefs` must never be written over real data.
  */
 export async function patchReachabilityPrefs(
   patch: Partial<ReachabilityPrefs>
 ): Promise<ReachabilityPrefs> {
-  const current = await loadReachabilityPrefs()
-  const next = { ...current, ...patch }
-  await saveReachabilityPrefs(next)
-  return next
+  if (!isTauri()) return { ...DEFAULT_REACHABILITY_PREFS, ...patch }
+  return enqueueWrite(async () => {
+    const current = await transport.call<ReachabilityPrefs>("companion_reachability_get")
+    const next = { ...DEFAULT_REACHABILITY_PREFS, ...current, ...patch }
+    await transport.call<void>("companion_reachability_set", { config: next })
+    return next
+  })
 }

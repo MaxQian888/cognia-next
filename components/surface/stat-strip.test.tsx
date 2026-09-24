@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { StatStrip, type StatStripItem } from "./stat-strip"
 
@@ -65,5 +65,36 @@ describe("StatStrip", () => {
   it("separates a bad number from a merely notable one", () => {
     render(<StatStrip stats={[stat("caps", { value: 3, tone: "critical" })]} />)
     expect(screen.getByText("3").className).toContain("text-red-600")
+  })
+
+  it("keeps cells without an action as plain, non-interactive text", () => {
+    render(<StatStrip stats={[stat("caps")]} />)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  it("makes a cell with an action a disclosure button that keeps its number in the name", () => {
+    const onSelect = jest.fn()
+    render(
+      <StatStrip
+        stats={[
+          stat("agents", {
+            label: "Agents working",
+            value: 2,
+            action: {
+              onSelect,
+              label: "Show which agents",
+              expanded: false,
+              controls: "agents-region",
+            },
+          }),
+        ]}
+      />
+    )
+    const button = screen.getByRole("button", { name: /2\s*Agents working\s*Show which agents/ })
+    expect(button).toHaveAttribute("aria-expanded", "false")
+    expect(button).toHaveAttribute("aria-controls", "agents-region")
+    expect(button).toHaveAttribute("data-testid", "stat-agents")
+    fireEvent.click(button)
+    expect(onSelect).toHaveBeenCalledTimes(1)
   })
 })

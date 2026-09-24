@@ -50,6 +50,7 @@ import {
   toggleTerminalAction,
   type MenuActionId,
 } from "@/lib/desktop/menu-actions"
+import { takeNativeMenuClaim } from "@/lib/desktop/menu-focus-claims"
 
 const log = loggers.ui
 
@@ -100,6 +101,13 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
     const unlisteners: Array<() => void> = []
 
     const handleId = async (id: MenuActionId): Promise<void> => {
+      // A focused surface (the project editor) pressed this accelerator's
+      // chord and owns it there — run its action instead of the app one.
+      const claimed = takeNativeMenuClaim(id)
+      if (claimed) {
+        claimed()
+        return
+      }
       const saveSettings = useSettingsStore.getState().save
       const settings = useSettingsStore.getState().settings
       const reduceMotionCurrent = settings?.reduceMotion ?? false

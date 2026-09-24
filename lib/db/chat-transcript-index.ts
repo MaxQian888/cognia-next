@@ -40,7 +40,6 @@ export async function commitTranscriptIndexPage({
   now?: number
 }): Promise<void> {
   const db = getDb()
-  const state = await db.chatTranscriptIndexState.get(sessionId)
   const durableItems = items.filter((item) => item.kind !== "active-turn")
   const rows: ChatTurnSummaryRow[] = durableItems.map((item) => ({
     sessionId,
@@ -52,12 +51,15 @@ export async function commitTranscriptIndexPage({
     item,
     updatedAt: now,
   }))
-  const indexedBeforeCreatedAt = items.reduce(
-    (oldest, item) => Math.min(oldest, item.startedAt),
-    state?.revision === revision ? state.indexedBeforeCreatedAt : Number.MAX_SAFE_INTEGER
-  )
-
   await db.transaction("rw", db.chatTurnSummaries, db.chatTranscriptIndexState, async () => {
+    const state = await db.chatTranscriptIndexState.get(sessionId)
+    // A delayed page must never roll the durable recovery cursor backwards.
+    if (state && state.revision > revision) return
+    const sameRevision = state?.revision === revision
+    const indexedBeforeCreatedAt = items.reduce(
+      (oldest, item) => Math.min(oldest, item.startedAt),
+      sameRevision ? state.indexedBeforeCreatedAt : Number.MAX_SAFE_INTEGER
+    )
     if (state && state.revision !== revision) {
       await db.chatTurnSummaries.where("sessionId").equals(sessionId).delete()
     }
@@ -67,7 +69,7 @@ export async function commitTranscriptIndexPage({
       revision,
       indexedBeforeCreatedAt:
         indexedBeforeCreatedAt === Number.MAX_SAFE_INTEGER ? 0 : indexedBeforeCreatedAt,
-      complete,
+      complete: complete || (sameRevision && state.complete),
       updatedAt: now,
     })
   })

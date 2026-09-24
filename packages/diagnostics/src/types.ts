@@ -313,6 +313,13 @@ export type DiagnosticCode =
    * whichever device is running the turn that holds it.
    */
   | "workspaceBusy"
+  /**
+   * An external agent's process id is still registered to a live process
+   * (another window of this conversation, a turn still running). The adapter
+   * already reclaims ids left behind by a dead renderer, so reaching this means
+   * a real holder: the remedy is to wait, never to reconfigure the agent.
+   */
+  | "agentProcessBusy"
   | "workspaceBundleFailed"
   | "environmentUnavailable"
   | "environmentSetupFailed"
@@ -328,6 +335,20 @@ export type DiagnosticCode =
   | "promptBlockedByPlugin"
   | "externalAgentNotSelected"
   | "externalAgentNotReady"
+  /**
+   * The turn was addressed with a leading `@codex` / `@claude` / `@<Squad
+   * member>` (`lib/chat/turn-route/`) and that runtime cannot take it here: no
+   * such agent is set up, it is blocked, or the member is gone. Refused before
+   * the user message is written — an addressed turn never quietly runs on the
+   * conversation's own runtime instead.
+   */
+  | "turnRouteUnavailable"
+  /**
+   * An addressed turn was sent while this conversation's turn was still
+   * running. A live follow-up can only steer the runtime that is answering; it
+   * cannot move the turn to another one.
+   */
+  | "turnRouteWhileBusy"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

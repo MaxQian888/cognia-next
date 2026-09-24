@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 const probeVendors = jest.fn()
 jest.mock("@/lib/agent-migration/probe", () => ({ probeVendors: () => probeVendors() }))
 
-// `@/lib/ai/agent/external/presets` is deliberately NOT mocked. It used to be,
+// `@/lib/ai/agent/external/config/presets` is deliberately NOT mocked. It used to be,
 // with a hand-written table containing a `pi` key that does not exist in the
 // real preset list, and that fiction is what let the Pi bug below survive a
 // green test. The real module is two checked-in JSON files and types, so it is
@@ -16,7 +16,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector({ settings: { ocrSettings } }),
 }))
 
-import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/presets"
+import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/config/presets"
 import { useMachineScan } from "./use-machine-scan"
 
 beforeEach(() => {

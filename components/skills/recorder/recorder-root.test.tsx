@@ -128,7 +128,7 @@ import { useRecorderStore } from "@/stores/skills/recorder-store"
 import type { RecordedStep } from "@/lib/skills/recording/types"
 
 import { SkillRecorderRoot } from "./recorder-root"
-import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 
 const RECORDING = "0191b0e2-1c3a-7a11-9c1a-4d2f6b8c9e01"
 

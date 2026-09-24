@@ -12,6 +12,7 @@
  * Rust side.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { transport } from "@/lib/tauri"
 import { DEFAULT_CONSENT_TIMEOUT_MS } from "./consent-durations"
 
@@ -76,7 +77,8 @@ export async function listenUiaEvents(
   handler: (payload: UiaEventPayload) => void
 ): Promise<() => void> {
   const { listen } = await import("@tauri-apps/api/event")
-  return listen<UiaEventPayload>(UIA_EVENT_NAME, (event) => handler(event.payload))
+  const off = await listen<UiaEventPayload>(UIA_EVENT_NAME, (event) => handler(event.payload))
+  return () => safeUnlisten(off)
 }
 
 export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox"

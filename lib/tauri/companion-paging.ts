@@ -83,12 +83,15 @@ export async function collectPages<T>(
     const page = await fetchPage(token)
     items.push(...page.items)
     if (items.length >= maxItems) {
-      if (options.requireComplete && (items.length > maxItems || page.nextPageToken)) {
+      if (
+        options.requireComplete &&
+        (items.length > maxItems || page.nextPageToken !== undefined)
+      ) {
         throw new Error("Incomplete collection: item limit reached")
       }
       return items.slice(0, maxItems)
     }
-    if (!page.nextPageToken) return items
+    if (page.nextPageToken === undefined) return items
     if (options.requireComplete && seenTokens.has(page.nextPageToken)) {
       throw new Error("Incomplete collection: repeated page token")
     }

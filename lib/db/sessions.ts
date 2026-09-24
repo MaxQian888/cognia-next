@@ -12,7 +12,7 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
-import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { revokeClaimsForDeletedSession } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
@@ -93,6 +93,39 @@ export async function listScopedSessions(projectId?: string): Promise<ChatSessio
     .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
     .reverse()
     .toArray()
+}
+
+/**
+ * The sessions a workspace's conversation list shows: its own, plus every
+ * session that belongs to no workspace at all.
+ *
+ * A session without a `projectId` is not "another workspace's". Two kinds
+ * exist: conversations that predate workspace isolation, and — the whole
+ * history of a paired web or phone client — rows materialized from the host's
+ * state stream, which never carries a workspace (`lib/sync/host-state-service`).
+ * `listScopedSessions` reads through `[projectId+updatedAt]`, an index those
+ * rows are not in, so a list scoped by it showed a paired client no
+ * conversations at all, and a long-time user none of their oldest. A
+ * conversation of no workspace is shown in whichever workspace is open —
+ * the same reading `folderAcceptsSession` gives a missing `projectId`.
+ *
+ * The unscoped rows have no index to be found through, so they cost a table
+ * scan; the scan is what the unscoped `listSessions` does anyway. Both reads
+ * start before the first `await`, for the liveQuery zone-safety reason
+ * `listScopedSessions` spells out. Newest-first, like the scoped read.
+ */
+export async function listWorkspaceSessions(projectId: string): Promise<ChatSession[]> {
+  const db = getDb()
+  const [scoped, unscoped] = await Promise.all([
+    db.sessions
+      .where("[projectId+updatedAt]")
+      .between([projectId, Dexie.minKey], [projectId, Dexie.maxKey])
+      .reverse()
+      .toArray(),
+    db.sessions.filter((session) => !session.projectId).toArray(),
+  ])
+  if (unscoped.length === 0) return scoped
+  return [...scoped, ...unscoped].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /**

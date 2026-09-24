@@ -17,9 +17,16 @@ import {
   readUsageDelta,
   type LlmConfig,
 } from "./llm"
-import { generateText } from "ai"
+import { generateText, streamText } from "ai"
 import { createAzure } from "@ai-sdk/azure"
 import { createOpenAI } from "@ai-sdk/openai"
+
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
 
 jest.mock("ai", () => ({
   generateText: jest.fn(async ({ model }) => ({
@@ -436,5 +443,57 @@ describe("readUsageDelta", () => {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     })
+  })
+})
+
+// The REAL `streamText` on the webview runtime renderer callers reach this
+// client from (`renderer-llm-client`). A failed or stopped stream must not leak
+// the SDK's tracing `completion` promise as an unhandled rejection (see
+// `webview-safe-telemetry.ts`).
+describe("createLlmClient.stream with the real AI SDK (webview runtime)", () => {
+  const actualAi = jest.requireActual<typeof import("ai")>("ai")
+  let restoreRuntime: () => void
+  beforeEach(() => {
+    restoreRuntime = simulateWebviewRuntime()
+    ;(streamText as jest.Mock).mockImplementationOnce(actualAi.streamText)
+  })
+  afterEach(() => restoreRuntime())
+
+  /** An OpenAI-family client whose every entrypoint hands back `model`. */
+  function clientServing(model: unknown) {
+    ;(createOpenAI as jest.Mock).mockImplementationOnce(() =>
+      Object.assign(() => model, { chat: () => model, responses: () => model })
+    )
+    return createLlmClient({ provider: "openai", model: "gpt-test", apiKey: "k" })
+  }
+
+  it("ends a stream cut off mid-response without leaking an unhandled rejection", async () => {
+    // The SDK's default `onError` logs the stream error.
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+    const client = clientServing(truncatedStreamModel())
+
+    const deltas: string[] = []
+    for await (const delta of client.stream("hi")) deltas.push(delta)
+    await drainRejectionReports()
+
+    expect(deltas).toEqual([])
+    expect(client.getUsageSnapshot()).toMatchObject({ inputTokens: 0, outputTokens: 0 })
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it("stops on a mid-stream abort without leaking an unhandled rejection", async () => {
+    const client = clientServing(abortableStreamModel())
+    const abort = new AbortController()
+
+    const deltas: string[] = []
+    for await (const delta of client.stream("hi", { abortSignal: abort.signal })) {
+      deltas.push(delta)
+      abort.abort()
+    }
+    await drainRejectionReports()
+
+    expect(abort.signal.aborted).toBe(true)
+    expect(deltas).toEqual(["partial answer"])
   })
 })

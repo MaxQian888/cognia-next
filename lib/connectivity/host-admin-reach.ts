@@ -104,8 +104,9 @@ export function resolveHostAdminReach(
 ): HostAdminReach {
   switch (context.profile) {
     case "desktop":
-    case "headless":
       return AVAILABLE
+    case "headless":
+      return requirement === "desktop-shell" ? blocked("needs-desktop-shell") : AVAILABLE
     case "web-standalone":
       return blocked("no-host")
     case "mobile-companion":

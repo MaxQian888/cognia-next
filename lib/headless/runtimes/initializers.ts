@@ -171,8 +171,8 @@ registerHeadlessRuntime({
   hosts: ["brain"],
   start: async () => {
     const [{ configureAgentTeamRuntime }, { buildAgentTeamRuntimeDeps }] = await Promise.all([
-      import("@/lib/ai/agent/agent-team"),
-      import("@/lib/ai/agent/agent-team-runtime-deps"),
+      import("@/lib/ai/agent/team/agent-team"),
+      import("@/lib/ai/agent/team/agent-team-runtime-deps"),
     ])
     configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
   },
@@ -189,9 +189,9 @@ registerHeadlessRuntime({
       { setAcpDynamicMcpHostController },
       { createAcpDynamicMcpHostController },
     ] = await Promise.all([
-      import("@/lib/ai/agent/external/rehydrate"),
-      import("@/lib/ai/agent/external/acp-client"),
-      import("@/lib/ai/agent/external/acp-dynamic-mcp-controller"),
+      import("@/lib/ai/agent/external/session/rehydrate"),
+      import("@/lib/ai/agent/external/runtimes/acp/acp-client"),
+      import("@/lib/ai/agent/external/runtimes/acp/acp-dynamic-mcp-controller"),
     ])
     setAcpDynamicMcpHostController(createAcpDynamicMcpHostController())
     const stopRehydration = startExternalAgentRehydration()

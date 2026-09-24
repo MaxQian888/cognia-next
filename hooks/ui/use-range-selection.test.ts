@@ -128,4 +128,25 @@ describe("useRangeSelection", () => {
     act(() => result.current.handleClick("c", SHIFT))
     expect(result.current.handleClick).toBe(before)
   })
+
+  it("keeps handleClick / selectAll stable when the order changes, and reads the new order", () => {
+    // The list model hands over a fresh `orderedIds` array on every session
+    // write; a callback depending on it gave every row a new `onSelect` each
+    // time. The handlers now read the order at call time.
+    const { result, rerender } = renderHook(
+      ({ orderedIds }: { orderedIds: readonly string[] }) => useRangeSelection(orderedIds),
+      { initialProps: { orderedIds: ["a", "b", "c"] as readonly string[] } }
+    )
+    const { handleClick, selectAll } = result.current
+    rerender({ orderedIds: ["c", "a", "b", "d"] })
+    expect(result.current.handleClick).toBe(handleClick)
+    expect(result.current.selectAll).toBe(selectAll)
+    // A Shift range spans the order on screen now, not the one at mount.
+    act(() => result.current.handleClick("a", PLAIN))
+    act(() => result.current.handleClick("d", SHIFT))
+    expect(ids(result.current.selected)).toEqual(["a", "b", "d"])
+    act(() => result.current.selectAll())
+    expect(ids(result.current.selected)).toEqual(["a", "b", "c", "d"])
+    expect(result.current.anchorId).toBe("d")
+  })
 })

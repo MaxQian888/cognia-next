@@ -8,7 +8,7 @@ import {
   handleTeamTaskMove,
 } from "./agent-team-write-handlers"
 
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     pause: jest.fn(async () => {}),
     resume: jest.fn(async () => {}),

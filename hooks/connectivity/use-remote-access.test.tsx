@@ -14,17 +14,56 @@ let settings: Record<string, unknown> | null = null
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: { settings: unknown }) => unknown) => selector({ settings }),
 }))
-jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() }, isTauri: () => false }))
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: jest.fn() },
+  localTransport: { call: jest.fn() },
+  isTauri: () => profile === "desktop",
+}))
+import { localTransport, transport } from "@/lib/tauri"
 // The probe is injected in every case below. Mocking the module keeps the
 // platform-fetch import chain (keyring, proxy) out of a hook test.
 jest.mock("@/lib/signaling/relay-probe", () => ({ probeRelay: jest.fn() }))
 
 describe("useRemoteAccess", () => {
   beforeEach(() => {
+    jest.clearAllMocks()
     profile = "desktop"
     settings = null
     reach.mockReturnValue({ available: true })
   })
+
+  it("reads this desktop's connectivity independently of its selected remote host", async () => {
+    ;(localTransport.call as jest.Mock).mockImplementation(async (name) => {
+      if (name === "companion_signaling_status")
+        return { enabled: true, signalingUrl: "wss://local/signaling" }
+      if (name === "companion_tunnel_current")
+        return { publicUrl: "https://local-tunnel", localUrl: "http://localhost" }
+      return { networks: [] }
+    })
+    const { result } = renderHook(() => useRemoteAccess({ pollMs: 0, meshPollMs: 0 }))
+    await waitFor(() => expect(result.current.relay.signalingUrl).toBe("wss://local/signaling"))
+    expect(result.current.tunnel.publicUrl).toBe("https://local-tunnel")
+    expect(transport.call).not.toHaveBeenCalled()
+  })
+
+  it.each(["mobile-companion", "cloud-companion"])(
+    "keeps %s signaling on its paired host",
+    async (nextProfile) => {
+      profile = nextProfile
+      reach.mockImplementation((name) =>
+        name === "companion_signaling_status"
+          ? { available: true }
+          : { available: false, block: "needs-desktop-shell" }
+      )
+      ;(transport.call as jest.Mock).mockResolvedValue({
+        enabled: true,
+        signalingUrl: "wss://paired/signaling",
+      })
+      const { result } = renderHook(() => useRemoteAccess({ pollMs: 0, meshPollMs: 0 }))
+      await waitFor(() => expect(result.current.relay.signalingUrl).toBe("wss://paired/signaling"))
+      expect(localTransport.call).not.toHaveBeenCalled()
+    }
+  )
 
   it("reads the Host's relay switch and URL, the tunnel and the mesh, and probes on demand", async () => {
     const probe = jest.fn(async () => ({

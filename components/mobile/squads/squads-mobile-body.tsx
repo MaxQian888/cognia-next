@@ -33,6 +33,7 @@ import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { SquadInspector } from "@/components/squads/squad-inspector"
 import { SquadListPane } from "@/components/squads/squad-list-pane"
+import { useBuiltInTeams } from "@/components/squads/built-in-teams"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useCreateSquad } from "@/hooks/squads/use-create-squad"
@@ -47,6 +48,7 @@ export interface SquadsMobileBodyProps {
 export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
   const t = useTranslations("squads.fleet")
   const fleet = useSquadFleet({ query: route.query, filter: route.filter })
+  const builtIns = useBuiltInTeams()
   const teams = useAgentTeamStore((s) => s.teams)
   const tasks = useAgentTeamStore((s) => s.tasks)
   const teammates = useAgentTeamStore((s) => s.teammates)
@@ -116,7 +118,12 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
         </TabsList>
 
         <TabsContent value="squads" className="min-h-0 flex-1">
-          <SquadListPane fleet={fleet} route={route} onCreate={onCreate} />
+          <SquadListPane
+            fleet={fleet}
+            route={route}
+            onCreate={onCreate}
+            builtInTeams={builtIns.teams}
+          />
         </TabsContent>
 
         <TabsContent value="runs" className="min-h-0 flex-1 overflow-hidden">

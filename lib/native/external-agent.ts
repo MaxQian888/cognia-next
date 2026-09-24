@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
 import type { SandboxPlacement } from "@/types/sandbox/environment-spec"
 
@@ -255,44 +256,50 @@ export async function acpTerminalList(): Promise<string[]> {
 // Event Listeners
 // ============================================================================
 
+async function listenExternalAgentEvent<T>(
+  event: string,
+  callback: (payload: T) => void
+): Promise<UnlistenFn> {
+  const unlisten = await listen<T>(event, (message) => callback(message.payload))
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    safeUnlisten(unlisten)
+  }
+}
+
 export async function onExternalAgentSpawn(
   callback: (event: ExternalAgentSpawnEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ExternalAgentSpawnEvent>("external-agent://spawn", (event) => {
-    callback(event.payload)
-  })
+  return listenExternalAgentEvent<ExternalAgentSpawnEvent>("external-agent://spawn", callback)
 }
 
 export async function onExternalAgentStdout(
   callback: (event: ExternalAgentStdoutEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ExternalAgentStdoutEvent>("external-agent://stdout", (event) => {
-    callback(event.payload)
-  })
+  return listenExternalAgentEvent<ExternalAgentStdoutEvent>("external-agent://stdout", callback)
 }
 
 export async function onExternalAgentExit(
   callback: (event: ExternalAgentExitEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ExternalAgentExitEvent>("external-agent://exit", (event) => {
-    callback(event.payload)
-  })
+  return listenExternalAgentEvent<ExternalAgentExitEvent>("external-agent://exit", callback)
 }
 
 export async function onExternalAgentStateChange(
   callback: (event: ExternalAgentStateChangeEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ExternalAgentStateChangeEvent>("external-agent://state-change", (event) => {
-    callback(event.payload)
-  })
+  return listenExternalAgentEvent<ExternalAgentStateChangeEvent>(
+    "external-agent://state-change",
+    callback
+  )
 }
 
 export async function onExternalAgentStderr(
   callback: (event: ExternalAgentStderrEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<ExternalAgentStderrEvent>("external-agent://stderr", (event) => {
-    callback(event.payload)
-  })
+  return listenExternalAgentEvent<ExternalAgentStderrEvent>("external-agent://stderr", callback)
 }
 
 // ============================================================================

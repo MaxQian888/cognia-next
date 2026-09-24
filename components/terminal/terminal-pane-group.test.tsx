@@ -4,6 +4,10 @@
 
 import { forwardRef, useImperativeHandle } from "react"
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -164,5 +168,27 @@ describe("TerminalPaneGroup", () => {
     const closeButtons = screen.getAllByTestId("terminal-pane-close")
     fireEvent.click(closeButtons[1]!) // the "b" pane
     expect(onClosePane).toHaveBeenCalledWith("b")
+  })
+
+  it("keeps the pane close button reachable without a hover", () => {
+    useTerminalStore.getState().registerSession(info("a"))
+    useTerminalStore.getState().registerSession(info("b"))
+    useTerminalStore.getState().addPaneToGroup("a", "b")
+    const onClosePane = jest.fn()
+    render(<TerminalPaneGroup anchorId="a" onFocusedChange={jest.fn()} onClosePane={onClosePane} />)
+    const close = screen.getAllByRole("button", { name: "closePane" })[0]!
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.controlBase) {
+      expect(close).toHaveClass(variant)
+    }
+    // The pane is not a `group`: the button keeps revealing on its own hover.
+    expect(close).toHaveClass("hover:opacity-100")
+    expect(close).not.toHaveClass("group-hover:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(close).not.toHaveClass(forbidden)
+    }
+    close.focus()
+    expect(close).toHaveFocus()
+    fireEvent.click(close)
+    expect(onClosePane).toHaveBeenCalledWith("a")
   })
 })

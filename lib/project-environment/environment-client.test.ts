@@ -173,6 +173,17 @@ describe("declarationReader", () => {
     )
   })
 
+  it("enforces the UTF-8 byte limit for multilingual declarations", async () => {
+    const reader = declarationReader({
+      ...result,
+      files: [{ ...result.files[0], contents: "中😀" }],
+    })
+    await expect(reader("/repo", ".cognia/workspace.json", 6)).rejects.toThrow(
+      "7 bytes, over the 6 limit"
+    )
+    await expect(reader("/repo", ".cognia/workspace.json", 7)).resolves.toBe("中😀")
+  })
+
   // The resolver walks its candidates in order and matches a not-found message
   // to mean "try the next one". A reader that rejected differently would turn
   // a repository with only a devcontainer into an unreadable one.

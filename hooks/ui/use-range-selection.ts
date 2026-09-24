@@ -48,6 +48,16 @@ export function useRangeSelection(orderedIds: readonly string[]): UseRangeSelect
   useEffect(() => {
     rawAnchorRef.current = rawAnchor
   }, [rawAnchor])
+  // Same reason, and the bigger one: `orderedIds` is a fresh array whenever
+  // the list model recomputes — every session write that changes a row — so a
+  // callback depending on it handed every row a new `onSelect` on each of
+  // them. The handlers read the order at call time instead. An effect is late
+  // enough: React flushes pending passive effects before it dispatches the
+  // next discrete event, so a click always sees the order that was painted.
+  const orderedIdsRef = useRef(orderedIds)
+  useEffect(() => {
+    orderedIdsRef.current = orderedIds
+  }, [orderedIds])
 
   // Externally-visible selection: drop entries that are no longer in
   // `orderedIds`. Doing this in a `useMemo` avoids the "setState in effect"
@@ -75,69 +85,66 @@ export function useRangeSelection(orderedIds: readonly string[]): UseRangeSelect
     return orderedIds.includes(rawAnchor) ? rawAnchor : null
   }, [rawAnchor, orderedIds])
 
-  const handleClick = useCallback(
-    (id: string, e: RangeSelectionMouseEvent) => {
-      const ctrl = e.ctrlKey || e.metaKey
-      const shift = e.shiftKey
-      const ids = orderedIds
-      setLastInteractionWasModified(ctrl || shift)
+  const handleClick = useCallback((id: string, e: RangeSelectionMouseEvent) => {
+    const ctrl = e.ctrlKey || e.metaKey
+    const shift = e.shiftKey
+    const ids = orderedIdsRef.current
+    setLastInteractionWasModified(ctrl || shift)
 
-      if (shift) {
-        // Range from the current visible anchor → id (inclusive). The
-        // anchor is read through a ref so the click handler doesn't have
-        // to depend on `rawAnchor` (which would invalidate it after every
-        // click and break SessionRow memoization).
-        const currentAnchor = rawAnchorRef.current
-        const visibleAnchor =
-          currentAnchor !== null && ids.includes(currentAnchor) ? currentAnchor : null
-        if (visibleAnchor === null) {
-          setRawSelected(new Set([id]))
-          setRawAnchor(id)
-          return
-        }
-        const a = ids.indexOf(visibleAnchor)
-        const b = ids.indexOf(id)
-        if (a === -1 || b === -1) {
-          setRawSelected(new Set([id]))
-          setRawAnchor(id)
-          return
-        }
-        const [lo, hi] = a <= b ? [a, b] : [b, a]
-        const range = ids.slice(lo, hi + 1)
-        if (ctrl) {
-          // Additive Shift+Ctrl: union with the current selection.
-          setRawSelected((prev) => {
-            const next = new Set(prev)
-            for (const rid of range) next.add(rid)
-            return next
-          })
-          return
-        }
-        setRawSelected(new Set(range))
-        // Plain Shift leaves the anchor in place so successive Shift-clicks
-        // continue to extend from the original anchor (Explorer behavior).
-        return
-      }
-
-      if (ctrl) {
-        setRawSelected((prev) => {
-          const next = new Set(prev)
-          if (next.has(id)) next.delete(id)
-          else next.add(id)
-          return next
-        })
+    if (shift) {
+      // Range from the current visible anchor → id (inclusive). The
+      // anchor is read through a ref so the click handler doesn't have
+      // to depend on `rawAnchor` (which would invalidate it after every
+      // click and break SessionRow memoization).
+      const currentAnchor = rawAnchorRef.current
+      const visibleAnchor =
+        currentAnchor !== null && ids.includes(currentAnchor) ? currentAnchor : null
+      if (visibleAnchor === null) {
+        setRawSelected(new Set([id]))
         setRawAnchor(id)
         return
       }
+      const a = ids.indexOf(visibleAnchor)
+      const b = ids.indexOf(id)
+      if (a === -1 || b === -1) {
+        setRawSelected(new Set([id]))
+        setRawAnchor(id)
+        return
+      }
+      const [lo, hi] = a <= b ? [a, b] : [b, a]
+      const range = ids.slice(lo, hi + 1)
+      if (ctrl) {
+        // Additive Shift+Ctrl: union with the current selection.
+        setRawSelected((prev) => {
+          const next = new Set(prev)
+          for (const rid of range) next.add(rid)
+          return next
+        })
+        return
+      }
+      setRawSelected(new Set(range))
+      // Plain Shift leaves the anchor in place so successive Shift-clicks
+      // continue to extend from the original anchor (Explorer behavior).
+      return
+    }
 
-      setRawSelected(new Set([id]))
+    if (ctrl) {
+      setRawSelected((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
       setRawAnchor(id)
-    },
-    [orderedIds]
-  )
+      return
+    }
+
+    setRawSelected(new Set([id]))
+    setRawAnchor(id)
+  }, [])
 
   const selectAll = useCallback(() => {
-    const ids = orderedIds
+    const ids = orderedIdsRef.current
     setRawSelected((prev) => {
       if (prev.size === ids.length && ids.every((id) => prev.has(id))) return prev
       return new Set(ids)
@@ -147,7 +154,7 @@ export function useRangeSelection(orderedIds: readonly string[]): UseRangeSelect
       return prev === next ? prev : next
     })
     setLastInteractionWasModified((prev) => (prev === true ? prev : true))
-  }, [orderedIds])
+  }, [])
 
   // Guarded with previous-value setters so a caller that invokes `clear()`
   // when state is already empty (e.g. the channel-list's mount-time effect)

@@ -1,9 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 const logInfo = jest.fn()
 
@@ -19,7 +20,23 @@ jest.mock("next-intl", () => ({
   // Literal, not a hoisted const: jest.mock factories run before module-scope
   // bindings are initialized (TDZ).
   useNow: () => new Date(1_750_000_000_000),
+  useTimeZone: () => "UTC",
 }))
+
+// The real title component, wrapped to count how often each row renders it —
+// a row that re-renders re-renders its title.
+const mockTitleRenders = jest.fn<void, [string]>()
+jest.mock("@/components/chat/ui/hover-scroll-text", () => {
+  const actual = jest.requireActual<typeof import("@/components/chat/ui/hover-scroll-text")>(
+    "@/components/chat/ui/hover-scroll-text"
+  )
+  return {
+    HoverScrollText: (props: Parameters<typeof actual.HoverScrollText>[0]) => {
+      mockTitleRenders(props.text)
+      return <actual.HoverScrollText {...props} />
+    },
+  }
+})
 
 jest.mock("@cognia/logging", () => ({
   loggers: {
@@ -34,11 +51,15 @@ jest.mock("@cognia/logging", () => ({
 // The branch count behind the delete confirm is a Dexie live query. Stubbed so
 // the count is a test input rather than a seeded database.
 let branchCount = 0
+let mockBranchQueries = 0
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => branchCount,
+  useLiveQuery: () => {
+    mockBranchQueries += 1
+    return branchCount
+  },
 }))
 
-import { SessionRow } from "./session-row"
+import { SessionRow, sessionRowPropsEqual } from "./session-row"
 
 const baseSession: ChatSession = {
   id: "s-1",
@@ -50,6 +71,8 @@ const baseSession: ChatSession = {
 
 beforeEach(() => {
   logInfo.mockReset()
+  mockTitleRenders.mockReset()
+  mockBranchQueries = 0
 })
 
 function setup(overrides: Partial<Parameters<typeof SessionRow>[0]> = {}) {
@@ -173,15 +196,22 @@ test("focused rows carry data-focused for the keyboard-nav ring", () => {
 test("compact density tightens the row padding", () => {
   const { container } = setup({ density: "compact" })
   expect(container.querySelector("li")).toHaveAttribute("data-density", "compact")
-  // The padding lives on the select button so it stays part of the hit target.
-  expect(screen.getByRole("button", { name: /Hello/ }).className).toContain("py-1")
+  // The padding lives on the select button so it stays part of the hit target,
+  // and follows the appearance density's row padding: half of it compact
+  // (0.25rem — the old `py-1` — at the default).
+  expect(screen.getByRole("button", { name: /Hello/ }).className).toContain(
+    "py-[calc(var(--density-row-padding,0.5rem)/2)]"
+  )
   expect(container.querySelector("li")?.className).not.toMatch(/\bpy-/)
 })
 
 test("comfortable density keeps the taller row padding on the select button", () => {
   const { container } = setup({ density: "comfortable" })
   expect(container.querySelector("li")).toHaveAttribute("data-density", "comfortable")
-  expect(screen.getByRole("button", { name: /Hello/ }).className).toContain("py-2")
+  // All of `--density-row-padding` (0.5rem — the old `py-2` — at the default).
+  expect(screen.getByRole("button", { name: /Hello/ }).className).toContain(
+    "py-[var(--density-row-padding,0.5rem)]"
+  )
 })
 
 test("shows the message preview line only when showPreview is on", () => {
@@ -284,6 +314,15 @@ test("applies the multi-select visual when `selected` is true", () => {
   const li = container.querySelector("li")
   expect(li?.getAttribute("data-selected")).toBe("true")
   expect(li?.className).toMatch(/ring-/)
+})
+
+test("draws the selection and keyboard rings inset, so a clipping section cannot cut them", () => {
+  // The collapsible section bodies clip overflow for their animation; an
+  // outset ring on a section's first or last row was cut off there.
+  const { container } = setup({ selected: true, focused: true })
+  const li = container.querySelector("li")!
+  expect(li.className).toContain("ring-inset")
+  expect(li.className).toContain("ring-2")
 })
 
 test("renders an insertion cue at the pending drop edge", () => {
@@ -466,6 +505,18 @@ test("Archive menu item is hidden when no onArchive callback is provided", async
   expect(screen.queryByText("archive")).toBeNull()
 })
 
+test("runs the branch-count query only while the delete confirm is open", async () => {
+  // One index subscription per sidebar row, re-run on every session write,
+  // with the dialog closed — that is what this used to cost.
+  const user = userEvent.setup()
+  setup()
+  expect(mockBranchQueries).toBe(0)
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("delete"))
+  await screen.findByRole("alertdialog")
+  expect(mockBranchQueries).toBeGreaterThan(0)
+})
+
 test("Delete requires confirmation before removing the session", async () => {
   const user = userEvent.setup()
   const { onDelete } = setup()
@@ -643,6 +694,24 @@ describe("row chrome", () => {
     expect(stamp).toHaveAttribute("title", expect.stringContaining("dateStyle"))
   })
 
+  it("shapes the stamp against the list's day clock, not the mount-time clock", () => {
+    // Earlier on the same (UTC) day as the mocked `useNow`: a clock time. With
+    // the list's clock one day on, the same stamp is yesterday — a weekday.
+    const at = 1_749_990_000_000
+    const { unmount } = setup({
+      showTimestamp: true,
+      session: { ...baseSession, lastMessageAt: at } as ChatSession,
+    })
+    expect(screen.getByTestId("session-row-timestamp")).toHaveTextContent("hour,minute")
+    unmount()
+    setup({
+      showTimestamp: true,
+      now: at + 24 * 60 * 60 * 1000,
+      session: { ...baseSession, lastMessageAt: at } as ChatSession,
+    })
+    expect(screen.getByTestId("session-row-timestamp")).toHaveTextContent(`dt(${at}|weekday)`)
+  })
+
   it("falls back to updatedAt when the session was never message-stamped", () => {
     setup({ showTimestamp: true, session: { ...baseSession, updatedAt: 1_749_000_000_000 } })
     expect(screen.getByTestId("session-row-timestamp")).toHaveTextContent("1749000000000")
@@ -710,6 +779,174 @@ test("Remove from folder detaches the session", async () => {
   await user.hover(await screen.findByText("moveToFolder"))
   fireEvent.click(await screen.findByText("removeFromFolder"))
   expect(onAssignToFolder).toHaveBeenCalledWith("s-1", null)
+})
+
+describe("layout", () => {
+  it("puts every leading glyph in one 20px slot, so titles line up", () => {
+    const glyphs = [
+      {},
+      { accentColor: "#ff0000" },
+      { iconSubject: { name: "Octopus", avatarEmoji: "🐙" } },
+    ]
+    for (const props of glyphs) {
+      const { unmount } = setup(props)
+      expect(screen.getByTestId("session-row-leading").className).toContain("size-5")
+      unmount()
+    }
+  })
+
+  it("lets metadata items shrink and ellipsize instead of running off the rail", () => {
+    setup({
+      metadata: [
+        { kind: "model", value: "A model with an extremely long display name" },
+        { kind: "workspace", value: "Workspace" },
+      ],
+    })
+    const item = screen
+      .getByTestId("session-row-metadata")
+      .querySelector('[data-metadata-kind="model"]')!
+    expect(item.className).not.toContain("shrink-0")
+    expect(item.className).toContain("min-w-0")
+    expect(item.lastElementChild).toHaveClass("truncate")
+  })
+
+  it("overlays the actions button instead of reserving a slot for it in every row", () => {
+    setup({ showTimestamp: true, session: { ...baseSession, lastMessageAt: 1 } as ChatSession })
+    const actions = screen.getByTestId("session-row-actions")
+    // Out of the flow, shown on hover / keyboard focus / open menu …
+    expect(actions.className).toContain("absolute")
+    expect(actions.className).toContain("group-hover:opacity-100")
+    expect(actions.className).toContain("group-has-[:focus-visible]:opacity-100")
+    expect(actions.className).toContain("group-has-[[data-state=open]]:opacity-100")
+    // … and back in the flow, visible, where there is no hover to reveal it.
+    expect(actions.className).toContain("[@media(hover:none)]:static")
+    expect(actions.className).toContain("[@media(hover:none)]:opacity-100")
+    expect(within(actions).getByRole("button", { name: "actionsMenu" })).toHaveClass("touch-hit")
+  })
+
+  it("keeps the actions menu reachable without a hover", async () => {
+    setup()
+    const actions = screen.getByTestId("session-row-actions")
+    // The shared policy: focus inside, an open menu and touch reveal it too.
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(actions).toHaveClass(variant)
+    }
+    // Quiet is opacity only. `pointer-events-none` here was the audit's
+    // "the ⋯ only answers a click after a pointerover" bug.
+    expect(actions).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+    const trigger = within(actions).getByRole("button", { name: "actionsMenu" })
+    trigger.focus()
+    expect(trigger).toHaveFocus()
+    // A bare click with no pointerover / pointerdown first opens the menu.
+    // (Opening probes the CLI asynchronously; let that settle inside act.)
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+    expect(screen.getByRole("menu")).toBeInTheDocument()
+  })
+
+  it("keeps the drag grip reachable without a hover", () => {
+    setup({ dragListeners: {}, dragAttributes: {} })
+    const grip = screen.getByTestId("session-row-drag-handle")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(grip).toHaveClass(variant)
+    }
+    expect(grip).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+    grip.focus()
+    expect(grip).toHaveFocus()
+  })
+
+  it("writes the virtual index the measurer reads, and keeps its node ref attached", () => {
+    const nodeRef = jest.fn()
+    const { container, rerender } = setup({ virtualIndex: 7, nodeRef })
+    expect(container.querySelector("li")).toHaveAttribute("data-index", "7")
+    expect(nodeRef).toHaveBeenCalledTimes(1)
+    // A re-render with the same ref must not detach and re-attach it — each
+    // re-attach is a forced layout read in the virtualizer.
+    rerender(
+      <ul>
+        <SessionRow
+          session={baseSession}
+          active
+          virtualIndex={7}
+          nodeRef={nodeRef}
+          onSelect={jest.fn()}
+          onDelete={jest.fn()}
+          onRename={jest.fn()}
+        />
+      </ul>
+    )
+    expect(nodeRef).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("memo", () => {
+  const handlers = { onSelect: jest.fn(), onDelete: jest.fn(), onRename: jest.fn() }
+  const base = { session: baseSession, active: false, ...handlers }
+
+  it("treats equal-valued positioning, metadata, avatar and landing mark as unchanged", () => {
+    expect(
+      sessionRowPropsEqual(
+        {
+          ...base,
+          nodeStyle: { position: "absolute", transform: "translateY(40px)" },
+          metadata: [{ kind: "model", value: "M" }],
+          iconSubject: { name: "A", avatarEmoji: "🐙" },
+          settleFlash: { nonce: 1, holdMs: 900 },
+        },
+        {
+          ...base,
+          nodeStyle: { position: "absolute", transform: "translateY(40px)" },
+          metadata: [{ kind: "model", value: "M" }],
+          iconSubject: { name: "A", avatarEmoji: "🐙" },
+          settleFlash: { nonce: 1, holdMs: 900 },
+        }
+      )
+    ).toBe(true)
+  })
+
+  it("re-renders for any real change", () => {
+    expect(sessionRowPropsEqual(base, { ...base, active: true })).toBe(false)
+    expect(sessionRowPropsEqual(base, { ...base, session: { ...baseSession } })).toBe(false)
+    expect(
+      sessionRowPropsEqual(
+        { ...base, nodeStyle: { transform: "translateY(0px)" } },
+        { ...base, nodeStyle: { transform: "translateY(36px)" } }
+      )
+    ).toBe(false)
+    expect(
+      sessionRowPropsEqual(
+        { ...base, metadata: [{ kind: "model", value: "M" }] },
+        { ...base, metadata: [{ kind: "model", value: "N" }] }
+      )
+    ).toBe(false)
+    expect(
+      sessionRowPropsEqual(
+        { ...base, settleFlash: { nonce: 1, holdMs: 900 } },
+        { ...base, settleFlash: { nonce: 2, holdMs: 900 } }
+      )
+    ).toBe(false)
+    expect(sessionRowPropsEqual(base, { ...base, onSelect: jest.fn() })).toBe(false)
+    expect(sessionRowPropsEqual(base, { ...base, now: 5 })).toBe(false)
+  })
+
+  it("skips the render when the parent re-renders with equal props", () => {
+    const Parent = ({ tick }: { tick: number }) => (
+      <ul data-tick={tick}>
+        <SessionRow
+          {...base}
+          // Fresh objects every parent render, equal in value.
+          nodeStyle={{ position: "absolute", transform: "translateY(0px)" }}
+          metadata={[{ kind: "agent", value: "Alice" }]}
+        />
+      </ul>
+    )
+    const { rerender } = render(<Parent tick={0} />)
+    expect(mockTitleRenders).toHaveBeenCalledTimes(1)
+    rerender(<Parent tick={1} />)
+    rerender(<Parent tick={2} />)
+    expect(mockTitleRenders).toHaveBeenCalledTimes(1)
+  })
 })
 
 test("shows the source platform as an accessible corner badge on IM session avatars", () => {

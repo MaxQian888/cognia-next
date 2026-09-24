@@ -24,11 +24,33 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { InboxErrorBoundary } from "@/components/inbox/inbox-error-boundary"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { DraftApprovalPanel } from "@/components/mobile/connector/draft-approval-panel"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { listAllPendingDrafts } from "@/lib/db/connector-drafts"
+import { loggers } from "@cognia/logging"
+
+const log = loggers.ui
+
+/**
+ * Pending-draft count for the tab badge. The badge is decoration on the tab
+ * header, so a failed read degrades to "no badge" instead of throwing out of
+ * `useLiveQuery` into the route-wide boundary (which would blank both tabs).
+ * The live query re-runs on the next drafts-table change, so the badge
+ * recovers on its own once the database does.
+ */
+export async function countPendingDraftsForBadge(): Promise<number> {
+  try {
+    return (await listAllPendingDrafts()).length
+  } catch (error) {
+    log.warn("mobile inbox: pending-draft count unavailable", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return 0
+  }
+}
 
 export type MobileInboxTab = "messages" | "drafts"
 
@@ -39,7 +61,7 @@ export interface MobileInboxBodyProps {
 export function MobileInboxBody({ initialTab = "messages" }: MobileInboxBodyProps) {
   const t = useTranslations("mobile.inbox")
   const [tab, setTab] = useState<MobileInboxTab>(initialTab)
-  const draftCount = useLiveQuery(async () => (await listAllPendingDrafts()).length, []) ?? 0
+  const draftCount = useLiveQuery(countPendingDraftsForBadge, []) ?? 0
 
   return (
     <Tabs
@@ -84,7 +106,11 @@ export function MobileInboxBody({ initialTab = "messages" }: MobileInboxBodyProp
         <InboxShell view="all" />
       </TabsContent>
       <TabsContent value="drafts" className="min-h-0 overflow-hidden">
-        <DraftApprovalPanel />
+        {/* Pane-level containment, matching the InboxShell panes: a failed
+            drafts read shows Retry here while the Messages tab keeps working. */}
+        <InboxErrorBoundary>
+          <DraftApprovalPanel />
+        </InboxErrorBoundary>
       </TabsContent>
     </Tabs>
   )

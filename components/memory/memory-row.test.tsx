@@ -4,6 +4,7 @@
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Memory } from "@/types/memory/memory"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 import { MemoryRow } from "./memory-row"
 
 function mem(over: Partial<Memory> = {}): Memory {
@@ -191,5 +192,32 @@ describe("MemoryRow", () => {
   it("marks the density it was rendered at", () => {
     setup({}, { density: "compact" })
     expect(screen.getByTestId("memory-row").dataset.density).toBe("compact")
+  })
+
+  it("keeps the row actions reachable without a hover", () => {
+    const { onArchive } = setup()
+    const actions = screen.getByTestId("memory-row-actions")
+    // Focus, an open overflow menu and touch reveal it too; row hover stays
+    // the mouse path. It only ever fades.
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.groupBase) {
+      expect(actions).toHaveClass(variant)
+    }
+    expect(actions).toHaveClass("opacity-0", "group-hover/row:opacity-100")
+    expect(actions).not.toHaveClass("invisible", "hidden", "pointer-events-none")
+
+    const archive = screen.getByTestId("memory-row-archive")
+    archive.focus()
+    expect(archive).toHaveFocus()
+    fireEvent.click(archive)
+    expect(onArchive).toHaveBeenCalledWith("m1")
+
+    // A bare click (no pointerover / pointerdown first) opens the overflow menu.
+    fireEvent.click(screen.getByTestId("memory-row-more"))
+    expect(screen.getByRole("menu")).toBeInTheDocument()
+  })
+
+  it("keeps the actions resident while the row is the open one", () => {
+    setup({}, { active: true })
+    expect(screen.getByTestId("memory-row-actions")).not.toHaveClass("opacity-0")
   })
 })

@@ -30,11 +30,23 @@ const mkTeam = (p: Partial<Team> = {}): Team =>
   }) as unknown as Team
 
 describe("TeamCard", () => {
-  it("renders the team name and links to its workspace", () => {
+  it("renders the team name and links to its Discover detail, not the Squad page", () => {
+    // `/squads?id=` addresses AgentTeams; a Team id there rendered an empty
+    // inspector.
     render(<TeamCard team={mkTeam()} />)
     expect(screen.getByText("Research Squad")).toBeInTheDocument()
     const link = screen.getByTestId("team-card-t1")
-    expect(link).toHaveAttribute("href", "/squads?id=t1")
+    expect(link).toHaveAttribute("href", "/discover?category=teams&item=t1")
+  })
+
+  it("selects in place when the host passes onSelect", async () => {
+    const onSelect = jest.fn()
+    const team = mkTeam()
+    render(<TeamCard team={team} onSelect={onSelect} />)
+    const card = screen.getByTestId("team-card-t1")
+    expect(card.tagName).toBe("BUTTON")
+    card.click()
+    expect(onSelect).toHaveBeenCalledWith(team)
   })
 
   it("shows the member count and description", () => {
@@ -55,7 +67,7 @@ describe("TeamCard", () => {
     render(<TeamCard team={mkTeam({ id: "a/b c" })} />)
     expect(screen.getByTestId("team-card-a/b c")).toHaveAttribute(
       "href",
-      "/squads?id=a%2Fb%20c"
+      "/discover?category=teams&item=a%2Fb%20c"
     )
   })
 })

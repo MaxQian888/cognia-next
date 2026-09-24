@@ -24,12 +24,40 @@ describe("notifyScheduledDue", () => {
         body: "Backup is due",
         channels: ["center", "toast", "os"],
         dedupeKey: "pet-scheduled-due:t1",
+        coalesceWindowMs: Number.POSITIVE_INFINITY,
         groupKey: SCHEDULED_DUE_GROUP_KEY,
         sourceRef: { kind: "task", id: "t1" },
         icon: "Clock",
         directed: true,
       })
     )
+  })
+
+  it("passes meta/actions/href through to the record", async () => {
+    const notify = jest.fn().mockResolvedValue("id2")
+    const meta = { scheduledDue: { taskId: "t1", name: "Backup" } }
+    const actions = [
+      { id: "open", label: "Open", command: "scheduler.open-task", args: { taskId: "t1" } },
+    ]
+    const ok = await notifyScheduledDue(
+      "t1",
+      { title: "Due", meta, actions, href: "/scheduler?item=app%3At1" },
+      { notify }
+    )
+
+    expect(ok).toBe(true)
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ meta, actions, href: "/scheduler?item=app%3At1" })
+    )
+  })
+
+  it("omits optional fields when not supplied", async () => {
+    const notify = jest.fn().mockResolvedValue("id3")
+    await notifyScheduledDue("t1", { title: "Due" }, { notify })
+    const input = notify.mock.calls[0][0]
+    expect(input.meta).toBeUndefined()
+    expect(input.actions).toBeUndefined()
+    expect(input.href).toBeUndefined()
   })
 
   it("falls back to the runtime notify when none is injected", async () => {

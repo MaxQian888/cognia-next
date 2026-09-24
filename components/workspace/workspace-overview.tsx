@@ -56,7 +56,7 @@ import { listWorkspaceEnvironments } from "@/lib/task-workspace/client"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
-import { listActiveIssueRunIssueIds } from "@/lib/db/issue-runs"
+import { listActiveAgentRuns, type ActiveAgentRun } from "@/lib/workspace/active-agent-runs"
 import { listTrustedWorkspaces } from "@/lib/db/trusted-workspaces"
 import { ISSUE_STATUSES, statusCategoryOf } from "@/types/issues"
 import type { IssueProject, IssueStatus } from "@/types/issues"
@@ -66,6 +66,7 @@ import { WorkspaceCapabilities } from "./workspace-capabilities"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
 import { AgentBranchesSection } from "./agent-branches-section"
+import { AGENTS_WORKING_REGION_ID, WorkspaceAgentsWorking } from "./workspace-agents-working"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 import { useWorkspacePickerDialogs, WorkspacePickerList } from "./workspace-picker-list"
 
@@ -105,6 +106,7 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
   const [manageOpen, setManageOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [agentsOpen, setAgentsOpen] = useState(false)
   // Mounted outside the Popover, because it closes before opening any of them
   // and a Popover unmounts its children on close. The picker says so itself.
   const { actions: pickerActions, element: pickerDialogs } = useWorkspacePickerDialogs()
@@ -122,12 +124,14 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
     [workspaceId],
     []
   )
-  const runningIssueIds = useClientLiveQuery(
-    () =>
-      workspaceId ? listActiveIssueRunIssueIds(workspaceId) : Promise.resolve(new Set<string>()),
+  // One array feeds both the "Agents working" number and the list the tile
+  // opens, so the two can never disagree.
+  const activeAgentRuns = useClientLiveQuery(
+    () => (workspaceId ? listActiveAgentRuns(workspaceId) : Promise.resolve([])),
     [workspaceId],
-    new Set<string>()
+    [] as ActiveAgentRun[]
   )
+  const agentsWorking = activeAgentRuns ?? []
   const trusted = useClientLiveQuery(() => listTrustedWorkspaces(), [], [])
   const trustedPaths = useMemo(
     () => new Set((trusted ?? []).map((row) => normalizePath(row.path))),
@@ -192,8 +196,14 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
     {
       id: "agents-working",
       label: t("workspace.agentsWorking"),
-      value: runningIssueIds?.size ?? 0,
-      tone: (runningIssueIds?.size ?? 0) > 0 ? "positive" : "neutral",
+      value: agentsWorking.length,
+      tone: agentsWorking.length > 0 ? "positive" : "neutral",
+      action: {
+        onSelect: () => setAgentsOpen((open) => !open),
+        label: agentsOpen ? t("workspace.agentsWorkingHide") : t("workspace.agentsWorkingShow"),
+        expanded: agentsOpen,
+        controls: agentsOpen ? AGENTS_WORKING_REGION_ID : undefined,
+      },
     },
     {
       // The fourth tile exists so the Environments tab is discoverable at all.
@@ -303,6 +313,8 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
               testId="workspace-stat-strip"
               cellTestIdPrefix="workspace-stat"
             />
+
+            {agentsOpen ? <WorkspaceAgentsWorking runs={agentsWorking} /> : null}
 
             <div className="grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
               <ConsoleSection

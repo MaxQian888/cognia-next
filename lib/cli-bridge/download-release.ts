@@ -8,6 +8,7 @@
  * to extract into, so the caller gates the UI with `isTauri()`.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
@@ -72,6 +73,6 @@ export async function downloadCogniaCli(options: DownloadOptions = {}): Promise<
       signatureVerified: Boolean(result.signatureVerified),
     }
   } finally {
-    unlisten?.()
+    safeUnlisten(unlisten)
   }
 }

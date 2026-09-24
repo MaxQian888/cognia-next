@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -62,17 +62,28 @@ const select = jest.fn()
 const create = jest.fn()
 const remove = jest.fn().mockResolvedValue(undefined)
 const rename = jest.fn()
+const archive = jest.fn()
+const unarchive = jest.fn()
+const bulkSetPinned = jest.fn()
+const assignToFolder = jest.fn()
+const isLoadingSessionsRef = { current: false }
 const directSend = jest.fn().mockResolvedValue(undefined)
 const teamSend = jest.fn().mockResolvedValue(undefined)
 let activeSessionId: string | null = null
 jest.mock("@/hooks/chat", () => ({
   useSessions: () => ({
     sessions: sessionsRef.current,
+    isLoadingSessions: isLoadingSessionsRef.current,
     activeSessionId,
     select,
     create,
     remove,
     rename,
+    archive,
+    unarchive,
+    bulkSetPinned,
+    assignToFolder,
+    folders: [],
   }),
   useClaudeChat: () => ({
     send: directSend,
@@ -92,6 +103,7 @@ jest.mock("@/hooks/chat", () => ({
 
 const errorMessageRef: { current: string | null } = { current: null }
 const setPermissionMode = jest.fn()
+const clearActiveSession = jest.fn()
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(
     <T,>(
@@ -99,12 +111,16 @@ jest.mock("@/stores/chat", () => ({
         errorMessage: string | null
         status: string
         pendingApprovals: unknown[]
+        activeSessionEpoch: number
+        clearActiveSession: typeof clearActiveSession
       }) => T
     ): T =>
       selector({
         errorMessage: errorMessageRef.current,
         status: "idle",
         pendingApprovals: [],
+        activeSessionEpoch: 0,
+        clearActiveSession,
       }),
     { getState: () => ({ setPermissionMode }) }
   ),
@@ -131,6 +147,7 @@ const pendingSettingsRequestRef: { current: { tab?: string; nonce: number } | nu
   current: null,
 }
 const clearPendingSettings = jest.fn()
+const requestChatHome = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(
     selector: (s: {
@@ -138,6 +155,9 @@ jest.mock("@/stores/ui", () => ({
       setSelectedGuild: typeof setSelectedGuild
       pendingSettingsRequest: typeof pendingSettingsRequestRef.current
       clearPendingSettings: typeof clearPendingSettings
+      requestChatHome: typeof requestChatHome
+      chatHomeEpoch: number
+      selectedGuildEpoch: number
     }) => T
   ): T =>
     selector({
@@ -145,6 +165,9 @@ jest.mock("@/stores/ui", () => ({
       setSelectedGuild,
       pendingSettingsRequest: pendingSettingsRequestRef.current,
       clearPendingSettings,
+      requestChatHome,
+      chatHomeEpoch: 0,
+      selectedGuildEpoch: 0,
     }),
 }))
 
@@ -178,9 +201,67 @@ jest.mock("@/lib/db/teams", () => ({
 }))
 
 const inboxUnreadRef = { current: 0 }
+const shellCharacters = [{ id: "c1", name: "Octo" }]
+const useDexieFirstQuery = jest.fn((_opts: { table?: string }) => ({ data: shellCharacters }))
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: <T,>(query: () => Promise<T>, _deps: unknown, fallback: T): T =>
     query.toString().includes("loadMobileUnread") ? (inboxUnreadRef.current as T) : fallback,
+  useDexieFirstQuery: (opts: { table?: string }) => useDexieFirstQuery(opts),
+}))
+
+// The drawer list's long-lived source. A passthrough: the shell test pins that
+// it wraps the drawer and gets the shell's characters.
+const sourceCharactersRef: { current: unknown } = { current: undefined }
+jest.mock("@/components/mobile/shell/mobile-channel-list-source", () => ({
+  MobileChannelListSourceProvider: ({
+    characters,
+    children,
+  }: {
+    characters: unknown
+    children: React.ReactNode
+  }) => {
+    sourceCharactersRef.current = characters
+    return <div data-testid="channel-list-source">{children}</div>
+  },
+}))
+
+// Same send gate the desktop workspace applies.
+const runtimeGateRef: {
+  current: {
+    composerDisabled: boolean
+    availability: { state: string; reason: string }
+    recovery: { kind: string }
+    connecting: boolean
+  }
+} = {
+  current: {
+    composerDisabled: false,
+    availability: { state: "available", reason: "local-host" },
+    recovery: { kind: "none" },
+    connecting: false,
+  },
+}
+jest.mock("@/hooks/chat/use-chat-runtime-gate", () => ({
+  useChatRuntimeGate: () => runtimeGateRef.current,
+}))
+jest.mock("@/components/mobile/shell/mobile-chat-runtime-notice", () => ({
+  MobileChatRuntimeNotice: () => <div data-testid="mobile-chat-runtime-notice" />,
+}))
+jest.mock("@/components/mobile/shell/mobile-credential-warning", () => ({
+  MobileCredentialWarning: ({
+    showLabel,
+    onResolve,
+  }: {
+    showLabel: boolean
+    onResolve: () => void
+  }) => (
+    <button
+      type="button"
+      data-testid="mobile-no-api-key"
+      data-show-label={showLabel ? "true" : "false"}
+      onClick={onResolve}
+    />
+  ),
 }))
 
 // Stub heavy children — the shell test verifies structural wiring, not
@@ -199,7 +280,13 @@ jest.mock("@/components/chat/chat-view", () => ({
     onSend,
     onResumeAfterPlanApproval,
     welcomeExtras,
+    composerDisabled,
+    runtimeNotice,
+    heroRouting,
   }: {
+    heroRouting?: boolean
+    composerDisabled?: boolean
+    runtimeNotice?: React.ReactNode
     showHeader?: boolean
     welcomeExtras?: typeof welcomeExtrasRef.current
     onSend?: (
@@ -216,7 +303,10 @@ jest.mock("@/components/chat/chat-view", () => ({
         data-testid="chat-pane"
         data-show-header={showHeader === false ? "false" : "true"}
         data-has-plan-resume={onResumeAfterPlanApproval ? "true" : "false"}
+        data-composer-disabled={composerDisabled ? "true" : "false"}
+        data-hero-routing={String(heroRouting)}
       >
+        {runtimeNotice}
         <button
           data-testid="chat-send-stub"
           onClick={() => {
@@ -312,19 +402,20 @@ jest.mock("@/hooks/chat/use-credential-status", () => ({
   useCredentialStatus: () => credentialStatusRef.current,
 }))
 
+const channelListPropsRef: { current: Record<string, unknown> | null } = { current: null }
 jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
-  MobileChannelList: ({
-    onSelect,
-    onNewDirect,
-  }: {
-    onSelect: (id: string) => void
-    onNewDirect: () => void
-  }) => (
-    <div>
-      <button data-testid="channel-select-stub" onClick={() => onSelect("s-2")} />
-      <button data-testid="channel-new-direct-stub" onClick={onNewDirect} />
-    </div>
-  ),
+  MobileChannelList: (props: { onSelect: (id: string) => void; onNewDirect: () => void }) => {
+    channelListPropsRef.current = props as unknown as Record<string, unknown>
+    return (
+      <div>
+        <button data-testid="channel-select-stub" onClick={() => props.onSelect("s-2")} />
+        <button data-testid="channel-new-direct-stub" onClick={props.onNewDirect} />
+        {/* A row owns its horizontal drags (see <SwipeRow>). */}
+        <div data-swipe-row="" data-testid="channel-row-stub" />
+        <div data-testid="channel-body-stub" />
+      </div>
+    )
+  },
 }))
 
 jest.mock("@/components/mobile/shell/character-header", () => ({
@@ -380,6 +471,12 @@ jest.mock("@/components/mobile/home/mobile-home-layout-sheet", () => ({
 jest.mock("@/components/mobile/home/mobile-quick-actions", () => ({
   MobileQuickActions: () => <div data-testid="mobile-quick-actions-stub" />,
 }))
+// The search palette is its own surface with its own suite; here it only has
+// to be a sheet that can be open.
+jest.mock("@/components/mobile/home/mobile-command-palette", () => ({
+  MobileCommandPalette: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="command-palette-stub" /> : null,
+}))
 jest.mock("@/components/mobile/home/mobile-active-runs-card", () => ({
   MobileActiveRunsCard: () => null,
 }))
@@ -427,6 +524,18 @@ beforeEach(() => {
   artifactDockState = { dockCollapsed: true, unreadArtifact: false, toggleDock: toggleArtifactDock }
   inboxUnreadRef.current = 0
   welcomeExtrasRef.current = null
+  isLoadingSessionsRef.current = false
+  requestChatHome.mockReset()
+  clearActiveSession.mockReset()
+  channelListPropsRef.current = null
+  sourceCharactersRef.current = undefined
+  useDexieFirstQuery.mockClear()
+  runtimeGateRef.current = {
+    composerDisabled: false,
+    availability: { state: "available", reason: "local-host" },
+    recovery: { kind: "none" },
+    connecting: false,
+  }
 })
 
 /** The `welcomeExtras` bundle the shell handed the chat pane on this render. */
@@ -604,6 +713,19 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
   })
 
+  it("keeps an explicit close control for assistive tech, off the list's +", async () => {
+    // The painted corner button sat on top of New chat's "+", so it is gone —
+    // but a screen reader cannot always reach the overlay, Escape or a swipe.
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-nav-trigger"))
+    const close = await screen.findByTestId("mobile-nav-close")
+    expect(close).toHaveAccessibleName("closeNav")
+    expect(close).toHaveClass("sr-only")
+    await user.click(close)
+    await waitFor(() => expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull())
+  })
+
   it("opens and closes the drawer on an edge swipe, the way every phone drawer does", async () => {
     render(<AppShellMobile />)
     const touch = (x: number, y: number) =>
@@ -636,12 +758,15 @@ describe("<AppShellMobile />", () => {
     // A drag aimed at the surface in front cannot be told apart from one aimed
     // at the shell behind it, and answering both stacks the drawer under a
     // sheet the user is still reading.
+    //
+    // Opened through the search palette. This used to open the character
+    // picker through ⋮ → New chat, which stopped opening it when every New
+    // chat door moved to the welcome surface; the test had been waiting on a
+    // picker that never came.
     const user = userEvent.setup()
     render(<AppShellMobile />)
-    await user.click(screen.getByTestId("mobile-actions-trigger"))
-    await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
-    await user.click(screen.getByTestId("mobile-action-new-chat"))
-    await waitFor(() => expect(screen.getByTestId("char-picker")).toBeInTheDocument())
+    await user.click(screen.getByTestId("mobile-search-trigger"))
+    await waitFor(() => expect(screen.getByTestId("command-palette-stub")).toBeInTheDocument())
 
     const touch = (x: number, y: number) =>
       Object.assign([{ clientX: x, clientY: y } as Touch], {
@@ -659,6 +784,122 @@ describe("<AppShellMobile />", () => {
     fire("touchmove", 180, 400)
     fire("touchend", 180, 400)
     expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull()
+  })
+
+  describe("drawer gestures", () => {
+    const touch = (x: number, y: number) =>
+      Object.assign([{ clientX: x, clientY: y } as Touch], {
+        item: () => ({ clientX: x, clientY: y }) as Touch,
+      }) as unknown as TouchList
+    const fire = (target: EventTarget, type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true }) as TouchEvent
+      // A lifted finger is no longer in `touches`, only in `changedTouches`.
+      const lifted = Object.assign([], { item: () => null }) as unknown as TouchList
+      Object.defineProperty(event, "touches", {
+        value: type === "touchend" ? lifted : touch(x, y),
+      })
+      Object.defineProperty(event, "changedTouches", { value: touch(x, y) })
+      act(() => {
+        target.dispatchEvent(event)
+      })
+    }
+    const swipeLeftFrom = (target: EventTarget) => {
+      fire(target, "touchstart", 200, 400)
+      fire(target, "touchmove", 60, 404)
+      fire(target, "touchend", 60, 404)
+    }
+    const openDrawer = async () => {
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      await waitFor(() => expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument())
+    }
+
+    it("leaves a drag that starts on a conversation row to the row", async () => {
+      // The row reveals its actions at ~108px; the drawer closes at 56px. This
+      // used to shut the drawer under the finger reaching for Delete.
+      render(<AppShellMobile />)
+      await openDrawer()
+      swipeLeftFrom(screen.getByTestId("channel-row-stub"))
+      expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument()
+    })
+
+    it("still closes on a drag that starts on the drawer itself", async () => {
+      render(<AppShellMobile />)
+      await openDrawer()
+      swipeLeftFrom(screen.getByTestId("channel-body-stub"))
+      await waitFor(() => expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull())
+    })
+
+    it("ignores a drag on a surface opened from inside the drawer", async () => {
+      // An action sheet or confirm is portaled outside the drawer; a sideways
+      // flick there is not a request to put the drawer away underneath it.
+      render(<AppShellMobile />)
+      await openDrawer()
+      const portaled = document.createElement("div")
+      document.body.appendChild(portaled)
+      swipeLeftFrom(portaled)
+      expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument()
+      portaled.remove()
+    })
+  })
+
+  describe("navigation drawer", () => {
+    it("has no corner close button covering the list's New chat", async () => {
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      const sheet = await screen.findByTestId("mobile-nav-sheet")
+      expect(within(sheet).queryByRole("button", { name: "Close" })).toBeNull()
+    })
+
+    it("reserves the notch, home indicator and landscape inset itself", async () => {
+      // Portaled out of the shell, so the shell's own safe-area classes never
+      // reached it.
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      const sheet = await screen.findByTestId("mobile-nav-sheet")
+      expect(sheet).toHaveClass(
+        "pt-[env(safe-area-inset-top)]",
+        "pb-[env(safe-area-inset-bottom)]",
+        "pl-[env(safe-area-inset-left)]"
+      )
+    })
+
+    it("lets the list column shrink to its slot", async () => {
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      expect(await screen.findByTestId("mobile-nav-list-slot")).toHaveClass("min-w-0", "flex-1")
+    })
+
+    it("hands the list the shared writers and the loading state, un-voided", async () => {
+      isLoadingSessionsRef.current = true
+      const user = userEvent.setup()
+      render(<AppShellMobile />)
+      await user.click(screen.getByTestId("mobile-nav-trigger"))
+      await screen.findByTestId("mobile-nav-sheet")
+      const props = channelListPropsRef.current!
+      expect(props.isLoadingSessions).toBe(true)
+      // Passed through as-is so the list can await them and surface failures.
+      expect(props.onDelete).toBe(remove)
+      expect(props.onRename).toBe(rename)
+      expect(props.onArchive).toBe(archive)
+      expect(props.onUnarchive).toBe(unarchive)
+      expect(props.onSetPinned).toBe(bulkSetPinned)
+      expect(props.onAssignToFolder).toBe(assignToFolder)
+    })
+
+    it("keeps the list's source outside the drawer, fed by the shell's character read", () => {
+      render(<AppShellMobile />)
+      // Mounted while the drawer is closed — that is what survives a reopen.
+      expect(screen.getByTestId("channel-list-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull()
+      expect(sourceCharactersRef.current).toBe(shellCharacters)
+      expect(useDexieFirstQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ table: "characters" })
+      )
+    })
   })
 
   it("mounts the guild rail in its sheet variant so it is not md-gated away", async () => {
@@ -773,7 +1014,10 @@ describe("<AppShellMobile />", () => {
     expect(screen.queryByTestId("mobile-members-trigger")).not.toBeInTheDocument()
   })
 
-  it("opens the character picker via the actions menu → 'New chat'", async () => {
+  it("lands ⋮ → 'New chat' on the welcome surface, not the character picker", async () => {
+    // Every New chat door on this shell goes to the welcome screen (the picker
+    // is reachable from the welcome's own entry). The old assertion here
+    // expected the picker, which that change stopped opening.
     const user = userEvent.setup()
     render(<AppShellMobile />)
 
@@ -781,7 +1025,9 @@ describe("<AppShellMobile />", () => {
     await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
     await user.click(screen.getByTestId("mobile-action-new-chat"))
 
-    await waitFor(() => expect(screen.getByTestId("char-picker")).toBeInTheDocument())
+    await waitFor(() => expect(requestChatHome).toHaveBeenCalled())
+    expect(clearActiveSession).toHaveBeenCalled()
+    expect(screen.queryByTestId("char-picker")).toBeNull()
   })
 
   it("routes to /settings via the actions menu → 'Settings'", async () => {
@@ -936,6 +1182,44 @@ describe("<AppShellMobile />", () => {
 
     render(<AppShellMobile />)
     expect(screen.queryByTestId("mobile-no-api-key")).not.toBeInTheDocument()
+  })
+
+  it("shrinks the credential warning to an icon on a narrow bar and labels it when wide", () => {
+    sessionsRef.current = [
+      {
+        id: "s-1",
+        title: "x",
+        kind: "direct",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "s-1"
+    credentialStatusRef.current = { keyOk: false, plan: null }
+    const { unmount } = render(<AppShellMobile />)
+    expect(screen.getByTestId("mobile-no-api-key")).toHaveAttribute("data-show-label", "false")
+    unmount()
+    mediaMatches["(min-width: 36rem)"] = true
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("mobile-no-api-key")).toHaveAttribute("data-show-label", "true")
+  })
+
+  it("gates the composer on chat availability, the way the desktop workspace does", () => {
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-composer-disabled", "false")
+    expect(screen.queryByTestId("mobile-chat-runtime-notice")).toBeNull()
+  })
+
+  it("disables the composer and explains why when the host cannot take a send", () => {
+    runtimeGateRef.current = {
+      composerDisabled: true,
+      availability: { state: "requires-pairing", reason: "companion-not-paired" },
+      recovery: { kind: "route" },
+      connecting: false,
+    }
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-composer-disabled", "true")
+    expect(screen.getByTestId("mobile-chat-runtime-notice")).toBeInTheDocument()
   })
 
   it("hides the export action when there is no active session", async () => {
@@ -1096,6 +1380,28 @@ it("leaves platform read capture to the shared pane and retains local session re
   ]
   view.rerender(<AppShellMobile />)
   await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("local"))
+})
+
+it("lets the welcome composer address a runtime only when its first turn is a direct chat", () => {
+  // With no session `handleFirstTurn` creates a direct chat, which takes a
+  // runtime route; into an active team room it sends through the room's own
+  // router, which carries none — so the hero must not offer one there.
+  const { unmount } = render(<AppShellMobile />)
+  expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-hero-routing", "true")
+  unmount()
+  activeSessionId = "team-session"
+  sessionsRef.current = [
+    {
+      id: "team-session",
+      title: "Team",
+      kind: "team",
+      teamId: "team-x",
+      createdAt: 0,
+      updatedAt: 0,
+    } as ChatSession,
+  ]
+  render(<AppShellMobile />)
+  expect(screen.getByTestId("chat-pane")).toHaveAttribute("data-hero-routing", "false")
 })
 
 it("normalizes an explicitly absent template before the mobile team send", async () => {

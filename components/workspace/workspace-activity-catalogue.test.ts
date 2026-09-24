@@ -17,8 +17,8 @@ describe("workspace activity catalogue", () => {
     }
   })
 
-  it("covers the three terminal plan statuses", () => {
-    for (const status of ["completed", "failed", "cancelled"] as const) {
+  it("covers every terminal plan status, rejected included", () => {
+    for (const status of ["completed", "failed", "cancelled", "rejected"] as const) {
       expect(PLAN_STATUSES_FOR_TEST).toContain(status)
     }
     expect(new Set(PLAN_STATUSES_FOR_TEST).size).toBe(PLAN_STATUSES_FOR_TEST.length)

@@ -53,6 +53,33 @@ test("files the selection into a folder, and can take it out of one", async () =
   expect(onMoveToFolder).toHaveBeenLastCalledWith(null)
 })
 
+test("lists a folder that cannot take the selection as disabled, with the reason", async () => {
+  const onMoveToFolder = jest.fn()
+  const user = userEvent.setup()
+  setup({
+    folders: [{ id: "f1", name: "Research" } as never, { id: "f2", name: "Elsewhere" } as never],
+    blockedFolderIds: new Set(["f2"]),
+    onMoveToFolder,
+  })
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  expect(screen.getByTestId("channel-list-bulk-folder-blocked-note")).toHaveTextContent(
+    "folderOtherWorkspace"
+  )
+  const blocked = screen.getByTestId("channel-list-bulk-folder-f2")
+  expect(blocked).toHaveAttribute("data-disabled")
+  await user.click(blocked)
+  expect(onMoveToFolder).not.toHaveBeenCalled()
+  await user.click(screen.getByTestId("channel-list-bulk-folder-f1"))
+  expect(onMoveToFolder).toHaveBeenCalledWith("f1")
+})
+
+test("says nothing about workspaces when every folder can take the selection", async () => {
+  const user = userEvent.setup()
+  setup({ folders: [{ id: "f1", name: "Research" } as never], onMoveToFolder: jest.fn() })
+  await user.click(screen.getByTestId("channel-list-bulk-move-to-folder"))
+  expect(screen.queryByTestId("channel-list-bulk-folder-blocked-note")).toBeNull()
+})
+
 test("hides the folder control without a handler, and in the archived view", () => {
   const { unmount } = setup()
   expect(screen.queryByTestId("channel-list-bulk-move-to-folder")).toBeNull()

@@ -122,12 +122,29 @@ export class NodePerformanceHost implements PerformanceHostAdapter {
     if (input.requestedCadenceMs > MAX_CADENCE_MS) {
       return this.reject("unsupported", "requested cadence exceeds 10000 ms")
     }
-    if (this.leases.size >= MAX_LEASES) {
+    // Same rule as the Rust sampler (`src-tauri/src/perf/sampler.rs`): a client
+    // re-opening a purpose it already holds has lost track of that lease, and it
+    // is reclaimed in place rather than refused. Device AND client must match,
+    // so only the caller's own lease can ever be displaced; the device id of a
+    // remote caller is the authenticated one `host-dispatch` stamps.
+    const superseded = [...this.leases.values()]
+      .filter(
+        ({ lease }) =>
+          lease.deviceId === input.deviceId &&
+          lease.purpose === input.purpose &&
+          lease.clientId === input.clientId
+      )
+      .map(({ lease }) => lease.leaseId)
+    const others = this.leases.size - superseded.length
+    if (others >= MAX_LEASES) {
       return this.reject("host-lease-limit", "host lease limit reached")
     }
     if (
       [...this.leases.values()].some(
-        ({ lease }) => lease.deviceId === input.deviceId && lease.purpose === input.purpose
+        ({ lease }) =>
+          !superseded.includes(lease.leaseId) &&
+          lease.deviceId === input.deviceId &&
+          lease.purpose === input.purpose
       )
     ) {
       return this.reject("device-purpose-limit", "device already owns this lease purpose")
@@ -137,13 +154,19 @@ export class NodePerformanceHost implements PerformanceHostAdapter {
       return this.reject("rate-limited", "lease open is rate limited")
     }
     this.lastOpenByDevice.set(input.deviceId, now)
-    if (this.leases.size === 0) {
-      this.targetId = input.targetId
-      this.routingGeneration = input.routingGeneration
-      this.samplingSessionId = id("session")
-      this.sequence = 0
-      this.previousCounters = null
-      this.frames.length = 0
+    if (others === 0) {
+      const continuesSession =
+        superseded.length > 0 &&
+        this.targetId === input.targetId &&
+        this.routingGeneration === input.routingGeneration
+      if (!continuesSession) {
+        this.targetId = input.targetId
+        this.routingGeneration = input.routingGeneration
+        this.samplingSessionId = id("session")
+        this.sequence = 0
+        this.previousCounters = null
+        this.frames.length = 0
+      }
     } else if (this.targetId !== input.targetId) {
       return this.reject("target-mismatch", "active leases bind another target")
     } else if (this.routingGeneration !== input.routingGeneration) {
@@ -152,6 +175,8 @@ export class NodePerformanceHost implements PerformanceHostAdapter {
         "active leases bind another routing generation"
       )
     }
+    // After every refusal: a refused re-open keeps the lease the client had.
+    for (const leaseId of superseded) this.leases.delete(leaseId)
     const lease: PerfLease = {
       wireVersion: PERF_WIRE_VERSION,
       leaseId: id("lease"),

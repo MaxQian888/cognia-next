@@ -23,6 +23,7 @@ import {
   resolveProviderProtocol,
   decideOpenAiEndpointFlavor,
 } from "../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
+import { webviewSafeTelemetry } from "../../ai/webview-safe-telemetry"
 
 export interface LlmClientCallOptions {
   /** System / role-priming prompt. Defaults to a generic distiller voice. */
@@ -343,6 +344,9 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         stopSequences: options?.stopSequences,
         abortSignal: options?.abortSignal,
         maxRetries: options?.maxRetries,
+        // Renderer callers reach this client too: a failed or stopped stream
+        // must not leak the SDK's tracing promise (see webview-safe-telemetry).
+        telemetry: webviewSafeTelemetry(),
       })
       for await (const delta of result.textStream) {
         yield delta

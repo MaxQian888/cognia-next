@@ -205,7 +205,11 @@ describe("roomSend", () => {
     await expect(
       roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", regenerate: true }, deps(runner))
     ).resolves.toEqual({ accepted: true })
-    expect(calls.regenerate).toHaveBeenCalledWith("room-1", expect.any(Function))
+    expect(calls.regenerate).toHaveBeenCalledWith(
+      "room-1",
+      expect.any(Function),
+      expect.any(Function)
+    )
     expect(calls.send).not.toHaveBeenCalled()
 
     await roomSend(
@@ -227,6 +231,45 @@ describe("roomSend", () => {
         deps(runner)
       )
     ).rejects.toThrow("room_send.editMessageId must be a string when present")
+    release()
+  })
+
+  it("tells the companion which files a regenerate or an edit could not resend", async () => {
+    // The runner names them before it accepts the turn; they ride the acceptance.
+    const { runner, calls, release } = fakeRunner()
+    calls.regenerate.mockImplementationOnce(
+      (
+        _session: string,
+        onAccepted?: () => void,
+        onNotResent?: (filenames: readonly string[]) => void
+      ) => {
+        onNotResent?.(["clip.mp4"])
+        onAccepted?.()
+        return new Promise<void>(() => {})
+      }
+    )
+    await expect(
+      roomSend({ sessionId: "room-1", callerDeviceId: "dev-1", regenerate: true }, deps(runner))
+    ).resolves.toEqual({ accepted: true, notResent: ["clip.mp4"] })
+
+    calls.editAndResend.mockImplementationOnce(
+      (
+        _session: string,
+        _message: string,
+        _content: unknown,
+        opts: RoomSendOptions & { onNotResent?: (filenames: readonly string[]) => void }
+      ) => {
+        opts.onNotResent?.(["photo.png"])
+        opts.onAccepted?.()
+        return new Promise<void>(() => {})
+      }
+    )
+    await expect(
+      roomSend(
+        { sessionId: "room-1", callerDeviceId: "dev-1", content: "again", editMessageId: "u-1" },
+        deps(runner)
+      )
+    ).resolves.toEqual({ accepted: true, notResent: ["photo.png"] })
     release()
   })
 

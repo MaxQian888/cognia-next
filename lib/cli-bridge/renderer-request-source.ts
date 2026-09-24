@@ -17,6 +17,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { invoke } from "@tauri-apps/api/core"
 
 const REQUEST_EVENT = "cli-bridge://renderer-request"
@@ -67,7 +68,7 @@ export async function installCliRendererRequestSource(
 
   return () => {
     installed = false
-    unlisten()
+    safeUnlisten(unlisten)
   }
 }
 

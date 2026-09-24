@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useTranslations } from "next-intl"
+import type { ReactNode } from "react"
 import { AlertTriangle, CheckCircle2, CircleDashed, MinusCircle, XCircle } from "lucide-react"
 
 import {
@@ -46,12 +47,34 @@ export interface SafeModeShellProps {
   state: RecoveryStateV1 | null
   probing: boolean
   onRetry: (subsystem: RecoverySubsystem, action?: RecoveryRetryAction) => void
+  /**
+   * The secure-storage unlock notice, owned by the recovery gate. Shown above
+   * the checkpoints so a locked keychain always has a Retry in diagnostics
+   * mode, whichever subsystem put the app here.
+   */
+  secretStoreNotice?: ReactNode
 }
 
-export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
+export function SafeModeShell({ state, probing, onRetry, secretStoreNotice }: SafeModeShellProps) {
   const t = useTranslations("safeMode")
   const suspect = state ? recoverySuspect(state) : undefined
   const checkpoints = state?.checkpoints?.length ? state.checkpoints : null
+  // Cold boot resets checkpoints to pending while preserving the suspect.
+  // Retry still re-runs the ordered sequence; pending never offers keep-off.
+  const pendingRetry =
+    checkpoints?.find(
+      (checkpoint) => checkpoint.status === "pending" && checkpoint.subsystem === suspect?.subsystem
+    )?.subsystem ??
+    (checkpoints?.some(
+      (checkpoint) =>
+        checkpoint.status === "failed" || state?.disabledSubsystems.includes(checkpoint.subsystem)
+    )
+      ? undefined
+      : RECOVERY_ORDER.find((subsystem) =>
+          checkpoints?.some(
+            (checkpoint) => checkpoint.subsystem === subsystem && checkpoint.status === "pending"
+          )
+        ))
 
   return (
     <main className="mx-auto flex min-h-svh w-full max-w-3xl flex-col gap-6 px-4 py-10">
@@ -62,6 +85,8 @@ export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
           <p className="text-muted-foreground text-sm">{t("description")}</p>
         </div>
       </header>
+
+      {secretStoreNotice}
 
       {suspect ? (
         <Card>
@@ -121,7 +146,9 @@ export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
                       {t("status.disabled")}
                     </Badge>
                   ) : null}
-                  {checkpoint.status === "failed" || disabled ? (
+                  {checkpoint.status === "failed" ||
+                  disabled ||
+                  checkpoint.subsystem === pendingRetry ? (
                     <div className="ms-auto flex gap-2">
                       <Button
                         size="sm"
@@ -131,7 +158,7 @@ export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
                       >
                         {t("actions.retry")}
                       </Button>
-                      {disabled ? null : (
+                      {disabled || checkpoint.status !== "failed" ? null : (
                         <Button
                           size="sm"
                           variant="ghost"

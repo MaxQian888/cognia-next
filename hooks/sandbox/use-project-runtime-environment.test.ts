@@ -151,6 +151,58 @@ beforeEach(() => {
 })
 
 describe("useProjectRuntimeEnvironment", () => {
+  it("clears a stale declaration and preview after a failed read, then recovers", async () => {
+    const saved = defaultRuntimeSelection()
+    const { result } = renderHook(() => useProjectRuntimeEnvironment(input({ saved }), sources))
+    await waitFor(() => expect(result.current.preview?.kind).toBe("placed"))
+    client.environmentDeclarationRead.mockRejectedValueOnce(new Error("checkout unavailable"))
+    await act(async () => {
+      await result.current.reload()
+    })
+    await waitFor(() => expect(result.current.preview).toBeUndefined())
+    expect(result.current.files).toBeUndefined()
+    expect(result.current.error).toBe("checkout unavailable")
+    expect(result.current.loading).toBe(false)
+    await act(async () => {
+      await result.current.reload()
+    })
+    await waitFor(() => expect(result.current.preview?.kind).toBe("placed"))
+    expect(result.current.error).toBeUndefined()
+  })
+
+  it("does not retain the previous Host catalog and driver when reloading offline", async () => {
+    const { result } = renderHook(() => useProjectRuntimeEnvironment(input(), sources))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.catalog).toBeDefined()
+    expect(result.current.driver).toBeDefined()
+    client.fetchEnvironmentCatalog.mockRejectedValueOnce(new Error("Host offline"))
+    await act(async () => {
+      await result.current.reload()
+    })
+    expect(result.current.catalog).toBeUndefined()
+    expect(result.current.driver).toBeUndefined()
+    expect(result.current.error).toBe("Host offline")
+  })
+
+  it("reports a workspace resolver failure and finishes loading", async () => {
+    let fail = false
+    const from: RunEnvironmentSources = {
+      ...sources,
+      workspaceConfig: async () => {
+        if (fail) throw new Error("trust database unavailable")
+        return { kind: "absent" }
+      },
+    }
+    const { result } = renderHook(() => useProjectRuntimeEnvironment(input(), from))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    fail = true
+    await act(async () => {
+      await result.current.reload()
+    })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBe("trust database unavailable")
+  })
+
   it.each([new Error("save failed"), { message: "save failed" }, "save failed"])(
     "preserves the draft and releases busy state when saving fails (%p)",
     async (cause) => {

@@ -10,6 +10,10 @@ import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { KEYED_TTS_PROVIDERS, normalizeTTSProvider, type TTSProvider } from "@cognia/tts/types"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
+import {
+  reportSecretStoreFailure,
+  toSecretStoreUnavailableError,
+} from "@/lib/credentials/secret-store-readiness"
 
 /** Stable provider keys understood by the keyring backend. */
 export type KeyringProviderId =
@@ -120,7 +124,17 @@ export async function clearProviderKey(provider: KeyringProviderId): Promise<voi
 export async function loadAllProviderKeys(): Promise<Partial<Record<KeyringProviderId, string>>> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")
-    const ids = await invoke<KeyringProviderId[]>("tts_keyring_list_providers")
+    let ids: KeyringProviderId[]
+    try {
+      ids = await invoke<KeyringProviderId[]>("tts_keyring_list_providers")
+    } catch (error) {
+      // A locked secret store is one typed failure, reported once centrally;
+      // callers keep their "not loaded" state and reload after the unlock.
+      const typed = toSecretStoreUnavailableError(error)
+      if (!typed) throw error
+      reportSecretStoreFailure(typed, "tts.keys")
+      throw typed
+    }
     const out: Partial<Record<KeyringProviderId, string>> = {}
     for (const id of ids) out[id] = HOST_KEY_PRESENT
     return out

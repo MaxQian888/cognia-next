@@ -8,8 +8,9 @@
  * `<CategoryChipStrip />`, splits the previous `twinDrafts` tab into
  * `twinIngest` and `twinDrafts`, wires `<PullToRefresh />`, and renders
  * the new Phase 3 categories (workflow templates / MCP / connectors / OCR
- * providers) through the shared `<DiscoverGrid />` with a bottom-Sheet
- * inspector.
+ * providers) through the shared `<DiscoverGrid />`. Every category's `?item=`
+ * opens the shared `<DiscoverItemSheet />` docked to the bottom; character and
+ * team taps select into it, and editing a character starts from its sheet.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -21,7 +22,7 @@ import { ActiveFilterChips } from "@/components/discover/active-filter-chips"
 import { CategoryChipStrip } from "@/components/discover/category-chip-strip"
 import { DiscoverGrid } from "@/components/discover/discover-grid"
 import { DiscoverHome } from "@/components/discover/discover-home"
-import { DiscoverInspector } from "@/components/discover/discover-inspector"
+import { DiscoverItemSheet } from "@/components/discover/discover-item-sheet"
 import { DiscoverViewToggle } from "@/components/discover/discover-view-toggle"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
 import { SkillMarketplaceSheet } from "@/components/discover/skill-marketplace-sheet"
@@ -43,7 +44,6 @@ import { TwinSourcesPanel } from "@/components/mobile/discover/twin-sources-pane
 import { EmptyState } from "@/components/mobile/empty-state"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import { useDiscoverHome } from "@/hooks/discover/use-discover-home"
 import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
@@ -58,7 +58,6 @@ import { observeTwins } from "@/lib/db/twins"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 import type { Twin } from "@/types/twin"
 import { runSyncDown } from "@/lib/sync/companion-sync"
-import type { Character } from "@cognia/agent-config-types"
 import {
   FAVORITES_CATEGORY,
   FORYOU_CATEGORY,
@@ -71,10 +70,10 @@ import { discoverViewContainer } from "@/lib/discover/view-classes"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 
 /**
- * Categories whose content is rendered through the shared
- * `<DiscoverGrid />` + bottom-Sheet `<DiscoverInspector />` flow. The
- * legacy ones (characters / teams / skills / plugins) keep their
- * mobile-tuned cards + edit sheets because they predate the unified grid.
+ * Categories whose content is rendered through the shared `<DiscoverGrid />`.
+ * The legacy ones (characters / teams / skills / plugins) keep their
+ * mobile-tuned cards because they predate the unified grid; all of them open
+ * the same item sheet on `?item=`.
  */
 const GRID_CATEGORIES = new Set<DiscoverCategoryId>([
   "mcpTools",
@@ -137,8 +136,8 @@ export function DiscoverMobileBody() {
   } = useDiscoverRouteState()
   const [query, setQuery] = useState("")
   const searchRef = useRef<HTMLInputElement>(null)
+  /** The create-character editor (the FAB). Editing opens from the item sheet. */
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   /** Card whose long-press action sheet (share, …) is open. */
   const [actionItem, setActionItem] = useState<DiscoverItem | null>(null)
   const [preferredTwinId, setPreferredTwinId] = useState<string | null>(null)
@@ -167,16 +166,18 @@ export function DiscoverMobileBody() {
   useSearchHotkey(searchRef)
 
   // Land on the user's preferred category when the URL carries none, matching
-  // the desktop body. Falls back to their first visible category.
+  // the desktop body. Falls back to their first visible category. Not while an
+  // item is open: switching category clears `?item=`, which would wipe a cold
+  // deep link before its sheet opened.
   const landing = useMemo(
     () => resolveLandingCategory(preferences.landingCategory, layout),
     [preferences.landingCategory, layout]
   )
   useEffect(() => {
-    if (!categoryExplicit && category !== landing) {
+    if (!categoryExplicit && item === null && category !== landing) {
       setCategory(landing)
     }
-  }, [categoryExplicit, category, landing, setCategory])
+  }, [categoryExplicit, item, category, landing, setCategory])
 
   const charactersQuery = useDiscoverQuery("characters", query, { sort, filter, favoriteKeys })
   const teamsQuery = useDiscoverQuery("teams", query, { sort, filter, favoriteKeys })
@@ -188,20 +189,22 @@ export function DiscoverMobileBody() {
   const teams = teamsQuery.items
   const skills = skillsQuery.items
 
-  const featured = charactersQuery.items
-    .map((i) => (i.kind === "character" ? i.data : null))
-    .filter((c): c is Character => Boolean(c?.isBuiltIn))
+  const featured = charactersQuery.items.flatMap((i) =>
+    i.kind === "character" && i.data.isBuiltIn ? [i.data] : []
+  )
 
   const trimmed = query.trim()
   const isHome = category === FORYOU_CATEGORY
-  // Favorites + the Phase-3 grid categories render through the shared grid +
-  // bottom-Sheet inspector; the legacy categories own their own row UI.
+  // Favorites + the Phase-3 grid categories render through the shared grid;
+  // the legacy categories own their own row UI.
   const isGridDriven =
     category === FAVORITES_CATEGORY || GRID_CATEGORIES.has(category as DiscoverCategoryId)
-  // The aggregated landing selects into the same bottom-sheet inspector, backed
-  // by the home hook's flat item list.
-  const inspectorOpen = item !== null && (isGridDriven || isHome)
+  // `?item=` opens the item sheet on EVERY category, legacy lists included, so
+  // a deep link lands on its detail wherever it points. It used to open only
+  // for the grid categories and the landing, which left `?item=char_…` inert.
+  // `gridQuery` follows the active category, so it lists the legacy kinds too.
   const inspectorItems = isHome ? home.items : gridQuery.items
+  const inspectorLoading = isHome ? home.loading : gridQuery.loading
   // The view toggle also drives density for the three legacy card lists.
   const showToggle = isGridDriven || TOGGLE_LEGACY_CATEGORIES.has(category as DiscoverCategoryId)
   const legacyListClass = discoverViewContainer(view(category))
@@ -258,10 +261,7 @@ export function DiscoverMobileBody() {
       {category === "characters" && trimmed.length === 0 ? (
         <FeaturedCarousel
           characters={featured}
-          onSelect={(c) => {
-            setEditingCharacter(c)
-            setEditorOpen(true)
-          }}
+          onSelect={(c) => setItem(c.id)}
           className="pb-2"
         />
       ) : null}
@@ -284,10 +284,7 @@ export function DiscoverMobileBody() {
                 <Button
                   type="button"
                   size="sm"
-                  onClick={() => {
-                    setEditingCharacter(null)
-                    setEditorOpen(true)
-                  }}
+                  onClick={() => setEditorOpen(true)}
                   data-testid="character-create-fab"
                 >
                   <PlusIcon className="size-4" />
@@ -310,13 +307,7 @@ export function DiscoverMobileBody() {
                     return (
                       <StaggerRow key={c.id}>
                         <LongPress onLongPress={() => setActionItem(it)} className="block">
-                          <CharacterCard
-                            character={c}
-                            onSelect={(picked) => {
-                              setEditingCharacter(picked)
-                              setEditorOpen(true)
-                            }}
-                          />
+                          <CharacterCard character={c} onSelect={(picked) => setItem(picked.id)} />
                         </LongPress>
                       </StaggerRow>
                     )
@@ -343,7 +334,7 @@ export function DiscoverMobileBody() {
                   return (
                     <StaggerRow key={tm.id}>
                       <LongPress onLongPress={() => setActionItem(it)} className="block">
-                        <TeamCard team={tm} />
+                        <TeamCard team={tm} onSelect={(picked) => setItem(picked.id)} />
                       </LongPress>
                     </StaggerRow>
                   )
@@ -480,14 +471,7 @@ export function DiscoverMobileBody() {
         </div>
       </PullToRefresh>
 
-      <CharacterDetailSheet
-        open={editorOpen}
-        character={editingCharacter}
-        onOpenChange={(next) => {
-          setEditorOpen(next)
-          if (!next) setEditingCharacter(null)
-        }}
-      />
+      <CharacterDetailSheet open={editorOpen} character={null} onOpenChange={setEditorOpen} />
 
       {/* Long-press action sheet for legacy cards (characters / teams / skills):
           surfaces the desktop-parity "Share via link" flow on mobile. */}
@@ -498,19 +482,15 @@ export function DiscoverMobileBody() {
         }}
       />
 
-      {/* Bottom-Sheet inspector for grid-driven categories. The legacy
-          categories (characters / teams / skills / plugins / twin*) own
-          their own row-level interactions and do not open this sheet. */}
-      <Sheet open={inspectorOpen} onOpenChange={(open) => (open ? null : clearItem())}>
-        <SheetContent side="bottom" className="max-h-[85vh] p-0">
-          <DiscoverInspector
-            category={category}
-            itemId={item}
-            items={inspectorItems}
-            onClose={clearItem}
-          />
-        </SheetContent>
-      </Sheet>
+      {/* The item detail, driven by `?item=` for every category. */}
+      <DiscoverItemSheet
+        side="bottom"
+        itemId={item}
+        items={inspectorItems}
+        loading={inspectorLoading}
+        category={category}
+        onClose={clearItem}
+      />
     </main>
   )
 }

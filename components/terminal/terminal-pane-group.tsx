@@ -30,6 +30,7 @@ import { XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { HOVER_REVEAL_CONTROL_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
@@ -179,7 +180,14 @@ function PaneBox({
         <Button
           size="icon"
           variant="ghost"
-          className="absolute right-1 top-1 z-10 h-5 w-5 opacity-0 hover:opacity-100 focus-visible:opacity-100"
+          className={cn(
+            "absolute right-1 top-1 z-10 h-5 w-5",
+            // The pane is not a `group`: the button reveals on its own hover.
+            // `transition-all` keeps the Button's own transition, which the
+            // policy's `transition-opacity` would otherwise replace.
+            HOVER_REVEAL_CONTROL_BASE_CLASS,
+            "transition-all hover:opacity-100"
+          )}
           onClick={onClose}
           aria-label={closeLabel}
           data-testid="terminal-pane-close"

@@ -1,30 +1,48 @@
 "use client"
 
 /**
- * Right rail for the desktop discover page.
+ * Discover item detail, plus the per-category overview the desktop rail shows.
  *
  * When no `itemId` is selected: shows a per-category overview (count,
- * helper text). When an item is selected: dispatches per-kind to a
- * focused detail panel with the canonical action (enable/disable,
- * open dedicated page, edit). Phase 4 will replace the plugin panel
- * with the install-flow-aware variant.
+ * helper text, marketplace CTAs). When an item is selected: dispatches
+ * per-kind to a focused detail panel with the item's primary actions
+ * (start a chat, open a team, enable/disable, favorite, share, open the
+ * dedicated page).
+ *
+ * The selected-item view is rendered inside `DiscoverItemSheet` on every
+ * tier (`presentation="sheet"`), which is why the header can promote its
+ * heading to the dialog's accessible title. The rail itself only ever shows
+ * the overview.
  */
 
 import { useState } from "react"
 import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { useLocale, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { ExternalLinkIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ExternalLinkIcon,
+  MessageSquarePlusIcon,
+  MessagesSquareIcon,
+  PencilIcon,
+  SettingsIcon,
+  StarIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 
 import { CharacterDetailSheet } from "@/components/mobile/discover/character-detail-sheet"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
 import { SkillMarketplaceSheet } from "@/components/discover/skill-marketplace-sheet"
 import { TwinProfileCard } from "@/components/discover/twin-profile-card"
 import { DiscoverShareButton } from "@/components/discover/discover-share-button"
+import { useShellNav } from "@/components/shell/use-shell-nav"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import { Switch } from "@/components/ui/switch"
+import { useDiscoverFavorites } from "@/hooks/discover/use-discover-favorites"
 import { usePluginMarketplace } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePlatform } from "@/hooks/use-platform"
 import type {
@@ -54,6 +72,9 @@ import { getDb } from "@/lib/db/schema"
 import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { setSkillStatus } from "@/lib/db/skills"
 import { connectionsHref, mcpHref, settingsHref } from "@/lib/settings/deep-link"
+import { characterChatTitle } from "@/lib/chat/character-chat-title"
+import { openCharacterChat, startGuildConversation } from "@/lib/shell/start-guild-conversation"
+import { cn } from "@/lib/utils"
 import {
   DocsProviderNotice,
   useDocsProviderReach,
@@ -63,9 +84,15 @@ import { Surface } from "@/components/surface/surface"
 export interface DiscoverInspectorProps {
   category: DiscoverView
   itemId: string | null
-  items: DiscoverItem[]
+  items: readonly DiscoverItem[]
   onClose: () => void
   className?: string
+  /**
+   * `"sheet"` when rendered inside `DiscoverItemSheet`: the header's heading
+   * and category line become the dialog's accessible title and description.
+   * `"panel"` (default) renders plain elements, for hosts with no dialog.
+   */
+  presentation?: "panel" | "sheet"
 }
 
 export function DiscoverInspector({
@@ -74,6 +101,7 @@ export function DiscoverInspector({
   items,
   onClose,
   className,
+  presentation = "panel",
 }: DiscoverInspectorProps) {
   const t = useTranslations("discover")
   const selected = itemId ? items.find((i) => i.id === itemId) : null
@@ -106,7 +134,7 @@ export function DiscoverInspector({
       className={className}
       data-testid={`discover-inspector-${selected.kind}-${selected.id}`}
     >
-      <InspectorHeader item={selected} onClose={onClose} />
+      <InspectorHeader item={selected} onClose={onClose} presentation={presentation} />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
         <InspectorBody item={selected} />
         <DiscoverShareButton item={selected} />
@@ -115,19 +143,38 @@ export function DiscoverInspector({
   )
 }
 
-function InspectorHeader({ item, onClose }: { item: DiscoverItem; onClose: () => void }) {
+function InspectorHeader({
+  item,
+  onClose,
+  presentation,
+}: {
+  item: DiscoverItem
+  onClose: () => void
+  presentation: "panel" | "sheet"
+}) {
   const t = useTranslations("discover")
   const tDocs = useTranslations("docsProviders")
   const locale = useLocale()
   const name = displayName(item, t, locale, tDocs)
+  const heading = (
+    <h2 className="truncate text-sm font-semibold" data-testid="discover-inspector-title">
+      {name}
+    </h2>
+  )
+  const categoryLine = (
+    <p className="text-xs text-muted-foreground">{t(`categories.${categoryOf(item)}`)}</p>
+  )
   return (
     <header className="flex items-start gap-2 border-b border-border px-4 py-3">
       <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-semibold" data-testid="discover-inspector-title">
-          {name}
-        </h2>
-        <p className="text-xs text-muted-foreground">{t(`categories.${categoryOf(item)}`)}</p>
+        {presentation === "sheet" ? <SheetTitle asChild>{heading}</SheetTitle> : heading}
+        {presentation === "sheet" ? (
+          <SheetDescription asChild>{categoryLine}</SheetDescription>
+        ) : (
+          categoryLine
+        )}
       </div>
+      <FavoriteToggle item={item} />
       <Button
         type="button"
         variant="ghost"
@@ -139,6 +186,39 @@ function InspectorHeader({ item, onClose }: { item: DiscoverItem; onClose: () =>
         <XIcon className="size-4" />
       </Button>
     </header>
+  )
+}
+
+/**
+ * Star toggle for the open item, the same `${kind}:${id}` favorite the grid
+ * cards write, so the Favorites view and the card stars stay in agreement.
+ */
+function FavoriteToggle({ item }: { item: DiscoverItem }) {
+  const t = useTranslations("discover")
+  const { isFavorite, toggleFavorite } = useDiscoverFavorites()
+  const favorited = isFavorite(item.kind, item.id)
+  const onToggle = async () => {
+    try {
+      await toggleFavorite(item.kind, item.id)
+    } catch (err) {
+      toast.error(t("favorite.failed"), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      onClick={() => void onToggle()}
+      aria-label={favorited ? t("favorite.remove") : t("favorite.add")}
+      aria-pressed={favorited}
+      data-testid="discover-inspector-favorite"
+      className={cn(favorited && "text-amber-500 hover:text-amber-500")}
+    >
+      <StarIcon className={cn("size-4", favorited && "fill-current")} />
+    </Button>
   )
 }
 
@@ -190,7 +270,31 @@ function InspectorBody({ item }: { item: DiscoverItem }) {
 
 function CharacterInspector({ character }: { character: Character }) {
   const t = useTranslations("discover")
+  const tMembers = useTranslations("desktop.memberList")
+  const router = useRouter()
+  const pathname = usePathname() ?? "/discover"
   const [editOpen, setEditOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  // The shared "open this character's chat" path: it switches to the newest
+  // existing direct conversation with the character before creating one, so
+  // repeated clicks do not pile up empty chats named after the same persona.
+  const onStartChat = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      await openCharacterChat(character, {
+        newChatTitle: characterChatTitle(tMembers, character.name),
+        navigate: (route) => router.push(route),
+        pathname,
+      })
+    } catch (err) {
+      toast.error(t("inspector.startChatFailed", { name: character.name }), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setStarting(false)
+    }
+  }
   return (
     <>
       {character.description ? (
@@ -198,15 +302,28 @@ function CharacterInspector({ character }: { character: Character }) {
       ) : null}
       <div className="flex flex-wrap gap-2">
         {character.isBuiltIn ? <Badge variant="outline">{t("builtInBadge")}</Badge> : null}
+        {character.model ? <Badge variant="secondary">{character.model}</Badge> : null}
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant="default"
+          disabled={starting}
+          aria-busy={starting}
+          onClick={() => void onStartChat()}
+          data-testid="discover-inspector-start-chat"
+        >
+          <MessageSquarePlusIcon className="size-4" />
+          {t("inspector.startChat")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
           onClick={() => setEditOpen(true)}
           data-testid="discover-inspector-edit-character"
         >
-          {t("inspector.openFull")}
+          <PencilIcon className="size-4" />
+          {t("inspector.editCharacter")}
         </Button>
       </div>
       <CharacterDetailSheet open={editOpen} character={character} onOpenChange={setEditOpen} />
@@ -214,26 +331,76 @@ function CharacterInspector({ character }: { character: Character }) {
   )
 }
 
+/**
+ * A Team is a guild of Characters (the Dexie `teams` table), which is what the
+ * chat sidebar lists as a scope. It is NOT a Squad: `/squads?id=` addresses the
+ * `AgentTeam` store, so linking a Team id there opened an empty inspector. The
+ * Team's own actions are the ones the sidebar offers: open its conversations,
+ * start a new one, or manage it in Settings → Teams.
+ */
 function TeamInspector({ team }: { team: Team }) {
   const t = useTranslations("discover")
+  const tChannels = useTranslations("desktop.channelList")
+  const router = useRouter()
+  const pathname = usePathname() ?? "/discover"
+  const { switchToTeam } = useShellNav()
+  const [starting, setStarting] = useState(false)
   const memberCount = team.members?.length ?? 0
+  const onNewConversation = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      await startGuildConversation({
+        teamId: team.id,
+        teamTitle: tChannels("newConversation"),
+        navigate: (route) => router.push(route),
+        pathname,
+      })
+    } catch (err) {
+      toast.error(t("inspector.newTeamConversationFailed", { name: team.name }), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setStarting(false)
+    }
+  }
   return (
     <>
       {team.description ? (
         <p className="text-sm text-muted-foreground">{team.description}</p>
       ) : null}
+      <div className="flex flex-wrap gap-2">
+        {team.isBuiltIn ? <Badge variant="outline">{t("builtInBadge")}</Badge> : null}
+      </div>
       <p className="text-xs text-muted-foreground">{t("memberCount", { count: memberCount })}</p>
-      <Button
-        asChild
-        variant="default"
-        className="self-start"
-        data-testid="discover-inspector-open-team"
-      >
-        <Link href={`/squads?id=${encodeURIComponent(team.id)}`}>
-          <ExternalLinkIcon className="size-4" />
-          {t("inspector.openFull")}
-        </Link>
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="default"
+          onClick={() => switchToTeam(team.id)}
+          data-testid="discover-inspector-open-team"
+        >
+          <MessagesSquareIcon className="size-4" />
+          {t("inspector.openTeam")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={starting}
+          aria-busy={starting}
+          onClick={() => void onNewConversation()}
+          data-testid="discover-inspector-new-team-conversation"
+        >
+          <MessageSquarePlusIcon className="size-4" />
+          {t("inspector.newTeamConversation")}
+        </Button>
+        <Button asChild variant="ghost" data-testid="discover-inspector-manage-teams">
+          <Link href={settingsHref("teams")}>
+            <SettingsIcon className="size-4" />
+            {t("inspector.manageTeams")}
+          </Link>
+        </Button>
+      </div>
     </>
   )
 }

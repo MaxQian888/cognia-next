@@ -91,6 +91,10 @@ jest.mock("@/lib/attention/attention-store", () => ({
 const setActiveSessionMock = jest.fn()
 const setSelectedGuildMock = jest.fn()
 const clearApprovalMock = jest.fn()
+const selectExternalAgentMock = jest.fn()
+jest.mock("@/lib/agent/external-agent-selection", () => ({
+  selectExternalAgent: (...args: unknown[]) => selectExternalAgentMock(...args),
+}))
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: {
     getState: () => ({ setActiveSession: setActiveSessionMock, clearApproval: clearApprovalMock }),
@@ -155,6 +159,7 @@ beforeEach(() => {
   navigateMock.mockClear()
   setActiveSessionMock.mockClear()
   setSelectedGuildMock.mockClear()
+  selectExternalAgentMock.mockClear()
   closeGateMock.mockClear()
   clearApprovalMock.mockClear()
   showWindowMock.mockReset().mockResolvedValue(undefined)
@@ -253,6 +258,55 @@ it("preserves the selected chat when opening a run", async () => {
   deps.navigate("/agent-runs?run=run-b", { kind: "run", runId: "run-b" })
 
   expect(navigateMock).toHaveBeenCalledWith("/agent-runs?run=run-b")
+  expect(setActiveSessionMock).not.toHaveBeenCalled()
+  expect(setSelectedGuildMock).not.toHaveBeenCalled()
+})
+
+it("opens an ACP session's bound chat and selects its agent", async () => {
+  await mount()
+  await act(async () =>
+    onActionIntent({
+      kind: "open-owner",
+      requestId: "req",
+      revision: 1,
+      rowId: "external:devin:ext-1",
+    })
+  )
+  const deps = (executeMock.mock.calls[0] as unknown[])[2] as IslandActionDeps
+  deps.navigate("/", {
+    kind: "external",
+    agent: "devin",
+    sessionId: "ext-1",
+    agentId: "agent-1",
+    chatSessionId: "chat-9",
+  })
+
+  expect(setActiveSessionMock).toHaveBeenCalledWith("chat-9")
+  expect(setSelectedGuildMock).toHaveBeenCalledWith({ kind: "dm" })
+  expect(selectExternalAgentMock).toHaveBeenCalledWith("agent-1")
+  expect(navigateMock).toHaveBeenCalledWith("/")
+})
+
+it("selects the agent without touching chat for an unbound ACP session", async () => {
+  await mount()
+  await act(async () =>
+    onActionIntent({
+      kind: "open-owner",
+      requestId: "req",
+      revision: 1,
+      rowId: "external:acp:ext-2",
+    })
+  )
+  const deps = (executeMock.mock.calls[0] as unknown[])[2] as IslandActionDeps
+  deps.navigate("/me/external-agents", {
+    kind: "external",
+    agent: "acp",
+    sessionId: "ext-2",
+    agentId: "agent-2",
+  })
+
+  expect(navigateMock).toHaveBeenCalledWith("/me/external-agents")
+  expect(selectExternalAgentMock).toHaveBeenCalledWith("agent-2")
   expect(setActiveSessionMock).not.toHaveBeenCalled()
   expect(setSelectedGuildMock).not.toHaveBeenCalled()
 })

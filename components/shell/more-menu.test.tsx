@@ -2,9 +2,13 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { LucideIcon } from "lucide-react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -101,5 +105,23 @@ describe("MoreMenuContent", () => {
     await user.click(screen.getByTestId("more-customize"))
     expect(props.onCustomize).toHaveBeenCalled()
     expect(screen.getByTestId("more-customize")).toHaveTextContent("moreCount")
+  })
+
+  it("keeps the per-item pin button reachable without a hover", () => {
+    const props = renderMenu()
+    const pin = screen.getByTestId("more-pin-skills")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(pin).toHaveClass(variant)
+    }
+    // Revealed while focus sits on the row's open button too.
+    expect(pin).toHaveClass("group-focus-within:opacity-100")
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(pin).not.toHaveClass(forbidden)
+    }
+    pin.focus()
+    expect(pin).toHaveFocus()
+    fireEvent.click(pin)
+    expect(props.onPin).toHaveBeenCalledWith("skills")
+    expect(props.onOpen).not.toHaveBeenCalled()
   })
 })

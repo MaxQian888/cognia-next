@@ -1,7 +1,18 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 
+// Records the zone each render hands the provider.
+const mockProviderZones: (string | undefined)[] = []
 jest.mock("next-intl", () => ({
-  NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  NextIntlClientProvider: ({
+    children,
+    timeZone,
+  }: {
+    children: React.ReactNode
+    timeZone?: string
+  }) => {
+    mockProviderZones.push(timeZone)
+    return children
+  },
 }))
 
 jest.mock("@/i18n/messages", () => ({
@@ -15,7 +26,10 @@ jest.mock("@/lib/tauri/store", () => ({ getPref: jest.fn() }))
 // The overlay reads the same settings slice the full LocaleGate does, so the
 // browser and Capacitor shells (where `getPref` is always null) still honour
 // the chosen language.
-const settingsState: { settings: { language?: string } | null; loaded: boolean } = {
+const settingsState: {
+  settings: { language?: string; profile?: { timezone?: string } } | null
+  loaded: boolean
+} = {
   settings: null,
   loaded: false,
 }
@@ -31,6 +45,7 @@ const getPrefMock = getPref as jest.Mock
 const loadMessagesMock = loadMessages as jest.Mock
 
 beforeEach(() => {
+  mockProviderZones.length = 0
   getPrefMock.mockReset().mockResolvedValue(null)
   loadMessagesMock.mockReset()
   settingsState.settings = null
@@ -68,4 +83,20 @@ it("uses the hydrated settings language where the Tauri pref is unreachable", as
     render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
   })
   await waitFor(() => expect(loadMessagesMock).toHaveBeenCalledWith("zh-CN"))
+})
+
+// The overlays print times too; UTC put the tray panel hours away from the
+// same timestamp in the main window.
+it("formats in UTC until settings load, then in the user's zone", () => {
+  const { rerender } = render(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
+  expect(mockProviderZones.at(-1)).toBe("UTC")
+
+  settingsState.loaded = true
+  settingsState.settings = { profile: { timezone: "Asia/Tokyo" } }
+  rerender(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
+  expect(mockProviderZones.at(-1)).toBe("Asia/Tokyo")
+
+  settingsState.settings = { profile: { timezone: "Not/AZone" } }
+  rerender(<LightweightLocaleGate>overlay</LightweightLocaleGate>)
+  expect(mockProviderZones.at(-1)).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
 })

@@ -32,6 +32,7 @@ function renderShell(props: Partial<React.ComponentProps<typeof SafeModeShell>> 
         state={props.state === undefined ? state() : props.state}
         probing={props.probing ?? false}
         onRetry={onRetry}
+        secretStoreNotice={props.secretStoreNotice}
       />
     </NextIntlClientProvider>
   )
@@ -116,6 +117,37 @@ describe("SafeModeShell", () => {
     ).not.toBeInTheDocument()
   })
 
+  it.each(["sidecar", undefined] as const)(
+    "offers one safe continuation for a cold boot with suspect %s",
+    async (suspectSubsystem) => {
+      const user = userEvent.setup()
+      const { onRetry } = renderShell({ state: state({ suspectSubsystem }) })
+      const retry = screen.getByRole("button", { name: messages.safeMode.actions.retry })
+      expect(
+        screen.queryByRole("button", { name: messages.safeMode.actions.keepDisabled })
+      ).not.toBeInTheDocument()
+      await user.click(retry)
+      expect(onRetry).toHaveBeenCalledWith(suspectSubsystem ?? "database", "retry")
+    }
+  )
+
+  it("does not offer pending continuation past an existing failure", () => {
+    renderShell({
+      state: state({
+        checkpoints: [
+          { subsystem: "database", status: "failed" },
+          { subsystem: "plugins", status: "pending" },
+        ],
+      }),
+    })
+    expect(screen.getAllByRole("button", { name: messages.safeMode.actions.retry })).toHaveLength(1)
+  })
+
+  it("disables pending continuation while probes run", () => {
+    renderShell({ probing: true, state: state({ suspectSubsystem: "sidecar" }) })
+    expect(screen.getByRole("button", { name: messages.safeMode.actions.retry })).toBeDisabled()
+  })
+
   it("disables the actions while probes are running", () => {
     renderShell({
       probing: true,
@@ -154,5 +186,14 @@ describe("SafeModeShell", () => {
     renderShell({ state: null })
     expect(screen.getByText(messages.safeMode.checkpoints.empty)).toBeInTheDocument()
     expect(screen.queryByText(/build-/)).not.toBeInTheDocument()
+  })
+
+  it("renders the gate's secure-storage notice above the checkpoints", () => {
+    renderShell({ secretStoreNotice: <p data-testid="secret-notice">locked</p> })
+    const notice = screen.getByTestId("secret-notice")
+    const checkpoints = screen.getByText(messages.safeMode.checkpoints.title)
+    expect(
+      notice.compareDocumentPosition(checkpoints) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 })

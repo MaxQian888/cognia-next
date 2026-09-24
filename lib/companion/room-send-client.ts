@@ -51,6 +51,12 @@ export interface RoomSendRequest {
 
 export interface RoomSendResponse {
   accepted: boolean
+  /**
+   * For a regenerate or an edit: files the host could not send again with the
+   * turn (a natively sent video, an image whose bytes are gone), by filename.
+   * The host resends the rest; the companion names these to the user.
+   */
+  notResent?: string[]
 }
 
 export async function sendRoomTurn(request: RoomSendRequest): Promise<RoomSendResponse> {

@@ -19,7 +19,7 @@ jest.mock("@cognia/redact", () => ({
 
 const managerGetMock = jest.fn()
 const managerStartMock = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     get: (...args: unknown[]) => managerGetMock(...args),
     start: (...args: unknown[]) => managerStartMock(...args),

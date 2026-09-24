@@ -573,6 +573,94 @@ describe("applicableApproval", () => {
 })
 
 describe("placeAgentRun", () => {
+  it("propagates declaration read failures and clears a previous placement", async () => {
+    await placeAgentRun(request(), sources())
+    const failure = new Error("workspace read permission denied")
+    await expect(
+      placeAgentRun(
+        request(),
+        sources({
+          declarationFiles: async () => {
+            throw failure
+          },
+        })
+      )
+    ).rejects.toBe(failure)
+    expect(spawnPlacementFor("agent-1")).toBeUndefined()
+    expect(runEnvironmentOutcome("agent-1")).toBeUndefined()
+  })
+
+  it("does not request declaration files from a disabled pool", async () => {
+    const declarationFiles = jest.fn(async () => {
+      throw new Error("pool disabled")
+    })
+    await expect(
+      prepareRunEnvironment(
+        request(),
+        sources({
+          catalog: async () => catalog({ poolEnabled: false }),
+          declarationFiles,
+        })
+      )
+    ).resolves.toMatchObject({ kind: "fallback", code: "sandbox_fallback_pool_disabled" })
+    expect(declarationFiles).not.toHaveBeenCalled()
+  })
+
+  it("does not publish an older preparation over a newer outcome", async () => {
+    let finish!: (value: EnvironmentCatalogView) => void
+    const pendingCatalog = new Promise<EnvironmentCatalogView>((resolve) => {
+      finish = resolve
+    })
+    const old = placeAgentRun(request(), sources({ catalog: () => pendingCatalog }))
+    const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" })
+    const latest = await placeAgentRun(
+      request(),
+      sources({
+        selection: async () => ({ runtime: undefined, policy: undefined }),
+      })
+    )
+    finish(catalog())
+    await rejected
+    expect(runEnvironmentOutcome("agent-1")).toBe(latest)
+    expect(spawnPlacementFor("agent-1")).toBeUndefined()
+  })
+
+  it("invalidates an outstanding preparation when its outcome is forgotten", async () => {
+    let finish!: (value: EnvironmentCatalogView) => void
+    const pendingCatalog = new Promise<EnvironmentCatalogView>((resolve) => {
+      finish = resolve
+    })
+    const pending = placeAgentRun(request(), sources({ catalog: () => pendingCatalog }))
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    forgetRunEnvironmentOutcome("agent-1")
+    finish(catalog())
+    await rejected
+    expect(runEnvironmentOutcome("agent-1")).toBeUndefined()
+    expect(spawnPlacementFor("agent-1")).toBeUndefined()
+  })
+
+  it("keeps a newer placement when an older preparation fails", async () => {
+    let fail!: (cause: Error) => void
+    const pendingCatalog = new Promise<EnvironmentCatalogView>((_resolve, reject) => {
+      fail = reject
+    })
+    const pending = placeAgentRun(
+      request(),
+      sources({
+        declarationFiles: async () => {
+          await pendingCatalog
+          return { files: [], searched: [] }
+        },
+      })
+    )
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    const latest = await placeAgentRun(request(), sources())
+    fail(new Error("old transport closed"))
+    await rejected
+    expect(runEnvironmentOutcome("agent-1")).toBe(latest)
+    expect(spawnPlacementFor("agent-1")).toBeDefined()
+  })
+
   it("parks the placement for the spawn and records the outcome", async () => {
     const outcome = await placeAgentRun(request(), sources())
 

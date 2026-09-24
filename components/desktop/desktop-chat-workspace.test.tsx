@@ -32,55 +32,46 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    shell: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: (...args: unknown[]) => logWarn(...args),
-      error: jest.fn(),
-    },
-    ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-    plugin: {
+// Every namespace answers: the import graph reaches modules that build a
+// child logger at load time (`loggers.mcp.child(...)` in lib/db/mcp-servers.ts,
+// among others), and a hand-listed set of namespaces broke the whole suite
+// every time that graph grew. `shell` keeps its spies for the assertions below.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => {
+    const logger: Record<string, unknown> = {
       trace: jest.fn(),
       debug: jest.fn(),
       info: jest.fn(),
       warn: jest.fn(),
       error: jest.fn(),
-      child: function () {
-        return this
-      },
-      withContext: function () {
-        return this
-      },
-    },
-    agent: {
-      trace: jest.fn(),
-      debug: jest.fn(),
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      child: function () {
-        return this
-      },
-      withContext: function () {
-        return this
-      },
-    },
-  },
-  createLogger: () => ({
-    trace: jest.fn(),
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    child() {
-      return this
-    },
-    withContext() {
-      return this
-    },
-  }),
-}))
+    }
+    logger.child = () => logger
+    logger.withContext = () => logger
+    return logger
+  }
+  const shell = {
+    ...makeLogger(),
+    info: (...args: unknown[]) => logInfo(...args),
+    warn: (...args: unknown[]) => logWarn(...args),
+  }
+  const byNamespace = new Map<PropertyKey, Record<string, unknown>>([["shell", shell]])
+  return {
+    loggers: new Proxy(
+      {},
+      {
+        get: (_target, namespace) => {
+          let logger = byNamespace.get(namespace)
+          if (!logger) {
+            logger = makeLogger()
+            byNamespace.set(namespace, logger)
+          }
+          return logger
+        },
+      }
+    ),
+    createLogger: () => makeLogger(),
+  }
+})
 
 jest.mock("sonner", () => ({
   toast: { error: jest.fn(), info: jest.fn(), success: jest.fn(), warning: jest.fn() },
@@ -101,6 +92,9 @@ const createFolder = jest.fn().mockResolvedValue({ id: "f-new" })
 const renameFolder = jest.fn().mockResolvedValue(undefined)
 const deleteFolder = jest.fn().mockResolvedValue(undefined)
 const assignToFolder = jest.fn().mockResolvedValue(undefined)
+const bulkAssignToFolder = jest.fn().mockResolvedValue(undefined)
+// Every `crossWorkspace` the workspace asked `useSessions` for, in order.
+const useSessionsCrossWorkspace: boolean[] = []
 let activeSessionId: string | null = null
 // Navigation epochs — mirror the real stores so the workspace can decide
 // whether the guild or the active session was chosen more recently.
@@ -110,6 +104,7 @@ let activeSessionEpoch = 0
 let mockActiveProjectIdForSessions: string | null = null
 jest.mock("@/hooks/chat", () => ({
   useSessions: ({ crossWorkspace = false }: { crossWorkspace?: boolean } = {}) => {
+    useSessionsCrossWorkspace.push(crossWorkspace)
     const listedActiveSession =
       sessionsRef.current.find((session) => session.id === activeSessionId) ?? null
     const activeSession =
@@ -138,6 +133,7 @@ jest.mock("@/hooks/chat", () => ({
       renameFolder,
       deleteFolder,
       assignToFolder,
+      bulkAssignToFolder,
     }
   },
   useClaudeChat: () => directChatMock,
@@ -167,6 +163,7 @@ const teamChatMock = {
 
 const errorMessageRef: { current: string | null } = { current: null }
 const closeSessionStoreMock = jest.fn()
+const clearActiveSession = jest.fn()
 jest.mock("@/stores/chat", () => ({
   useChatStore: Object.assign(
     <T,>(
@@ -174,12 +171,14 @@ jest.mock("@/stores/chat", () => ({
         errorMessage: string | null
         pendingApprovals: unknown[]
         activeSessionEpoch: number
+        clearActiveSession: typeof clearActiveSession
       }) => T
     ): T =>
       selector({
         errorMessage: errorMessageRef.current,
         pendingApprovals: [],
         activeSessionEpoch,
+        clearActiveSession,
       }),
     {
       getState: () => ({
@@ -192,9 +191,17 @@ jest.mock("@/stores/chat", () => ({
 }))
 
 const loadSettings = jest.fn().mockResolvedValue(undefined)
+// The conversation-sidebar preferences the workspace reads to scope the query.
+let mockConversationSidebar: Record<string, unknown> | undefined
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: Object.assign(
-    <T,>(selector: (s: { load: typeof loadSettings }) => T): T => selector({ load: loadSettings }),
+    <T,>(
+      selector: (s: {
+        load: typeof loadSettings
+        settings: { conversationSidebar?: Record<string, unknown> }
+      }) => T
+    ): T =>
+      selector({ load: loadSettings, settings: { conversationSidebar: mockConversationSidebar } }),
     { getState: () => ({ settings: { apiKey: "k" } }) }
   ),
 }))
@@ -208,6 +215,7 @@ const pendingSettingsRequestRef: { current: { tab?: string; nonce: number } | nu
   current: null,
 }
 const clearPendingSettings = jest.fn()
+const requestChatHome = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(
     selector: (s: {
@@ -217,6 +225,8 @@ jest.mock("@/stores/ui", () => ({
       pendingSettingsRequest: typeof pendingSettingsRequestRef.current
       clearPendingSettings: typeof clearPendingSettings
       sidebarCollapsed: boolean
+      chatHomeEpoch: number
+      requestChatHome: typeof requestChatHome
     }) => T
   ): T =>
     selector({
@@ -226,6 +236,8 @@ jest.mock("@/stores/ui", () => ({
       pendingSettingsRequest: pendingSettingsRequestRef.current,
       clearPendingSettings,
       sidebarCollapsed: false,
+      chatHomeEpoch: 0,
+      requestChatHome,
     }),
 }))
 
@@ -303,6 +315,10 @@ jest.mock("@/components/chat/tool-approval-dialog", () => ({
 
 import { requestComposerMention } from "@/lib/chat/composer-mention-request"
 import { DesktopChatWorkspace } from "./desktop-chat-workspace"
+import { ContextBar } from "@/components/chat/composer/context-bar"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import type { Project } from "@/types"
 import { useProjectStore } from "@/stores/project/project-store"
 import { toast } from "sonner"
 
@@ -347,6 +363,11 @@ beforeEach(() => {
   channelListPropsLog.length = 0
   paneGroupPropsLog.length = 0
   closeSessionStoreMock.mockClear()
+  clearActiveSession.mockClear()
+  requestChatHome.mockClear()
+  bulkAssignToFolder.mockClear()
+  useSessionsCrossWorkspace.length = 0
+  mockConversationSidebar = undefined
   // The workspace-switch tests below write the real project store; reset it so
   // an `activeProjectId` never leaks into the guild-reconcile suites.
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
@@ -368,15 +389,39 @@ test("auto-selects a matching session on first render and logs", async () => {
   expect(select).toHaveBeenCalledWith("s-1")
 })
 
-test("passes the active project root to the welcome context bar", () => {
+// Contract since 482da24ad ("sidebar scope tree…"): the welcome surface's
+// execution controls are the composer's `ContextBar`, which takes the active
+// PROJECT (and resolves its roots itself) plus the new-chat execution
+// selection — not the retired picker's bare `rootDir` string.
+test("hands the active project and the new-chat execution to the welcome context bar", () => {
   const project = useProjectStore.getState().createProject({ name: "Workspace", rootDir: "/repo" })
   useProjectStore.getState().setActiveProject(project.id)
 
   render(<DesktopChatWorkspace />)
 
   const slot = paneGroupPropsLog.at(-1)?.welcomeContextBarSlot as
-    { props?: { rootDir?: string } } | undefined
-  expect(slot?.props?.rootDir).toBe("/repo")
+    | {
+        type?: unknown
+        props?: {
+          project?: Project
+          execution?: unknown
+          onExecutionChange?: unknown
+        }
+      }
+    | undefined
+  expect(slot?.type).toBe(ContextBar)
+  expect(slot?.props?.project?.id).toBe(project.id)
+  // The project it gets is the one whose primary root is the workspace's repo.
+  expect(primaryRootOf(slot!.props!.project!)?.path).toBe("/repo")
+  expect(slot?.props?.execution).toEqual(expect.objectContaining({ location: expect.any(String) }))
+  expect(slot?.props?.onExecutionChange).toEqual(expect.any(Function))
+})
+
+test("gives the welcome context bar no project while none is active", () => {
+  render(<DesktopChatWorkspace />)
+  const slot = paneGroupPropsLog.at(-1)?.welcomeContextBarSlot as
+    { props?: { project?: Project } } | undefined
+  expect(slot?.props?.project).toBeUndefined()
 })
 
 test("switching to a team session adjusts the guild filter via guildFromSession", async () => {
@@ -548,8 +593,13 @@ test("clicking a team with no conversations lands on the welcome state without c
     render(<DesktopChatWorkspace />)
   })
   // The reconcile clears the stale direct session so the welcome renders; it
-  // must NOT silently insert a new team session row.
-  await waitFor(() => expect(select).toHaveBeenCalledWith(null))
+  // must NOT silently insert a new team session row. Since 482da24ad the clear
+  // goes through `clearActiveSession`, which drops the pointer WITHOUT
+  // stamping a navigation epoch — `select(null)` stamped one, and that newer
+  // "the user navigated to nothing" intent outranked the guild pick that
+  // produced it, bouncing the reconcile straight back.
+  await waitFor(() => expect(clearActiveSession).toHaveBeenCalledTimes(1))
+  expect(select).not.toHaveBeenCalled()
   expect(create).not.toHaveBeenCalled()
 })
 
@@ -571,7 +621,9 @@ test("clears the active session when switching to an empty DM bucket", async () 
   await act(async () => {
     render(<DesktopChatWorkspace />)
   })
-  await waitFor(() => expect(select).toHaveBeenCalledWith(null))
+  // Epoch-free clear (482da24ad): see the team-without-conversations case.
+  await waitFor(() => expect(clearActiveSession).toHaveBeenCalledTimes(1))
+  expect(select).not.toHaveBeenCalled()
 })
 
 test("syncs the guild to the active session when the session is the most recent intent", async () => {
@@ -656,6 +708,58 @@ test("an active team session renders the shared ChatPaneGroup, and no roster col
   expect(screen.queryByTestId("team-members-panel")).toBeNull()
 })
 
+describe("where the welcome composer may address a runtime", () => {
+  // A team room routes `@Name` through its own router and its send carries no
+  // runtime route, so the welcome composer must not offer `@codex` when its
+  // first turn is going into one.
+  const lastHeroRouting = () => paneGroupPropsLog.at(-1)?.heroRouting
+
+  test("into a new direct chat: routes", async () => {
+    sessionsRef.current = []
+    activeSessionId = null
+    activeSessionEpoch = 1
+    selectedGuild = { kind: "dm" }
+    selectedGuildEpoch = 2
+    await act(async () => {
+      render(<DesktopChatWorkspace />)
+    })
+    expect(lastHeroRouting()).toBe(true)
+  })
+
+  test("into a new conversation of the selected team guild: does not", async () => {
+    sessionsRef.current = []
+    activeSessionId = null
+    activeSessionEpoch = 1
+    selectedGuild = { kind: "team", teamId: "t-x" }
+    selectedGuildEpoch = 2
+    await act(async () => {
+      render(<DesktopChatWorkspace />)
+    })
+    expect(lastHeroRouting()).toBe(false)
+  })
+
+  test("into an active team room: does not", async () => {
+    sessionsRef.current = [
+      {
+        id: "t-1",
+        title: "team chat",
+        kind: "team",
+        teamId: "team-x",
+        createdAt: 0,
+        updatedAt: 0,
+      } as unknown as ChatSession,
+    ]
+    activeSessionId = "t-1"
+    activeSessionEpoch = 5
+    selectedGuild = { kind: "team", teamId: "team-x" }
+    selectedGuildEpoch = 6
+    await act(async () => {
+      render(<DesktopChatWorkspace />)
+    })
+    expect(lastHeroRouting()).toBe(false)
+  })
+})
+
 test("hands a mention request from outside its tree to the composer", async () => {
   await act(async () => {
     render(<DesktopChatWorkspace />)
@@ -703,7 +807,11 @@ test("an offline Companion keeps cached chat visible and disables sending with a
   expect(paneGroupPropsLog.at(-1)?.composerDisabled).toBe(true)
 })
 
-test("the pane group's onCreate starts a team conversation while a team guild is selected", async () => {
+// Contract since 482da24ad: the pane's "new conversation" action (composer
+// /clear, the welcome CTA) goes HOME in the current scope — the team guild's own
+// welcome — instead of inserting an empty team session up front. The team's
+// conversation is created by the welcome's first send (`handleFirstTurn`).
+test("the pane group's onCreate goes to the team's welcome, and its first send creates the conversation", async () => {
   create.mockResolvedValue({ id: "fresh" })
   sessionsRef.current = [
     {
@@ -726,10 +834,24 @@ test("the pane group's onCreate starts a team conversation while a team guild is
   await act(async () => {
     ;(props.onCreate as () => void)()
   })
-  await waitFor(() =>
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "team-x" }))
-  )
+  // Home in the current scope: no guild argument, so the team guild stays.
+  expect(requestChatHome).toHaveBeenCalledTimes(1)
+  expect(requestChatHome).toHaveBeenCalledWith()
+  expect(create).not.toHaveBeenCalled()
+
+  // The welcome (no active conversation now) sends its first message: that is
+  // what creates the team's conversation, in the selected team.
+  activeSessionId = null
+  const latest = paneGroupPropsLog[paneGroupPropsLog.length - 1]
+  await act(async () => {
+    await (latest.onHeroSend as (text: string) => Promise<void>)("kick-off")
+  })
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "team", teamId: "team-x" }))
   expect(select).toHaveBeenCalledWith("fresh")
+  expect(teamChatMock.send).toHaveBeenCalledWith(
+    "kick-off",
+    expect.objectContaining({ sessionId: "fresh" })
+  )
   // No approval modal is mounted anymore — approvals ride the inline gates.
   expect(screen.queryByTestId("tool-approval-dialog")).not.toBeInTheDocument()
 })
@@ -1000,13 +1122,20 @@ test("ChannelList callback props stay referentially stable across re-renders", (
 // The picked character's conversation title is persisted, so an unresolved
 // message would name the conversation `desktop.memberList.chatTitle` for good —
 // including in the shell that later ships the message.
+//
+// Since 482da24ad the picker's door is the welcome composer's "chat as a
+// character" button (`welcomeComposerToolbar`, and the pane's `onPickCharacter`)
+// — the sidebar's New chat lands on the welcome instead (next test).
 test("names a picked character's conversation after them when the title message is missing", async () => {
   missingMessageKeys.add("chatTitle")
   create.mockResolvedValue({ id: "new-direct" } as ChatSession)
   render(<DesktopChatWorkspace />)
-  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  expect(screen.queryByTestId("char-picker")).toBeNull()
+  // The real toolbar element the workspace hands the welcome composer.
+  const toolbar = paneGroupPropsLog.at(-1)?.welcomeComposerToolbar as React.ReactNode
+  const { getByTestId } = render(<TooltipProvider>{toolbar}</TooltipProvider>)
   await act(async () => {
-    ;(props.onNewDirect as () => void)()
+    fireEvent.click(getByTestId("welcome-character-entry"))
   })
   await act(async () => {
     fireEvent.click(screen.getByTestId("char-picker"))
@@ -1014,6 +1143,29 @@ test("names a picked character's conversation after them when the title message 
   expect(create).toHaveBeenCalledWith(
     expect.objectContaining({ title: "Brainstorm Buddy", kind: "direct", characterId: "c-pick" })
   )
+  expect(select).toHaveBeenCalledWith("new-direct")
+  expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "dm" })
+})
+
+test("the pane's own pick-a-character action opens the same picker", async () => {
+  render(<DesktopChatWorkspace />)
+  await act(async () => {
+    ;(paneGroupPropsLog.at(-1)?.onPickCharacter as () => void)()
+  })
+  expect(screen.getByTestId("char-picker")).toBeInTheDocument()
+})
+
+test("the sidebar's New chat lands on the welcome instead of opening the picker", async () => {
+  // 482da24ad: "Every 'New chat' affordance in the DM scope lands on the welcome
+  // surface" — nothing is created up front, and the picker stays closed.
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  await act(async () => {
+    ;(props.onNewDirect as () => void)()
+  })
+  expect(requestChatHome).toHaveBeenCalledTimes(1)
+  expect(screen.queryByTestId("char-picker")).toBeNull()
+  expect(create).not.toHaveBeenCalled()
 })
 
 test("onBulkDelete delegates to bulkRemove and surfaces the i18n'd success toast", async () => {
@@ -1157,3 +1309,65 @@ test.each([false, true])(
     )
   }
 )
+
+describe("sidebar wiring", () => {
+  const latestListProps = () => channelListPropsLog[channelListPropsLog.length - 1]!
+
+  test("loads every workspace only for the grouping the list actually draws", () => {
+    // Stored `groupBy: "workspace"` (the default) used to load every
+    // workspace's chats into the merged rail — a team-axis scope tree.
+    mockConversationSidebar = { groupBy: "workspace" }
+    render(<DesktopChatWorkspace />)
+    expect(useSessionsCrossWorkspace.at(-1)).toBe(true)
+    const report = latestListProps().onEffectiveGroupByChange as (g: string | null) => void
+    act(() => report("team"))
+    expect(useSessionsCrossWorkspace.at(-1)).toBe(false)
+    // No list mounted any more (the Sheet closed): the stored preference again.
+    act(() => report(null))
+    expect(useSessionsCrossWorkspace.at(-1)).toBe(true)
+  })
+
+  test("still loads every workspace when search is told to reach them", () => {
+    mockConversationSidebar = { groupBy: "workspace", search: { workspace: "all" } }
+    render(<DesktopChatWorkspace />)
+    const report = latestListProps().onEffectiveGroupByChange as (g: string | null) => void
+    act(() => report("team"))
+    expect(useSessionsCrossWorkspace.at(-1)).toBe(true)
+  })
+
+  test("keeps one onSelect across session updates, and it reads the latest list", () => {
+    // It reaches every memoized sidebar row: a new identity per session write
+    // re-rendered all of them several times a second while a reply streamed.
+    sessionsRef.current = [{ id: "s-1", title: "A", kind: "direct", createdAt: 0, updatedAt: 0 }]
+    const { rerender } = render(<DesktopChatWorkspace />)
+    const onSelect = latestListProps().onSelect as (id: string) => void
+    sessionsRef.current = [
+      ...sessionsRef.current,
+      { id: "s-9", title: "T", kind: "team", teamId: "t-1", createdAt: 0, updatedAt: 0 },
+    ]
+    rerender(<DesktopChatWorkspace />)
+    expect(latestListProps().onSelect).toBe(onSelect)
+    act(() => onSelect("s-9"))
+    expect(select).toHaveBeenCalledWith("s-9")
+    expect(setSelectedGuild).toHaveBeenLastCalledWith({ kind: "team", teamId: "t-1" })
+  })
+
+  test("files a selection through the batch writer and says how many moved", async () => {
+    render(<DesktopChatWorkspace />)
+    const move = latestListProps().onBulkAssignToFolder as (
+      ids: string[],
+      folderId: string | null
+    ) => Promise<void>
+    const { toast } = await import("sonner")
+    await act(async () => {
+      await move(["s-1", "s-2"], "f-1")
+    })
+    expect(bulkAssignToFolder).toHaveBeenCalledWith(["s-1", "s-2"], "f-1")
+    expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("moveSuccess")
+    await act(async () => {
+      await move(["s-1"], null)
+    })
+    expect(bulkAssignToFolder).toHaveBeenLastCalledWith(["s-1"], null)
+    expect((toast.success as jest.Mock).mock.calls.at(-1)?.[0]).toBe("removeFromFolderSuccess")
+  })
+})

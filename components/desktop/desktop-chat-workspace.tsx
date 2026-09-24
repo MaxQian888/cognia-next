@@ -39,7 +39,7 @@ import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
 import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import type { Character, SendContent } from "@cognia/agent-config-types"
+import type { Character, ConversationGroupBy, SendContent } from "@cognia/agent-config-types"
 import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -60,19 +60,15 @@ import {
 import { useProjectStore } from "@/stores/project/project-store"
 import { isChatHomeActive, planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
-import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
-import { usePlatform } from "@/hooks/use-platform"
 import {
-  resolveOperationAvailability,
-  type OperationAvailabilityState,
-} from "@/lib/runtime/operation-availability"
-import { resolveRuntimeRecovery } from "@/lib/runtime/recovery-resolver"
+  runtimeAvailabilityMessageKey,
+  useChatRuntimeGate,
+} from "@/hooks/chat/use-chat-runtime-gate"
 
 const log = loggers.shell
 
 export function DesktopChatWorkspace() {
   const router = useRouter()
-  const platform = usePlatform()
   const runtimeT = useTranslations("desktop.chatRuntime")
   const tMembers = useTranslations("desktop.memberList")
   const tChat = useTranslations("chat")
@@ -84,21 +80,28 @@ export function DesktopChatWorkspace() {
   useEffect(() => {
     workspaceTRef.current = workspaceT
   }, [workspaceT])
-  const runtimeSnapshot = useRuntimeSnapshot()
-  const chatAvailability = resolveOperationAvailability({
-    snapshot: runtimeSnapshot,
-    command: "claude_send",
-    localExecutorAvailable: runtimeSnapshot.target?.kind === "standalone",
-    readOnlyFallback: true,
-  })
-  const composerDisabled = chatAvailability.state !== "available"
-  const runtimeRecovery = resolveRuntimeRecovery(chatAvailability, platform)
+  // Whether the composer can send, and the notice + recovery route when it
+  // cannot — the same gate the phone shell uses, so the two cannot drift.
+  const {
+    availability: chatAvailability,
+    composerDisabled,
+    recovery: runtimeRecovery,
+    connecting: runtimeConnecting,
+  } = useChatRuntimeGate()
   // Two independent reasons to load every workspace's conversations: grouping
   // BY workspace, and a search told to reach them. Binding the second to the
   // first is what used to make "can I find this chat?" depend on how the list
   // happened to be grouped.
+  //
+  // "Grouping" is the one the list is drawn with, which the list reports
+  // (`onEffectiveGroupByChange`): the merged rail is always the team-axis scope
+  // tree, so a stored `groupBy: "workspace"` there used to pull every other
+  // workspace's chats into a tree that never shows workspaces — and made title
+  // search (all workspaces) disagree with content search (this one). Until a
+  // list reports (and once none is mounted) the stored preference stands.
   const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
-  const sidebarGroupBy = resolveConversationGroupBy(sidebarSettings)
+  const [listGroupBy, setListGroupBy] = useState<ConversationGroupBy | null>(null)
+  const sidebarGroupBy = listGroupBy ?? resolveConversationGroupBy(sidebarSettings)
   const sidebarSearch = resolveConversationSearchOptions(sidebarSettings)
   const {
     sessions,
@@ -122,6 +125,7 @@ export function DesktopChatWorkspace() {
     deleteFolder,
     reorderFolders,
     assignToFolder,
+    bulkAssignToFolder,
   } = useSessions({
     crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
   })
@@ -315,10 +319,20 @@ export function DesktopChatWorkspace() {
     [create, newChatExecution, select]
   )
 
+  // Read through a ref so `handleSwitchToSession` keeps one identity: it is the
+  // sidebar's `onSelect`, which reaches every memoized row, and depending on
+  // `sessions` gave all of them a new handler on every session write (several
+  // a second while a reply streams). Updated in an effect — React flushes it
+  // before dispatching the next click, so a click always sees the list it hit.
+  const sessionsRef = useRef(sessions)
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
+
   const handleSwitchToSession = useCallback(
     (id: string) => {
       log.info("switch-to-session", { sessionId: id })
-      const target = sessions.find((s) => s.id === id)
+      const target = sessionsRef.current.find((s) => s.id === id)
       // Follow the conversation into its workspace *before* focusing it. Under
       // `groupBy: "workspace"` the list spans every workspace, and everything
       // downstream of the chat pane — artifacts, terminals, the workspace panel,
@@ -359,7 +373,7 @@ export function DesktopChatWorkspace() {
       if (!target) return
       setSelectedGuild(guildFromSession(target))
     },
-    [select, sessions, setSelectedGuild]
+    [select, setSelectedGuild]
   )
 
   const isCanvasGuild = selectedGuild.kind === "canvas"
@@ -534,6 +548,18 @@ export function DesktopChatWorkspace() {
     [bulkUnarchive]
   )
 
+  const handleChannelBulkAssignToFolder = useCallback(
+    async (ids: string[], folderId: string | null) => {
+      const count = ids.length
+      log.info("channel bulk-assign-folder", { count, filed: folderId !== null })
+      await bulkAssignToFolder(ids, folderId)
+      toast.success(
+        bulkTRef.current(folderId ? "moveSuccess" : "removeFromFolderSuccess", { count })
+      )
+    },
+    [bulkAssignToFolder]
+  )
+
   // Starter cards / follow-up chips. On the welcome page there is no session
   // yet, so this has to start one before sending: `send` drops the prompt when
   // no session is selected, which made the cards read as dead buttons. The new
@@ -674,7 +700,9 @@ export function DesktopChatWorkspace() {
       onDeleteFolder={deleteFolder}
       onReorderFolders={reorderFolders}
       onAssignToFolder={assignToFolder}
+      onBulkAssignToFolder={handleChannelBulkAssignToFolder}
       onReorderSessions={handleReorderSessions}
+      onEffectiveGroupByChange={setListGroupBy}
     />
   )
 
@@ -728,6 +756,16 @@ export function DesktopChatWorkspace() {
                     onPickCharacter={() => setCharacterPickerOpen(true)}
                     onUseSample={handleUseSample}
                     onHeroSend={handleFirstTurn}
+                    // Where `handleFirstTurn` delivers: into the active
+                    // session, or — with none — a new conversation in the
+                    // selected guild. A team room routes `@Name` itself and
+                    // its send carries no runtime route, so the hero must not
+                    // offer one there.
+                    heroRouting={
+                      activeSessionId
+                        ? !isTeamSessionId(activeSessionId)
+                        : selectedGuild.kind !== "team"
+                    }
                     onOpenSettings={openSettings}
                     welcomeContextBarSlot={
                       <ContextBar
@@ -773,8 +811,7 @@ export function DesktopChatWorkspace() {
                             </p>
                             <p className="text-muted-foreground">
                               {runtimeT(
-                                runtimeSnapshot.connectionState === "connecting" &&
-                                  chatAvailability.state === "offline"
+                                runtimeConnecting && chatAvailability.state === "offline"
                                   ? "connecting"
                                   : `states.${runtimeAvailabilityMessageKey(chatAvailability.state)}`
                               )}
@@ -821,8 +858,4 @@ export function DesktopChatWorkspace() {
       />
     </>
   )
-}
-
-function runtimeAvailabilityMessageKey(state: OperationAvailabilityState): string {
-  return state.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
 }

@@ -14,7 +14,7 @@
  * own key as the badge text and no gate would notice.
  */
 
-import { OPEN_PLAN_STATUSES, type PlanStatus } from "@/types/agent/plan"
+import { OPEN_PLAN_STATUSES, TERMINAL_PLAN_STATUSES, type PlanStatus } from "@/types/agent/plan"
 import { ISSUE_RUN_STATUSES, type IssueRunStatus } from "@/types/issues"
 
 /** The Badge variants this module's statuses map onto. */
@@ -35,6 +35,7 @@ export const PLAN_STATUS_VARIANT: Record<PlanStatus, StatusVariant> = {
   completed: "secondary",
   failed: "destructive",
   cancelled: "outline",
+  rejected: "outline",
 }
 
 /** How each issue-run status is drawn. */
@@ -47,14 +48,12 @@ export const RUN_STATUS_VARIANT: Record<IssueRunStatus, StatusVariant> = {
 }
 
 /**
- * Every `PlanStatus`. Built from `OPEN_PLAN_STATUSES` plus the three terminal
- * ones rather than hand-listed, so the open half can never drift.
+ * Every `PlanStatus`. Built from `OPEN_PLAN_STATUSES` plus the terminal ones
+ * rather than hand-listed, so neither half can drift.
  */
 export const PLAN_STATUSES_FOR_TEST = [
   ...OPEN_PLAN_STATUSES,
-  "completed",
-  "failed",
-  "cancelled",
+  ...TERMINAL_PLAN_STATUSES,
 ] as const satisfies readonly PlanStatus[]
 
 /** Every `IssueRunStatus`, straight from the authority that defines them. */

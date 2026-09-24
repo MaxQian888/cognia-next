@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { act, renderHook } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
+import { Suspense, useState } from "react"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
@@ -86,6 +87,40 @@ beforeEach(() => {
 })
 
 describe("useShellNav", () => {
+  it("reports a cold destination until its transition commits", async () => {
+    let ready = false
+    let resolve!: () => void
+    const destination = new Promise<void>((done) => {
+      resolve = done
+    })
+    function Route({ route }: { route: string }) {
+      if (route === "/logs" && !ready) throw destination
+      return <span>{route}</span>
+    }
+    function Navigation() {
+      const [route, setRoute] = useState("/")
+      routerPush.mockImplementation(setRoute)
+      const nav = useShellNav()
+      return (
+        <>
+          <button onClick={() => nav.goToFeature("/logs")}>Logs</button>
+          <output>{nav.pendingRoute ?? "idle"}</output>
+          <Suspense fallback={null}>
+            <Route route={route} />
+          </Suspense>
+        </>
+      )
+    }
+    render(<Navigation />)
+    fireEvent.click(screen.getByRole("button", { name: "Logs" }))
+    expect(screen.getByRole("status")).toHaveTextContent("/logs")
+    await act(async () => {
+      ready = true
+      resolve()
+    })
+    expect(screen.getByRole("status")).toHaveTextContent("idle")
+  })
+
   it("lights the selected chat guild only on the home route", () => {
     const { result, rerender } = renderHook(() => useShellNav())
     expect(result.current.isDmActive).toBe(true)

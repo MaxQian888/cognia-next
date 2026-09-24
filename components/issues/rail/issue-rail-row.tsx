@@ -12,6 +12,7 @@
 
 import type { ReactNode } from "react"
 
+import { HOVER_REVEAL_GROUP_BASE_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 
 export interface IssueRailRowProps {
@@ -23,7 +24,11 @@ export interface IssueRailRowProps {
   count?: number
   /** Full-width slot under the label, e.g. a project's progress bar. */
   detail?: ReactNode
-  /** Revealed on hover/focus, e.g. "open in the projects console". */
+  /**
+   * Quiet until the row is hovered or focused, a popup opened from it is up,
+   * or the pointer is coarse (touch, where it is always shown), e.g. "open in
+   * the projects console".
+   */
   trailing?: ReactNode
   testId?: string
 }
@@ -59,9 +64,12 @@ export function IssueRailRow({
             <span
               className={cn(
                 "shrink-0 text-xs tabular-nums text-muted-foreground",
-                // Make room for the trailing control on hover instead of
-                // letting the two overlap.
-                trailing && "group-hover/rail-row:invisible"
+                // Make room for the trailing control wherever it is shown
+                // (hover, focus in the row, an open popup, a coarse pointer)
+                // instead of letting the two overlap. The count is plain text,
+                // so hiding it takes nothing out of reach.
+                trailing &&
+                  "group-hover/rail-row:invisible group-focus-within/rail-row:invisible group-has-[[data-state=open]]/rail-row:invisible pointer-coarse:invisible"
               )}
             >
               {count}
@@ -71,7 +79,13 @@ export function IssueRailRow({
         {detail}
       </button>
       {trailing ? (
-        <span className="absolute right-1.5 top-1.5 opacity-0 transition-opacity group-focus-within/rail-row:opacity-100 group-hover/rail-row:opacity-100">
+        <span
+          className={cn(
+            "absolute right-1.5 top-1.5",
+            HOVER_REVEAL_GROUP_BASE_CLASS,
+            "group-focus-within/rail-row:opacity-100 group-hover/rail-row:opacity-100"
+          )}
+        >
           {trailing}
         </span>
       ) : null}

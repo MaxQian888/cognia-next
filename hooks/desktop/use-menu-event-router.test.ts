@@ -151,6 +151,11 @@ jest.mock("@cognia/logging", () => ({
 }))
 
 import { useMenuEventRouter } from "./use-menu-event-router"
+import {
+  __resetNativeMenuClaimsForTesting,
+  claimNativeMenuAction,
+  MENU_CLAIM_WINDOW_MS,
+} from "@/lib/desktop/menu-focus-claims"
 
 async function flush(): Promise<void> {
   // Two microtask drains for the cascade inside the hook's subscribe loop.
@@ -169,6 +174,7 @@ beforeEach(() => {
   settingsSave.mockClear().mockResolvedValue(undefined)
   settingsRef.reduceMotion = false
   logWarn.mockReset()
+  __resetNativeMenuClaimsForTesting()
 })
 
 test("subscribes to one channel per menu id (minus zoom + reload + fullscreen) plus tray fallback", async () => {
@@ -243,6 +249,42 @@ test("each menu event routes to the right action helper", async () => {
     await flush()
     expect(calls.find((c) => c.name === helper)).toBeDefined()
   }
+})
+
+test("a fresh keyboard claim from a focused surface replaces the app action once", async () => {
+  renderHook(() => useMenuEventRouter())
+  await flush()
+
+  const surfaceToggle = jest.fn()
+  claimNativeMenuAction("toggle-sidebar", surfaceToggle, { fallbackMs: 60_000 })
+  calls.length = 0
+  subscribers.get("menu://toggle-sidebar")?.()
+  await flush()
+  expect(surfaceToggle).toHaveBeenCalledTimes(1)
+  expect(calls.find((c) => c.name === "toggleSidebarAction")).toBeUndefined()
+
+  // The claim is spent: the next (e.g. mouse-picked) menu event is the app's.
+  subscribers.get("menu://toggle-sidebar")?.()
+  await flush()
+  expect(surfaceToggle).toHaveBeenCalledTimes(1)
+  expect(calls.find((c) => c.name === "toggleSidebarAction")).toBeDefined()
+})
+
+test("a stale keyboard claim falls back to the app action", async () => {
+  renderHook(() => useMenuEventRouter())
+  await flush()
+
+  const surfaceFocus = jest.fn()
+  claimNativeMenuAction("go-inbox", surfaceFocus, {
+    now: Date.now() - MENU_CLAIM_WINDOW_MS - 50,
+    // Keep the self-running fallback out of this assertion window.
+    fallbackMs: 60_000,
+  })
+  calls.length = 0
+  subscribers.get("menu://go-inbox")?.()
+  await flush()
+  expect(surfaceFocus).not.toHaveBeenCalled()
+  expect(calls.find((c) => c.name === "goAction")).toBeDefined()
 })
 
 test("keyboard-shortcuts event invokes the onShowKeyboardShortcuts callback", async () => {

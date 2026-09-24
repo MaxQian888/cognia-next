@@ -32,6 +32,20 @@ import { cn } from "@/lib/utils"
  */
 export type StatStripTone = "positive" | "attention" | "critical" | "neutral"
 
+/**
+ * Makes a cell a button that opens what the number summarises. A count the
+ * reader cannot drill into ("Agents working 2" — which two?) is a dead end.
+ */
+export interface StatStripAction {
+  onSelect: () => void
+  /** Already-translated hint appended to the cell's accessible name. */
+  label: string
+  /** Disclosure state, when the cell toggles an inline region. */
+  expanded?: boolean
+  /** Id of the region the cell controls. */
+  controls?: string
+}
+
 export interface StatStripItem {
   /** Stable id, also the cell's `data-testid` suffix. */
   id: string
@@ -41,6 +55,8 @@ export interface StatStripItem {
   /** Renders as `value/total`. Omit for a plain count. */
   total?: number | string
   tone?: StatStripTone
+  /** Optional drill-down; omitted cells stay plain, non-interactive text. */
+  action?: StatStripAction
 }
 
 /**
@@ -114,30 +130,55 @@ export function StatStrip({
         )}
         data-testid={testId}
       >
-        {stats.map((stat) => (
-          <div
-            key={stat.id}
-            className="min-w-0 bg-card px-3 py-2"
-            data-testid={`${cellTestIdPrefix}-${stat.id}`}
-          >
-            <div className="flex items-baseline gap-0.5">
-              <span
-                className={cn(
-                  "text-lg font-semibold leading-none tabular-nums",
-                  STAT_TONE[stat.tone ?? "neutral"]
-                )}
-              >
-                {stat.value}
-              </span>
-              {stat.total !== undefined ? (
-                <span className="text-xs leading-none tabular-nums text-muted-foreground">
-                  /{stat.total}
+        {stats.map((stat) => {
+          const body = (
+            <>
+              <div className="flex items-baseline gap-0.5">
+                <span
+                  className={cn(
+                    "text-lg font-semibold leading-none tabular-nums",
+                    STAT_TONE[stat.tone ?? "neutral"]
+                  )}
+                >
+                  {stat.value}
                 </span>
-              ) : null}
+                {stat.total !== undefined ? (
+                  <span className="text-xs leading-none tabular-nums text-muted-foreground">
+                    /{stat.total}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 truncate text-[11px] text-muted-foreground">{stat.label}</p>
+            </>
+          )
+          if (stat.action) {
+            return (
+              // The visible number and label stay the button's name; the hint
+              // is appended for assistive tech rather than replacing them.
+              <button
+                key={stat.id}
+                type="button"
+                onClick={stat.action.onSelect}
+                aria-expanded={stat.action.expanded}
+                aria-controls={stat.action.controls}
+                className="min-w-0 cursor-pointer bg-card px-3 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                data-testid={`${cellTestIdPrefix}-${stat.id}`}
+              >
+                {body}
+                <span className="sr-only">{stat.action.label}</span>
+              </button>
+            )
+          }
+          return (
+            <div
+              key={stat.id}
+              className="min-w-0 bg-card px-3 py-2"
+              data-testid={`${cellTestIdPrefix}-${stat.id}`}
+            >
+              {body}
             </div>
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">{stat.label}</p>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </Surface>
   )

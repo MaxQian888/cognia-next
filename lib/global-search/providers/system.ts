@@ -11,8 +11,11 @@ import { CalendarClockIcon, PlugIcon, ServerCogIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
+import { duplicateNames, scheduledIdentityLabel } from "@/lib/scheduler/duplicate-names"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import type { ScheduledTask } from "@/types/scheduler"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import type { GlobalSearchContext } from "../types"
 import { createListProvider } from "./list-provider"
 
 export const SCHEDULED_TASKS_PROVIDER_ID = "builtin.scheduled-tasks"
@@ -31,27 +34,56 @@ function toEpoch(value: Date | number | string | undefined): number | undefined 
   return Number.isFinite(ms) ? ms : undefined
 }
 
+/** A task plus whether another task carries the same display name. */
+interface ScheduledTaskRow {
+  task: ScheduledTask
+  sharesName: boolean
+}
+
+/**
+ * Mark same-named tasks over the WHOLE list, not the matched slice: two
+ * `demo-heartbeat` rows are ambiguous whether or not the query matched both.
+ */
+export function withSharedNames(tasks: readonly ScheduledTask[]): ScheduledTaskRow[] {
+  const shared = duplicateNames(tasks)
+  return tasks.map((task) => ({ task, sharesName: shared.has(task.name) }))
+}
+
+/**
+ * The palette row's second line. A same-named task leads with the scheduler
+ * list's identity line (kind label + stable source id, `scheduledIdentityLabel`),
+ * so the two paused demo-heartbeat rows stop looking identical here too.
+ * Palette tasks are the app-table kind of the unified scheduler.
+ */
+function taskSubtitle(row: ScheduledTaskRow, ctx: GlobalSearchContext): string | undefined {
+  const description = row.task.description?.trim() || undefined
+  if (!row.sharesName) return description
+  const kind: ScheduledItemKind = "app"
+  const identity = scheduledIdentityLabel(ctx.t(`scheduler.kindFilter.${kind}`), row.task.id)
+  return description ? `${identity} · ${description}` : identity
+}
+
 export function createScheduledTasksProvider(deps: Pick<SystemProviderDeps, "listTasks">) {
-  return createListProvider<ScheduledTask>({
+  return createListProvider<ScheduledTaskRow>({
     id: SCHEDULED_TASKS_PROVIDER_ID,
     kind: "scheduled-task",
-    load: () => deps.listTasks(),
-    getTitle: (task) => task.name,
-    getSecondary: (task) => task.description,
-    getKeywords: (task) => [task.id, task.type, ...(task.tags ?? [])],
-    getTimestamp: (task) => toEpoch(task.updatedAt),
+    load: async () => withSharedNames(await deps.listTasks()),
+    getTitle: ({ task }) => task.name,
+    getSecondary: ({ task }) => task.description,
+    getKeywords: ({ task }) => [task.id, task.type, ...(task.tags ?? [])],
+    getTimestamp: ({ task }) => toEpoch(task.updatedAt),
     toItem: ({ row, match }, ctx) => ({
-      id: `scheduled-task:${row.id}`,
+      id: `scheduled-task:${row.task.id}`,
       kind: "scheduled-task",
-      title: row.name,
+      title: row.task.name,
       titlePositions: match.positions,
-      subtitle: row.description?.trim() || undefined,
-      meta: ctx.t(`scheduler.statuses.${row.status}`),
+      subtitle: taskSubtitle(row, ctx),
+      meta: ctx.t(`scheduler.statuses.${row.task.status}`),
       icon: { lucide: CalendarClockIcon },
       score: match.score,
-      timestamp: toEpoch(row.updatedAt),
-      extra: { archived: row.status === "disabled" || row.status === "expired" },
-      action: { type: "navigate", href: `/scheduler?task=${encodeURIComponent(row.id)}` },
+      timestamp: toEpoch(row.task.updatedAt),
+      extra: { archived: row.task.status === "disabled" || row.task.status === "expired" },
+      action: { type: "navigate", href: `/scheduler?task=${encodeURIComponent(row.task.id)}` },
     }),
   })
 }

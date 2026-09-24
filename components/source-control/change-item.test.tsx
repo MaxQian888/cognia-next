@@ -1,4 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { ChangeItem } from "./change-item"
 import type { GitFileChange } from "@/types/git"
 
@@ -56,6 +60,27 @@ describe("ChangeItem", () => {
     render(<ChangeItem change={change} selected={false} onSelect={onSelect} onStage={onStage} />)
     fireEvent.click(screen.getByTestId(`stage-${change.path}`))
     expect(onStage).toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("keeps the row actions reachable without a hover", () => {
+    const onSelect = jest.fn()
+    const onStage = jest.fn()
+    render(<ChangeItem change={change} selected={false} onSelect={onSelect} onStage={onStage} />)
+    const stage = screen.getByTestId(`stage-${change.path}`)
+    const wrapper = stage.parentElement!
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(wrapper).not.toHaveClass(forbidden)
+    }
+    // The row is the nearest unnamed `group`, so its hover still reveals the actions.
+    expect(wrapper.closest(".group")).toBe(screen.getByTestId(`change-item-${change.path}`))
+    stage.focus()
+    expect(stage).toHaveFocus()
+    fireEvent.click(stage)
+    expect(onStage).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
   })
 

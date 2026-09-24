@@ -57,21 +57,29 @@ jest.mock("./workspace-capabilities", () => ({
 
 let projectsResult: unknown[] = []
 let issuesResult: unknown[] = []
-let runningResult: ReadonlySet<string> = new Set()
+let runningResult: unknown[] = []
 let trustedResult: Array<{ path: string; trustedAt: number }> = []
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: (fn: () => Promise<unknown>) => {
     // Distinguish the queries by which db module the caller reached for.
     const source = fn.toString()
     if (source.includes("listIssueProjects")) return projectsResult
-    if (source.includes("listActiveIssueRunIssueIds")) return runningResult
+    if (source.includes("listActiveAgentRuns")) return runningResult
     if (source.includes("listTrustedWorkspaces")) return trustedResult
     return issuesResult
   },
 }))
 jest.mock("@/lib/db/issues", () => ({ listIssues: jest.fn() }))
 jest.mock("@/lib/db/issue-projects", () => ({ listIssueProjects: jest.fn() }))
-jest.mock("@/lib/db/issue-runs", () => ({ listActiveIssueRunIssueIds: jest.fn() }))
+jest.mock("@/lib/workspace/active-agent-runs", () => ({ listActiveAgentRuns: jest.fn() }))
+jest.mock("./workspace-agents-working", () => ({
+  AGENTS_WORKING_REGION_ID: "workspace-section-agents-working",
+  WorkspaceAgentsWorking: ({ runs }: { runs: Array<{ runId: string }> }) => (
+    <section id="workspace-section-agents-working" data-testid="agents-working-stub">
+      {runs.map((run) => run.runId).join(",")}
+    </section>
+  ),
+}))
 jest.mock("@/lib/db/trusted-workspaces", () => ({ listTrustedWorkspaces: jest.fn() }))
 let manageDialogProps: { open: boolean; onOpenChange: (open: boolean) => void } | null = null
 jest.mock("@/components/shell/workspace-manage-dialog", () => ({
@@ -101,7 +109,7 @@ function issue(status: string) {
 beforeEach(() => {
   projectsResult = []
   issuesResult = []
-  runningResult = new Set()
+  runningResult = []
   trustedResult = []
   manageDialogProps = null
   storeState = { activeProjectId: "w1", projects: [] }
@@ -204,9 +212,38 @@ describe("WorkspaceOverview", () => {
   })
 
   it("counts issues with an active run as agents working", () => {
-    runningResult = new Set(["i1", "i2"])
+    runningResult = [{ runId: "r1" }, { runId: "r2" }]
     render(<WorkspaceOverview />)
     expect(screen.getByTestId("workspace-stat-agents-working")).toHaveTextContent("2")
+  })
+
+  /**
+   * Audit finding: "Agents working 2" with no way to see which two. The tile
+   * toggles the list, fed by the same array as the number.
+   */
+  it("opens the list of the agents it counts, from the same source", async () => {
+    const user = userEvent.setup()
+    runningResult = [{ runId: "r1" }, { runId: "r2" }]
+    render(<WorkspaceOverview />)
+
+    const tile = screen.getByTestId("workspace-stat-agents-working")
+    expect(tile.tagName).toBe("BUTTON")
+    expect(tile).toHaveAttribute("aria-expanded", "false")
+    expect(tile).toHaveTextContent("workspace.agentsWorkingShow")
+    expect(screen.queryByTestId("agents-working-stub")).not.toBeInTheDocument()
+
+    await user.click(tile)
+    expect(tile).toHaveAttribute("aria-expanded", "true")
+    expect(tile).toHaveAttribute("aria-controls", "workspace-section-agents-working")
+    expect(screen.getByTestId("agents-working-stub")).toHaveTextContent("r1,r2")
+
+    await user.click(tile)
+    expect(screen.queryByTestId("agents-working-stub")).not.toBeInTheDocument()
+  })
+
+  it("keeps the other tiles as plain numbers", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-stat-open-issues").tagName).toBe("DIV")
   })
 
   it("opens the ONE root editor (the manage dialog) instead of editing roots here", () => {

@@ -25,6 +25,10 @@ import { subscribeToHostConsent } from "@/lib/host-consent/client"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
 import {
+  getActiveRemoteTransport,
+  subscribeActiveRemoteTransport,
+} from "@/lib/tauri/transport-routing"
+import {
   getActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
   type RuntimeTargetScope,
@@ -115,6 +119,11 @@ export function CompanionOutboundRunnerProvider({
   const tApproval = useTranslations("mobile.offline")
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const runtimeTarget = useRuntimeSnapshot().target
+  const remoteTransport = useSyncExternalStore(
+    subscribeActiveRemoteTransport,
+    getActiveRemoteTransport,
+    () => null
+  )
   const mobileRuntimeMode = useSettingsStore((state) => state.settings?.mobileRuntimeMode)
   const platform = platformOverride ?? detectedPlatform
   const hasWebTarget = webCompanionOverride ?? hasWebCompanionTarget()
@@ -285,20 +294,24 @@ export function CompanionOutboundRunnerProvider({
   }, [collabScope, dispatcher])
 
   useEffect(() => {
-    if (platform !== "tauri" || !scope) return
+    // Local desktop owns this database. HostState snapshots are companion RPCs,
+    // not Tauri commands; only a desktop driving a remote host needs a mirror.
+    if (platform !== "tauri" || !scope || !remoteTransport) return
     let cancelled = false
     let stopSync = () => {}
     let unregisterResync = () => {}
 
     void (async () => {
-      const manifest = parseHostFeatureManifest(await transport.call("host_feature_manifest", {}))
+      const manifest = parseHostFeatureManifest(
+        await remoteTransport.call("host_feature_manifest", {})
+      )
       if (cancelled || !manifest) return
       updateRuntimeSnapshot({
         host: runtimeHostSnapshotFromManifest(manifest, { hostStateWriteEnabled: false }),
       })
       if (manifest.features["session.state-sync"]?.version !== 1) return
       const installed = await installHostStateSyncForTarget({
-        transport,
+        transport: remoteTransport,
         accountId: scope.accountId,
         runtimeTargetId: scope.targetId,
       })
@@ -320,7 +333,7 @@ export function CompanionOutboundRunnerProvider({
       unregisterResync()
       stopSync()
     }
-  }, [platform, scope])
+  }, [platform, remoteTransport, scope])
 
   return null
 }
