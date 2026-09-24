@@ -34,8 +34,8 @@ import {
   isDistributionInstallable,
   runtimeSupportsPlatform,
   selectDistribution,
-} from "../runtime-catalog"
-import { assessRuntimeVersion, type RuntimeProbeObservation } from "../runtime-version"
+} from "../config/install-catalog"
+import { assessRuntimeVersion, type RuntimeProbeObservation } from "../config/runtime-version"
 import {
   availableProviders,
   getProviderAdapter,

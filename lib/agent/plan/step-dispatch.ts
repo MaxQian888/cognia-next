@@ -349,7 +349,7 @@ async function runStepWork(
       }
       const [{ createPlanTeammateRunContext }, { dispatchTeammate }] = await Promise.all([
         import("./plan-teammate-context"),
-        import("@/lib/ai/agent/team/dispatch-teammate"),
+        import("@/lib/ai/agent/team/teammate/dispatch-teammate"),
       ])
       const teamCtx = createPlanTeammateRunContext({ runId: runCtx.runId, team, teammates })
       const result = await dispatchTeammate(teamCtx, {

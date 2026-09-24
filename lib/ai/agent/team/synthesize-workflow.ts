@@ -12,7 +12,7 @@
  * definition for this id. The full snapshot lives on the workflowRuns row.
  */
 
-import { isTaskReviewEnabled, resolveMaxRevisions, reviewNodeId } from "./task-review-policy"
+import { isTaskReviewEnabled, resolveMaxRevisions, reviewNodeId } from "./gates/task-review-policy"
 import { buildTeamWorkflowId } from "./team-workflow-id"
 import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"

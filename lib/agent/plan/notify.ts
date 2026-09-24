@@ -14,13 +14,14 @@
  *   • `plan:completed`     — scheduler event, so event-triggered tasks chain.
  *   • notification center  — a durable row a human actually sees when the app
  *     is not in front of them. A plan waiting for approval is `directed` and
- *     carries Approve / Reject actions; a terminal plan is ambient.
+ *     carries Approve / Reject actions; an in-session plan halted on a failed
+ *     step is `directed` (it waits on the user); a terminal plan is ambient.
  *
  * Every one is best-effort by design: the Dexie write already succeeded, so a
  * transport hiccup must never surface as a failed plan.
  */
 
-import type { AgentPlan, PlanStatus } from "@/types/agent/plan"
+import type { AgentPlan, PlanStatus, PlanStep, PlanStepHalt } from "@/types/agent/plan"
 import { isTauri } from "@/lib/platform/detect"
 import { registerNotificationCommand } from "@/lib/notifications/action-registry"
 
@@ -77,6 +78,7 @@ const TERMINAL_COPY: Partial<Record<PlanStatus, { level: "success" | "error"; ve
   completed: { level: "success", verb: "completed" },
   failed: { level: "error", verb: "failed" },
   cancelled: { level: "success", verb: "was cancelled" },
+  rejected: { level: "success", verb: "was rejected" },
 }
 
 async function centerNotify(
@@ -114,8 +116,9 @@ export async function notifyPlanAwaitingApproval(plan: AgentPlan): Promise<void>
           variant: "primary",
         },
         {
+          // A real rejection (terminal `rejected`), not a disguised cancel.
           id: "reject",
-          label: "Discard",
+          label: "Reject",
           command: PLAN_RESPOND_COMMAND,
           args: { planId: plan.id, decision: "reject" },
           variant: "secondary",
@@ -124,6 +127,47 @@ export async function notifyPlanAwaitingApproval(plan: AgentPlan): Promise<void>
     })
   } catch {
     // Center unavailable (headless / web) — the dock still shows the plan.
+  }
+}
+
+/** One-line headline per halt cause for the (English, runtime) notification copy. */
+const HALT_HEADLINE: Record<PlanStepHalt["cause"], string> = {
+  dispatch_failed: "could not start",
+  turn_failed: "failed",
+  not_started: "never started",
+  silent: "stalled",
+  unrecorded: "ended without finishing",
+  interrupted: "was interrupted",
+}
+
+/**
+ * An in-session plan halted on a step (`PlanRuntime.failInSessionStep`). The
+ * plan is paused waiting for the user's retry / skip / mark-done / cancel,
+ * which only the tracker card in the conversation can dispatch — so this row
+ * is directed and deep-links to the session rather than carrying actions.
+ * Deduped per halt, so a retried step that fails again notifies again.
+ */
+export async function notifyPlanStepHalted(
+  plan: AgentPlan,
+  step: Pick<PlanStep, "title"> | undefined,
+  halt: PlanStepHalt
+): Promise<void> {
+  try {
+    const subject = step ? `step "${step.title}"` : "the plan run"
+    await centerNotify({
+      source: "session",
+      level: "error",
+      title: `Plan ${subject} ${HALT_HEADLINE[halt.cause]}: ${plan.title}`,
+      body: halt.detail,
+      href: `/?session=${plan.sessionId}`,
+      dedupeKey: `plan-halt:${plan.id}:${halt.at}`,
+      groupKey: plan.sessionId,
+      directed: true,
+      icon: "ListChecks",
+      sourceRef: { kind: "plan", id: plan.id },
+    })
+  } catch {
+    // Best-effort: the tracker card in the conversation shows the halt.
   }
 }
 
@@ -153,7 +197,7 @@ export async function notifyPlanTerminal(plan: AgentPlan, status: PlanStatus): P
 }
 
 /**
- * Install the notification-action handler for the Approve / Discard buttons.
+ * Install the notification-action handler for the Approve / Reject buttons.
  * Mounted once at boot (`PlanNotificationInitializer`); returns the
  * unregister function. Without it the actions render and do nothing — the
  * exact built-but-dormant shape this subsystem already paid for once.
@@ -173,7 +217,9 @@ export function installPlanNotificationActions(): () => void {
     await runtime.approvePlan(planId)
     // Orchestrated plans can start headlessly from here; an in-session plan is
     // handed to the chat surface that owns its visible turns (same split as
-    // the run-control `approve` command).
+    // the run-control `approve` command). Its first step is armed on the step
+    // watchdog, so if no surface sends it the plan halts `not_started` with a
+    // retry on the tracker card instead of sitting `executing` forever.
     const started = await runtime.startPlan(planId)
     if (started?.strategy === "orchestrated") void runtime.runPlan(planId)
   })

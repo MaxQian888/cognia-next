@@ -99,20 +99,20 @@ import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
   isSupportedExternalAgentProtocol,
-} from "@/lib/ai/agent/external/config-normalizer"
+} from "@/lib/ai/agent/external/config/config-normalizer"
 import type { ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import { isEnvironmentScopedVerdict } from "@/lib/ai/agent/external/canonical-contract"
 import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
-import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
 import {
   getPresetConfig,
   getRunnablePresets,
   type ExternalAgentPresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 import {
   PROCESS_PLANE_COMMANDS,
   type ProcessPlaneUnavailableReason,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
 import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-runtimes"
 import { RuntimeDetectionBadge } from "./runtime-detection-badge"
@@ -120,7 +120,7 @@ import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapte
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
 import { CogniaModelPicker } from "./cognia-model-picker"
-import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
+import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
 
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"

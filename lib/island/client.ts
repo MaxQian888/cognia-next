@@ -13,6 +13,7 @@
 import { loggers } from "@cognia/logging"
 
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import {
   ISLAND_ACTION_INTENT_EVENT,
   ISLAND_ACTION_RESULT_EVENT,
@@ -57,7 +58,13 @@ async function listenHere<T>(event: string, handler: (payload: T) => void): Prom
   if (!isTauri()) return () => {}
   try {
     const { listen } = await import("@tauri-apps/api/event")
-    return await listen<T>(event, (e) => handler(e.payload))
+    const unlisten = await listen<T>(event, (e) => handler(e.payload))
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      safeUnlisten(unlisten)
+    }
   } catch (error) {
     loggers.tray?.warn?.(`island: listen ${event} failed`, { error: String(error) })
     return () => {}

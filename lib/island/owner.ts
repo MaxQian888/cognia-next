@@ -8,7 +8,12 @@
  * task, what identity two observations of it share, and which route opens it.
  */
 
+import {
+  getExternalApprovalTarget,
+  isExternalAgentApprovalRequestId,
+} from "@/lib/ai/agent/external/session/chat-decision-bridge"
 import type { AttentionItem } from "@/lib/attention/types"
+import { acpSessionOwnerFacts } from "@/lib/fleet/acp-session-registry"
 import type { FleetSession } from "@/lib/fleet/types"
 import type { FleetOwnerRef, IslandSource } from "./types"
 
@@ -27,6 +32,8 @@ export function fleetSessionOwner(session: FleetSession): FleetOwnerRef {
       agent: session.agent,
       sessionId: session.sessionId,
       ...(session.transcriptPath ? { transcriptPath: session.transcriptPath } : {}),
+      ...(session.externalAgentId ? { agentId: session.externalAgentId } : {}),
+      ...(session.chatSessionId ? { chatSessionId: session.chatSessionId } : {}),
     }
   }
   if (session.agentTeamId || session.agentTeamRunId) {
@@ -52,10 +59,29 @@ export function attentionOwner(item: AttentionItem): FleetOwnerRef | null {
     }
   }
   switch (item.source) {
-    case "chat":
+    case "chat": {
+      // An external agent's approval is pushed into the chat approval queue
+      // by `registerExternalApproval`. When the ACP fleet projection knows the
+      // session the ask came from, the row folds into that session's external
+      // owner — one row, not a session plus a duplicate "chat" approval.
+      const requestId = item.approval?.requestId
+      if (requestId && isExternalAgentApprovalRequestId(requestId)) {
+        const target = getExternalApprovalTarget(requestId)
+        const facts = target ? acpSessionOwnerFacts(target.externalSessionId) : undefined
+        if (target && facts) {
+          return {
+            kind: "external",
+            agent: facts.agent,
+            sessionId: target.externalSessionId,
+            agentId: target.agentId,
+            chatSessionId: target.chatSessionId,
+          }
+        }
+      }
       return item.sessionId
         ? { kind: "chat", sessionId: item.sessionId, requestId: item.approval?.requestId }
         : null
+    }
     case "team":
       return item.teamId || item.runId
         ? {
@@ -127,7 +153,12 @@ export function ownerRoute(owner: FleetOwnerRef): string | null {
     case "run":
       return `/agent-runs?run=${encodeURIComponent(owner.runId)}`
     case "external":
-      return null
+      // A renderer-managed (ACP) session DOES have a route: the chat it is
+      // bound to, or the external-agents page that owns the agent. A
+      // hook-observed CLI keeps `null` — its owner is a terminal, and the
+      // island offers focus-terminal there instead.
+      if (owner.chatSessionId) return "/"
+      return owner.agentId ? "/me/external-agents" : null
   }
 }
 

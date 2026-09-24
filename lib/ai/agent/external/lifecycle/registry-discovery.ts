@@ -37,7 +37,7 @@ import {
   fetchAcpRegistry,
   resolveAcpRegistryDistribution,
   type AcpRegistryAgent,
-} from "../acp-registry"
+} from "../runtimes/acp/acp-registry"
 import type {
   ExternalAgentBinaryDistribution,
   ExternalAgentRuntimeCatalogEntry,

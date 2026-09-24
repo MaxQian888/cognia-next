@@ -1,6 +1,6 @@
 /**
  * Run-scoped PR observation controller — the loop half of the Agent Team PR
- * feedback feature. Modeled on {@link import("./rate-limit-resume").RateLimitResumeController}:
+ * feedback feature. Modeled on {@link import("../durable/rate-limit-resume").RateLimitResumeController}:
  * the clock and timers are injected so it is deterministic under fake timers, and
  * `dispose()` (called in the team run's `finally`) cancels every pending poll so
  * a scheduled fetch never fires after the run ends.

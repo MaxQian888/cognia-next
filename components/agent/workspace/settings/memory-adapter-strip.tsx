@@ -32,7 +32,7 @@ import {
   listSharedMemoryAdapterEntries,
   getSharedMemoryAdapter,
 } from "@/lib/plugin/registries/shared-memory-adapter-registry"
-import { syncSharedMemoryFromAdapter } from "@/lib/ai/agent/team/shared-memory-orchestrator"
+import { syncSharedMemoryFromAdapter } from "@/lib/ai/agent/team/memory/shared-memory-orchestrator"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { markSettingsSaved } from "./settings-save-indicator"
 

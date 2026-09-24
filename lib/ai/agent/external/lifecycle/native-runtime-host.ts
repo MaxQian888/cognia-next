@@ -36,7 +36,7 @@ import {
 } from "@/types/agent/external-agent-lifecycle"
 
 import { agentInvoke, supportsExternalAgents } from "../agent-transport"
-import type { RuntimeProbeObservation } from "../runtime-version"
+import type { RuntimeProbeObservation } from "../config/runtime-version"
 import type { ProviderHost } from "./providers"
 import type { ReceiptStore } from "./receipts"
 import { createRuntimeHost, type RuntimeHostDependencies } from "./runtime-host"

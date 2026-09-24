@@ -20,6 +20,16 @@ jest.mock("./fleet-stream-store", () => ({
   },
 }))
 
+const acpSnapshot = new Map<string, FleetSession>()
+jest.mock("./acp-fleet-projection", () => ({
+  acpFleetProjection: {
+    subscribe: (listener: () => void) => () => {
+      void listener
+    },
+    getSnapshot: () => acpSnapshot,
+  },
+}))
+
 import type { FleetSession } from "./types"
 import { mergeFleetSnapshots, unifiedFleetStore } from "./unified-fleet-store"
 import { CANONICAL_SESSION_LINGER_MS } from "./canonical-projection"
@@ -59,6 +69,7 @@ describe("mergeFleetSnapshots", () => {
     const merged = mergeFleetSnapshots(
       { sessions: [session("codex", "external")], generatedAt: 10 },
       canonical,
+      new Map(),
       20
     )
     expect(merged.sessions.map(({ agent, origin }) => [agent, origin])).toEqual([
@@ -66,6 +77,28 @@ describe("mergeFleetSnapshots", () => {
       ["cognia", undefined],
     ])
     expect(merged.generatedAt).toBe(20)
+  })
+
+  it("folds the ACP projection in as a third source without shadowing live rows", () => {
+    const acp = new Map([
+      ["devin:devin-1", session("devin", "devin-1")],
+      ["acp:acp-1", session("acp", "acp-1")],
+      // Same agent:sessionId as the canonical row — first source wins.
+      ["cognia:built-in", session("cognia", "built-in")],
+    ])
+    const canonical = new Map([["built-in", session("cognia", "built-in")]])
+    const merged = mergeFleetSnapshots(
+      { sessions: [session("codex", "external")], generatedAt: 10 },
+      canonical,
+      acp,
+      20
+    )
+    expect(merged.sessions.map(({ agent, sessionId }) => `${agent}:${sessionId}`)).toEqual([
+      "codex:external",
+      "cognia:built-in",
+      "devin:devin-1",
+      "acp:acp-1",
+    ])
   })
 })
 

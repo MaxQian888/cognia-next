@@ -205,7 +205,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
 
   /**
    * A Squad run. Every verb is the one control state machine in
-   * `lib/ai/agent/team/squad-control.ts` (ADR-0169): there is no legacy branch
+   * `lib/ai/agent/team/squad/squad-control.ts` (ADR-0169): there is no legacy branch
    * and no `trigger.team` workflow fallback, because every live run has its
    * durable record from the moment it was journalled. A team row without one
    * is backfilled history and refuses controls as `source_rejected`.
@@ -220,7 +220,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     if (!durable) throw new Error("No durable record behind this Squad run")
 
     if (command.action === "steer") {
-      const { steerDurableRun } = await import("@/lib/ai/agent/team/durable-control")
+      const { steerDurableRun } = await import("@/lib/ai/agent/team/durable/durable-control")
       // The coordinator persists a receipt BEFORE attempting live delivery, so
       // "nothing is attached right now" is the durable path working, not a
       // failure. Only "no child can act at all" is a real degradation.
@@ -236,7 +236,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       // Squad reviews settle through the interrupt the gate opened. The
       // control gate has already validated the interrupt; here the decision
       // reaches the waiting lifecycle (or its persisted slot, after a restart).
-      const { settleSquadReviewFromControl } = await import("@/lib/ai/agent/team/squad-review-gate")
+      const { settleSquadReviewFromControl } =
+        await import("@/lib/ai/agent/team/gates/squad-review-gate")
       await settleSquadReviewFromControl(command)
       // A recovery decision has no lifecycle waiting on it: the run is parked
       // and its process may be long gone. The decision is applied here, and a
@@ -247,7 +248,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
         ? await getDb().executionRunInterrupts.get(command.interruptId)
         : undefined
       if (row?.type === "team_recovery") {
-        const { applyTeamRecoveryFromControl } = await import("@/lib/ai/agent/team/team-recovery")
+        const { applyTeamRecoveryFromControl } =
+          await import("@/lib/ai/agent/team/durable/team-recovery")
         const applied = await applyTeamRecoveryFromControl(command)
         if (!applied.applied) throw new Error(applied.reason ?? "source_rejected")
         return applied.replacementExecutionRunId
@@ -266,7 +268,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
             ? "resume"
             : undefined
     if (!action) throw new UnsupportedForKindError(command.action, "team")
-    const { controlSquadRun } = await import("@/lib/ai/agent/team/squad-control")
+    const { controlSquadRun } = await import("@/lib/ai/agent/team/squad/squad-control")
     const result = await controlSquadRun(run.sourceId, action)
     if (!result.ok) {
       if (result.reason === "recovery_required") {
@@ -288,7 +290,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     const durable = await getAgentTeamRun(run.sourceId).catch(() => undefined)
     const teamId = durable?.teamId ?? (await teamIdForExecutionRun(run.id))
     if (!teamId) throw new UnsupportedForKindError("retry", "team")
-    const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+    const { startSquadRun } = await import("@/lib/ai/agent/team/squad/start-squad-run")
     const result = await startSquadRun({
       squadId: teamId,
       goal: "",

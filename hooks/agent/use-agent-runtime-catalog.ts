@@ -23,12 +23,15 @@ import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-age
 import {
   externalAgentProcessPlane,
   PROCESS_PLANE_COMMANDS,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 import { findRuntimeByKey, runtimeRefKey } from "@/lib/ai/agent/runtime-catalog/types"
 import { listAgentRuntimes } from "@/lib/ai/agent/runtime-catalog/catalog"
+import type { AgentRuntimeCatalogInput } from "@/lib/ai/agent/runtime-catalog/catalog"
 import type { AgentRuntimeDescriptor } from "@/lib/ai/agent/runtime-catalog/types"
 import type { ExternalAgentValiditySnapshot } from "@/types/agent/external-agent"
+import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
+import type { ExternalAgentState } from "@/stores/agent/external-agent-store/types"
 
 export interface AgentRuntimeCatalogState {
   runtimes: AgentRuntimeDescriptor[]
@@ -62,6 +65,43 @@ function makeWarningDescriber(t: (key: string) => string) {
 }
 
 /**
+ * The catalog's inputs, gathered from the external-agent store's state and the
+ * host configuration list.
+ *
+ * Shared by this hook and by the send path's non-React snapshot
+ * (`lib/chat/turn-route/snapshot.ts`), which must answer "what can run this
+ * turn" from exactly the rows the composer offered. Two private copies of this
+ * gathering is how the picker and the send path start disagreeing about
+ * whether an agent is runnable.
+ *
+ * `hostConfigs` is passed in, not read: the hook holds them in component state
+ * and the snapshot loads them once per send.
+ */
+export function catalogInputFromState(input: {
+  providerId?: string
+  external: Pick<ExternalAgentState, "enabled" | "agents" | "agentValidity">
+  hostConfigs: readonly ExternalAgentConfigRecord[]
+  describeWarning?: AgentRuntimeCatalogInput["describeWarning"]
+}): AgentRuntimeCatalogInput {
+  return {
+    providerId: input.providerId,
+    externalEnabled: input.external.enabled,
+    externalAgents: Object.values(input.external.agents ?? {}).map(hydrateAgentConfig),
+    agentValidity: input.external.agentValidity,
+    hostConfigs: input.hostConfigs,
+    // The verdict, not a boolean. `supportsExternalAgents()` answers yes or no
+    // and throws the reason away, and the reason is the whole difference
+    // between a row that says "grant this device Agent Control" and one that
+    // says "install the desktop app" about a Host that could have run it. It
+    // also carries `transient`, which is what stops the selector treating a
+    // Host still reporting its features as grounds to rewrite the user's
+    // chosen agent back to the built-in lane on every launch.
+    runtimeSupportsExternalAgents: externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn),
+    ...(input.describeWarning ? { describeWarning: input.describeWarning } : {}),
+  }
+}
+
+/**
  * @param sessionId The conversation whose lane is being described. Omitting it
  * resolves against the app default, which is right for a composer that has no
  * conversation yet and wrong everywhere else: the lane is per session, so a
@@ -89,22 +129,14 @@ export function useAgentRuntimeCatalog(
   const [, bumpRegistryTick] = useReducer((tick: number) => tick + 1, 0)
   useEffect(() => onProtocolAdapterRegistryChange(() => bumpRegistryTick()), [])
 
-  const runtimes = listAgentRuntimes({
-    providerId,
-    externalEnabled,
-    externalAgents: Object.values(storedAgents ?? {}).map(hydrateAgentConfig),
-    agentValidity,
-    hostConfigs: hostUnavailable ? [] : hostConfigs,
-    // The verdict, not a boolean. `supportsExternalAgents()` answers yes or no
-    // and throws the reason away, and the reason is the whole difference
-    // between a row that says "grant this device Agent Control" and one that
-    // says "install the desktop app" about a Host that could have run it. It
-    // also carries `transient`, which is what stops the selector treating a
-    // Host still reporting its features as grounds to rewrite the user's
-    // chosen agent back to the built-in lane on every launch.
-    runtimeSupportsExternalAgents: externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn),
-    describeWarning: makeWarningDescriber(t),
-  })
+  const runtimes = listAgentRuntimes(
+    catalogInputFromState({
+      providerId,
+      external: { enabled: externalEnabled, agents: storedAgents, agentValidity },
+      hostConfigs: hostUnavailable ? [] : hostConfigs,
+      describeWarning: makeWarningDescriber(t),
+    })
+  )
 
   return {
     runtimes,

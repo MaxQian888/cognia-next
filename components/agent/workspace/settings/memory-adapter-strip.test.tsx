@@ -42,7 +42,7 @@ jest.mock("@/lib/plugin/registries/shared-memory-adapter-registry", () => ({
 }))
 
 const syncMock = jest.fn<Promise<{ pulled: number }>, [string]>()
-jest.mock("@/lib/ai/agent/team/shared-memory-orchestrator", () => ({
+jest.mock("@/lib/ai/agent/team/memory/shared-memory-orchestrator", () => ({
   syncSharedMemoryFromAdapter: (...args: unknown[]) => syncMock(...(args as [string])),
 }))
 

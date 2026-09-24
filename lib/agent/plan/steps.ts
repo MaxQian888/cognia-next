@@ -87,6 +87,40 @@ export function applyStepStatus(
 }
 
 /**
+ * Skip one step AND take it out of the dependency chain: it becomes `skipped`
+ * and every step that depended on it now depends on its prerequisites instead
+ * (transitively, deduplicated, order preserved).
+ *
+ * Why the rewire: {@link nextRunnableStep} deliberately treats a skipped
+ * dependency as blocking — that is how a step bypassed by a branch stops the
+ * steps built on it. A user who skips a broken step is saying the opposite:
+ * "carry on without it". Without the rewire, skipping step 2 of a linear plan
+ * would leave step 3 waiting on a step that will never complete, and the plan
+ * would end `failed` the moment it resumed.
+ */
+export function skipStepInDag(
+  steps: PlanStep[],
+  stepId: string,
+  patch: Partial<Omit<PlanStep, "id" | "status" | "dependencies">> = {}
+): ReturnType<typeof applyStepStatus> {
+  const skipped = steps.find((s) => s.id === stepId)
+  if (!skipped) return applyStepStatus(steps, stepId, "skipped", patch)
+  const inherited = skipped.dependencies.filter((dep) => dep !== stepId)
+  const rewired = steps.map((s) => {
+    if (s.id === stepId || !s.dependencies.includes(stepId)) return s
+    const next: string[] = []
+    for (const dep of s.dependencies) {
+      const replacement = dep === stepId ? inherited : [dep]
+      for (const id of replacement) {
+        if (id !== s.id && !next.includes(id)) next.push(id)
+      }
+    }
+    return { ...s, dependencies: next }
+  })
+  return applyStepStatus(rewired, stepId, "skipped", patch)
+}
+
+/**
  * True when every step has reached a terminal status. Used by the driver /
  * orchestrator to decide whether the plan as a whole is done.
  */
@@ -116,4 +150,18 @@ export function nextRunnableStep(steps: PlanStep[]): PlanStep | undefined {
       }
       return step.dependencies.every((depId) => byId.get(depId)?.status === "completed")
     })
+}
+
+/**
+ * The step a finished (or failed) turn was working: the explicit cursor when
+ * it still points at an in-progress step, else any in-progress step (the
+ * cursor can lag a concurrent orchestrator write).
+ */
+export function currentInProgressStep(
+  steps: PlanStep[],
+  currentStepId?: string
+): PlanStep | undefined {
+  const cursor = currentStepId ? steps.find((s) => s.id === currentStepId) : undefined
+  if (cursor?.status === "in_progress") return cursor
+  return [...steps].sort((a, b) => a.order - b.order).find((s) => s.status === "in_progress")
 }

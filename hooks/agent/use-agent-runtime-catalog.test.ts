@@ -3,7 +3,7 @@
  */
 
 import { renderHook } from "@testing-library/react"
-import { useAgentRuntimeCatalog } from "./use-agent-runtime-catalog"
+import { catalogInputFromState, useAgentRuntimeCatalog } from "./use-agent-runtime-catalog"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
@@ -48,11 +48,11 @@ jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
 jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
   onProtocolAdapterRegistryChange: () => () => {},
 }))
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentExecutionBlock: (agent: { enabled?: boolean }) =>
     agent.enabled === false ? { code: "agent_disabled", reason: "Agent is disabled." } : null,
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({ isFromPreset: () => null }))
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({ isFromPreset: () => null }))
 
 function agent(id: string, name: string, enabled = true) {
   return { id, name, enabled, protocol: "acp" }
@@ -146,5 +146,41 @@ describe("useAgentRuntimeCatalog", () => {
     hostState.unavailable = "no-host"
     const { result } = renderHook(() => useAgentRuntimeCatalog())
     expect(result.current.runtimes.map((row) => row.key)).toEqual(["builtin"])
+  })
+})
+
+describe("catalogInputFromState", () => {
+  it("gathers the same inputs the hook hands the catalog", () => {
+    const describeWarning = () => null
+    const hostConfigs = [{ configId: "eac_1" }] as never[]
+    const input = catalogInputFromState({
+      providerId: "deepseek",
+      external: {
+        enabled: true,
+        agents: { a1: agent("a1", "Codex") } as never,
+        agentValidity: {},
+      },
+      hostConfigs,
+      describeWarning,
+    })
+    expect(input).toMatchObject({
+      providerId: "deepseek",
+      externalEnabled: true,
+      externalAgents: [agent("a1", "Codex")],
+      agentValidity: {},
+      hostConfigs,
+      describeWarning,
+    })
+    // The verdict object, not a boolean — see the comment at its assignment.
+    expect(input.runtimeSupportsExternalAgents).toBeDefined()
+  })
+
+  it("omits the warning describer when the caller has none", () => {
+    const input = catalogInputFromState({
+      external: { enabled: false, agents: {}, agentValidity: {} },
+      hostConfigs: [],
+    })
+    expect("describeWarning" in input).toBe(false)
+    expect(input.externalAgents).toEqual([])
   })
 })

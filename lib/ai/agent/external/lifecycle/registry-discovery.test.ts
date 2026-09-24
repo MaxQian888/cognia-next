@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-import { resetAcpRegistryCacheForTests, type AcpRegistryAgent } from "../acp-registry"
+import { resetAcpRegistryCacheForTests, type AcpRegistryAgent } from "../runtimes/acp/acp-registry"
 import {
   classifyRegistryAgent,
   discoverRegistryAgents,
@@ -8,7 +8,7 @@ import {
   registryCatalogEntry,
   registryRuntimeId,
 } from "./registry-discovery"
-import { isDistributionInstallable } from "../runtime-catalog"
+import { isDistributionInstallable } from "../config/install-catalog"
 
 const SHA = "b".repeat(64)
 

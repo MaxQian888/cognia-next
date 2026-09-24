@@ -31,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type {
   InstalledRuntime,
   RuntimeResolution,
-} from "@/lib/ai/agent/external/installed-runtimes"
+} from "@/lib/ai/agent/external/config/installed-runtimes"
 import { cn } from "@/lib/utils"
 
 const VISUALS: Record<

@@ -31,7 +31,7 @@ import {
   subscribeExternalAgentProcessPlane as subscribe,
   type ProcessPlaneAvailability,
   type ProcessPlaneCommand,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 
 /**
  * A value `useSyncExternalStore` can compare.

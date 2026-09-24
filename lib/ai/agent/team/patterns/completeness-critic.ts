@@ -12,7 +12,7 @@ import {
   type CompletenessCriticParams,
   type Finding,
 } from "@/types/agent/ultracode"
-import { dispatchStructured } from "../structured-dispatch"
+import { dispatchStructured } from "../teammate/structured-dispatch"
 import { collectFindings, getTeamCtxOrThrow, nonRetryable, renderFinding } from "./_shared"
 
 const GAPS_HINT = '{ "gaps": [{ "description": "…", "suggestedSearch"?: "…" }] }'

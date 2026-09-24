@@ -2,8 +2,12 @@
  * @jest-environment jsdom
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 import { PlanDocument } from "./plan-document"
 import type { AgentPlan, PlanEditPatch } from "@/types/agent/plan"
 
@@ -151,6 +155,25 @@ describe("PlanDocument", () => {
       },
       { timeout: 2000 }
     )
+  })
+
+  it("keeps the step move / delete controls reachable without a hover", () => {
+    render(<PlanDocument plan={makePlan()} editable onEdit={jest.fn()} />)
+    const up = screen.getByTestId("plan-doc-up-1")
+    const actions = up.parentElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(actions).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(actions).not.toHaveClass(forbidden)
+    }
+    expect(actions).toContainElement(screen.getByTestId("plan-doc-del-1"))
+    up.focus()
+    expect(up).toHaveFocus()
+    // fireEvent, not userEvent: no pointer hover precedes the click.
+    fireEvent.click(up)
+    expect(screen.getByTestId("plan-doc-step-0")).toHaveValue("Add PKCE flow")
+    expect(screen.getByTestId("plan-doc-step-1")).toHaveValue("Audit call sites")
   })
 
   it("renders read-only with status icons and kind chips for terminal plans", () => {

@@ -6,7 +6,7 @@ import {
   reconcilePiAuthVerdict,
   type PiAuthVerdict,
   type PiListedModel,
-} from "@/lib/ai/agent/external/pi-auth"
+} from "@/lib/ai/agent/external/runtimes/pi/pi-auth"
 
 /**
  * What the Pi credential diagnostic found (ADR-0119).

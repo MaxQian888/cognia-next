@@ -43,7 +43,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { GitBranchIcon, Shrink, Undo2 } from "lucide-react"
-import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"

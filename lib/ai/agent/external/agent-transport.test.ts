@@ -42,7 +42,7 @@ import {
   PROCESS_PLANE_COMMANDS,
   PROCESS_PLANE_FEATURE,
   PROCESS_SPAWN_CAPABILITY,
-} from "./process-plane"
+} from "./capability/process-plane"
 
 const g = globalThis as Record<string, unknown>
 
@@ -292,8 +292,26 @@ describe("agent fs seam", () => {
 
 describe("static-import guard (T-A10 contract)", () => {
   it("acp-client has no static @tauri-apps imports left", () => {
-    const source = fs.readFileSync(path.join(__dirname, "acp-client.ts"), "utf8")
+    const source = fs.readFileSync(path.join(__dirname, "runtimes/acp/acp-client.ts"), "utf8")
     const staticImport = /^import[^\n]*from\s+"@tauri-apps\//m
     expect(staticImport.test(source)).toBe(false)
   })
+})
+
+it("contains native unregister rejections", async () => {
+  const failures: Promise<void>[] = []
+  const spies: jest.SpyInstance[] = []
+  const off = jest.fn(() => {
+    const failure = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    failures.push(failure)
+    spies.push(jest.spyOn(failure, "catch"))
+    return failure
+  })
+  setTauri(true)
+  listenMock.mockResolvedValue(off)
+  const stop = await agentListen("external-agent://exit", () => {})
+  stop()
+  const attached = spies.map((spy) => spy.mock.calls.length)
+  await Promise.all(failures.map((failure) => failure.catch(() => {})))
+  expect(attached).toEqual([1])
 })

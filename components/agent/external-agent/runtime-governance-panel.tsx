@@ -16,7 +16,7 @@
  * has nothing to say beyond "not installed", which is not news.
  *
  * @see lib/ai/agent/external/lifecycle/service.ts
- * @see lib/ai/agent/external/runtime-version.ts for what each verdict means
+ * @see lib/ai/agent/external/config/runtime-version.ts for what each verdict means
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -38,7 +38,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Skeleton } from "@/components/ui/skeleton"
 import { runsExternalAgentProcessesLocally } from "@/lib/ai/agent/external/agent-transport"
 import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
-import { findRuntimeById, isUnpinnedLaunch } from "@/lib/ai/agent/external/runtime-catalog"
+import { findRuntimeById, isUnpinnedLaunch } from "@/lib/ai/agent/external/config/install-catalog"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type {
   ExternalAgentRuntimeStatus,

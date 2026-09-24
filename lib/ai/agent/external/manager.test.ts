@@ -3,7 +3,7 @@
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
 const mockGatewayMint = jest.fn()
 const mockGatewayRevoke = jest.fn().mockResolvedValue(true)
-jest.mock("./dsh-managed-launch", () => ({
+jest.mock("./runtimes/dsh/dsh-managed-launch", () => ({
   prepareDshManagedLaunch: async (config: unknown) => config,
 }))
 jest.mock("@/lib/gateway/mint-session-ticket", () => ({
@@ -26,17 +26,17 @@ jest.mock("@/lib/ai/agent/recovery/canonical-log", () => ({
     appendCanonicalEnvelopesMock(...(args as [string, Array<{ event: { kind: string } }>])),
 }))
 
-jest.mock("./acp-client", () => ({
+jest.mock("./runtimes/acp/acp-client", () => ({
   AcpClientAdapter: class {
     readonly protocol = "acp"
   },
 }))
-jest.mock("./opencode-client", () => ({
+jest.mock("./runtimes/opencode/opencode-client", () => ({
   OpenCodeClientAdapter: class {
     readonly protocol = "opencode"
   },
 }))
-jest.mock("./opencode-v2-client", () => ({
+jest.mock("./runtimes/opencode/opencode-v2-client", () => ({
   OpenCodeV2ClientAdapter: class {
     readonly protocol = "opencode-v2"
   },
@@ -55,7 +55,7 @@ jest.mock("@/lib/native/external-agent", () => ({
   acpTerminalRelease: jest.fn(),
   acpTerminalWaitForExit: jest.fn(),
 }))
-jest.mock("./installed-runtimes", () => ({
+jest.mock("./config/installed-runtimes", () => ({
   detectInstalledRuntimes: jest.fn(),
 }))
 jest.mock("@/lib/utils", () => ({
@@ -76,20 +76,20 @@ import {
   type ExternalAgentLifecycleEvent,
 } from "./manager"
 import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
-import { PiRpcClientAdapter } from "./pi-rpc-client"
-import { AcpClientAdapter } from "./acp-client"
-import { DevinAcpAdapter } from "./devin-acp-adapter"
+import { PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
+import { AcpClientAdapter } from "./runtimes/acp/acp-client"
+import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
 import {
   __setModelSurfaceDepsForTests,
   cachedAgentModelSurface,
   forgetAgentModelSurface,
   loadAgentModelSurface,
-} from "./model-surface-cache"
+} from "./capability/model-surface-cache"
 import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
-import { detectInstalledRuntimes } from "./installed-runtimes"
-import { __setProcessPlaneDepsForTests } from "./process-plane"
-import { EMPTY_THINKING_SURFACE } from "./session-models"
-import { parseGatewaySessionId } from "./gateway-task"
+import { detectInstalledRuntimes } from "./config/installed-runtimes"
+import { __setProcessPlaneDepsForTests } from "./capability/process-plane"
+import { EMPTY_THINKING_SURFACE } from "./session/session-models"
+import { parseGatewaySessionId } from "./config/gateway-task"
 import {
   __resetRunEnvironmentForTests,
   recordRunEnvironmentOutcome,
@@ -3336,7 +3336,7 @@ it("retires only the exited Devin process and resumes stale preferred sessions i
 
 describe("current OpenCode native client access", () => {
   it("returns only the connected current OpenCode adapter", () => {
-    const { OpenCodeV2ClientAdapter } = jest.requireMock("./opencode-v2-client")
+    const { OpenCodeV2ClientAdapter } = jest.requireMock("./runtimes/opencode/opencode-v2-client")
     const manager = freshManager()
     const adapter = new OpenCodeV2ClientAdapter()
     const adapters = (manager as unknown as { adapters: Map<string, unknown> }).adapters

@@ -11,10 +11,24 @@ jest.mock("@/lib/db/plans", () => ({
 }))
 jest.mock("./notify", () => ({ emitPlanStatus: jest.fn() }))
 jest.mock("./runtime", () => ({ getPlanRuntime: jest.fn() }))
+// The watchdog is exercised in its own suite; here only the arm / disarm
+// contract with the driver is pinned.
+jest.mock("./step-watchdog", () => ({
+  armPlanStepWatch: jest.fn().mockResolvedValue(undefined),
+  disarmPlanStepWatch: jest.fn(),
+}))
 
 import { getPlan, updatePlan, appendPlanEvent } from "@/lib/db/plans"
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { getPlanRuntime } from "./runtime"
-import { advancePlanToNextStep, currentInProgressStep, handlePlanTurnComplete } from "./turn-driver"
+import { PLAN_RENDERER_BOOT_ID } from "./step-halt"
+import { armPlanStepWatch, disarmPlanStepWatch } from "./step-watchdog"
+import {
+  advancePlanToNextStep,
+  chatPlanStepHooks,
+  currentInProgressStep,
+  handlePlanTurnComplete,
+} from "./turn-driver"
 import type { AgentPlan, PlanStep, PlanStepStatus } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
@@ -22,6 +36,8 @@ const getPlanMock = getPlan as jest.Mock
 const updatePlanMock = updatePlan as jest.Mock
 const appendPlanEventMock = appendPlanEvent as jest.Mock
 const getPlanRuntimeMock = getPlanRuntime as jest.Mock
+const armMock = armPlanStepWatch as jest.Mock
+const disarmMock = disarmPlanStepWatch as jest.Mock
 
 const finishPlanRun = jest.fn()
 
@@ -432,5 +448,90 @@ describe("lifecycle hooks around a plan step", () => {
     // Every pre-existing caller passes nothing — behaviour must be unchanged.
     const outcome = await advancePlanToNextStep("p1", GEN)
     expect(outcome.kind).toBe("continue")
+  })
+})
+
+describe("step supervision", () => {
+  it("stamps the dispatch with this renderer's boot id and arms the watchdog", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(42_000)
+    const store = seed(plan())
+    const out = await advancePlanToNextStep("p1", GEN)
+    expect(out.kind).toBe("continue")
+    expect(store.current().turnDispatch).toEqual({
+      stepId: "s0",
+      bootId: PLAN_RENDERER_BOOT_ID,
+      dispatchedAt: 42_000,
+    })
+    expect(store.current().steps[0].startedAt).toBe(42_000)
+    expect(armMock).toHaveBeenCalledWith({
+      planId: "p1",
+      stepId: "s0",
+      sessionId: "ses_a",
+      generationId: GEN,
+      dispatchedAt: 42_000,
+    })
+    jest.restoreAllMocks()
+  })
+
+  it("counts attempts so a retried step reports attempt 2", async () => {
+    const store = seed(plan({ steps: [step(0, { attempts: 1 }), step(1)] }))
+    await advancePlanToNextStep("p1", GEN)
+    expect(store.current().steps[0].attempts).toBe(2)
+    expect(appendPlanEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "step_started",
+        payload: expect.objectContaining({ stepId: "s0", attempt: 2 }),
+      })
+    )
+  })
+
+  it("arms nothing and withdraws the stamp when a hook blocks the step", async () => {
+    const store = seed(plan())
+    const firer = jest.fn(async (event: string) =>
+      event === "UserPromptSubmit" ? { block: "not now", warnings: [] } : null
+    ) as never
+    const out = await advancePlanToNextStep("p1", GEN, { firer })
+    expect(out).toMatchObject({ kind: "exit", status: "paused" })
+    expect(armMock).not.toHaveBeenCalled()
+    expect(store.current().turnDispatch).toBeUndefined()
+  })
+
+  it("disarms the finished step and clears its stamp before starting the next", async () => {
+    const store = seed(
+      plan({
+        steps: [step(0, { status: "in_progress" }), step(1)],
+        currentStepId: "s0",
+        turnDispatch: { stepId: "s0", bootId: PLAN_RENDERER_BOOT_ID, dispatchedAt: 1 },
+      })
+    )
+    const calls: string[] = []
+    disarmMock.mockImplementation(() => calls.push("disarm"))
+    armMock.mockImplementation(async () => {
+      calls.push("arm")
+    })
+    await handlePlanTurnComplete({ planId: "p1", lastResponse: "ok", capturedGenerationId: GEN })
+    expect(calls).toEqual(["disarm", "arm"])
+    // The next step's stamp replaced the finished one.
+    expect(store.current().turnDispatch?.stepId).toBe("s1")
+  })
+
+  it("does not arm when the plan finishes", async () => {
+    seed(plan({ steps: [step(0, { status: "in_progress" })], currentStepId: "s0" }))
+    await handlePlanTurnComplete({ planId: "p1", lastResponse: "ok", capturedGenerationId: GEN })
+    expect(armMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("chatPlanStepHooks", () => {
+  it("speaks as the plan-step agent with the chat session, like the chat hook does", () => {
+    expect(chatPlanStepHooks("p1", "ses_a")).toEqual({
+      firer: defaultLifecycleFirer,
+      hookContext: {
+        agentId: "plan-step",
+        agentKind: "plan-step",
+        agentRef: "p1",
+        sessionId: "ses_a",
+      },
+    })
   })
 })

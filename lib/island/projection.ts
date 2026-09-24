@@ -179,13 +179,16 @@ function rowFromSession(
     source: owner.kind,
     owner,
     agent: session.agent,
+    ...(session.agentLabel ? { agentLabel: safe(session.agentLabel, 32) } : {}),
     status,
     priority: ISLAND_STATUS_RANK[status],
     // A Cognia session id is an opaque UUID, not a name: leave the title empty
     // so an attention item folded in below can supply one. External agents keep
     // the session id as the last resort, as their fleet list does.
     title: safe(
-      session.projectName ?? (session.agent === "cognia" ? "" : session.sessionId),
+      session.projectName ??
+        session.agentLabel ??
+        (session.agent === "cognia" ? "" : session.sessionId),
       TITLE_MAX
     ),
     summary,
@@ -297,6 +300,7 @@ function mergeRows(base: IslandRowProjection, incoming: IslandRowProjection): Is
     // The session owner never carries the clearing ids (`requestId`,
     // `interruptId`); the attention owner does, and `dismissStale` needs them.
     owner: ownerWithClearingIds(base.owner, incoming.owner),
+    agentLabel: base.agentLabel ?? incoming.agentLabel,
     status,
     priority: ISLAND_STATUS_RANK[status],
     stale,

@@ -9,8 +9,8 @@
 
 import { EMPTY_VENDOR_ROOTS } from "@/lib/agent-roots"
 import { MIGRATION_VENDORS } from "@/lib/agent-migration/types"
-import { EXTERNAL_AGENT_RUNTIMES } from "@/lib/ai/agent/external/runtime-catalog"
-import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/presets"
+import { EXTERNAL_AGENT_RUNTIMES } from "@/lib/ai/agent/external/config/install-catalog"
+import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/config/presets"
 import { SUBAGENT_SOURCE_ADAPTERS } from "@/lib/claude/subagent-importers"
 import { STATIC_SESSION_SOURCE_IDS } from "@/lib/session-import/registry"
 

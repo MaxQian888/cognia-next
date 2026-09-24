@@ -12,7 +12,7 @@ import type {
   TeamTaskStatus,
 } from "@/types/agent/agent-team"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
-import { canMoveTask, sortColumn, type TaskMoveDenial } from "./task-move-guard"
+import { canMoveTask, sortColumn, type TaskMoveDenial } from "./gates/task-move-guard"
 
 /** Canonical column order — mirrors the task lifecycle left to right. */
 export const BOARD_COLUMN_ORDER: readonly TeamTaskStatus[] = [

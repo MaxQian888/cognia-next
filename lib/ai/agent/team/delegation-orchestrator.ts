@@ -43,7 +43,7 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
-import { abortTeam } from "@/lib/ai/agent/agent-team-runtime"
+import { abortTeam } from "@/lib/ai/agent/team/agent-team-runtime"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 
 /**
@@ -453,7 +453,7 @@ async function runTwinDelegation(
     const twinDeps = await tryBuildTwinDeps()
     if (twinDeps) {
       const [{ applyTeammateTwinContext }, { getTwin }] = await Promise.all([
-        import("./twin-context"),
+        import("./teammate/twin-context"),
         import("@/lib/db/twins"),
       ])
       const twin = await getTwin(twinId).catch(() => undefined)
@@ -722,7 +722,7 @@ export function delegateToTeam(input: DelegateToTeamInput): {
     if (quietDeferred) return delegation
     try {
       // Lazy import keeps the heavy team runtime out of this module's graph.
-      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      const { agentTeamManager } = await import("@/lib/ai/agent/team/agent-team")
       if (!agentTeamManager.get(input.targetTeamId)) {
         return settleTeamDelegation(
           delegation.id,

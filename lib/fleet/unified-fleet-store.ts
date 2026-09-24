@@ -7,6 +7,7 @@ import { redactAgentEventEnvelope } from "@/lib/ai/agent/execution/event-envelop
 import { subscribeAgentEvents } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type { TauriEventStore } from "@/lib/tauri/event-store"
+import { acpFleetProjection } from "./acp-fleet-projection"
 import {
   CANONICAL_SESSION_LINGER_MS,
   canonicalSessionExpired,
@@ -15,9 +16,12 @@ import {
 import { EMPTY_FLEET_SNAPSHOT, fleetStreamStore } from "./fleet-stream-store"
 import type { FleetSession, FleetSnapshot } from "./types"
 
+const EMPTY_SESSION_MAP: ReadonlyMap<string, FleetSession> = new Map()
+
 export function mergeFleetSnapshots(
   external: FleetSnapshot,
   canonical: ReadonlyMap<string, FleetSession>,
+  acp: ReadonlyMap<string, FleetSession> = EMPTY_SESSION_MAP,
   generatedAt = external.generatedAt
 ): FleetSnapshot {
   const sessions: FleetSession[] = external.sessions.map((session) => ({
@@ -25,9 +29,14 @@ export function mergeFleetSnapshots(
     origin: session.origin ?? ("external" as const),
   }))
   const keys = new Set(sessions.map((session) => `${session.agent}:${session.sessionId}`))
-  for (const session of canonical.values()) {
-    const key = `${session.agent}:${session.sessionId}`
-    if (!keys.has(key)) sessions.push(session)
+  for (const source of [canonical, acp]) {
+    for (const session of source.values()) {
+      const key = `${session.agent}:${session.sessionId}`
+      if (!keys.has(key)) {
+        keys.add(key)
+        sessions.push(session)
+      }
+    }
   }
   return { ...external, sessions, generatedAt: Math.max(external.generatedAt, generatedAt) }
 }
@@ -38,6 +47,7 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
   let snapshot = EMPTY_FLEET_SNAPSHOT
   let detachExternal: (() => void) | undefined
   let detachCanonical: (() => void) | undefined
+  let detachAcp: (() => void) | undefined
   let generation = 0
   /** Per-session sweep timers for finished rows. Keyed by canonical sessionId. */
   const sweeps = new Map<string, ReturnType<typeof setTimeout>>()
@@ -55,7 +65,12 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
       0,
       ...Array.from(canonical.values(), (session) => session.lastEventAt)
     )
-    snapshot = mergeFleetSnapshots(fleetStreamStore.getSnapshot(), canonical, latestCanonicalEvent)
+    snapshot = mergeFleetSnapshots(
+      fleetStreamStore.getSnapshot(),
+      canonical,
+      acpFleetProjection.getSnapshot(),
+      latestCanonicalEvent
+    )
     emit()
   }
   /**
@@ -99,6 +114,7 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     const currentGeneration = generation
     evictExpired()
     detachExternal = fleetStreamStore.subscribe(refresh)
+    detachAcp = acpFleetProjection.subscribe(refresh)
     refresh()
     void subscribeAgentEvents(onEnvelope).then((unlisten) => {
       if (currentGeneration !== generation) unlisten()
@@ -109,8 +125,10 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     generation += 1
     detachExternal?.()
     detachCanonical?.()
+    detachAcp?.()
     detachExternal = undefined
     detachCanonical = undefined
+    detachAcp = undefined
     for (const timer of sweeps.values()) clearTimeout(timer)
     sweeps.clear()
   }

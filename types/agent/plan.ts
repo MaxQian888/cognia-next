@@ -160,6 +160,17 @@ export type PlanExecutionMode = "in_session" | "orchestrated" | "auto"
 /**
  * Plan status state machine. `draft`/`awaiting_approval`/`approved` are
  * pre-execution; `executing`/`paused` are live; the rest are terminal.
+ *
+ *   rejected  → the user declined the plan BEFORE it ran (the approval gate's
+ *               "no"). Distinct from `cancelled`, which abandons a plan that
+ *               was approved or already running: a rejection is a verdict on
+ *               the plan itself and carries its own `rejected` trail event
+ *               (with the optional reason). Only reachable from the
+ *               pre-execution statuses — see {@link REJECTABLE_PLAN_STATUSES}.
+ *
+ * A step failure in an in-session run lands `paused` (not `failed`): the plan
+ * halts on the broken step with a {@link PlanStepHalt} record and waits for
+ * the user to retry / skip / mark-done the step or cancel the plan.
  */
 export type PlanStatus =
   | "draft"
@@ -170,6 +181,7 @@ export type PlanStatus =
   | "completed"
   | "failed"
   | "cancelled"
+  | "rejected"
 
 /** Statuses that count as "open" for the one-open-plan-per-session invariant. */
 export const OPEN_PLAN_STATUSES: readonly PlanStatus[] = [
@@ -180,9 +192,84 @@ export const OPEN_PLAN_STATUSES: readonly PlanStatus[] = [
   "paused",
 ]
 
+/** Statuses a plan can never leave. Runtime authority for {@link isTerminalPlanStatus}. */
+export const TERMINAL_PLAN_STATUSES: readonly PlanStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]
+
+/**
+ * Statuses from which a plan may be REJECTED: the pre-execution half of the
+ * machine. A plan that is executing or paused has already been accepted, so
+ * backing out of it is a cancellation, not a rejection.
+ */
+export const REJECTABLE_PLAN_STATUSES: readonly PlanStatus[] = [
+  "draft",
+  "awaiting_approval",
+  "approved",
+]
+
 /** True when a plan status is terminal (cannot transition out). */
 export function isTerminalPlanStatus(status: PlanStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled"
+  return TERMINAL_PLAN_STATUSES.includes(status)
+}
+
+/** True when a plan in this status can still be rejected. */
+export function isRejectablePlanStatus(status: PlanStatus): boolean {
+  return REJECTABLE_PLAN_STATUSES.includes(status)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// In-session step supervision (halt record + dispatch stamp)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why an in-session step stopped without finishing. Written by
+ * `PlanRuntime.failInSessionStep`, rendered (localized) by the tracker's
+ * step-failure card.
+ *
+ *   dispatch_failed → the chat surface refused to send the step's turn
+ *   turn_failed     → the turn started and ended with an error
+ *   not_started     → no turn began within the start budget (never dispatched)
+ *   silent          → the turn kept streaming but produced nothing for the
+ *                     silence budget (a stalled spawn / dropped stream)
+ *   unrecorded      → the turn ended but nothing recorded the step as done
+ *   interrupted     → the renderer that ran the step went away (app restart)
+ */
+export type PlanStepHaltCause =
+  "dispatch_failed" | "turn_failed" | "not_started" | "silent" | "unrecorded" | "interrupted"
+
+/**
+ * The halt an in-session plan is paused on. Present only while the plan sits
+ * `paused` waiting for the user's decision; cleared when the user retries,
+ * skips or completes the step (the plan resumes) and left as history when the
+ * plan is cancelled.
+ */
+export interface PlanStepHalt {
+  /** The step that stopped. Absent when the run was interrupted between steps. */
+  stepId?: string
+  cause: PlanStepHaltCause
+  /** Raw technical detail (error text / budget). Supporting text, never the label. */
+  detail: string
+  /** Epoch ms the halt was recorded. */
+  at: number
+}
+
+/** The user's decision on a halted (or paused) in-session plan. */
+export type PlanStepContinueAction = "retry" | "skip" | "complete" | "resume"
+
+/**
+ * Which renderer dispatched the in-session step that is currently running.
+ * `bootId` is that renderer's per-load id: a step still `in_progress` under a
+ * different boot id was orphaned by an app restart, because a chat turn cannot
+ * outlive the renderer that sent it.
+ */
+export interface PlanTurnDispatch {
+  stepId: string
+  bootId: string
+  dispatchedAt: number
 }
 
 /** Per-plan knobs. Defaults come from `DEFAULT_PLAN_CONFIG`. */
@@ -253,6 +340,10 @@ export interface AgentPlan {
   updatedAt: number
   /** Set when status becomes terminal. Drives history sorting. */
   endedAt?: number
+  /** Why an in-session run is paused on a step. See {@link PlanStepHalt}. */
+  stepHalt?: PlanStepHalt
+  /** The in-session step turn currently in flight. See {@link PlanTurnDispatch}. */
+  turnDispatch?: PlanTurnDispatch
   metadata?: Record<string, unknown>
 }
 
@@ -361,6 +452,7 @@ export type PlanEventKind =
   | "step_started"
   | "step_completed"
   | "step_failed"
+  | "step_skipped"
   | "replanned"
   | "paused"
   | "resumed"
@@ -380,6 +472,7 @@ export type PlanEventPayload =
     }
   | { kind: "plan_updated"; totalSteps: number }
   | { kind: "approved" }
+  /** The plan was declined before execution (terminal `rejected`); `feedback` is the reason. */
   | { kind: "rejected"; feedback?: string }
   /** "No, keep planning": approval deferred, plan retained as a draft. */
   | { kind: "deferred"; feedback?: string }
@@ -389,9 +482,18 @@ export type PlanEventPayload =
       trigger: PlanRefinementTrigger
       changes: string[]
     }
-  | { kind: "step_started"; stepId: string; title: string; stepKind: PlanStepKind }
+  | {
+      kind: "step_started"
+      stepId: string
+      title: string
+      stepKind: PlanStepKind
+      /** 1-based attempt number; > 1 when the user retried the step. */
+      attempt?: number
+    }
   | { kind: "step_completed"; stepId: string; title: string; tokensDelta?: number }
   | { kind: "step_failed"; stepId: string; title: string; error: string; attempt: number }
+  /** The user skipped a step; its dependents were re-pointed at its prerequisites. */
+  | { kind: "step_skipped"; stepId: string; title: string; reason?: string }
   | { kind: "replanned"; reason: PlanRefinementTrigger; failedStepId?: string }
   | { kind: "paused" }
   | { kind: "resumed" }

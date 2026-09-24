@@ -17,6 +17,12 @@ import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { buildRoutingEngine } from "@cognia/provider-routing/build-preview-engine"
+import {
+  abortableStreamModel,
+  drainRejectionReports,
+  simulateWebviewRuntime,
+  truncatedStreamModel,
+} from "@/lib/ai/webview-stream-fixtures"
 import { executeAgent, runCompletionRail } from "./agent-executor"
 
 const mockPlanRoute = jest.fn()
@@ -546,6 +552,47 @@ describe("executeAgent", () => {
         expect.objectContaining({ providerId: "anthropic", selectionMode: "explicit-provider" }),
         expect.anything()
       )
+    })
+
+    // The REAL `streamText` on the webview runtime this rail exists for. A
+    // failed or stopped stream must not leak the SDK's tracing `completion`
+    // promise as an unhandled rejection (see `webview-safe-telemetry.ts`).
+    describe("with the real AI SDK stream (webview runtime)", () => {
+      const actualAi = jest.requireActual<typeof import("ai")>("ai")
+      let restoreRuntime: () => void
+      beforeEach(() => {
+        restoreRuntime = simulateWebviewRuntime()
+        primeTextChannel()
+        mockStreamText.mockImplementation(actualAi.streamText)
+      })
+      afterEach(() => restoreRuntime())
+
+      it("rejects a stream cut off mid-response without leaking an unhandled rejection", async () => {
+        // The SDK's default `onError` logs the stream error.
+        const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
+        mockCreateModel.mockReturnValue(truncatedStreamModel() as never)
+
+        await expect(runCompletionRail("hi")).rejects.toThrow("No output generated")
+        await drainRejectionReports()
+
+        expect(mockStreamText).toHaveBeenCalledTimes(1)
+        consoleError.mockRestore()
+      })
+
+      it("rejects a mid-stream abort without leaking an unhandled rejection", async () => {
+        mockCreateModel.mockReturnValue(abortableStreamModel() as never)
+        const abort = new AbortController()
+
+        const failure = await runCompletionRail("hi", {
+          abortSignal: abort.signal,
+          onDelta: () => abort.abort(),
+        }).catch((error: unknown) => error)
+        await drainRejectionReports()
+
+        expect(abort.signal.aborted).toBe(true)
+        expect(failure).toBe(abort.signal.reason)
+        expect(mockStreamText).toHaveBeenCalledTimes(1)
+      })
     })
   })
 

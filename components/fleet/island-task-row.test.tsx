@@ -113,8 +113,22 @@ describe("capability gating", () => {
     expect(screen.queryByTestId("island-permission-actions")).toBeNull()
   })
 
-  it("does not show the main-window hint on an external row that waits", () => {
-    renderRow({ status: "blocked", statusKey: "awaitingPermission", summary: "" })
+  it("shows the main-window hint on any blocked row without inline controls", () => {
+    // An external ask the island has no control for (e.g. an ACP elicitation
+    // whose schema doesn't map to options) must still tell the user where the
+    // decision lives — a silent blocked row is a dead end.
+    renderRow({ status: "blocked", statusKey: "awaitingInput", summary: "" })
+    expect(screen.getByTestId("island-decide-in-main").textContent).toContain("decideInMain")
+  })
+
+  it("hides the hint once the row exposes its own decision controls", () => {
+    renderRow({
+      status: "blocked",
+      statusKey: "awaitingPermission",
+      summary: "",
+      permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
+      capabilities: { ...NO_ISLAND_CAPABILITIES, permissionDecision: true },
+    })
     expect(screen.queryByTestId("island-decide-in-main")).toBeNull()
   })
 })
@@ -233,5 +247,10 @@ describe("accessibility", () => {
       waitingSince: 4_000,
     })
     expect(screen.getByTestId("island-waited").textContent).toContain("waitingFor")
+  })
+
+  it("passes the configured label through to the agent badge", () => {
+    renderRow({ agent: "acp", agentLabel: "My Kiro" })
+    expect(screen.getByTestId("agent-badge-acp").textContent).toContain("My Kiro")
   })
 })

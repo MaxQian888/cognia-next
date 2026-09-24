@@ -16,7 +16,7 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
 }))
 
 const blockReason = jest.fn<string | null, [unknown]>(() => null)
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentExecutionBlockReason: (c: unknown) => blockReason(c),
 }))
 

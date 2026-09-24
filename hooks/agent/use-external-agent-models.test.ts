@@ -4,7 +4,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
-import type { ExternalAgentModelSurface } from "@/lib/ai/agent/external/session-models"
+import type { ExternalAgentModelSurface } from "@/lib/ai/agent/external/session/session-models"
 
 let runtimeRef: AgentRuntimeRef = { kind: "builtin" } as AgentRuntimeRef
 const loadAgentModelSurface = jest.fn()
@@ -25,7 +25,7 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 // not merely lose coverage, it makes every test in this file throw at render.
 let cacheRevision = 0
 const cacheListeners = new Set<() => void>()
-jest.mock("@/lib/ai/agent/external/model-surface-cache", () => ({
+jest.mock("@/lib/ai/agent/external/capability/model-surface-cache", () => ({
   loadAgentModelSurface: (...args: unknown[]) => loadAgentModelSurface(...args),
   cachedAgentModelSurface: (...args: unknown[]) => cachedAgentModelSurface(...args),
   bindConversationSession: (...args: unknown[]) => bindConversationSession(...args),
@@ -38,12 +38,12 @@ jest.mock("@/lib/ai/agent/external/model-surface-cache", () => ({
   AGENT_MODEL_CATALOG: "*catalog*",
   EMPTY_MODEL_SURFACE: { choices: [], currentModelId: null, write: { kind: "none" } },
 }))
-jest.mock("@/lib/ai/agent/external/process-plane", () => ({
+jest.mock("@/lib/ai/agent/external/capability/process-plane", () => ({
   externalAgentProcessPlaneScope: () => "local",
   subscribeExternalAgentProcessPlane: () => () => {},
 }))
 const mountHostConfigForCatalog = jest.fn()
-jest.mock("@/lib/ai/agent/external/host-config-mount", () => ({
+jest.mock("@/lib/ai/agent/external/config/host-config-mount", () => ({
   mountHostConfigForCatalog: (...args: unknown[]) => mountHostConfigForCatalog(...args),
 }))
 jest.mock("@/lib/ai/agent/external/manager", () => ({

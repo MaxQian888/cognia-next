@@ -51,13 +51,13 @@ import {
   isWindowsExceptionEligible,
   normalizePlatform,
   runtimeSupportsPlatform,
-} from "../runtime-catalog"
+} from "../config/install-catalog"
 // Type-only: importing this module for real pulls the registry client, and
 // through it proxy-fetch and the settings store, into the boot graph. Startup
 // rehydration imports this service, so a static import would make every launch
 // pay for a listing most users never open.
 import type { RegistryDiscoveryResult } from "./registry-discovery"
-import { externalAgentSandboxSupportsPlatform } from "../security-policy"
+import { externalAgentSandboxSupportsPlatform } from "../policy/security-policy"
 import {
   EXTERNAL_AGENT_KEYRING_NAMESPACE,
   applyResolvedCredentials,
@@ -963,7 +963,7 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
     ])
   const { createKeyringStore } = await import("@/lib/credentials/keyring-store")
   const { getDeviceId } = await import("@/lib/device/device-identity")
-  const { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } = await import("../security-policy")
+  const { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } = await import("../policy/security-policy")
   const { createHostRuntimeHost } = await import("./native-runtime-host")
 
   const state = () => useExternalAgentStore.getState()

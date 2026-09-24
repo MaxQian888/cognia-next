@@ -16,9 +16,14 @@
  * to `interruptSession` so the turn actually stops.
  */
 
-import { getExecutionBroker } from "./broker"
+import { ExecutionAbortError, getExecutionBroker } from "./broker"
 import type { ExecutionBroker } from "./broker"
-import type { ExecutionLease, ExecutionLegKind } from "./types"
+import type {
+  ExecutionAdmissionBlocker,
+  ExecutionLease,
+  ExecutionLeaseRequest,
+  ExecutionLegKind,
+} from "./types"
 import { useChatStore } from "@/stores/chat"
 import { interruptSession } from "@/lib/claude/ipc"
 
@@ -32,6 +37,12 @@ interface HeldChatLease {
 }
 
 const held = new Map<string, HeldChatLease>()
+/**
+ * Turns the broker parked instead of admitting, keyed by session, with the
+ * controller that withdraws the wait. Present only between the refusal to admit
+ * and the admission (or cancellation) that ends it.
+ */
+const queued = new Map<string, AbortController>()
 let watcherInstalled = false
 let unsubscribeWatcher: (() => void) | null = null
 
@@ -85,6 +96,16 @@ export interface AcquireChatLeaseParams {
   onCancel?: () => void
   providerId?: string
   providerLimit?: number
+  /**
+   * Called synchronously — before the wait starts — when the broker is about
+   * to QUEUE this turn rather than admit it, with what it is waiting for.
+   *
+   * The send path uses it to put the user's message on screen as queued. Without
+   * it the turn sat inside `acquire` with nothing to show for it: no message, no
+   * error, until whatever held the working tree let go minutes later. A turn
+   * that queues this way can be withdrawn with {@link cancelQueuedChatTurn}.
+   */
+  onQueued?: (blocker: ExecutionAdmissionBlocker) => void
 }
 
 /**
@@ -100,7 +121,7 @@ export async function acquireChatLease(
 ): Promise<void> {
   ensureWatcher()
   if (held.has(params.sessionId)) return
-  const lease = await broker.acquire({
+  const request: ExecutionLeaseRequest = {
     kind: params.kind ?? "chat",
     label: params.label,
     sessionId: params.sessionId,
@@ -108,7 +129,23 @@ export async function acquireChatLease(
     ...(params.slotKey ? { slotKey: params.slotKey } : {}),
     ...(params.providerId ? { providerId: params.providerId } : {}),
     ...(params.providerLimit ? { providerLimit: params.providerLimit } : {}),
-  })
+  }
+  // Asked and acted on in the same tick as the acquire below, so the answer
+  // cannot go stale between the question and the queueing it predicts.
+  const blocker = broker.admissionBlocker(request)
+  let waiting: AbortController | null = null
+  if (blocker) {
+    waiting = new AbortController()
+    request.signal = waiting.signal
+    queued.set(params.sessionId, waiting)
+    params.onQueued?.(blocker)
+  }
+  let lease: ExecutionLease
+  try {
+    lease = await broker.acquire(request)
+  } finally {
+    if (waiting && queued.get(params.sessionId) === waiting) queued.delete(params.sessionId)
+  }
   // A broker-side cancel aborts the lease signal — bridge it to an interrupt so
   // the live turn actually stops. (A normal release never fires `abort`.)
   const onCancel =
@@ -128,7 +165,7 @@ export async function acquireChatLease(
  * over.
  *
  * Acquiring first cannot deadlock: the old lease is still running for this
- * session, so the broker's continuation exemption (`hasActiveSession`) admits
+ * session, so the broker's continuation exemption (a RUNNING leg) admits
  * the replacement immediately without waiting on the shared pool, the slot, or
  * the fallback provider's lane. The old lease is released straight afterwards,
  * which returns its permits and drains whoever was waiting on them.
@@ -169,6 +206,30 @@ export async function switchChatLeaseProvider(
   current.lease.release("error")
 }
 
+/** Whether a turn for `sessionId` is waiting for admission right now. */
+export function isChatTurnQueued(sessionId: string): boolean {
+  return queued.has(sessionId)
+}
+
+/**
+ * Withdraw a turn that is still waiting for admission. Its pending
+ * {@link acquireChatLease} rejects with an {@link ExecutionAbortError}, which the
+ * send path reads as "the user took this message back" — never as a failure.
+ * Returns false when nothing is waiting (it was admitted, or already gone).
+ */
+export function cancelQueuedChatTurn(sessionId: string): boolean {
+  const waiting = queued.get(sessionId)
+  if (!waiting) return false
+  queued.delete(sessionId)
+  waiting.abort()
+  return true
+}
+
+/** True for the rejection {@link cancelQueuedChatTurn} produces. */
+export function isQueuedChatTurnCancellation(error: unknown): boolean {
+  return error instanceof ExecutionAbortError
+}
+
 /**
  * Release a held chat lease immediately (e.g. a pre-stream failure path).
  * Idempotent / no-op when nothing is held for the session.
@@ -187,6 +248,8 @@ export function releaseChatLease(
 export function __resetChatLeasesForTesting(): void {
   for (const entry of held.values()) entry.lease.release("ok")
   held.clear()
+  for (const waiting of queued.values()) waiting.abort()
+  queued.clear()
   unsubscribeWatcher?.()
   unsubscribeWatcher = null
   watcherInstalled = false

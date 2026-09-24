@@ -14,14 +14,14 @@ import type {
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
 
-import type { ExternalAgentExecutionBlockAssessment } from "./config-normalizer"
+import type { ExternalAgentExecutionBlockAssessment } from "./config/config-normalizer"
 import { computeAgentReadiness } from "./agent-readiness"
 
 const mockExecutionBlock = jest.fn<
   ExternalAgentExecutionBlockAssessment | null,
   [ExternalAgentConfig]
 >(() => null)
-jest.mock("./config-normalizer", () => ({
+jest.mock("./config/config-normalizer", () => ({
   getExternalAgentExecutionBlock: (agent: ExternalAgentConfig, _reach?: unknown) =>
     mockExecutionBlock(agent),
 }))

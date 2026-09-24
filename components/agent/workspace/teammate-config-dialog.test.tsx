@@ -35,8 +35,8 @@ jest.mock("@/lib/db/characters", () => ({
 jest.mock("@/lib/claude/agents/subagents", () => ({
   resolveAllSubagents: () => ({}),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
-  getPresetConfig: jest.requireActual("@/lib/ai/agent/external/presets").getPresetConfig,
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
+  getPresetConfig: jest.requireActual("@/lib/ai/agent/external/config/presets").getPresetConfig,
   getAvailablePresets: () => [],
   // `ExternalPresetSection` (inside the dialog) builds its picker from this.
   // Omitting it made every render in this file throw "getRunnablePresets is
@@ -46,7 +46,7 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   // The runtime Select derives its options from the real preset catalog (via
   // `runtime-options`). Keep that export REAL — a hand-listed copy here would
   // reintroduce exactly the drift `runtime-options` exists to prevent.
-  BUILTIN_EXECUTABLE_PRESET_IDS: jest.requireActual("@/lib/ai/agent/external/presets")
+  BUILTIN_EXECUTABLE_PRESET_IDS: jest.requireActual("@/lib/ai/agent/external/config/presets")
     .BUILTIN_EXECUTABLE_PRESET_IDS,
 }))
 

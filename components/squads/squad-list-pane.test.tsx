@@ -6,6 +6,15 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import type { Team } from "@cognia/agent-config-types"
+
+// The built-in rows open a chat scope; the shell nav is not under test here.
+const switchToTeamMock = jest.fn()
+jest.mock("@/components/shell/use-shell-nav", () => ({
+  useShellNav: () => ({ switchToTeam: (id: string) => switchToTeamMock(id) }),
+}))
+jest.mock("@/lib/db/teams", () => ({ duplicateTeam: jest.fn() }))
+
 import { SquadListPane } from "./squad-list-pane"
 import type { SquadFleetRow, SquadFleetSnapshot } from "@/hooks/squads/use-squad-fleet"
 import type { SquadRouteState } from "@/hooks/squads/use-squad-route-state"
@@ -177,5 +186,80 @@ describe("loading and empty", () => {
   it("keeps the CTA reachable once there are rows", () => {
     render(<SquadListPane fleet={fleet()} route={route()} onCreate={jest.fn()} />)
     expect(screen.getByTestId("squad-fleet-create")).toBeInTheDocument()
+  })
+})
+
+describe("built-in Teams", () => {
+  const builtIns = [
+    { id: "team_builtin_brainstorm", name: "Brainstorm Squad", members: [], isBuiltIn: true },
+    { id: "team_builtin_research_squad", name: "Research", members: [], isBuiltIn: true },
+  ] as unknown as Team[]
+
+  /**
+   * The sidebar offers these as scopes while the page said "No Squads yet"
+   * with nothing explaining them.
+   */
+  it("lists them in their own section while the Squad count stays at zero", () => {
+    render(
+      <SquadListPane
+        fleet={fleet({ squads: [], total: 0 })}
+        route={route()}
+        builtInTeams={builtIns}
+      />
+    )
+    expect(screen.getByText("No Squads yet")).toBeInTheDocument()
+    expect(screen.getByTestId("squad-builtin-teams")).toBeInTheDocument()
+    expect(screen.getAllByTestId(/^squad-builtin-row-/)).toHaveLength(2)
+    // Not Squad rows: nothing selects them into the Squad inspector.
+    expect(screen.queryAllByTestId("squad-fleet-row")).toHaveLength(0)
+  })
+
+  it("points the empty state at the built-ins", () => {
+    render(
+      <SquadListPane
+        fleet={fleet({ squads: [], total: 0 })}
+        route={route()}
+        builtInTeams={builtIns}
+      />
+    )
+    expect(
+      screen.getByText(/The 2 built-in teams below are ready to use right now\./)
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the plain empty copy when there are none", () => {
+    render(<SquadListPane fleet={fleet({ squads: [], total: 0 })} route={route()} />)
+    expect(screen.queryByTestId("squad-builtin-teams")).not.toBeInTheDocument()
+    expect(screen.queryByText(/built-in teams below/)).not.toBeInTheDocument()
+  })
+
+  it("sits below the user's Squads", () => {
+    render(<SquadListPane fleet={fleet()} route={route()} builtInTeams={builtIns} />)
+    const list = screen.getByTestId("squad-fleet-list")
+    const section = screen.getByTestId("squad-builtin-teams")
+    expect(list.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("drops out under a run-state filter, which a Team cannot match", () => {
+    render(
+      <SquadListPane
+        fleet={fleet()}
+        route={route({ filter: "live", narrowed: true })}
+        builtInTeams={builtIns}
+      />
+    )
+    expect(screen.queryByTestId("squad-builtin-teams")).not.toBeInTheDocument()
+  })
+
+  it("narrows with the search box", () => {
+    render(
+      <SquadListPane
+        fleet={fleet()}
+        route={route({ query: "research", narrowed: true })}
+        builtInTeams={builtIns}
+      />
+    )
+    expect(screen.getAllByTestId(/^squad-builtin-row-/)).toHaveLength(1)
+    expect(screen.getByTestId("squad-builtin-row-team_builtin_research_squad")).toBeInTheDocument()
   })
 })

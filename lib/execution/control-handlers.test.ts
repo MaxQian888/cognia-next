@@ -35,13 +35,13 @@ jest.mock("@/lib/workflow/runtime/cancel-run", () => ({
 const mockControlSquadRun = jest.fn(
   async (_runId: string, _action: string) => ({ ok: true }) as { ok: boolean; reason?: string }
 )
-jest.mock("@/lib/ai/agent/team/squad-control", () => ({
+jest.mock("@/lib/ai/agent/team/squad/squad-control", () => ({
   controlSquadRun: (...args: unknown[]) =>
     mockControlSquadRun(...(args as Parameters<typeof mockControlSquadRun>)),
 }))
 
 const mockSettleSquadReview = jest.fn(async (_command: unknown) => undefined)
-jest.mock("@/lib/ai/agent/team/squad-review-gate", () => ({
+jest.mock("@/lib/ai/agent/team/gates/squad-review-gate", () => ({
   settleSquadReviewFromControl: (...args: unknown[]) =>
     mockSettleSquadReview(...(args as [unknown])),
 }))
@@ -55,7 +55,7 @@ const mockStartSquadRun = jest.fn(
       reason?: string
     }
 )
-jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+jest.mock("@/lib/ai/agent/team/squad/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => mockStartSquadRun(...(args as [unknown])),
 }))
 
@@ -70,7 +70,7 @@ const mockSteerDurableRun = jest.fn(async (_runId: string, _message: string) => 
   receiptIds: ["receipt-1"],
   childCount: 1,
 }))
-jest.mock("@/lib/ai/agent/team/durable-control", () => ({
+jest.mock("@/lib/ai/agent/team/durable/durable-control", () => ({
   controlDurableRun: (...args: unknown[]) =>
     mockControlDurableRun(...(args as Parameters<typeof mockControlDurableRun>)),
   steerDurableRun: (...args: unknown[]) =>

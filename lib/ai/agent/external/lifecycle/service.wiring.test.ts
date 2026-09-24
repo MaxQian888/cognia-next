@@ -63,7 +63,7 @@ jest.mock("../agent-transport", () => ({
   supportsExternalAgents: () => supportsProcesses(),
 }))
 
-import { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } from "../security-policy"
+import { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } from "../policy/security-policy"
 import { EXTERNAL_AGENT_KEYRING_NAMESPACE } from "./credentials"
 import {
   ExternalAgentLifecycleService,

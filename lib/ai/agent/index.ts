@@ -1,11 +1,23 @@
 /**
- * Minimal `lib/ai/agent` barrel for cognia-next.
+ * `lib/ai/agent` barrel.
  *
- * The Cognia source defines a much richer agent runtime here (executor,
- * loop, tool-call manager, orchestrator, MCP bridges, etc.). cognia-next
- * does not need that machinery for the External-Agent migration — only
- * the type contracts that `lib/ai/agent/external/*` and `types/agent/*`
- * import.
+ * This directory is the agent subsystem root. Layout:
+ *
+ *   - `agent-executor.ts`        one-shot built-in agent runs (plugin dispatch)
+ *   - `background-agent-manager` fire-and-forget agents, journaled via Dexie
+ *   - `execution/`               execution spec, host environments, capability snapshots
+ *   - `external/`                external-agent runtimes: `runtimes/` per-protocol
+ *                                clients, `policy/`, `capability/`, `config/`,
+ *                                `session/`, `lifecycle/`, plus the manager core
+ *   - `recovery/`                crashed-run reconciliation
+ *   - `runtime-catalog/`         "what can run the next turn" catalog
+ *   - `team/`                    agent-team facade (agent-team*) plus `squad/`,
+ *                                `durable/`, `gates/`, `teammate/`, `workers/`,
+ *                                `ledger/`, `memory/`, `ultracode/`, `delivery/`,
+ *                                `auto/`, `patterns/`, `pr-feedback/`, `workspace/`
+ *
+ * Historically this barrel also carried the shared type contracts below; keep
+ * them here so `types/agent/*` and external consumers keep one import site.
  */
 
 import type { z } from "zod"

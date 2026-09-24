@@ -102,3 +102,20 @@ describe("island to main", () => {
     expect(() => off()).not.toThrow()
   })
 })
+
+describe("listener teardown", () => {
+  it("absorbs the asynchronous Tauri unregister race and disposes only once", async () => {
+    const rejection = Promise.reject(new TypeError("listeners[eventId].handlerId"))
+    const handled = jest.spyOn(rejection, "catch")
+    const unlisten = jest.fn(() => rejection)
+    listenMock.mockResolvedValue(unlisten)
+    const off = await onIslandState(() => {})
+    off()
+    off()
+    // Observe attachment synchronously; then consume the fixture if this test fails.
+    const attached = handled.mock.calls.length
+    await rejection.catch(() => {})
+    expect(attached).toBe(1)
+    expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+})

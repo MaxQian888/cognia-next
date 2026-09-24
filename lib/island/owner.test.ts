@@ -1,5 +1,14 @@
 import type { AttentionItem } from "@/lib/attention/types"
+import {
+  __resetExternalApprovalsForTests,
+  registerExternalApproval,
+} from "@/lib/ai/agent/external/session/chat-decision-bridge"
+import {
+  __resetAcpSessionRegistryForTests,
+  registerAcpSession,
+} from "@/lib/fleet/acp-session-registry"
 import type { FleetSession } from "@/lib/fleet/types"
+import type { ExternalAgentPermissionRequestEvent } from "@/types/agent/external-agent"
 import {
   attentionOwner,
   fleetSessionOwner,
@@ -54,6 +63,24 @@ describe("fleetSessionOwner", () => {
       agent: "codex",
       sessionId: "s1",
       transcriptPath: "/t.jsonl",
+    })
+  })
+
+  it("carries the manager identity of a renderer-managed ACP session", () => {
+    const owner = fleetSessionOwner(
+      session({
+        agent: "devin",
+        sessionId: "ext-1",
+        externalAgentId: "agent-1",
+        chatSessionId: "chat-9",
+      })
+    )
+    expect(owner).toEqual({
+      kind: "external",
+      agent: "devin",
+      sessionId: "ext-1",
+      agentId: "agent-1",
+      chatSessionId: "chat-9",
     })
   })
 
@@ -128,6 +155,74 @@ describe("attentionOwner", () => {
       approval: { requestId: "req" },
     } as unknown as AttentionItem
     expect(attentionOwner(item)).toEqual({ kind: "chat", sessionId: "sess", requestId: "req" })
+  })
+
+  it("folds an external approval into its ACP session owner instead of a second row", () => {
+    __resetExternalApprovalsForTests()
+    __resetAcpSessionRegistryForTests()
+    const event = {
+      type: "permission_request",
+      sessionId: "ext-1",
+      timestamp: new Date(0),
+      request: { id: "r1", requestId: "r1", sessionId: "ext-1", toolInfo: { name: "Bash" } },
+    } as ExternalAgentPermissionRequestEvent
+    const approval = registerExternalApproval({
+      agentId: "agent-1",
+      chatSessionId: "chat-9",
+      event,
+    })
+    registerAcpSession("ext-1", { agent: "devin", agentId: "agent-1" })
+    const item = {
+      ...base,
+      id: "chat:req",
+      source: "chat",
+      kind: "tool-approval",
+      sessionId: "chat-9",
+      approval: { requestId: approval!.requestId },
+    } as unknown as AttentionItem
+
+    const owner = attentionOwner(item)
+    expect(owner).toEqual({
+      kind: "external",
+      agent: "devin",
+      sessionId: "ext-1",
+      agentId: "agent-1",
+      chatSessionId: "chat-9",
+    })
+    // The folded owner is the same identity the session row produced.
+    expect(taskIdentity(owner!)).toBe("external:devin:ext-1")
+    __resetExternalApprovalsForTests()
+    __resetAcpSessionRegistryForTests()
+  })
+
+  it("keeps a chat owner when the ACP session was never registered", () => {
+    __resetExternalApprovalsForTests()
+    __resetAcpSessionRegistryForTests()
+    const event = {
+      type: "permission_request",
+      sessionId: "ext-gone",
+      timestamp: new Date(0),
+      request: { id: "r2", requestId: "r2", sessionId: "ext-gone", toolInfo: { name: "Bash" } },
+    } as ExternalAgentPermissionRequestEvent
+    const approval = registerExternalApproval({
+      agentId: "agent-1",
+      chatSessionId: "chat-9",
+      event,
+    })
+    const item = {
+      ...base,
+      id: "chat:req",
+      source: "chat",
+      kind: "tool-approval",
+      sessionId: "chat-9",
+      approval: { requestId: approval!.requestId },
+    } as unknown as AttentionItem
+    expect(attentionOwner(item)).toEqual({
+      kind: "chat",
+      sessionId: "chat-9",
+      requestId: approval!.requestId,
+    })
+    __resetExternalApprovalsForTests()
   })
 
   it("returns null when the discriminating id is missing", () => {
@@ -237,6 +332,21 @@ describe("taskIdentity", () => {
 describe("ownerRoute", () => {
   it("has no route for an external agent, whose owner is a terminal", () => {
     expect(ownerRoute({ kind: "external", agent: "codex", sessionId: "x" })).toBeNull()
+  })
+
+  it("routes a renderer-managed ACP session to its chat or the agents page", () => {
+    expect(
+      ownerRoute({
+        kind: "external",
+        agent: "devin",
+        sessionId: "x",
+        agentId: "agent-1",
+        chatSessionId: "chat-9",
+      })
+    ).toBe("/")
+    expect(ownerRoute({ kind: "external", agent: "acp", sessionId: "x", agentId: "agent-1" })).toBe(
+      "/me/external-agents"
+    )
   })
 
   it("encodes ids into the route", () => {

@@ -27,7 +27,7 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("@cognia/provider-types/provider", () => ({
   getAllProviders: () => ({ gateway: { protocol: "openai" } }),
 }))
-jest.mock("@/lib/ai/agent/external/gateway-task", () => ({
+jest.mock("@/lib/ai/agent/external/config/gateway-task", () => ({
   canUseCogniaModels: (config: { protocol: string }) => config.protocol === "pi-rpc",
 }))
 jest.mock("@/lib/ai/model-options", () => ({

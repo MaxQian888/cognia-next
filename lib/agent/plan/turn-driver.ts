@@ -26,20 +26,35 @@
  * with `agent_kind: "plan-step"`, so an `agents: "plan-step"` selector scopes to
  * exactly these turns. A blocking hook PAUSES the plan (rather than failing it)
  * so the user can fix the hook and resume.
+ *
+ * Supervision: deciding is not enough when the dispatched turn never comes
+ * back. Every started step is stamped with the dispatching renderer's boot id
+ * (`plan.turnDispatch`, so a restart can tell an orphan from a live turn) and
+ * armed on the step watchdog (`./step-watchdog`), which reports a turn that
+ * fails, never starts, goes silent or ends unrecorded to
+ * `PlanRuntime.failInSessionStep`. The step's attempt counter is bumped here,
+ * at the one place a step starts, so a retry is visible as attempt 2.
  */
 
-import type { PlanStatus, PlanStep } from "@/types/agent/plan"
+import type { PlanStatus } from "@/types/agent/plan"
 import { appendPlanEvent, getPlan, updatePlan } from "@/lib/db/plans"
 import {
+  defaultLifecycleFirer,
   firePostCallHooks,
   firePreCallHooks,
   noopLifecycleFirer,
   type AgentHookContext,
   type LifecycleHookFirer,
 } from "@/lib/claude/hooks/lifecycle-firer"
-import { applyStepStatus, nextRunnableStep } from "./steps"
+import { applyStepStatus, currentInProgressStep, nextRunnableStep } from "./steps"
 import { renderPlanStepMessage } from "./prompts"
 import { emitPlanStatus } from "./notify"
+import { PLAN_RENDERER_BOOT_ID, holdPlanRendererLock } from "./step-halt"
+import { armPlanStepWatch, disarmPlanStepWatch } from "./step-watchdog"
+
+// Re-exported: the helper moved to `./steps` so the runtime can share it
+// without importing the driver; existing importers keep this path.
+export { currentInProgressStep }
 
 /** Max characters of the assistant's turn stored as a step's `result` summary. */
 const MAX_RESULT_LEN = 500
@@ -112,19 +127,32 @@ export async function advancePlanToNextStep(
     return { kind: "exit", status, reason }
   }
 
+  // Stamped with this renderer's boot id below; the lock is what tells another
+  // window's recovery sweep that this renderer (and its turn) is still alive.
+  holdPlanRendererLock()
+  const dispatchedAt = Date.now()
+  const attempt = (next.attempts ?? 0) + 1
   const applied = applyStepStatus(plan.steps, next.id, "in_progress", {
-    startedAt: plan.updatedAt,
+    startedAt: dispatchedAt,
+    attempts: attempt,
   })
   await updatePlan(planId, {
     steps: applied.steps,
     totalSteps: applied.totalSteps,
     completedSteps: applied.completedSteps,
     currentStepId: next.id,
+    turnDispatch: { stepId: next.id, bootId: PLAN_RENDERER_BOOT_ID, dispatchedAt },
   })
   await appendPlanEvent({
     planId,
     kind: "step_started",
-    payload: { kind: "step_started", stepId: next.id, title: next.title, stepKind: next.kind },
+    payload: {
+      kind: "step_started",
+      stepId: next.id,
+      title: next.title,
+      stepKind: next.kind,
+      attempt,
+    },
   })
   const fresh = await getPlan(planId)
   void emitPlanStatus(fresh)
@@ -142,8 +170,9 @@ export async function advancePlanToNextStep(
   })
   if (pre.block) {
     // Pause, do not fail: the plan is fine, a policy said not now. The user can
-    // fix the hook and resume from the tracker dock.
-    await updatePlan(planId, { status: "paused" })
+    // fix the hook and resume from the tracker dock. No turn goes out, so the
+    // dispatch stamp is withdrawn and nothing is armed.
+    await updatePlan(planId, { status: "paused", turnDispatch: undefined })
     await appendPlanEvent({
       planId,
       kind: "exit",
@@ -153,11 +182,35 @@ export async function advancePlanToNextStep(
     return { kind: "exit", status: "paused", reason: pre.block }
   }
 
+  // From here the caller owns dispatching the turn; the watchdog owns noticing
+  // when that turn never comes back.
+  void armPlanStepWatch({
+    planId,
+    stepId: next.id,
+    sessionId: plan.sessionId,
+    generationId: capturedGenerationId,
+    dispatchedAt,
+  })
+
   return {
     kind: "continue",
     stepId: next.id,
     stepTitle: next.title,
     userMessage: pre.additionalContext ? `${userMessage}\n\n${pre.additionalContext}` : userMessage,
+  }
+}
+
+/**
+ * The hook deps every chat-surface dispatch of a plan step uses: the renderer's
+ * default firer and the same `plan-step` identity the chat hook's continuation
+ * path passes (`agentRef` = plan, `sessionId` = chat session). Shared so the
+ * first step (approval), a user retry / skip / resume, and the runtime closing
+ * a FAILED step's bracket all speak as one agent to a settings.json hook.
+ */
+export function chatPlanStepHooks(planId: string, sessionId: string): PlanTurnHookDeps {
+  return {
+    firer: defaultLifecycleFirer,
+    hookContext: { agentId: "plan-step", agentKind: "plan-step", agentRef: planId, sessionId },
   }
 }
 
@@ -203,11 +256,15 @@ export async function handlePlanTurnComplete(
       ...(result ? { result } : {}),
       completedAt: plan.updatedAt,
     })
+    // The step's turn came back: stop watching it before anything else can
+    // fail, and withdraw its dispatch stamp (the next step stamps its own).
+    disarmPlanStepWatch(planId)
     await updatePlan(planId, {
       steps: applied.steps,
       totalSteps: applied.totalSteps,
       completedSteps: applied.completedSteps,
       currentStepId: applied.currentStepId,
+      turnDispatch: undefined,
     })
     await appendPlanEvent({
       planId,
@@ -235,18 +292,4 @@ export async function handlePlanTurnComplete(
     ...(input.firer ? { firer: input.firer } : {}),
     ...(input.hookContext ? { hookContext: input.hookContext } : {}),
   })
-}
-
-/**
- * The step a finished turn was working: the explicit cursor when it still
- * points at an in-progress step, else any in-progress step (the cursor can lag
- * a concurrent orchestrator write).
- */
-export function currentInProgressStep(
-  steps: PlanStep[],
-  currentStepId?: string
-): PlanStep | undefined {
-  const cursor = currentStepId ? steps.find((s) => s.id === currentStepId) : undefined
-  if (cursor?.status === "in_progress") return cursor
-  return [...steps].sort((a, b) => a.order - b.order).find((s) => s.status === "in_progress")
 }

@@ -7,7 +7,7 @@ import {
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const dispatchStructuredMock = jest.fn()
-jest.mock("../structured-dispatch", () => ({
+jest.mock("../teammate/structured-dispatch", () => ({
   dispatchStructured: (...a: unknown[]) => dispatchStructuredMock(...a),
 }))
 

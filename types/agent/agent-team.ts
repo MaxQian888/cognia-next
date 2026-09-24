@@ -15,7 +15,10 @@
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
 import type { TwinSettings } from "@/types/twin"
-import type { ExternalAgentPresetId, NonExecutablePresetId } from "@/lib/ai/agent/external/presets"
+import type {
+  ExternalAgentPresetId,
+  NonExecutablePresetId,
+} from "@/lib/ai/agent/external/config/presets"
 import type { ProjectEditorSession } from "@/types/editor/project-editor"
 import type {
   AgentTeamEnvironmentRef,
@@ -201,7 +204,7 @@ export type TeamExecutorKind =
 /**
  * Where a team run was triggered from. Anything not "interactive" is
  * headless — no operator is watching a modal, so the HITL gates resolve
- * through `lib/ai/agent/team/gate-policy.ts` instead of blocking.
+ * through `lib/ai/agent/team/gates/gate-policy.ts` instead of blocking.
  */
 export type TeamRunOrigin =
   "interactive" | "scheduler" | "remote" | "external" | "plugin" | "im" | "delegation"
@@ -327,7 +330,7 @@ export interface TeamGovernancePolicy {
  *   - `characterPackIds` → `character-pack-registry`. The team uses
  *     `getPackCharacterByRuntimeId` to project a pack character into a
  *     teammate's persona at run time.
- *   - `externalAgentPresetIds` → `lib/ai/agent/external/presets.ts`.
+ *   - `externalAgentPresetIds` → `lib/ai/agent/external/config/presets.ts`.
  *   - `subagentIds` → built-in name or `<pluginId>:<subagentId>`
  *     resolved through `resolveAllSubagents`.
  *   - `a2uiTemplateIds` → A2UI template registry (existing) consumed by
@@ -803,7 +806,7 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
  * Runtime that executes a teammate's tasks. `claude` goes through the Tauri
  * Anthropic sidecar; every other value is an external-agent preset id and
  * dispatches to that external ACP/CLI agent (see
- * `lib/ai/agent/external/presets.ts`; `resolveTeammatePresetId` treats the
+ * `lib/ai/agent/external/config/presets.ts`; `resolveTeammatePresetId` treats the
  * runtime string as the preset id directly). Covers the full executable preset
  * catalog — `custom`, service-discovered preview integrations, and the managed
  * DeepSeek Harness profiles are excluded because they have no fixed executable
@@ -927,7 +930,7 @@ export interface TeammateConfig {
    * as a session-less child fusion run of the team run, booked on the
    * `agentsWorkflows` surface; `"delegate"` additionally needs the team to have
    * a project to work in. With Router + Fusion off, every value behaves like
-   * `"auto"`. See `lib/ai/agent/team/member-fusion-turn.ts`.
+   * `"auto"`. See `lib/ai/agent/team/teammate/member-fusion-turn.ts`.
    */
   fusionAction?: import("@/lib/router-fusion/gate/explicit-run").FusionActionChoice
   /** Custom metadata */
@@ -935,7 +938,7 @@ export interface TeammateConfig {
   /**
    * Per-teammate overlay on the team's default capability pool. Each entry
    * is a `CapabilityListOverlay` (add / remove / replace). Leave undefined
-   * to inherit the team default unchanged. See `lib/ai/agent/team/capability-resolver.ts`.
+   * to inherit the team default unchanged. See `lib/ai/agent/team/teammate/capability-resolver.ts`.
    */
   capabilities?: TeammateCapabilityOverlay
   /**
@@ -944,7 +947,7 @@ export interface TeammateConfig {
    * `resolveSendOptions` twin runtime injects the twin's persona (voice /
    * playbooks / entities) plus per-task RAG knowledge — the teammate acts as
    * that digital employee. Undefined = a plain teammate with no twin.
-   * See `lib/ai/agent/team/teammate-character.ts` + `dispatch-teammate.ts`.
+   * See `lib/ai/agent/team/teammate/teammate-character.ts` + `dispatch-teammate.ts`.
    */
   twinId?: string
   /**

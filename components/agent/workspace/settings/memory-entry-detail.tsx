@@ -19,7 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { deleteEntry } from "@/lib/ai/agent/team/shared-memory-orchestrator"
+import { deleteEntry } from "@/lib/ai/agent/team/memory/shared-memory-orchestrator"
 import type { SharedMemoryEntry } from "@/types/agent/agent-team"
 import { ConfirmActionDialog } from "./confirm-action-dialog"
 import { markSettingsSaved } from "./settings-save-indicator"

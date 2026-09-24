@@ -15,6 +15,8 @@ jest.mock("@/components/source-control/diff-viewer", () => ({
 }))
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: () => "5 minutes ago" }),
+  useNow: () => new Date(),
   useTranslations: (namespace?: string) => (key: string, values?: Record<string, unknown>) => {
     const full = namespace === "agentRuns.status" ? `status.${key}` : key
     return values ? `${full}:${JSON.stringify(values)}` : full
@@ -809,4 +811,15 @@ describe("RunDetailPane", () => {
     const overview = screen.getByRole("tabpanel")
     expect(within(overview).getByText("status.running")).toBeInTheDocument()
   })
+})
+
+it("formats past start and completion timestamps as elapsed time", () => {
+  render(
+    <RunDetailPane
+      row={row({ startedAt: 1_000, endedAt: 61_000, status: "completed" })}
+      actions={makeActions()}
+    />
+  )
+  expect(screen.getAllByText(/5 minutes ago/).length).toBeGreaterThanOrEqual(2)
+  expect(screen.queryByText(/Overdue/)).not.toBeInTheDocument()
 })

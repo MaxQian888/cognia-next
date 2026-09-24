@@ -84,7 +84,7 @@ let fleetSource: "tauri" | "companion" | "none" = "none"
 jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
   useFleetSnapshot: () => ({ source: fleetSource, snapshot: { sessions: [] } }),
 }))
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     start: jest.fn(async () => {}),
     pause: jest.fn(async () => {}),

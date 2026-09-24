@@ -19,7 +19,7 @@
  */
 
 import { useMemo } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { ActivityIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -32,7 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
-import { formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { useExecutionCockpit } from "@/hooks/agent-runs/use-agent-runs"
 import { useRunControlActions } from "@/hooks/agent-runs/use-agent-run-actions"
 import {
@@ -369,6 +368,8 @@ function RunListRow({
   selected: boolean
   onSelect: () => void
 }) {
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("agentRuns")
   return (
     <button
@@ -387,7 +388,7 @@ function RunListRow({
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
         <span className="uppercase">{t(`kind.${runKindLabelKey(row)}`)}</span>
         <span>·</span>
-        <span>{formatRelativeTime(new Date(row.startedAt))}</span>
+        <span>{format.relativeTime(new Date(row.startedAt), now)}</span>
         {row.origin === "gateway-api" && (
           <>
             <span>·</span>

@@ -18,8 +18,9 @@
 import {
   getExternalAgentExecutionBlock,
   type ExternalAgentRuntimeReach,
-} from "@/lib/ai/agent/external/config-normalizer"
-import { isFromPreset } from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/config-normalizer"
+import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
+import { externalAgentPresetIdOf } from "@/lib/ai/agent/external/config/preset-identity"
 import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
 import type { AgentRuntimeAdapterId } from "@cognia/agent-config-types/agent-execution"
 import type {
@@ -114,6 +115,7 @@ function externalDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescr
         ? null
         : (input.describeWarning?.(input.agentValidity?.[agent.id]) ?? null)
       const ref = { kind: "external", agentId: agent.id } as const
+      const presetId = isFromPreset(agent) ?? externalAgentPresetIdOf(agent)
       return {
         ref,
         key: runtimeRefKey(ref),
@@ -121,6 +123,7 @@ function externalDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescr
         name: agent.name,
         protocolLabel: agent.protocol.toUpperCase(),
         brandId: isFromPreset(agent) ?? agent.name,
+        ...(presetId ? { presetId } : {}),
         ...(blockedReason ? { blockedReason } : {}),
         ...(block?.transient === true ? { blockTransient: true } : {}),
         ...(warning ? { warning } : {}),
@@ -137,6 +140,7 @@ function hostDescriptor(record: ExternalAgentConfigRecord): AgentRuntimeDescript
   const config = record.config as { name?: string; protocol?: string }
   const name = config.name ?? record.configId
   const ref = hostRefFor(record, name)
+  const presetId = externalAgentPresetIdOf(record.config)
   return {
     ref,
     key: runtimeRefKey(ref),
@@ -144,6 +148,7 @@ function hostDescriptor(record: ExternalAgentConfigRecord): AgentRuntimeDescript
     placement: "host",
     name,
     ...(config.protocol ? { protocolLabel: config.protocol.toUpperCase() } : {}),
+    ...(presetId ? { presetId } : {}),
   }
 }
 
@@ -243,6 +248,9 @@ function mergeRows(
     key: chosen.key,
     group: chosen.group,
     name: localRow.name ?? hostRow.name,
+    ...(localRow.presetId || hostRow.presetId
+      ? { presetId: localRow.presetId ?? hostRow.presetId }
+      : {}),
     placement: "both",
     alternateRef: other.ref,
     // A block belongs to the LOCAL lane's process reach. Running on the host

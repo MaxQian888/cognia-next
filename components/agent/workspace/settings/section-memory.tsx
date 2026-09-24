@@ -24,7 +24,7 @@ import {
   selectSharedMemoryEntriesForReader,
   OPERATOR_READER_ID,
 } from "@/stores/agent/agent-team-store/selectors"
-import { clearTeamMemory } from "@/lib/ai/agent/team/shared-memory-orchestrator"
+import { clearTeamMemory } from "@/lib/ai/agent/team/memory/shared-memory-orchestrator"
 import type { AgentTeam, SharedMemoryEntry } from "@/types/agent/agent-team"
 import { MemoryComposer } from "./memory-composer"
 import { MemoryEntryDetail } from "./memory-entry-detail"

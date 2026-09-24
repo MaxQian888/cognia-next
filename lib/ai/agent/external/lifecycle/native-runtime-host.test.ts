@@ -3,7 +3,7 @@ import {
   type ExternalAgentRuntimeReceipt,
 } from "@/types/agent/external-agent-lifecycle"
 
-import { findRuntimeById } from "../runtime-catalog"
+import { findRuntimeById } from "../config/install-catalog"
 import {
   PROBE_COMMAND,
   RECEIPT_STORE_KEY,

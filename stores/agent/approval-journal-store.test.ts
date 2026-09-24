@@ -4,6 +4,8 @@ import {
   toPersistedApproval,
   markUnsettledInterrupted,
   migrateApprovalJournal,
+  stampNotified,
+  unannouncedInterrupted,
   type PersistedApproval,
 } from "./approval-journal-store"
 import type { PendingApproval } from "@cognia/agent-config-types"
@@ -146,5 +148,54 @@ describe("toPersistedApproval", () => {
       input: {},
     }
     expect(toPersistedApproval(approval, "chat-1").requestedAt).toEqual(expect.any(Number))
+  })
+})
+
+describe("announce-once bookkeeping", () => {
+  it("unannouncedInterrupted keeps only interrupted rows without a notifiedAt stamp", () => {
+    const rows: PersistedApproval[] = [
+      { ...entry({ requestId: "new" }), status: "interrupted" },
+      { ...entry({ requestId: "told" }), status: "interrupted", notifiedAt: 5 },
+      { ...entry({ requestId: "live" }), status: "pending" },
+    ]
+    expect(unannouncedInterrupted(rows).map((e) => e.requestId)).toEqual(["new"])
+  })
+
+  it("markNotified stamps once, keeps the entry listed, and never overwrites a stamp", () => {
+    const s = useApprovalJournalStore.getState()
+    s.record(entry({ requestId: "a" }))
+    s.record(entry({ requestId: "b" }))
+    s.interrupt("a")
+    s.markNotified(["a"], 100)
+    s.markNotified(["a", "b"], 200)
+    const byId = new Map(useApprovalJournalStore.getState().entries.map((e) => [e.requestId, e]))
+    expect(byId.get("a")).toMatchObject({ status: "interrupted", notifiedAt: 100 })
+    expect(byId.get("b")?.notifiedAt).toBe(200)
+    expect(stampNotified([], ["x"], 1)).toEqual([])
+  })
+
+  it("the stamp survives a relaunch (rehydrate + interrupt marking)", async () => {
+    window.localStorage.setItem(
+      "cognia-approval-journal",
+      JSON.stringify({
+        version: 1,
+        state: {
+          entries: [
+            { ...entry({ requestId: "told" }), status: "interrupted", notifiedAt: 7 },
+            { ...entry({ requestId: "new" }), status: "pending" },
+          ],
+        },
+      })
+    )
+    await useApprovalJournalStore.persist.rehydrate()
+    const entries = useApprovalJournalStore.getState().entries
+    expect(unannouncedInterrupted(entries).map((e) => e.requestId)).toEqual(["new"])
+    expect(entries.find((e) => e.requestId === "told")?.notifiedAt).toBe(7)
+    // The legacy migration path keeps it too.
+    expect(
+      migrateApprovalJournal({ entries: [{ requestId: "m", notifiedAt: 3 }] }).entries[0]
+    ).toMatchObject({ status: "interrupted", notifiedAt: 3 })
+    window.localStorage.clear()
+    reset()
   })
 })

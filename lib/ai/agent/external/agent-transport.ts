@@ -16,11 +16,12 @@
  */
 // `isTauri` via @/lib/utils (the app-wide re-export the existing agent test
 // suites mock); `isHeadlessHost` from the platform leaf.
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import { isTauri } from "@/lib/utils"
-import type { AcpHostCapabilities } from "./acp-feature-profile"
-import { canStartExternalAgentProcess } from "./process-plane"
+import type { AcpHostCapabilities } from "./runtimes/acp/acp-feature-profile"
+import { canStartExternalAgentProcess } from "./capability/process-plane"
 import { withSpawnPlacement } from "@/lib/sandbox/spawn-placement-registry"
 
 /**
@@ -125,7 +126,8 @@ export async function agentListen<T>(
 ): Promise<() => void> {
   if (isTauri()) {
     const { listen } = await import("@tauri-apps/api/event")
-    return listen<T>(event, (e) => handler(e.payload))
+    const off = await listen<T>(event, (e) => handler(e.payload))
+    return () => safeUnlisten(off)
   }
   const { transport } = await import("@/lib/tauri/transport-instance")
   const off = transport.subscribe<T>(event, handler)

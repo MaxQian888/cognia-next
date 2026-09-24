@@ -153,8 +153,8 @@ async function defaultResolveCandidates(
 
 async function defaultInstallAdapters(): Promise<void> {
   const [{ configureAgentTeamRuntime }, { buildAgentTeamRuntimeDeps }] = await Promise.all([
-    import("@/lib/ai/agent/team/squad-lifecycle-runner"),
-    import("@/lib/ai/agent/agent-team-runtime-deps"),
+    import("@/lib/ai/agent/team/squad/squad-lifecycle-runner"),
+    import("@/lib/ai/agent/team/agent-team-runtime-deps"),
   ])
   configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
 }
@@ -170,12 +170,12 @@ async function defaultRecoverInterrupts(now: number): Promise<void> {
 }
 
 async function defaultRecoverRuns() {
-  const { recoverDurableAgentTeams } = await import("@/lib/ai/agent/agent-team")
+  const { recoverDurableAgentTeams } = await import("@/lib/ai/agent/team/agent-team")
   return recoverDurableAgentTeams()
 }
 
 async function defaultArmRecoveries() {
-  const { armPendingTeamRecoveries } = await import("@/lib/ai/agent/team/team-recovery")
+  const { armPendingTeamRecoveries } = await import("@/lib/ai/agent/team/durable/team-recovery")
   return armPendingTeamRecoveries()
 }
 

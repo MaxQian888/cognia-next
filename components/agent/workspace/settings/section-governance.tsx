@@ -39,7 +39,7 @@ import {
   clampMaxRevisions,
   DEFAULT_TASK_REVIEW_MAX_REVISIONS,
   MAX_TASK_REVIEW_REVISIONS,
-} from "@/lib/ai/agent/team/task-review-policy"
+} from "@/lib/ai/agent/team/gates/task-review-policy"
 import { markSettingsSaved } from "./settings-save-indicator"
 import { ConfirmActionDialog } from "./confirm-action-dialog"
 

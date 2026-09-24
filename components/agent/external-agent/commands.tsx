@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { AcpAvailableCommand } from "@/types/agent/external-agent"
 
@@ -70,7 +71,7 @@ function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="opacity-0 group-hover:opacity-100 transition-opacity"
+        className={HOVER_REVEAL_CONTROL_CLASS}
         onClick={handleExecute}
         disabled={isExecuting}
         aria-label={t("runCommand", { name: command.name })}

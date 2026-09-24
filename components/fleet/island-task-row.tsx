@@ -123,7 +123,7 @@ export function IslandTaskRow({
           )}
         />
         {row.agent ? (
-          <AgentBadge agent={row.agent} />
+          <AgentBadge agent={row.agent} label={row.agentLabel} />
         ) : (
           <span
             data-testid="island-source-badge"
@@ -273,11 +273,14 @@ export function IslandTaskRow({
             </span>
           ) : null}
           {/*
-           * A blocked Cognia row (chat approval, team gate, run interrupt) has
-           * no decision controls here yet — see IslandRowCapabilities. Say so,
-           * rather than leaving a wait with no visible way out.
+           * A blocked row the island cannot answer here (a Cognia approval or
+           * gate, an external ask whose shape has no island control — e.g. a
+           * free-form ACP elicitation) still needs a visible way out. When no
+           * inline decision rendered, say the answer lives in the main window.
            */}
-          {row.status === "blocked" && row.owner.kind !== "external" ? (
+          {row.status === "blocked" &&
+          !row.capabilities.permissionDecision &&
+          !row.capabilities.questionResponse ? (
             <span className="text-white/35" data-testid="island-decide-in-main">
               {" · "}
               {t("decideInMain")}

@@ -12,8 +12,8 @@ import {
   EXTERNAL_AGENT_CAPABILITY_IDS,
   EXTERNAL_CAPABILITY_REASON_KEYS,
 } from "@cognia/agent-config-types/external-agent-capability"
-import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
-import { externalCapabilityManifest } from "@/lib/ai/agent/external/capability-manifest"
+import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability/capability-profile"
+import { externalCapabilityManifest } from "@/lib/ai/agent/external/capability/capability-manifest"
 
 import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
 

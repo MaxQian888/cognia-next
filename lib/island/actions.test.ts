@@ -10,6 +10,12 @@ const interrupt = jest.fn()
 const focusTerminal = jest.fn<Promise<boolean>, [string, string]>()
 const revealTranscript = jest.fn<Promise<boolean>, [string | null | undefined]>()
 
+const acpRespond = jest.fn<Promise<boolean>, [string, "allow" | "deny"]>()
+const acpQuestionRespond = jest.fn<Promise<boolean>, [string, number[][]]>()
+const acpQuestionReject = jest.fn<Promise<boolean>, [string]>()
+const acpSendMessage = jest.fn<Promise<boolean>, [string, string, string]>()
+const acpInterrupt = jest.fn()
+
 jest.mock("@/lib/tauri/fleet", () => ({
   fleetPermissionRespond: (...args: [string, "allow" | "deny"]) => respond(...args),
   fleetQuestionRespond: (...args: [string, number[][]]) => questionRespond(...args),
@@ -18,6 +24,14 @@ jest.mock("@/lib/tauri/fleet", () => ({
   fleetInterruptSession: (...args: unknown[]) => interrupt(...args),
   fleetFocusTerminal: (...args: [string, string]) => focusTerminal(...args),
   fleetRevealTranscript: (...args: [string | null | undefined]) => revealTranscript(...args),
+}))
+
+jest.mock("@/lib/fleet/acp-fleet-projection", () => ({
+  respondAcpFleetPermission: (...args: [string, "allow" | "deny"]) => acpRespond(...args),
+  respondAcpFleetQuestion: (...args: [string, number[][]]) => acpQuestionRespond(...args),
+  rejectAcpFleetQuestion: (...args: [string]) => acpQuestionReject(...args),
+  sendAcpFleetMessage: (...args: [string, string, string]) => acpSendMessage(...args),
+  interruptAcpFleetSession: (...args: [string, string]) => acpInterrupt(...args),
 }))
 
 function row(over: Partial<IslandRowProjection> = {}): IslandRowProjection {
@@ -374,5 +388,96 @@ describe("executeIslandAction execution", () => {
     const result = await executeIslandAction(intent({ kind: "dismiss-stale" }), state([stale]), d)
     expect(d.dismissStale).toHaveBeenCalled()
     expect(result.outcome).toBe("completed")
+  })
+})
+
+describe("executeIslandAction ACP routing", () => {
+  const acpOwner = {
+    kind: "external",
+    agent: "devin",
+    sessionId: "ext-1",
+    agentId: "agent-1",
+    chatSessionId: "chat-9",
+  } as const
+
+  function acpRow(over: Partial<IslandRowProjection> = {}): IslandRowProjection {
+    return row({
+      id: "external:devin:ext-1",
+      owner: acpOwner,
+      agent: "devin",
+      permission: { requestId: "p1", toolName: "Bash", requestedAt: 0 },
+      question: {
+        requestId: "q1",
+        requestedAt: 0,
+        questions: [{ question: "Pick", options: ["a", "b"], multiSelect: false }],
+      },
+      ...over,
+    })
+  }
+
+  it("routes a permission decision to the manager, never to the Rust commands", async () => {
+    acpRespond.mockResolvedValue(true)
+    const result = await executeIslandAction(
+      intent({
+        kind: "permission-decision",
+        rowId: "external:devin:ext-1",
+        permissionRequestId: "p1",
+        behavior: "deny",
+      }),
+      state([acpRow()]),
+      deps()
+    )
+    expect(acpRespond).toHaveBeenCalledWith("p1", "deny")
+    expect(respond).not.toHaveBeenCalled()
+    expect(result.outcome).toBe("completed")
+  })
+
+  it("routes question answer and rejection to the manager", async () => {
+    acpQuestionRespond.mockResolvedValue(true)
+    acpQuestionReject.mockResolvedValue(true)
+    const acpIntent = (kind: "question-response" | "question-reject") =>
+      intent({ kind, rowId: "external:devin:ext-1", questionRequestId: "q1", selections: [[1]] })
+    expect(
+      (await executeIslandAction(acpIntent("question-response"), state([acpRow()]), deps())).outcome
+    ).toBe("completed")
+    expect(acpQuestionRespond).toHaveBeenCalledWith("q1", [[1]])
+    expect(
+      (await executeIslandAction(acpIntent("question-reject"), state([acpRow()]), deps())).outcome
+    ).toBe("completed")
+    expect(acpQuestionReject).toHaveBeenCalledWith("q1")
+    expect(questionRespond).not.toHaveBeenCalled()
+    expect(questionReject).not.toHaveBeenCalled()
+  })
+
+  it("sends a reply and an interrupt through the manager", async () => {
+    acpSendMessage.mockResolvedValue(true)
+    acpInterrupt.mockResolvedValue({ ok: true })
+    const replyResult = await executeIslandAction(
+      intent({ kind: "reply", rowId: "external:devin:ext-1", text: "  go on  " }),
+      state([acpRow()]),
+      deps()
+    )
+    expect(acpSendMessage).toHaveBeenCalledWith("agent-1", "ext-1", "go on")
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(replyResult.outcome).toBe("completed")
+
+    const interruptResult = await executeIslandAction(
+      intent({ kind: "interrupt", rowId: "external:devin:ext-1" }),
+      state([acpRow()]),
+      deps()
+    )
+    expect(acpInterrupt).toHaveBeenCalledWith("agent-1", "ext-1")
+    expect(interrupt).not.toHaveBeenCalled()
+    expect(interruptResult.outcome).toBe("completed")
+  })
+
+  it("surfaces a manager refusal as failed rather than completed", async () => {
+    acpInterrupt.mockResolvedValue({ ok: false, reason: "callFailed" })
+    const result = await executeIslandAction(
+      intent({ kind: "interrupt", rowId: "external:devin:ext-1" }),
+      state([acpRow()]),
+      deps()
+    )
+    expect(result).toMatchObject({ outcome: "failed", reason: "callFailed" })
   })
 })

@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { AlertTriangleIcon } from "lucide-react"
 
@@ -43,7 +43,6 @@ import {
   type DelegateReviewState,
 } from "@/components/router-fusion/delegate-review-model"
 import { saveFileAs } from "@/lib/files/file-bridge"
-import { formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
 import type { ExecutionRunInterrupt } from "@/types/execution/run"
 
@@ -80,6 +79,8 @@ export function DelegateReviewPane({
   load = loadDelegateReview,
   save = saveFileAs,
 }: DelegateReviewPaneProps) {
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("routerFusionDelegate.review")
   const tPatch = useTranslations("routerFusionDelegate.patch")
   const [result, setResult] = useState<{ forKey: string; state: DelegateReviewState } | null>(null)
@@ -289,7 +290,7 @@ export function DelegateReviewPane({
                 <span className="min-w-0 flex-1 truncate">
                   {t("approval.decidedAt", {
                     status: t(`approval.status.${entry.status}`),
-                    when: formatRelativeTime(new Date(entry.decidedAt ?? entry.createdAt)),
+                    when: format.relativeTime(new Date(entry.decidedAt ?? entry.createdAt), now),
                   })}
                 </span>
               </li>

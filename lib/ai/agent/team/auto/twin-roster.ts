@@ -10,7 +10,7 @@
  * fresh specialists, exactly as before this feature existed).
  */
 
-import { gatherTeamTwins } from "../twin-context"
+import { gatherTeamTwins } from "../teammate/twin-context"
 import type { TwinRosterEntry } from "./types"
 
 /** Per-run cap on how many twins are offered to the composer. */

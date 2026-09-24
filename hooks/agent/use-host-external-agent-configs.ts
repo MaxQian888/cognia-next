@@ -26,7 +26,7 @@ import {
   reconcileRemoteHostConfigs,
   updateRemoteHostConfig,
   type HostConfigsUnavailableReason,
-} from "@/lib/ai/agent/external/remote-host-configs"
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 

@@ -41,6 +41,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui
 import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { SquadListPane } from "@/components/squads/squad-list-pane"
+import { useBuiltInTeams } from "@/components/squads/built-in-teams"
 import { SquadInspector } from "@/components/squads/squad-inspector"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
@@ -65,6 +66,7 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
   const tasks = useAgentTeamStore((s) => s.tasks)
   const teammates = useAgentTeamStore((s) => s.teammates)
   const fleet = useSquadFleet({ query: route.query, filter: route.filter })
+  const builtIns = useBuiltInTeams()
   const createSquad = useCreateSquad()
   // `/fleet` is the live triage read of the HOST's sessions, where a parked
   // permission can be answered remotely. Its contract is `standalone: "hidden"`
@@ -136,7 +138,14 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
       }
       leftPane={{
         label: t("railLabel"),
-        content: <SquadListPane fleet={fleet} route={route} onCreate={onCreate} />,
+        content: (
+          <SquadListPane
+            fleet={fleet}
+            route={route}
+            onCreate={onCreate}
+            builtInTeams={builtIns.teams}
+          />
+        ),
         // Wider than the shell's 18% default. A row here carries a name AND a
         // status badge, and the badge is `shrink-0`, so at the default the name
         // is what gives way: on an 800px pane with the inspector open the rail

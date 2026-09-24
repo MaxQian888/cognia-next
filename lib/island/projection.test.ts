@@ -730,3 +730,76 @@ describe("mergeRows liveness and clearing ids", () => {
     expect(row.owner).toMatchObject({ kind: "chat", requestId: "req" })
   })
 })
+
+describe("projectIslandState ACP sessions", () => {
+  it("carries the configured label and the manager identity into the row", () => {
+    const row = project([
+      session({
+        agent: "acp",
+        sessionId: "ext-1",
+        projectName: null,
+        agentLabel: "My Kiro",
+        externalAgentId: "agent-1",
+        chatSessionId: "chat-9",
+      }),
+    ]).rows[0]
+    expect(row.agentLabel).toBe("My Kiro")
+    expect(row.owner).toEqual({
+      kind: "external",
+      agent: "acp",
+      sessionId: "ext-1",
+      agentId: "agent-1",
+      chatSessionId: "chat-9",
+    })
+    // A chat-bound ACP session opens its conversation, not a terminal.
+    expect(row.capabilities.openOwner).toBe(true)
+    // The label, not an opaque session id, is the title.
+    expect(row.title).toBe("My Kiro")
+  })
+
+  it("offers permission, question, reply and interrupt controls on a live ACP row", () => {
+    const row = project([
+      session({
+        agent: "devin",
+        sessionId: "ext-1",
+        status: "waiting-permission",
+        pendingPermission: { requestId: "p1", toolName: "Bash", detail: null, requestedAt: NOW },
+        capabilities: {
+          approvePermission: true,
+          sendMessage: true,
+          focusTerminal: false,
+          openTranscript: false,
+          interrupt: true,
+        },
+      }),
+    ]).rows[0]
+    expect(row.capabilities).toMatchObject({
+      permissionDecision: true,
+      reply: true,
+      interrupt: true,
+      focusTerminal: false,
+      openTranscript: false,
+    })
+  })
+
+  it("blocks reply while a permission ask is open (the ask owns the turn)", () => {
+    const row = project([
+      session({
+        agent: "acp",
+        sessionId: "ext-1",
+        status: "waiting-permission",
+        pendingPermission: { requestId: "p1", toolName: "Bash", detail: null, requestedAt: NOW },
+        capabilities: {
+          approvePermission: true,
+          sendMessage: false,
+          focusTerminal: false,
+          openTranscript: false,
+          interrupt: true,
+        },
+      }),
+    ]).rows[0]
+    expect(row.status).toBe("blocked")
+    expect(row.capabilities.reply).toBe(false)
+    expect(row.capabilities.interrupt).toBe(true)
+  })
+})

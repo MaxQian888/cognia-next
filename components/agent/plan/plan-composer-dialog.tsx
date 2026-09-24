@@ -18,6 +18,12 @@
  * this, delegation / tool / sub-workflow / approval-gate steps existed in the
  * executor and the type model but could only be produced by a workflow node,
  * so the richer half of the plan IR was unreachable from the product.
+ *
+ * Edit mode (`editPlan`): the same editor, pre-filled from a plan that is still
+ * awaiting approval — the approval card's "Edit" action. Saving re-validates
+ * every step and amends the plan in place through `applyPlanComposerEdit`
+ * instead of creating a new one. Hosts remount the dialog (a `key`) per edit
+ * session so the fields always start from the plan as it is now.
  */
 
 import { useState } from "react"
@@ -43,10 +49,11 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { getPlanRuntime } from "@/lib/agent/plan/runtime"
+import { PlanEditValidationError, applyPlanComposerEdit } from "@/lib/agent/plan/draft-edit"
 import { loadPlanConfigDefaults } from "@/lib/agent/plan/plan-settings"
 import { linearAgentTurnSteps } from "@/lib/agent/plan/steps"
 import { validatePlanStepParams } from "@/lib/agent/plan/step-params"
-import type { CreatePlanStepInput, PlanStepKind } from "@/types/agent/plan"
+import type { AgentPlan, CreatePlanStepInput, PlanStep, PlanStepKind } from "@/types/agent/plan"
 
 /** Max characters kept from a title / step line (matches the other producers). */
 const MAX_TITLE_LEN = 200
@@ -116,6 +123,54 @@ export function buildStepParams(
   })
 }
 
+/**
+ * The inverse of {@link buildStepParams}: the editable draft for an existing
+ * step, so edit mode opens with every step's type and fields as they are.
+ */
+export function stepDraftFromStep(step: Pick<PlanStep, "kind" | "params">): StepKindDraft {
+  const params = step.params
+  if (!params || params.kind !== step.kind) return { kind: step.kind }
+  switch (params.kind) {
+    case "agent_turn":
+    case "approval_gate":
+      return { kind: params.kind, ...(params.prompt ? { prompt: params.prompt } : {}) }
+    case "teammate_dispatch":
+      return {
+        kind: params.kind,
+        ...(params.teamId ? { teamId: params.teamId } : {}),
+        ...(params.teammateId ? { teammateId: params.teammateId } : {}),
+        ...(params.spawnPrompt ? { prompt: params.spawnPrompt } : {}),
+      }
+    case "tool_call":
+      return {
+        kind: params.kind,
+        toolName: params.toolName,
+        ...(Object.keys(params.input ?? {}).length > 0
+          ? { toolInput: JSON.stringify(params.input) }
+          : {}),
+      }
+    case "mcp_tool_call":
+      return {
+        kind: params.kind,
+        serverId: params.serverId,
+        toolName: params.toolName,
+        ...(params.input && Object.keys(params.input).length > 0
+          ? { toolInput: JSON.stringify(params.input) }
+          : {}),
+      }
+    case "sub_workflow":
+      return { kind: params.kind, workflowId: params.workflowId }
+    case "editor_review":
+      return {
+        kind: params.kind,
+        path: params.path,
+        content: params.content,
+        ...(params.title ? { title: params.title } : {}),
+        ...(params.prompt ? { prompt: params.prompt } : {}),
+      }
+  }
+}
+
 /** `{}` for blank input, the parsed object, or the `"invalid"` sentinel. */
 function parseJsonObject(raw: string | undefined): Record<string, unknown> | "invalid" {
   const text = raw?.trim()
@@ -136,6 +191,13 @@ export interface PlanComposerDialogProps {
   onOpenChange: (open: boolean) => void
   /** Fired with the new plan id after a successful create (tests / callers). */
   onCreated?: (planId: string) => void
+  /**
+   * Edit an existing (awaiting-approval) plan instead of creating one. The
+   * fields start from this plan; saving amends it in place.
+   */
+  editPlan?: AgentPlan
+  /** Fired with the plan id after a successful edit-mode save. */
+  onSaved?: (planId: string) => void
 }
 
 /** Split the textarea into ordered, non-empty step titles. */
@@ -153,21 +215,37 @@ export function parseStepLines(raw: string): string[] {
   )
 }
 
+/** Step rows of a plan in display order (edit-mode seed). */
+function orderedSteps(plan: AgentPlan): PlanStep[] {
+  return [...plan.steps].sort((a, b) => a.order - b.order)
+}
+
 export function PlanComposerDialog({
   sessionId,
   characterId,
   open,
   onOpenChange,
   onCreated,
+  editPlan,
+  onSaved,
 }: PlanComposerDialogProps) {
   const t = useTranslations("plan.composer")
-  const [title, setTitle] = useState("")
-  const [stepsText, setStepsText] = useState("")
+  const editing = Boolean(editPlan)
+  const [title, setTitle] = useState(() => editPlan?.title ?? "")
+  const [stepsText, setStepsText] = useState(() =>
+    editPlan
+      ? orderedSteps(editPlan)
+          .map((step) => step.title)
+          .join("\n")
+      : ""
+  )
   const [busy, setBusy] = useState(false)
   // Kind drafts are positional: index i belongs to the i-th parsed line. A line
   // edit therefore keeps the kinds attached to positions, which is what a user
   // rewording step 2 expects; missing entries fall back to a plain agent turn.
-  const [drafts, setDrafts] = useState<StepKindDraft[]>([])
+  const [drafts, setDrafts] = useState<StepKindDraft[]>(() =>
+    editPlan ? orderedSteps(editPlan).map(stepDraftFromStep) : []
+  )
 
   const steps = parseStepLines(stepsText)
   const draftAt = (i: number): StepKindDraft => drafts[i] ?? DEFAULT_STEP_DRAFT
@@ -195,8 +273,38 @@ export function PlanComposerDialog({
   }
 
   const handleOpenChange = (next: boolean) => {
-    if (!next) reset()
+    // Edit mode is remounted per session by its host, so there is nothing to
+    // reset; clearing here would flash an empty form while the dialog closes.
+    if (!next && !editing) reset()
     onOpenChange(next)
+  }
+
+  const handleSave = async () => {
+    if (!canSubmit || !editPlan) return
+    setBusy(true)
+    try {
+      await applyPlanComposerEdit(editPlan, {
+        title: title.trim().slice(0, MAX_PLAN_TITLE_LEN),
+        steps: steps.map((stepTitle, i) => {
+          const result = built[i]
+          return {
+            title: stepTitle,
+            kind: draftAt(i).kind,
+            ...("params" in result && result.params ? { params: result.params } : {}),
+          }
+        }),
+      })
+      onSaved?.(editPlan.id)
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(
+        error instanceof PlanEditValidationError && error.stepIndex
+          ? t("invalidStep", { index: error.stepIndex })
+          : t("saveFailed")
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleCreate = async () => {
@@ -240,8 +348,8 @@ export function PlanComposerDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="plan-composer-dialog">
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
-          <DialogDescription>{t("description")}</DialogDescription>
+          <DialogTitle>{editing ? t("editTitle") : t("title")}</DialogTitle>
+          <DialogDescription>{editing ? t("editDescription") : t("description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -303,9 +411,15 @@ export function PlanComposerDialog({
           <Button variant="ghost" onClick={() => handleOpenChange(false)} disabled={busy}>
             {t("cancel")}
           </Button>
-          <Button onClick={handleCreate} disabled={!canSubmit} data-testid="plan-composer-create">
-            {t("create")}
-          </Button>
+          {editing ? (
+            <Button onClick={handleSave} disabled={!canSubmit} data-testid="plan-composer-save">
+              {t("save")}
+            </Button>
+          ) : (
+            <Button onClick={handleCreate} disabled={!canSubmit} data-testid="plan-composer-create">
+              {t("create")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

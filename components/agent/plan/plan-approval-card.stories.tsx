@@ -11,14 +11,15 @@ const meta = {
     plan: buildDraftPlan(),
     onApprove: fn(),
     onKeepPlanning: fn(),
-    onDiscard: fn(),
+    onReject: fn(),
+    onOpenEditor: fn(),
   },
 } satisfies Meta<typeof PlanApprovalCard>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Approve / keep-planning / discard only (no refine or edit affordances).
+// Approve / keep-planning / reject / edit-in-editor (no refine or inline edit).
 export const Default: Story = {}
 
 // With onRefine, the refinement actions appear in the overflow menu.

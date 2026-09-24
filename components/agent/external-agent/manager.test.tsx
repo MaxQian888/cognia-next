@@ -11,7 +11,10 @@ import type { AcpPermissionRequest, ExternalAgentInstance } from "@/types/agent/
 
 import { ExternalAgentManager } from "./manager"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
-import { registerPreset, __resetDynamicPresetsForTesting } from "@/lib/ai/agent/external/presets"
+import {
+  registerPreset,
+  __resetDynamicPresetsForTesting,
+} from "@/lib/ai/agent/external/config/presets"
 import {
   registerPluginProtocolAdapter,
   __resetPluginProtocolAdaptersForTesting,

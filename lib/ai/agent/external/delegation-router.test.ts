@@ -93,4 +93,28 @@ describe("routeDelegation", () => {
     routeDelegation({ prompt: "x", context: { sessionId: "s1" } }, { checkDelegation })
     expect(checkDelegation).toHaveBeenCalledWith("x", { sessionId: "s1" })
   })
+
+  it("matches on the prompt but forwards and redacts the payload", () => {
+    // A chat turn's attached file rides along with the question: the file's
+    // contents must not route the turn, and they must still reach the agent.
+    const checkDelegation = jest.fn(() => MATCH)
+    const decision = routeDelegation(
+      { prompt: "refactor this", payload: "file body a@b.com\n\nrefactor this" },
+      {
+        checkDelegation,
+        redact: (text) => ({ redacted: text.replace("a@b.com", "[[EMAIL_1]]"), map: {} }),
+      }
+    )
+    expect(checkDelegation).toHaveBeenCalledWith("refactor this", undefined)
+    expect(decision.filteredPrompt).toBe("file body [[EMAIL_1]]\n\nrefactor this")
+  })
+
+  it("hands back the payload, not the matched prompt, when no rule matches", () => {
+    const decision = routeDelegation(
+      { prompt: "hello", payload: "file body\n\nhello" },
+      { checkDelegation: () => NO_MATCH }
+    )
+    expect(decision.shouldDelegate).toBe(false)
+    expect(decision.filteredPrompt).toBe("file body\n\nhello")
+  })
 })

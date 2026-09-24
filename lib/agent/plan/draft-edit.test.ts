@@ -110,3 +110,104 @@ describe("linearSteps", () => {
     expect(steps[2].dependencies).toEqual([steps[1].id])
   })
 })
+
+describe("applyPlanComposerEdit", () => {
+  const step = (id: string, order: number, over: Record<string, unknown> = {}) => ({
+    id,
+    title: `t${order}`,
+    kind: "agent_turn" as const,
+    status: "pending" as const,
+    order,
+    dependencies: [] as string[],
+    ...over,
+  })
+
+  beforeEach(() => updatePlanDraft.mockClear())
+
+  it("applies a same-length edit in place, keeping ids and the DAG", async () => {
+    const { applyPlanComposerEdit } = await import("./draft-edit")
+    const source = plan({
+      source: "agent_tool",
+      steps: [step("a", 0), step("b", 1), step("c", 2, { dependencies: ["a"] })],
+    })
+    await applyPlanComposerEdit(source, {
+      title: "  New title ",
+      steps: [
+        { title: "t0", kind: "agent_turn" },
+        {
+          title: "renamed",
+          kind: "approval_gate",
+          params: { kind: "approval_gate", prompt: "ok?" },
+        },
+        { title: "t2", kind: "agent_turn" },
+      ],
+    })
+    const [id, patch] = updatePlanDraft.mock.calls[0]
+    expect(id).toBe("p1")
+    expect(patch.title).toBe("New title")
+    expect(patch.steps.map((s: { id: string }) => s.id)).toEqual(["a", "b", "c"])
+    expect(patch.steps[1]).toMatchObject({ title: "renamed", kind: "approval_gate" })
+    // The authored parallel edge survives the edit.
+    expect(patch.steps[2].dependencies).toEqual(["a"])
+    expect(patch.metadata).toMatchObject({ existing: true, userEdited: true })
+  })
+
+  it("re-derives a linear chain when the step count changes", async () => {
+    const { applyPlanComposerEdit } = await import("./draft-edit")
+    await applyPlanComposerEdit(plan({ steps: [step("a", 0)] }), {
+      title: "x",
+      steps: [
+        { title: "one", kind: "agent_turn" },
+        { title: "two", kind: "agent_turn" },
+      ],
+    })
+    const [, patch] = updatePlanDraft.mock.calls[0]
+    expect(patch.steps).toHaveLength(2)
+    expect(patch.steps[1].dependencies).toEqual([patch.steps[0].id])
+  })
+
+  it("rewrites a captured markdown body's steps section to match", async () => {
+    const { applyPlanComposerEdit } = await import("./draft-edit")
+    await applyPlanComposerEdit(
+      plan({
+        steps: [step("a", 0, { title: "alpha" })],
+        metadata: { planText: "# Plan\n\n## Steps\n\n1. alpha\n" },
+      }),
+      { title: "Plan", steps: [{ title: "omega", kind: "agent_turn" }] }
+    )
+    const [, patch] = updatePlanDraft.mock.calls[0]
+    expect(patch.metadata.planText).toContain("1. omega")
+    expect(patch.metadata.planText).not.toContain("alpha")
+  })
+
+  it("leaves steps untouched on a title-only edit", async () => {
+    const { applyPlanComposerEdit } = await import("./draft-edit")
+    await applyPlanComposerEdit(plan({ steps: [step("a", 0)] }), {
+      title: "Only the title",
+      steps: [{ title: "t0", kind: "agent_turn" }],
+    })
+    const [, patch] = updatePlanDraft.mock.calls[0]
+    expect(patch.steps).toBeUndefined()
+  })
+
+  it("re-validates: refuses an empty plan and a step its kind cannot run", async () => {
+    const { applyPlanComposerEdit, PlanEditValidationError } = await import("./draft-edit")
+    await expect(applyPlanComposerEdit(plan(), { title: "x", steps: [] })).rejects.toBeInstanceOf(
+      PlanEditValidationError
+    )
+    await expect(
+      applyPlanComposerEdit(plan(), {
+        title: "x",
+        steps: [
+          { title: "ok", kind: "agent_turn" },
+          {
+            title: "broken",
+            kind: "sub_workflow",
+            params: { kind: "sub_workflow", workflowId: "  " },
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ reason: "invalid_step", stepIndex: 2 })
+    expect(updatePlanDraft).not.toHaveBeenCalled()
+  })
+})

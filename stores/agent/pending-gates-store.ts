@@ -12,7 +12,7 @@
  * Squad gates are NOT here any more (ADR-0169). A Squad's plan, capability
  * audit, budget extension, deadlock, teammate repair, re-plan and recovery
  * decisions are durable `ExecutionRunInterrupt`s opened by
- * `lib/ai/agent/team/squad-review-gate.ts` and answered through the run
+ * `lib/ai/agent/team/gates/squad-review-gate.ts` and answered through the run
  * control plane, which is what lets a reload, a phone and an IM card all see
  * and settle the same question.
  *

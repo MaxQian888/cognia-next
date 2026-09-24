@@ -10,7 +10,7 @@ import {
   buildDshChannelManifest,
   doctorDshRuntime,
   type DshDoctorReport,
-} from "@/lib/ai/agent/external/dsh-runtime-install"
+} from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
 
 /**

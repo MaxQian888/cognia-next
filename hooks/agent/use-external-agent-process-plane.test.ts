@@ -6,7 +6,7 @@ import { act, renderHook } from "@testing-library/react"
 import {
   __setProcessPlaneDepsForTests,
   PROCESS_PLANE_COMMANDS,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 
 import { useExternalAgentProcessPlane } from "./use-external-agent-process-plane"

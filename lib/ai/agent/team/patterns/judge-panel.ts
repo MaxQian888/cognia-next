@@ -14,7 +14,7 @@ import {
   type JudgePanelParams,
   type JudgeScore,
 } from "@/types/agent/ultracode"
-import { dispatchStructured } from "../structured-dispatch"
+import { dispatchStructured } from "../teammate/structured-dispatch"
 import { fanoutLimit, getTeamCtxOrThrow, mapSettled, nonRetryable } from "./_shared"
 
 const ATTEMPT_HINT = '{ "angle": "…", "content": "…" }'

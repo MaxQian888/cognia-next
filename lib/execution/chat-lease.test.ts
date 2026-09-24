@@ -1,5 +1,8 @@
 import {
   acquireChatLease,
+  cancelQueuedChatTurn,
+  isChatTurnQueued,
+  isQueuedChatTurnCancellation,
   releaseChatLease,
   switchChatLeaseProvider,
   __resetChatLeasesForTesting,
@@ -28,6 +31,61 @@ beforeEach(() => {
 afterEach(() => {
   __resetChatLeasesForTesting()
   __resetExecutionBrokerForTesting()
+})
+
+describe("chat-lease — a turn that has to wait", () => {
+  it("says what it is waiting for BEFORE the wait, then runs when the tree frees", async () => {
+    const broker = getExecutionBroker()
+    const plan = await broker.acquire({
+      kind: "workflow-step",
+      label: "Ship the refactor",
+      slotKey: "dir:/repo",
+    })
+    const onQueued = jest.fn()
+    let admitted = false
+    const pending = acquireChatLease({
+      sessionId: "s",
+      label: "chat",
+      slotKey: "dir:/repo",
+      onQueued,
+    }).then(() => {
+      admitted = true
+    })
+    // Synchronous: the message can be shown as queued before anything awaits.
+    expect(onQueued).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "slot",
+        holder: expect.objectContaining({ kind: "workflow-step", label: "Ship the refactor" }),
+      })
+    )
+    expect(isChatTurnQueued("s")).toBe(true)
+    await Promise.resolve()
+    expect(admitted).toBe(false)
+    plan.release("ok")
+    await pending
+    expect(admitted).toBe(true)
+    expect(isChatTurnQueued("s")).toBe(false)
+  })
+
+  it("never reports a turn that is admitted straight away as queued", async () => {
+    const onQueued = jest.fn()
+    await acquireChatLease({ sessionId: "s", label: "chat", slotKey: "dir:/repo", onQueued })
+    expect(onQueued).not.toHaveBeenCalled()
+    expect(isChatTurnQueued("s")).toBe(false)
+  })
+
+  it("lets the user withdraw a queued turn, rejecting as a cancellation", async () => {
+    const broker = getExecutionBroker()
+    await broker.acquire({ kind: "workflow-step", label: "plan", slotKey: "dir:/repo" })
+    const pending = acquireChatLease({ sessionId: "s", label: "chat", slotKey: "dir:/repo" })
+    expect(cancelQueuedChatTurn("s")).toBe(true)
+    const error = await pending.catch((reason: unknown) => reason)
+    expect(isQueuedChatTurnCancellation(error)).toBe(true)
+    expect(isChatTurnQueued("s")).toBe(false)
+    // Nothing is left waiting on the tree.
+    expect(broker.slotQueueLength("dir:/repo")).toBe(0)
+    expect(cancelQueuedChatTurn("s")).toBe(false)
+  })
 })
 
 describe("chat-lease", () => {

@@ -15,9 +15,21 @@ const AGENT_STYLES: Record<FleetAgent, string> = {
   codex: "bg-sky-500/20 text-sky-300 border-sky-400/30",
   opencode: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
   cognia: "bg-violet-500/20 text-violet-300 border-violet-400/30",
+  devin: "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30",
+  acp: "bg-white/10 text-white/70 border-white/15",
 }
 
-export function AgentBadge({ agent, className }: { agent: FleetAgent; className?: string }) {
+export function AgentBadge({
+  agent,
+  label,
+  className,
+}: {
+  agent: FleetAgent
+  /** Configured agent name for the generic `acp` identity; ignored for
+   *  dedicated agents whose i18n name is the product name. */
+  label?: string
+  className?: string
+}) {
   const t = useTranslations("fleet.agents")
   return (
     <span
@@ -28,7 +40,7 @@ export function AgentBadge({ agent, className }: { agent: FleetAgent; className?
         className
       )}
     >
-      {t(agent)}
+      {agent === "acp" && label ? label : t(agent)}
     </span>
   )
 }

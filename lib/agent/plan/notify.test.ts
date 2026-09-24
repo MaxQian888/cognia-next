@@ -136,6 +136,50 @@ describe("notification center fan-out", () => {
       PLAN_RESPOND_COMMAND,
       PLAN_RESPOND_COMMAND,
     ])
+    // The second decision is a real rejection and says so.
+    expect(input.actions.map((a: { id: string; label: string }) => [a.id, a.label])).toEqual([
+      ["approve", "Approve"],
+      ["reject", "Reject"],
+    ])
+  })
+
+  it("posts a directed, deep-linked row when an in-session step halts", async () => {
+    const { notifyPlanStepHalted } = await import("./notify")
+    await notifyPlanStepHalted(
+      plan({ status: "paused" }),
+      { title: "Run the migration" },
+      { stepId: "s2", cause: "turn_failed", detail: "Pi process exited", at: 77 }
+    )
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify.mock.calls[0][0]).toMatchObject({
+      level: "error",
+      directed: true,
+      title: 'Plan step "Run the migration" failed: Ship v2',
+      body: "Pi process exited",
+      href: "/?session=ses",
+      dedupeKey: "plan-halt:p1:77",
+      sourceRef: { kind: "plan", id: "p1" },
+    })
+    // Decisions need the chat surface, so the row deep-links instead.
+    expect(notify.mock.calls[0][0].actions).toBeUndefined()
+  })
+
+  it("names a between-steps halt without a step", async () => {
+    const { notifyPlanStepHalted } = await import("./notify")
+    await notifyPlanStepHalted(plan({ status: "paused" }), undefined, {
+      cause: "interrupted",
+      detail: "the app restarted",
+      at: 1,
+    })
+    expect(notify.mock.calls[0][0].title).toBe("Plan the plan run was interrupted: Ship v2")
+  })
+
+  it("never lets a halt notification failure escape", async () => {
+    notify.mockRejectedValue(new Error("center down"))
+    const { notifyPlanStepHalted } = await import("./notify")
+    await expect(
+      notifyPlanStepHalted(plan(), undefined, { cause: "silent", detail: "x", at: 1 })
+    ).resolves.toBeUndefined()
   })
 
   it("stays silent for a plan that did not stop for approval", async () => {
@@ -151,6 +195,9 @@ describe("notification center fan-out", () => {
     // Ambient, not directed: a finished plan is progress, not a request.
     expect(notify.mock.calls[0][0].directed).toBeUndefined()
     notify.mockClear()
+    await notifyPlanTerminal(plan({ status: "rejected" }), "rejected")
+    expect(notify.mock.calls[0][0]).toMatchObject({ title: "Plan was rejected: Ship v2" })
+    notify.mockClear()
     await notifyPlanTerminal(plan({ status: "executing" }), "executing")
     expect(notify).not.toHaveBeenCalled()
   })
@@ -162,7 +209,7 @@ describe("notification center fan-out", () => {
     await expect(notifyPlanTerminal(plan(), "failed")).resolves.toBeUndefined()
   })
 
-  it("wires the Approve / Discard actions to the plan runtime", async () => {
+  it("wires the Approve / Reject actions to the plan runtime", async () => {
     const registered: Record<string, (ctx: { args?: Record<string, unknown> }) => Promise<void>> =
       {}
     jest.doMock("@/lib/notifications/action-registry", () => ({

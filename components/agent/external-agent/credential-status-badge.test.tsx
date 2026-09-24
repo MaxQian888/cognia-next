@@ -7,7 +7,7 @@ import { NextIntlClientProvider } from "next-intl"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import en from "@/i18n/messages/en.json"
-import type { PiAuthVerdict } from "@/lib/ai/agent/external/pi-auth"
+import type { PiAuthVerdict } from "@/lib/ai/agent/external/runtimes/pi/pi-auth"
 
 let authStatus = {
   status: { listing: "ok" as "ok" | "unreadable" | "idle", verdicts: [] as PiAuthVerdict[] },

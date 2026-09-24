@@ -32,7 +32,7 @@ import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-m
 import {
   canonicalLaunchCommandString,
   findRuntimeById,
-} from "@/lib/ai/agent/external/runtime-catalog"
+} from "@/lib/ai/agent/external/config/install-catalog"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 
 import {

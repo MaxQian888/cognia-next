@@ -23,6 +23,7 @@
 
 import { streamText, type ModelMessage } from "ai"
 import { partitionPrompt } from "@/lib/ai/prompt-partition"
+import { webviewSafeTelemetry } from "@/lib/ai/webview-safe-telemetry"
 import {
   createFeatureProviderModel,
   createProviderSettingsSnapshot,
@@ -33,7 +34,7 @@ import {
 import type { AppSettings, Character } from "@cognia/agent-config-types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
-import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
+import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/policy/permission-cascade"
 import { buildJsonInstruction, parseStructured } from "@/lib/workflow/nodes/ai/structured"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -330,7 +331,7 @@ function toolResultReviewResponderFor(
 
 /**
  * Build a minimal in-memory `Character` from a config that has no
- * `characterId`. Mirrors `lib/ai/agent/team/teammate-character.ts` — the
+ * `characterId`. Mirrors `lib/ai/agent/team/teammate/teammate-character.ts` — the
  * synthesised character is never persisted, it is handed straight to
  * `resolveSendOptions` as `BuildOptionsContext.character`.
  */
@@ -896,7 +897,14 @@ export async function runCompletionRail(
         providerSettings,
         customProviders,
       } as AppSettings)
-      const options: Record<string, unknown> = { model, ...modelParams, ...providerVisiblePayload }
+      const options: Record<string, unknown> = {
+        model,
+        ...modelParams,
+        ...providerVisiblePayload,
+        // This rail is the web/mobile fallback: keep a failed or stopped stream
+        // from leaking the SDK's tracing promise (see webview-safe-telemetry).
+        telemetry: webviewSafeTelemetry(),
+      }
       if (config.temperature !== undefined) options.temperature = config.temperature
       if (config.abortSignal) options.abortSignal = config.abortSignal
 

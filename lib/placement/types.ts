@@ -8,7 +8,7 @@
  * could see the others' answers or reasons.
  *
  * This is that missing vocabulary. It is deliberately a generalization of
- * `lib/ai/agent/team/remote-worker-runtime.ts`, which was already a complete
+ * `lib/ai/agent/team/workers/remote-worker-runtime.ts`, which was already a complete
  * placement resolver for one candidate kind: the same reason values, the same
  * deterministic tiebreak, the same "waiting is not failure" distinction.
  */

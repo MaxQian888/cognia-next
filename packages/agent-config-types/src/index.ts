@@ -3064,7 +3064,11 @@ export interface ConversationView {
 export interface ConversationSidebarSettings {
   /** Row density. Defaults to `"comfortable"`. */
   density?: ConversationSidebarDensity
-  /** Show a second line with the last-message preview + relative time. Default off. */
+  /**
+   * Show a second line with the last-message preview. Default off. The time of
+   * the last activity is its own setting (`showTimestamps`), so a preview line
+   * never carries one.
+   */
   showPreview?: boolean
   /** Show each bound Agent/Team's configured image, emoji, and color. Defaults to on. */
   showCustomIcons?: boolean
@@ -4100,7 +4104,7 @@ export interface AppSettings {
    * message (quoted question + answer) back into the session. When disabled
    * or absent the same event degrades to plain assistant text, matching what
    * the agent wrote. Read in `hooks/chat/use-claude-chat-controller.ts` and
-   * `lib/ai/agent/external/event-to-parts.ts`; card in
+   * `lib/ai/agent/external/session/event-to-parts.ts`; card in
    * `components/chat/message-parts/async-questions-card.tsx`.
    */
   inlineQuestions?: {

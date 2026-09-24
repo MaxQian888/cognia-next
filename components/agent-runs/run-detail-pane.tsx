@@ -19,7 +19,7 @@
  */
 
 import { useState } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
   CheckCircle2Icon,
@@ -36,7 +36,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
 import { RunImOrigin, useRunImOrigin } from "@/components/execution/run-im-origin"
-import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
+import { formatDuration } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
 import { isSquadRun, RunCoordinationTab } from "./run-coordination-tab"
 import { RunReportTab } from "./run-report-tab"
@@ -90,6 +90,8 @@ export interface RunDetailPaneProps {
 }
 
 export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
+  const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("agentRuns")
   const { run, detail, interrupts, journalAvailable, isLoading, botResult } = useExecutionRunDetail(
     row.runId
@@ -359,12 +361,12 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           <InspectRow label={t("detail.status")} value={t(`status.${row.status}`)} />
           <InspectRow
             label={t("detail.started")}
-            value={formatRelativeTime(new Date(row.startedAt))}
+            value={format.relativeTime(new Date(row.startedAt), now)}
           />
           {row.endedAt !== undefined && (
             <InspectRow
               label={t("detail.finished")}
-              value={`${formatRelativeTime(new Date(row.endedAt))} (${duration})`}
+              value={`${format.relativeTime(new Date(row.endedAt), now)} (${duration})`}
             />
           )}
           {row.progressRatio !== undefined && (
@@ -579,7 +581,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
                     </Badge>
                     <span className="min-w-0 flex-1 truncate">{interrupt.title}</span>
                     <span className="shrink-0 text-muted-foreground">
-                      {formatRelativeTime(new Date(interrupt.createdAt))}
+                      {format.relativeTime(new Date(interrupt.createdAt), now)}
                     </span>
                     {interrupt.type === "bot_approval" && interrupt.approvalDetail && (
                       <BotApprovalDetail detail={interrupt.approvalDetail} />

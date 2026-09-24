@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event"
 
 import { BoardToolbar } from "./board-toolbar"
 import { EMPTY_BOARD_FILTER, type BoardFilter } from "@/lib/ai/agent/team/board-model"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
+import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
 jest.mock("next-intl", () => ({
@@ -16,7 +16,7 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     start: jest.fn(async () => {}),
     pause: jest.fn(async () => {}),

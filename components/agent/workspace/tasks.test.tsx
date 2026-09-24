@@ -65,7 +65,7 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 }))
 
 // ── twin catalog stub — the assignee-hint effect must not touch Dexie ────────
-jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+jest.mock("@/lib/ai/agent/team/teammate/twin-context", () => ({
   gatherTeamTwins: jest.fn(async () => []),
 }))
 

@@ -78,7 +78,7 @@ function plan(over: Partial<AgentPlan> = {}): AgentPlan {
 const noop = {
   onApprove: jest.fn(),
   onKeepPlanning: jest.fn(),
-  onDiscard: jest.fn(),
+  onReject: jest.fn(),
 }
 
 describe("PlanApprovalCard", () => {
@@ -178,13 +178,49 @@ describe("PlanApprovalCard", () => {
     expect(onKeepPlanning).toHaveBeenLastCalledWith("focus on tests")
   })
 
-  it("fires onDiscard from the overflow menu with feedback", async () => {
-    const onDiscard = jest.fn()
-    render(<PlanApprovalCard plan={plan()} {...noop} onDiscard={onDiscard} />)
+  it("offers Reject as a visible action, confirmed with an optional reason", async () => {
+    const onReject = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onReject={onReject} />)
+    // No longer buried in the overflow menu.
+    expect(screen.getByTestId("plan-approval-reject")).toHaveTextContent("approval.reject")
     await userEvent.type(screen.getByTestId("plan-approval-feedback"), "wrong direction")
+    await userEvent.click(screen.getByTestId("plan-approval-reject"))
+    // The confirm step replaces the action row and is seeded with the feedback.
+    expect(screen.getByTestId("plan-approval-reject-confirm")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-approval-reject-reason")).toHaveValue("wrong direction")
+    expect(onReject).not.toHaveBeenCalled()
+    await userEvent.clear(screen.getByTestId("plan-approval-reject-reason"))
+    await userEvent.type(screen.getByTestId("plan-approval-reject-reason"), "  out of scope ")
+    await userEvent.click(screen.getByTestId("plan-approval-reject-confirm-button"))
+    expect(onReject).toHaveBeenCalledWith("out of scope")
+  })
+
+  it("rejects without a reason, and Back cancels the confirm step", async () => {
+    const onReject = jest.fn()
+    render(<PlanApprovalCard plan={plan()} {...noop} onReject={onReject} />)
+    await userEvent.click(screen.getByTestId("plan-approval-reject"))
+    await userEvent.click(screen.getByTestId("plan-approval-reject-back"))
+    expect(screen.queryByTestId("plan-approval-reject-confirm")).not.toBeInTheDocument()
+    expect(onReject).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByTestId("plan-approval-reject"))
+    await userEvent.click(screen.getByTestId("plan-approval-reject-confirm-button"))
+    expect(onReject).toHaveBeenCalledWith(undefined)
+  })
+
+  it("no longer hides a discard in the overflow menu", async () => {
+    render(<PlanApprovalCard plan={plan()} {...noop} />)
     await userEvent.click(screen.getByTestId("plan-approval-more"))
-    await userEvent.click(await screen.findByTestId("plan-approval-discard"))
-    expect(onDiscard).toHaveBeenCalledWith("wrong direction")
+    expect(screen.queryByTestId("plan-approval-discard")).not.toBeInTheDocument()
+  })
+
+  it("shows Edit only when the host can open the plan editor", async () => {
+    const onOpenEditor = jest.fn()
+    const { unmount } = render(<PlanApprovalCard plan={plan()} {...noop} />)
+    expect(screen.queryByTestId("plan-approval-open-editor")).not.toBeInTheDocument()
+    unmount()
+    render(<PlanApprovalCard plan={plan()} {...noop} onOpenEditor={onOpenEditor} />)
+    await userEvent.click(screen.getByTestId("plan-approval-open-editor"))
+    expect(onOpenEditor).toHaveBeenCalledTimes(1)
   })
 
   it("shows refine actions in the overflow menu only when onRefine is provided", async () => {

@@ -3,17 +3,17 @@
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import type { InstalledRuntime } from "@/lib/ai/agent/external/installed-runtimes"
-import type { ProcessPlaneAvailability } from "@/lib/ai/agent/external/process-plane"
+import type { InstalledRuntime } from "@/lib/ai/agent/external/config/installed-runtimes"
+import type { ProcessPlaneAvailability } from "@/lib/ai/agent/external/capability/process-plane"
 
 const detectInstalledRuntimes = jest.fn()
 let plane: ProcessPlaneAvailability = { ok: true, via: "local" }
 let scope = "local"
 
-jest.mock("@/lib/ai/agent/external/installed-runtimes", () => ({
+jest.mock("@/lib/ai/agent/external/config/installed-runtimes", () => ({
   detectInstalledRuntimes: (...args: unknown[]) => detectInstalledRuntimes(...args),
 }))
-jest.mock("@/lib/ai/agent/external/process-plane", () => ({
+jest.mock("@/lib/ai/agent/external/capability/process-plane", () => ({
   externalAgentProcessPlane: () => plane,
   externalAgentProcessPlaneScope: () => scope,
   PROCESS_PLANE_COMMANDS: { detect: "external_agent_detect_runtimes" },

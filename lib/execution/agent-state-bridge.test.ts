@@ -158,6 +158,13 @@ describe("agent state execution bridge", () => {
     expect(await getDb().executionRunEvents.where("runId").equals(runId).count()).toBe(4)
   })
 
+  it("projects a rejected Plan as a declined (cancelled) run", async () => {
+    const row = session()
+    await syncPlanExecutionRun(plan({ id: "plan-rejected", status: "rejected" }), row)
+    const run = await getDb().executionRuns.get(agentStateExecutionRunId("plan", "plan-rejected"))
+    expect(run?.latestSnapshot).toMatchObject({ kind: "plan", status: "cancelled" })
+  })
+
   it("does not create a presenter binding when live activity is disabled", async () => {
     const row = session("session-disabled")
     await upsertByConversationKey({

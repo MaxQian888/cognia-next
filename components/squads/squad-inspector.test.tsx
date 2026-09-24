@@ -24,7 +24,7 @@ jest.mock("@/components/squads/squad-readiness-card", () => ({
     <div data-testid="squad-readiness" data-squad={squadId} />
   ),
 }))
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     start: (...a: unknown[]) => start(...(a as [])),
     pause: (...a: unknown[]) => pause(...(a as [])),

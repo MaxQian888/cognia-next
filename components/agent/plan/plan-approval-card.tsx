@@ -11,14 +11,25 @@
  *  - "Yes, review each edit"    → onApprove("default")
  *  - "Approve & run fully automated" (overflow, elevated) → onApprove("auto")
  *  - "No, keep planning"        → onKeepPlanning(feedback?) — non-destructive
- *  - "Discard plan" (overflow, destructive) → onDiscard(feedback?)
+ *  - "Reject"                   → inline confirm with an optional reason, then
+ *                                 onReject(reason?) — the terminal `rejected`
+ *                                 status, not a disguised cancel
+ *  - "Edit"                     → onOpenEditor() — the host opens the "Write a
+ *                                 plan" editor pre-filled with this plan
  *  - refine presets (overflow)  → onRefine(type, feedback?)
  *  - pencil toggle              → inline title/steps edit, saved via onEdit
  */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ListIcon, MoreHorizontalIcon, PencilIcon, SparklesIcon } from "lucide-react"
+import {
+  ListIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  SparklesIcon,
+  SquarePenIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -31,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 import { PlanDocument } from "./plan-document"
 import { PlanHtmlView } from "./plan-html-view"
 import type { PlanHtmlStyle } from "@/lib/agent/plan/plan-html"
@@ -77,8 +89,17 @@ export interface PlanApprovalCardProps {
    * follow-up turn by the host.
    */
   onKeepPlanning: (feedback?: string) => void
-  /** Destructive discard (plan → cancelled). */
-  onDiscard: (feedback?: string) => void
+  /**
+   * Reject the plan (terminal `rejected`), with the optional reason the user
+   * typed in the confirm step. The card asks for confirmation first.
+   */
+  onReject: (reason?: string) => void
+  /**
+   * Open the plan editor ("Write a plan": title + one step per line + step
+   * types) pre-filled with this plan. The host owns the dialog; omitted ⇒ no
+   * Edit button.
+   */
+  onOpenEditor?: () => void
   /** When provided, refine presets are shown in the overflow menu. */
   onRefine?: (type: PlanRefinementType, feedback?: string) => void
   /**
@@ -108,7 +129,8 @@ export function PlanApprovalCard({
   plan,
   onApprove,
   onKeepPlanning,
-  onDiscard,
+  onReject,
+  onOpenEditor,
   onRefine,
   onEdit,
   disabled,
@@ -124,6 +146,9 @@ export function PlanApprovalCard({
   const [classicView, setClassicView] = useState(false)
   const [editSteps, setEditSteps] = useState("")
   const [editMarkdown, setEditMarkdown] = useState("")
+  // Reject is terminal, so it takes a second, explicit step that also collects
+  // the reason. `null` = not confirming.
+  const [rejectReason, setRejectReason] = useState<string | null>(null)
   const steps = [...plan.steps].sort((a, b) => a.order - b.order)
   // The full markdown body an `exit_plan_mode` plan was captured from — the
   // step list is only a lossy projection of it, so when it's present we render
@@ -324,16 +349,65 @@ export function PlanApprovalCard({
             </div>
           )}
 
-          <Textarea
-            rows={2}
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder={t("approval.feedbackPlaceholder")}
-            className="text-xs"
-            data-testid="plan-approval-feedback"
-          />
+          {rejectReason !== null ? (
+            <div
+              className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2"
+              role="group"
+              aria-label={t("approval.rejectConfirmTitle")}
+              data-testid="plan-approval-reject-confirm"
+            >
+              <p className="text-xs font-medium">{t("approval.rejectConfirmTitle")}</p>
+              <p className="text-xs text-muted-foreground">{t("approval.rejectConfirmBody")}</p>
+              <label className="sr-only" htmlFor="plan-reject-reason">
+                {t("approval.rejectReasonLabel")}
+              </label>
+              <Textarea
+                id="plan-reject-reason"
+                rows={2}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder={t("approval.rejectReasonPlaceholder")}
+                className="text-xs"
+                data-testid="plan-approval-reject-reason"
+              />
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() => setRejectReason(null)}
+                  data-testid="plan-approval-reject-back"
+                >
+                  {t("approval.rejectBack")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={disabled}
+                  onClick={() => onReject(rejectReason.trim() || undefined)}
+                  data-testid="plan-approval-reject-confirm-button"
+                >
+                  {t("approval.rejectConfirm")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Textarea
+              rows={2}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder={t("approval.feedbackPlaceholder")}
+              className="text-xs"
+              data-testid="plan-approval-feedback"
+            />
+          )}
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div
+            className={cn(
+              "flex flex-wrap items-center justify-end gap-2",
+              rejectReason !== null && "hidden"
+            )}
+          >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -372,17 +446,33 @@ export function PlanApprovalCard({
                     ))}
                   </>
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={disabled}
-                  onSelect={() => onDiscard(trimmed())}
-                  data-testid="plan-approval-discard"
-                >
-                  {t("approval.discard")}
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive"
+              disabled={disabled}
+              // The feedback already typed is the likeliest reason; it seeds
+              // the confirm step rather than being thrown away.
+              onClick={() => setRejectReason(feedback)}
+              data-testid="plan-approval-reject"
+            >
+              <XCircleIcon className="size-3.5" />
+              {t("approval.reject")}
+            </Button>
+            {onOpenEditor && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled}
+                onClick={onOpenEditor}
+                data-testid="plan-approval-open-editor"
+              >
+                <SquarePenIcon className="size-3.5" />
+                {t("approval.editInEditor")}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

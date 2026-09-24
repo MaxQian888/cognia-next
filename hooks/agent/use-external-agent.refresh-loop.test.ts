@@ -52,14 +52,14 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   }),
 }))
 
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   normalizeExternalAgentConfigInput: (c: unknown) => c,
   isExternalAgentExecutable: () => true,
   getExternalAgentExecutionBlockReason: () => null,
   getExternalAgentExecutionBlock: () => null,
 }))
 
-jest.mock("@/lib/ai/agent/external/session-extension-errors", () => ({
+jest.mock("@/lib/ai/agent/external/session/session-extension-errors", () => ({
   isExternalAgentSessionExtensionUnsupportedForMethod: () => false,
 }))
 

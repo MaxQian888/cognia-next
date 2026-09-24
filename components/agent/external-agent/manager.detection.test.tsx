@@ -12,7 +12,7 @@
 
 import en from "@/i18n/messages/en.json"
 import zh from "@/i18n/messages/zh-CN.json"
-import type { ProcessPlaneUnavailableReason } from "@/lib/ai/agent/external/process-plane"
+import type { ProcessPlaneUnavailableReason } from "@/lib/ai/agent/external/capability/process-plane"
 
 import { PLANE_WARNING_KEYS } from "./manager"
 

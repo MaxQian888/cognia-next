@@ -48,7 +48,7 @@ import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
-} from "@/lib/ai/agent/external/permission-modes"
+} from "@/lib/ai/agent/external/policy/permission-modes"
 import type { AcpPermissionMode, ExternalAgentProtocol } from "@/types/agent/external-agent"
 
 interface ExternalAgentSummary {

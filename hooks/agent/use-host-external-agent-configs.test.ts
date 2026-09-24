@@ -7,7 +7,7 @@ import {
   HOST_CONFIG_COMMANDS,
   __setRemoteHostConfigDepsForTests,
   type RemoteHostConfigDeps,
-} from "@/lib/ai/agent/external/remote-host-configs"
+} from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 
 const ALL_OPS = Object.values(HOST_CONFIG_COMMANDS)

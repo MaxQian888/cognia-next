@@ -262,6 +262,52 @@ describe("listAgentRuntimes", () => {
     expect(rows[2].placement).toBe("host")
   })
 
+  it("names the preset each external row was created from", () => {
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [
+        agent({ id: "a1", name: "Codex", metadata: { preset: "codex-app-server" } }),
+        // A plugin-registered preset the static table does not know is still
+        // the agent's preset: the field reads `metadata.preset`, not the table.
+        agent({ id: "a2", name: "Plug", metadata: { preset: "plugin-preset" } }),
+        agent({ id: "a3", name: "Handmade" }),
+      ],
+    })
+    expect(rows.find((row) => row.key === "external:a1")?.presetId).toBe("codex-app-server")
+    expect(rows.find((row) => row.key === "external:a2")?.presetId).toBe("plugin-preset")
+    expect(rows.find((row) => row.key === "external:a3")?.presetId).toBeUndefined()
+    expect(rows[0].presetId).toBeUndefined()
+  })
+
+  it("names the preset of a host-owned row and keeps it on a merged row", () => {
+    const hostConfig = {
+      id: "host_codex",
+      enabled: true,
+      transport: "stdio",
+      createdAt: "2026-09-10T00:00:00.000Z",
+      updatedAt: "2026-09-10T00:00:00.000Z",
+      name: "Codex",
+      protocol: "codex-app-server",
+      metadata: { preset: "codex-app-server" },
+    } as unknown as ExternalAgentConfigRecord["config"]
+    const hostOnly = listAgentRuntimes({
+      ...base,
+      hostConfigs: [hostRecord({ config: hostConfig })],
+    })
+    expect(hostOnly[1].presetId).toBe("codex-app-server")
+
+    const merged = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      // The local copy lost its metadata; the host record still carries it.
+      externalAgents: [agent({ id: "local_codex", name: "Codex", protocol: "codex-app-server" })],
+      hostConfigs: [hostRecord({ config: hostConfig })],
+      runtimeSupportsExternalAgents: { ok: true, via: "remote" },
+    })
+    expect(merged[1]).toMatchObject({ placement: "both", presetId: "codex-app-server" })
+  })
+
   it("keeps host rows in their own group and only when ready and enabled", () => {
     const rows = listAgentRuntimes({
       ...base,

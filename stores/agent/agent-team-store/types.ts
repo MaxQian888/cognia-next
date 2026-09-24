@@ -27,7 +27,7 @@ import {
   type CreateTaskInput,
   type SendMessageInput,
 } from "@/types/agent/agent-team"
-import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
+import type { TaskMoveError } from "@/lib/ai/agent/team/gates/task-move-guard"
 
 export interface AgentTeamState {
   // Data

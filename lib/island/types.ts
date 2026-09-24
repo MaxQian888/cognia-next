@@ -70,7 +70,21 @@ export type FleetOwnerRef =
   | { kind: "team"; teamId?: string; runId?: string }
   | { kind: "run"; runId: string; interruptId?: string }
   | { kind: "gate"; gateKey: { scope: string; id: string }; sessionId?: string }
-  | { kind: "external"; agent: FleetAgent; sessionId: string; transcriptPath?: string }
+  | {
+      kind: "external"
+      agent: FleetAgent
+      sessionId: string
+      transcriptPath?: string
+      /**
+       * `ExternalAgentManager` agent id for renderer-managed (ACP) sessions.
+       * Present only on those rows, and it is what makes their decisions,
+       * interrupts and prompts routable through the manager instead of the
+       * Rust fleet commands.
+       */
+      agentId?: string
+      /** The chat session an external run is bound to — its owner route. */
+      chatSessionId?: string
+    }
 
 /* -- Rows ---------------------------------------------------------------- */
 
@@ -151,6 +165,8 @@ export interface IslandRowProjection {
   source: IslandSource
   owner: FleetOwnerRef
   agent?: FleetAgent
+  /** Configured agent display name, for generic `acp` rows. */
+  agentLabel?: string
   status: IslandRowStatus
   /** Precomputed sort rank so the overlay never re-derives policy. */
   priority: number

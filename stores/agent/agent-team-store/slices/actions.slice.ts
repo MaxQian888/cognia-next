@@ -11,9 +11,12 @@ import {
   type AgentTeamTemplate,
   type TeamDelegationRecord,
 } from "@/types/agent/agent-team"
-import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
-import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/execution-binding-resolver"
-import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
+import {
+  normalizeAgentTeamConfig,
+  normalizeAgentTeamTask,
+} from "@/lib/ai/agent/team/agent-team-compat"
+import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/teammate/execution-binding-resolver"
+import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/gates/task-move-guard"
 import { assignAgentTeamAvatarId, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
 import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"

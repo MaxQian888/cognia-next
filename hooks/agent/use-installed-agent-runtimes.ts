@@ -6,7 +6,7 @@
  * The picker asks once, when it opens. Detection spawns catalogued `--version`
  * reads on the host, so re-asking on every render (or every keystroke in the
  * form beneath it) would fork a process tree per character. The cache lives in
- * `lib/ai/agent/external/installed-runtimes`, which is where `refresh` clears.
+ * `lib/ai/agent/external/config/installed-runtimes`, which is where `refresh` clears.
  *
  * `undefined` for a preset means "not asked, or nothing to ask", and callers
  * must render that as unknown. It is not a synonym for missing: telling a user
@@ -19,14 +19,14 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   detectInstalledRuntimes,
   type InstalledRuntime,
-} from "@/lib/ai/agent/external/installed-runtimes"
+} from "@/lib/ai/agent/external/config/installed-runtimes"
 import {
   externalAgentProcessPlaneScope,
   PROCESS_PLANE_COMMANDS,
   type ProcessPlaneUnavailableReason,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
-import { findRuntimeByPresetId } from "@/lib/ai/agent/external/runtime-catalog"
+import { findRuntimeByPresetId } from "@/lib/ai/agent/external/config/install-catalog"
 
 /** Stable identity so the memo below does not re-run on every render. */
 const EMPTY: readonly InstalledRuntime[] = Object.freeze([])

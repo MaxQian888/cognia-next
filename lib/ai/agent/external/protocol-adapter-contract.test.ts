@@ -14,7 +14,7 @@
  * The cases below are generated from `SUPPORTED_EXTERNAL_AGENT_PROTOCOLS`, so a
  * new protocol joins them by existing, not by somebody remembering.
  */
-import { SUPPORTED_EXTERNAL_AGENT_PROTOCOLS } from "./config-normalizer"
+import { SUPPORTED_EXTERNAL_AGENT_PROTOCOLS } from "./config/config-normalizer"
 import { registerBuiltinProtocolAdapters } from "./manager"
 import { BaseProtocolAdapter, ProtocolAdapterRegistry } from "./protocol-adapter"
 
@@ -43,7 +43,7 @@ describe("the registered protocol set", () => {
     expect(orphans).toEqual([])
   })
 
-  it("covers the seven protocols this repository ships", () => {
+  it("covers the six protocols this repository ships", () => {
     // A literal list as well, so DELETING a protocol from both sides at once
     // still has to be a deliberate edit to this file.
     expect([...SUPPORTED_EXTERNAL_AGENT_PROTOCOLS].sort()).toEqual([
@@ -123,14 +123,17 @@ describe.each(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS.map((p) => [p] as const))(
       expect(adapter.isConnected()).toBe(false)
     })
 
-    it("claims no capabilities before it has spoken to the agent", () => {
+    it("claims only static adapter capabilities before connecting", () => {
       const adapter = builtinRegistry().create(protocol)
       if (!adapter) throw new Error(`no adapter for ${protocol}`)
-      // Capabilities are DISCOVERED at connect. An adapter that answered with a
-      // hardcoded matrix here would let the negotiator believe things about an
-      // agent nobody has handshaked with, and the belief would survive a
-      // connect that failed.
-      expect(adapter.capabilities).toBeUndefined()
+      // DSH mounts MCP servers at process startup; this is an adapter feature,
+      // not a discovered runtime capability. No tools or other capabilities
+      // may be claimed before the handshake.
+      if (protocol === "dsh-sdk") {
+        expect(adapter.capabilities).toEqual({ mcpTools: true })
+      } else {
+        expect(adapter.capabilities).toBeUndefined()
+      }
       expect(adapter.tools).toBeUndefined()
     })
 

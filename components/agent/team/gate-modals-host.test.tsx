@@ -8,11 +8,11 @@ import { GateModalsHost } from "./gate-modals-host"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeammate } from "@/types/agent/agent-team"
-import type { RecordGateAnswerInput } from "@/lib/ai/agent/team/record-gate-answer"
+import type { RecordGateAnswerInput } from "@/lib/ai/agent/team/gates/record-gate-answer"
 
 const approveMock = jest.fn()
 const recordGateAnswerMock = jest.fn<Promise<string>, [RecordGateAnswerInput]>(async () => "s1")
-jest.mock("@/lib/ai/agent/team/record-gate-answer", () => ({
+jest.mock("@/lib/ai/agent/team/gates/record-gate-answer", () => ({
   recordSquadGateAnswer: (input: RecordGateAnswerInput) => recordGateAnswerMock(input),
 }))
 const rejectMock = jest.fn()

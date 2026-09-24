@@ -21,7 +21,10 @@ import type {
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
 
-import { getExternalAgentExecutionBlock, type ExternalAgentRuntimeReach } from "./config-normalizer"
+import {
+  getExternalAgentExecutionBlock,
+  type ExternalAgentRuntimeReach,
+} from "./config/config-normalizer"
 
 /** Compact per-agent state used for rail rows, pills, and the board. */
 export type AgentReadinessState =

@@ -31,8 +31,8 @@ import {
   resolveDrop,
   type BoardFilter,
 } from "@/lib/ai/agent/team/board-model"
-import { allowedMoveTargets } from "@/lib/ai/agent/team/task-move-guard"
-import { gatherTeamTwins } from "@/lib/ai/agent/team/twin-context"
+import { allowedMoveTargets } from "@/lib/ai/agent/team/gates/task-move-guard"
+import { gatherTeamTwins } from "@/lib/ai/agent/team/teammate/twin-context"
 import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"

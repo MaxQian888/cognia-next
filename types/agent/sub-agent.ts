@@ -149,7 +149,7 @@ export interface SubAgentConfig {
    * preset id. Projected onto `AgentDefinition.externalPresetId` so `dispatch_agent`
    * routes the run to the external CLI instead of the built-in executor. The
    * `systemPrompt`/`tools` remain advisory on the external path. See
-   * `lib/plugin/agent-sdk/dispatch.ts` + `lib/ai/agent/external/presets.ts`.
+   * `lib/plugin/agent-sdk/dispatch.ts` + `lib/ai/agent/external/config/presets.ts`.
    */
   externalPresetId?: string
   /**

@@ -5,14 +5,14 @@
  * they are called or which presets they expose, because
  * `protocol/external-agent-runtimes.json` already does, behind a gate
  * (`scripts/gates/check-external-agent-runtimes.mjs`). Everything here is a
- * lookup through `lib/ai/agent/external/runtime-catalog`, never a second copy.
+ * lookup through `lib/ai/agent/external/config/install-catalog`, never a second copy.
  *
  * That catalog imports only two checked-in JSON files and types, so this file
  * stays safe for the fast `node` Jest project.
  */
 
 import { isBuiltinExecutableExternalAgentProtocol } from "@cognia/agent-config-types/external-agent-capability"
-import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
+import { findRuntimeById } from "@/lib/ai/agent/external/config/install-catalog"
 
 import { AGENT_ECOSYSTEMS, findEcosystemById, findEcosystemByMigrationVendor } from "./catalog"
 

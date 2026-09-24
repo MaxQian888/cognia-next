@@ -19,7 +19,7 @@ jest.mock("@/lib/plugin/registries/character-pack-registry", () => ({
   listCharacterPackIds: () => [],
 }))
 jest.mock("@/lib/plugin/registries/subagent-registry", () => ({ listSubagentEntries: () => [] }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({ getAvailablePresets: () => [] }))
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({ getAvailablePresets: () => [] }))
 jest.mock("@/lib/db/skills", () => ({ listSkills: async () => [] }))
 jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: async () => [] }))
 jest.mock("@/lib/db/a2ui-templates", () => ({ listTemplates: async () => [] }))

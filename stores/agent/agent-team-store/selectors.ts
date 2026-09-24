@@ -6,7 +6,7 @@ import type {
   SharedMemoryEntry,
   TeamDelegationRecord,
 } from "@/types/agent/agent-team"
-import { resolveTeammateCapabilities } from "@/lib/ai/agent/team/capability-resolver"
+import { resolveTeammateCapabilities } from "@/lib/ai/agent/team/teammate/capability-resolver"
 
 // ============================================================================
 // Base Selectors

@@ -40,6 +40,7 @@
 
 import { createLogger } from "@cognia/logging"
 import type {
+  ExecutionAdmissionBlocker,
   ExecutionBrokerEvent,
   ExecutionLease,
   ExecutionLeaseRequest,
@@ -202,8 +203,8 @@ export class ExecutionBroker {
 
     const id = this.idFactory()
     const controller = new AbortController()
-    // Continuation exemption: an already-active session is never blocked.
-    const exempt = Boolean(request.exempt) || this.hasActiveSession(request.sessionId, resource)
+    // Continuation exemption: a session with a RUNNING leg is never blocked.
+    const exempt = this.isExemptRequest(request, resource)
 
     const managed: ManagedLease = {
       id,
@@ -271,6 +272,82 @@ export class ExecutionBroker {
       managed.reject = reject
       pool.queue.push(managed)
     })
+  }
+
+  /**
+   * Why `request` would wait if it were acquired right now, or `null` when it
+   * would be admitted immediately.
+   *
+   * Read-only, and it walks exactly the checks `acquire` does in the same
+   * order, so a caller that asks and then acquires in the same tick (the chat
+   * send path) learns up front that the turn is about to queue — and on what —
+   * instead of discovering it as an `await` that never returns. `acquire`
+   * blocking silently on a held slot is how a manual send vanished for two
+   * minutes behind a plan step: nothing on screen said the turn was waiting,
+   * let alone for what.
+   */
+  admissionBlocker(request: ExecutionLeaseRequest): ExecutionAdmissionBlocker | null {
+    const resource = request.resource ?? DEFAULT_RESOURCE
+    if (this.isExemptRequest(request, resource)) return null
+    const slotKey = request.slotKey
+    if (slotKey && this.slotHolders.has(slotKey)) {
+      const holder = this.active.get(this.slotHolders.get(slotKey)!)
+      return {
+        reason: "slot",
+        slotKey,
+        holder: holder ? this.snapshotOf(holder) : null,
+        ahead: this.slotQueueLength(slotKey),
+      }
+    }
+    const pool = this.poolFor(resource)
+    if (pool.inUse + normalizeWeight(request.weight) > pool.limit) {
+      return { reason: "capacity", limit: pool.limit, ahead: pool.queue.length }
+    }
+    const providerLimit = normalizeProviderLimit(request.providerLimit)
+    if (request.providerId && providerLimit !== undefined) {
+      const providerPool = this.providerPools.get(request.providerId)
+      const inUse = providerPool?.inUse ?? 0
+      if (inUse >= providerLimit) {
+        return { reason: "provider", providerId: request.providerId, limit: providerLimit }
+      }
+    }
+    return null
+  }
+
+  /**
+   * The continuation exemption, decided once for `acquire` and
+   * `admissionBlocker` alike.
+   *
+   * Only a RUNNING leg of the same session exempts. The exemption exists
+   * because a nested turn is reached from a leg that is already running and
+   * cannot release until the nested one resolves; a leg that is merely queued
+   * has started nothing and nests nothing. Counting it let a second send into a
+   * conversation whose first send was still waiting for a directory walk
+   * straight past that wait, into the tree the slot was protecting.
+   */
+  private isExemptRequest(
+    request: ExecutionLeaseRequest,
+    resource: ExecutionResourceClass
+  ): boolean {
+    return Boolean(request.exempt) || this.hasRunningSession(request.sessionId, resource)
+  }
+
+  private hasRunningSession(
+    sessionId: string | undefined,
+    resource: ExecutionResourceClass
+  ): boolean {
+    if (!sessionId) return false
+    for (const m of this.active.values()) {
+      if (
+        m.request.sessionId === sessionId &&
+        m.resource === resource &&
+        m.state === "running" &&
+        !m.released
+      ) {
+        return true
+      }
+    }
+    return false
   }
 
   private queueForSlot(slotKey: string, managed: ManagedLease): void {
@@ -659,8 +736,10 @@ export class ExecutionBroker {
 
   /**
    * True when admitting a NEW (weight-1, non-exempt) leg on `resource` would
-   * exceed the limit. A leg for an already-active `sessionId` is a continuation
-   * and never at capacity. This is the broker-backed replacement for
+   * exceed the limit. A leg for a `sessionId` that is already RUNNING is a
+   * continuation and never at capacity — the same rule `acquire` exempts by, so
+   * the pre-check and the admission cannot disagree about a session whose only
+   * leg is still queued. This is the broker-backed replacement for
    * `selectIsAtStreamCap`.
    *
    * `providerId` extends the same question to the provider lane. Callers that
@@ -674,7 +753,7 @@ export class ExecutionBroker {
     sessionId?: string,
     providerId?: string
   ): boolean {
-    if (sessionId && this.hasActiveSession(sessionId, resource)) return false
+    if (sessionId && this.hasRunningSession(sessionId, resource)) return false
     const pool = this.poolFor(resource)
     if (pool.inUse + 1 > pool.limit) return true
     if (!providerId) return false

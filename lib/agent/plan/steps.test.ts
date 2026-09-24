@@ -1,5 +1,9 @@
 import {
   PLAN_REFINEMENT_PROMPTS,
+  REJECTABLE_PLAN_STATUSES,
+  TERMINAL_PLAN_STATUSES,
+  isRejectablePlanStatus,
+  isTerminalPlanStatus,
   isTerminalStepStatus,
   type CreatePlanStepInput,
   type PlanStep,
@@ -11,6 +15,7 @@ import {
   linearAgentTurnSteps,
   materializeSteps,
   nextRunnableStep,
+  skipStepInDag,
 } from "./steps"
 
 function input(over: Partial<CreatePlanStepInput> = {}): CreatePlanStepInput {
@@ -150,6 +155,27 @@ describe("type helpers", () => {
     expect(isTerminalStepStatus("in_progress")).toBe(false)
   })
 
+  it("treats a rejection as terminal, alongside completed / failed / cancelled", () => {
+    expect([...TERMINAL_PLAN_STATUSES].sort()).toEqual([
+      "cancelled",
+      "completed",
+      "failed",
+      "rejected",
+    ])
+    for (const status of TERMINAL_PLAN_STATUSES) expect(isTerminalPlanStatus(status)).toBe(true)
+    expect(isTerminalPlanStatus("paused")).toBe(false)
+    expect(isTerminalPlanStatus("awaiting_approval")).toBe(false)
+  })
+
+  it("only lets a plan that has not started be rejected", () => {
+    expect([...REJECTABLE_PLAN_STATUSES]).toEqual(["draft", "awaiting_approval", "approved"])
+    expect(isRejectablePlanStatus("awaiting_approval")).toBe(true)
+    // Backing out of a running plan is a cancellation, not a rejection.
+    expect(isRejectablePlanStatus("executing")).toBe(false)
+    expect(isRejectablePlanStatus("paused")).toBe(false)
+    expect(isRejectablePlanStatus("rejected")).toBe(false)
+  })
+
   it("PLAN_REFINEMENT_PROMPTS covers every refinement type including repair", () => {
     expect(Object.keys(PLAN_REFINEMENT_PROMPTS).sort()).toEqual([
       "expand",
@@ -222,5 +248,58 @@ describe("nextRunnableStep", () => {
       s("c", { order: 2, dependencies: ["a", "b"] }),
     ]
     expect(nextRunnableStep(steps)?.id).toBe("c")
+  })
+})
+
+describe("skipStepInDag", () => {
+  function s(id: string, order: number, over: Partial<PlanStep> = {}): PlanStep {
+    return {
+      id,
+      title: id,
+      kind: "agent_turn",
+      status: "pending",
+      order,
+      dependencies: [],
+      ...over,
+    }
+  }
+
+  it("marks the step skipped and re-points its dependents at its prerequisites", () => {
+    const steps = [
+      s("a", 0, { status: "completed" }),
+      s("b", 1, { status: "failed", dependencies: ["a"] }),
+      s("c", 2, { dependencies: ["b"] }),
+    ]
+    const out = skipStepInDag(steps, "b", { error: undefined })
+    const byId = new Map(out.steps.map((step) => [step.id, step]))
+    expect(byId.get("b")?.status).toBe("skipped")
+    expect(byId.get("c")?.dependencies).toEqual(["a"])
+    // The dependent is now runnable, so a resumed linear plan carries on.
+    expect(nextRunnableStep(out.steps)?.id).toBe("c")
+    expect(out.currentStepId).toBe("c")
+  })
+
+  it("merges inherited prerequisites without duplicates and keeps unrelated edges", () => {
+    const steps = [
+      s("a", 0, { status: "completed" }),
+      s("x", 1, { status: "completed" }),
+      s("b", 2, { dependencies: ["a", "x"] }),
+      s("c", 3, { dependencies: ["x", "b"] }),
+    ]
+    const out = skipStepInDag(steps, "b")
+    expect(out.steps.find((step) => step.id === "c")?.dependencies).toEqual(["x", "a"])
+  })
+
+  it("a skipped root leaves its dependents with no prerequisites", () => {
+    const steps = [s("a", 0, { status: "failed" }), s("b", 1, { dependencies: ["a"] })]
+    const out = skipStepInDag(steps, "a")
+    expect(out.steps.find((step) => step.id === "b")?.dependencies).toEqual([])
+    expect(nextRunnableStep(out.steps)?.id).toBe("b")
+  })
+
+  it("is a plain status write for an unknown step id", () => {
+    const steps = [s("a", 0)]
+    const out = skipStepInDag(steps, "missing")
+    expect(out.steps).toEqual(steps)
   })
 })

@@ -75,7 +75,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 }))
 
 const dispatchTeammateMock = jest.fn()
-jest.mock("@/lib/ai/agent/team/dispatch-teammate", () => ({
+jest.mock("@/lib/ai/agent/team/teammate/dispatch-teammate", () => ({
   dispatchTeammate: (...a: unknown[]) => dispatchTeammateMock(...a),
 }))
 

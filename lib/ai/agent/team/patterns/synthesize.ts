@@ -15,7 +15,7 @@ import {
   type RankedAttemptLike,
   type SynthesizeParams,
 } from "@/types/agent/ultracode"
-import { dispatchStructured } from "../structured-dispatch"
+import { dispatchStructured } from "../teammate/structured-dispatch"
 import {
   collectFindings,
   collectUpstreamArray,

@@ -160,6 +160,9 @@ function planExecutionStatus(plan: AgentPlan): ExecutionRunStatus {
     case "failed":
       return "failed"
     case "cancelled":
+    // A rejected plan never ran: the run it projects was declined, which the
+    // execution vocabulary spells `cancelled`.
+    case "rejected":
       return "cancelled"
   }
 }

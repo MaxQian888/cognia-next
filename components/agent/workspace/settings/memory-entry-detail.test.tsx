@@ -14,7 +14,7 @@ jest.mock("./settings-save-indicator", () => ({
 }))
 
 const deleteEntryMock = jest.fn()
-jest.mock("@/lib/ai/agent/team/shared-memory-orchestrator", () => ({
+jest.mock("@/lib/ai/agent/team/memory/shared-memory-orchestrator", () => ({
   deleteEntry: (...args: unknown[]) => deleteEntryMock(...args),
 }))
 

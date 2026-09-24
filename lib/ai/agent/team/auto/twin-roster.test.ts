@@ -1,8 +1,8 @@
 import { gatherTwinRoster, MAX_TWIN_ROSTER } from "./twin-roster"
-import { gatherTeamTwins } from "../twin-context"
+import { gatherTeamTwins } from "../teammate/twin-context"
 import type { TeamTwinSummary } from "../team-run-context"
 
-jest.mock("../twin-context", () => ({ gatherTeamTwins: jest.fn() }))
+jest.mock("../teammate/twin-context", () => ({ gatherTeamTwins: jest.fn() }))
 const mockGather = gatherTeamTwins as jest.MockedFunction<typeof gatherTeamTwins>
 
 describe("gatherTwinRoster", () => {

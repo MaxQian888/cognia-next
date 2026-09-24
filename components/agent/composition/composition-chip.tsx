@@ -60,6 +60,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
+import { COMPOSER_TOOLBAR_CHIP } from "@/lib/chat/composer-skin"
 import { CompositionPicker } from "./composition-picker"
 import { usePresetCatalog } from "@/hooks/agent/use-preset-catalog"
 import { useCodeSandboxPresentations } from "@/hooks/agent/use-code-sandbox-presentations"
@@ -155,14 +156,12 @@ export function CompositionChip({
     else setDefaultComposition(next)
   }
 
-  // Same quiet chip as the rest of the composer row (see `TOOLBAR_CHIP` in
-  // `bottom-toolbar.tsx`): no fill, no border, hover-only affordance, and
-  // shrinkable — the shadcn button base is `shrink-0`, which is how a chip on
-  // that row ends up painting over its neighbour instead of ellipsizing.
-  const chipClass = cn(
-    "h-7 min-w-0 shrink gap-1 rounded-md px-2 text-[11px] font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-    className
-  )
+  // The same quiet chip as the rest of the composer row — literally the same
+  // class (`COMPOSER_TOOLBAR_CHIP`): no fill, no border, hover-only affordance
+  // in both themes, and shrinkable, since the shadcn button base is `shrink-0`
+  // and that is how a chip on the row ends up painting over its neighbour
+  // instead of ellipsizing.
+  const chipClass = cn(COMPOSER_TOOLBAR_CHIP, "gap-1", className)
 
   if (layout === "split") {
     return (
@@ -253,8 +252,8 @@ export function CompositionChip({
                   aria-label={t("advanced")}
                   className={cn(
                     chipClass,
-                    "size-7 shrink-0 justify-center p-0",
-                    overrideCount > 0 && "w-auto gap-1 px-1.5 text-foreground"
+                    "size-7 shrink-0 justify-center p-0 has-[>svg]:px-0",
+                    overrideCount > 0 && "w-auto gap-1 px-1.5 has-[>svg]:px-1.5 text-foreground"
                   )}
                 >
                   <SlidersHorizontal aria-hidden className="size-3.5" />

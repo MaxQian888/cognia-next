@@ -140,6 +140,15 @@ export function PlanTrackerPanel({ plan, styleVariant }: PlanTrackerPanelProps) 
                   )}
                 >
                   {s.title}
+                  {/* Why a step failed belongs beside it, not only in the trail. */}
+                  {s.status === "failed" && s.error && (
+                    <span
+                      className="mt-0.5 block text-[11px] font-normal text-destructive"
+                      data-testid="plan-tracker-step-error"
+                    >
+                      {s.error}
+                    </span>
+                  )}
                 </span>
                 <Badge variant="outline" className="shrink-0 text-[10px]">
                   {t(STEP_STATUS_LABEL_KEY[s.status])}

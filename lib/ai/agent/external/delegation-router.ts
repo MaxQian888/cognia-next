@@ -23,8 +23,14 @@ import type {
 import type { RedactionRecord } from "@cognia/redact"
 
 export interface RouteDelegationInput {
-  /** The user prompt for this turn. */
+  /** The user prompt for this turn — what the rules match. */
   prompt: string
+  /**
+   * The text handed to the external agent, when that is more than what the
+   * rules match: a chat turn's attached files ride along with the question but
+   * do not route it. Filtered like `prompt`. Defaults to `prompt`.
+   */
+  payload?: string
   /** Optional opaque context forwarded to the matcher. */
   context?: Record<string, unknown>
 }
@@ -76,20 +82,21 @@ export function routeDelegation(
   deps: RouteDelegationDeps
 ): RoutingDecision {
   const decision = deps.checkDelegation(input.prompt, input.context)
+  const payload = input.payload ?? input.prompt
 
   if (!decision.shouldDelegate || !decision.targetAgentId) {
     return {
       shouldDelegate: false,
       reason: decision.reason,
       reasonCode: decision.reasonCode,
-      filteredPrompt: input.prompt,
+      filteredPrompt: payload,
     }
   }
 
-  let filteredPrompt = input.prompt
+  let filteredPrompt = payload
   let redactionMap: Record<string, RedactionRecord> | undefined
   if (deps.redact) {
-    const { redacted, map } = deps.redact(input.prompt)
+    const { redacted, map } = deps.redact(payload)
     filteredPrompt = redacted
     if (Object.keys(map).length > 0) redactionMap = map
   }

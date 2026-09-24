@@ -10,7 +10,7 @@ import en from "@/i18n/messages/en.json"
 import type {
   InstalledRuntime,
   RuntimeResolution,
-} from "@/lib/ai/agent/external/installed-runtimes"
+} from "@/lib/ai/agent/external/config/installed-runtimes"
 
 import { RuntimeDetectionBadge } from "./runtime-detection-badge"
 

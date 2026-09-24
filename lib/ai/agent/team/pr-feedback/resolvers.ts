@@ -20,7 +20,7 @@ import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import type { GitDefaultBranch, GitRemote } from "@/types/git"
 import { getTeamRunContext } from "@/lib/ai/agent/team/team-run-context"
-import { dispatchStructured } from "@/lib/ai/agent/team/structured-dispatch"
+import { dispatchStructured } from "@/lib/ai/agent/team/teammate/structured-dispatch"
 import {
   buildReviewerPrompt,
   REVIEWER_SYSTEM_PROMPT,

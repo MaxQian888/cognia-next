@@ -58,10 +58,10 @@ import {
   getExternalAgentExecutionBlock,
   isExternalAgentExecutable,
   normalizeExternalAgentConfigInput,
-} from "@/lib/ai/agent/external/config-normalizer"
+} from "@/lib/ai/agent/external/config/config-normalizer"
 
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
-import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
 import { describeExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import {
@@ -76,7 +76,7 @@ import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
-} from "@/lib/ai/agent/external/session-capabilities"
+} from "@/lib/ai/agent/external/capability/session-capabilities"
 import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
 
 interface ResumedInteractions {
@@ -974,7 +974,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     let cancelled = false
     void (async () => {
       const [{ loadAgentModelSurface }, manager] = await Promise.all([
-        import("@/lib/ai/agent/external/model-surface-cache"),
+        import("@/lib/ai/agent/external/capability/model-surface-cache"),
         getManager(),
       ])
       const result = await loadAgentModelSurface(activeAgentId, sessionId)

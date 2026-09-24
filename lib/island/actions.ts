@@ -15,6 +15,13 @@
  */
 
 import {
+  interruptAcpFleetSession,
+  rejectAcpFleetQuestion,
+  respondAcpFleetPermission,
+  respondAcpFleetQuestion,
+  sendAcpFleetMessage,
+} from "@/lib/fleet/acp-fleet-projection"
+import {
   fleetFocusTerminal,
   fleetInterruptSession,
   fleetOpencodeSendMessage,
@@ -72,6 +79,15 @@ function ok(intent: IslandActionIntent, revision: number): IslandActionResult {
 }
 
 /**
+ * Whether this owner is controlled by the renderer-side ExternalAgentManager
+ * (an ACP session) rather than the Rust fleet registry. `agentId` is stamped
+ * only by the ACP fleet projection, so it is the routing marker.
+ */
+function acpManagedOwner(owner: FleetOwnerRef): boolean {
+  return owner.kind === "external" && Boolean(owner.agentId)
+}
+
+/**
  * Validate then perform. `state` is the main window's live projection, which
  * is the only authority. `intent.revision` is what the user was looking at.
  */
@@ -101,7 +117,10 @@ export async function executeIslandAction(
       if (row.permission?.requestId !== intent.permissionRequestId) {
         return reject(intent, revision, "requestChanged")
       }
-      const accepted = await fleetPermissionRespond(intent.permissionRequestId, intent.behavior)
+      const acp = acpManagedOwner(row.owner)
+      const accepted = acp
+        ? await respondAcpFleetPermission(intent.permissionRequestId, intent.behavior)
+        : await fleetPermissionRespond(intent.permissionRequestId, intent.behavior)
       return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
     }
 
@@ -110,7 +129,9 @@ export async function executeIslandAction(
       if (row.question?.requestId !== intent.questionRequestId) {
         return reject(intent, revision, "requestChanged")
       }
-      const accepted = await fleetQuestionRespond(intent.questionRequestId, intent.selections)
+      const accepted = acpManagedOwner(row.owner)
+        ? await respondAcpFleetQuestion(intent.questionRequestId, intent.selections)
+        : await fleetQuestionRespond(intent.questionRequestId, intent.selections)
       return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
     }
 
@@ -119,7 +140,9 @@ export async function executeIslandAction(
       if (row.question?.requestId !== intent.questionRequestId) {
         return reject(intent, revision, "requestChanged")
       }
-      const accepted = await fleetQuestionReject(intent.questionRequestId)
+      const accepted = acpManagedOwner(row.owner)
+        ? await rejectAcpFleetQuestion(intent.questionRequestId)
+        : await fleetQuestionReject(intent.questionRequestId)
       return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
     }
 
@@ -128,14 +151,18 @@ export async function executeIslandAction(
       const text = intent.text.trim()
       if (!text) return reject(intent, revision, "emptyInput")
       if (row.owner.kind !== "external") return reject(intent, revision, "notPermitted")
-      const messageId = await fleetOpencodeSendMessage(row.owner.sessionId, text)
-      return messageId ? ok(intent, revision) : fail(intent, revision, "callFailed")
+      const accepted = row.owner.agentId
+        ? await sendAcpFleetMessage(row.owner.agentId, row.owner.sessionId, text)
+        : Boolean(await fleetOpencodeSendMessage(row.owner.sessionId, text))
+      return accepted ? ok(intent, revision) : fail(intent, revision, "callFailed")
     }
 
     case "interrupt": {
       if (!row.capabilities.interrupt) return reject(intent, revision, "notPermitted")
       if (row.owner.kind !== "external") return reject(intent, revision, "notPermitted")
-      const result = await fleetInterruptSession(row.owner.agent, row.owner.sessionId)
+      const result = row.owner.agentId
+        ? await interruptAcpFleetSession(row.owner.agentId, row.owner.sessionId)
+        : await fleetInterruptSession(row.owner.agent, row.owner.sessionId)
       return result.ok
         ? ok(intent, revision)
         : { requestId: intent.requestId, revision, outcome: "failed", reason: result.reason }

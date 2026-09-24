@@ -52,14 +52,14 @@ const isInQuietHoursMock = isInQuietHours as unknown as jest.Mock
 
 const teamStartMock = jest.fn()
 const teamGetMock = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     start: (...a: unknown[]) => teamStartMock(...a),
     get: (...a: unknown[]) => teamGetMock(...a),
   },
 }))
 const abortTeamMock = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team-runtime", () => ({
   abortTeam: (...a: unknown[]) => abortTeamMock(...a),
 }))
 // Twin runtime — dynamic-imported by runTwinDelegation.
@@ -68,7 +68,7 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: (...a: unknown[]) => tryBuildTwinDepsMock(...a),
 }))
 const applyTeammateTwinContextMock = jest.fn()
-jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+jest.mock("@/lib/ai/agent/team/teammate/twin-context", () => ({
   applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
 }))
 const getTwinMock = jest.fn()

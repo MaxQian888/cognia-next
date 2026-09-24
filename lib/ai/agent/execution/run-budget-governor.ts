@@ -15,7 +15,7 @@ import {
   createBudgetGuard,
   type BudgetGuard,
   type BudgetGuardOptions,
-} from "@/lib/ai/agent/team/budget-guard"
+} from "@/lib/ai/agent/team/gates/budget-guard"
 import {
   evaluateCostBudget,
   exceededScopes,

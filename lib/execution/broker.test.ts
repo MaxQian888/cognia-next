@@ -147,6 +147,37 @@ describe("ExecutionBroker — continuation exemption", () => {
     a.release("ok")
   })
 
+  it("does NOT exempt a second leg of a session whose only leg is still queued", async () => {
+    // The exemption protects a nested turn reached from RUNNING work. A queued
+    // leg runs nothing, so letting it exempt its session let a second send walk
+    // past the slot the first one was (visibly) waiting for.
+    const broker = makeBroker(4)
+    const plan = await broker.acquire(req({ kind: "workflow-step", slotKey: "/repos/app" }))
+    const firstSend = broker.acquire(req({ kind: "chat", sessionId: "s1", slotKey: "/repos/app" }))
+    let secondAdmitted = false
+    const secondSend = broker
+      .acquire(req({ kind: "chat", sessionId: "s1", slotKey: "/repos/app" }))
+      .then((lease) => {
+        secondAdmitted = true
+        return lease
+      })
+    await Promise.resolve()
+    expect(secondAdmitted).toBe(false)
+    expect(broker.isAtCapacity("ai-turn", "s1")).toBe(false)
+    plan.release("ok")
+    const first = await firstSend
+    expect(first.exempt).toBe(false)
+    expect(broker.slotHolder("/repos/app")).toBe(first.id)
+    // Still behind the tree: the second send waits its turn in FIFO order.
+    await Promise.resolve()
+    expect(secondAdmitted).toBe(false)
+    first.release("ok")
+    const second = await secondSend
+    expect(second.exempt).toBe(false)
+    expect(broker.slotHolder("/repos/app")).toBe(second.id)
+    second.release("ok")
+  })
+
   it("honours an explicit exempt flag", async () => {
     const broker = makeBroker(1)
     const a = await broker.acquire(req())
@@ -828,5 +859,52 @@ describe("ExecutionBroker — execution slots", () => {
     first.release()
     const lease = await next
     expect(broker.slotHolder("/repos/app")).toBe(lease.id)
+  })
+})
+
+describe("ExecutionBroker — admissionBlocker", () => {
+  it("is null for a request that would be admitted now", () => {
+    const broker = makeBroker(2)
+    expect(broker.admissionBlocker(req({ slotKey: "/repos/app" }))).toBeNull()
+  })
+
+  it("names the leg holding the tree a request would wait for", async () => {
+    const broker = makeBroker(4)
+    await broker.acquire(
+      req({ kind: "workflow-step", label: "Refactor plan", slotKey: "/repos/app" })
+    )
+    void broker.acquire(req({ slotKey: "/repos/app" })).catch(() => undefined)
+    const blocker = broker.admissionBlocker(req({ kind: "chat", slotKey: "/repos/app" }))
+    expect(blocker).toMatchObject({
+      reason: "slot",
+      slotKey: "/repos/app",
+      ahead: 1,
+      holder: { kind: "workflow-step", label: "Refactor plan", holdsSlot: true },
+    })
+  })
+
+  it("reports the shared ceiling when the pool is full", async () => {
+    const broker = makeBroker(1)
+    await broker.acquire(req())
+    expect(broker.admissionBlocker(req())).toEqual({ reason: "capacity", limit: 1, ahead: 0 })
+  })
+
+  it("reports a saturated provider lane without touching its limit", async () => {
+    const broker = makeBroker(4)
+    await broker.acquire(req({ providerId: "anthropic", providerLimit: 1 }))
+    expect(broker.admissionBlocker(req({ providerId: "anthropic", providerLimit: 1 }))).toEqual({
+      reason: "provider",
+      providerId: "anthropic",
+      limit: 1,
+    })
+  })
+
+  it("never blocks a continuation of running work, exactly like acquire", async () => {
+    const broker = makeBroker(1)
+    await broker.acquire(req({ sessionId: "s1", slotKey: "/repos/app" }))
+    expect(broker.admissionBlocker(req({ sessionId: "s1", slotKey: "/repos/app" }))).toBeNull()
+    expect(broker.admissionBlocker(req({ sessionId: "s2", slotKey: "/repos/app" }))).toMatchObject({
+      reason: "slot",
+    })
   })
 })

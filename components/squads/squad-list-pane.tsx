@@ -23,11 +23,18 @@
  *
  * And an empty list offers a way out. It used to say Squads are made in
  * Settings and leave you to go find Settings.
+ *
+ * The built-in Teams the chat sidebar offers as scopes are listed below the
+ * Squads (`BuiltInTeamsSection`), so "No Squads yet" no longer sits next to a
+ * sidebar full of squad-looking scopes with nothing explaining them. They are
+ * not counted as Squads; the empty state points at them instead.
  */
 
 import { useTranslations } from "next-intl"
 import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
 
+import type { Team } from "@cognia/agent-config-types"
+import { BuiltInTeamsSection } from "@/components/squads/built-in-teams"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { StatusBadge } from "@/components/status-badge"
@@ -50,12 +57,27 @@ export interface SquadListPaneProps {
   route: SquadRouteState
   /** Absent when the host has nowhere to create from. The CTA is then omitted. */
   onCreate?: () => void
+  /**
+   * The built-in Teams (`useBuiltInTeams`). Listed in their own section and
+   * never counted as Squads. Omit on a host that has no chat scopes to open.
+   */
+  builtInTeams?: readonly Team[]
   className?: string
 }
 
-export function SquadListPane({ fleet, route, onCreate, className }: SquadListPaneProps) {
+const NO_TEAMS: readonly Team[] = []
+
+export function SquadListPane({
+  fleet,
+  route,
+  onCreate,
+  builtInTeams = NO_TEAMS,
+  className,
+}: SquadListPaneProps) {
   const t = useTranslations("squads.fleet")
   const { squads, total, live, waiting, loading } = fleet
+  // A Team has no run state, so "Needs you" / "Working" cannot match one.
+  const showBuiltIns = builtInTeams.length > 0 && route.filter === "all"
 
   // Two cells, not three. `STAT_COLUMNS` gives two an unconditional
   // `grid-cols-2`, which is right in a 300px rail AND full width on a phone.
@@ -130,7 +152,13 @@ export function SquadListPane({ fleet, route, onCreate, className }: SquadListPa
             <EmptyState
               icon={UsersIcon}
               title={route.narrowed ? t("noMatchesTitle") : t("emptyTitle")}
-              description={route.narrowed ? t("noMatchesDescription") : t("emptyDescription")}
+              description={
+                route.narrowed
+                  ? t("noMatchesDescription")
+                  : builtInTeams.length > 0
+                    ? t("emptyDescriptionWithBuiltIns", { count: builtInTeams.length })
+                    : t("emptyDescription")
+              }
               {...(route.narrowed
                 ? { cta: { label: t("clearFilters"), onSelect: route.clearFilters } }
                 : onCreate
@@ -161,6 +189,7 @@ export function SquadListPane({ fleet, route, onCreate, className }: SquadListPa
               ))}
             </ul>
           )}
+          {showBuiltIns ? <BuiltInTeamsSection teams={builtInTeams} query={route.query} /> : null}
         </div>
       </ScrollArea>
 

@@ -27,6 +27,7 @@ import { ArrowDownIcon, ArrowUpIcon, PlusIcon, XIcon } from "lucide-react"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import {
   listItemTitle,
@@ -359,7 +360,7 @@ export function PlanDocument({
               </Badge>
             )}
             {canEdit && (
-              <span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+              <span className={cn("flex shrink-0 items-center", HOVER_REVEAL_GROUP_CLASS)}>
                 <Button
                   size="icon"
                   variant="ghost"
@@ -506,11 +507,13 @@ export function PlanDocument({
                       "size-1.5 shrink-0 self-center rounded-full",
                       ev.kind === "approved" || ev.kind === "step_completed"
                         ? "bg-green-600"
-                        : ev.kind === "rejected" ||
-                            ev.kind === "step_failed" ||
-                            ev.kind === "cancelled"
-                          ? "bg-rose-600"
-                          : "bg-muted-foreground/50"
+                        : ev.kind === "step_skipped"
+                          ? "bg-amber-500"
+                          : ev.kind === "rejected" ||
+                              ev.kind === "step_failed" ||
+                              ev.kind === "cancelled"
+                            ? "bg-rose-600"
+                            : "bg-muted-foreground/50"
                     )}
                   />
                   <span className="shrink-0 font-mono text-[10px] uppercase text-muted-foreground">

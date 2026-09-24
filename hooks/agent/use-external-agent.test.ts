@@ -59,7 +59,7 @@ const isExecutableMock = jest.fn().mockReturnValue(true)
 const getBlockReasonMock = jest.fn().mockReturnValue(null)
 const getBlockMock = jest.fn().mockReturnValue(null)
 
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   normalizeExternalAgentConfigInput: (...args: unknown[]) => normalizeMock(...args),
   isExternalAgentExecutable: (...args: unknown[]) => isExecutableMock(...args),
   getExternalAgentExecutionBlockReason: (...args: unknown[]) => getBlockReasonMock(...args),
@@ -67,7 +67,7 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
 }))
 
 const isUnsupportedForMethodMock = jest.fn().mockReturnValue(false)
-jest.mock("@/lib/ai/agent/external/session-extension-errors", () => ({
+jest.mock("@/lib/ai/agent/external/session/session-extension-errors", () => ({
   isExternalAgentSessionExtensionUnsupportedForMethod: (...a: unknown[]) =>
     isUnsupportedForMethodMock(...a),
 }))

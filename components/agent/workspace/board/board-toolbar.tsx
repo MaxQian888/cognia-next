@@ -21,7 +21,7 @@ import {
 import { Toggle } from "@/components/ui/toggle"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { cn } from "@/lib/utils"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
+import { agentTeamManager } from "@/lib/ai/agent/team/agent-team"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import {
   collectFilterOptions,

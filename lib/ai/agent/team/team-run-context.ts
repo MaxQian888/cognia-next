@@ -21,8 +21,8 @@ import type {
 import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 import type { ConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import type { ModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
-import type { TeammatePool } from "./teammate-pool"
-import type { BudgetGuard } from "./budget-guard"
+import type { TeammatePool } from "./teammate/teammate-pool"
+import type { BudgetGuard } from "./gates/budget-guard"
 import type { TeamNotifier } from "./team-notifier"
 import type { AgentTeamRegistryWorkspaceController } from "./workspace/registry-controller"
 
@@ -130,9 +130,9 @@ export interface TeamRunContext {
    */
   readonly lead?: AgentTeammate
   readonly runLeadReview?: NonNullable<
-    import("../agent-team-runtime").RunTeamLifecycleDeps["runLeadReview"]
+    import("./agent-team-runtime").RunTeamLifecycleDeps["runLeadReview"]
   >
-  readonly gatePolicy?: import("./gate-policy").TeamGatePolicy
+  readonly gatePolicy?: import("./gates/gate-policy").TeamGatePolicy
   /**
    * Trigger origin of this run (IM conversation binding, workflow, …).
    * Threaded from `runTeamLifecycle`'s `deps.triggeredFrom` so run-scoped
@@ -149,14 +149,14 @@ export interface TeamRunContext {
    * dispatch executor on first claim so each teammate's plugin capability
    * pool (skills / mcp / native-tools / character / subagents / a2ui)
    * is computed exactly once per run. See
-   * `lib/ai/agent/team/capability-resolver.ts:resolveTeammateCapabilities`.
+   * `lib/ai/agent/team/teammate/capability-resolver.ts:resolveTeammateCapabilities`.
    */
   readonly resolvedCapabilities: Map<string, ResolvedCapabilities>
   /**
    * Per-run cache of external-agent backing instances, keyed by preset id.
    * Populated lazily by `resolveTeammateExternalAgent` so all teammates backed
    * by the same external preset reuse one spawned CLI process for the run.
-   * See `lib/ai/agent/team/resolve-external-backing.ts`.
+   * See `lib/ai/agent/team/teammate/resolve-external-backing.ts`.
    */
   readonly externalAgentInstances: Map<string, string>
   /**
@@ -165,7 +165,7 @@ export interface TeamRunContext {
    * a caught rate-limit failure to it, and the lifecycle disposes it in
    * `finally` so no timer outlives the run. Absent when nudges are disabled.
    */
-  readonly rateLimitResume?: import("./rate-limit-resume").RateLimitResumeController
+  readonly rateLimitResume?: import("./durable/rate-limit-resume").RateLimitResumeController
   /**
    * Per-run Employee Digital Twin runtime deps (ADR-0003), built once by
    * `resolveTeamTwinRuntime` when any teammate is twin-bound OR the team exposes

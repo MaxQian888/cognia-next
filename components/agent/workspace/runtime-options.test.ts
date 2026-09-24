@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { RUNTIME_OPTIONS, RUNTIME_LABEL_KEYS, runtimeLabelKey } from "./runtime-options"
-import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/presets"
+import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 describe("runtime-options", () => {
   it("lists claude first, then every executable preset (in lock-step with the catalog)", () => {

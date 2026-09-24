@@ -7,7 +7,7 @@ import type {
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { ExternalAgentLifecycleError } from "@/types/agent/external-agent-lifecycle"
-import { resetAcpRegistryCacheForTests } from "../acp-registry"
+import { resetAcpRegistryCacheForTests } from "../runtimes/acp/acp-registry"
 
 import {
   ExternalAgentLifecycleService,

@@ -53,7 +53,7 @@ import { listTwins } from "@/lib/db/twins"
 import {
   presetStateToTeammateConfig,
   teammateToPresetState,
-} from "@/lib/ai/agent/team/teammate-preset-adapter"
+} from "@/lib/ai/agent/team/teammate/teammate-preset-adapter"
 import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { getProviderDisplayName } from "@/lib/ai/icons"
@@ -64,7 +64,7 @@ import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 import { FusionActionField } from "@/components/router-fusion/fusion-action-field"
 import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
-import { getPresetConfig } from "@/lib/ai/agent/external/presets"
+import { getPresetConfig } from "@/lib/ai/agent/external/config/presets"
 import type { ExternalAgentCogniaModelBinding } from "@/types/agent/external-agent"
 
 export interface TeammateConfigDialogProps {
@@ -133,7 +133,7 @@ export function TeammateConfigDialog({
 
   // Provider ids the app actually has configured. Only meaningful for a lead:
   // a lead is never dispatched through a runtime, it runs its planning/review
-  // turns on a resolved provider (see lib/ai/agent/team/lead-execution.ts).
+  // turns on a resolved provider (see lib/ai/agent/team/squad/lead-execution.ts).
   const settings = useSettingsStore((s) => s.settings)
   const providerOptions = useMemo(() => {
     const builtIn = Object.entries(settings?.providerSettings ?? {})

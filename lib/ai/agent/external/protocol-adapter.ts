@@ -58,7 +58,7 @@ import {
   type ExternalAgentCompactionCapability,
   type ExternalAgentCompactionOptions,
   type ExternalAgentProviderUndoCapability,
-} from "./session-capabilities"
+} from "./capability/session-capabilities"
 import type { ExternalAgentCapabilityMatrix } from "@cognia/agent-config-types/external-agent-capability"
 
 /**

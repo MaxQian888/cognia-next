@@ -13,9 +13,10 @@
  * transcript's original wording.
  */
 
-import type { AgentPlan, PlanEditPatch } from "@/types/agent/plan"
-import { projectStepTitles } from "./plan-doc"
+import type { AgentPlan, CreatePlanStepInput, PlanEditPatch, PlanStep } from "@/types/agent/plan"
+import { projectStepTitles, rebuildPlanText } from "./plan-doc"
 import { linearAgentTurnSteps, materializeSteps } from "./steps"
+import { validatePlanStepParams } from "./step-params"
 import { getPlanRuntime } from "./runtime"
 
 /** Wrap plain titles as a linear `agent_turn` chain — a draft carries no
@@ -46,6 +47,105 @@ export async function applyPlanEditPatch(plan: AgentPlan, patch: PlanEditPatch):
       ...plan.metadata,
       userEdited: true,
       ...("planText" in patch ? { planText: patch.planText } : {}),
+    },
+  })
+}
+
+/** Thrown when an edit from the plan editor does not describe a runnable plan. */
+export class PlanEditValidationError extends Error {
+  constructor(
+    readonly reason: "empty" | "invalid_step",
+    /** 1-based step index for `invalid_step`. */
+    readonly stepIndex?: number
+  ) {
+    super(
+      reason === "empty"
+        ? "a plan needs at least one step"
+        : `step ${stepIndex} has parameters its kind cannot run with`
+    )
+    this.name = "PlanEditValidationError"
+  }
+}
+
+/** One edited step: what the "Write a plan" editor produces per line. */
+export type PlanComposerStepEdit = Pick<CreatePlanStepInput, "title" | "kind" | "params">
+
+function sameParams(a: PlanStep["params"], b: PlanStep["params"]): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+}
+
+/**
+ * Amend a not-yet-approved plan from the "Write a plan" editor (title + one
+ * step per line + optional step types) — the approval card's Edit action.
+ *
+ * Re-validates before writing: every step's params go back through the shared
+ * `validatePlanStepParams` (the same gate the composer and the agent tools
+ * use), so a plan that reaches approval is one the executor can run.
+ *
+ * Keeps what can be kept. When the step COUNT is unchanged the edit is applied
+ * position by position onto the existing rows — ids, dependencies (a DAG the
+ * agent authored stays a DAG) and the trail's step references survive a
+ * rename or a kind change. A different count re-derives a fresh linear chain,
+ * which is the only shape a list of lines can describe. A captured markdown
+ * body (`metadata.planText`) has its steps section rewritten to match, so the
+ * document and the executable steps cannot disagree, and `userEdited` makes
+ * approval embed the amended plan rather than the transcript's original.
+ */
+export async function applyPlanComposerEdit(
+  plan: AgentPlan,
+  edit: { title: string; steps: PlanComposerStepEdit[] }
+): Promise<AgentPlan | null> {
+  if (edit.steps.length === 0) throw new PlanEditValidationError("empty")
+  edit.steps.forEach((step, i) => {
+    if (step.params && "error" in validatePlanStepParams(step.kind, step.params)) {
+      throw new PlanEditValidationError("invalid_step", i + 1)
+    }
+  })
+
+  const title = edit.title.trim().slice(0, 120) || plan.title
+  const ordered = [...plan.steps].sort((a, b) => a.order - b.order)
+  const inputs: CreatePlanStepInput[] = linearAgentTurnSteps(edit.steps.map((s) => s.title)).map(
+    (base, i) => ({
+      ...base,
+      kind: edit.steps[i].kind,
+      ...(edit.steps[i].params ? { params: edit.steps[i].params } : {}),
+    })
+  )
+  const steps: PlanStep[] =
+    inputs.length === ordered.length
+      ? ordered.map((row, i) => {
+          const next = inputs[i]
+          const { params: _dropped, ...rest } = row
+          void _dropped
+          return {
+            ...rest,
+            title: next.title,
+            kind: next.kind,
+            ...(next.params ? { params: next.params } : {}),
+          }
+        })
+      : materializeSteps(inputs)
+  const stepsChanged =
+    steps.length !== ordered.length ||
+    steps.some(
+      (step, i) =>
+        step.title !== ordered[i].title ||
+        step.kind !== ordered[i].kind ||
+        !sameParams(step.params, ordered[i].params)
+    )
+
+  const meta = plan.metadata as { planText?: unknown } | undefined
+  const planText = typeof meta?.planText === "string" ? meta.planText : ""
+  const titles = steps.map((step) => step.title)
+  const titlesChanged =
+    titles.some((t, i) => t !== ordered[i]?.title) || titles.length !== ordered.length
+  return getPlanRuntime().updatePlanDraft(plan.id, {
+    title,
+    ...(stepsChanged ? { steps } : {}),
+    metadata: {
+      ...plan.metadata,
+      userEdited: true,
+      ...(planText && titlesChanged ? { planText: rebuildPlanText(planText, titles) } : {}),
     },
   })
 }

@@ -64,7 +64,7 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
   // answer, and losing the answer would be far worse than losing the note.
   const recordAnswer = (decision: "approved" | "rejected" | "dismissed"): void => {
     if (!gate.runId) return
-    void import("@/lib/ai/agent/team/record-gate-answer")
+    void import("@/lib/ai/agent/team/gates/record-gate-answer")
       .then(({ recordSquadGateAnswer }) =>
         recordSquadGateAnswer({
           runId: gate.runId,

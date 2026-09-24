@@ -4,7 +4,13 @@
  * kebab-case — pinned by the Rust serde tests.
  */
 
-export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia"
+/**
+ * `devin` and `acp` are renderer-side identities: their sessions arrive through
+ * `lib/fleet/acp-fleet-projection.ts` (the `ExternalAgentManager` ACP channel),
+ * never through Rust hook ingress. `acp` is the generic identity for ACP agents
+ * without a dedicated variant (the configured agent name rides `agentLabel`).
+ */
+export type FleetAgent = "claude-code" | "codex" | "opencode" | "cognia" | "devin" | "acp"
 export type FleetOrigin =
   "built-in" | "team" | "workflow" | "external" | "local-external" | "managed-team"
 
@@ -170,6 +176,17 @@ export interface FleetSession {
   agentTeamChildRunId?: string
   executionRunId?: string
   reviewEvidenceRef?: string
+  /**
+   * `ExternalAgentManager` agent id for renderer-managed sessions (ACP).
+   * Its presence marks the row as manager-controlled: the island routes
+   * decisions and interrupts through the manager, not the Rust commands.
+   */
+  externalAgentId?: string
+  /** The Cognia chat session an external run is bound to, when one exists. */
+  chatSessionId?: string
+  /** Configured agent display name — carried for generic `acp` rows whose
+   *  `agent` value has no i18n product name. */
+  agentLabel?: string
 }
 
 export interface FleetHost {

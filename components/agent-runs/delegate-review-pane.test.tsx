@@ -243,6 +243,10 @@ describe("DelegateReviewPane", () => {
       "This run delivered a patch only"
     )
     expect(screen.getByTestId("delegate-review-history")).toHaveTextContent("Approved")
+    expect(screen.getByTestId("delegate-review-history")).toHaveTextContent(
+      new Date(30).toISOString()
+    )
+    expect(screen.getByTestId("delegate-review-history")).not.toHaveTextContent("Overdue")
   })
 
   it("downloads the patch document through the app's save dialog", async () => {

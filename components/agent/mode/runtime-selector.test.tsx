@@ -166,7 +166,7 @@ const mockBlock = (agent: {
   }
   return null
 }
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentExecutionBlock: (agent: {
     enabled?: boolean
     protocol?: string
@@ -176,7 +176,7 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
 jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
   onProtocolAdapterRegistryChange: () => () => {},
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   isFromPreset: () => null,
 }))
 

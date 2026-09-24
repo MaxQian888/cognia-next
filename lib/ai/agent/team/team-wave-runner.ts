@@ -18,8 +18,8 @@ import type { VisualWorkflow } from "@/types/workflow/visual"
 import type { RunWorkflowResult } from "@/lib/workflow/runtime/orchestrator"
 import type { TeamRunContext } from "./team-run-context"
 import { synthesizeTeamWorkflow, validateTeamTaskGraph } from "./synthesize-workflow"
-import { runReplanCheckpoint, type ReplanCheckpointOutcome } from "./replan-checkpoint"
-import { continueDecision } from "./replan-schema"
+import { runReplanCheckpoint, type ReplanCheckpointOutcome } from "./durable/replan-checkpoint"
+import { continueDecision } from "./gates/replan-schema"
 
 export type WaveRunStatus = "succeeded" | "failed" | "cancelled"
 

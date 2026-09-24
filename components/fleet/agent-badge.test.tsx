@@ -12,11 +12,26 @@ jest.mock("next-intl", () => ({
 
 describe("AgentBadge", () => {
   it("renders a translated chip per agent", () => {
-    for (const agent of ["claude-code", "codex", "opencode", "cognia"] as const) {
+    for (const agent of ["claude-code", "codex", "opencode", "cognia", "devin"] as const) {
       const { unmount } = render(<AgentBadge agent={agent} />)
       expect(screen.getByTestId(`agent-badge-${agent}`)).toHaveTextContent(`agents.${agent}`)
       unmount()
     }
+  })
+
+  it("shows the configured agent name for a generic acp row", () => {
+    render(<AgentBadge agent="acp" label="My Kiro" />)
+    expect(screen.getByTestId("agent-badge-acp")).toHaveTextContent("My Kiro")
+  })
+
+  it("falls back to the generic product name when no label is configured", () => {
+    render(<AgentBadge agent="acp" />)
+    expect(screen.getByTestId("agent-badge-acp")).toHaveTextContent("agents.acp")
+  })
+
+  it("ignores a label on a dedicated agent — the i18n product name wins", () => {
+    render(<AgentBadge agent="devin" label="Something Else" />)
+    expect(screen.getByTestId("agent-badge-devin")).toHaveTextContent("agents.devin")
   })
 })
 

@@ -133,6 +133,13 @@ export interface AgentRuntimeDescriptor {
   /** Brand icon id for the row glyph. */
   brandId?: string
   /**
+   * The external-agent preset this row was created from (`metadata.preset`), so
+   * a caller asking "which configured agent is a Codex?" reads one field
+   * instead of unwrapping each configuration again. Absent on the builtin lane
+   * and on an agent configured by hand.
+   */
+  presetId?: string
+  /**
    * Why this row cannot execute at all, derived from configuration alone, so it
    * is authoritative now and the row is not selectable.
    */

@@ -84,7 +84,7 @@ jest.mock("@dnd-kit/sortable", () => ({
 }))
 
 // Twin catalog: deterministic + keeps Dexie out of the suite.
-jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+jest.mock("@/lib/ai/agent/team/teammate/twin-context", () => ({
   gatherTeamTwins: jest.fn(async () => [
     { id: "twin-9", name: "Ada", expertise: "frontend" },
     { id: "twin-kb", name: "Kb", expertise: "docs" },
@@ -93,7 +93,7 @@ jest.mock("@/lib/ai/agent/team/twin-context", () => ({
 
 // The toolbar's run controls reach the manager facade (whose import graph
 // drags in the whole runtime) — stub it.
-jest.mock("@/lib/ai/agent/agent-team", () => ({
+jest.mock("@/lib/ai/agent/team/agent-team", () => ({
   agentTeamManager: {
     start: jest.fn(async () => {}),
     pause: jest.fn(async () => {}),

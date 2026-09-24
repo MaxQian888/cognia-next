@@ -1,5 +1,5 @@
 import type { TeammateRuntime } from "@/types/agent/agent-team"
-import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/presets"
+import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/config/presets"
 
 /**
  * Shared teammate-runtime dropdown options + label keys, used by both the

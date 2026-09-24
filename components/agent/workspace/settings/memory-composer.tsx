@@ -34,7 +34,7 @@ import {
   publishEntry,
   SharedMemoryPiiError,
   OPERATOR_READER_ID,
-} from "@/lib/ai/agent/team/shared-memory-orchestrator"
+} from "@/lib/ai/agent/team/memory/shared-memory-orchestrator"
 import type { AgentTeam, SharedMemoryEntry } from "@/types/agent/agent-team"
 import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { markSettingsSaved } from "./settings-save-indicator"

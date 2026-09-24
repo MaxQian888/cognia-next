@@ -62,7 +62,7 @@ import {
   gatewaySessionId,
   normalizeCogniaModelBinding,
   parseGatewaySessionId,
-} from "./gateway-task"
+} from "./config/gateway-task"
 import { loggers } from "@cognia/logging"
 import {
   type ProtocolAdapter,
@@ -71,15 +71,15 @@ import {
   type SessionCreateOptions,
   type SessionListOptions,
 } from "./protocol-adapter"
-import { AcpClientAdapter } from "./acp-client"
-import { DevinAcpAdapter } from "./devin-acp-adapter"
-import { CodexAppServerAdapter } from "./codex-app-server-client"
-import { OpenCodeClientAdapter } from "./opencode-client"
-import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
-import { A2aClientAdapter } from "./a2a-client"
-import { DshSdkClientAdapter } from "./dsh-sdk-client"
-import { prepareDshManagedLaunch } from "./dsh-managed-launch"
-import { clampThinkingLevel, PiRpcClientAdapter } from "./pi-rpc-client"
+import { AcpClientAdapter } from "./runtimes/acp/acp-client"
+import { DevinAcpAdapter } from "./runtimes/acp/devin-acp-adapter"
+import { CodexAppServerAdapter } from "./runtimes/codex/codex-app-server-client"
+import { OpenCodeClientAdapter } from "./runtimes/opencode/opencode-client"
+import { OpenCodeV2ClientAdapter } from "./runtimes/opencode/opencode-v2-client"
+import { A2aClientAdapter } from "./runtimes/remote/a2a-client"
+import { DshSdkClientAdapter } from "./runtimes/dsh/dsh-sdk-client"
+import { prepareDshManagedLaunch } from "./runtimes/dsh/dsh-managed-launch"
+import { clampThinkingLevel, PiRpcClientAdapter } from "./runtimes/pi/pi-rpc-client"
 import {
   catalogModelSurface,
   EMPTY_THINKING_SURFACE,
@@ -87,25 +87,28 @@ import {
   resolveExternalAgentModels,
   resolveExternalAgentThinking,
   type ExternalAgentModelSurface,
-} from "./session-models"
+} from "./session/session-models"
 import {
   cachedAgentModelSurface,
   forgetAgentModelSurface,
   loadAgentModelSurface,
   type ExternalAgentSessionSurface,
-} from "./model-surface-cache"
-import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
-import { canProjectOpenCodeV2Mcp } from "./opencode-v2-launcher"
+} from "./capability/model-surface-cache"
+import {
+  createDshRuntimeTransport,
+  resolveDshLaunchFromConfig,
+} from "./runtimes/dsh/dsh-runtime-transport"
+import { canProjectOpenCodeV2Mcp } from "./runtimes/opencode/opencode-v2-launcher"
 import { runsExternalAgentProcessesLocally } from "./agent-transport"
 import {
   assertRunEnvironmentPlaced,
   RunEnvironmentRefusedError,
 } from "@/lib/sandbox/run-environment"
-import { acpToolsToAgentTools } from "./translators"
-import { detectInstalledRuntimes } from "./installed-runtimes"
-import { externalAgentProcessPlane, PROCESS_PLANE_COMMANDS } from "./process-plane"
-import { findRuntimeForConfig } from "./runtime-catalog"
-import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
+import { acpToolsToAgentTools } from "./session/translators"
+import { detectInstalledRuntimes } from "./config/installed-runtimes"
+import { externalAgentProcessPlane, PROCESS_PLANE_COMMANDS } from "./capability/process-plane"
+import { findRuntimeForConfig } from "./config/install-catalog"
+import { createExternalAgentTraceBridge } from "./session/agent-trace-bridge"
 import {
   observeExternalAgentEvent,
   gateExternalAgentPermission,
@@ -118,13 +121,13 @@ import {
   getUnsupportedProtocolReason,
   probeExternalAgentEcosystemReadiness,
   projectExternalAgentReadinessMetadata,
-} from "./config-normalizer"
-import { adaptPermissionMode } from "./permission-modes"
+} from "./config/config-normalizer"
+import { adaptPermissionMode } from "./policy/permission-modes"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
   isExternalAgentSessionExtensionUnsupportedForMethod,
-} from "./session-extension-errors"
+} from "./session/session-extension-errors"
 import {
   createUnknownSessionExtensionSupport,
   normalizeExternalAgentValiditySnapshot,
@@ -132,10 +135,13 @@ import {
 import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
 import { isTauri } from "@/lib/tauri"
 import { hostPlatformId } from "@/lib/tauri/os"
-import { negotiateCapabilityProfile, withRegisteredPluginDeclaration } from "./capability-profile"
-import { liveCapabilityFacts } from "./capability-live-facts"
-import { externalAgentPresetIdOf } from "./preset-identity"
-import { externalAgentSandboxSupportsPlatform } from "./security-policy"
+import {
+  negotiateCapabilityProfile,
+  withRegisteredPluginDeclaration,
+} from "./capability/capability-profile"
+import { liveCapabilityFacts } from "./capability/capability-live-facts"
+import { externalAgentPresetIdOf, isDevinAgentConfig } from "./config/preset-identity"
+import { externalAgentSandboxSupportsPlatform } from "./policy/security-policy"
 import type {
   ExternalAgentCapabilityProfileV1,
   ExternalAgentHostCeilings,
@@ -145,7 +151,7 @@ import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
-} from "./session-capabilities"
+} from "./capability/session-capabilities"
 import type { AcpAvailableCommand } from "@/types/agent/external-agent"
 import {
   canonicalEventFromExternalEvent,
@@ -354,9 +360,7 @@ export function createConfiguredProtocolAdapter(
   config: ExternalAgentConfig
 ): ProtocolAdapter | undefined {
   const adapter = protocolAdapterRegistry.create(config.protocol)
-  const command = config.process?.command.split(/[\\/]/).at(-1)
-  const isDevin =
-    externalAgentPresetIdOf(config) === "devin" || command === "devin" || command === "devin.exe"
+  const isDevin = isDevinAgentConfig(config)
   return config.transport === "stdio" && isDevin && adapter?.constructor === AcpClientAdapter
     ? new DevinAcpAdapter(adapter as AcpClientAdapter)
     : adapter

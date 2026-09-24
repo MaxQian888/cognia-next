@@ -12,8 +12,15 @@
  *   - Approve & fully automated → approve, resume in `auto` (overflow menu)
  *   - No, keep planning        → plan back to `draft`, stay in plan mode;
  *                                feedback (if any) is sent as a normal user turn
- *   - Discard plan             → cancel (destructive, overflow menu)
+ *   - Reject (+ optional reason) → terminal `rejected` (confirmed in the card)
+ *   - Edit                     → the "Write a plan" editor, pre-filled, amends
+ *                                the plan in place after re-validating it
  *   - Refine / inline edit     → re-plan in place / updatePlanDraft
+ *
+ * In-session first step: when the chat refuses the step's turn, the step is
+ * failed (`dispatch_failed`) and the plan halts on it, so the tracker card
+ * shows the error with retry / skip / mark done / cancel — rather than an
+ * `executing` plan with a step `in_progress` that no turn is running.
  *
  * Direct chat drives approval directly on the Dexie row (unlike the *team* flow,
  * there is no blocked runtime waiter — the plan-mode turn already ended), then
@@ -24,6 +31,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { PlanApprovalCard, type PlanEditPatch, type PlanResumeMode } from "./plan-approval-card"
+import { PlanComposerDialog } from "./plan-composer-dialog"
 import { useSessionPlan } from "@/hooks/agent/use-session-plan"
 import {
   getPlanRuntime,
@@ -34,6 +42,7 @@ import { Button } from "@/components/ui/button"
 import { applyPlanEditPatch } from "@/lib/agent/plan/draft-edit"
 import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
+import { chatPlanStepHooks } from "@/lib/agent/plan/turn-driver"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -101,6 +110,9 @@ export function PlanApprovalDock({
   const appSettings = useSettingsStore((s) => s.settings)
   const [busyPlanId, setBusyPlanId] = useState<string | null>(null)
   const busy = !!plan && busyPlanId === plan.id
+  // One number per editor session: the dialog is keyed on it, so each Edit
+  // opens the "Write a plan" form fresh from the plan as it is now.
+  const [editorSession, setEditorSession] = useState<number | null>(null)
   const [localFailure, setLocalFailure] = useState<
     (PlanChatResumeFailure & { planId: string }) | null
   >(null)
@@ -179,6 +191,7 @@ export function PlanApprovalDock({
     if (busy) return
     setBusyPlanId(plan.id)
     let continuation: PlanChatResumeFailure | null = null
+    let inSessionStep: { stepId: string; generationId: string } | null = null
     try {
       // Which executor owns this plan is decided BEFORE approving, from the
       // pure resolver — calling `startPlan` blind would hand an `orchestrated`
@@ -191,8 +204,14 @@ export function PlanApprovalDock({
         // executing + its first step in progress and hands back that step's
         // turn text; `handlePlanTurnComplete` in the chat hook advances from
         // there, one visible turn per step.
-        const started = await getPlanRuntime().startPlan(plan.id)
+        const started = await getPlanRuntime().startPlan(
+          plan.id,
+          chatPlanStepHooks(plan.id, sessionId)
+        )
         if (started?.strategy === "in_session" && started.userMessage) {
+          if (started.stepId && started.generationId) {
+            inSessionStep = { stepId: started.stepId, generationId: started.generationId }
+          }
           continuation = { prompt: started.userMessage, mode }
           await onResume(continuation.prompt, mode)
           return
@@ -203,8 +222,21 @@ export function PlanApprovalDock({
       continuation = { prompt: buildPlanApprovedPrompt(plan), mode }
       await onResume(continuation.prompt, mode)
       // Leave `busy` true — approvePlan flips the status so this dock unmounts.
-    } catch {
-      if (continuation) await rememberResumeFailure(plan.id, continuation)
+    } catch (error) {
+      if (inSessionStep) {
+        // The step is already `in_progress`: record why its turn never went
+        // out, which halts the plan on it with the tracker's failure card.
+        await getPlanRuntime()
+          .failInSessionStep(plan.id, {
+            stepId: inSessionStep.stepId,
+            cause: "dispatch_failed",
+            detail: error instanceof Error ? error.message : String(error),
+            capturedGenerationId: inSessionStep.generationId,
+          })
+          .catch(() => undefined)
+      } else if (continuation) {
+        await rememberResumeFailure(plan.id, continuation)
+      }
       setBusyPlanId(null)
     }
   }
@@ -221,11 +253,15 @@ export function PlanApprovalDock({
     }
   }
 
-  const handleDiscard = async (feedback?: string) => {
+  const handleReject = async (reason?: string) => {
     if (busy) return
     setBusyPlanId(plan.id)
     try {
-      await getPlanRuntime().rejectPlan(plan.id, feedback)
+      // Terminal `rejected`: the row leaves the open-plan slot and this dock
+      // unmounts on the live query.
+      await getPlanRuntime().rejectPlan(plan.id, reason)
+    } catch {
+      toast.error(t("approval.rejectFailed"))
     } finally {
       setBusyPlanId(null)
     }
@@ -285,12 +321,25 @@ export function PlanApprovalDock({
         disabled={busy}
         onApprove={handleApprove}
         onKeepPlanning={handleKeepPlanning}
-        onDiscard={handleDiscard}
+        onReject={handleReject}
+        onOpenEditor={() => setEditorSession(Date.now())}
         onRefine={handleRefine}
         onEdit={handleEdit}
         interactiveView={appSettings?.planSettings?.interactiveHtmlView === true}
         interactiveStyle={resolvePlanHtmlStyle(appSettings?.planSettings?.interactiveHtmlStyle)}
       />
+      {editorSession !== null && (
+        <PlanComposerDialog
+          key={editorSession}
+          sessionId={sessionId}
+          {...(plan.characterId ? { characterId: plan.characterId } : {})}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditorSession(null)
+          }}
+          editPlan={plan}
+        />
+      )}
     </div>
   )
 }

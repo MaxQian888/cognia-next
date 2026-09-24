@@ -55,8 +55,8 @@ import { createLogger } from "@cognia/logging"
 import { TaskComments } from "./task-comments"
 import { TaskBoard } from "./board/task-board"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { gatherTeamTwins } from "@/lib/ai/agent/team/twin-context"
-import { rankAssigneesForTask } from "@/lib/ai/agent/team/twin-expertise-hints"
+import { gatherTeamTwins } from "@/lib/ai/agent/team/teammate/twin-context"
+import { rankAssigneesForTask } from "@/lib/ai/agent/team/teammate/twin-expertise-hints"
 import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
 
 const log = createLogger("agentTeams.tasks")

@@ -9,8 +9,11 @@ import type {
   CreateExternalAgentInput,
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
-import { createAgentFromPreset, type ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
-import { normalizeExternalAgentConfigInput } from "@/lib/ai/agent/external/config-normalizer"
+import {
+  createAgentFromPreset,
+  type ExternalAgentPresetId,
+} from "@/lib/ai/agent/external/config/presets"
+import { normalizeExternalAgentConfigInput } from "@/lib/ai/agent/external/config/config-normalizer"
 import {
   createExternalAgentBenchmarkBaseline,
   normalizeExternalAgentValiditySnapshot,

@@ -31,6 +31,26 @@ export type ExecutionLegKind =
  */
 export type ExecutionResourceClass = "ai-turn"
 
+/**
+ * Why a lease request would wait instead of being admitted right now
+ * ({@link import("./broker").ExecutionBroker.admissionBlocker}).
+ *
+ * `slot` names the leg holding the working tree — the thing a waiting user
+ * needs to hear about — while `capacity` and `provider` are shared ceilings
+ * with no single holder.
+ */
+export type ExecutionAdmissionBlocker =
+  | {
+      reason: "slot"
+      slotKey: string
+      /** The leg holding the tree; null only if it vanished mid-read. */
+      holder: ExecutionLegSnapshot | null
+      /** Legs already waiting for the same tree. */
+      ahead: number
+    }
+  | { reason: "capacity"; limit: number; ahead: number }
+  | { reason: "provider"; providerId: string; limit: number }
+
 /** Lifecycle phase of a registered leg. */
 export type ExecutionLegState = "queued" | "running"
 

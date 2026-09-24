@@ -26,7 +26,7 @@
  */
 
 import { describeExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
-import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config/config-normalizer"
 import type { RunEnvironmentRequest } from "@/lib/sandbox/run-environment"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 

@@ -252,7 +252,7 @@ export function AgentRuntimeSelector({
                 type="button"
                 disabled={disabled}
                 className={cn(
-                  "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
+                  "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground outline-none transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
                   className,
                   // Glyph-only on the default runtime: square it up so it reads
                   // as a peer of the other icon-sized status controls rather
@@ -267,7 +267,10 @@ export function AgentRuntimeSelector({
                 <Icon className="size-3.5 shrink-0" />
                 {namesAChoice ? (
                   <>
-                    <span className="min-w-0 truncate font-medium">{label}</span>
+                    {/* Same weight as every other chip on the row: a bold runtime
+                        name read as the row's heading rather than as one of its
+                        answers. */}
+                    <span className="min-w-0 truncate">{label}</span>
                     <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
                   </>
                 ) : null}

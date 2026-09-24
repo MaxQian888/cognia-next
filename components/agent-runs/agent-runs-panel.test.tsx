@@ -11,6 +11,8 @@ import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 // Namespace-aware so the status pill (which scopes to `agentRuns.status`)
 // renders a distinguishable label instead of colliding with the filter chips.
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: () => "5 minutes ago" }),
+  useNow: () => new Date(),
   useTranslations: (namespace?: string) => (key: string, values?: Record<string, unknown>) => {
     const full = namespace === "agentRuns.status" ? `status.${key}` : key
     return values ? `${full}:${JSON.stringify(values)}` : full
@@ -450,4 +452,11 @@ describe("the origin filter", () => {
     const list = screen.getByRole("list", { name: "title" })
     expect(within(list).getByText(/originActor/)).toBeInTheDocument()
   })
+})
+
+it("renders past run starts as elapsed time instead of overdue deadlines", () => {
+  cockpit.rows = [row({ startedAt: Date.now() - 300_000 })]
+  render(<AgentRunsPanel onSelect={jest.fn()} />)
+  expect(screen.getByText("5 minutes ago")).toBeInTheDocument()
+  expect(screen.queryByText("Overdue")).not.toBeInTheDocument()
 })

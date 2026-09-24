@@ -47,8 +47,8 @@ const catalogEntries = new Map<string, ExternalAgentRuntimeCatalogEntry>([
   [systemEntry.runtimeId, systemEntry],
 ])
 
-jest.mock("../runtime-catalog", () => {
-  const actual = jest.requireActual("../runtime-catalog")
+jest.mock("../config/install-catalog", () => {
+  const actual = jest.requireActual("../config/install-catalog")
   return {
     ...actual,
     findRuntimeById: (id: string) => catalogEntries.get(id),

@@ -30,7 +30,7 @@ import { listMcpServerPresetIds } from "@/lib/plugin/registries/mcp-server-prese
 import { listNativeAnthropicToolIds } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { listCharacterPackIds } from "@/lib/plugin/registries/character-pack-registry"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
-import { getAvailablePresets } from "@/lib/ai/agent/external/presets"
+import { getAvailablePresets } from "@/lib/ai/agent/external/config/presets"
 import { listSharedMemoryAdapterIds } from "@/lib/plugin/registries/shared-memory-adapter-registry"
 import { listSkills } from "@/lib/db/skills"
 import { listMcpServers } from "@/lib/db/mcp-servers"

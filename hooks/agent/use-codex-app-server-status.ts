@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { CodexAppServerStatus } from "@/lib/ai/agent/external/codex-app-server-client"
+import type { CodexAppServerStatus } from "@/lib/ai/agent/external/runtimes/codex/codex-app-server-client"
 
 const EMPTY_STATUS: CodexAppServerStatus = { mcpServers: [], skills: [] }
 

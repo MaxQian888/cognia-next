@@ -9,8 +9,10 @@ import {
   PlanComposerDialog,
   buildStepParams,
   parseStepLines,
+  stepDraftFromStep,
 } from "./plan-composer-dialog"
-import type { CreatePlanInput } from "@/types/agent/plan"
+import type { AgentPlan, CreatePlanInput } from "@/types/agent/plan"
+import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -23,6 +25,22 @@ const createPlan = jest.fn()
 jest.mock("@/lib/agent/plan/runtime", () => ({
   getPlanRuntime: () => ({ createPlan: (...a: unknown[]) => createPlan(...a) }),
 }))
+
+const applyPlanComposerEdit = jest.fn()
+jest.mock("@/lib/agent/plan/draft-edit", () => {
+  class PlanEditValidationError extends Error {
+    constructor(
+      readonly reason: string,
+      readonly stepIndex?: number
+    ) {
+      super(reason)
+    }
+  }
+  return {
+    PlanEditValidationError,
+    applyPlanComposerEdit: (...a: unknown[]) => applyPlanComposerEdit(...a),
+  }
+})
 
 const loadPlanConfigDefaults = jest.fn()
 jest.mock("@/lib/agent/plan/plan-settings", () => ({
@@ -290,5 +308,137 @@ describe("buildStepParams — editor_review", () => {
         prompt: "Does this look right?",
       },
     })
+  })
+})
+
+describe("stepDraftFromStep", () => {
+  it("round-trips every kind's params back into editable fields", () => {
+    expect(stepDraftFromStep({ kind: "agent_turn" })).toEqual({ kind: "agent_turn" })
+    expect(
+      stepDraftFromStep({
+        kind: "teammate_dispatch",
+        params: { kind: "teammate_dispatch", teamId: "t", spawnPrompt: "go" },
+      })
+    ).toEqual({ kind: "teammate_dispatch", teamId: "t", prompt: "go" })
+    expect(
+      stepDraftFromStep({
+        kind: "tool_call",
+        params: { kind: "tool_call", toolName: "x", input: { a: 1 } },
+      })
+    ).toEqual({ kind: "tool_call", toolName: "x", toolInput: '{"a":1}' })
+    expect(
+      stepDraftFromStep({
+        kind: "mcp_tool_call",
+        params: { kind: "mcp_tool_call", serverId: "s", toolName: "t" },
+      })
+    ).toEqual({ kind: "mcp_tool_call", serverId: "s", toolName: "t" })
+    expect(
+      stepDraftFromStep({ kind: "sub_workflow", params: { kind: "sub_workflow", workflowId: "w" } })
+    ).toEqual({ kind: "sub_workflow", workflowId: "w" })
+    expect(
+      stepDraftFromStep({
+        kind: "editor_review",
+        params: { kind: "editor_review", path: "a.ts", content: "", title: "T" },
+      })
+    ).toEqual({ kind: "editor_review", path: "a.ts", content: "", title: "T" })
+    // A draft rebuilt from its own step validates to the same params.
+    const draft = stepDraftFromStep({
+      kind: "approval_gate",
+      params: { kind: "approval_gate", prompt: "ok?" },
+    })
+    expect(buildStepParams(draft)).toEqual({ params: { kind: "approval_gate", prompt: "ok?" } })
+  })
+})
+
+describe("PlanComposerDialog — edit mode", () => {
+  const editPlan: AgentPlan = {
+    id: "p_edit",
+    sessionId: "ses",
+    title: "Existing plan",
+    source: "manual",
+    executionMode: "auto",
+    status: "awaiting_approval",
+    steps: [
+      {
+        id: "b",
+        title: "second",
+        kind: "agent_turn",
+        status: "pending",
+        order: 1,
+        dependencies: ["a"],
+      },
+      {
+        id: "a",
+        title: "first",
+        kind: "agent_turn",
+        status: "pending",
+        order: 0,
+        dependencies: [],
+      },
+    ],
+    totalSteps: 2,
+    completedSteps: 0,
+    config: DEFAULT_PLAN_CONFIG,
+    refinementCount: 0,
+    generationId: "g",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  it("opens pre-filled with the plan's title and ordered steps", () => {
+    render(<PlanComposerDialog sessionId="ses" open onOpenChange={jest.fn()} editPlan={editPlan} />)
+    expect(screen.getByText("editTitle")).toBeInTheDocument()
+    expect(screen.getByLabelText("titleLabel")).toHaveValue("Existing plan")
+    expect(screen.getByLabelText("stepsLabel")).toHaveValue("first\nsecond")
+    expect(screen.queryByTestId("plan-composer-create")).not.toBeInTheDocument()
+  })
+
+  it("saves the amended plan in place and closes", async () => {
+    applyPlanComposerEdit.mockResolvedValue(null)
+    const onOpenChange = jest.fn()
+    const onSaved = jest.fn()
+    render(
+      <PlanComposerDialog
+        sessionId="ses"
+        open
+        onOpenChange={onOpenChange}
+        editPlan={editPlan}
+        onSaved={onSaved}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("stepsLabel"), {
+      target: { value: "first\nsecond, reworded\nthird" },
+    })
+    await userEvent.click(screen.getByTestId("plan-composer-save"))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("p_edit"))
+    expect(applyPlanComposerEdit).toHaveBeenCalledWith(editPlan, {
+      title: "Existing plan",
+      steps: [
+        { title: "first", kind: "agent_turn" },
+        { title: "second, reworded", kind: "agent_turn" },
+        { title: "third", kind: "agent_turn" },
+      ],
+    })
+    expect(createPlan).not.toHaveBeenCalled()
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("keeps the dialog open with a toast when re-validation refuses the edit", async () => {
+    const { PlanEditValidationError } = jest.requireMock("@/lib/agent/plan/draft-edit")
+    applyPlanComposerEdit.mockRejectedValue(new PlanEditValidationError("invalid_step", 2))
+    const onOpenChange = jest.fn()
+    render(
+      <PlanComposerDialog sessionId="ses" open onOpenChange={onOpenChange} editPlan={editPlan} />
+    )
+    await userEvent.click(screen.getByTestId("plan-composer-save"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("invalidStep"))
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("reports a generic save failure", async () => {
+    applyPlanComposerEdit.mockRejectedValue(new Error("db down"))
+    render(<PlanComposerDialog sessionId="ses" open onOpenChange={jest.fn()} editPlan={editPlan} />)
+    await userEvent.click(screen.getByTestId("plan-composer-save"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("saveFailed"))
   })
 })

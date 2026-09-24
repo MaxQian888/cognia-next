@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
 
 // Control the orchestrator: publishEntry succeeds or throws a PII error.
 const mockPublishEntry = jest.fn()
-jest.mock("@/lib/ai/agent/team/shared-memory-orchestrator", () => {
+jest.mock("@/lib/ai/agent/team/memory/shared-memory-orchestrator", () => {
   class SharedMemoryPiiError extends Error {
     constructor(public readonly key: string) {
       super("pii")
@@ -29,7 +29,7 @@ jest.mock("@/lib/ai/agent/team/shared-memory-orchestrator", () => {
 jest.mock("./settings-save-indicator", () => ({ markSettingsSaved: jest.fn() }))
 
 import { MemoryComposer } from "./memory-composer"
-import { SharedMemoryPiiError } from "@/lib/ai/agent/team/shared-memory-orchestrator"
+import { SharedMemoryPiiError } from "@/lib/ai/agent/team/memory/shared-memory-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 

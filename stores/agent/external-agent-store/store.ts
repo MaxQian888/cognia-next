@@ -7,7 +7,7 @@ import type { ExternalAgentStore } from "./types"
 import {
   getUnsupportedProtocolReason,
   isSupportedExternalAgentProtocol,
-} from "@/lib/ai/agent/external/config-normalizer"
+} from "@/lib/ai/agent/external/config/config-normalizer"
 import {
   createExternalAgentBenchmarkBaseline,
   normalizeExternalAgentValiditySnapshot,

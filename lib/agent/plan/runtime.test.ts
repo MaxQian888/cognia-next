@@ -50,7 +50,15 @@ jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
   runWorkflow: (...a: Parameters<typeof runWorkflowMock>) => runWorkflowMock(...a),
 }))
 
+// The watchdog is exercised in its own suite (it needs the chat store); here
+// only the runtime's arm / disarm obligations are pinned.
+jest.mock("./step-watchdog", () => ({
+  armPlanStepWatch: jest.fn().mockResolvedValue(undefined),
+  disarmPlanStepWatch: jest.fn(),
+}))
+
 const isTauriMock = detect.isTauri as jest.Mock
+const disarmMock = jest.requireMock("./step-watchdog").disarmPlanStepWatch as jest.Mock
 
 // 30s: the first cold Dexie open (full schema migration chain) can exceed the
 // 5s default on slower disks — same bump as the other cold-Dexie suites.
@@ -133,14 +141,42 @@ describe("lifecycle transitions", () => {
     expect(events.map((e) => e.kind)).toContain("approved")
   })
 
-  it("rejectPlan cancels and records feedback", async () => {
+  it("rejectPlan lands the terminal rejected status and records the reason", async () => {
     const rt = getPlanRuntime()
     const plan = await rt.createPlan(createInput())
-    const rejected = await rt.rejectPlan(plan.id, "too vague")
-    expect(rejected?.status).toBe("cancelled")
+    const rejected = await rt.rejectPlan(plan.id, "  too vague  ")
+    // Its own status — not a cancel wearing a rejection event.
+    expect(rejected?.status).toBe("rejected")
+    expect(rejected?.endedAt).toBeGreaterThan(0)
     const events = await listPlanEvents(plan.id)
     const rej = events.find((e) => e.kind === "rejected")
-    expect(rej?.payload).toMatchObject({ kind: "rejected", feedback: "too vague" })
+    expect(rej?.payload).toEqual({ kind: "rejected", feedback: "too vague" })
+    expect(events.map((e) => e.kind)).not.toContain("cancelled")
+    // Terminal: it no longer holds the session's open-plan slot.
+    expect(await rt.getOpenPlanForSession("ses_a")).toBeUndefined()
+  })
+
+  it("rejectPlan omits a blank reason", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput())
+    await rt.rejectPlan(plan.id, "   ")
+    const rej = (await listPlanEvents(plan.id)).find((e) => e.kind === "rejected")
+    expect(rej?.payload).toEqual({ kind: "rejected" })
+  })
+
+  it("rejectPlan refuses a plan that already started (that is a cancel)", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await rt.startPlan(plan.id)
+    expect((await rt.rejectPlan(plan.id, "nope"))?.status).toBe("executing")
+    await rt.pausePlan(plan.id)
+    expect((await rt.rejectPlan(plan.id))?.status).toBe("paused")
+    expect((await listPlanEvents(plan.id)).map((e) => e.kind)).not.toContain("rejected")
+    // A rejected plan is terminal for every other transition too.
+    const other = await rt.createPlan(createInput({ sessionId: "ses_b" }))
+    await rt.rejectPlan(other.id)
+    expect((await rt.approvePlan(other.id))?.status).toBe("rejected")
+    expect((await rt.cancelPlan(other.id))?.status).toBe("rejected")
   })
 
   it("keepPlanning defers awaiting_approval → draft, keeps the plan, logs deferred", async () => {
@@ -432,6 +468,8 @@ describe("startPlan (in-session)", () => {
 
     expect(started).toMatchObject({ strategy: "in_session", status: "executing" })
     expect(started?.userMessage).toContain("Step 1 of 2")
+    // The generation the dispatch belongs to — a refused send reports back with it.
+    expect(started?.generationId).toBe((await rt.getPlan(plan.id))?.generationId)
     const row = await rt.getPlan(plan.id)
     expect(row?.status).toBe("executing")
     expect(row?.currentStepId).toBe(started?.stepId)
@@ -721,5 +759,247 @@ describe("chat resume failure recovery", () => {
       })
     ).toBeNull()
     await expect(runtime.setChatResumeFailure("missing", null)).resolves.toBeUndefined()
+  })
+})
+
+describe("failInSessionStep (in-session step failure)", () => {
+  async function running() {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const started = await rt.startPlan(plan.id)
+    return { rt, plan, started: started! }
+  }
+
+  it("fails the step, halts the plan paused on it, and writes the trail", async () => {
+    const { rt, plan, started } = await running()
+    disarmMock.mockClear()
+    const halted = await rt.failInSessionStep(plan.id, {
+      stepId: started.stepId,
+      cause: "turn_failed",
+      detail: "Pi process exited before the Cognia extension was ready",
+      capturedGenerationId: started.generationId,
+    })
+
+    expect(halted?.status).toBe("paused")
+    const step = halted?.steps.find((s) => s.id === started.stepId)
+    expect(step?.status).toBe("failed")
+    expect(step?.error).toBe("Pi process exited before the Cognia extension was ready")
+    expect(halted?.stepHalt).toMatchObject({
+      stepId: started.stepId,
+      cause: "turn_failed",
+      detail: "Pi process exited before the Cognia extension was ready",
+    })
+    expect(halted).not.toHaveProperty("turnDispatch")
+    // The generation rotated, so the dead turn's late completion is stale.
+    expect(halted?.generationId).not.toBe(started.generationId)
+    expect(disarmMock).toHaveBeenCalledWith(plan.id)
+
+    const events = await listPlanEvents(plan.id)
+    const failed = events.find((e) => e.kind === "step_failed")
+    expect(failed?.payload).toMatchObject({
+      kind: "step_failed",
+      stepId: started.stepId,
+      error: "Pi process exited before the Cognia extension was ready",
+      attempt: 1,
+    })
+    const exit = events.find((e) => e.kind === "exit")
+    expect(exit?.payload).toMatchObject({ kind: "exit", status: "paused" })
+    expect((exit?.payload as { reason: string }).reason).toContain("(turn_failed)")
+  })
+
+  it("drops a report whose generation is stale (the user already decided)", async () => {
+    const { rt, plan, started } = await running()
+    const out = await rt.failInSessionStep(plan.id, {
+      stepId: started.stepId,
+      cause: "silent",
+      detail: "x",
+      capturedGenerationId: "an-older-generation",
+    })
+    expect(out?.status).toBe("executing")
+    expect(out?.stepHalt).toBeUndefined()
+  })
+
+  it("drops a report about a step that is no longer in progress", async () => {
+    const { rt, plan, started } = await running()
+    await rt.setStepStatus(plan.id, started.stepId!, "completed")
+    const out = await rt.failInSessionStep(plan.id, {
+      stepId: started.stepId,
+      cause: "unrecorded",
+      detail: "x",
+    })
+    expect(out?.status).toBe("executing")
+  })
+
+  it("records only one failure when several reporters race", async () => {
+    const { rt, plan, started } = await running()
+    const input = {
+      stepId: started.stepId,
+      cause: "turn_failed" as const,
+      detail: "boom",
+      capturedGenerationId: started.generationId,
+    }
+    await Promise.all([rt.failInSessionStep(plan.id, input), rt.failInSessionStep(plan.id, input)])
+    const failures = (await listPlanEvents(plan.id)).filter((e) => e.kind === "step_failed")
+    expect(failures).toHaveLength(1)
+  })
+
+  it("halts between steps when nothing is in progress", async () => {
+    const { rt, plan, started } = await running()
+    await rt.setStepStatus(plan.id, started.stepId!, "completed")
+    const out = await rt.failInSessionStep(plan.id, { cause: "interrupted", detail: "restart" })
+    expect(out?.status).toBe("paused")
+    expect(out?.stepHalt).toMatchObject({ cause: "interrupted", detail: "restart" })
+    expect(out?.stepHalt?.stepId).toBeUndefined()
+  })
+
+  it("leaves orchestrated plans and non-executing plans alone", async () => {
+    const rt = getPlanRuntime()
+    const orchestrated = await rt.createPlan(
+      createInput({ executionMode: "orchestrated", config: { requireApproval: false } })
+    )
+    await getDb().agentPlans.update(orchestrated.id, { status: "executing" })
+    expect(
+      (await rt.failInSessionStep(orchestrated.id, { cause: "silent", detail: "x" }))?.status
+    ).toBe("executing")
+    const pending = await rt.createPlan(createInput({ sessionId: "ses_b" }))
+    expect((await rt.failInSessionStep(pending.id, { cause: "silent", detail: "x" }))?.status).toBe(
+      "awaiting_approval"
+    )
+    expect(await rt.failInSessionStep("ghost", { cause: "silent", detail: "x" })).toBeNull()
+  })
+})
+
+describe("continueInSessionPlan (retry / skip / complete / resume)", () => {
+  async function halted() {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const started = await rt.startPlan(plan.id)
+    await rt.failInSessionStep(plan.id, {
+      stepId: started!.stepId,
+      cause: "turn_failed",
+      detail: "boom",
+      capturedGenerationId: started!.generationId,
+    })
+    return { rt, plan, failedStepId: started!.stepId! }
+  }
+
+  it("retry re-runs the failed step as attempt 2 and hands back its turn", async () => {
+    const { rt, plan, failedStepId } = await halted()
+    const out = await rt.continueInSessionPlan(plan.id, "retry")
+    expect(out).toMatchObject({ kind: "continue", stepId: failedStepId })
+    if (out.kind !== "continue") throw new Error("expected continue")
+    expect(out.userMessage).toContain("Step 1 of 2")
+
+    const row = await rt.getPlan(plan.id)
+    expect(row?.status).toBe("executing")
+    expect(row?.generationId).toBe(out.generationId)
+    expect(row).not.toHaveProperty("stepHalt")
+    const step = row?.steps.find((s) => s.id === failedStepId)
+    expect(step?.status).toBe("in_progress")
+    expect(step?.attempts).toBe(2)
+    expect(step?.error).toBeUndefined()
+    expect(row?.turnDispatch?.stepId).toBe(failedStepId)
+
+    const kinds = (await listPlanEvents(plan.id, 0)).map((e) => e.kind).reverse()
+    expect(kinds.slice(-2)).toEqual(["resumed", "step_started"])
+    const restarted = (await listPlanEvents(plan.id)).find((e) => e.kind === "step_started")
+    expect(restarted?.payload).toMatchObject({ attempt: 2 })
+  })
+
+  it("skip takes the step out of the chain and starts the next one", async () => {
+    const { rt, plan, failedStepId } = await halted()
+    const out = await rt.continueInSessionPlan(plan.id, "skip")
+    expect(out.kind).toBe("continue")
+    const row = await rt.getPlan(plan.id)
+    const skipped = row?.steps.find((s) => s.id === failedStepId)
+    expect(skipped?.status).toBe("skipped")
+    const next = row?.steps.find((s) => s.id !== failedStepId)
+    expect(next?.status).toBe("in_progress")
+    // Re-pointed at the skipped step's (empty) prerequisites.
+    expect(next?.dependencies).toEqual([])
+    const skippedEvent = (await listPlanEvents(plan.id)).find((e) => e.kind === "step_skipped")
+    expect(skippedEvent?.payload).toMatchObject({ kind: "step_skipped", stepId: failedStepId })
+  })
+
+  it("complete marks the step done with the given result and moves on", async () => {
+    const { rt, plan, failedStepId } = await halted()
+    const out = await rt.continueInSessionPlan(plan.id, "complete", { result: "  done by hand " })
+    expect(out.kind).toBe("continue")
+    const row = await rt.getPlan(plan.id)
+    const done = row?.steps.find((s) => s.id === failedStepId)
+    expect(done?.status).toBe("completed")
+    expect(done?.result).toBe("done by hand")
+    expect(row?.completedSteps).toBe(1)
+  })
+
+  it("finishes the plan when the skipped step was the last one", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "completed")
+    const started = await rt.startPlan(plan.id)
+    await rt.failInSessionStep(plan.id, { cause: "silent", detail: "x" })
+    const out = await rt.continueInSessionPlan(plan.id, "skip")
+    expect(out).toMatchObject({ kind: "exit", status: "completed" })
+    expect((await rt.getPlan(plan.id))?.status).toBe("completed")
+    expect(started?.stepId).toBe(plan.steps[1].id)
+  })
+
+  it("resume re-dispatches the step a user pause interrupted", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const started = await rt.startPlan(plan.id)
+    await rt.pausePlan(plan.id)
+    expect(await rt.getPlan(plan.id)).not.toHaveProperty("turnDispatch")
+    const out = await rt.continueInSessionPlan(plan.id, "resume")
+    expect(out).toMatchObject({ kind: "continue", stepId: started?.stepId })
+  })
+
+  it("resumePlan drives an in-session plan through the same path", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    const started = await rt.startPlan(plan.id)
+    await rt.pausePlan(plan.id)
+    const resumed = await rt.resumePlan(plan.id)
+    expect(resumed?.status).toBe("executing")
+    expect(resumed?.turnDispatch?.stepId).toBe(started?.stepId)
+    expect(resumed?.steps.find((s) => s.id === started?.stepId)?.attempts).toBe(2)
+  })
+
+  it("is a no-op outside a paused in-session plan", async () => {
+    const rt = getPlanRuntime()
+    expect(await rt.continueInSessionPlan("ghost", "retry")).toEqual({
+      kind: "noop",
+      reason: "plan not found",
+    })
+    const plan = await rt.createPlan(createInput())
+    expect(await rt.continueInSessionPlan(plan.id, "retry")).toEqual({
+      kind: "noop",
+      reason: "plan status is awaiting_approval",
+    })
+    const orchestrated = await rt.createPlan(
+      createInput({ sessionId: "ses_b", executionMode: "orchestrated" })
+    )
+    await getDb().agentPlans.update(orchestrated.id, { status: "paused" })
+    expect(await rt.continueInSessionPlan(orchestrated.id, "skip")).toEqual({
+      kind: "noop",
+      reason: "the plan runs on the orchestrator",
+    })
+  })
+
+  it("refuses to skip / complete when nothing is halted or running", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await getDb().agentPlans.update(plan.id, { status: "paused" })
+    expect(await rt.continueInSessionPlan(plan.id, "skip")).toEqual({
+      kind: "noop",
+      reason: "no halted step to act on",
+    })
+  })
+
+  it("cancelling a halted plan keeps the halt as history", async () => {
+    const { rt, plan } = await halted()
+    const cancelled = await rt.cancelPlan(plan.id)
+    expect(cancelled?.status).toBe("cancelled")
+    expect(cancelled?.stepHalt?.cause).toBe("turn_failed")
   })
 })

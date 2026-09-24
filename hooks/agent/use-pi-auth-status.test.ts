@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import type { PiAuthVerdict } from "@/lib/ai/agent/external/pi-auth"
+import type { PiAuthVerdict } from "@/lib/ai/agent/external/runtimes/pi/pi-auth"
 
 import { __resetPiAuthStatusForTests, usePiAuthStatus } from "./use-pi-auth-status"
 

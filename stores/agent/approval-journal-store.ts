@@ -6,8 +6,11 @@
  * write-throughs each approval (record / settle / interrupt) to localStorage,
  * following the exact `pending-gates-store` pattern: the underlying sidecar
  * waiter dies with the page, so rehydration marks every unsettled entry
- * `interrupted` (info-only), and a one-shot boot notice tells the user how many
- * were interrupted.
+ * `interrupted` (info-only), and a boot notice tells the user how many were
+ * interrupted. Each entry is announced ONCE: the notice stamps `notifiedAt`,
+ * which persists, so a remount (account lock/unlock, a gate re-mounting the
+ * provider tree) or a revisit does not toast the same entries again. The
+ * entries themselves stay listed in the attention panel until settled.
  *
  * Small, transient, no queries → zustand persist (localStorage), not Dexie:
  * a Dexie table would demand a schema version + boot reconciliation for what is
@@ -34,6 +37,11 @@ export interface PersistedApproval {
   requestedAt: number
   status: PersistedApprovalStatus
   interruptReason?: string
+  /**
+   * Epoch ms the boot notice announced this interrupted entry. Set once and
+   * persisted; an entry carrying it is never announced again, but stays listed.
+   */
+  notifiedAt?: number
 }
 
 interface ApprovalJournalState {
@@ -43,6 +51,8 @@ interface ApprovalJournalState {
   interrupt(requestId: string, reason?: string): void
   dismiss(requestId: string): void
   clearSettled(): void
+  /** Stamp `notifiedAt` on these entries (those not already stamped). */
+  markNotified(requestIds: readonly string[], at: number): void
 }
 
 /** FIFO cap — approvals are transient; never let the journal grow unbounded. */
@@ -56,6 +66,23 @@ const MAX_ENTRIES = 100
 export function markUnsettledInterrupted(entries: PersistedApproval[]): PersistedApproval[] {
   return entries.map((e) =>
     e.status === "interrupted" ? e : { ...e, status: "interrupted" as const }
+  )
+}
+
+/** Interrupted entries the boot notice has not announced yet. Pure. */
+export function unannouncedInterrupted(entries: readonly PersistedApproval[]): PersistedApproval[] {
+  return entries.filter((e) => e.status === "interrupted" && e.notifiedAt === undefined)
+}
+
+/** Stamp `notifiedAt` on the named entries, keeping an existing stamp. Pure. */
+export function stampNotified(
+  entries: readonly PersistedApproval[],
+  requestIds: readonly string[],
+  at: number
+): PersistedApproval[] {
+  const ids = new Set(requestIds)
+  return entries.map((e) =>
+    ids.has(e.requestId) && e.notifiedAt === undefined ? { ...e, notifiedAt: at } : e
   )
 }
 
@@ -93,6 +120,8 @@ export const useApprovalJournalStore = create<ApprovalJournalState>()(
         set((s) => ({ entries: s.entries.filter((e) => e.requestId !== requestId) })),
       clearSettled: () =>
         set((s) => ({ entries: s.entries.filter((e) => e.status !== "settled") })),
+      markNotified: (requestIds, at) =>
+        set((s) => ({ entries: stampNotified(s.entries, requestIds, at) })),
     }),
     {
       name: "cognia-approval-journal",

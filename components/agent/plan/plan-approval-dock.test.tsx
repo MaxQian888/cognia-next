@@ -29,6 +29,7 @@ const keepPlanning = jest.fn().mockResolvedValue(null)
 const updatePlanDraft = jest.fn().mockResolvedValue(null)
 const startPlan = jest.fn().mockResolvedValue(null)
 const setChatResumeFailure = jest.fn().mockResolvedValue(null)
+const failInSessionStep = jest.fn().mockResolvedValue(null)
 jest.mock("@/lib/agent/plan/runtime", () => ({
   readPlanChatResumeFailure: (plan: AgentPlan) => plan.metadata?.chatResumeFailure ?? null,
   getPlanRuntime: () => ({
@@ -39,7 +40,33 @@ jest.mock("@/lib/agent/plan/runtime", () => ({
     updatePlanDraft,
     startPlan,
     setChatResumeFailure,
+    failInSessionStep,
   }),
+}))
+
+// The driver module drags in Dexie and the hook bridge; only its hook-identity
+// helper is used here.
+jest.mock("@/lib/agent/plan/turn-driver", () => ({
+  chatPlanStepHooks: (planId: string, sessionId: string) => ({
+    hookContext: { agentKind: "plan-step", agentRef: planId, sessionId },
+  }),
+}))
+
+// The editor dialog has its own suite; the stub pins the props the dock hands it.
+jest.mock("./plan-composer-dialog", () => ({
+  PlanComposerDialog: ({
+    editPlan,
+    onOpenChange,
+  }: {
+    editPlan?: { id: string }
+    onOpenChange: (open: boolean) => void
+  }) => (
+    <div data-testid="plan-editor-stub" data-edit={editPlan?.id}>
+      <button type="button" onClick={() => onOpenChange(false)}>
+        close-editor
+      </button>
+    </div>
+  ),
 }))
 
 const mockPlan = jest.fn()
@@ -214,10 +241,40 @@ describe("PlanApprovalDock", () => {
       const onResume = jest.fn()
       render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
       await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
-      await waitFor(() => expect(startPlan).toHaveBeenCalledWith("p1"))
+      await waitFor(() =>
+        expect(startPlan).toHaveBeenCalledWith("p1", {
+          hookContext: { agentKind: "plan-step", agentRef: "p1", sessionId: "ses" },
+        })
+      )
       expect(approvePlan).toHaveBeenCalledWith("p1")
       expect(onResume).toHaveBeenCalledWith("Step 1 of 2 …", "acceptEdits")
       expect(onResume).not.toHaveBeenCalledWith(PLAN_APPROVED_PROMPT, expect.anything())
+    })
+
+    it("halts the plan on the step when the chat refuses its turn", async () => {
+      mockPlan.mockReturnValue(linear())
+      startPlan.mockResolvedValue({
+        strategy: "in_session",
+        status: "executing",
+        stepId: "s0",
+        userMessage: "Step 1 of 2 …",
+        generationId: "gen-start",
+      })
+      const onResume = jest
+        .fn()
+        .mockRejectedValue(new Error("Pi process exited before the Cognia extension was ready"))
+      render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+      await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+      await waitFor(() =>
+        expect(failInSessionStep).toHaveBeenCalledWith("p1", {
+          stepId: "s0",
+          cause: "dispatch_failed",
+          detail: "Pi process exited before the Cognia extension was ready",
+          capturedGenerationId: "gen-start",
+        })
+      )
+      // The step failure owns the recovery UI now, not the resume-failure alert.
+      expect(setChatResumeFailure).not.toHaveBeenCalled()
     })
 
     it("falls back to the implementing turn when there is no runnable step", async () => {
@@ -272,13 +329,32 @@ describe("PlanApprovalDock", () => {
     expect(onSendPlanFeedback).toHaveBeenCalledWith("cover mobile too")
   })
 
-  it("discards (overflow) with feedback via rejectPlan", async () => {
+  it("rejects with the confirmed reason via rejectPlan", async () => {
     mockPlan.mockReturnValue(plan())
     render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
     await userEvent.type(screen.getByTestId("plan-approval-feedback"), "no")
-    await userEvent.click(screen.getByTestId("plan-approval-more"))
-    await userEvent.click(await screen.findByTestId("plan-approval-discard"))
+    await userEvent.click(screen.getByTestId("plan-approval-reject"))
+    await userEvent.click(screen.getByTestId("plan-approval-reject-confirm-button"))
     await waitFor(() => expect(rejectPlan).toHaveBeenCalledWith("p1", "no"))
+  })
+
+  it("toasts when the rejection cannot be written", async () => {
+    rejectPlan.mockRejectedValueOnce(new Error("db down"))
+    mockPlan.mockReturnValue(plan())
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    await userEvent.click(screen.getByTestId("plan-approval-reject"))
+    await userEvent.click(screen.getByTestId("plan-approval-reject-confirm-button"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("approval.rejectFailed"))
+  })
+
+  it("Edit opens the plan editor on this plan, and closing it unmounts it", async () => {
+    mockPlan.mockReturnValue(plan())
+    render(<PlanApprovalDock sessionId="ses" onResume={jest.fn()} />)
+    expect(screen.queryByTestId("plan-editor-stub")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId("plan-approval-open-editor"))
+    expect(screen.getByTestId("plan-editor-stub")).toHaveAttribute("data-edit", "p1")
+    await userEvent.click(screen.getByText("close-editor"))
+    expect(screen.queryByTestId("plan-editor-stub")).not.toBeInTheDocument()
   })
 
   it("saves an inline edit via updatePlanDraft with materialized linear steps", async () => {

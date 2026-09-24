@@ -30,17 +30,17 @@ import {
   agentModelSurfaceRevision,
   subscribeAgentModelSurface,
   type ModelSurfaceResult,
-} from "@/lib/ai/agent/external/model-surface-cache"
-import { mountHostConfigForCatalog } from "@/lib/ai/agent/external/host-config-mount"
+} from "@/lib/ai/agent/external/capability/model-surface-cache"
+import { mountHostConfigForCatalog } from "@/lib/ai/agent/external/config/host-config-mount"
 import {
   externalAgentProcessPlaneScope,
   subscribeExternalAgentProcessPlane,
-} from "@/lib/ai/agent/external/process-plane"
+} from "@/lib/ai/agent/external/capability/process-plane"
 import {
   EMPTY_THINKING_SURFACE,
   type ExternalAgentModelSurface,
   type ExternalAgentThinkingSurface,
-} from "@/lib/ai/agent/external/session-models"
+} from "@/lib/ai/agent/external/session/session-models"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 

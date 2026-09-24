@@ -13,7 +13,7 @@
 
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import type { RiskInput } from "@/lib/policy/risk/classify-risk"
-import { resolveTeammateCapabilities } from "./capability-resolver"
+import { resolveTeammateCapabilities } from "./teammate/capability-resolver"
 
 export interface BuildTeamRiskInputParams {
   team: AgentTeam
