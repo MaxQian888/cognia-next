@@ -395,6 +395,8 @@
     "scheduledDue": {
       "body": "「{taskName}」现在到点啦。",
       "bodyGeneric": "你有一个定时任务现在到点啦。",
+      "mute": "不再提醒",
+      "open": "打开",
       "title": "定时任务到点"
     }
   },

@@ -214,7 +214,9 @@
     "reviewChanges": "改动",
     "reviewDiff": "差异",
     "reviewEmpty": "请选择一个改动文件以审阅差异",
+    "reviewWithCount": "审阅，{count} 个已更改文件",
     "scopeLabel": "工作区范围",
+    "surfaceLabel": "工作区视图",
     "taskResources": {
       "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
       "adoptionPending": "建议变更 {lines} 行 · 等待审阅",

@@ -2253,7 +2253,8 @@
         "draft": "草稿",
         "executing": "执行中",
         "failed": "失败",
-        "paused": "已暂停"
+        "paused": "已暂停",
+        "rejected": "已拒绝"
       }
     }
   },

@@ -430,7 +430,8 @@
       "paused": "Paused",
       "completed": "Completed",
       "failed": "Failed",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "rejected": "Rejected"
     },
     "runStatus": {
       "queued": "Queued",

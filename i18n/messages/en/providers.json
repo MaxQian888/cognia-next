@@ -578,6 +578,17 @@
   "exportNow": "Export",
   "exportTitle": "Export Provider Settings",
   "exportWarning": "API keys will be included only if you check the option below. Handle with care.",
+  "externalRuntimes": {
+    "bannerDescription": "Your connected external agents already work with their own credentials. Configure a provider below only if you also want the built-in agent or direct model access.",
+    "bannerTitle": "Add a provider for Cognia’s built-in agent",
+    "description": "These agents sign in to their own model providers, so they can run turns even while the built-in providers below are unconfigured. Their credentials are managed in External Agents, not on this page.",
+    "listAria": "External agent runtimes",
+    "manage": "Manage in External Agents",
+    "runsOnHost": "Runs on the paired host",
+    "summary": "{working} of {total} ready",
+    "switchedOff": "External agents are switched off, so the {count} configured here will not run until you turn them back on.",
+    "title": "Agents with their own model access"
+  },
   "failed": "failed",
   "failedCount": "{count} failed",
   "features": "Features",

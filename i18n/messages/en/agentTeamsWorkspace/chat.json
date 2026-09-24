@@ -2,7 +2,6 @@
   "composer": {
     "attachmentsNotSupported": "Attachments aren't supported in team chat yet.",
     "imageNotSupported": "Image attachments aren't supported in team chat yet.",
-    "mentionTitle": "Mention an agent",
     "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
     "missingPrompt": "Add a message after the mention.",
     "noAgents": "No agents available — add a teammate first",

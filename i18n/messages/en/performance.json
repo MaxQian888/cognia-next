@@ -241,6 +241,18 @@
   "sourceHealth": {
     "error": "Latest error",
     "gaps": "Visible gaps",
+    "issue": {
+      "contended": {
+        "deviceBusy": "Another window on this device is already streaming host metrics. This page takes over automatically when that window closes or stops.",
+        "hostBusy": "The host is already serving its maximum number of live metric streams. Retrying automatically.",
+        "rateLimited": "The host asked to slow down. Retrying in a moment.",
+        "targetBusy": "The host is streaming metrics for a different target right now. Retrying automatically once it is free."
+      },
+      "detail": "Host said: {detail}",
+      "rejected": "The host refused the metrics stream ({code}).",
+      "renewFailed": "The metrics stream stopped renewing. It reconnects on its own if the host dropped it.",
+      "unreachable": "The selected host could not be reached for metrics."
+    },
     "kind": {
       "host": "Selected host",
       "renderer": "Local Renderer"

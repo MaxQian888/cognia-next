@@ -444,7 +444,7 @@
         "label": "Refine plan"
       },
       "reject": {
-        "description": "Cancel a pending plan and record rejection feedback.",
+        "description": "Reject a plan that has not started (terminal rejected status) and record the optional reason.",
         "label": "Reject plan"
       },
       "resume": {

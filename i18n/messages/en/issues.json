@@ -351,6 +351,17 @@
     "issueSummary": "Issues",
     "projectSummary": "Projects",
     "agentsWorking": "Agents working",
+    "agentsWorkingShow": "Show which agents are working",
+    "agentsWorkingHide": "Hide the list of working agents",
+    "agentsWorkingEmpty": "No agent is working in this workspace right now.",
+    "agentsWorkingMissingIssue": "Issue no longer available",
+    "agentsWorkingMeta": "{engine} · started {time}",
+    "agentsWorkingOpen": {
+      "session": "Open session",
+      "squad": "Open squad",
+      "agentBoard": "Open task board",
+      "issue": "Open issue"
+    },
     "resources": "Resources",
     "noProjects": "No projects in this workspace yet",
     "openIssues": "Open issues",

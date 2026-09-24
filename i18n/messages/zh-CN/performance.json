@@ -241,6 +241,18 @@
   "sourceHealth": {
     "error": "最近错误",
     "gaps": "可见缺口",
+    "issue": {
+      "contended": {
+        "deviceBusy": "本设备上的另一个窗口正在接收主机指标。该窗口关闭或停止后，此页面会自动接管。",
+        "hostBusy": "主机的实时指标流已达上限，正在自动重试。",
+        "rateLimited": "主机要求放慢请求频率，稍后自动重试。",
+        "targetBusy": "主机当前正在为另一个目标提供指标，空闲后会自动重试。"
+      },
+      "detail": "主机返回：{detail}",
+      "rejected": "主机拒绝了指标流（{code}）。",
+      "renewFailed": "指标流续期失败。如果主机已将其丢弃，会自动重新连接。",
+      "unreachable": "无法连接所选主机以获取指标。"
+    },
     "kind": {
       "host": "选中主机",
       "renderer": "本地 Renderer"

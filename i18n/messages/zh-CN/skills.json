@@ -55,6 +55,9 @@
     "export": "导出为 SKILL.md",
     "open": "打开",
     "selectAria": "选择 {name}",
+    "syncCurrent": "已同步",
+    "syncError": "同步失败",
+    "syncPending": "待同步",
     "usageCount": "已用 {count} 次"
   },
   "category": {

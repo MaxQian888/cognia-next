@@ -1,6 +1,7 @@
 {
   "artifacts": "Artifacts",
   "clearSearch": "Clear search",
+  "closeNav": "Close navigation",
   "deleteSession": "Delete this session",
   "directSessionTitle": "Chat with {name}",
   "exportConversation": "Export / share",
@@ -10,6 +11,7 @@
   "navSheetTitle": "Navigation",
   "newChat": "New chat",
   "noApiKey": "No API key",
+  "noApiKeyHint": "No API key — open session settings to add one",
   "openMembers": "Open team members",
   "openNav": "Open navigation",
   "search": "Search",

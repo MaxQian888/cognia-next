@@ -3,7 +3,9 @@
     "claude-code": "Claude Code",
     "codex": "Codex",
     "cognia": "Cognia",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "devin": "Devin",
+    "acp": "ACP"
   },
   "island": {
     "actionError": {

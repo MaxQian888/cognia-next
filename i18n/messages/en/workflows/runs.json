@@ -86,6 +86,7 @@
       "description": "This permanently deletes every run and its step logs for this workflow. This cannot be undone.",
       "title": "Clear all run history?"
     },
+    "clearSearchAndFilters": "Clear search and filters",
     "columns": {
       "duration": "Duration",
       "open": "Open",
@@ -115,6 +116,8 @@
     },
     "filteredEmpty": {
       "description": "Adjust or clear the filters to see runs.",
+      "queryDescription": "Your search and filters are hiding every run. Clear them to see the full history.",
+      "queryTitle": "No runs match “{query}”",
       "title": "No runs match"
     },
     "loadMore": "Load {count} more",

@@ -2,7 +2,6 @@
   "composer": {
     "attachmentsNotSupported": "团队对话暂不支持附件。",
     "imageNotSupported": "团队对话暂不支持图片附件。",
-    "mentionTitle": "提及一个智能体",
     "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
     "missingPrompt": "在 @ 提及之后请输入消息内容。",
     "noAgents": "暂无可用智能体 —— 请先添加队友",

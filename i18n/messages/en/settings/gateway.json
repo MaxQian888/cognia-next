@@ -152,6 +152,10 @@
       "serviceGroup": "Service"
     },
     "items": {
+      "custom": {
+        "description": "Raw JSON/YAML gateway config editor",
+        "label": "Custom"
+      },
       "exposure": {
         "description": "What /v1/models advertises",
         "label": "Model exposure"

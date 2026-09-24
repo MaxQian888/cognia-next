@@ -4,16 +4,16 @@
     "approveAcceptEdits": "Yes, auto-accept edits",
     "approveFullAuto": "Approve & run fully automated",
     "approveReviewEach": "Yes, review each edit",
-    "discard": "Discard plan",
     "edit": "Edit plan",
     "editCancel": "Cancel",
+    "editInEditor": "Edit",
     "editPlanHint": "Edit the plan as markdown…",
     "editPlanLabel": "Plan (markdown)",
     "editSave": "Save changes",
     "editStepsHint": "One step per line…",
     "editStepsLabel": "Steps (one per line)",
     "editTitleLabel": "Title",
-    "feedbackPlaceholder": "Optional feedback for keep-planning, discard, or refinement…",
+    "feedbackPlaceholder": "Optional feedback for keep-planning or refinement…",
     "interactive": {
       "addStep": "Add step",
       "deleteStep": "Delete step",
@@ -41,6 +41,14 @@
     "refineRepair": "Repair",
     "refineSimplify": "Simplify",
     "refineUnavailable": "Can't refine — no model is configured for background tasks.",
+    "reject": "Reject",
+    "rejectBack": "Back",
+    "rejectConfirm": "Reject plan",
+    "rejectConfirmBody": "The plan is closed and will not run. The reason is kept in the plan's history.",
+    "rejectConfirmTitle": "Reject this plan?",
+    "rejectFailed": "Could not reject the plan.",
+    "rejectReasonLabel": "Reason for rejecting (optional)",
+    "rejectReasonPlaceholder": "Why doesn't this plan work? (optional)",
     "resumeFailed": "The approved plan could not start. Resume to retry the same step.",
     "sourceLabel": "Source: {source}",
     "title": "Review plan"
@@ -82,7 +90,11 @@
     "stepsPlaceholder": "Audit the callers\nSwap the adapter\nUpdate the tests",
     "title": "Write a plan",
     "titleLabel": "Plan title",
-    "titlePlaceholder": "Migrate the auth module"
+    "titlePlaceholder": "Migrate the auth module",
+    "editTitle": "Edit plan",
+    "editDescription": "One step per line. Saving checks every step again before the plan can be approved.",
+    "save": "Save changes",
+    "saveFailed": "Could not save the plan."
   },
   "status": {
     "approved": "Approved",
@@ -92,7 +104,8 @@
     "draft": "Draft",
     "executing": "Executing",
     "failed": "Failed",
-    "paused": "Paused"
+    "paused": "Paused",
+    "rejected": "Rejected"
   },
   "tracker": {
     "cancel": "Cancel plan",
@@ -130,7 +143,8 @@
       "resumed": "resumed",
       "step_completed": "step done",
       "step_failed": "step failed",
-      "step_started": "step started"
+      "step_started": "step started",
+      "step_skipped": "step skipped"
     },
     "history": "Plan history",
     "moveDown": "Move step down",
@@ -147,5 +161,33 @@
     "stepsHeading": "Steps",
     "titleLabel": "Plan title",
     "toc": "Sections"
+  },
+  "stepFailure": {
+    "title": {
+      "dispatch_failed": "Step {index} could not start: {title}",
+      "turn_failed": "Step {index} failed: {title}",
+      "not_started": "Step {index} never started: {title}",
+      "silent": "Step {index} stalled: {title}",
+      "unrecorded": "Step {index} ended without finishing: {title}",
+      "interrupted": "Step {index} was interrupted: {title}"
+    },
+    "hint": {
+      "dispatch_failed": "The conversation refused to send this step's turn.",
+      "turn_failed": "The turn for this step ended with an error.",
+      "not_started": "No turn started for this step within {seconds} seconds.",
+      "silent": "The turn for this step produced no output for {minutes} minutes.",
+      "unrecorded": "The turn ended, but the step was never recorded as finished.",
+      "interrupted": "The app restarted while this step was running."
+    },
+    "betweenSteps": "The plan was interrupted between steps.",
+    "detailLabel": "Details",
+    "attempt": "Attempt {count}",
+    "noChat": "Open this conversation to retry, skip or finish the step.",
+    "retry": "Retry step",
+    "skip": "Skip step",
+    "markDone": "Mark done",
+    "resume": "Resume",
+    "cancel": "Cancel plan",
+    "actionFailed": "The plan could not continue."
   }
 }

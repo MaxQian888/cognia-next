@@ -1,4 +1,17 @@
 {
+  "builtIn": {
+    "badge": "Built-in",
+    "description": "Ready-made teams of characters that ship with Cognia. They appear as scopes in the chat sidebar and are read-only; duplicate one to get an editable copy.",
+    "duplicate": "Duplicate",
+    "duplicateAria": "Duplicate {name} into an editable team",
+    "duplicateFailed": "Couldn't duplicate {name}",
+    "duplicated": "Created {name}",
+    "editCopy": "Edit",
+    "manage": "Manage teams",
+    "open": "Open",
+    "openAria": "Open {name} conversations",
+    "title": "Built-in teams"
+  },
   "fleet": {
     "boardUnselectedDescription": "A board belongs to one Squad. Choose one from the list to see its tasks.",
     "boardUnselectedTitle": "Pick a Squad",
@@ -8,6 +21,7 @@
     "defaultLeadName": "Team Lead",
     "description": "What every Squad is doing right now.",
     "emptyDescription": "Make one here, then hand a conversation to it from the composer.",
+    "emptyDescriptionWithBuiltIns": "Make one here, then hand a conversation to it from the composer. {count, plural, =1 {The built-in team below is} other {The # built-in teams below are}} ready to use right now.",
     "emptyTitle": "No Squads yet",
     "filters": {
       "label": "Narrow the list",

@@ -241,6 +241,7 @@
   "details": "详情",
   "disableTask": "禁用",
   "duplicate": "复制",
+  "dueReminderMuted": "已静音",
   "duration": "时长",
   "edit": "编辑",
   "editSystemTask": "编辑系统任务",
@@ -467,6 +468,8 @@
     "toast": "应用内提示",
     "webhook": "Webhook"
   },
+  "notifyDueReminder": "到点时提醒我",
+  "notifyDueReminderEventHint": "到点提醒只在按时间触发的任务上生效，事件任务没有到点时间。",
   "notifyImConversation": "IM 会话",
   "notifyImConversationHint": "留空则使用设置里的全局运维频道。该会话需已开启主动推送才会收到消息。",
   "notifyImConversationPlaceholder": "例如 slack:ops-bot:C012AB3CD",
@@ -844,6 +847,7 @@
       "loading": "正在检查签名状态…",
       "manageSecret": "管理签名密钥",
       "title": "Webhook 签名",
+      "unavailable": "已配置签名密钥，但安全存储已锁定。解锁前，需要签名的 Webhook 投递都会失败。",
       "webOnly": "Web 模式下无法签名出站 Webhook —— 签名密钥存储在 OS keyring 中。"
     },
     "status": {

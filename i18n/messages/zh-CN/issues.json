@@ -351,6 +351,17 @@
     "issueSummary": "议题",
     "projectSummary": "项目",
     "agentsWorking": "工作中的 Agent",
+    "agentsWorkingShow": "查看正在工作的 Agent",
+    "agentsWorkingHide": "收起正在工作的 Agent 列表",
+    "agentsWorkingEmpty": "当前工作区没有正在工作的 Agent。",
+    "agentsWorkingMissingIssue": "议题已不存在",
+    "agentsWorkingMeta": "{engine} · {time}开始",
+    "agentsWorkingOpen": {
+      "session": "打开会话",
+      "squad": "打开小队",
+      "agentBoard": "打开任务板",
+      "issue": "打开议题"
+    },
     "resources": "资源",
     "noProjects": "当前工作区还没有项目",
     "openIssues": "未完成议题",

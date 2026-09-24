@@ -578,6 +578,17 @@
   "exportNow": "导出",
   "exportTitle": "导出服务商设置",
   "exportWarning": "API 密钥仅在勾选下方选项时才会包含，请谨慎处理。",
+  "externalRuntimes": {
+    "bannerDescription": "已连接的外部智能体已在使用各自的凭据工作。只有在还需要内置智能体或直接访问模型时，才需要在下方配置服务商。",
+    "bannerTitle": "为 Cognia 内置智能体添加服务商",
+    "description": "这些智能体会登录各自的模型服务商，因此即使下方的内置服务商尚未配置，它们也能正常运行。它们的凭据在“外部智能体”设置中管理，而不在此页面。",
+    "listAria": "外部智能体运行时",
+    "manage": "在“外部智能体”中管理",
+    "runsOnHost": "在已配对的主机上运行",
+    "summary": "{working}/{total} 已就绪",
+    "switchedOff": "外部智能体已关闭，此处配置的 {count} 个智能体在重新开启前不会运行。",
+    "title": "自带模型访问的智能体"
+  },
   "failed": "失败",
   "failedCount": "{count} 个失败",
   "features": "功能",

@@ -377,6 +377,14 @@
       "hint": "Running an external agent needs the desktop app — in the browser, use the built-in agent.",
       "label": "Needs the desktop app"
     },
+    "turnRouteUnavailable": {
+      "hint": "This message was addressed to a runtime that can't take it here — set that agent up, or send without the @ at the start.",
+      "label": "Can't send to that runtime"
+    },
+    "turnRouteWhileBusy": {
+      "hint": "A reply is still running. Wait for it to finish, then send the addressed message again.",
+      "label": "Wait for the current reply"
+    },
     "turnSilent": {
       "hint": "This turn has been running a while without reporting anything. A long tool call looks the same from here, so check the log before stopping it.",
       "label": "No response yet"
@@ -396,6 +404,10 @@
     "workspaceBusy": {
       "label": "Working copy in use",
       "hint": "Another turn is still using this conversation's working copy. Wait for it to finish, or send from the device that is running it."
+    },
+    "agentProcessBusy": {
+      "label": "Agent already running",
+      "hint": "This conversation's agent is still running in another process, so a second copy was not started. Wait for that run to finish, then retry."
     },
     "workspaceUnavailable": {
       "label": "Workspace unavailable",

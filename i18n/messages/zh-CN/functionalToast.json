@@ -1,0 +1,16 @@
+{
+  "dismiss": "关闭",
+  "generic": "通知",
+  "scheduledDue": {
+    "dueFailed": "到点 · 已连续失败 {count} 次",
+    "dueNow": "到点执行",
+    "lastFailed": "{ago}失败",
+    "lastRan": "{ago}运行",
+    "neverRan": "首次运行",
+    "next": "下次 {relative}",
+    "nextNone": "无下次运行",
+    "now": "到点",
+    "runStarting": "第 {count} 次运行开始",
+    "runStartingIn": "第 {count} 次运行开始 · {workspace}"
+  }
+}

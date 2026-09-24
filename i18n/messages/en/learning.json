@@ -1,0 +1,10 @@
+{
+  "guide": {
+    "complete": "Complete",
+    "guideTitle": "Guide",
+    "nextStep": "Next",
+    "previousStep": "Previous",
+    "skipGuide": "Skip guide",
+    "stepProgress": "Step {current} of {total}"
+  }
+}

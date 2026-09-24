@@ -1608,12 +1608,19 @@
       },
       "unavailable": {
         "body": "{baseUrl} 上的宿主没有返回登录配置：{message}",
+        "discoveryFailed": "无法确定要登录的宿主：{message}",
         "title": "现在无法登录"
       }
     },
     "gate": {
       "abandonAttempt": "不再等待",
+      "allowCredentialStoreAccess": "允许访问凭据存储",
       "attemptsRemaining": "{count, plural, =1 {还可尝试 1 次，之后需要等待} other {还可尝试 # 次，之后需要等待}}",
+      "autoUnlockFailedMissing": "在本设备上找不到已保存的密码，已关闭自动解锁。请输入密码继续。",
+      "autoUnlockFailedOther": "未能自动打开此档案。请输入密码重试。",
+      "autoUnlockFailedRejected": "已保存的密码已无法打开此档案，已将其删除并关闭自动解锁。请输入当前密码。",
+      "autoUnlockFailedStore": "无法读取本设备的凭据存储。请输入密码继续；自动解锁仍保持开启，下次启动时会再次尝试。",
+      "autoUnlockFailedTitle": "未能自动解锁",
       "backToPassword": "改用密码解锁",
       "capsLockOn": "大写锁定已开启",
       "confirmPasswordLabel": "确认新密码",
@@ -1621,12 +1628,14 @@
       "cooldown": "尝试次数过多，请在 {seconds} 秒后重试。",
       "copyDiagnostics": "复制详情",
       "createAccount": "创建账户",
+      "deviceWorkspaceHint": "此工作空间由本设备的凭据存储保护，无需输入密码。",
       "diagnosticsCopied": "已复制",
       "displayNameLabel": "账户名称",
       "displayNamePlaceholder": "本地账户",
       "errorInvalidPassword": "密码不正确。",
       "errorInvalidRecoveryKey": "恢复密钥不正确。",
       "errorPasswordRequired": "请输入密码。",
+      "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“在这台设备上自动解锁”即可直接解锁。",
       "errorStorageLayoutUnsupported": "本机数据由另一个版本的应用写入，无法打开。",
       "errorThrottled": "尝试次数过多，请等待冷却结束。",
       "errorUnknown": "解锁失败。如果反复出现，请复制下方详情。",
@@ -1636,8 +1645,11 @@
       "firstRunTitle": "创建本地账户",
       "hidePassword": "隐藏密码",
       "loading": "正在加载账户...",
+      "localWorkspaceLocked": "本地工作空间已锁定。",
+      "localWorkspaceUnavailable": "无法打开本地工作空间。请恢复此设备的凭据存储访问权限后重试。",
       "newPasswordLabel": "新密码",
       "newPasswordPlaceholder": "新密码",
+      "openLocalWorkspace": "打开本地工作空间",
       "operationFailed": "本地账户操作失败。",
       "passwordLabel": "密码",
       "passwordMismatch": "两次输入的密码不一致。",
@@ -1657,6 +1669,8 @@
       "recoveryUnlockDescription": "输入创建账户时保存的一次性恢复密钥，然后设置新密码。恢复密钥在此之后依然有效。",
       "recoveryUnlockForm": "使用恢复密钥解锁",
       "reloadWindow": "重新加载窗口",
+      "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。",
+      "rememberOnDeviceLabel": "在这台设备上自动解锁",
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
@@ -1769,6 +1783,7 @@
       "deleteScheduledToast": "正在删除「{name}」",
       "deleteTokensMayRemainLive": "身份提供方可能仍保留着已删除账户的会话。请到身份提供方控制台确认已退出。",
       "description": "创建、重命名和移除此设备上的本地账户。",
+      "deviceProtectionHelp": "此工作空间会在本设备上自动打开。设置密码后即可启用锁屏，后续启动时需要输入密码。",
       "editDisplayNameLabel": "账户名称",
       "empty": "选择账户",
       "emptyList": "还没有本地账户",
@@ -1786,10 +1801,19 @@
       "passwordChanged": "密码已修改。",
       "passwordMismatch": "两次输入的密码不一致。",
       "passwordTooShort": "密码长度至少为 {min} 个字符。",
+      "rememberOnDeviceConfirm": "开启",
+      "rememberOnDeviceLabel": "在这台设备上自动解锁",
+      "rememberOnDeviceOffHelp": "已关闭。每次启动都需要输入密码。",
+      "rememberOnDeviceOnHelp": "已开启。在这台设备上打开此档案时无需输入密码。",
+      "rememberOnDevicePasswordLabel": "输入此档案的密码以确认",
+      "rememberOnDevicePasswordRequired": "请输入密码以开启此选项。",
       "save": "保存",
       "searchLabel": "搜索账户",
       "searchPlaceholder": "搜索账户",
       "sessionSecurityHeading": "会话安全",
+      "sessionSecurityRememberedHelp": "此档案在这台设备上无需密码即可打开，因此不会因空闲而锁定，也无需手动锁定。关闭自动解锁后可使用这些控制项。",
+      "setPassword": "设置密码",
+      "setPasswordHeading": "保护此工作空间",
       "statusActive": "当前",
       "statusLocked": "已锁定",
       "statusUnlocked": "已解锁",
@@ -2874,7 +2898,6 @@
       "composer": {
         "attachmentsNotSupported": "团队对话暂不支持附件。",
         "imageNotSupported": "团队对话暂不支持图片附件。",
-        "mentionTitle": "提及一个智能体",
         "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
         "missingPrompt": "在 @ 提及之后请输入消息内容。",
         "noAgents": "暂无可用智能体 —— 请先添加队友",
@@ -4141,7 +4164,9 @@
       "reviewChanges": "改动",
       "reviewDiff": "差异",
       "reviewEmpty": "请选择一个改动文件以审阅差异",
+      "reviewWithCount": "审阅，{count} 个已更改文件",
       "scopeLabel": "工作区范围",
+      "surfaceLabel": "工作区视图",
       "taskResources": {
         "adoptionGenerationOnly": "生成了 {lines} 行 · 旧回退链路无法判断采用情况",
         "adoptionPending": "建议变更 {lines} 行 · 等待审阅",
@@ -6163,6 +6188,10 @@
       "attachments": {
         "analyzing": "正在解析图片…",
         "countLimit": "最多只能附加 {max} 个附件。",
+        "externalOmitted": {
+          "files": "外部智能体只接收文本，{names} 中的图片或视频未发送；其中提取出的文字已发送。",
+          "links": "有 {count} 个已抓取的网页未发送：外部智能体只接收你的消息和附件中的文字。"
+        },
         "extracting": "读取中…",
         "fallbackFile": "文件",
         "fallbackName": "附件",
@@ -6170,6 +6199,7 @@
         "folderEmpty": "该文件夹中没有可添加的文件。",
         "folderTruncated": "仅读取了拖入文件夹中的前 {max} 个文件。",
         "linkSkipped": "有 {count} 个链接无法读取，仍会发送原始网址。",
+        "notResent": "{names} 无法再次发送，已略去。如需包含，请重新附加。",
         "openPreviewAria": "预览 {filename}",
         "optimized": "添加前已优化 {count} 张大图。",
         "oversizeBody": "这些附件大约会增加 {tokens}k tokens 的上下文。仍要发送吗？",
@@ -6220,6 +6250,10 @@
         "removeAria": "移除 {filename}",
         "reorderAria": "拖动排序 {filename}",
         "skipped": "{count, plural, =1 {1 个附件已被} other {# 个附件已被}}跳过（不支持的文件类型）。",
+        "squadOmitted": {
+          "files": "Squad 的目标只能是文本，{names} 中的图片或视频未交给它；其中提取出的文字已交给它。",
+          "links": "有 {count} 个已抓取的网页未交给 Squad：它的目标只包含你的消息和附件中的文字。"
+        },
         "tokenBadge": "{tokens} tok",
         "unsupported": "有 {count} 个文件不受支持。",
         "video": {
@@ -6608,6 +6642,7 @@
         "presetTitle": "套用提示词预设",
         "recentSection": "最近使用",
         "resultCount": "{count} 个命令",
+        "runtimesSection": "运行时",
         "searchArgumentsAria": "搜索 /{name} 的参数",
         "searchArgumentsPlaceholder": "搜索参数选项…",
         "searchAria": "搜索斜杠命令",
@@ -6632,6 +6667,7 @@
         },
         "skillTitle": "启用技能",
         "slashTitle": "斜杠命令",
+        "squadMembersSection": "Squad 成员",
         "suggestionCount": "{count} 个选项",
         "templateParamCount": "{count, plural, =1 {1 个参数} other {# 个参数}}",
         "templatesSection": "模板",
@@ -6650,6 +6686,9 @@
         "removeAria": "移除引用 {path}"
       },
       "removePastedChip": "移除粘贴的文本",
+      "reviewDraftsAria": "审阅 {count} 条待处理草稿",
+      "reviewDraftsLabel": "审阅草稿",
+      "reviewDraftsTooltip": "有起草好的回复等待你审阅。直接输入消息即可改为发送你自己的内容。",
       "roomTargets": {
         "asleepDisabled": "房间处于休眠，切换回复模式前没有人会回复。",
         "chipLabel": "发给",
@@ -6664,10 +6703,28 @@
         "title": "由谁回复这条消息",
         "trigger": "选择由谁回复"
       },
+      "route": {
+        "blocked": "{runtime} 无法在此运行",
+        "blockedDetail": "{runtime} 无法在此运行：{detail}",
+        "busy": "请等当前回复结束后，再发给 @{handle}。",
+        "disabled": "外部智能体已关闭。",
+        "emptyPrompt": "请在 @{handle} 后输入消息。",
+        "memberMissing": "@{handle} 已不在任何 Squad 中。",
+        "memberRuntime": "{name} 运行在 {runtime} 上，此处不可用。",
+        "notConfigured": "尚未配置 {runtime} 智能体。",
+        "openSettings": "去设置",
+        "runsAs": "以 {name} 的身份回答，运行于 {engine}",
+        "runsOn": "由 {name} 回答",
+        "starting": "{runtime} 尚未就绪",
+        "startingDetail": "{runtime} 尚未就绪：{detail}",
+        "unavailable": "无法发送给 @{handle}"
+      },
       "sandboxShield": {
+        "externalDetail": "内置沙箱设置在此不适用：外部智能体使用自带的工具，且 Cognia 从不在智能体沙箱之外启动它。",
         "inheritedDetail": "本会话目前跟随角色或应用默认值。首次进入沙盒执行时，会固定为当时的层级。",
         "label": {
           "cua-desktop": "沙盒层级不可用 — 绑定桌面",
+          "external": "智能体沙箱 — 外部运行时",
           "microvm": "沙盒已开启 — microVM 层",
           "off": "沙盒未开启",
           "os": "沙盒已开启 — OS 层"
@@ -6675,6 +6732,7 @@
         "pinnedDetail": "本会话已固定自己的沙盒层级，之后在别处改动默认值不会再改变它。",
         "tooltip": {
           "cua-desktop": "该层级已停用：绑定桌面目前仅能证明远程 GUI 隔离，shell 与文件操作并未进入沙盒。请改用 OS 或 microVM 层级。",
+          "external": "此会话运行在外部智能体上。它的进程始终运行在 Cognia 强制启用的智能体沙箱中，可写入工作区并访问网络。",
           "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
           "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
           "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
@@ -6880,6 +6938,7 @@
         },
         "micPermissionDenied": "麦克风访问已被禁止——请在系统或浏览器设置中开启。",
         "microphoneLabel": "麦克风",
+        "microphoneLiveOnly": "仅用于实时语音。语音输入使用系统默认麦克风。",
         "noMicFound": "未找到麦克风。",
         "selectMicAria": "选择麦克风",
         "startListening": "开始语音输入",
@@ -7862,6 +7921,7 @@
         "timestamp": "时间",
         "usage": "Token"
       },
+      "routedVia": "经由 @{handle}",
       "routing": {
         "alias": "别名 · {alias}",
         "auto": "自动 · {target}",
@@ -8300,6 +8360,7 @@
       "input": "输入",
       "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
       "output": "输出",
+      "partialModelData": "模型明细仅包含已有用量记录的轮次，汇总同时包含更早的轮次。",
       "reasoning": "推理",
       "speed": "速度",
       "title": "会话成本",
@@ -8552,6 +8613,35 @@
       "done": "{count, plural, other {已删除 # 条消息。}}",
       "error": "无法删除这些消息。",
       "title": "从这条消息起全部删除？"
+    },
+    "turnAdmission": {
+      "ariaCancel": "取消这条排队中的消息，并放回输入框",
+      "ariaRetry": "重新运行这条消息",
+      "cancel": "取消",
+      "detail": "详情：{detail}",
+      "failed": "未运行 — {reason}",
+      "failedGeneric": "智能体无法运行这个回合",
+      "holderKind": {
+        "chat": "另一个会话",
+        "connector": "一条连接器回复",
+        "goal": "一个目标",
+        "other": "其他任务",
+        "scheduled": "一个定时任务",
+        "subagent": "一个子智能体",
+        "team": "一次团队运行",
+        "workflow-step": "一个计划或工作流步骤"
+      },
+      "interrupted": "未发送 — 等待期间应用已关闭",
+      "interruptedHint": "应用关闭或重新加载时这个回合仍在排队，因此从未运行。",
+      "queued": "排队中 — {reason}",
+      "queuedHint": "这条消息会在可以运行时立即开始。取消会把它放回输入框。",
+      "retry": "重试",
+      "waiting": {
+        "capacity": "正在等待空闲的智能体名额",
+        "provider": "正在等待该提供方的并发上限",
+        "slot": "正在等待{holder}在此工作副本中结束",
+        "slotNamed": "正在等待{holder}“{label}”在此工作副本中结束"
+      }
     },
     "twinBadge": {
       "fewShotOff": "风格少样本已关闭",
@@ -11148,11 +11238,13 @@
         "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
         "deleteConfirmTitle": "删除 {count} 个会话？",
         "deleteSuccess": "已删除 {count} 个会话",
+        "folderOtherWorkspace": "灰显的文件夹与部分所选会话不在同一工作区。",
         "moveSuccess": "已移动 {count} 个会话",
         "moveToFolder": "移动到文件夹",
         "pin": "置顶",
         "pinSuccess": "已置顶 {count} 个会话",
         "removeFromFolder": "移出文件夹",
+        "removeFromFolderSuccess": "已将 {count} 个会话移出文件夹",
         "selectedCount": "已选 {count} 项",
         "share": "分享",
         "unarchive": "取消归档",
@@ -11194,7 +11286,6 @@
         }
       },
       "groupEmpty": "还没有会话",
-      "groupOther": "其它",
       "groupShowAll": "显示全部 {count} 条",
       "groupShowLess": "收起",
       "groupShowMore": "再显示 {count} 条",
@@ -11223,7 +11314,6 @@
       "searchMessageContent": "搜索消息正文",
       "searchPlaceholder": "搜索对话…",
       "searchShortcutHint": "按 / 开始搜索",
-      "searchToggleAria": "搜索此列表",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "searchingMessages": "正在搜索消息内容…",
       "sectionPinned": "置顶",
@@ -11835,8 +11925,41 @@
       "perfMem": "内存",
       "runningCount": "{count, plural, other {# 个会话进行中}}",
       "streaming": "流式响应中",
-      "syncLast": "已同步 {time}",
-      "syncNever": "未同步",
+      "syncCenter": {
+        "chip": {
+          "error": "无法获取同步状态",
+          "loading": "正在检查同步",
+          "paired": "{connected}/{total} 台设备在线",
+          "remote": "由远程主机同步",
+          "unpaired": "未设置同步"
+        },
+        "feedback": {
+          "failed": "无法发起同步：{error}",
+          "noneConnected": "目前没有已配对设备在线。设备重新连接后会自动追上。",
+          "requested": "{count, plural, other {已请求 # 台已连接设备立即同步。}}设备会在后台拉取。"
+        },
+        "hostDescription": "这台桌面端是主机。已配对的手机和浏览器会从这里拉取会话、设置和历史记录。",
+        "lastContact": "最近一次设备连接：{time}",
+        "manageDevices": "管理设备",
+        "moreDevices": "{count, plural, other {另有 # 台设备}}",
+        "neverContacted": "还没有已配对设备连接过。",
+        "neverSeen": "从未连接",
+        "plane": {
+          "connecting": "正在连接",
+          "degraded": "不稳定",
+          "disconnected": "离线",
+          "ready": "已连接",
+          "replaying": "正在追赶"
+        },
+        "readFailed": "无法读取这台桌面端上的已配对设备。",
+        "remoteDescription": "这台桌面端正在使用远程主机。你的设备与该主机同步，而不是与这台桌面端同步。",
+        "remoteSettings": "远程主机",
+        "setUp": "设置同步",
+        "settings": "连接设置",
+        "title": "设备同步",
+        "trigger": "设备同步：{status}",
+        "unpairedDescription": "还没有手机或浏览器与这台桌面端配对。配对一台设备，即可在多设备间同步会话。"
+      },
       "syncNow": "立即同步",
       "terminal": "{count, plural, =0 {终端} other {# 个终端}}",
       "terminalAiShellToggle": "切换 AI Shell 面板",
@@ -12372,6 +12495,10 @@
         "hint": "此会话绑定的外部智能体已不存在——请另选一个。",
         "label": "未找到智能体"
       },
+      "agentProcessBusy": {
+        "hint": "该会话的智能体仍在另一个进程中运行，因此没有再启动一个副本。请等待那次运行结束后重试。",
+        "label": "智能体已在运行"
+      },
       "agentUnavailable": {
         "hint": "外部智能体没有响应——请重新连接，或回退到内置智能体。",
         "label": "智能体不可用"
@@ -12712,6 +12839,14 @@
         "hint": "运行外部智能体需要桌面端应用——在浏览器中请使用内置智能体。",
         "label": "需要桌面端应用"
       },
+      "turnRouteUnavailable": {
+        "hint": "这条消息指定的运行时在此处无法接手——先配置好对应的智能体，或去掉开头的 @ 再发送。",
+        "label": "无法发送到该运行时"
+      },
+      "turnRouteWhileBusy": {
+        "hint": "当前回复仍在进行。请等它结束后，再重新发送这条指定了运行时的消息。",
+        "label": "请等待当前回复结束"
+      },
       "turnSilent": {
         "hint": "这一轮已经跑了一段时间，期间没有任何回报。长时间的工具调用从这里看是一样的——先看日志，再决定要不要停止。",
         "label": "还没有任何响应"
@@ -12939,6 +13074,7 @@
     "emptyWorkflowTemplates": "暂无工作流模板。",
     "favorite": {
       "add": "加入收藏",
+      "failed": "无法更新收藏",
       "remove": "取消收藏"
     },
     "featured": "精选",
@@ -12966,12 +13102,23 @@
       "aria": "详情面板",
       "close": "关闭",
       "disable": "已禁用",
+      "editCharacter": "编辑角色",
       "empty": "选择一项查看详情。",
       "enable": "已启用",
       "itemCount": "{count, plural, =0 {暂无项目} =1 {1 项} other {# 项}}",
+      "loadingDescription": "正在目录中查找此项…",
+      "loadingTitle": "正在加载详情",
       "manageCommands": "管理命令",
+      "manageTeams": "管理团队",
       "mcpPresetFields": "{count, plural, =1 {需填写 1 个字段} other {需填写 # 个字段}}",
+      "missingDescription": "此项已被删除，或在此设备上不可用。",
+      "missingTitle": "未找到此项",
+      "newTeamConversation": "新建会话",
+      "newTeamConversationFailed": "无法与 {name} 开始新会话",
       "openFull": "打开完整页面",
+      "openTeam": "打开会话",
+      "startChat": "开始聊天",
+      "startChatFailed": "无法打开与 {name} 的聊天",
       "templateMissingDeps": "{count, plural, =1 {缺少 1 项依赖} other {缺少 # 项依赖}}",
       "title": "详情",
       "twinDraftFallbackName": "{kind} 草稿",
@@ -13998,13 +14145,18 @@
     },
     "scorerCatalog": {
       "assertion": "断言",
+      "choice-match": "选项匹配",
+      "contains-any": "包含任一",
       "cost": "成本",
+      "exact-match": "精确匹配",
       "judge-instruction-following": "指令遵循（LLM 评委）",
       "judge-task-completion": "任务完成度（LLM 评委）",
+      "numeric-match": "数值匹配",
       "rag-answer-relevancy": "回答相关性",
       "rag-context-precision": "上下文精确度",
       "rag-context-recall": "上下文召回率",
       "rag-faithfulness": "忠实度",
+      "regex-match": "正则匹配",
       "tool-args": "工具参数",
       "tool-order": "工具调用顺序",
       "tool-redundancy": "工具冗余",
@@ -15020,9 +15172,11 @@
   },
   "fleet": {
     "agents": {
+      "acp": "ACP",
       "claude-code": "Claude Code",
       "codex": "Codex",
       "cognia": "Cognia",
+      "devin": "Devin",
       "opencode": "OpenCode"
     },
     "island": {
@@ -15178,6 +15332,22 @@
       "subagents": "{count} 个子代理",
       "waitingFor": "已等待 {duration}",
       "you": "你："
+    }
+  },
+  "functionalToast": {
+    "dismiss": "关闭",
+    "generic": "通知",
+    "scheduledDue": {
+      "dueFailed": "到点 · 已连续失败 {count} 次",
+      "dueNow": "到点执行",
+      "lastFailed": "{ago}失败",
+      "lastRan": "{ago}运行",
+      "neverRan": "首次运行",
+      "next": "下次 {relative}",
+      "nextNone": "无下次运行",
+      "now": "到点",
+      "runStarting": "第 {count} 次运行开始",
+      "runStartingIn": "第 {count} 次运行开始 · {workspace}"
     }
   },
   "globalSearch": {
@@ -17467,6 +17637,17 @@
     },
     "workspace": {
       "agentsWorking": "工作中的 Agent",
+      "agentsWorkingEmpty": "当前工作区没有正在工作的 Agent。",
+      "agentsWorkingHide": "收起正在工作的 Agent 列表",
+      "agentsWorkingMeta": "{engine} · {time}开始",
+      "agentsWorkingMissingIssue": "议题已不存在",
+      "agentsWorkingOpen": {
+        "agentBoard": "打开任务板",
+        "issue": "打开议题",
+        "session": "打开会话",
+        "squad": "打开小队"
+      },
+      "agentsWorkingShow": "查看正在工作的 Agent",
       "environments": "环境",
       "issueSummary": "议题",
       "manage": "管理工作区",
@@ -17580,6 +17761,16 @@
       "retry": "重试",
       "team": "团队工作区",
       "title": "Cognia 工作台"
+    }
+  },
+  "learning": {
+    "guide": {
+      "complete": "完成",
+      "guideTitle": "向导",
+      "nextStep": "下一步",
+      "previousStep": "上一步",
+      "skipGuide": "跳过向导",
+      "stepProgress": "第 {current} 步，共 {total} 步"
     }
   },
   "loading": {
@@ -19803,6 +19994,7 @@
         "historyCount": "{count, plural, =0 {还没有记录} other {# 条提交记录}}",
         "historyHint": "每条提交只留一小段旁注——页面标题、来源站点、是否还在运行。不含正文和你的指令：那些在它开出的会话里，你可以在那里阅读和删除。",
         "historyTitle": "已记录的提交",
+        "listenerFailed": "无法读取浏览器访问状态，请重新打开此页面重试。",
         "openDevices": "打开设备控制台",
         "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入上方列表。扩展会在连接页面显示该来源。",
         "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
@@ -20523,6 +20715,17 @@
       "workspaceReady": "工作区就绪"
     },
     "home": {
+      "actionFailed": {
+        "archive": "无法归档该会话。",
+        "delete": "无法删除该会话。",
+        "markRead": "无法将该会话标为已读。",
+        "move": "无法移动该会话。",
+        "pin": "无法置顶该会话。",
+        "rename": "无法重命名该会话。",
+        "unarchive": "无法恢复该会话。",
+        "unpin": "无法取消置顶该会话。"
+      },
+      "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
       "actions": {
         "devices": "设备",
         "discover": "发现",
@@ -20537,6 +20740,7 @@
         "twin": "数字分身",
         "workflows": "工作流"
       },
+      "actionsDescription": "此会话的操作",
       "activeRuns": {
         "empty": "暂无运行中的工作流",
         "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
@@ -20565,16 +20769,22 @@
       "emptyChats": "还没有聊天，点击 + 新建一个。",
       "emptyFiltered": "没有与「{query}」匹配的聊天。",
       "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
+      "folderEmpty": "空文件夹——长按聊天即可移到这里。",
       "hideSection": "隐藏{section}",
+      "loadingChats": "正在加载会话…",
+      "markRead": "标为已读",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
       "quickActions": "快捷操作",
       "recent": "最近",
       "renameAria": "重命名会话",
+      "results": "搜索结果",
+      "rowActionsHint": "长按或滑动可查看更多操作",
       "search": "搜索聊天…",
       "searchAria": "搜索聊天",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
       "searchingMessages": "正在搜索消息内容…",
+      "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
       "sections": {
         "activeRuns": "运行中",
         "quickActions": "快捷操作",
@@ -20585,12 +20795,16 @@
       "swipePin": "置顶",
       "swipeUnarchive": "取消归档",
       "swipeUnpin": "取消置顶",
+      "undo": "撤销",
       "ungroupedAgent": "未绑定角色",
       "ungroupedTeam": "对话",
       "ungroupedWorkspace": "未归属工作区",
       "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
       "viewActive": "显示活跃聊天",
-      "viewArchived": "显示已归档聊天"
+      "viewArchived": "显示已归档聊天",
+      "viewTabActive": "聊天",
+      "viewTabArchived": "已归档",
+      "viewTabsLabel": "会话视图"
     },
     "hooks": {
       "backAria": "返回我的",
@@ -20974,13 +21188,6 @@
       "searchAria": "搜索记忆",
       "searchPlaceholder": "搜索记忆…",
       "title": "记忆"
-    },
-    "mentionPopover": {
-      "count": "{count} 个匹配",
-      "dismiss": "关闭",
-      "empty": "该团队暂无成员。",
-      "noMatches": "未找到匹配「{query}」的成员",
-      "title": "提及队友"
     },
     "messageActions": {
       "bookmark": "收藏",
@@ -21657,6 +21864,7 @@
     "shell": {
       "artifacts": "制品",
       "clearSearch": "清空搜索",
+      "closeNav": "关闭导航",
       "deleteSession": "删除此会话",
       "directSessionTitle": "与 {name} 的聊天",
       "exportConversation": "导出 / 分享",
@@ -21666,6 +21874,7 @@
       "navSheetTitle": "导航",
       "newChat": "新建聊天",
       "noApiKey": "未配置密钥",
+      "noApiKeyHint": "未配置密钥——打开会话设置进行添加",
       "openMembers": "打开成员列表",
       "openNav": "打开导航",
       "search": "搜索",
@@ -23583,6 +23792,18 @@
     "sourceHealth": {
       "error": "最近错误",
       "gaps": "可见缺口",
+      "issue": {
+        "contended": {
+          "deviceBusy": "本设备上的另一个窗口正在接收主机指标。该窗口关闭或停止后，此页面会自动接管。",
+          "hostBusy": "主机的实时指标流已达上限，正在自动重试。",
+          "rateLimited": "主机要求放慢请求频率，稍后自动重试。",
+          "targetBusy": "主机当前正在为另一个目标提供指标，空闲后会自动重试。"
+        },
+        "detail": "主机返回：{detail}",
+        "rejected": "主机拒绝了指标流（{code}）。",
+        "renewFailed": "指标流续期失败。如果主机已将其丢弃，会自动重新连接。",
+        "unreachable": "无法连接所选主机以获取指标。"
+      },
       "kind": {
         "host": "选中主机",
         "renderer": "本地 Renderer"
@@ -24159,6 +24380,8 @@
       "scheduledDue": {
         "body": "「{taskName}」现在到点啦。",
         "bodyGeneric": "你有一个定时任务现在到点啦。",
+        "mute": "不再提醒",
+        "open": "打开",
         "title": "定时任务到点"
       }
     },
@@ -24355,16 +24578,16 @@
       "approveAcceptEdits": "是，自动接受编辑",
       "approveFullAuto": "批准并完全自动运行",
       "approveReviewEach": "是，逐个审核编辑",
-      "discard": "丢弃计划",
       "edit": "编辑计划",
       "editCancel": "取消",
+      "editInEditor": "编辑",
       "editPlanHint": "以 Markdown 编辑计划…",
       "editPlanLabel": "计划（Markdown）",
       "editSave": "保存修改",
       "editStepsHint": "每行一个步骤…",
       "editStepsLabel": "步骤（每行一个）",
       "editTitleLabel": "标题",
-      "feedbackPlaceholder": "继续规划、丢弃或优化的可选反馈…",
+      "feedbackPlaceholder": "可选：用于继续规划或优化的反馈…",
       "interactive": {
         "addStep": "添加步骤",
         "deleteStep": "删除步骤",
@@ -24392,6 +24615,14 @@
       "refineRepair": "修复",
       "refineSimplify": "简化",
       "refineUnavailable": "无法优化——未配置用于后台任务的模型。",
+      "reject": "拒绝",
+      "rejectBack": "返回",
+      "rejectConfirm": "拒绝计划",
+      "rejectConfirmBody": "计划将被关闭且不会执行，拒绝原因会保留在计划历史中。",
+      "rejectConfirmTitle": "拒绝这个计划？",
+      "rejectFailed": "无法拒绝该计划。",
+      "rejectReasonLabel": "拒绝原因（可选）",
+      "rejectReasonPlaceholder": "这个计划哪里不合适？（可选）",
       "resumeFailed": "已批准的计划未能开始执行。点击继续以重试同一步骤。",
       "sourceLabel": "来源：{source}",
       "title": "审阅计划"
@@ -24403,6 +24634,8 @@
       "create": "创建计划",
       "createFailed": "无法创建计划。",
       "description": "每行一个步骤。批准前仍可重新排序和编辑步骤。",
+      "editDescription": "每行一个步骤。保存时会重新校验所有步骤，之后才能批准计划。",
+      "editTitle": "编辑计划",
       "field": {
         "content": "建议的内容",
         "path": "文件路径",
@@ -24428,6 +24661,8 @@
       },
       "kindLabel": "类型",
       "openLabel": "编写计划",
+      "save": "保存修改",
+      "saveFailed": "无法保存计划。",
       "stepCount": "{count, plural, =0 {尚无步骤} other {# 个步骤}}",
       "stepsLabel": "步骤",
       "stepsPlaceholder": "审查调用方\n替换适配器\n更新测试",
@@ -24455,6 +24690,7 @@
         "resumed": "已恢复",
         "step_completed": "步骤完成",
         "step_failed": "步骤失败",
+        "step_skipped": "步骤已跳过",
         "step_started": "步骤开始"
       },
       "history": "计划历史",
@@ -24481,7 +24717,36 @@
       "draft": "草稿",
       "executing": "执行中",
       "failed": "失败",
-      "paused": "已暂停"
+      "paused": "已暂停",
+      "rejected": "已拒绝"
+    },
+    "stepFailure": {
+      "actionFailed": "计划无法继续。",
+      "attempt": "第 {count} 次尝试",
+      "betweenSteps": "计划在两个步骤之间被中断。",
+      "cancel": "取消计划",
+      "detailLabel": "详情",
+      "hint": {
+        "dispatch_failed": "对话拒绝发送这一步的回合。",
+        "interrupted": "这一步运行时应用重启了。",
+        "not_started": "这一步在 {seconds} 秒内没有开始任何回合。",
+        "silent": "这一步的回合已有 {minutes} 分钟没有任何输出。",
+        "turn_failed": "这一步的回合以错误结束。",
+        "unrecorded": "回合已结束，但这一步从未被记录为完成。"
+      },
+      "markDone": "标记为完成",
+      "noChat": "打开此对话以重试、跳过或完成该步骤。",
+      "resume": "继续",
+      "retry": "重试步骤",
+      "skip": "跳过步骤",
+      "title": {
+        "dispatch_failed": "第 {index} 步无法开始：{title}",
+        "interrupted": "第 {index} 步被中断：{title}",
+        "not_started": "第 {index} 步未能启动：{title}",
+        "silent": "第 {index} 步已停滞：{title}",
+        "turn_failed": "第 {index} 步失败：{title}",
+        "unrecorded": "第 {index} 步结束但未完成：{title}"
+      }
     },
     "tracker": {
       "cancel": "取消计划",
@@ -26592,11 +26857,29 @@
   },
   "projectEditor": {
     "action": {
+      "addFileToChat": "将文件添加到聊天",
+      "addSelectionToChat": "将所选内容添加到聊天",
+      "addToChat": "添加到聊天",
+      "changeAllOccurrences": "更改所有匹配项",
+      "copy": "复制",
       "copyPath": "复制路径",
       "copyRelativePath": "复制相对路径",
+      "cut": "剪切",
+      "findInFolder": "在文件夹中查找…",
       "format": "格式化文档",
+      "goToImplementation": "转到实现",
+      "goToReferences": "转到引用",
+      "open": "打开",
+      "openToSide": "在侧边打开",
+      "paste": "粘贴",
+      "renameSymbol": "重命名符号",
+      "revealInExplorer": "在资源管理器视图中显示",
+      "revealInFileExplorer": "在文件管理器中显示",
       "save": "保存",
       "searchProject": "在项目中搜索"
+    },
+    "agent": {
+      "addedToChat": "已将 {name} 添加到聊天上下文"
     },
     "breadcrumbs": {
       "empty": "空文件夹",
@@ -26609,8 +26892,45 @@
     "closeDirtyConfirmCount": "{count} 个文件有未保存的更改。仍要关闭并丢弃这些更改吗？",
     "closeTab": "关闭 {name}",
     "collapseAll": "全部折叠",
+    "command": {
+      "changeEol": "将行尾序列更改为 {eol}",
+      "closeActive": "视图：关闭编辑器",
+      "closeAll": "视图：关闭全部编辑器",
+      "closeOthers": "视图：关闭组内其他编辑器",
+      "focusFirstGroup": "聚焦第一个编辑器组",
+      "focusSecondGroup": "聚焦第二个编辑器组",
+      "fontZoomIn": "视图：放大编辑器字体",
+      "fontZoomOut": "视图：缩小编辑器字体",
+      "fontZoomReset": "视图：重置编辑器字体",
+      "format": "格式化文档",
+      "goToFile": "文件：转到文件…",
+      "goToSymbol": "转到编辑器中的符号…",
+      "nextProblem": "转到下一个问题",
+      "palette": "视图：命令面板",
+      "previewToSide": "视图：在侧边打开预览",
+      "reopen": "视图：重新打开已关闭的编辑器",
+      "revealActive": "文件：在资源管理器中显示当前文件",
+      "revert": "文件：还原文件",
+      "save": "文件：保存",
+      "saveAll": "文件：全部保存",
+      "searchProject": "搜索：在文件中查找",
+      "splitEditor": "视图：拆分编辑器",
+      "toggleMinimap": "视图：切换缩略图",
+      "togglePreview": "视图：切换预览",
+      "toggleProblems": "视图：切换问题面板",
+      "toggleSidebar": "视图：切换主侧栏",
+      "toggleWordWrap": "视图：切换自动换行",
+      "zenMode": "视图：切换禅模式"
+    },
+    "confirmDiscard": "丢弃更改",
+    "confirmDontSave": "不保存",
+    "confirmOverwrite": "覆盖",
+    "confirmSave": "保存",
+    "confirmTitle": "确认",
     "delete": "删除",
     "deleteConfirm": "删除“{name}”？此操作无法撤销。",
+    "deletedOnDisk": "已在磁盘删除",
+    "deletedTab": "{name} —— 已在磁盘删除",
     "editorTab": "编辑器",
     "emptyEditor": "从文件树打开一个文件开始编辑。",
     "externallyChanged": "磁盘已变更",
@@ -26628,7 +26948,11 @@
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "newFromTemplate": "从模板新建文件",
+    "overwriteExternalConfirm": "“{name}”在你打开后已在磁盘上被修改。用你的草稿覆盖外部更改吗？",
+    "overwriteExternalConfirmCount": "{count} 个文件在你打开后已在磁盘上被修改。用你的草稿覆盖外部更改吗？",
     "pinTab": "固定 {name}",
+    "previewCloseHint": "关闭预览",
+    "previewOpenHint": "打开预览",
     "previewTab": "{name} —— 预览标签页，双击可固定",
     "proIde": {
       "cancelDownload": "取消",
@@ -26680,23 +27004,72 @@
       "fix": "请修复这段代码中的问题。",
       "review": "请审查这段代码，找出潜在的错误和改进点。"
     },
+    "problems": {
+      "close": "关闭面板",
+      "empty": "目前在工作区中没有检测到问题。",
+      "filter": "筛选（如文本、**/*.ts、!**/node_modules/**）",
+      "noMatch": "没有符合筛选条件的结果。",
+      "title": "问题"
+    },
     "quickOpen": {
       "allFiles": "所有文件",
+      "commands": "命令",
       "description": "按名称搜索并打开文件。",
       "empty": "没有匹配的文件",
       "footer": "↑↓ 移动 · ↵ 打开",
+      "footerCommands": "↑↓ 选择 · ↵ 执行",
+      "footerGoto": "输入行号 · ↵ 跳转",
+      "footerSymbols": "{file} — 输入符号名 · ↵ 跳转",
+      "gotoLine": "跳转到第 {line} 行",
+      "gotoLineColumn": "跳转到第 {line} 行第 {column} 列",
+      "gotoLineHint": "输入行号",
       "hint": "快速打开",
       "indexed": "已索引 {count} 个文件",
       "indexing": "正在索引文件…",
+      "noActiveDoc": "没有活动的编辑器",
+      "noActiveDocHint": "打开文件以搜索其中的符号",
+      "noCommands": "没有匹配的命令",
+      "noSymbols": "未找到符号",
       "openEditors": "已打开的编辑器",
       "placeholder": "按名称搜索文件",
       "refreshing": "正在刷新…",
+      "symbolKind": {
+        "array": "数组",
+        "boolean": "布尔值",
+        "class": "类",
+        "constant": "常量",
+        "constructor": "构造函数",
+        "enum": "枚举",
+        "enumMember": "枚举成员",
+        "event": "事件",
+        "field": "字段",
+        "file": "文件",
+        "function": "函数",
+        "interface": "接口",
+        "key": "键",
+        "method": "方法",
+        "module": "模块",
+        "namespace": "命名空间",
+        "null": "空值",
+        "number": "数字",
+        "object": "对象",
+        "operator": "运算符",
+        "package": "包",
+        "property": "属性",
+        "string": "字符串",
+        "struct": "结构体",
+        "typeParameter": "类型参数",
+        "variable": "变量"
+      },
+      "symbols": "符号",
       "title": "快速打开",
       "truncated": "已索引 {count} 个文件（已截断）"
     },
     "refresh": "刷新",
     "rename": "重命名",
     "revealActive": "显示当前文件",
+    "revealSystemFailed": "无法显示该文件：{error}",
+    "revertDirtyConfirm": "“{name}”有未保存的更改。放弃更改并从磁盘重新加载吗？",
     "rootFollowing": "{name} · 跟随对话",
     "rootLabel": "项目根目录",
     "rootMain": "main（主仓库）",
@@ -26712,6 +27085,8 @@
     },
     "searchPlaceholder": "在项目中搜索…",
     "searchResults": "{files} 个文件中 {count} 个结果",
+    "searchScope": "搜索范围：{path}",
+    "searchScopeClear": "清除搜索范围",
     "searchTab": "搜索",
     "sidebar": {
       "aria": "编辑器侧边栏",
@@ -26722,21 +27097,50 @@
     },
     "statusBar": {
       "aria": "编辑器状态",
+      "changeEol": "选择行尾序列",
+      "changeIndentation": "选择缩进方式",
+      "changeLanguage": "选择语言模式",
+      "convertToSpaces": "将缩进转换为空格",
+      "convertToTabs": "将缩进转换为制表符",
+      "deletedOnDisk": "已在磁盘删除",
       "externallyChanged": "磁盘已变更",
+      "indentSpaces": "空格：{size}",
+      "indentTabs": "制表符宽度：{size}",
+      "indentUsingSpaces": "使用空格缩进",
+      "indentUsingTabs": "使用制表符缩进",
+      "languagePlaceholder": "选择语言模式",
+      "noLanguage": "没有匹配的语言",
       "position": "行 {line}，列 {col}",
       "problemsTooltip": "跳转到下一个问题",
       "selected": "（已选 {count} 个字符）",
+      "tabSize": "制表符宽度：{size}",
       "unsaved": "未保存"
     },
+    "sync": {
+      "closeTab": "关闭标签页",
+      "compare": "对比",
+      "compareFailed": "无法读取磁盘副本：{error}",
+      "compareTitle": "磁盘 ↔ 草稿 —— {name}",
+      "conflictBanner": "文件已在磁盘上被修改，与你未保存的草稿冲突。",
+      "deletedBanner": "此文件已在磁盘上删除，当前缓冲区是最后一份副本。",
+      "externalBanner": "文件已在磁盘上被修改，当前内容已过期。",
+      "reloadDisk": "重新加载磁盘版本",
+      "restoreBuffer": "恢复",
+      "saveMine": "保存我的版本"
+    },
     "tabs": {
+      "addToChat": "添加到聊天",
       "close": "关闭",
       "closeAll": "全部关闭",
       "closeOthers": "关闭其他",
       "closeToRight": "关闭右侧",
       "listOpen": "列出已打开的编辑器",
+      "moveToOtherGroup": "将编辑器移动到另一组",
       "pin": "保持打开",
       "preview": "预览",
+      "reload": "从磁盘重新加载",
       "reopenClosed": "重新打开已关闭的编辑器",
+      "revealInExplorer": "在资源管理器视图中显示",
       "revert": "还原文件"
     },
     "templates": {
@@ -26784,13 +27188,8 @@
       "outline": "大纲",
       "outlineEmpty": "当前文件没有可用的符号。",
       "path": "路径",
-      "previewFrameTitle": "项目文件预览",
-      "previewRun": "预览与运行",
-      "problems": "问题",
-      "problemsUnavailable": "Monaco 模型挂载后将显示问题列表。",
       "relinkDescription": "文件在应用外重命名后，可选择同一仓库中的旧线程继续使用。",
       "relinkTitle": "重新关联旧资源线程",
-      "review": "审阅",
       "saved": "已保存",
       "state": "状态"
     }
@@ -27905,6 +28304,17 @@
     "exportNow": "导出",
     "exportTitle": "导出服务商设置",
     "exportWarning": "API 密钥仅在勾选下方选项时才会包含，请谨慎处理。",
+    "externalRuntimes": {
+      "bannerDescription": "已连接的外部智能体已在使用各自的凭据工作。只有在还需要内置智能体或直接访问模型时，才需要在下方配置服务商。",
+      "bannerTitle": "为 Cognia 内置智能体添加服务商",
+      "description": "这些智能体会登录各自的模型服务商，因此即使下方的内置服务商尚未配置，它们也能正常运行。它们的凭据在“外部智能体”设置中管理，而不在此页面。",
+      "listAria": "外部智能体运行时",
+      "manage": "在“外部智能体”中管理",
+      "runsOnHost": "在已配对的主机上运行",
+      "summary": "{working}/{total} 已就绪",
+      "switchedOff": "外部智能体已关闭，此处配置的 {count} 个智能体在重新开启前不会运行。",
+      "title": "自带模型访问的智能体"
+    },
     "failed": "失败",
     "failedCount": "{count} 个失败",
     "features": "功能",
@@ -29888,6 +30298,14 @@
       "title": "子系统健康检查"
     },
     "description": "应用连续两次启动失败，因此插件、连接器和后台任务将暂停，直到各子系统通过健康检查。",
+    "secretStore": {
+      "description": "系统钥匙串未允许访问，Cognia 无法打开加密凭据存储。已保存的 API 密钥、订阅、代理密码和插件密钥在解锁前均不可用。",
+      "failed": "解锁未成功。请在系统钥匙串对话框中允许访问后重试。",
+      "region": "安全存储状态",
+      "title": "安全存储已锁定",
+      "unlock": "解锁",
+      "unlocking": "正在解锁…"
+    },
     "status": {
       "disabled": "保持关闭",
       "failed": "未通过",
@@ -30226,6 +30644,7 @@
     },
     "details": "详情",
     "disableTask": "禁用",
+    "dueReminderMuted": "已静音",
     "duplicate": "复制",
     "duration": "时长",
     "edit": "编辑",
@@ -30466,6 +30885,8 @@
       "toast": "应用内提示",
       "webhook": "Webhook"
     },
+    "notifyDueReminder": "到点时提醒我",
+    "notifyDueReminderEventHint": "到点提醒只在按时间触发的任务上生效，事件任务没有到点时间。",
     "notifyImConversation": "IM 会话",
     "notifyImConversationHint": "留空则使用设置里的全局运维频道。该会话需已开启主动推送才会收到消息。",
     "notifyImConversationPlaceholder": "例如 slack:ops-bot:C012AB3CD",
@@ -30886,6 +31307,7 @@
         "loading": "正在检查签名状态…",
         "manageSecret": "管理签名密钥",
         "title": "Webhook 签名",
+        "unavailable": "已配置签名密钥，但安全存储已锁定。解锁前，需要签名的 Webhook 投递都会失败。",
         "webOnly": "Web 模式下无法签名出站 Webhook —— 签名密钥存储在 OS keyring 中。"
       },
       "status": {
@@ -33651,6 +34073,46 @@
       "vscode": {
         "activateButton": "应用",
         "activeLabel": "使用中",
+        "activeVariant": {
+          "applied": {
+            "authored": {
+              "dark": "深色模式正在显示 {name} 自带的深色配色。",
+              "light": "浅色模式正在显示 {name} 自带的浅色配色。"
+            },
+            "derived": {
+              "dark": "深色模式正在显示由 {name} 的浅色配色派生出的深色配色。",
+              "light": "浅色模式正在显示由 {name} 的深色配色派生出的浅色配色。"
+            },
+            "dormant": {
+              "dark": "{name} 没有深色配色，因此在深色模式下未生效，当前显示的是基础颜色预设。",
+              "light": "{name} 没有浅色配色，因此在浅色模式下未生效，当前显示的是基础颜色预设。"
+            },
+            "dormantOnly": {
+              "dark": "{name} 只有深色配色，因此在浅色模式下未生效，当前显示的是基础颜色预设。切换回深色模式后会重新生效。",
+              "light": "{name} 只有浅色配色，因此在深色模式下未生效，当前显示的是基础颜色预设。切换回浅色模式后会重新生效。"
+            },
+            "fixed": "{name} 只提供一套配色，浅色和深色模式下显示效果相同。"
+          },
+          "badge": {
+            "authored": {
+              "dark": "使用中 · 深色",
+              "light": "使用中 · 浅色"
+            },
+            "derived": {
+              "dark": "使用中 · 深色（派生）",
+              "light": "使用中 · 浅色（派生）"
+            },
+            "dormant": {
+              "dark": "使用中 · 深色模式下未生效",
+              "light": "使用中 · 浅色模式下未生效"
+            },
+            "dormantOnly": {
+              "dark": "使用中 · 仅深色 · 浅色模式下未生效",
+              "light": "使用中 · 仅浅色 · 深色模式下未生效"
+            },
+            "fixed": "使用中 · 两种模式相同"
+          }
+        },
         "browse": "浏览文件",
         "cancelButton": "取消",
         "deactivateButton": "使用预设",
@@ -39081,6 +39543,10 @@
           "serviceGroup": "服务"
         },
         "items": {
+          "custom": {
+            "description": "直接编辑网关原始配置（JSON/YAML）",
+            "label": "自定义"
+          },
           "exposure": {
             "description": "/v1/models 对外公布的内容",
             "label": "模型暴露"
@@ -41093,6 +41559,7 @@
       "autoLock": {
         "description": "在一段时间无操作后锁定账户，需重新验证身份方可继续。",
         "help": "超过该空闲时间后，账户将被锁定，需再次解锁。",
+        "inertHelp": "此档案在这台设备上自动解锁时，此设置不生效。",
         "label": "空闲后锁定",
         "off": "从不",
         "option": "{minutes} 分钟",
@@ -41688,7 +42155,9 @@
           "cline": "Cline（.clinerules/*.md）",
           "codex-cli": "Codex CLI（~/.codex/agents/*.md）",
           "cursor": "Cursor（.cursor/rules/*.mdc）",
-          "generic-md": "通用 markdown + frontmatter"
+          "generic-md": "通用 markdown + frontmatter",
+          "opencode": "OpenCode（.opencode/agents/*.md）",
+          "pi": "Pi（.pi/agents/*.md）"
         },
         "step1Title": "选择来源",
         "step2Title": "选择文件",
@@ -43653,6 +44122,9 @@
       "export": "导出为 SKILL.md",
       "open": "打开",
       "selectAria": "选择 {name}",
+      "syncCurrent": "已同步",
+      "syncError": "同步失败",
+      "syncPending": "待同步",
       "usageCount": "已用 {count} 次"
     },
     "category": {
@@ -44992,6 +45464,19 @@
     }
   },
   "squads": {
+    "builtIn": {
+      "badge": "内置",
+      "description": "随 Cognia 提供的现成角色团队。它们会作为聊天侧栏中的范围出现，且为只读；复制一份即可得到可编辑的副本。",
+      "duplicate": "复制",
+      "duplicateAria": "将 {name} 复制为可编辑的团队",
+      "duplicateFailed": "无法复制 {name}",
+      "duplicated": "已创建 {name}",
+      "editCopy": "编辑",
+      "manage": "管理团队",
+      "open": "打开",
+      "openAria": "打开 {name} 的会话",
+      "title": "内置团队"
+    },
     "fleet": {
       "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
       "boardUnselectedTitle": "先选一个小队",
@@ -45001,6 +45486,7 @@
       "defaultLeadName": "队长",
       "description": "每个小队此刻在做什么。",
       "emptyDescription": "在这里新建一个，然后在输入框把会话交给它。",
+      "emptyDescriptionWithBuiltIns": "在这里新建一个，然后在输入框把会话交给它。{count, plural, other {下方的 # 个内置团队}}现在就能用。",
       "emptyTitle": "还没有小队",
       "filters": {
         "all": "全部",
@@ -51428,7 +51914,8 @@
             "draft": "草稿",
             "executing": "执行中",
             "failed": "失败",
-            "paused": "已暂停"
+            "paused": "已暂停",
+            "rejected": "已拒绝"
           }
         }
       },
@@ -52806,6 +53293,8 @@
       },
       "empty": {
         "clearFilters": "清空筛选",
+        "clearSearch": "清空搜索",
+        "clearSearchAndFilters": "清空搜索和筛选",
         "cta": "创建工作流",
         "description": "创建第一个工作流，把多步流程串联到聊天、触发器和工具之上。",
         "descriptionQuery": "试试其它关键词，或清空筛选条件。",
@@ -52813,6 +53302,9 @@
         "filterTitle": "未找到匹配的工作流",
         "folderDescription": "在这里新建工作流，或把已有的工作流移进来。",
         "folderTitle": "此文件夹为空",
+        "searchAndFilterDescription": "当前搜索和 {count, plural, other {# 个筛选条件}}隐藏了此处的全部工作流。",
+        "searchDescription": "当前搜索隐藏了此处的全部工作流，清空搜索即可查看。",
+        "searchTitle": "没有与“{query}”匹配的工作流",
         "title": "暂无工作流",
         "titleQuery": "未找到匹配的工作流"
       },
@@ -52938,6 +53430,9 @@
           "while": "条件循环"
         }
       },
+      "missingRequired": "{fields}为必填项",
+      "notesLabel": "备注",
+      "notesTitle": "作者备注——不属于节点配置",
       "outputHandles": {
         "approved": "已批准",
         "conflict": "冲突",
@@ -52949,6 +53444,105 @@
         "restacked": "已重排",
         "timeout": "超时",
         "true": "真"
+      },
+      "paramLabels": {
+        "actions": "动作",
+        "adapterId": "连接器",
+        "angles": "评审角度",
+        "artifactId": "Artifact",
+        "assignees": "答复对象",
+        "body": "正文",
+        "branch": "分支",
+        "branchLabels": "分支标签",
+        "characterId": "角色",
+        "code": "代码",
+        "command": "命令",
+        "completionPolicy": "完成策略",
+        "content": "内容",
+        "conversationKey": "会话",
+        "councillors": "议会成员",
+        "cron": "调度计划",
+        "dataJson": "导入 JSON",
+        "datasetId": "数据集",
+        "description": "描述",
+        "dispatchNodeId": "派发步骤",
+        "dryRoundsToStop": "停止前空轮数",
+        "emoji": "表情",
+        "end": "结束时间",
+        "endSeconds": "结束时间点",
+        "eventType": "事件类型",
+        "executionId": "执行记录",
+        "expression": "表达式",
+        "fields": "字段",
+        "finderPrompt": "发现者提示词",
+        "fromRelPath": "源路径",
+        "goal": "目标",
+        "goalId": "目标",
+        "handle": "元素句柄",
+        "input": "输入",
+        "isFavorite": "收藏",
+        "issue": "事项",
+        "judgesPerAttempt": "每次尝试的评审数",
+        "knowledgeBaseId": "知识库",
+        "knowledgeBaseIds": "知识库",
+        "labelsRaw": "标签",
+        "language": "语言",
+        "lineageId": "谱系",
+        "locator": "定位符",
+        "maxRevisions": "最大修订次数",
+        "maxRounds": "最大轮数",
+        "message": "消息",
+        "messageId": "消息",
+        "modalities": "模态",
+        "name": "名称",
+        "notificationId": "通知",
+        "objective": "目标",
+        "objectiveText": "目标",
+        "output": "输出",
+        "path": "路径",
+        "planId": "计划",
+        "pluginId": "插件",
+        "prompt": "提示词",
+        "query": "查询",
+        "rawObjective": "目标",
+        "recordingId": "录制",
+        "relPath": "文件路径",
+        "request": "请求",
+        "revision": "修订版本",
+        "root": "根目录",
+        "runId": "运行记录",
+        "scriptPath": "脚本路径",
+        "serverId": "MCP 服务器",
+        "sessionId": "会话",
+        "siteId": "站点",
+        "skepticsPerFinding": "每项发现的质疑者数",
+        "skillIds": "技能",
+        "sourceId": "来源",
+        "sourcePath": "源文件",
+        "sourcePaths": "源文件",
+        "start": "开始时间",
+        "stepId": "步骤",
+        "subgoalId": "子目标",
+        "synthesizerAlias": "综合器",
+        "systemPrompt": "系统提示词",
+        "tabId": "终端标签页",
+        "targetConversationKey": "目标会话",
+        "taskId": "任务",
+        "teamId": "团队",
+        "template": "模板",
+        "templateId": "模板",
+        "text": "文本",
+        "timeSeconds": "时间点",
+        "title": "标题",
+        "toRelPath": "目标路径",
+        "toolName": "工具",
+        "twinId": "数字分身",
+        "type": "类型",
+        "url": "URL",
+        "userPrompt": "用户提示词",
+        "value": "值",
+        "variable": "变量",
+        "workflowId": "工作流"
       },
       "pinnedTitle": "已固定测试数据"
     },
@@ -53428,7 +54022,7 @@
             "label": "优化计划"
           },
           "reject": {
-            "description": "取消待定计划并记录拒绝反馈。",
+            "description": "拒绝尚未开始的计划（终态“已拒绝”），并记录可选的拒绝原因。",
             "label": "拒绝计划"
           },
           "resume": {
@@ -54135,6 +54729,7 @@
           "description": "这将永久删除该工作流的所有运行记录及其步骤日志，且无法撤销。",
           "title": "清空全部运行历史？"
         },
+        "clearSearchAndFilters": "清除搜索和筛选",
         "columns": {
           "duration": "时长",
           "open": "打开",
@@ -54164,6 +54759,8 @@
         },
         "filteredEmpty": {
           "description": "调整或清除筛选条件以查看运行。",
+          "queryDescription": "当前搜索和筛选条件隐藏了全部运行，清除后即可查看完整历史。",
+          "queryTitle": "没有与“{query}”匹配的运行",
           "title": "没有匹配的运行"
         },
         "loadMore": "再加载 {count} 条",
@@ -54437,7 +55034,8 @@
         "draft": "草稿",
         "executing": "执行中",
         "failed": "已失败",
-        "paused": "已暂停"
+        "paused": "已暂停",
+        "rejected": "已拒绝"
       },
       "planStatusAria": "计划状态",
       "plans": "计划",

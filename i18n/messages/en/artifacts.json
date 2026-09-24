@@ -214,7 +214,9 @@
     "reviewChanges": "Changes",
     "reviewDiff": "Diff",
     "reviewEmpty": "Select a changed file to review its diff",
+    "reviewWithCount": "Review, {count, plural, one {# changed file} other {# changed files}}",
     "scopeLabel": "Workspace scope",
+    "surfaceLabel": "Workspace view",
     "taskResources": {
       "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
       "adoptionPending": "{lines} proposed lines · awaiting review",

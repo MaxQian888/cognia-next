@@ -782,6 +782,46 @@
   "vscode": {
     "activateButton": "Apply",
     "activeLabel": "Active",
+    "activeVariant": {
+      "applied": {
+        "authored": {
+          "dark": "Dark mode is showing {name}’s own dark palette.",
+          "light": "Light mode is showing {name}’s own light palette."
+        },
+        "derived": {
+          "dark": "Dark mode is showing a dark palette derived from {name}’s light one.",
+          "light": "Light mode is showing a light palette derived from {name}’s dark one."
+        },
+        "dormant": {
+          "dark": "{name} has no dark palette, so it is inactive in dark mode and the base color preset is shown instead.",
+          "light": "{name} has no light palette, so it is inactive in light mode and the base color preset is shown instead."
+        },
+        "dormantOnly": {
+          "dark": "{name} only has a dark palette, so it is inactive in light mode and the base color preset is shown instead. It applies again when you switch to dark mode.",
+          "light": "{name} only has a light palette, so it is inactive in dark mode and the base color preset is shown instead. It applies again when you switch to light mode."
+        },
+        "fixed": "{name} ships one palette and shows it unchanged in light and dark mode."
+      },
+      "badge": {
+        "authored": {
+          "dark": "Active · Dark",
+          "light": "Active · Light"
+        },
+        "derived": {
+          "dark": "Active · Dark (derived)",
+          "light": "Active · Light (derived)"
+        },
+        "dormant": {
+          "dark": "Active · Inactive in dark mode",
+          "light": "Active · Inactive in light mode"
+        },
+        "dormantOnly": {
+          "dark": "Active · Dark only · inactive in light mode",
+          "light": "Active · Light only · inactive in dark mode"
+        },
+        "fixed": "Active · Same in both modes"
+      }
+    },
     "browse": "Browse files",
     "cancelButton": "Cancel",
     "deactivateButton": "Use preset",

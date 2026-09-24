@@ -67,7 +67,20 @@
     "unlockForm": "解锁本地账户",
     "unlockTitle": "解锁 {name}",
     "unlocking": "正在解锁…",
-    "useRecoveryKey": "忘记密码？"
+    "useRecoveryKey": "忘记密码？",
+    "openLocalWorkspace": "打开本地工作空间",
+    "localWorkspaceUnavailable": "无法打开本地工作空间。请恢复此设备的凭据存储访问权限后重试。",
+    "localWorkspaceLocked": "本地工作空间已锁定。",
+    "allowCredentialStoreAccess": "允许访问凭据存储",
+    "errorSecretStoreUnavailable": "本设备的凭据存储未能保存密码。取消勾选“在这台设备上自动解锁”即可直接解锁。",
+    "autoUnlockFailedTitle": "未能自动解锁",
+    "autoUnlockFailedStore": "无法读取本设备的凭据存储。请输入密码继续；自动解锁仍保持开启，下次启动时会再次尝试。",
+    "autoUnlockFailedMissing": "在本设备上找不到已保存的密码，已关闭自动解锁。请输入密码继续。",
+    "autoUnlockFailedRejected": "已保存的密码已无法打开此档案，已将其删除并关闭自动解锁。请输入当前密码。",
+    "autoUnlockFailedOther": "未能自动打开此档案。请输入密码重试。",
+    "deviceWorkspaceHint": "此工作空间由本设备的凭据存储保护，无需输入密码。",
+    "rememberOnDeviceLabel": "在这台设备上自动解锁",
+    "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。"
   },
   "manage": {
     "activeAccountLabel": "当前账户",
@@ -139,7 +152,17 @@
     "title": "本地账户",
     "undo": "撤销",
     "updatedAtLabel": "更新于",
-    "tabIdentity": "身份"
+    "tabIdentity": "身份",
+    "setPasswordHeading": "保护此工作空间",
+    "setPassword": "设置密码",
+    "deviceProtectionHelp": "此工作空间会在本设备上自动打开。设置密码后即可启用锁屏，后续启动时需要输入密码。",
+    "rememberOnDeviceLabel": "在这台设备上自动解锁",
+    "rememberOnDeviceOnHelp": "已开启。在这台设备上打开此档案时无需输入密码。",
+    "rememberOnDeviceOffHelp": "已关闭。每次启动都需要输入密码。",
+    "rememberOnDevicePasswordLabel": "输入此档案的密码以确认",
+    "rememberOnDevicePasswordRequired": "请输入密码以开启此选项。",
+    "rememberOnDeviceConfirm": "开启",
+    "sessionSecurityRememberedHelp": "此档案在这台设备上无需密码即可打开，因此不会因空闲而锁定，也无需手动锁定。关闭自动解锁后可使用这些控制项。"
   },
   "passwordStrength": {
     "aria": "密码强度",
@@ -293,7 +316,8 @@
     },
     "unavailable": {
       "title": "现在无法登录",
-      "body": "{baseUrl} 上的宿主没有返回登录配置：{message}"
+      "body": "{baseUrl} 上的宿主没有返回登录配置：{message}",
+      "discoveryFailed": "无法确定要登录的宿主：{message}"
     },
     "advanced": {
       "toggle": "高级：手动配置 Logto",

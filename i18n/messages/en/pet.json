@@ -402,6 +402,8 @@
     "scheduledDue": {
       "body": "\"{taskName}\" is due right now.",
       "bodyGeneric": "One of your scheduled tasks is due right now.",
+      "mute": "Mute",
+      "open": "Open",
       "title": "Scheduled task due"
     }
   },

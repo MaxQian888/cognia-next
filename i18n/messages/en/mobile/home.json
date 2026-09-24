@@ -1,4 +1,15 @@
 {
+  "actionFailed": {
+    "archive": "Couldn't archive the conversation.",
+    "delete": "Couldn't delete the conversation.",
+    "markRead": "Couldn't mark the conversation as read.",
+    "move": "Couldn't move the conversation.",
+    "pin": "Couldn't pin the conversation.",
+    "rename": "Couldn't rename the conversation.",
+    "unarchive": "Couldn't restore the conversation.",
+    "unpin": "Couldn't unpin the conversation."
+  },
+  "actionLocked": "This conversation is read-only while it is handed off to another device.",
   "actions": {
     "discover": "Discover",
     "fleet": "Agent fleet",
@@ -13,6 +24,7 @@
     "squads": "Squads",
     "templates": "Templates"
   },
+  "actionsDescription": "Actions for this conversation",
   "activeRuns": {
     "empty": "No active runs",
     "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
@@ -41,16 +53,22 @@
   "emptyChats": "No chats yet. Tap + to start one.",
   "emptyFiltered": "No chats match “{query}”.",
   "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
+  "folderEmpty": "Empty — long-press a chat to move it here.",
   "hideSection": "Hide {section}",
+  "loadingChats": "Loading conversations…",
+  "markRead": "Mark as read",
   "pinned": "Pinned",
   "presenceStreaming": "Streaming",
   "quickActions": "Quick actions",
   "recent": "Recent",
   "renameAria": "Rename conversation",
+  "results": "Results",
+  "rowActionsHint": "Long-press or swipe for more actions",
   "search": "Search chats…",
   "searchAria": "Search chats",
   "searchTruncated": "Some results may be hidden — refine your search.",
   "searchingMessages": "Searching messages…",
+  "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
   "sections": {
     "activeRuns": "Active runs",
     "quickActions": "Quick actions",
@@ -61,10 +79,14 @@
   "swipePin": "Pin",
   "swipeUnarchive": "Unarchive",
   "swipeUnpin": "Unpin",
+  "undo": "Undo",
   "ungroupedAgent": "No agent",
   "ungroupedTeam": "Chats",
   "ungroupedWorkspace": "No workspace",
   "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
   "viewActive": "Show active chats",
-  "viewArchived": "Show archived chats"
+  "viewArchived": "Show archived chats",
+  "viewTabActive": "Chats",
+  "viewTabArchived": "Archived",
+  "viewTabsLabel": "Conversation view"
 }

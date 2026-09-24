@@ -1,4 +1,15 @@
 {
+  "actionFailed": {
+    "archive": "无法归档该会话。",
+    "delete": "无法删除该会话。",
+    "markRead": "无法将该会话标为已读。",
+    "move": "无法移动该会话。",
+    "pin": "无法置顶该会话。",
+    "rename": "无法重命名该会话。",
+    "unarchive": "无法恢复该会话。",
+    "unpin": "无法取消置顶该会话。"
+  },
+  "actionLocked": "该会话正在交接到另一台设备，期间为只读。",
   "actions": {
     "discover": "发现",
     "fleet": "智能体队列",
@@ -13,6 +24,7 @@
     "squads": "小队",
     "templates": "模板"
   },
+  "actionsDescription": "此会话的操作",
   "activeRuns": {
     "empty": "暂无运行中的工作流",
     "title": "{count, plural, =1 {1 个工作流运行中} other {# 个工作流运行中}}",
@@ -41,16 +53,22 @@
   "emptyChats": "还没有聊天，点击 + 新建一个。",
   "emptyFiltered": "没有与「{query}」匹配的聊天。",
   "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
+  "folderEmpty": "空文件夹——长按聊天即可移到这里。",
   "hideSection": "隐藏{section}",
+  "loadingChats": "正在加载会话…",
+  "markRead": "标为已读",
   "pinned": "置顶",
   "presenceStreaming": "回复中",
   "quickActions": "快捷操作",
   "recent": "最近",
   "renameAria": "重命名会话",
+  "results": "搜索结果",
+  "rowActionsHint": "长按或滑动可查看更多操作",
   "search": "搜索聊天…",
   "searchAria": "搜索聊天",
   "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
   "searchingMessages": "正在搜索消息内容…",
+  "sectionCount": "{count, plural, =1 {1 个会话} other {# 个会话}}",
   "sections": {
     "activeRuns": "运行中",
     "quickActions": "快捷操作",
@@ -61,10 +79,14 @@
   "swipePin": "置顶",
   "swipeUnarchive": "取消归档",
   "swipeUnpin": "取消置顶",
+  "undo": "撤销",
   "ungroupedAgent": "未绑定角色",
   "ungroupedTeam": "对话",
   "ungroupedWorkspace": "未归属工作区",
   "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
   "viewActive": "显示活跃聊天",
-  "viewArchived": "显示已归档聊天"
+  "viewArchived": "显示已归档聊天",
+  "viewTabActive": "聊天",
+  "viewTabArchived": "已归档",
+  "viewTabsLabel": "会话视图"
 }

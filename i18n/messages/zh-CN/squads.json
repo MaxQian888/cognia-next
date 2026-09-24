@@ -1,4 +1,17 @@
 {
+  "builtIn": {
+    "badge": "内置",
+    "description": "随 Cognia 提供的现成角色团队。它们会作为聊天侧栏中的范围出现，且为只读；复制一份即可得到可编辑的副本。",
+    "duplicate": "复制",
+    "duplicateAria": "将 {name} 复制为可编辑的团队",
+    "duplicateFailed": "无法复制 {name}",
+    "duplicated": "已创建 {name}",
+    "editCopy": "编辑",
+    "manage": "管理团队",
+    "open": "打开",
+    "openAria": "打开 {name} 的会话",
+    "title": "内置团队"
+  },
   "fleet": {
     "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
     "boardUnselectedTitle": "先选一个小队",
@@ -8,6 +21,7 @@
     "defaultLeadName": "队长",
     "description": "每个小队此刻在做什么。",
     "emptyDescription": "在这里新建一个，然后在输入框把会话交给它。",
+    "emptyDescriptionWithBuiltIns": "在这里新建一个，然后在输入框把会话交给它。{count, plural, other {下方的 # 个内置团队}}现在就能用。",
     "emptyTitle": "还没有小队",
     "filters": {
       "label": "收窄列表",

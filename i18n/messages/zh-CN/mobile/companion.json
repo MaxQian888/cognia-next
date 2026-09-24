@@ -444,6 +444,7 @@
     "pairedTitle": "已配对的浏览器",
     "regenerate": "重新生成配对码",
     "requiresListener": "浏览器访问尚未开启，配对码没有可连接的对象。请先在上方开启，并重启 Companion 服务。",
+    "listenerFailed": "无法读取浏览器访问状态，请重新打开此页面重试。",
     "singleUse": "仅可使用一次。扩展兑换后即刻作废，本身不携带任何凭据。",
     "title": "浏览器伴侣"
   },

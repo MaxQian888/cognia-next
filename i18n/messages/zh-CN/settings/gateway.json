@@ -152,6 +152,10 @@
       "serviceGroup": "服务"
     },
     "items": {
+      "custom": {
+        "description": "直接编辑网关原始配置（JSON/YAML）",
+        "label": "自定义"
+      },
       "exposure": {
         "description": "/v1/models 对外公布的内容",
         "label": "模型暴露"

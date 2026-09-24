@@ -1,6 +1,7 @@
 {
   "artifacts": "制品",
   "clearSearch": "清空搜索",
+  "closeNav": "关闭导航",
   "deleteSession": "删除此会话",
   "directSessionTitle": "与 {name} 的聊天",
   "exportConversation": "导出 / 分享",
@@ -10,6 +11,7 @@
   "navSheetTitle": "导航",
   "newChat": "新建聊天",
   "noApiKey": "未配置密钥",
+  "noApiKeyHint": "未配置密钥——打开会话设置进行添加",
   "openMembers": "打开成员列表",
   "openNav": "打开导航",
   "search": "搜索",

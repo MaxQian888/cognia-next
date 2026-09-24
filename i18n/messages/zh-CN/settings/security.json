@@ -5,7 +5,8 @@
     "label": "空闲后锁定",
     "off": "从不",
     "option": "{minutes} 分钟",
-    "title": "自动锁定"
+    "title": "自动锁定",
+    "inertHelp": "此档案在这台设备上自动解锁时，此设置不生效。"
   },
   "contextInspector": {
     "auditGap": "部分治理投影失败，治理历史记录不完整。",

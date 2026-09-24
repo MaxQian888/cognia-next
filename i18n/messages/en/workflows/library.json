@@ -31,6 +31,8 @@
   },
   "empty": {
     "clearFilters": "Clear filters",
+    "clearSearch": "Clear search",
+    "clearSearchAndFilters": "Clear search and filters",
     "cta": "Create workflow",
     "description": "Build your first workflow to automate a multi-step flow across chat, triggers, and tools.",
     "descriptionQuery": "Try a different search term or clear the filter.",
@@ -38,6 +40,9 @@
     "filterTitle": "No matching workflows",
     "folderDescription": "Add a workflow here, or move existing ones into this folder.",
     "folderTitle": "This folder is empty",
+    "searchAndFilterDescription": "Your search and {count, plural, one {# filter} other {# filters}} are hiding every workflow here.",
+    "searchDescription": "Your search is hiding every workflow here. Clear it to see them all.",
+    "searchTitle": "No workflows match “{query}”",
     "title": "No workflows yet",
     "titleQuery": "No matching workflows"
   },

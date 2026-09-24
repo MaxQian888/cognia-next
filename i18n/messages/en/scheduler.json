@@ -241,6 +241,7 @@
   "details": "Details",
   "disableTask": "Disable",
   "duplicate": "Duplicate",
+  "dueReminderMuted": "Muted",
   "duration": "Duration",
   "edit": "Edit",
   "editSystemTask": "Edit System Task",
@@ -467,6 +468,8 @@
     "toast": "Toast",
     "webhook": "Webhook"
   },
+  "notifyDueReminder": "Remind when due",
+  "notifyDueReminderEventHint": "The due reminder only fires on schedule-based triggers; event tasks never become due.",
   "notifyImConversation": "IM conversation",
   "notifyImConversationHint": "Leave empty to use the global ops channel from settings. The conversation must have proactive push enabled to receive anything.",
   "notifyImConversationPlaceholder": "e.g. slack:ops-bot:C012AB3CD",
@@ -844,6 +847,7 @@
       "loading": "Checking signing status…",
       "manageSecret": "Manage signing secret",
       "title": "Webhook signing",
+      "unavailable": "A signing secret is configured, but secure storage is locked. Signed webhook deliveries fail until you unlock it.",
       "webOnly": "Web sessions cannot sign outbound webhooks — the signing secret is stored in the OS keyring."
     },
     "status": {

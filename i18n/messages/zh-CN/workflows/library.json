@@ -31,6 +31,8 @@
   },
   "empty": {
     "clearFilters": "清空筛选",
+    "clearSearch": "清空搜索",
+    "clearSearchAndFilters": "清空搜索和筛选",
     "cta": "创建工作流",
     "description": "创建第一个工作流，把多步流程串联到聊天、触发器和工具之上。",
     "descriptionQuery": "试试其它关键词，或清空筛选条件。",
@@ -38,6 +40,9 @@
     "filterTitle": "未找到匹配的工作流",
     "folderDescription": "在这里新建工作流，或把已有的工作流移进来。",
     "folderTitle": "此文件夹为空",
+    "searchAndFilterDescription": "当前搜索和 {count, plural, other {# 个筛选条件}}隐藏了此处的全部工作流。",
+    "searchDescription": "当前搜索隐藏了此处的全部工作流，清空搜索即可查看。",
+    "searchTitle": "没有与“{query}”匹配的工作流",
     "title": "暂无工作流",
     "titleQuery": "未找到匹配的工作流"
   },

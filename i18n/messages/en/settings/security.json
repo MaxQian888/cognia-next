@@ -5,7 +5,8 @@
     "label": "Lock after inactivity",
     "off": "Never",
     "option": "{minutes} min",
-    "title": "Auto-lock"
+    "title": "Auto-lock",
+    "inertHelp": "Not used while this profile unlocks automatically on this device."
   },
   "contextInspector": {
     "auditGap": "Governance history is incomplete because some projections failed.",

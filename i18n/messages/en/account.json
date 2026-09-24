@@ -67,7 +67,20 @@
     "unlockForm": "Unlock local account",
     "unlockTitle": "Unlock {name}",
     "unlocking": "Unlocking...",
-    "useRecoveryKey": "Forgot your password?"
+    "useRecoveryKey": "Forgot your password?",
+    "openLocalWorkspace": "Open local workspace",
+    "localWorkspaceUnavailable": "The local workspace could not be opened. Retry after restoring access to this device’s credential store.",
+    "localWorkspaceLocked": "The local workspace is locked.",
+    "allowCredentialStoreAccess": "Allow credential store access",
+    "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Unlock automatically on this device” to unlock without it.",
+    "autoUnlockFailedTitle": "Couldn’t unlock automatically",
+    "autoUnlockFailedStore": "This device’s credential store could not be read. Enter your password to continue; automatic unlock stays on and is tried again at the next launch.",
+    "autoUnlockFailedMissing": "The saved password was not found on this device, so automatic unlock was turned off. Enter your password to continue.",
+    "autoUnlockFailedRejected": "The saved password no longer opens this profile, so it was removed and automatic unlock was turned off. Enter your current password.",
+    "autoUnlockFailedOther": "The profile could not be opened automatically. Enter your password to try again.",
+    "deviceWorkspaceHint": "This workspace is protected by this device’s credential store. No password is needed.",
+    "rememberOnDeviceLabel": "Unlock automatically on this device",
+    "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working."
   },
   "manage": {
     "activeAccountLabel": "Current account",
@@ -139,7 +152,17 @@
     "title": "Local accounts",
     "undo": "Undo",
     "updatedAtLabel": "Updated",
-    "tabIdentity": "Identity"
+    "tabIdentity": "Identity",
+    "setPasswordHeading": "Protect this workspace",
+    "setPassword": "Set password",
+    "deviceProtectionHelp": "This workspace opens automatically on this device. Set a password to enable locking and require it on future launches.",
+    "rememberOnDeviceLabel": "Unlock automatically on this device",
+    "rememberOnDeviceOnHelp": "On. This profile opens without asking for its password on this device.",
+    "rememberOnDeviceOffHelp": "Off. The password is asked for at every launch.",
+    "rememberOnDevicePasswordLabel": "Confirm with this profile’s password",
+    "rememberOnDevicePasswordRequired": "Enter the password to turn this on.",
+    "rememberOnDeviceConfirm": "Turn on",
+    "sessionSecurityRememberedHelp": "This profile opens without a prompt on this device, so it is never locked when idle and there is nothing to lock. Turn off automatic unlock to use these controls."
   },
   "passwordStrength": {
     "aria": "Password strength",
@@ -293,7 +316,8 @@
     },
     "unavailable": {
       "title": "Sign-in is not available right now",
-      "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}"
+      "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}",
+      "discoveryFailed": "Could not determine which host to sign in to: {message}"
     },
     "advanced": {
       "toggle": "Advanced: configure Logto manually",

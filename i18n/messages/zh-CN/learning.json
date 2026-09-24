@@ -1,0 +1,10 @@
+{
+  "guide": {
+    "complete": "完成",
+    "guideTitle": "向导",
+    "nextStep": "下一步",
+    "previousStep": "上一步",
+    "skipGuide": "跳过向导",
+    "stepProgress": "第 {current} 步，共 {total} 步"
+  }
+}

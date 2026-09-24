@@ -4,16 +4,16 @@
     "approveAcceptEdits": "是，自动接受编辑",
     "approveFullAuto": "批准并完全自动运行",
     "approveReviewEach": "是，逐个审核编辑",
-    "discard": "丢弃计划",
     "edit": "编辑计划",
     "editCancel": "取消",
+    "editInEditor": "编辑",
     "editPlanHint": "以 Markdown 编辑计划…",
     "editPlanLabel": "计划（Markdown）",
     "editSave": "保存修改",
     "editStepsHint": "每行一个步骤…",
     "editStepsLabel": "步骤（每行一个）",
     "editTitleLabel": "标题",
-    "feedbackPlaceholder": "继续规划、丢弃或优化的可选反馈…",
+    "feedbackPlaceholder": "可选：用于继续规划或优化的反馈…",
     "interactive": {
       "addStep": "添加步骤",
       "deleteStep": "删除步骤",
@@ -41,6 +41,14 @@
     "refineRepair": "修复",
     "refineSimplify": "简化",
     "refineUnavailable": "无法优化——未配置用于后台任务的模型。",
+    "reject": "拒绝",
+    "rejectBack": "返回",
+    "rejectConfirm": "拒绝计划",
+    "rejectConfirmBody": "计划将被关闭且不会执行，拒绝原因会保留在计划历史中。",
+    "rejectConfirmTitle": "拒绝这个计划？",
+    "rejectFailed": "无法拒绝该计划。",
+    "rejectReasonLabel": "拒绝原因（可选）",
+    "rejectReasonPlaceholder": "这个计划哪里不合适？（可选）",
     "resumeFailed": "已批准的计划未能开始执行。点击继续以重试同一步骤。",
     "sourceLabel": "来源：{source}",
     "title": "审阅计划"
@@ -82,7 +90,11 @@
     "stepsPlaceholder": "审查调用方\n替换适配器\n更新测试",
     "title": "编写计划",
     "titleLabel": "计划标题",
-    "titlePlaceholder": "迁移认证模块"
+    "titlePlaceholder": "迁移认证模块",
+    "editTitle": "编辑计划",
+    "editDescription": "每行一个步骤。保存时会重新校验所有步骤，之后才能批准计划。",
+    "save": "保存修改",
+    "saveFailed": "无法保存计划。"
   },
   "status": {
     "approved": "已批准",
@@ -92,7 +104,8 @@
     "draft": "草稿",
     "executing": "执行中",
     "failed": "失败",
-    "paused": "已暂停"
+    "paused": "已暂停",
+    "rejected": "已拒绝"
   },
   "tracker": {
     "cancel": "取消计划",
@@ -130,7 +143,8 @@
       "resumed": "已恢复",
       "step_completed": "步骤完成",
       "step_failed": "步骤失败",
-      "step_started": "步骤开始"
+      "step_started": "步骤开始",
+      "step_skipped": "步骤已跳过"
     },
     "history": "计划历史",
     "moveDown": "下移步骤",
@@ -147,5 +161,33 @@
     "stepsHeading": "步骤",
     "titleLabel": "计划标题",
     "toc": "章节"
+  },
+  "stepFailure": {
+    "title": {
+      "dispatch_failed": "第 {index} 步无法开始：{title}",
+      "turn_failed": "第 {index} 步失败：{title}",
+      "not_started": "第 {index} 步未能启动：{title}",
+      "silent": "第 {index} 步已停滞：{title}",
+      "unrecorded": "第 {index} 步结束但未完成：{title}",
+      "interrupted": "第 {index} 步被中断：{title}"
+    },
+    "hint": {
+      "dispatch_failed": "对话拒绝发送这一步的回合。",
+      "turn_failed": "这一步的回合以错误结束。",
+      "not_started": "这一步在 {seconds} 秒内没有开始任何回合。",
+      "silent": "这一步的回合已有 {minutes} 分钟没有任何输出。",
+      "unrecorded": "回合已结束，但这一步从未被记录为完成。",
+      "interrupted": "这一步运行时应用重启了。"
+    },
+    "betweenSteps": "计划在两个步骤之间被中断。",
+    "detailLabel": "详情",
+    "attempt": "第 {count} 次尝试",
+    "noChat": "打开此对话以重试、跳过或完成该步骤。",
+    "retry": "重试步骤",
+    "skip": "跳过步骤",
+    "markDone": "标记为完成",
+    "resume": "继续",
+    "cancel": "取消计划",
+    "actionFailed": "计划无法继续。"
   }
 }

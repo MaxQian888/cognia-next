@@ -55,6 +55,9 @@
     "export": "Export as SKILL.md",
     "open": "Open",
     "selectAria": "Select {name}",
+    "syncCurrent": "Synced",
+    "syncError": "Sync error",
+    "syncPending": "Sync pending",
     "usageCount": "Used {count}×"
   },
   "category": {

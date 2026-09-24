@@ -17,7 +17,7 @@
 import enMessages from "./messages/en.json"
 import zhMessages from "./messages/zh-CN.json"
 
-import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
+import type { TaskMoveError } from "@/lib/ai/agent/team/gates/task-move-guard"
 import { ISSUE_GROUP_BY_OPTIONS } from "@/lib/issues/board-model"
 import type { IssueFilterFacet } from "@/lib/issues/filter-chips"
 import { AGENT_TASK_RUN_ADAPTER_ID } from "@/lib/issues/run/agent-task-adapter"

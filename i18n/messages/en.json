@@ -1608,12 +1608,19 @@
       },
       "unavailable": {
         "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}",
+        "discoveryFailed": "Could not determine which host to sign in to: {message}",
         "title": "Sign-in is not available right now"
       }
     },
     "gate": {
       "abandonAttempt": "Stop waiting",
+      "allowCredentialStoreAccess": "Allow credential store access",
       "attemptsRemaining": "{count, plural, =1 {1 attempt left before a cooldown} other {# attempts left before a cooldown}}",
+      "autoUnlockFailedMissing": "The saved password was not found on this device, so automatic unlock was turned off. Enter your password to continue.",
+      "autoUnlockFailedOther": "The profile could not be opened automatically. Enter your password to try again.",
+      "autoUnlockFailedRejected": "The saved password no longer opens this profile, so it was removed and automatic unlock was turned off. Enter your current password.",
+      "autoUnlockFailedStore": "This device’s credential store could not be read. Enter your password to continue; automatic unlock stays on and is tried again at the next launch.",
+      "autoUnlockFailedTitle": "Couldn’t unlock automatically",
       "backToPassword": "Use my password instead",
       "capsLockOn": "Caps Lock is on",
       "confirmPasswordLabel": "Confirm new password",
@@ -1621,12 +1628,14 @@
       "cooldown": "Too many attempts. Try again in {seconds}s.",
       "copyDiagnostics": "Copy details",
       "createAccount": "Create account",
+      "deviceWorkspaceHint": "This workspace is protected by this device’s credential store. No password is needed.",
       "diagnosticsCopied": "Copied",
       "displayNameLabel": "Account name",
       "displayNamePlaceholder": "Local account",
       "errorInvalidPassword": "That password is not correct.",
       "errorInvalidRecoveryKey": "That recovery key is not correct.",
       "errorPasswordRequired": "Enter your password.",
+      "errorSecretStoreUnavailable": "This device’s credential store did not keep the password. Untick “Unlock automatically on this device” to unlock without it.",
       "errorStorageLayoutUnsupported": "This device's local data was written by a different version of the app and cannot be opened.",
       "errorThrottled": "Too many attempts. Wait for the cooldown to end.",
       "errorUnknown": "Unlocking failed. Copy the details below if it keeps happening.",
@@ -1636,8 +1645,11 @@
       "firstRunTitle": "Create local account",
       "hidePassword": "Hide password",
       "loading": "Loading accounts...",
+      "localWorkspaceLocked": "The local workspace is locked.",
+      "localWorkspaceUnavailable": "The local workspace could not be opened. Retry after restoring access to this device’s credential store.",
       "newPasswordLabel": "New password",
       "newPasswordPlaceholder": "New password",
+      "openLocalWorkspace": "Open local workspace",
       "operationFailed": "Local account operation failed.",
       "passwordLabel": "Password",
       "passwordMismatch": "Passwords do not match.",
@@ -1657,6 +1669,8 @@
       "recoveryUnlockDescription": "Enter the one-time recovery key you saved when this account was created, then choose a new password. The recovery key keeps working afterwards.",
       "recoveryUnlockForm": "Unlock with a recovery key",
       "reloadWindow": "Reload the window",
+      "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working.",
+      "rememberOnDeviceLabel": "Unlock automatically on this device",
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
@@ -1769,6 +1783,7 @@
       "deleteScheduledToast": "Deleting “{name}”",
       "deleteTokensMayRemainLive": "The identity provider may still hold a session for the deleted account. Sign out from the provider's own console to be sure.",
       "description": "Create, rename, and remove local accounts on this device.",
+      "deviceProtectionHelp": "This workspace opens automatically on this device. Set a password to enable locking and require it on future launches.",
       "editDisplayNameLabel": "Account name",
       "empty": "Select an account",
       "emptyList": "No local accounts yet",
@@ -1786,10 +1801,19 @@
       "passwordChanged": "Password changed.",
       "passwordMismatch": "Passwords do not match.",
       "passwordTooShort": "Password must be at least {min} characters.",
+      "rememberOnDeviceConfirm": "Turn on",
+      "rememberOnDeviceLabel": "Unlock automatically on this device",
+      "rememberOnDeviceOffHelp": "Off. The password is asked for at every launch.",
+      "rememberOnDeviceOnHelp": "On. This profile opens without asking for its password on this device.",
+      "rememberOnDevicePasswordLabel": "Confirm with this profile’s password",
+      "rememberOnDevicePasswordRequired": "Enter the password to turn this on.",
       "save": "Save",
       "searchLabel": "Search accounts",
       "searchPlaceholder": "Search accounts",
       "sessionSecurityHeading": "Session security",
+      "sessionSecurityRememberedHelp": "This profile opens without a prompt on this device, so it is never locked when idle and there is nothing to lock. Turn off automatic unlock to use these controls.",
+      "setPassword": "Set password",
+      "setPasswordHeading": "Protect this workspace",
       "statusActive": "Active",
       "statusLocked": "Locked",
       "statusUnlocked": "Unlocked",
@@ -2874,7 +2898,6 @@
       "composer": {
         "attachmentsNotSupported": "Attachments aren't supported in team chat yet.",
         "imageNotSupported": "Image attachments aren't supported in team chat yet.",
-        "mentionTitle": "Mention an agent",
         "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
         "missingPrompt": "Add a message after the mention.",
         "noAgents": "No agents available — add a teammate first",
@@ -4141,7 +4164,9 @@
       "reviewChanges": "Changes",
       "reviewDiff": "Diff",
       "reviewEmpty": "Select a changed file to review its diff",
+      "reviewWithCount": "Review, {count, plural, one {# changed file} other {# changed files}}",
       "scopeLabel": "Workspace scope",
+      "surfaceLabel": "Workspace view",
       "taskResources": {
         "adoptionGenerationOnly": "{lines} generated lines · adoption unavailable for the legacy fallback",
         "adoptionPending": "{lines} proposed lines · awaiting review",
@@ -6163,6 +6188,10 @@
       "attachments": {
         "analyzing": "Analyzing image…",
         "countLimit": "Only {max} attachments allowed.",
+        "externalOmitted": {
+          "files": "External agents receive text only, so the images or video in {names} weren't sent. Any text extracted from {count, plural, =1 {it} other {them}} was.",
+          "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} sent: external agents receive only your message and the text of attached files."
+        },
         "extracting": "Reading…",
         "fallbackFile": "file",
         "fallbackName": "attachment",
@@ -6170,6 +6199,7 @@
         "folderEmpty": "That folder has no attachable files.",
         "folderTruncated": "Only the first {max} files from the dropped folder were read.",
         "linkSkipped": "{count, plural, =1 {1 link couldn't be read} other {# links couldn't be read}}; the original URL will still be sent.",
+        "notResent": "{names} couldn't be sent again and {count, plural, =1 {was} other {were}} left out. Attach {count, plural, =1 {it} other {them}} again to include {count, plural, =1 {it} other {them}}.",
         "openPreviewAria": "Preview {filename}",
         "optimized": "{count, plural, =1 {1 large image was optimized} other {# large images were optimized}} before attaching.",
         "oversizeBody": "These attachments add about {tokens}k tokens of context. Send anyway?",
@@ -6220,6 +6250,10 @@
         "removeAria": "Remove {filename}",
         "reorderAria": "Reorder {filename}",
         "skipped": "{count, plural, =1 {1 attachment was} other {# attachments were}} skipped (unsupported file type).",
+        "squadOmitted": {
+          "files": "A Squad's goal is text only, so the images or video in {names} weren't handed to it. Any text extracted from {count, plural, =1 {it} other {them}} was.",
+          "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} handed to the Squad: its goal holds only your message and the text of attached files."
+        },
         "tokenBadge": "{tokens} tok",
         "unsupported": "{count, plural, =1 {1 file isn't supported} other {# files aren't supported}}.",
         "video": {
@@ -6608,6 +6642,7 @@
         "presetTitle": "Apply a prompt preset",
         "recentSection": "Recent",
         "resultCount": "{count, plural, one {# command} other {# commands}}",
+        "runtimesSection": "Runtimes",
         "searchArgumentsAria": "Search parameters for /{name}",
         "searchArgumentsPlaceholder": "Search parameter options…",
         "searchAria": "Search slash commands",
@@ -6632,6 +6667,7 @@
         },
         "skillTitle": "Enable a skill",
         "slashTitle": "Slash command",
+        "squadMembersSection": "Squad members",
         "suggestionCount": "{count, plural, one {# option} other {# options}}",
         "templateParamCount": "{count, plural, =1 {1 parameter} other {# parameters}}",
         "templatesSection": "Templates",
@@ -6650,6 +6686,9 @@
         "removeAria": "Remove reference to {path}"
       },
       "removePastedChip": "Remove pasted text",
+      "reviewDraftsAria": "Review {count, plural, one {# pending draft} other {# pending drafts}}",
+      "reviewDraftsLabel": "Review drafts",
+      "reviewDraftsTooltip": "Drafted replies are waiting for your review. Type a message to send your own instead.",
       "roomTargets": {
         "asleepDisabled": "The room is asleep. Nobody replies until the reply mode changes.",
         "chipLabel": "To",
@@ -6664,10 +6703,28 @@
         "title": "Who replies to this message",
         "trigger": "Choose who replies"
       },
+      "route": {
+        "blocked": "{runtime} can't run here",
+        "blockedDetail": "{runtime} can't run here: {detail}",
+        "busy": "Wait for the current reply to finish before addressing @{handle}.",
+        "disabled": "External agents are turned off.",
+        "emptyPrompt": "Add a message after @{handle}.",
+        "memberMissing": "@{handle} is no longer in a Squad.",
+        "memberRuntime": "{name} runs on {runtime}, which isn't available here.",
+        "notConfigured": "No {runtime} agent is set up.",
+        "openSettings": "Set up",
+        "runsAs": "Answers as {name}, on {engine}",
+        "runsOn": "Answers on {name}",
+        "starting": "{runtime} isn't ready yet",
+        "startingDetail": "{runtime} isn't ready yet: {detail}",
+        "unavailable": "Can't send to @{handle}"
+      },
       "sandboxShield": {
+        "externalDetail": "The built-in sandbox setting does not apply here: the external agent brings its own tools, and Cognia never starts it outside the agent sandbox.",
         "inheritedDetail": "This conversation follows the character or app default. It will be pinned to the tier it runs on the first time it uses the sandbox.",
         "label": {
           "cua-desktop": "Sandbox tier unavailable — bound desktop",
+          "external": "Agent sandbox — external runtime",
           "microvm": "Sandbox active — microVM tier",
           "off": "Sandbox off",
           "os": "Sandbox active — OS tier"
@@ -6675,6 +6732,7 @@
         "pinnedDetail": "This conversation keeps its own sandbox tier, so changing the default elsewhere will not re-tier it.",
         "tooltip": {
           "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
+          "external": "This conversation runs on an external agent. Its process always runs inside Cognia's mandatory agent sandbox, which can write to the workspace and reach the network.",
           "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
           "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
@@ -6880,6 +6938,7 @@
         },
         "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
         "microphoneLabel": "Microphone",
+        "microphoneLiveOnly": "Used by live voice. Dictation records from the system default microphone.",
         "noMicFound": "No microphone found.",
         "selectMicAria": "Select microphone",
         "startListening": "Start voice input",
@@ -7862,6 +7921,7 @@
         "timestamp": "Time",
         "usage": "Tokens"
       },
+      "routedVia": "via @{handle}",
       "routing": {
         "alias": "Alias · {alias}",
         "auto": "Auto · {target}",
@@ -8300,6 +8360,7 @@
       "input": "Input",
       "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
       "output": "Output",
+      "partialModelData": "The model breakdown covers recorded turns only. Totals include earlier turns.",
       "reasoning": "Reasoning",
       "speed": "Speed",
       "title": "Session cost",
@@ -8552,6 +8613,35 @@
       "done": "{count, plural, =1 {Deleted 1 message.} other {Deleted # messages.}}",
       "error": "Couldn't delete those messages.",
       "title": "Delete from this message on?"
+    },
+    "turnAdmission": {
+      "ariaCancel": "Cancel this queued message and put it back in the composer",
+      "ariaRetry": "Run this message again",
+      "cancel": "Cancel",
+      "detail": "Details: {detail}",
+      "failed": "Didn't run — {reason}",
+      "failedGeneric": "the agent could not run this turn",
+      "holderKind": {
+        "chat": "another conversation",
+        "connector": "a connector reply",
+        "goal": "a goal",
+        "other": "other work",
+        "scheduled": "a scheduled task",
+        "subagent": "a subagent",
+        "team": "a team run",
+        "workflow-step": "a plan or workflow step"
+      },
+      "interrupted": "Not sent — the app closed while this message was waiting",
+      "interruptedHint": "This turn was queued when the app was closed or reloaded, so it never ran.",
+      "queued": "Queued — {reason}",
+      "queuedHint": "This message starts as soon as it can. Cancel puts it back in the composer.",
+      "retry": "Retry",
+      "waiting": {
+        "capacity": "waiting for a free agent slot",
+        "provider": "waiting for this provider's concurrency limit",
+        "slot": "waiting for {holder} to finish in this working copy",
+        "slotNamed": "waiting for {holder} “{label}” to finish in this working copy"
+      }
     },
     "twinBadge": {
       "fewShotOff": "Style few-shot off",
@@ -11148,11 +11238,13 @@
         "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
         "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
         "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+        "folderOtherWorkspace": "Dimmed folders are in a different workspace from some of the selected conversations.",
         "moveSuccess": "{count, plural, one {Moved # conversation} other {Moved # conversations}}",
         "moveToFolder": "Move to folder",
         "pin": "Pin",
         "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
         "removeFromFolder": "Remove from folder",
+        "removeFromFolderSuccess": "{count, plural, one {Took # conversation out of its folder} other {Took # conversations out of their folders}}",
         "selectedCount": "{count, plural, one {# selected} other {# selected}}",
         "share": "Share",
         "unarchive": "Unarchive",
@@ -11194,7 +11286,6 @@
         }
       },
       "groupEmpty": "No conversations yet",
-      "groupOther": "Other",
       "groupShowAll": "Show all {count}",
       "groupShowLess": "Show less",
       "groupShowMore": "Show {count} more",
@@ -11223,7 +11314,6 @@
       "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search chats…",
       "searchShortcutHint": "Press / to search",
-      "searchToggleAria": "Search this list",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchingMessages": "Searching messages…",
       "sectionPinned": "Pinned",
@@ -11835,8 +11925,41 @@
       "perfMem": "Memory",
       "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}",
       "streaming": "Streaming",
-      "syncLast": "Synced {time}",
-      "syncNever": "Not synced",
+      "syncCenter": {
+        "chip": {
+          "error": "Sync status unavailable",
+          "loading": "Checking sync",
+          "paired": "{connected}/{total} devices online",
+          "remote": "Synced by remote host",
+          "unpaired": "Sync not set up"
+        },
+        "feedback": {
+          "failed": "Couldn't request a sync: {error}",
+          "noneConnected": "No paired device is connected right now. Devices catch up automatically when they reconnect.",
+          "requested": "{count, plural, =1 {Asked 1 connected device to sync now.} other {Asked # connected devices to sync now.}} They pull in the background."
+        },
+        "hostDescription": "This desktop is the host. Your paired phones and browsers pull conversations, settings and history from it.",
+        "lastContact": "Last device contact {time}",
+        "manageDevices": "Manage devices",
+        "moreDevices": "{count, plural, =1 {+1 more device} other {+# more devices}}",
+        "neverContacted": "No paired device has connected yet.",
+        "neverSeen": "Never seen",
+        "plane": {
+          "connecting": "Connecting",
+          "degraded": "Unstable",
+          "disconnected": "Offline",
+          "ready": "Connected",
+          "replaying": "Catching up"
+        },
+        "readFailed": "Couldn't read the paired devices on this desktop.",
+        "remoteDescription": "This desktop is working on a remote host. Your devices sync with that host, not with this desktop.",
+        "remoteSettings": "Remote hosts",
+        "setUp": "Set up sync",
+        "settings": "Connectivity settings",
+        "title": "Device sync",
+        "trigger": "Device sync: {status}",
+        "unpairedDescription": "No phone or browser is paired with this desktop yet. Pair one to keep your conversations in sync across devices."
+      },
       "syncNow": "Sync now",
       "terminal": "{count, plural, =0 {Terminal} one {# terminal} other {# terminals}}",
       "terminalAiShellToggle": "Toggle AI Shell panel",
@@ -12372,6 +12495,10 @@
         "hint": "The external agent this session points at no longer exists — pick another one.",
         "label": "Agent not found"
       },
+      "agentProcessBusy": {
+        "hint": "This conversation's agent is still running in another process, so a second copy was not started. Wait for that run to finish, then retry.",
+        "label": "Agent already running"
+      },
       "agentUnavailable": {
         "hint": "The external agent isn't responding — reconnect, or fall back to the built-in agent.",
         "label": "Agent unavailable"
@@ -12712,6 +12839,14 @@
         "hint": "Running an external agent needs the desktop app — in the browser, use the built-in agent.",
         "label": "Needs the desktop app"
       },
+      "turnRouteUnavailable": {
+        "hint": "This message was addressed to a runtime that can't take it here — set that agent up, or send without the @ at the start.",
+        "label": "Can't send to that runtime"
+      },
+      "turnRouteWhileBusy": {
+        "hint": "A reply is still running. Wait for it to finish, then send the addressed message again.",
+        "label": "Wait for the current reply"
+      },
       "turnSilent": {
         "hint": "This turn has been running a while without reporting anything. A long tool call looks the same from here, so check the log before stopping it.",
         "label": "No response yet"
@@ -12939,6 +13074,7 @@
     "emptyWorkflowTemplates": "No workflow templates available.",
     "favorite": {
       "add": "Add to favorites",
+      "failed": "Couldn't update favorites",
       "remove": "Remove from favorites"
     },
     "featured": "Featured",
@@ -12966,12 +13102,23 @@
       "aria": "Details panel",
       "close": "Close",
       "disable": "Disabled",
+      "editCharacter": "Edit character",
       "empty": "Select an item to see its details.",
       "enable": "Enabled",
       "itemCount": "{count, plural, =0 {No items} =1 {1 item} other {# items}}",
+      "loadingDescription": "Looking this item up in the catalog…",
+      "loadingTitle": "Loading details",
       "manageCommands": "Manage commands",
+      "manageTeams": "Manage teams",
       "mcpPresetFields": "{count, plural, =1 {1 field to fill in} other {# fields to fill in}}",
+      "missingDescription": "This item was removed, or it isn't available on this device.",
+      "missingTitle": "Item not found",
+      "newTeamConversation": "New conversation",
+      "newTeamConversationFailed": "Couldn't start a conversation with {name}",
       "openFull": "Open full page",
+      "openTeam": "Open conversations",
+      "startChat": "Start chat",
+      "startChatFailed": "Couldn't open a chat with {name}",
       "templateMissingDeps": "{count, plural, =1 {1 missing dependency} other {# missing dependencies}}",
       "title": "Details",
       "twinDraftFallbackName": "{kind} draft",
@@ -13998,13 +14145,18 @@
     },
     "scorerCatalog": {
       "assertion": "Assertions",
+      "choice-match": "Choice match",
+      "contains-any": "Contains any",
       "cost": "Cost",
+      "exact-match": "Exact match",
       "judge-instruction-following": "Instruction following (LLM judge)",
       "judge-task-completion": "Task completion (LLM judge)",
+      "numeric-match": "Numeric match",
       "rag-answer-relevancy": "Answer relevancy",
       "rag-context-precision": "Context precision",
       "rag-context-recall": "Context recall",
       "rag-faithfulness": "Faithfulness",
+      "regex-match": "Regex match",
       "tool-args": "Tool arguments",
       "tool-order": "Tool order",
       "tool-redundancy": "Tool redundancy",
@@ -15020,9 +15172,11 @@
   },
   "fleet": {
     "agents": {
+      "acp": "ACP",
       "claude-code": "Claude Code",
       "codex": "Codex",
       "cognia": "Cognia",
+      "devin": "Devin",
       "opencode": "OpenCode"
     },
     "island": {
@@ -15178,6 +15332,22 @@
       "subagents": "{count, plural, one {# subagent} other {# subagents}}",
       "waitingFor": "waiting {duration}",
       "you": "You:"
+    }
+  },
+  "functionalToast": {
+    "dismiss": "Dismiss",
+    "generic": "Notification",
+    "scheduledDue": {
+      "dueFailed": "Due · {count}× failed",
+      "dueNow": "Due now",
+      "lastFailed": "failed {ago}",
+      "lastRan": "ran {ago}",
+      "neverRan": "first run",
+      "next": "next {relative}",
+      "nextNone": "no next run",
+      "now": "due",
+      "runStarting": "Run #{count} starting",
+      "runStartingIn": "Run #{count} starting · {workspace}"
     }
   },
   "globalSearch": {
@@ -17467,6 +17637,17 @@
     },
     "workspace": {
       "agentsWorking": "Agents working",
+      "agentsWorkingEmpty": "No agent is working in this workspace right now.",
+      "agentsWorkingHide": "Hide the list of working agents",
+      "agentsWorkingMeta": "{engine} · started {time}",
+      "agentsWorkingMissingIssue": "Issue no longer available",
+      "agentsWorkingOpen": {
+        "agentBoard": "Open task board",
+        "issue": "Open issue",
+        "session": "Open session",
+        "squad": "Open squad"
+      },
+      "agentsWorkingShow": "Show which agents are working",
       "environments": "Environments",
       "issueSummary": "Issues",
       "manage": "Manage workspace",
@@ -17580,6 +17761,16 @@
       "retry": "Retry",
       "team": "Team workspaces",
       "title": "Cognia workbench"
+    }
+  },
+  "learning": {
+    "guide": {
+      "complete": "Complete",
+      "guideTitle": "Guide",
+      "nextStep": "Next",
+      "previousStep": "Previous",
+      "skipGuide": "Skip guide",
+      "stepProgress": "Step {current} of {total}"
     }
   },
   "loading": {
@@ -19803,6 +19994,7 @@
         "historyCount": "{count, plural, =0 {Nothing recorded yet} other {# recorded submissions}}",
         "historyHint": "A short note per submission — the page title, the site it came from and whether it is still running. Never the page text or your instruction: those live in the conversation it started, where you can read and delete them.",
         "historyTitle": "Recorded submissions",
+        "listenerFailed": "Could not read browser access status. Reopen this page to try again.",
         "openDevices": "Open device console",
         "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
         "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
@@ -20523,6 +20715,17 @@
       "workspaceReady": "Workspace ready"
     },
     "home": {
+      "actionFailed": {
+        "archive": "Couldn't archive the conversation.",
+        "delete": "Couldn't delete the conversation.",
+        "markRead": "Couldn't mark the conversation as read.",
+        "move": "Couldn't move the conversation.",
+        "pin": "Couldn't pin the conversation.",
+        "rename": "Couldn't rename the conversation.",
+        "unarchive": "Couldn't restore the conversation.",
+        "unpin": "Couldn't unpin the conversation."
+      },
+      "actionLocked": "This conversation is read-only while it is handed off to another device.",
       "actions": {
         "devices": "Devices",
         "discover": "Discover",
@@ -20537,6 +20740,7 @@
         "twin": "Digital twin",
         "workflows": "Workflows"
       },
+      "actionsDescription": "Actions for this conversation",
       "activeRuns": {
         "empty": "No active runs",
         "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
@@ -20565,16 +20769,22 @@
       "emptyChats": "No chats yet. Tap + to start one.",
       "emptyFiltered": "No chats match “{query}”.",
       "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
+      "folderEmpty": "Empty — long-press a chat to move it here.",
       "hideSection": "Hide {section}",
+      "loadingChats": "Loading conversations…",
+      "markRead": "Mark as read",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
       "quickActions": "Quick actions",
       "recent": "Recent",
       "renameAria": "Rename conversation",
+      "results": "Results",
+      "rowActionsHint": "Long-press or swipe for more actions",
       "search": "Search chats…",
       "searchAria": "Search chats",
       "searchTruncated": "Some results may be hidden — refine your search.",
       "searchingMessages": "Searching messages…",
+      "sectionCount": "{count, plural, =1 {1 conversation} other {# conversations}}",
       "sections": {
         "activeRuns": "Active runs",
         "quickActions": "Quick actions",
@@ -20585,12 +20795,16 @@
       "swipePin": "Pin",
       "swipeUnarchive": "Unarchive",
       "swipeUnpin": "Unpin",
+      "undo": "Undo",
       "ungroupedAgent": "No agent",
       "ungroupedTeam": "Chats",
       "ungroupedWorkspace": "No workspace",
       "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
       "viewActive": "Show active chats",
-      "viewArchived": "Show archived chats"
+      "viewArchived": "Show archived chats",
+      "viewTabActive": "Chats",
+      "viewTabArchived": "Archived",
+      "viewTabsLabel": "Conversation view"
     },
     "hooks": {
       "backAria": "Back to Me",
@@ -20974,13 +21188,6 @@
       "searchAria": "Search memories",
       "searchPlaceholder": "Search memories…",
       "title": "Memory"
-    },
-    "mentionPopover": {
-      "count": "{count} {count, plural, one {match} other {matches}}",
-      "dismiss": "Dismiss",
-      "empty": "No members in this team yet.",
-      "noMatches": "No matches for \"{query}\"",
-      "title": "Mention a teammate"
     },
     "messageActions": {
       "bookmark": "Bookmark",
@@ -21657,6 +21864,7 @@
     "shell": {
       "artifacts": "Artifacts",
       "clearSearch": "Clear search",
+      "closeNav": "Close navigation",
       "deleteSession": "Delete this session",
       "directSessionTitle": "Chat with {name}",
       "exportConversation": "Export / share",
@@ -21666,6 +21874,7 @@
       "navSheetTitle": "Navigation",
       "newChat": "New chat",
       "noApiKey": "No API key",
+      "noApiKeyHint": "No API key — open session settings to add one",
       "openMembers": "Open team members",
       "openNav": "Open navigation",
       "search": "Search",
@@ -23583,6 +23792,18 @@
     "sourceHealth": {
       "error": "Latest error",
       "gaps": "Visible gaps",
+      "issue": {
+        "contended": {
+          "deviceBusy": "Another window on this device is already streaming host metrics. This page takes over automatically when that window closes or stops.",
+          "hostBusy": "The host is already serving its maximum number of live metric streams. Retrying automatically.",
+          "rateLimited": "The host asked to slow down. Retrying in a moment.",
+          "targetBusy": "The host is streaming metrics for a different target right now. Retrying automatically once it is free."
+        },
+        "detail": "Host said: {detail}",
+        "rejected": "The host refused the metrics stream ({code}).",
+        "renewFailed": "The metrics stream stopped renewing. It reconnects on its own if the host dropped it.",
+        "unreachable": "The selected host could not be reached for metrics."
+      },
       "kind": {
         "host": "Selected host",
         "renderer": "Local Renderer"
@@ -24159,6 +24380,8 @@
       "scheduledDue": {
         "body": "\"{taskName}\" is due right now.",
         "bodyGeneric": "One of your scheduled tasks is due right now.",
+        "mute": "Mute",
+        "open": "Open",
         "title": "Scheduled task due"
       }
     },
@@ -24355,16 +24578,16 @@
       "approveAcceptEdits": "Yes, auto-accept edits",
       "approveFullAuto": "Approve & run fully automated",
       "approveReviewEach": "Yes, review each edit",
-      "discard": "Discard plan",
       "edit": "Edit plan",
       "editCancel": "Cancel",
+      "editInEditor": "Edit",
       "editPlanHint": "Edit the plan as markdown…",
       "editPlanLabel": "Plan (markdown)",
       "editSave": "Save changes",
       "editStepsHint": "One step per line…",
       "editStepsLabel": "Steps (one per line)",
       "editTitleLabel": "Title",
-      "feedbackPlaceholder": "Optional feedback for keep-planning, discard, or refinement…",
+      "feedbackPlaceholder": "Optional feedback for keep-planning or refinement…",
       "interactive": {
         "addStep": "Add step",
         "deleteStep": "Delete step",
@@ -24392,6 +24615,14 @@
       "refineRepair": "Repair",
       "refineSimplify": "Simplify",
       "refineUnavailable": "Can't refine — no model is configured for background tasks.",
+      "reject": "Reject",
+      "rejectBack": "Back",
+      "rejectConfirm": "Reject plan",
+      "rejectConfirmBody": "The plan is closed and will not run. The reason is kept in the plan's history.",
+      "rejectConfirmTitle": "Reject this plan?",
+      "rejectFailed": "Could not reject the plan.",
+      "rejectReasonLabel": "Reason for rejecting (optional)",
+      "rejectReasonPlaceholder": "Why doesn't this plan work? (optional)",
       "resumeFailed": "The approved plan could not start. Resume to retry the same step.",
       "sourceLabel": "Source: {source}",
       "title": "Review plan"
@@ -24403,6 +24634,8 @@
       "create": "Create plan",
       "createFailed": "Could not create the plan.",
       "description": "One step per line. You can reorder and edit the steps before approving.",
+      "editDescription": "One step per line. Saving checks every step again before the plan can be approved.",
+      "editTitle": "Edit plan",
       "field": {
         "content": "Proposed contents",
         "path": "File path",
@@ -24428,6 +24661,8 @@
       },
       "kindLabel": "Type",
       "openLabel": "Write a plan",
+      "save": "Save changes",
+      "saveFailed": "Could not save the plan.",
       "stepCount": "{count, plural, =0 {No steps yet} one {# step} other {# steps}}",
       "stepsLabel": "Steps",
       "stepsPlaceholder": "Audit the callers\nSwap the adapter\nUpdate the tests",
@@ -24455,6 +24690,7 @@
         "resumed": "resumed",
         "step_completed": "step done",
         "step_failed": "step failed",
+        "step_skipped": "step skipped",
         "step_started": "step started"
       },
       "history": "Plan history",
@@ -24481,7 +24717,36 @@
       "draft": "Draft",
       "executing": "Executing",
       "failed": "Failed",
-      "paused": "Paused"
+      "paused": "Paused",
+      "rejected": "Rejected"
+    },
+    "stepFailure": {
+      "actionFailed": "The plan could not continue.",
+      "attempt": "Attempt {count}",
+      "betweenSteps": "The plan was interrupted between steps.",
+      "cancel": "Cancel plan",
+      "detailLabel": "Details",
+      "hint": {
+        "dispatch_failed": "The conversation refused to send this step's turn.",
+        "interrupted": "The app restarted while this step was running.",
+        "not_started": "No turn started for this step within {seconds} seconds.",
+        "silent": "The turn for this step produced no output for {minutes} minutes.",
+        "turn_failed": "The turn for this step ended with an error.",
+        "unrecorded": "The turn ended, but the step was never recorded as finished."
+      },
+      "markDone": "Mark done",
+      "noChat": "Open this conversation to retry, skip or finish the step.",
+      "resume": "Resume",
+      "retry": "Retry step",
+      "skip": "Skip step",
+      "title": {
+        "dispatch_failed": "Step {index} could not start: {title}",
+        "interrupted": "Step {index} was interrupted: {title}",
+        "not_started": "Step {index} never started: {title}",
+        "silent": "Step {index} stalled: {title}",
+        "turn_failed": "Step {index} failed: {title}",
+        "unrecorded": "Step {index} ended without finishing: {title}"
+      }
     },
     "tracker": {
       "cancel": "Cancel plan",
@@ -26592,11 +26857,29 @@
   },
   "projectEditor": {
     "action": {
+      "addFileToChat": "Add File to Chat",
+      "addSelectionToChat": "Add Selection to Chat",
+      "addToChat": "Add to Chat",
+      "changeAllOccurrences": "Change All Occurrences",
+      "copy": "Copy",
       "copyPath": "Copy Path",
       "copyRelativePath": "Copy Relative Path",
+      "cut": "Cut",
+      "findInFolder": "Find in Folder…",
       "format": "Format Document",
+      "goToImplementation": "Go to Implementation",
+      "goToReferences": "Go to References",
+      "open": "Open",
+      "openToSide": "Open to the Side",
+      "paste": "Paste",
+      "renameSymbol": "Rename Symbol",
+      "revealInExplorer": "Reveal in Explorer View",
+      "revealInFileExplorer": "Reveal in File Explorer",
       "save": "Save",
       "searchProject": "Search in Project"
+    },
+    "agent": {
+      "addedToChat": "Added {name} to chat context"
     },
     "breadcrumbs": {
       "empty": "Empty folder",
@@ -26609,8 +26892,45 @@
     "closeDirtyConfirmCount": "{count} files have unsaved changes. Close anyway and discard them?",
     "closeTab": "Close {name}",
     "collapseAll": "Collapse All",
+    "command": {
+      "changeEol": "Change End of Line Sequence to {eol}",
+      "closeActive": "View: Close Editor",
+      "closeAll": "View: Close All Editors",
+      "closeOthers": "View: Close Other Editors in Group",
+      "focusFirstGroup": "Focus First Editor Group",
+      "focusSecondGroup": "Focus Second Editor Group",
+      "fontZoomIn": "View: Editor Font Zoom In",
+      "fontZoomOut": "View: Editor Font Zoom Out",
+      "fontZoomReset": "View: Editor Font Zoom Reset",
+      "format": "Format Document",
+      "goToFile": "File: Go to File...",
+      "goToSymbol": "Go to Symbol in Editor...",
+      "nextProblem": "Go to Next Problem",
+      "palette": "View: Command Palette",
+      "previewToSide": "View: Open Preview to the Side",
+      "reopen": "View: Reopen Closed Editor",
+      "revealActive": "File: Reveal Active File in Explorer View",
+      "revert": "File: Revert File",
+      "save": "File: Save",
+      "saveAll": "File: Save All",
+      "searchProject": "Search: Find in Files",
+      "splitEditor": "View: Split Editor",
+      "toggleMinimap": "View: Toggle Minimap",
+      "togglePreview": "View: Toggle Preview",
+      "toggleProblems": "View: Toggle Problems",
+      "toggleSidebar": "View: Toggle Primary Side Bar",
+      "toggleWordWrap": "View: Toggle Word Wrap",
+      "zenMode": "View: Toggle Zen Mode"
+    },
+    "confirmDiscard": "Discard",
+    "confirmDontSave": "Don't Save",
+    "confirmOverwrite": "Overwrite",
+    "confirmSave": "Save",
+    "confirmTitle": "Confirm",
     "delete": "Delete",
     "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
+    "deletedOnDisk": "Deleted on disk",
+    "deletedTab": "{name} — deleted on disk",
     "editorTab": "Editor",
     "emptyEditor": "Open a file from the tree to start editing.",
     "externallyChanged": "Changed on disk",
@@ -26628,7 +26948,11 @@
     "newFile": "New File",
     "newFolder": "New Folder",
     "newFromTemplate": "New File from Template",
+    "overwriteExternalConfirm": "\"{name}\" changed on disk since you opened it. Overwrite the external changes with your draft?",
+    "overwriteExternalConfirmCount": "{count} files changed on disk since you opened them. Overwrite the external changes with your drafts?",
     "pinTab": "Keep {name} open",
+    "previewCloseHint": "Close Preview",
+    "previewOpenHint": "Open Preview",
     "previewTab": "{name} — preview tab, double-click to keep it open",
     "proIde": {
       "cancelDownload": "Cancel",
@@ -26680,23 +27004,72 @@
       "fix": "Please fix the issues in this code.",
       "review": "Please review this code for potential bugs and improvements."
     },
+    "problems": {
+      "close": "Close Panel",
+      "empty": "No problems have been detected in the workspace so far.",
+      "filter": "Filter (e.g. text, **/*.ts, !**/node_modules/**)",
+      "noMatch": "No results found with the provided filter criteria.",
+      "title": "Problems"
+    },
     "quickOpen": {
       "allFiles": "all files",
+      "commands": "Commands",
       "description": "Search files by name to open them.",
       "empty": "No matching files",
       "footer": "↑↓ navigate · ↵ open",
+      "footerCommands": "↑↓ navigate · ↵ run",
+      "footerGoto": "type a line number · ↵ go",
+      "footerSymbols": "{file} — type a symbol name · ↵ go",
+      "gotoLine": "Go to line {line}",
+      "gotoLineColumn": "Go to line {line}, column {column}",
+      "gotoLineHint": "Type a line number",
       "hint": "Quick Open",
       "indexed": "{count} files indexed",
       "indexing": "Indexing files…",
+      "noActiveDoc": "No active editor",
+      "noActiveDocHint": "Open a file to search its symbols",
+      "noCommands": "No matching commands",
+      "noSymbols": "No symbols found",
       "openEditors": "open editors",
       "placeholder": "Search files by name",
       "refreshing": "Refreshing…",
+      "symbolKind": {
+        "array": "arrays",
+        "boolean": "booleans",
+        "class": "classes",
+        "constant": "constants",
+        "constructor": "constructors",
+        "enum": "enums",
+        "enumMember": "enum members",
+        "event": "events",
+        "field": "fields",
+        "file": "files",
+        "function": "functions",
+        "interface": "interfaces",
+        "key": "keys",
+        "method": "methods",
+        "module": "modules",
+        "namespace": "namespaces",
+        "null": "nulls",
+        "number": "numbers",
+        "object": "objects",
+        "operator": "operators",
+        "package": "packages",
+        "property": "properties",
+        "string": "strings",
+        "struct": "structs",
+        "typeParameter": "type parameters",
+        "variable": "variables"
+      },
+      "symbols": "symbols",
       "title": "Quick Open",
       "truncated": "{count} files indexed (truncated)"
     },
     "refresh": "Refresh",
     "rename": "Rename",
     "revealActive": "Reveal Active File",
+    "revealSystemFailed": "Couldn't reveal the file: {error}",
+    "revertDirtyConfirm": "\"{name}\" has unsaved changes. Discard them and reload the file from disk?",
     "rootFollowing": "{name} · following",
     "rootLabel": "Project root",
     "rootMain": "main (repository)",
@@ -26712,6 +27085,8 @@
     },
     "searchPlaceholder": "Search in project…",
     "searchResults": "{count} results in {files} files",
+    "searchScope": "Searching in: {path}",
+    "searchScopeClear": "Clear search scope",
     "searchTab": "Search",
     "sidebar": {
       "aria": "Editor sidebar",
@@ -26722,21 +27097,50 @@
     },
     "statusBar": {
       "aria": "Editor status",
+      "changeEol": "Select End of Line Sequence",
+      "changeIndentation": "Select Indentation",
+      "changeLanguage": "Select Language Mode",
+      "convertToSpaces": "Convert Indentation to Spaces",
+      "convertToTabs": "Convert Indentation to Tabs",
+      "deletedOnDisk": "Deleted on disk",
       "externallyChanged": "Changed on disk",
+      "indentSpaces": "Spaces: {size}",
+      "indentTabs": "Tab Size: {size}",
+      "indentUsingSpaces": "Indent Using Spaces",
+      "indentUsingTabs": "Indent Using Tabs",
+      "languagePlaceholder": "Select Language Mode",
+      "noLanguage": "No matching languages",
       "position": "Ln {line}, Col {col}",
       "problemsTooltip": "Jump to the next problem",
       "selected": "({count} selected)",
+      "tabSize": "Tab Size: {size}",
       "unsaved": "Unsaved"
     },
+    "sync": {
+      "closeTab": "Close Tab",
+      "compare": "Compare",
+      "compareFailed": "Couldn't read the disk copy: {error}",
+      "compareTitle": "Disk ↔ draft — {name}",
+      "conflictBanner": "Changed on disk — your unsaved draft conflicts with it.",
+      "deletedBanner": "This file was deleted on disk. Your buffer is the last copy.",
+      "externalBanner": "Changed on disk — the buffer is stale.",
+      "reloadDisk": "Reload disk",
+      "restoreBuffer": "Restore",
+      "saveMine": "Save my version"
+    },
     "tabs": {
+      "addToChat": "Add to Chat",
       "close": "Close",
       "closeAll": "Close All",
       "closeOthers": "Close Others",
       "closeToRight": "Close to the Right",
       "listOpen": "List open editors",
+      "moveToOtherGroup": "Move Editor into Other Group",
       "pin": "Keep Open",
       "preview": "preview",
+      "reload": "Reload from Disk",
       "reopenClosed": "Reopen Closed Editor",
+      "revealInExplorer": "Reveal in Explorer View",
       "revert": "Revert File"
     },
     "templates": {
@@ -26784,13 +27188,8 @@
       "outline": "Outline",
       "outlineEmpty": "No symbols are available for this file.",
       "path": "Path",
-      "previewFrameTitle": "Project file preview",
-      "previewRun": "Preview and run",
-      "problems": "Problems",
-      "problemsUnavailable": "Problems become available after the Monaco model is mounted.",
       "relinkDescription": "Choose a thread from the same repository after an external file rename.",
       "relinkTitle": "Reassociate an earlier resource thread",
-      "review": "Review",
       "saved": "Saved",
       "state": "State"
     }
@@ -27905,6 +28304,17 @@
     "exportNow": "Export",
     "exportTitle": "Export Provider Settings",
     "exportWarning": "API keys will be included only if you check the option below. Handle with care.",
+    "externalRuntimes": {
+      "bannerDescription": "Your connected external agents already work with their own credentials. Configure a provider below only if you also want the built-in agent or direct model access.",
+      "bannerTitle": "Add a provider for Cognia’s built-in agent",
+      "description": "These agents sign in to their own model providers, so they can run turns even while the built-in providers below are unconfigured. Their credentials are managed in External Agents, not on this page.",
+      "listAria": "External agent runtimes",
+      "manage": "Manage in External Agents",
+      "runsOnHost": "Runs on the paired host",
+      "summary": "{working} of {total} ready",
+      "switchedOff": "External agents are switched off, so the {count} configured here will not run until you turn them back on.",
+      "title": "Agents with their own model access"
+    },
     "failed": "failed",
     "failedCount": "{count} failed",
     "features": "Features",
@@ -29888,6 +30298,14 @@
       "title": "Subsystem health checks"
     },
     "description": "The app failed to start twice in a row, so plugins, connectors and background work are held back until each subsystem passes its health check.",
+    "secretStore": {
+      "description": "Cognia could not open its encrypted credential store because the system keychain did not allow access. Saved API keys, subscriptions, proxy passwords and plugin secrets stay unavailable until you unlock it.",
+      "failed": "Unlock did not succeed. Allow access in the system keychain dialog, then try again.",
+      "region": "Secure storage status",
+      "title": "Secure storage is locked",
+      "unlock": "Unlock",
+      "unlocking": "Unlocking…"
+    },
     "status": {
       "disabled": "Kept off",
       "failed": "Failed",
@@ -30226,6 +30644,7 @@
     },
     "details": "Details",
     "disableTask": "Disable",
+    "dueReminderMuted": "Muted",
     "duplicate": "Duplicate",
     "duration": "Duration",
     "edit": "Edit",
@@ -30466,6 +30885,8 @@
       "toast": "Toast",
       "webhook": "Webhook"
     },
+    "notifyDueReminder": "Remind when due",
+    "notifyDueReminderEventHint": "The due reminder only fires on schedule-based triggers; event tasks never become due.",
     "notifyImConversation": "IM conversation",
     "notifyImConversationHint": "Leave empty to use the global ops channel from settings. The conversation must have proactive push enabled to receive anything.",
     "notifyImConversationPlaceholder": "e.g. slack:ops-bot:C012AB3CD",
@@ -30886,6 +31307,7 @@
         "loading": "Checking signing status…",
         "manageSecret": "Manage signing secret",
         "title": "Webhook signing",
+        "unavailable": "A signing secret is configured, but secure storage is locked. Signed webhook deliveries fail until you unlock it.",
         "webOnly": "Web sessions cannot sign outbound webhooks — the signing secret is stored in the OS keyring."
       },
       "status": {
@@ -33651,6 +34073,46 @@
       "vscode": {
         "activateButton": "Apply",
         "activeLabel": "Active",
+        "activeVariant": {
+          "applied": {
+            "authored": {
+              "dark": "Dark mode is showing {name}’s own dark palette.",
+              "light": "Light mode is showing {name}’s own light palette."
+            },
+            "derived": {
+              "dark": "Dark mode is showing a dark palette derived from {name}’s light one.",
+              "light": "Light mode is showing a light palette derived from {name}’s dark one."
+            },
+            "dormant": {
+              "dark": "{name} has no dark palette, so it is inactive in dark mode and the base color preset is shown instead.",
+              "light": "{name} has no light palette, so it is inactive in light mode and the base color preset is shown instead."
+            },
+            "dormantOnly": {
+              "dark": "{name} only has a dark palette, so it is inactive in light mode and the base color preset is shown instead. It applies again when you switch to dark mode.",
+              "light": "{name} only has a light palette, so it is inactive in dark mode and the base color preset is shown instead. It applies again when you switch to light mode."
+            },
+            "fixed": "{name} ships one palette and shows it unchanged in light and dark mode."
+          },
+          "badge": {
+            "authored": {
+              "dark": "Active · Dark",
+              "light": "Active · Light"
+            },
+            "derived": {
+              "dark": "Active · Dark (derived)",
+              "light": "Active · Light (derived)"
+            },
+            "dormant": {
+              "dark": "Active · Inactive in dark mode",
+              "light": "Active · Inactive in light mode"
+            },
+            "dormantOnly": {
+              "dark": "Active · Dark only · inactive in light mode",
+              "light": "Active · Light only · inactive in dark mode"
+            },
+            "fixed": "Active · Same in both modes"
+          }
+        },
         "browse": "Browse files",
         "cancelButton": "Cancel",
         "deactivateButton": "Use preset",
@@ -39081,6 +39543,10 @@
           "serviceGroup": "Service"
         },
         "items": {
+          "custom": {
+            "description": "Raw JSON/YAML gateway config editor",
+            "label": "Custom"
+          },
           "exposure": {
             "description": "What /v1/models advertises",
             "label": "Model exposure"
@@ -41093,6 +41559,7 @@
       "autoLock": {
         "description": "Lock the account after a period of inactivity, requiring re-authentication to continue.",
         "help": "After this idle time, the account locks and must be unlocked again.",
+        "inertHelp": "Not used while this profile unlocks automatically on this device.",
         "label": "Lock after inactivity",
         "off": "Never",
         "option": "{minutes} min",
@@ -41688,7 +42155,9 @@
           "cline": "Cline (.clinerules/*.md)",
           "codex-cli": "Codex CLI (~/.codex/agents/*.md)",
           "cursor": "Cursor (.cursor/rules/*.mdc)",
-          "generic-md": "Generic markdown + frontmatter"
+          "generic-md": "Generic markdown + frontmatter",
+          "opencode": "OpenCode (.opencode/agents/*.md)",
+          "pi": "Pi (.pi/agents/*.md)"
         },
         "step1Title": "Select source",
         "step2Title": "Select files",
@@ -43653,6 +44122,9 @@
       "export": "Export as SKILL.md",
       "open": "Open",
       "selectAria": "Select {name}",
+      "syncCurrent": "Synced",
+      "syncError": "Sync error",
+      "syncPending": "Sync pending",
       "usageCount": "Used {count}×"
     },
     "category": {
@@ -44992,6 +45464,19 @@
     }
   },
   "squads": {
+    "builtIn": {
+      "badge": "Built-in",
+      "description": "Ready-made teams of characters that ship with Cognia. They appear as scopes in the chat sidebar and are read-only; duplicate one to get an editable copy.",
+      "duplicate": "Duplicate",
+      "duplicateAria": "Duplicate {name} into an editable team",
+      "duplicateFailed": "Couldn't duplicate {name}",
+      "duplicated": "Created {name}",
+      "editCopy": "Edit",
+      "manage": "Manage teams",
+      "open": "Open",
+      "openAria": "Open {name} conversations",
+      "title": "Built-in teams"
+    },
     "fleet": {
       "boardUnselectedDescription": "A board belongs to one Squad. Choose one from the list to see its tasks.",
       "boardUnselectedTitle": "Pick a Squad",
@@ -45001,6 +45486,7 @@
       "defaultLeadName": "Team Lead",
       "description": "What every Squad is doing right now.",
       "emptyDescription": "Make one here, then hand a conversation to it from the composer.",
+      "emptyDescriptionWithBuiltIns": "Make one here, then hand a conversation to it from the composer. {count, plural, =1 {The built-in team below is} other {The # built-in teams below are}} ready to use right now.",
       "emptyTitle": "No Squads yet",
       "filters": {
         "all": "All",
@@ -51428,7 +51914,8 @@
             "draft": "Draft",
             "executing": "Executing",
             "failed": "Failed",
-            "paused": "Paused"
+            "paused": "Paused",
+            "rejected": "Rejected"
           }
         }
       },
@@ -52806,6 +53293,8 @@
       },
       "empty": {
         "clearFilters": "Clear filters",
+        "clearSearch": "Clear search",
+        "clearSearchAndFilters": "Clear search and filters",
         "cta": "Create workflow",
         "description": "Build your first workflow to automate a multi-step flow across chat, triggers, and tools.",
         "descriptionQuery": "Try a different search term or clear the filter.",
@@ -52813,6 +53302,9 @@
         "filterTitle": "No matching workflows",
         "folderDescription": "Add a workflow here, or move existing ones into this folder.",
         "folderTitle": "This folder is empty",
+        "searchAndFilterDescription": "Your search and {count, plural, one {# filter} other {# filters}} are hiding every workflow here.",
+        "searchDescription": "Your search is hiding every workflow here. Clear it to see them all.",
+        "searchTitle": "No workflows match “{query}”",
         "title": "No workflows yet",
         "titleQuery": "No matching workflows"
       },
@@ -52938,6 +53430,9 @@
           "while": "while"
         }
       },
+      "missingRequired": "{fields} required",
+      "notesLabel": "Note",
+      "notesTitle": "Author note — not part of the node's configuration",
       "outputHandles": {
         "approved": "approved",
         "conflict": "conflict",
@@ -52949,6 +53444,105 @@
         "restacked": "restacked",
         "timeout": "timeout",
         "true": "true"
+      },
+      "paramLabels": {
+        "actions": "Actions",
+        "adapterId": "Connector",
+        "angles": "Angles",
+        "artifactId": "Artifact",
+        "assignees": "Assignees",
+        "body": "Body",
+        "branch": "Branch",
+        "branchLabels": "Branch labels",
+        "characterId": "Character",
+        "code": "Code",
+        "command": "Command",
+        "completionPolicy": "Completion policy",
+        "content": "Content",
+        "conversationKey": "Conversation",
+        "councillors": "Council members",
+        "cron": "Schedule",
+        "dataJson": "Import JSON",
+        "datasetId": "Dataset",
+        "description": "Description",
+        "dispatchNodeId": "Dispatch step",
+        "dryRoundsToStop": "Dry rounds to stop",
+        "emoji": "Emoji",
+        "end": "End",
+        "endSeconds": "End time",
+        "eventType": "Event type",
+        "executionId": "Execution",
+        "expression": "Expression",
+        "fields": "Fields",
+        "finderPrompt": "Finder prompt",
+        "fromRelPath": "Source path",
+        "goal": "Goal",
+        "goalId": "Goal",
+        "handle": "Element handle",
+        "input": "Input",
+        "isFavorite": "Favorite",
+        "issue": "Issue",
+        "judgesPerAttempt": "Judges per attempt",
+        "knowledgeBaseId": "Knowledge base",
+        "knowledgeBaseIds": "Knowledge bases",
+        "labelsRaw": "Labels",
+        "language": "Language",
+        "lineageId": "Lineage",
+        "locator": "Locator",
+        "maxRevisions": "Max revisions",
+        "maxRounds": "Max rounds",
+        "message": "Message",
+        "messageId": "Message",
+        "modalities": "Modalities",
+        "name": "Name",
+        "notificationId": "Notification",
+        "objective": "Objective",
+        "objectiveText": "Objective",
+        "output": "Output",
+        "path": "Path",
+        "planId": "Plan",
+        "pluginId": "Plugin",
+        "prompt": "Prompt",
+        "query": "Query",
+        "rawObjective": "Objective",
+        "recordingId": "Recording",
+        "relPath": "File path",
+        "request": "Request",
+        "revision": "Revision",
+        "root": "Root folder",
+        "runId": "Run",
+        "scriptPath": "Script path",
+        "serverId": "MCP server",
+        "sessionId": "Session",
+        "siteId": "Site",
+        "skepticsPerFinding": "Skeptics per finding",
+        "skillIds": "Skills",
+        "sourceId": "Source",
+        "sourcePath": "Source file",
+        "sourcePaths": "Source files",
+        "start": "Start",
+        "stepId": "Step",
+        "subgoalId": "Subgoal",
+        "synthesizerAlias": "Synthesizer",
+        "systemPrompt": "System prompt",
+        "tabId": "Terminal tab",
+        "targetConversationKey": "Target conversation",
+        "taskId": "Task",
+        "teamId": "Team",
+        "template": "Template",
+        "templateId": "Template",
+        "text": "Text",
+        "timeSeconds": "Timestamp",
+        "title": "Title",
+        "toRelPath": "Destination path",
+        "toolName": "Tool",
+        "twinId": "Digital twin",
+        "type": "Type",
+        "url": "URL",
+        "userPrompt": "User prompt",
+        "value": "Value",
+        "variable": "Variable",
+        "workflowId": "Workflow"
       },
       "pinnedTitle": "Pinned test data"
     },
@@ -53428,7 +54022,7 @@
             "label": "Refine plan"
           },
           "reject": {
-            "description": "Cancel a pending plan and record rejection feedback.",
+            "description": "Reject a plan that has not started (terminal rejected status) and record the optional reason.",
             "label": "Reject plan"
           },
           "resume": {
@@ -54135,6 +54729,7 @@
           "description": "This permanently deletes every run and its step logs for this workflow. This cannot be undone.",
           "title": "Clear all run history?"
         },
+        "clearSearchAndFilters": "Clear search and filters",
         "columns": {
           "duration": "Duration",
           "open": "Open",
@@ -54164,6 +54759,8 @@
         },
         "filteredEmpty": {
           "description": "Adjust or clear the filters to see runs.",
+          "queryDescription": "Your search and filters are hiding every run. Clear them to see the full history.",
+          "queryTitle": "No runs match “{query}”",
           "title": "No runs match"
         },
         "loadMore": "Load {count} more",
@@ -54437,7 +55034,8 @@
         "draft": "Draft",
         "executing": "Executing",
         "failed": "Failed",
-        "paused": "Paused"
+        "paused": "Paused",
+        "rejected": "Rejected"
       },
       "planStatusAria": "Plan status",
       "plans": "Plans",

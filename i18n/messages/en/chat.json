@@ -372,6 +372,15 @@
         "strategyLabel": "Pick frames"
       },
       "videoSizeExceeded": "{count, plural, =1 {1 video is} other {# videos are}} over {max} MB and can't be processed here.",
+      "notResent": "{names} couldn't be sent again and {count, plural, =1 {was} other {were}} left out. Attach {count, plural, =1 {it} other {them}} again to include {count, plural, =1 {it} other {them}}.",
+      "externalOmitted": {
+        "files": "External agents receive text only, so the images or video in {names} weren't sent. Any text extracted from {count, plural, =1 {it} other {them}} was.",
+        "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} sent: external agents receive only your message and the text of attached files."
+      },
+      "squadOmitted": {
+        "files": "A Squad's goal is text only, so the images or video in {names} weren't handed to it. Any text extracted from {count, plural, =1 {it} other {them}} was.",
+        "links": "{count, plural, =1 {A fetched page wasn't} other {# fetched pages weren't}} handed to the Squad: its goal holds only your message and the text of attached files."
+      },
       "processing": {
         "audioPlayer": "Play {filename}",
         "modelHint": "Choose a transcription model for audio, or a vision model for images.",
@@ -692,6 +701,7 @@
       "presetTitle": "Apply a prompt preset",
       "recentSection": "Recent",
       "resultCount": "{count, plural, one {# command} other {# commands}}",
+      "runtimesSection": "Runtimes",
       "searchArgumentsAria": "Search parameters for /{name}",
       "searchArgumentsPlaceholder": "Search parameter options…",
       "searchAria": "Search slash commands",
@@ -716,6 +726,7 @@
       },
       "skillTitle": "Enable a skill",
       "slashTitle": "Slash command",
+      "squadMembersSection": "Squad members",
       "suggestionCount": "{count, plural, one {# option} other {# options}}",
       "templateParamCount": "{count, plural, =1 {1 parameter} other {# parameters}}",
       "templatesSection": "Templates",
@@ -734,6 +745,9 @@
       "removeAria": "Remove reference to {path}"
     },
     "removePastedChip": "Remove pasted text",
+    "reviewDraftsAria": "Review {count, plural, one {# pending draft} other {# pending drafts}}",
+    "reviewDraftsLabel": "Review drafts",
+    "reviewDraftsTooltip": "Drafted replies are waiting for your review. Type a message to send your own instead.",
     "roomTargets": {
       "asleepDisabled": "The room is asleep. Nobody replies until the reply mode changes.",
       "chipLabel": "To",
@@ -748,10 +762,28 @@
       "title": "Who replies to this message",
       "trigger": "Choose who replies"
     },
+    "route": {
+      "blocked": "{runtime} can't run here",
+      "blockedDetail": "{runtime} can't run here: {detail}",
+      "busy": "Wait for the current reply to finish before addressing @{handle}.",
+      "disabled": "External agents are turned off.",
+      "emptyPrompt": "Add a message after @{handle}.",
+      "memberMissing": "@{handle} is no longer in a Squad.",
+      "memberRuntime": "{name} runs on {runtime}, which isn't available here.",
+      "notConfigured": "No {runtime} agent is set up.",
+      "openSettings": "Set up",
+      "runsAs": "Answers as {name}, on {engine}",
+      "runsOn": "Answers on {name}",
+      "starting": "{runtime} isn't ready yet",
+      "startingDetail": "{runtime} isn't ready yet: {detail}",
+      "unavailable": "Can't send to @{handle}"
+    },
     "sandboxShield": {
+      "externalDetail": "The built-in sandbox setting does not apply here: the external agent brings its own tools, and Cognia never starts it outside the agent sandbox.",
       "inheritedDetail": "This conversation follows the character or app default. It will be pinned to the tier it runs on the first time it uses the sandbox.",
       "label": {
         "cua-desktop": "Sandbox tier unavailable — bound desktop",
+        "external": "Agent sandbox — external runtime",
         "microvm": "Sandbox active — microVM tier",
         "off": "Sandbox off",
         "os": "Sandbox active — OS tier"
@@ -759,6 +791,7 @@
       "pinnedDetail": "This conversation keeps its own sandbox tier, so changing the default elsewhere will not re-tier it.",
       "tooltip": {
         "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
+        "external": "This conversation runs on an external agent. Its process always runs inside Cognia's mandatory agent sandbox, which can write to the workspace and reach the network.",
         "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
         "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
         "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
@@ -964,6 +997,7 @@
       },
       "micPermissionDenied": "Microphone access is blocked — enable it in your system or browser settings.",
       "microphoneLabel": "Microphone",
+      "microphoneLiveOnly": "Used by live voice. Dictation records from the system default microphone.",
       "noMicFound": "No microphone found.",
       "selectMicAria": "Select microphone",
       "startListening": "Start voice input",
@@ -1946,6 +1980,7 @@
       "timestamp": "Time",
       "usage": "Tokens"
     },
+    "routedVia": "via @{handle}",
     "routing": {
       "alias": "Alias · {alias}",
       "auto": "Auto · {target}",
@@ -2383,6 +2418,7 @@
     "duration": "Gen time",
     "input": "Input",
     "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
+    "partialModelData": "The model breakdown covers recorded turns only. Totals include earlier turns.",
     "output": "Output",
     "reasoning": "Reasoning",
     "speed": "Speed",
@@ -2636,6 +2672,35 @@
     "done": "{count, plural, =1 {Deleted 1 message.} other {Deleted # messages.}}",
     "error": "Couldn't delete those messages.",
     "title": "Delete from this message on?"
+  },
+  "turnAdmission": {
+    "ariaCancel": "Cancel this queued message and put it back in the composer",
+    "ariaRetry": "Run this message again",
+    "cancel": "Cancel",
+    "detail": "Details: {detail}",
+    "failed": "Didn't run — {reason}",
+    "failedGeneric": "the agent could not run this turn",
+    "holderKind": {
+      "chat": "another conversation",
+      "connector": "a connector reply",
+      "goal": "a goal",
+      "other": "other work",
+      "scheduled": "a scheduled task",
+      "subagent": "a subagent",
+      "team": "a team run",
+      "workflow-step": "a plan or workflow step"
+    },
+    "interrupted": "Not sent — the app closed while this message was waiting",
+    "interruptedHint": "This turn was queued when the app was closed or reloaded, so it never ran.",
+    "queued": "Queued — {reason}",
+    "queuedHint": "This message starts as soon as it can. Cancel puts it back in the composer.",
+    "retry": "Retry",
+    "waiting": {
+      "capacity": "waiting for a free agent slot",
+      "provider": "waiting for this provider's concurrency limit",
+      "slot": "waiting for {holder} to finish in this working copy",
+      "slotNamed": "waiting for {holder} “{label}” to finish in this working copy"
+    }
   },
   "twinBadge": {
     "fewShotOff": "Style few-shot off",

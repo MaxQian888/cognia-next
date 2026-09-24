@@ -1,0 +1,16 @@
+{
+  "dismiss": "Dismiss",
+  "generic": "Notification",
+  "scheduledDue": {
+    "dueFailed": "Due · {count}× failed",
+    "dueNow": "Due now",
+    "lastFailed": "failed {ago}",
+    "lastRan": "ran {ago}",
+    "neverRan": "first run",
+    "next": "next {relative}",
+    "nextNone": "no next run",
+    "now": "due",
+    "runStarting": "Run #{count} starting",
+    "runStartingIn": "Run #{count} starting · {workspace}"
+  }
+}

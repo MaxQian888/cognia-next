@@ -444,6 +444,7 @@
     "pairedTitle": "Paired browsers",
     "regenerate": "Generate a new code",
     "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
+    "listenerFailed": "Could not read browser access status. Reopen this page to try again.",
     "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
     "title": "Browser Companion"
   },

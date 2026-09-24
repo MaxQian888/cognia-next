@@ -430,7 +430,8 @@
       "paused": "已暂停",
       "completed": "已完成",
       "failed": "已失败",
-      "cancelled": "已取消"
+      "cancelled": "已取消",
+      "rejected": "已拒绝"
     },
     "runStatus": {
       "queued": "排队中",

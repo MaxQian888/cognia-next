@@ -33,7 +33,9 @@
       "cline": "Cline (.clinerules/*.md)",
       "codex-cli": "Codex CLI (~/.codex/agents/*.md)",
       "cursor": "Cursor (.cursor/rules/*.mdc)",
-      "generic-md": "Generic markdown + frontmatter"
+      "generic-md": "Generic markdown + frontmatter",
+      "opencode": "OpenCode (.opencode/agents/*.md)",
+      "pi": "Pi (.pi/agents/*.md)"
     },
     "step1Title": "Select source",
     "step2Title": "Select files",

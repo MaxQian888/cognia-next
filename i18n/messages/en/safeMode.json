@@ -18,6 +18,14 @@
     "title": "Subsystem health checks"
   },
   "description": "The app failed to start twice in a row, so plugins, connectors and background work are held back until each subsystem passes its health check.",
+  "secretStore": {
+    "title": "Secure storage is locked",
+    "description": "Cognia could not open its encrypted credential store because the system keychain did not allow access. Saved API keys, subscriptions, proxy passwords and plugin secrets stay unavailable until you unlock it.",
+    "unlock": "Unlock",
+    "unlocking": "Unlocking…",
+    "failed": "Unlock did not succeed. Allow access in the system keychain dialog, then try again.",
+    "region": "Secure storage status"
+  },
   "status": {
     "disabled": "Kept off",
     "failed": "Failed",
