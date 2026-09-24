@@ -23,8 +23,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { synthesizeThemeSwatches } from "@/lib/appearance/synthesize-theme-icon"
+import type { ActiveThemeVariant } from "@/lib/appearance/active-theme-variant"
+import { HOVER_REVEAL_GROUP_CLASS } from "@/lib/ui/hover-reveal"
 import type { ThemeColors } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
+import { ActiveThemeBadge } from "../components/active-theme-status"
 
 export type PresetSource = "builtin" | "imported" | "plugin"
 
@@ -68,6 +71,13 @@ export interface PresetGridProps {
   items: PresetItem[]
   /** Item.key of the currently active preset (or null). */
   activeKey: string | null
+  /**
+   * What the active preset contributes in the mode the app is painted in now.
+   * One theme is active for both modes, so a bare "Active" on a dark theme
+   * while the app is light read as a selection that had not taken; the badge
+   * names the mode instead. `null` before a mode has resolved.
+   */
+  activeStatus?: ActiveThemeVariant | null
   /** Single-click activates the preset. */
   onSelect: (item: PresetItem) => void
   /** Optional context menu actions — pass to enable each one. */
@@ -79,6 +89,7 @@ export interface PresetGridProps {
 export function PresetGrid({
   items,
   activeKey,
+  activeStatus = null,
   onSelect,
   onEditCopy,
   onRemoveImported,
@@ -143,12 +154,10 @@ export function PresetGrid({
                   aria-hidden
                 />
               </div>
-              <div className="mt-1 truncate text-xs font-medium">
-                {item.name}
-                {active && (
-                  <span className="ml-1 text-[10px] text-primary">{t("activeLabel")}</span>
-                )}
-              </div>
+              <div className="mt-1 w-full truncate text-xs font-medium">{item.name}</div>
+              {/* Its own line: the mode-qualified label is longer than the old
+                  bare "Active" and must not be truncated with the name. */}
+              {active && <ActiveThemeBadge status={activeStatus} className="whitespace-normal" />}
               <div className="flex items-center gap-1">
                 <span className="text-[10px] text-muted-foreground">{t(`variant.${variant}`)}</span>
                 <Badge variant="outline" className="px-1 py-0 text-[9px] leading-none">
@@ -157,7 +166,9 @@ export function PresetGrid({
               </div>
             </Button>
 
-            <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+            {/* Quiet until the card is hovered, never hover-only: focus, the
+                open menu, and a touch device all keep it visible. */}
+            <div className={cn("absolute right-1 top-1", HOVER_REVEAL_GROUP_CLASS)}>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

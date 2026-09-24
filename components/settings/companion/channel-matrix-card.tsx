@@ -23,7 +23,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
-import { isTauri, transport } from "@/lib/tauri"
+import { isTauri, localTransport as transport } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 

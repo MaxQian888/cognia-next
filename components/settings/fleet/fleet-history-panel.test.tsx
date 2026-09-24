@@ -4,6 +4,10 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { FleetSessionHistoryRow } from "@/lib/db/fleet-sessions"
+import {
+  HOVER_REVEAL_FORBIDDEN_CLASSES,
+  HOVER_REVEAL_REQUIRED_VARIANTS,
+} from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -160,6 +164,23 @@ describe("FleetHistoryPanel", () => {
     liveRows = [row()]
     render(<FleetHistoryPanel />)
     fireEvent.click(screen.getByTestId("fleet-history-delete-claude-code:s1"))
+    await waitFor(() => expect(deleteMock).toHaveBeenCalledWith("claude-code:s1"))
+  })
+
+  it("keeps the inline delete reachable without a hover", async () => {
+    liveRows = [row()]
+    render(<FleetHistoryPanel />)
+    const del = screen.getByRole("button", { name: "delete" })
+    expect(del).toHaveAttribute("data-testid", "fleet-history-delete-claude-code:s1")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(del).toHaveClass(variant)
+    }
+    for (const forbidden of HOVER_REVEAL_FORBIDDEN_CLASSES) {
+      expect(del).not.toHaveClass(forbidden)
+    }
+    del.focus()
+    expect(del).toHaveFocus()
+    fireEvent.click(del)
     await waitFor(() => expect(deleteMock).toHaveBeenCalledWith("claude-code:s1"))
   })
 

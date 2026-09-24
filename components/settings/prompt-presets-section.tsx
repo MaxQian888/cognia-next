@@ -229,9 +229,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
       })
       log.info("preset_created", { name: data.name, category: data.category })
       setCreating(false)
-      toast.success(
-        safeT("toast.created", `Preset "${data.name}" created.`).replace("{name}", data.name)
-      )
+      toast.success(safeT("toast.created", `Preset "${data.name}" created.`, { name: data.name }))
     } catch (err) {
       log.error("preset_create_failed", err, { name: data.name })
       throw err
@@ -261,9 +259,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
       })
       log.info("preset_updated", { id })
       setEditingId(null)
-      toast.success(
-        safeT("toast.updated", `Preset "${data.name}" updated.`).replace("{name}", data.name)
-      )
+      toast.success(safeT("toast.updated", `Preset "${data.name}" updated.`, { name: data.name }))
     } catch (err) {
       log.error("preset_update_failed", err, { id })
       throw err
@@ -274,9 +270,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
     try {
       await deletePreset(preset.id)
       log.info("preset_deleted", { id: preset.id })
-      toast.success(
-        safeT("toast.deleted", `Deleted "${preset.name}".`).replace("{name}", preset.name)
-      )
+      toast.success(safeT("toast.deleted", `Deleted "${preset.name}".`, { name: preset.name }))
     } catch (err) {
       log.error("preset_delete_failed", err, { id: preset.id })
       toast.error(err instanceof Error ? err.message : String(err))
@@ -287,9 +281,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
     try {
       const copy = await duplicatePreset(preset.id)
       log.info("preset_duplicated", { sourceId: preset.id, newId: copy.id })
-      toast.success(
-        safeT("toast.duplicated", `Duplicated as "${copy.name}".`).replace("{name}", copy.name)
-      )
+      toast.success(safeT("toast.duplicated", `Duplicated as "${copy.name}".`, { name: copy.name }))
       setEditingId(copy.id)
     } catch (err) {
       log.error("preset_duplicate_failed", err, { id: preset.id })
@@ -307,10 +299,9 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
         await setDefaultPreset(preset.id)
         log.info("preset_default_set", { id: preset.id })
         toast.success(
-          safeT("toast.defaultSet", `"${preset.name}" is now the default.`).replace(
-            "{name}",
-            preset.name
-          )
+          safeT("toast.defaultSet", `"${preset.name}" is now the default.`, {
+            name: preset.name,
+          })
         )
       }
     } catch (err) {
@@ -354,10 +345,9 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
       const exportedCount = file.payload.promptPresets?.length ?? 0
       log.info("preset_exported", { count: exportedCount })
       toast.success(
-        safeT("toast.exported", `Exported ${exportedCount} presets.`).replace(
-          "{count}",
-          String(exportedCount)
-        )
+        safeT("toast.exported", `Exported ${exportedCount} presets.`, {
+          count: exportedCount,
+        })
       )
     } catch (err) {
       log.error("preset_export_failed", err)
@@ -379,9 +369,10 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
       const skipped = summary.skipped.promptPresets ?? 0
       log.info("preset_imported", { added, skipped })
       toast.success(
-        safeT("toast.imported", `Imported ${added} new presets (${skipped} skipped).`)
-          .replace("{added}", String(added))
-          .replace("{skipped}", String(skipped))
+        safeT("toast.imported", `Imported ${added} new presets (${skipped} skipped).`, {
+          added,
+          skipped,
+        })
       )
     } catch (err) {
       log.error("preset_import_failed", err)

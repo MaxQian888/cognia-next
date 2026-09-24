@@ -7,7 +7,7 @@
  */
 
 import { listPairedDevices } from "@/lib/db/paired-devices"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 import type { TauriInvoker } from "@/lib/connectivity/mdns-discovery"
 import type { MeshStatus } from "@/lib/connectivity/mesh"
 
@@ -116,8 +116,7 @@ export async function seedLockedComputerUseAllowList(): Promise<void> {
 
 /**
  * The `lib/connectivity` wrappers take an invoker so they stay testable off
- * Tauri. Handing them the routed transport keeps these blocks on the same call
- * every other control uses.
+ * Tauri. These blocks manage this desktop, even when a remote host is selected.
  */
 export const transportInvoker = async (): Promise<TauriInvoker> => ({
   // Arity matters to the transport spies: `call(name, undefined)` is not

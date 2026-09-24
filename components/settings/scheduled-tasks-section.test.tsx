@@ -43,7 +43,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 jest.mock("@/lib/scheduler/webhook-outbound-config", () => ({
-  useWebhookSigningState: jest.fn(() => ({ enabled: false, loading: false })),
+  useWebhookSigningState: jest.fn(() => ({ enabled: false, loading: false, unavailable: false })),
 }))
 
 jest.mock("@/hooks/scheduler/use-system-scheduler", () => ({
@@ -95,7 +95,7 @@ beforeEach(() => {
   appSettingsRef.value = null
   mockedIsTauri.mockReturnValue(false)
   canDisplayNotificationsRef.current = false
-  mockedSigningHook.mockReturnValue({ enabled: false, loading: false })
+  mockedSigningHook.mockReturnValue({ enabled: false, loading: false, unavailable: false })
   mockedSystemHook.mockReturnValue({
     capabilities: null,
     isAvailable: false,
@@ -565,21 +565,30 @@ describe("ScheduledTasksSection — webhook signing card", () => {
 
   it("renders the 'enabled' state when the hook reports a configured secret", () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedSigningHook.mockReturnValue({ enabled: true, loading: false })
+    mockedSigningHook.mockReturnValue({ enabled: true, loading: false, unavailable: false })
     render(<ScheduledTasksSection />)
     expect(screen.getByTestId("signing-state-enabled")).toBeInTheDocument()
   })
 
   it("renders the 'disabled' state when the hook reports no secret", () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedSigningHook.mockReturnValue({ enabled: false, loading: false })
+    mockedSigningHook.mockReturnValue({ enabled: false, loading: false, unavailable: false })
     render(<ScheduledTasksSection />)
     expect(screen.getByTestId("signing-state-disabled")).toBeInTheDocument()
   })
 
+  it("renders the 'unavailable' state when the secret is configured but secure storage is locked", () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedSigningHook.mockReturnValue({ enabled: false, loading: false, unavailable: true })
+    render(<ScheduledTasksSection />)
+    expect(screen.getByTestId("signing-state-unavailable")).toBeInTheDocument()
+    expect(screen.queryByTestId("signing-state-disabled")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("signing-state-enabled")).not.toBeInTheDocument()
+  })
+
   it("renders a manage-secret link to the canonical webhooks section", () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedSigningHook.mockReturnValue({ enabled: true, loading: false })
+    mockedSigningHook.mockReturnValue({ enabled: true, loading: false, unavailable: false })
     render(<ScheduledTasksSection />)
     const link = screen.getByRole("link", { name: /manage signing secret/i })
     expect(link).toHaveAttribute("href", "/settings?section=webhooks")

@@ -36,6 +36,7 @@ import {
 } from "@/lib/db/fleet-sessions"
 import type { FleetAgent } from "@/lib/fleet/types"
 import { formatElapsed, truncateLine } from "@/lib/fleet/format"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 
 /** Rows shown before the show-all toggle expands the list. */
@@ -210,7 +211,10 @@ export function FleetHistoryPanel() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="size-5 shrink-0 text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                    className={cn(
+                      "size-5 shrink-0 text-muted-foreground",
+                      HOVER_REVEAL_CONTROL_CLASS
+                    )}
                     disabled={busy}
                     aria-label={t("delete")}
                     data-testid={`fleet-history-delete-${row.id}`}

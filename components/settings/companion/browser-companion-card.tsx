@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useReducer, useState } from "react"
 import { CopyIcon, HistoryIcon, MonitorSmartphoneIcon, PuzzleIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { clearBrowserSubmissions, summarizeBrowserSubmissions } from "@/lib/db/browser-submissions"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 
 /** Mirrors Rust `companion_api::commands::BrowserEnrollmentIssue`. */
 export interface BrowserEnrollmentIssue {
@@ -68,7 +68,7 @@ export function BrowserCompanionCard({
   loadListener = defaultLoadListener,
   createEnrollment = defaultCreateEnrollment,
   copy = defaultCopy,
-  now = () => Date.now(),
+  now = Date.now,
   loadHistory = summarizeBrowserSubmissions,
   clearHistory = clearBrowserSubmissions,
 }: BrowserCompanionCardProps = {}) {
@@ -77,7 +77,7 @@ export function BrowserCompanionCard({
   // browser tab or a phone is told so below; it is not shown a blank.
   const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
   const desktopShell = shellReach.available
-  const [listening, setListening] = useState<boolean | null>(null)
+  const [listening, setListening] = useState<"loading" | "stopped" | "ready" | "failed">("loading")
   const [issue, setIssue] = useState<BrowserEnrollmentIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,16 +85,26 @@ export function BrowserCompanionCard({
   const [history, setHistory] = useState<{ deviceIds: string[]; total: number } | null>(null)
   const [clearing, setClearing] = useState(false)
   const [cleared, setCleared] = useState(false)
+  const [, refreshExpiry] = useReducer((tick: number) => tick + 1, 0)
+
+  useEffect(() => {
+    if (!issue) return
+    const timer = window.setInterval(() => {
+      refreshExpiry()
+      if (now() >= issue.expiresAtMs) window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [issue, now])
 
   useEffect(() => {
     if (!desktopShell) return
     let cancelled = false
     void loadListener()
       .then((summary) => {
-        if (!cancelled) setListening(summary.boundPort !== null)
+        if (!cancelled) setListening(summary.boundPort !== null ? "ready" : "stopped")
       })
       .catch(() => {
-        if (!cancelled) setListening(false)
+        if (!cancelled) setListening("failed")
       })
     return () => {
       cancelled = true
@@ -146,8 +156,10 @@ export function BrowserCompanionCard({
   }, [clearHistory, history, loadHistory, t])
 
   const generate = useCallback(async () => {
+    if (!desktopShell || listening !== "ready") return
     setBusy(true)
     setCopied(false)
+    setIssue(null)
     try {
       setError(null)
       setIssue(await createEnrollment())
@@ -159,7 +171,7 @@ export function BrowserCompanionCard({
     } finally {
       setBusy(false)
     }
-  }, [createEnrollment])
+  }, [createEnrollment, desktopShell, listening])
 
   if (!desktopShell) {
     // Rendered with the reason, never hidden: a missing card reads as "this
@@ -193,7 +205,7 @@ export function BrowserCompanionCard({
   const minutesLeft = Math.max(1, Math.ceil(msRemaining / 60_000))
 
   const onCopy = async () => {
-    if (!code) return
+    if (!code || !issue || now() >= issue.expiresAtMs) return
     try {
       await copy(code)
       setCopied(true)
@@ -216,9 +228,14 @@ export function BrowserCompanionCard({
       {/* Rendered as a disabled control with the reason beside it, never
             hidden: a missing button reads as "this build does not have the
             feature", which is a different answer from "one switch away". */}
-      {listening === false ? (
+      {listening === "stopped" ? (
         <Alert data-testid="browser-companion-needs-listener">
           <AlertDescription>{t("requiresListener")}</AlertDescription>
+        </Alert>
+      ) : null}
+      {listening === "failed" ? (
+        <Alert variant="destructive" data-testid="browser-companion-listener-error">
+          <AlertDescription>{t("listenerFailed")}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -227,7 +244,7 @@ export function BrowserCompanionCard({
           type="button"
           size="sm"
           variant={issue ? "outline" : "default"}
-          disabled={busy || listening === false}
+          disabled={busy || listening !== "ready"}
           onClick={() => void generate()}
         >
           {busy ? t("generating") : issue ? t("regenerate") : t("generate")}

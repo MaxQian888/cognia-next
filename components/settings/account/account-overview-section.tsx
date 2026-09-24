@@ -59,6 +59,7 @@ import {
   SettingsField,
   SettingsStack,
 } from "@/components/settings/common/settings-block"
+import { unlocksWithoutPrompt } from "@/lib/accounts/desktop-local-account"
 import { isTauri } from "@/lib/tauri"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
@@ -337,7 +338,7 @@ export function AccountOverviewSection() {
             testid="account-local-block"
             action={
               <div className="flex items-center gap-2">
-                {unlockedAccountId ? (
+                {unlockedAccountId && !unlocksWithoutPrompt(activeAccount) ? (
                   <Button
                     type="button"
                     variant="ghost"

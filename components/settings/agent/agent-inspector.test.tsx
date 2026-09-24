@@ -23,7 +23,7 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
   },
 }))
 
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentEcosystemReadiness: () => undefined,
 }))
 

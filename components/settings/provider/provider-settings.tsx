@@ -47,6 +47,8 @@ import { ProviderHostNotice } from "./provider-host-notice"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
+import { ExternalRuntimeConnectionsCard } from "./external-runtime-connections-card"
+import { useExternalRuntimeConnections } from "./use-external-runtime-connections"
 import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
 import { useSettingsStore } from "@/stores/settings"
 import {
@@ -106,6 +108,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // landed. Show the skeleton until we actually know.
   const settingsLoaded = useSettingsStore((store) => store.loaded)
   const { providers: liveProviderHealth } = useProviderManager()
+  // External agents bring their own model access. Without them on this page,
+  // a Pi-only setup read as "every provider unconfigured, nothing works".
+  const externalRuntimes = useExternalRuntimeConnections()
 
   const [search, setSearch] = useState("")
   const [categoryFilterOverride, setCategoryFilterOverride] = useState<string | null>(null)
@@ -742,7 +747,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     <div className="flex h-full min-h-0 flex-col gap-4">
       {/* Companion hosts: keys entered here never reach the paired host. */}
       <ProviderHostNotice kind="companion" />
+      <ExternalRuntimeConnectionsCard connections={externalRuntimes} />
       <ProviderOnboardingBanner
+        externalRuntimeReady={externalRuntimes.workingCount > 0}
         onScrollToProvider={(id) => {
           // Clear any active search/category filter so the target row is
           // guaranteed to be mounted for the banner's own `getElementById`

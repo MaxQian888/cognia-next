@@ -40,6 +40,7 @@ const call = jest.fn(
 )
 jest.mock("@/lib/tauri", () => ({
   transport: { call: (...a: unknown[]) => call(...(a as [string, Record<string, unknown>?])) },
+  localTransport: { call: (...a: unknown[]) => call(...(a as [string, Record<string, unknown>?])) },
 }))
 jest.mock("@/lib/db/paired-devices", () => ({ listPairedDevices: async () => [] }))
 jest.mock("@/lib/tauri/opener", () => ({ openExternal: jest.fn(async () => {}) }))

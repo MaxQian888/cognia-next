@@ -41,17 +41,17 @@ import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-mode
 import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
-import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
-import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/presets"
+import { canUseCogniaModels } from "@/lib/ai/agent/external/config/gateway-task"
+import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
-} from "@/lib/ai/agent/external/permission-modes"
+} from "@/lib/ai/agent/external/policy/permission-modes"
 import {
   extensionPolicyArgs,
   resolvePiExtensionPolicy,
   type PiExtensionPolicy,
-} from "@/lib/ai/agent/external/pi-rpc-client"
+} from "@/lib/ai/agent/external/runtimes/pi/pi-rpc-client"
 import {
   useExternalAgentStore,
   type LifecycleExternalAgentConfig,

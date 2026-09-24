@@ -26,6 +26,7 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, CheckIcon, Trash2Icon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { Button } from "@/components/ui/button"
 import { resolveSourceToCss, disposeUrl } from "@/lib/appearance/wallpaper-storage"
 import { wallpaperUnavailableReason } from "@/lib/appearance/wallpaper-availability"
@@ -186,7 +187,9 @@ export function WallpaperCard({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-destructive opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+            // Quiet until the card is hovered, but reachable without a hover:
+            // keyboard focus reveals it and a touch device always shows it.
+            className={cn("h-6 w-6 text-destructive", HOVER_REVEAL_CONTROL_CLASS)}
             onClick={(e) => {
               e.stopPropagation()
               onDelete?.()

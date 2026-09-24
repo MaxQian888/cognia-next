@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import { CodexAppServerStatusCard } from "./codex-app-server-status-card"
-import type { CodexAppServerStatus } from "@/lib/ai/agent/external/codex-app-server-client"
+import type { CodexAppServerStatus } from "@/lib/ai/agent/external/runtimes/codex/codex-app-server-client"
 
 let hookValue: {
   status: CodexAppServerStatus

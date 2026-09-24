@@ -16,9 +16,11 @@ jest.mock("@/hooks/platform/use-surface-reach", () => ({
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: { call: jest.fn() },
+  localTransport: { call: jest.fn() },
 }))
 
 import { BrowserAccessCard, type BrowserAccessSummary } from "./browser-access-card"
+import { localTransport, transport } from "@/lib/tauri"
 
 const BASE: BrowserAccessSummary = {
   enabled: false,
@@ -36,7 +38,41 @@ const summary = (overrides: Partial<BrowserAccessSummary> = {}): BrowserAccessSu
 })
 
 beforeEach(() => {
+  jest.clearAllMocks()
   tauri = true
+})
+
+it("reads and saves browser access on this desktop independently of the selected host", async () => {
+  ;(localTransport.call as jest.Mock).mockResolvedValue(
+    summary({ allowedOrigins: ["http://localhost:3000"] })
+  )
+  render(<BrowserAccessCard />)
+  await screen.findByTestId("browser-access-card")
+  expect(localTransport.call).toHaveBeenCalledWith("companion_browser_access_get", {})
+  fireEvent.click(screen.getByLabelText("mobile.companion.browserAccess.enable"))
+  await waitFor(() =>
+    expect(localTransport.call).toHaveBeenCalledWith("companion_browser_access_set", {
+      enabled: true,
+      allowedOrigins: ["http://localhost:3000"],
+      port: 27891,
+    })
+  )
+  expect(transport.call).not.toHaveBeenCalled()
+})
+
+it("keeps a failed initial lookup visible without enabling writes", async () => {
+  render(
+    <BrowserAccessCard
+      load={async () => {
+        throw new Error("IPC unavailable")
+      }}
+    />
+  )
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "mobile.companion.browserAccess.loadFailed"
+  )
+  expect(screen.getByTestId("browser-access-card")).toBeInTheDocument()
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument()
 })
 
 it("explains, off the desktop shell, that the listener is configured in the desktop app", async () => {

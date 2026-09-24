@@ -9,6 +9,7 @@
  * public import path used by other consumers and tests.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useCallback, useEffect, useState } from "react"
 
 import { isTauri } from "@/lib/platform/detect"
@@ -307,14 +308,15 @@ export function buildTauriModelBridge(): OcrModelBridge | null {
           handler(event.payload)
         )
         if (detached) {
-          off()
+          safeUnlisten(off)
         } else {
           unlisten = off
         }
       })
       return () => {
         detached = true
-        unlisten?.()
+        safeUnlisten(unlisten)
+        unlisten = null
       }
     },
   }

@@ -39,7 +39,7 @@ import { pairRuntimeConfigs } from "@/lib/ai/agent/runtime-catalog/pairing"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { selectAgents } from "@/stores/agent/external-agent-store/selectors"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
-import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/remote-host-configs"
+import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/runtimes/remote/remote-host-configs"
 
 const UNAVAILABLE_KEY: Record<HostConfigsUnavailableReason, string> = {
   "no-host": "unavailableNoHost",

@@ -6,7 +6,11 @@ import type { AppSettings } from "@cognia/agent-config-types"
 import { __resetThemeRegistryForTesting, registerPluginTheme } from "@/lib/theme/theme-registry"
 
 const setTheme = jest.fn()
-jest.mock("next-themes", () => ({ useTheme: () => ({ setTheme }) }))
+// `undefined` = next-themes still hydrating; tests that need a painted mode set it.
+let mockResolvedTheme: string | undefined
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ setTheme, resolvedTheme: mockResolvedTheme }),
+}))
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string, params?: Record<string, unknown>) => {
     if (params && typeof params.name === "string") return `${k}:${params.name}`
@@ -101,6 +105,7 @@ beforeEach(() => {
   deleteCustomTheme.mockClear()
   removeImportedTheme.mockClear()
   routerReplace.mockClear()
+  mockResolvedTheme = undefined
   createCustomTheme.mockReturnValue("ct_new")
   storeState.settings = { theme: "system", colorTheme: "default", activeCustomThemeId: null }
   storeState.activeCustomThemeId = null
@@ -239,6 +244,111 @@ describe("ThemeTab", () => {
     // the name in the same DOM node).
     const draculaCard = screen.getByText(/Dracula/i).closest("button")
     expect(draculaCard?.getAttribute("aria-pressed")).toBe("true")
+  })
+
+  // One theme is active for both modes. The audit read "Active" on Dracula
+  // while the app was light as a selection that had not taken; the card and
+  // the note now say what the current mode is painting.
+  describe("active theme in the current mode", () => {
+    const draculaClone = {
+      id: "ct-dracula",
+      name: "Dracula",
+      sourceBuiltinName: "Dracula",
+      baseVariant: "dark" as const,
+      derivedVariant: "light" as const,
+      tokens: { dark: { background: "#282a36" }, light: { background: "#f8f8f2" } } as never,
+      isDark: true,
+    }
+
+    it("names the mode on the active card and explains a derived palette", () => {
+      mockResolvedTheme = "light"
+      storeState.settings = {
+        theme: "light",
+        colorTheme: "default",
+        activeCustomThemeId: "ct-dracula",
+        customThemes: [draculaClone],
+      }
+      render(<ThemeTab />)
+      const badge = screen.getByTestId("active-theme-badge")
+      expect(badge).toHaveTextContent("activeVariant.badge.derived.light")
+      expect(screen.getByRole("button", { name: /^Dracula/ })).toContainElement(badge)
+      expect(screen.getByTestId("active-theme-applied-note")).toHaveTextContent(
+        "activeVariant.applied.derived.light:Dracula"
+      )
+    })
+
+    it("follows the mode: the same theme reads as its own palette in dark mode", () => {
+      mockResolvedTheme = "dark"
+      storeState.settings = {
+        theme: "dark",
+        colorTheme: "default",
+        activeCustomThemeId: "ct-dracula",
+        customThemes: [draculaClone],
+      }
+      render(<ThemeTab />)
+      expect(screen.getByTestId("active-theme-badge")).toHaveTextContent(
+        "activeVariant.badge.authored.dark"
+      )
+    })
+
+    // Intentional dormancy, pinned: a single-palette theme contributes nothing
+    // outside its own mode, and the UI labels it inert rather than "Active".
+    it("labels a single-palette theme as inactive outside its own mode", () => {
+      mockResolvedTheme = "light"
+      storeState.settings = {
+        theme: "light",
+        colorTheme: "default",
+        activeCustomThemeId: "ct-legacy",
+        customThemes: [
+          {
+            id: "ct-legacy",
+            name: "Dracula",
+            sourceBuiltinName: "Dracula",
+            isDark: true,
+            colors: { background: "#282a36" },
+          },
+        ],
+      }
+      render(<ThemeTab />)
+      const badge = screen.getByTestId("active-theme-badge")
+      expect(badge).toHaveAttribute("data-dormant", "true")
+      expect(badge).toHaveTextContent("activeVariant.badge.dormantOnly.dark")
+      expect(screen.getByTestId("active-theme-applied-note")).toHaveAttribute(
+        "data-dormant",
+        "true"
+      )
+    })
+
+    it("says a directly activated plugin theme is the same in both modes", () => {
+      mockResolvedTheme = "light"
+      storeState.settings = {
+        theme: "light",
+        colorTheme: "default",
+        activeCustomThemeId: null,
+        activePluginThemeId: "p.night",
+      }
+      registerPluginTheme({
+        id: "p.night",
+        name: "Night Plugin",
+        variables: {},
+        source: "plugin",
+        pluginId: "p",
+        pluginName: "Plugin P",
+        colors: { background: "#111", foreground: "#eee", primary: "#7c3aed" } as never,
+        isDark: true,
+      })
+      render(<ThemeTab />)
+      expect(screen.getByTestId("active-theme-badge")).toHaveTextContent(
+        "activeVariant.badge.fixed"
+      )
+    })
+
+    it("shows no note when no theme is active", () => {
+      mockResolvedTheme = "light"
+      render(<ThemeTab />)
+      expect(screen.queryByTestId("active-theme-applied-note")).toBeNull()
+      expect(screen.queryByTestId("active-theme-badge")).toBeNull()
+    })
   })
 
   it("merges plugin themes registered before render into the grid", () => {

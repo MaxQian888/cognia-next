@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { MdnsBlock } from "./mdns-block"
+import { toast } from "sonner"
 
 import type { HostAdminReach } from "@/lib/connectivity/host-admin-reach"
 
@@ -23,10 +24,29 @@ jest.mock("@/lib/connectivity/mdns-discovery", () => ({
 }))
 jest.mock("@/lib/tauri", () => ({
   transport: { call: async (name: string) => (name === "companion_mdns_status" ? false : "fp") },
+  localTransport: {
+    call: async (name: string) => (name === "companion_mdns_status" ? false : "fp"),
+  },
 }))
 
 describe("MdnsBlock", () => {
-  beforeEach(() => reach.mockReturnValue({ available: true }))
+  beforeEach(() => {
+    reach.mockReturnValue({ available: true })
+    patch.mockReset().mockResolvedValue(undefined)
+    jest.mocked(toast.success).mockClear()
+    jest.mocked(toast.error).mockClear()
+  })
+
+  it("reports a failed boot preference save while retaining the live broadcast state", async () => {
+    patch.mockRejectedValueOnce(new Error("disk full"))
+    render(<MdnsBlock />)
+    await screen.findByTestId("mdns-autostart-failed")
+    fireEvent.click(screen.getByRole("switch"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("disk full"))
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.getByRole("switch")).toBeChecked()
+    expect(screen.getByRole("switch")).toBeEnabled()
+  })
 
   it("warns when the saved preference is on but nothing is broadcasting, and starts on toggle", async () => {
     render(<MdnsBlock />)

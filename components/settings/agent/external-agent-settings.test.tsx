@@ -231,8 +231,11 @@ jest.mock("@/lib/files/file-bridge", () => ({
 // Use the real `presets.ts` module — its registry exposes the shipping
 // presets so the gallery has actual data to render. We only spy on
 // `getAvailablePresets` for one test that needs to override the list.
-jest.mock("@/lib/ai/agent/external/presets", () => {
-  const actual = jest.requireActual("@/lib/ai/agent/external/presets") as Record<string, unknown>
+jest.mock("@/lib/ai/agent/external/config/presets", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/config/presets") as Record<
+    string,
+    unknown
+  >
   // Keep the real registry; make the executable-Codex preference deterministic
   // (no real `codex` CLI probe / Tauri invoke during tests).
   return {
@@ -241,7 +244,7 @@ jest.mock("@/lib/ai/agent/external/presets", () => {
   }
 })
 
-jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
+jest.mock("@/lib/ai/agent/external/config/config-normalizer", () => ({
   getExternalAgentEcosystemReadiness: () => undefined,
   getExternalAgentExecutionBlockReason: () => null,
   getExternalAgentExecutionBlock: () => null,
@@ -379,7 +382,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // preset at runtime. Reading `preset.process.args.join(" ")` threw on such
     // a preset and blanked the section instead of opening its editor.
     const { registerPreset, unregisterPreset } = jest.requireActual(
-      "@/lib/ai/agent/external/presets"
+      "@/lib/ai/agent/external/config/presets"
     ) as {
       registerPreset: (id: string, config: unknown) => unknown
       unregisterPreset: (id: string) => boolean

@@ -23,7 +23,7 @@ import {
   loadReachabilityPrefs,
   patchReachabilityPrefs,
 } from "@/lib/connectivity/reachability-prefs"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 
 import {
@@ -105,19 +105,19 @@ export function ServerBlock() {
         if (enabled) {
           const port = await startServer(desiredBind)
           setStatus({ running: true, bindMode: desiredBind, boundPort: port })
-          setWanted(true)
-          toast.success(t("started", { port }))
           await patchReachabilityPrefs({
             serverEnabled: true,
             port,
             bindLoopbackOnly: desiredBind === "loopback",
           })
+          setWanted(true)
+          toast.success(t("started", { port }))
         } else {
           await stopServer()
           setStatus({ running: false, bindMode: "none", boundPort: null })
+          await patchReachabilityPrefs({ serverEnabled: false })
           setWanted(false)
           toast.success(t("stopped"))
-          await patchReachabilityPrefs({ serverEnabled: false })
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -130,14 +130,15 @@ export function ServerBlock() {
 
   const onBindModeChange = useCallback(
     async (next: string) => {
-      const mode = next as BindMode
-      setDesiredBind(mode)
       if (!desktop) return
-      await patchReachabilityPrefs({ bindLoopbackOnly: mode === "loopback" })
-      if (!status.running) return
+      const mode = next as BindMode
       setBusy(true)
       try {
+        await patchReachabilityPrefs({ bindLoopbackOnly: mode === "loopback" })
+        setDesiredBind(mode)
+        if (!status.running) return
         await stopServer()
+        setStatus({ running: false, bindMode: "none", boundPort: null })
         const port = await startServer(mode)
         setStatus({ running: true, bindMode: mode, boundPort: port })
       } catch (err) {

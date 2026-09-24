@@ -508,12 +508,40 @@ jest.mock("./provider-empty-state", () => ({
 jest.mock("./provider-onboarding-banner", () => ({
   ProviderOnboardingBanner: ({
     onScrollToProvider,
+    externalRuntimeReady,
   }: {
     onScrollToProvider?: (id: string) => void
+    externalRuntimeReady?: boolean
   }) => (
     <button
       data-testid="provider-onboarding-banner"
+      data-external-runtime-ready={String(externalRuntimeReady ?? false)}
       onClick={() => onScrollToProvider?.("openai")}
+    />
+  ),
+}))
+// The external-runtime summary has its own suite; here only its wiring into
+// the page matters. The hook reads the runtime catalog, which is stubbed to a
+// mutable value per test.
+const mockExternalRuntimes = {
+  externalEnabled: true,
+  configuredCount: 0,
+  rows: [] as Array<{ key: string; name: string; state: string }>,
+  workingCount: 0,
+}
+jest.mock("./use-external-runtime-connections", () => ({
+  useExternalRuntimeConnections: () => mockExternalRuntimes,
+}))
+jest.mock("./external-runtime-connections-card", () => ({
+  ExternalRuntimeConnectionsCard: ({
+    connections,
+  }: {
+    connections: { rows: unknown[]; workingCount: number }
+  }) => (
+    <div
+      data-testid="external-runtime-connections-stub"
+      data-rows={connections.rows.length}
+      data-working={connections.workingCount}
     />
   ),
 }))
@@ -681,6 +709,47 @@ beforeEach(() => {
   mockHookState = makeHookState()
   mockDiscoverySnapshot.mockReturnValue({ models: [] })
   mockOpenRouterRow = { models: [{ id: "or-1", name: "OR Model" }] }
+})
+
+describe("ProviderSettings external agent runtimes", () => {
+  afterEach(() => {
+    mockExternalRuntimes.configuredCount = 0
+    mockExternalRuntimes.rows = []
+    mockExternalRuntimes.workingCount = 0
+  })
+
+  it("shows the runtimes that bring their own model access above the provider list", () => {
+    mockExternalRuntimes.configuredCount = 1
+    mockExternalRuntimes.rows = [{ key: "external:pi", name: "Pi", state: "connected" }]
+    mockExternalRuntimes.workingCount = 1
+    render(<ProviderSettings />)
+    const card = screen.getByTestId("external-runtime-connections-stub")
+    expect(card).toHaveAttribute("data-rows", "1")
+    expect(card).toHaveAttribute("data-working", "1")
+    expect(
+      card.compareDocumentPosition(screen.getByTestId("provider-layout")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it("stops telling a user with a working agent to get started", () => {
+    mockExternalRuntimes.rows = [{ key: "external:pi", name: "Pi", state: "connected" }]
+    mockExternalRuntimes.workingCount = 1
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-onboarding-banner")).toHaveAttribute(
+      "data-external-runtime-ready",
+      "true"
+    )
+  })
+
+  it("keeps the get-started copy when no external runtime is working", () => {
+    mockExternalRuntimes.rows = [{ key: "external:pi", name: "Pi", state: "off" }]
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-onboarding-banner")).toHaveAttribute(
+      "data-external-runtime-ready",
+      "false"
+    )
+  })
 })
 
 describe("ProviderSettings (cognia-next slim port)", () => {

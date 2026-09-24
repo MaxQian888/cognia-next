@@ -6,7 +6,14 @@ import {
 } from "./companion-server-commands"
 
 const call = jest.fn()
-jest.mock("@/lib/tauri", () => ({ transport: { call: (...args: unknown[]) => call(...args) } }))
+jest.mock("@/lib/tauri", () => ({
+  localTransport: { call: (...args: unknown[]) => call(...args) },
+  transport: {
+    call: () => {
+      throw new Error("Local controls must not use the selected host")
+    },
+  },
+}))
 jest.mock("@/lib/db/paired-devices", () => ({
   listPairedDevices: async () => [
     { deviceId: "a", allowRemoteControl: true, allowLockedComputerUse: true },

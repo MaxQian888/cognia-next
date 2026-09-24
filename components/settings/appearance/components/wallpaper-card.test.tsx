@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
@@ -117,6 +118,24 @@ describe("WallpaperCard", () => {
     fireEvent.click(screen.getByTestId("wallpaper-delete-button"))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onActivate).not.toHaveBeenCalled()
+  })
+
+  it("keeps the delete button reachable without a hover (focus and touch reveal it)", async () => {
+    await act(async () => {
+      render(
+        <WallpaperCard
+          wallpaper={baseWp()}
+          active={false}
+          onActivate={jest.fn()}
+          onDelete={jest.fn()}
+        />
+      )
+    })
+    const button = screen.getByTestId("wallpaper-delete-button")
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+      expect(button).toHaveClass(variant)
+    }
+    expect(button).not.toHaveClass("invisible", "pointer-events-none")
   })
 
   it("marks the tile unavailable when resolveSourceToCss rejects", async () => {

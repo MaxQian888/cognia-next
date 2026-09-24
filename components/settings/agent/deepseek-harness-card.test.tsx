@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import messages from "@/i18n/messages/en.json"
-import type { DshDoctorReport } from "@/lib/ai/agent/external/dsh-runtime-install"
+import type { DshDoctorReport } from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 
 const useDshRuntime = jest.fn()
 jest.mock("@/hooks/agent/use-dsh-runtime", () => ({

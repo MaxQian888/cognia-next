@@ -43,7 +43,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
-import { isTauri, transport } from "@/lib/tauri"
+import { isTauri, localTransport as transport } from "@/lib/tauri"
 import {
   KEYRING_CREDENTIAL_PREFIX,
   freshCredentialKeyId,

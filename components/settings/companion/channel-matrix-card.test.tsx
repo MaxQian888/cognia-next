@@ -11,8 +11,14 @@ import messages from "@/i18n/messages/en.json"
 
 jest.mock("@/stores/settings", () => ({ useSettingsStore: jest.fn() }))
 jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => true,
+  localTransport: { call: jest.fn() },
+  transport: { call: jest.fn() },
+}))
 
 import { toast } from "sonner"
+import { localTransport, transport } from "@/lib/tauri"
 
 const useSettingsStoreMock = useSettingsStore as unknown as jest.Mock
 
@@ -44,6 +50,27 @@ beforeEach(() => {
 })
 
 describe("<ChannelMatrixCard />", () => {
+  it("reads and probes this desktop without calling the selected remote host", async () => {
+    ;(localTransport.call as jest.Mock).mockImplementation(async (name: string) => {
+      if (name === "companion_server_status")
+        return { running: true, bindMode: "lan", boundPort: 27890 }
+      if (name === "companion_mdns_status") return false
+      if (name === "companion_tunnel_current") return null
+      return []
+    })
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ChannelMatrixCard />
+      </NextIntlClientProvider>
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("channel-matrix-summary")).toHaveTextContent("Reachable")
+    )
+    await userEvent.setup().click(screen.getByRole("button"))
+    expect(localTransport.call).toHaveBeenCalledWith("companion_test_local_reachability")
+    expect(transport.call).not.toHaveBeenCalled()
+  })
+
   it("renders every channel so a missing one is visible rather than absent", async () => {
     renderCard()
     for (const id of ["lan", "mdns", "tunnel", "webrtc"]) {

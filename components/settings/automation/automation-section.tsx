@@ -207,7 +207,6 @@ function OverviewTab() {
   //      failure (e.g. after a worker-restart that tried to reinit).
   useEffect(() => {
     if (!isTauri()) return
-    let unlisten: (() => void) | null = null
     let cancelled = false
     transport
       .call<BackendInitFailure | null>("automation_drain_init_failure", {})
@@ -215,20 +214,15 @@ function OverviewTab() {
         if (!cancelled && failure) setInitFailure(failure)
       })
       .catch(() => {})
-    void import("@tauri-apps/api/event").then(({ listen }) => {
-      void listen<BackendInitFailure>("automation:backend-init-failed", (event) => {
-        setInitFailure(event.payload)
-      }).then((u) => {
-        if (cancelled) {
-          u()
-        } else {
-          unlisten = u
-        }
-      })
-    })
+    const unlisten = transport.subscribe<BackendInitFailure>(
+      "automation:backend-init-failed",
+      (failure) => {
+        if (!cancelled) setInitFailure(failure)
+      }
+    )
     return () => {
       cancelled = true
-      if (unlisten) unlisten()
+      unlisten()
     }
   }, [])
 

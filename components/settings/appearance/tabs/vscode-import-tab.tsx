@@ -5,6 +5,7 @@
 // tab surface (form + the history list of previously imported themes).
 
 import { useTranslations } from "next-intl"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Trash2Icon } from "lucide-react"
@@ -12,7 +13,9 @@ import { useSettingsStore } from "@/stores/settings"
 import type { ImportedThemeRecord } from "@/types/appearance"
 import type { CustomTheme } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
+import { customThemeVariantIn, themeModeFromResolved } from "@/lib/appearance/active-theme-variant"
 import { VscodeImportForm } from "../vscode-import-form"
+import { ActiveThemeBadge } from "../components/active-theme-status"
 
 // Stable empty fallbacks. Selectors that return a fresh `[]` on every call
 // confuse zustand's `useSyncExternalStore` integration into thinking the
@@ -30,6 +33,11 @@ export function VscodeImportTab() {
     (s) => s.settings?.importedVscodeThemes ?? EMPTY_IMPORTED
   )
   const customThemes = useSettingsStore((s) => s.settings?.customThemes ?? EMPTY_CUSTOM_THEMES)
+  // The badge names the mode the active import is painting in, so a dark
+  // import left active while the app is light is not mistaken for one that
+  // failed to apply.
+  const { resolvedTheme } = useTheme()
+  const mode = themeModeFromResolved(resolvedTheme)
 
   const removeRecord = async (record: ImportedThemeRecord) => {
     deleteCustomTheme(record.customThemeId)
@@ -60,7 +68,10 @@ export function VscodeImportTab() {
                   <span className="font-medium">
                     {ct?.name ?? record.sourceName}
                     {isActive && (
-                      <span className="ml-1.5 text-[10px] text-primary">{t("activeLabel")}</span>
+                      <ActiveThemeBadge
+                        status={ct && mode ? customThemeVariantIn(ct, mode) : null}
+                        className="ml-1.5"
+                      />
                     )}
                   </span>
                   <span className="font-mono text-[10px] text-muted-foreground">

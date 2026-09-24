@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import type { UserProviderSettings } from "@cognia/provider-types"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 import { ProviderParametersTab } from "./provider-parameters-tab"
 
 jest.mock("next-intl", () => ({
@@ -61,5 +62,20 @@ describe("ProviderParametersTab", () => {
         maxRetries: undefined,
       },
     })
+  })
+
+  it("keeps each section's reset reachable without a hover", () => {
+    render(
+      <ProviderParametersTab providerId="openai" settings={settings} onSettingsChange={jest.fn()} />
+    )
+    const resets = screen.getAllByTitle("resetAll")
+    expect(resets.length).toBeGreaterThan(0)
+    for (const reset of resets) {
+      // Focus, an open popup and touch reveal it too; it only ever fades.
+      for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.control) {
+        expect(reset).toHaveClass(variant)
+      }
+      expect(reset).not.toHaveClass("invisible", "pointer-events-none")
+    }
   })
 })

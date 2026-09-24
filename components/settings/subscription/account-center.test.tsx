@@ -43,6 +43,7 @@ function summary(
   }
 }
 
+const reloadSubscriptionAccounts = jest.fn()
 const stateByProvider: Record<ProviderId, ReturnType<typeof accountState>> = {
   anthropic: accountState(),
   codex: accountState(),
@@ -77,7 +78,7 @@ jest.mock("@/lib/subscription/core/hooks", () => ({
     byProvider: stateByProvider,
     loading: false,
     error: null,
-    reload: jest.fn(),
+    reload: reloadSubscriptionAccounts,
   }),
 }))
 jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
@@ -252,6 +253,8 @@ it("surfaces a provider load failure while retaining the other accounts", async 
   render(<AccountCenter />)
   expect(screen.getByRole("alert")).toHaveTextContent("keyring locked")
   expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button", { name: "retry" }))
+  expect(reloadSubscriptionAccounts).toHaveBeenCalledWith({ allowInteraction: true })
   expect(screen.getByTestId("account-center-row-anthropic-claude-1")).toBeInTheDocument()
   stateByProvider.codex.error = null
 })

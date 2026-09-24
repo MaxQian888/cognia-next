@@ -876,7 +876,7 @@ interface WebhookSigningCardProps {
 
 function WebhookSigningCard({ tSigning }: WebhookSigningCardProps) {
   const desktopAvailable = isTauri()
-  const { enabled, loading } = useWebhookSigningState()
+  const { enabled, loading, unavailable } = useWebhookSigningState()
 
   return (
     <Card>
@@ -895,6 +895,10 @@ function WebhookSigningCard({ tSigning }: WebhookSigningCardProps) {
         ) : loading ? (
           <SettingsAlert icon={<Loader2 className="h-4 w-4 animate-spin" />}>
             {tSigning("loading")}
+          </SettingsAlert>
+        ) : unavailable ? (
+          <SettingsAlert icon={<AlertTriangle className="h-4 w-4" />}>
+            <span data-testid="signing-state-unavailable">{tSigning("unavailable")}</span>
           </SettingsAlert>
         ) : enabled ? (
           <SettingsAlert

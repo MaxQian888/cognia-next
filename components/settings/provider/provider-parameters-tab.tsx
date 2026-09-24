@@ -7,6 +7,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
+import { cn } from "@/lib/utils"
 import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { DynamicParameterForm } from "./dynamic-parameter-form"
 import type {
@@ -45,7 +47,10 @@ function SectionTrigger({ category, label, count, onReset, resetLabel }: Section
       <Button
         variant="ghost"
         size="icon"
-        className="h-6 w-6 mr-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        // Quiet until the section header is hovered, but never hover-only: it
+        // used to have no focus reveal, so a keyboard user tabbed onto an
+        // invisible reset button, and a touch device never showed it at all.
+        className={cn("mr-2 h-6 w-6 shrink-0", HOVER_REVEAL_CONTROL_CLASS)}
         onClick={onReset}
         title={resetLabel}
         aria-label={resetLabel}

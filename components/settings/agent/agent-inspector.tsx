@@ -47,13 +47,13 @@ import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsand
 import { SandboxPlacementBadge } from "@/components/agent/external-agent/sandbox-placement-badge"
 import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
 import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
-import { getExternalAgentEcosystemReadiness } from "@/lib/ai/agent/external/config-normalizer"
-import { isFromPreset } from "@/lib/ai/agent/external/presets"
+import { getExternalAgentEcosystemReadiness } from "@/lib/ai/agent/external/config/config-normalizer"
+import { isFromPreset } from "@/lib/ai/agent/external/config/presets"
 import {
   adaptPermissionMode,
   supportedPermissionModes,
-} from "@/lib/ai/agent/external/permission-modes"
-import type { AcpPreviewFeature } from "@/lib/ai/agent/external/acp-feature-profile"
+} from "@/lib/ai/agent/external/policy/permission-modes"
+import type { AcpPreviewFeature } from "@/lib/ai/agent/external/runtimes/acp/acp-feature-profile"
 import type { AgentReadiness, AgentReadinessAction } from "@/lib/ai/agent/external/agent-readiness"
 import {
   useExternalAgentStore,

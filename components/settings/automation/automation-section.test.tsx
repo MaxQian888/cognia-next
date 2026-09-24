@@ -21,12 +21,13 @@ jest.mock("next/navigation", () => ({
 // unavailable notice, which keeps this suite about the shell: the tab strip
 // and where selecting a tab navigates.
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => false,
+  isTauri: jest.fn(() => false),
   transport: { call: jest.fn().mockResolvedValue(null), subscribe: jest.fn(() => () => {}) },
 }))
 
 jest.mock("@/lib/automation/audit", () => ({ listAuditRows: jest.fn().mockResolvedValue([]) }))
 
+import { isTauri, transport } from "@/lib/tauri"
 import { AutomationSection } from "@/components/settings/automation/automation-section"
 
 function renderSection() {
@@ -39,6 +40,7 @@ function renderSection() {
 
 beforeEach(() => {
   replace.mockClear()
+  ;(isTauri as jest.Mock).mockReturnValue(false)
   pathname = "/settings"
   search = "section=automation"
 })
@@ -114,4 +116,17 @@ describe("AutomationSection", () => {
       expect.anything()
     )
   })
+})
+
+it("uses the shared event transport so native teardown races are contained", () => {
+  ;(isTauri as jest.Mock).mockReturnValue(true)
+  const stop = jest.fn()
+  ;(transport.subscribe as jest.Mock).mockReturnValueOnce(stop)
+  const { unmount } = renderSection()
+  expect(transport.subscribe).toHaveBeenCalledWith(
+    "automation:backend-init-failed",
+    expect.any(Function)
+  )
+  unmount()
+  expect(stop).toHaveBeenCalledTimes(1)
 })

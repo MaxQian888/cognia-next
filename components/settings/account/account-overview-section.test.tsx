@@ -88,6 +88,7 @@ jest.mock("@/components/ui/select", () => ({
 }))
 
 interface MockAccount {
+  protection?: "device" | "password"
   id: string
   displayName: string
 }
@@ -423,4 +424,24 @@ describe("AccountOverviewSection", () => {
       "securityAutoLockOff"
     )
   })
+})
+
+function enterTauriShell(): void {
+  ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+}
+
+afterEach(() => {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+})
+
+it("hides lock-now until a device workspace has a password", async () => {
+  const id = "acct_desktop_local_workspace"
+  mockIsTauri = true
+  mockAccounts = [{ id, displayName: "Local", protection: "device" }]
+  mockActiveAccountId = id
+  mockUnlockedAccountId = id
+  enterTauriShell()
+  render(<AccountOverviewSection />)
+  await screen.findByTestId("account-overview-manage-local")
+  expect(screen.queryByTestId("account-overview-lock-now")).not.toBeInTheDocument()
 })

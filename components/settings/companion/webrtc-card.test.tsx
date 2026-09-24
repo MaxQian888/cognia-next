@@ -53,6 +53,15 @@ const mockTransportCall = jest.fn()
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => true,
   transport: {
+    call: (name: string, params?: Record<string, unknown>) => {
+      if (name.startsWith("companion_signaling_")) {
+        throw new Error("Desktop signaling must use local IPC")
+      }
+      return mockTransportCall(name, params)
+    },
+    subscribe: jest.fn(),
+  },
+  localTransport: {
     call: (name: string, params?: Record<string, unknown>) => mockTransportCall(name, params),
     subscribe: jest.fn(),
   },

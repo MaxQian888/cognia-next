@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en/externalAgent.json"
 import zhMessages from "@/i18n/messages/zh-CN/externalAgent.json"
 import type { PiAuthStatus } from "@/hooks/agent/use-pi-auth-status"
-import type { PiAuthType, PiAuthProbeStatus } from "@/lib/ai/agent/external/pi-auth"
+import type { PiAuthType, PiAuthProbeStatus } from "@/lib/ai/agent/external/runtimes/pi/pi-auth"
 
 import { PiAuthStatusCard } from "./pi-auth-status-card"
 

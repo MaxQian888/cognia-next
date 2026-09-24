@@ -20,7 +20,7 @@ import {
   loadReachabilityPrefs,
   patchReachabilityPrefs,
 } from "@/lib/connectivity/reachability-prefs"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 
 import { DEFAULT_PORT, getMdnsStatus, transportInvoker } from "./companion-server-commands"
 import { HostReachNotice } from "./host-reach-notice"
@@ -68,18 +68,16 @@ export function MdnsBlock() {
           if (started.kind === "error") throw new Error(started.message)
           if (started.kind === "unsupported") throw new Error(t("onlyDesktop"))
           setRunning(true)
-          setWanted(true)
-          toast.success(t("started"))
         } else {
           await stopBroadcast(transportInvoker)
           setRunning(false)
-          setWanted(false)
-          toast.success(t("stopped"))
         }
         // Remember the choice so the boot restore re-advertises. Without this
         // the broadcast dies with the process and the phone that paired over
         // the LAN silently loses discovery on the next restart.
         await patchReachabilityPrefs({ mdnsEnabled: enabled })
+        setWanted(enabled)
+        toast.success(t(enabled ? "started" : "stopped"))
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       } finally {

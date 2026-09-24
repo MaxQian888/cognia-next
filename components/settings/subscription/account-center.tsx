@@ -158,7 +158,11 @@ export function AccountCenter() {
       {accountError && (
         <div role="alert" className="space-y-2 text-xs text-destructive">
           <p>{t("loadFailed", { error: accountError })}</p>
-          <Button size="sm" variant="outline" onClick={() => void reload()}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void reload({ allowInteraction: true })}
+          >
             {t("retry")}
           </Button>
         </div>

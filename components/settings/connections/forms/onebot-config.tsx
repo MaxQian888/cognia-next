@@ -11,6 +11,7 @@
  * Quiet-Hours + Mute controls.
  */
 
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
@@ -274,7 +275,7 @@ export function OneBotConfigDialog({
           clearTimeout(timer)
           resolve()
         }).then((unlisten) => {
-          setTimeout(unlisten, 10_500)
+          setTimeout(() => safeUnlisten(unlisten), 10_500)
         })
       })
       setVerifyResult("connected")

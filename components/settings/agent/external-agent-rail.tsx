@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/select"
 import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
-import { getPresetDisplayInfo, isFromPreset } from "@/lib/ai/agent/external/presets"
+import { getPresetDisplayInfo, isFromPreset } from "@/lib/ai/agent/external/config/presets"
 import type { AgentReadiness, AgentReadinessState } from "@/lib/ai/agent/external/agent-readiness"
 import type { LifecycleExternalAgentConfig } from "@/stores/agent/external-agent-store"
 import { useSettingsListDensity } from "@/components/settings/common/settings-master-detail"

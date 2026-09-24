@@ -1,6 +1,14 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { OcrModelsTab, type ModelStatus, type OcrModelBridge } from "./ocr-models-tab"
+import { isTauri } from "@/lib/platform/detect"
+import ocrMessages from "@/i18n/messages/en/ocr.json"
+import { listen } from "@tauri-apps/api/event"
+import {
+  buildTauriModelBridge,
+  OcrModelsTab,
+  type ModelStatus,
+  type OcrModelBridge,
+} from "./ocr-models-tab"
 
 function makeBridge(initial: Partial<ModelStatus> = {}): OcrModelBridge {
   const status: ModelStatus = {
@@ -122,6 +130,41 @@ describe("OcrModelsTab", () => {
       />
     )
 
-    expect(await screen.findByText(/legacy PP-OCRv5 files/i)).toHaveTextContent("/tmp/paddle")
+    expect(await screen.findByText(ocrMessages.modelStatus.legacyDetected)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /download models/i })).toBeInTheDocument()
   })
 })
+
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => false),
+}))
+
+it.each([false, true])(
+  "contains OCR unregister rejections, detached before registration: %s",
+  async (detachEarly) => {
+    jest.mocked(isTauri).mockReturnValue(true)
+    let release!: (off: () => void) => void
+    jest.mocked(listen).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const bridge = buildTauriModelBridge()!
+    const stop = bridge.onProgress(() => {})
+    await act(async () => {
+      await Promise.resolve()
+    })
+    if (detachEarly) stop()
+    const rejected = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+    const catchSpy = jest.spyOn(rejected, "catch")
+    release(() => rejected)
+    await Promise.resolve()
+    if (!detachEarly) stop()
+    const attached = catchSpy.mock.calls.length
+    await rejected.catch(() => {})
+    jest.mocked(isTauri).mockReturnValue(false)
+    expect(attached).toBe(1)
+  }
+)

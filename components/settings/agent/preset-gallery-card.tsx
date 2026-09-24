@@ -19,7 +19,7 @@ import {
   getAvailablePresets,
   getPresetConfig,
   resolvePreferredCodexExecutablePresetId,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 
 // =============================================================================
 // Preset Gallery Card

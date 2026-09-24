@@ -39,6 +39,12 @@ jest.mock("next-intl", () => ({
     params?.count != null ? `${k}:${params.count}` : k,
 }))
 
+// `undefined` = next-themes still hydrating; the badge tests set a mode.
+let mockResolvedTheme: string | undefined
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ resolvedTheme: mockResolvedTheme, setTheme: jest.fn() }),
+}))
+
 jest.mock("@/lib/appearance", () => ({
   importVscodeThemeJson: jest.fn(),
   readVsix: jest.fn(),
@@ -56,12 +62,16 @@ const setActive = jest.fn()
 const addImportedTheme = jest.fn()
 const removeImportedTheme = jest.fn()
 const deleteCustomTheme = jest.fn()
-const storeState: { settings: Partial<AppSettings> } = { settings: {} }
+const storeState: { settings: Partial<AppSettings>; activeCustomThemeId: string | null } = {
+  settings: {},
+  activeCustomThemeId: null,
+}
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: jest.fn((selector: (s: unknown) => unknown) =>
     selector({
       settings: storeState.settings,
+      activeCustomThemeId: storeState.activeCustomThemeId,
       createCustomTheme,
       updateCustomTheme,
       setActiveCustomTheme: setActive,
@@ -77,6 +87,8 @@ import { VscodeImportTab } from "./vscode-import-tab"
 beforeEach(() => {
   jest.clearAllMocks()
   storeState.settings = { customThemes: [], importedVscodeThemes: [] }
+  storeState.activeCustomThemeId = null
+  mockResolvedTheme = undefined
 })
 
 describe("VscodeImportTab", () => {
@@ -398,5 +410,64 @@ describe("VscodeImportTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /removeButton/ }))
     expect(deleteCustomTheme).toHaveBeenCalledWith("ct-1")
     expect(removeImportedTheme).toHaveBeenCalledWith("ct-1")
+  })
+
+  describe("active import badge", () => {
+    const record = {
+      customThemeId: "ct-1",
+      sourceName: "Imported",
+      sourceVariant: "dark" as const,
+      importedAt: 1,
+      origin: { kind: "json" as const, fileName: "x.json" },
+    }
+
+    it("names the mode the active import is painting in", () => {
+      mockResolvedTheme = "light"
+      storeState.activeCustomThemeId = "ct-1"
+      storeState.settings = {
+        customThemes: [
+          {
+            id: "ct-1",
+            name: "Imported",
+            baseVariant: "dark",
+            derivedVariant: "light",
+            tokens: { dark: { background: "#000" }, light: { background: "#fff" } } as never,
+            isDark: true,
+          },
+        ],
+        importedVscodeThemes: [record],
+      }
+      render(<VscodeImportTab />)
+      expect(screen.getByTestId("active-theme-badge")).toHaveTextContent(
+        "activeVariant.badge.derived.light"
+      )
+    })
+
+    it("labels a single-palette import as inactive outside its own mode", () => {
+      mockResolvedTheme = "light"
+      storeState.activeCustomThemeId = "ct-1"
+      storeState.settings = {
+        customThemes: [
+          { id: "ct-1", name: "Imported", colors: { background: "#000" }, isDark: true },
+        ],
+        importedVscodeThemes: [record],
+      }
+      render(<VscodeImportTab />)
+      const badge = screen.getByTestId("active-theme-badge")
+      expect(badge).toHaveAttribute("data-dormant", "true")
+      expect(badge).toHaveTextContent("activeVariant.badge.dormantOnly.dark")
+    })
+
+    it("shows the plain label until a mode has resolved", () => {
+      storeState.activeCustomThemeId = "ct-1"
+      storeState.settings = {
+        customThemes: [
+          { id: "ct-1", name: "Imported", colors: { background: "#000" }, isDark: true },
+        ],
+        importedVscodeThemes: [record],
+      }
+      render(<VscodeImportTab />)
+      expect(screen.getByTestId("active-theme-badge")).toHaveTextContent("activeLabel")
+    })
   })
 })

@@ -4,6 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { PresetGrid, type PresetItem } from "./preset-grid"
 import type { ThemeColors } from "@/types/plugin/plugin"
+import { HOVER_REVEAL_REQUIRED_VARIANTS } from "@/lib/ui/hover-reveal"
 
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (k: string, params?: Record<string, unknown>) => {
@@ -71,6 +72,58 @@ describe("PresetGrid", () => {
     expect(a?.getAttribute("aria-pressed")).toBe("true")
     const b = screen.getByText("B").closest("button")
     expect(b?.getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("says which mode the active card is active for, only on the active card", () => {
+    render(
+      <PresetGrid
+        items={ITEMS}
+        activeKey="builtin:A"
+        activeStatus={{ kind: "authored", mode: "dark", themeVariant: "dark" }}
+        onSelect={jest.fn()}
+      />
+    )
+    const badges = screen.getAllByTestId("active-theme-badge")
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveTextContent(
+      "settings.appearance.vscode.activeVariant.badge.authored.dark"
+    )
+    expect(screen.getByText("A").closest("button")).toContainElement(badges[0])
+  })
+
+  // The audit case: a dark palette active while the app is light. Intentional
+  // dormancy must read as inactive, not as a selection that did not take.
+  it("labels an active theme that is dormant in the current mode as inert", () => {
+    render(
+      <PresetGrid
+        items={ITEMS}
+        activeKey="builtin:A"
+        activeStatus={{ kind: "dormant", mode: "light", themeVariant: "dark" }}
+        onSelect={jest.fn()}
+      />
+    )
+    const badge = screen.getByTestId("active-theme-badge")
+    expect(badge).toHaveAttribute("data-dormant", "true")
+    expect(badge).toHaveTextContent(
+      "settings.appearance.vscode.activeVariant.badge.dormantOnly.dark"
+    )
+  })
+
+  it("falls back to the plain label while no mode has resolved", () => {
+    render(<PresetGrid items={ITEMS} activeKey="builtin:A" onSelect={jest.fn()} />)
+    expect(screen.getByTestId("active-theme-badge")).toHaveTextContent(
+      "settings.appearance.vscode.activeLabel"
+    )
+  })
+
+  it("keeps every card's actions menu reachable without a hover", () => {
+    render(<PresetGrid items={ITEMS} activeKey={null} onSelect={jest.fn()} />)
+    const trigger = screen.getByRole("button", { name: "settings.appearance.vscode.menu.aria:A" })
+    const wrapper = trigger.parentElement as HTMLElement
+    for (const variant of HOVER_REVEAL_REQUIRED_VARIANTS.group) {
+      expect(wrapper).toHaveClass(variant)
+    }
+    expect(wrapper).not.toHaveClass("invisible", "pointer-events-none")
   })
 
   it("shows the empty-state hint when items is []", () => {

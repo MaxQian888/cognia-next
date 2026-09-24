@@ -18,9 +18,19 @@ const QUICK_SETUP_PROVIDERS = ["openai", "anthropic", "google"] as const
 
 interface ProviderOnboardingBannerProps {
   onScrollToProvider?: (providerId: string) => void
+  /**
+   * An external agent is already connected with its own credentials. "Get
+   * started by configuring a provider" would then tell a user whose turns are
+   * working that nothing works yet, so the copy narrows to what a provider
+   * here would add: the built-in agent and direct model access.
+   */
+  externalRuntimeReady?: boolean
 }
 
-export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboardingBannerProps) {
+export function ProviderOnboardingBanner({
+  onScrollToProvider,
+  externalRuntimeReady = false,
+}: ProviderOnboardingBannerProps) {
   const t = useTranslations("providers")
   const dismissed = useSettingsStore((s) => s.providerOnboardingDismissed)
   const dismiss = useSettingsStore((s) => s.dismissProviderOnboarding)
@@ -45,8 +55,14 @@ export function ProviderOnboardingBanner({ onScrollToProvider }: ProviderOnboard
         <Sparkles className="h-4.5 w-4.5 text-primary" />
       </div>
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-medium">{t("onboardingTitle")}</p>
-        <p className="text-xs text-muted-foreground">{t("onboardingDescription")}</p>
+        <p className="text-sm font-medium">
+          {externalRuntimeReady ? t("externalRuntimes.bannerTitle") : t("onboardingTitle")}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {externalRuntimeReady
+            ? t("externalRuntimes.bannerDescription")
+            : t("onboardingDescription")}
+        </p>
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <span className="text-xs text-muted-foreground">{t("onboardingQuickSetup")}:</span>
           {QUICK_SETUP_PROVIDERS.map((id) => (

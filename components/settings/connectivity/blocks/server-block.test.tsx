@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { ServerBlock } from "./server-block"
+import { toast } from "sonner"
 
 import type { HostAdminReach } from "@/lib/connectivity/host-admin-reach"
 
@@ -16,16 +17,18 @@ jest.mock("@/lib/connectivity/reachability-prefs", () => ({
   loadReachabilityPrefs: async () => prefs,
   patchReachabilityPrefs: (p: unknown) => patch(p),
 }))
-const call = jest.fn(async (name: string) => {
+const defaultCall = async (name: string) => {
   if (name === "companion_server_status")
     return { running: false, bindMode: "none", boundPort: null }
   if (name === "companion_tls_paths")
     return { certPemPath: "/c.pem", keyPemPath: "/k.pem", fingerprintSha256: "ab" }
   if (name === "companion_server_start") return 27890
   return undefined
-})
+}
+const call = jest.fn(defaultCall)
 jest.mock("@/lib/tauri", () => ({
   transport: { call: (...a: unknown[]) => call(...(a as [string])) },
+  localTransport: { call: (...a: unknown[]) => call(...(a as [string])) },
 }))
 jest.mock("@/lib/db/paired-devices", () => ({ listPairedDevices: async () => [] }))
 
@@ -33,7 +36,10 @@ describe("ServerBlock", () => {
   beforeEach(() => {
     reach.mockReturnValue({ available: true })
     call.mockClear()
-    patch.mockClear()
+    call.mockImplementation(defaultCall)
+    patch.mockReset().mockResolvedValue(undefined)
+    jest.mocked(toast.success).mockClear()
+    jest.mocked(toast.error).mockClear()
   })
 
   it("shows the TLS material and starts the server on the chosen binding", async () => {
@@ -55,5 +61,42 @@ describe("ServerBlock", () => {
     expect(screen.getByRole("switch")).toBeDisabled()
     expect(screen.getByTestId("server-reach")).toHaveAttribute("data-reach", "needs-desktop-shell")
     expect(call).not.toHaveBeenCalled()
+  })
+
+  it("reports a preference failure without a success toast after starting", async () => {
+    patch.mockRejectedValueOnce(new Error("disk full"))
+    render(<ServerBlock />)
+    await screen.findByTestId("server-tls-paths")
+    fireEvent.click(screen.getByRole("switch"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("disk full"))
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.getByRole("switch")).toBeChecked()
+    expect(screen.getByRole("switch")).toBeEnabled()
+  })
+
+  it("catches a binding preference failure and leaves the previous selection intact", async () => {
+    patch.mockRejectedValueOnce(new Error("read failed"))
+    render(<ServerBlock />)
+    await screen.findByTestId("server-tls-paths")
+    fireEvent.click(screen.getByRole("radio", { name: "lanLabel" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("read failed"))
+    expect(screen.getByRole("radio", { name: "loopbackLabel" })).toBeChecked()
+    expect(call).not.toHaveBeenCalledWith("companion_server_stop")
+    expect(screen.getByRole("switch")).toBeEnabled()
+  })
+
+  it("shows stopped immediately when a binding restart fails after stop succeeds", async () => {
+    call.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status")
+        return { running: true, bindMode: "loopback", boundPort: 27890 }
+      if (name === "companion_server_start") throw new Error("port busy")
+      return defaultCall(name)
+    })
+    render(<ServerBlock />)
+    await waitFor(() => expect(screen.getByRole("switch")).toBeChecked())
+    fireEvent.click(screen.getByRole("radio", { name: "lanLabel" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("port busy"))
+    expect(screen.getByRole("switch")).not.toBeChecked()
+    expect(screen.getByRole("switch")).toBeEnabled()
   })
 })

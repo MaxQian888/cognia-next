@@ -65,6 +65,21 @@ beforeEach(() => {
 })
 
 describe("ProviderOnboardingBanner (dismissible hint)", () => {
+  it("does not tell a user with a connected external agent to get started", () => {
+    render(<ProviderOnboardingBanner externalRuntimeReady />)
+    expect(screen.getByText("externalRuntimes.bannerTitle")).toBeInTheDocument()
+    expect(screen.getByText("externalRuntimes.bannerDescription")).toBeInTheDocument()
+    expect(screen.queryByText("Get started")).toBeNull()
+    // The quick-setup chips and catalog refresh stay: a provider can still be added.
+    expect(screen.getByText("OpenAI")).toBeInTheDocument()
+  })
+
+  it("keeps the get-started copy by default", () => {
+    render(<ProviderOnboardingBanner />)
+    expect(screen.getByText("Get started")).toBeInTheDocument()
+    expect(screen.queryByText("externalRuntimes.bannerTitle")).toBeNull()
+  })
+
   it("renders the onboarding hint with quick-setup providers", () => {
     render(<ProviderOnboardingBanner />)
     expect(screen.getByText("Get started")).toBeInTheDocument()

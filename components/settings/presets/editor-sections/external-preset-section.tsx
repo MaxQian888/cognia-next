@@ -3,7 +3,7 @@
 /**
  * Preset editor: External agent preset section.
  *
- * Single-select picker over `lib/ai/agent/external/presets.ts:getRunnablePresets()`
+ * Single-select picker over `lib/ai/agent/external/config/presets.ts:getRunnablePresets()`
  * — the built-in five-tier list (`claude-code` / `codex` / `gemini-cli` /
  * `cursor-cli` / `custom`) extended with any plugin overlay entries the
  * `external-agent-preset` capability has registered. Selected id lands on
@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import { getPresetDisplayInfo, getRunnablePresets } from "@/lib/ai/agent/external/presets"
+import { getPresetDisplayInfo, getRunnablePresets } from "@/lib/ai/agent/external/config/presets"
 
 import type { PresetEditorState } from "../preset-editor-state"
 

@@ -10,8 +10,11 @@ import { PresetGalleryCard } from "./preset-gallery-card"
 
 // Keep the real preset registry; only the executable detection is stubbed so
 // no real `codex` CLI probe runs in jsdom.
-jest.mock("@/lib/ai/agent/external/presets", () => {
-  const actual = jest.requireActual("@/lib/ai/agent/external/presets") as Record<string, unknown>
+jest.mock("@/lib/ai/agent/external/config/presets", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/config/presets") as Record<
+    string,
+    unknown
+  >
   return {
     ...actual,
     resolvePreferredCodexExecutablePresetId: jest.fn(async () => "codex-app-server"),

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
-import { transport } from "@/lib/tauri"
+import { localTransport as transport } from "@/lib/tauri"
 
 /**
  * Mirrors Rust `companion_api::commands::BrowserAccessSummary`.
@@ -116,7 +116,7 @@ export function BrowserAccessCard({
     [save]
   )
 
-  if (!desktopShell) {
+  if (!desktopShell || (!summary && loadFailed)) {
     // Rendered with the reason, never hidden. A phone or a browser tab has
     // nothing to configure here and should be told so, not shown a gap.
     return (
@@ -126,10 +126,16 @@ export function BrowserAccessCard({
         description={t("description")}
         testid="browser-access-card"
         settingId="companion-browser-access"
-        attributes={{ "data-reach": shellReach.block ?? "unavailable" }}
+        attributes={desktopShell ? undefined : { "data-reach": shellReach.block ?? "unavailable" }}
         contentClassName="text-xs text-muted-foreground"
       >
-        <p data-testid="browser-access-desktop-only">{t("desktopOnly")}</p>
+        {desktopShell ? (
+          <p role="alert" data-testid="browser-access-error">
+            {t("loadFailed")}
+          </p>
+        ) : (
+          <p data-testid="browser-access-desktop-only">{t("desktopOnly")}</p>
+        )}
       </SettingsBlock>
     )
   }

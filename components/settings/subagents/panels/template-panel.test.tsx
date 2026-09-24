@@ -31,7 +31,7 @@ jest.mock("@/components/settings/provider/routing/provider-model-combobox", () =
     </button>
   ),
 }))
-jest.mock("@/lib/ai/agent/external/presets", () => ({
+jest.mock("@/lib/ai/agent/external/config/presets", () => ({
   BUILTIN_EXECUTABLE_PRESET_IDS: ["claude-code"],
   getPresetDisplayInfo: () => ({ name: "Claude Code" }),
 }))

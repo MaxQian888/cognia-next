@@ -7,7 +7,7 @@ import { AlertTriangle, CheckCircle2, Download, RefreshCw, Trash2, XCircle } fro
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useDshRuntime } from "@/hooks/agent/use-dsh-runtime"
-import type { DshDoctorFinding } from "@/lib/ai/agent/external/dsh-runtime-install"
+import type { DshDoctorFinding } from "@/lib/ai/agent/external/runtimes/dsh/dsh-runtime-install"
 import {
   dshCapabilitiesForTransport,
   profileTransport,

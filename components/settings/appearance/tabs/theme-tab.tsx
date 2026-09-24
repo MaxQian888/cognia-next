@@ -38,12 +38,17 @@ import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { THEME_TOKEN_CSS_VARS } from "@/lib/appearance"
 import { pluginThemeColors } from "@/lib/appearance/resolve-app-palette"
 import {
+  resolveActiveThemeSummary,
+  themeModeFromResolved,
+} from "@/lib/appearance/active-theme-variant"
+import {
   listPluginThemes,
   subscribeThemeRegistry,
   type PluginTheme,
 } from "@/lib/theme/theme-registry"
 import { cn } from "@/lib/utils"
 import { PresetGrid, type PresetItem } from "./preset-grid"
+import { ActiveThemeAppliedNote } from "../components/active-theme-status"
 import { VscodeImportDialog } from "../vscode-import-dialog"
 
 /** Custom properties the catalog owns — anything else in a plugin's
@@ -66,7 +71,7 @@ export function ThemeTab() {
   const setActivePlugin = useSettingsStore((s) => s.setActivePluginTheme)
   const setAccentColor = useSettingsStore((s) => s.setAccentColor)
   const createCustomTheme = useSettingsStore((s) => s.createCustomTheme)
-  const { setTheme } = useTheme()
+  const { setTheme, resolvedTheme } = useTheme()
   const theme: AppTheme = settings?.theme ?? "system"
   const colorTheme: ColorThemePreset = settings?.colorTheme ?? "default"
   const activeCustomThemeId = settings?.activeCustomThemeId ?? null
@@ -196,6 +201,19 @@ export function ThemeTab() {
     )
     return builtIn?.key ?? null
   }, [activePluginThemeId, activeCustomThemeId, customThemes, importedRecords, vscodePresets])
+
+  // ── What the active theme paints in the current mode ───────────────────
+  // One theme is active for both modes; the mode radio above picks which of
+  // its palettes is painted. The card badge and the note under the grid say
+  // which, so a dark theme left active while the app is light no longer reads
+  // as a selection that did not take.
+  const activeSummary = resolveActiveThemeSummary({
+    mode: themeModeFromResolved(resolvedTheme),
+    activePluginThemeId,
+    pluginThemes,
+    activeCustomThemeId,
+    customThemes,
+  })
 
   // ── Search + variant filter ────────────────────────────────────────────
   const [query, setQuery] = useState("")
@@ -497,9 +515,11 @@ export function ThemeTab() {
             <ToggleGroupItem value="dark">{t("vscode.filter.dark")}</ToggleGroupItem>
           </ToggleGroup>
         </div>
+        <ActiveThemeAppliedNote status={activeSummary.status} name={activeSummary.name} />
         <PresetGrid
           items={filteredPresets}
           activeKey={activeKey}
+          activeStatus={activeSummary.status}
           onSelect={handleSelect}
           onEditCopy={handleEditCopy}
           onRemoveImported={handleRemoveImported}

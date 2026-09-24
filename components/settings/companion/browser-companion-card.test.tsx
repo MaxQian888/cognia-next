@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
@@ -16,7 +16,9 @@ jest.mock("@/hooks/platform/use-surface-reach", () => ({
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: { call: jest.fn() },
+  localTransport: { call: jest.fn() },
 }))
+import { localTransport, transport } from "@/lib/tauri"
 
 import { decodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 
@@ -46,10 +48,59 @@ function renderCard(overrides: Partial<React.ComponentProps<typeof BrowserCompan
 }
 
 beforeEach(() => {
+  jest.clearAllMocks()
   tauri = true
 })
 
 describe("BrowserCompanionCard", () => {
+  it("keeps listener reads and enrollment on the local desktop", async () => {
+    ;(localTransport.call as jest.Mock).mockImplementation(async (name) =>
+      name === "companion_browser_access_get" ? { boundPort: 27891 } : ISSUE
+    )
+    renderCard({ loadListener: undefined, createEnrollment: undefined })
+    const generate = screen.getByRole("button", {
+      name: "mobile.companion.browserCompanion.generate",
+    })
+    await waitFor(() => expect(generate).toBeEnabled())
+    fireEvent.click(generate)
+    await screen.findByTestId("browser-companion-code")
+    expect(localTransport.call).toHaveBeenCalledWith("companion_create_browser_enrollment", {})
+    expect(transport.call).not.toHaveBeenCalled()
+  })
+
+  it("cannot generate before the listener status is known", async () => {
+    let resolve!: (state: { boundPort: number }) => void
+    const pending = new Promise<{ boundPort: number }>((done) => {
+      resolve = done
+    })
+    renderCard({ loadListener: () => pending })
+    const button = screen.getByRole("button", {
+      name: "mobile.companion.browserCompanion.generate",
+    })
+    expect(button).toBeDisabled()
+    await act(async () => resolve({ boundPort: 27891 }))
+    expect(button).toBeEnabled()
+  })
+
+  it("expires a code without any parent rerender and clears its timer on unmount", async () => {
+    jest.useFakeTimers().setSystemTime(NOW)
+    try {
+      const { unmount } = renderCard({ now: Date.now })
+      await act(async () => {})
+      fireEvent.click(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      )
+      await act(async () => {})
+      expect(screen.getByTestId("browser-companion-code")).toBeInTheDocument()
+      act(() => jest.advanceTimersByTime(5 * 60 * 1000))
+      expect(screen.getByTestId("browser-companion-expired")).toBeInTheDocument()
+      expect(screen.queryByTestId("browser-companion-code")).not.toBeInTheDocument()
+      unmount()
+      expect(jest.getTimerCount()).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
   /**
    * A phone or a browser tab cannot mint an enrolment code, and used to be
    * shown nothing, which reads as "this build has no such feature". It is
@@ -76,18 +127,24 @@ describe("BrowserCompanionCard", () => {
     ).toBeDisabled()
   })
 
-  it("treats an unreadable listener state as not listening", async () => {
+  it("reports an unreadable listener without claiming it is stopped", async () => {
     // Failing open would offer a code that cannot connect.
     renderCard({
       loadListener: async () => {
         throw new Error("nope")
       },
     })
-    await screen.findByTestId("browser-companion-needs-listener")
+    await screen.findByTestId("browser-companion-listener-error")
+    expect(screen.queryByTestId("browser-companion-needs-listener")).not.toBeInTheDocument()
   })
 
   it("mints a code the extension's own decoder accepts", async () => {
     renderCard()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      ).toBeEnabled()
+    )
     fireEvent.click(
       screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
     )
@@ -109,6 +166,11 @@ describe("BrowserCompanionCard", () => {
         copy={async () => undefined}
         now={() => now}
       />
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      ).toBeEnabled()
     )
     fireEvent.click(
       screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
@@ -138,6 +200,11 @@ describe("BrowserCompanionCard", () => {
         throw new Error("browser access is not listening; enable it in Settings")
       },
     })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      ).toBeEnabled()
+    )
     fireEvent.click(
       screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
     )
@@ -151,6 +218,11 @@ describe("BrowserCompanionCard", () => {
         throw new Error("denied")
       },
     })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      ).toBeEnabled()
+    )
     fireEvent.click(
       screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
     )
@@ -163,6 +235,11 @@ describe("BrowserCompanionCard", () => {
 
   it("confirms a successful copy", async () => {
     renderCard()
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
+      ).toBeEnabled()
+    )
     fireEvent.click(
       screen.getByRole("button", { name: "mobile.companion.browserCompanion.generate" })
     )

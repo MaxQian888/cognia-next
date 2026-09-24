@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -47,6 +47,7 @@ jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
+import { listen } from "@tauri-apps/api/event"
 const mockToastSuccess = toast.success as jest.Mock
 const mockToastError = toast.error as jest.Mock
 
@@ -226,6 +227,42 @@ describe("OneBotConfigDialog — edit existing", () => {
     createdAt: 1000,
     updatedAt: 2000,
   }
+
+  it("safely unregisters the connection verification listener after its timeout", async () => {
+    let cleanup: (() => void) | undefined
+    const nativeTimeout = globalThis.setTimeout
+    const timer = jest
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((handler, delay, ...args) => {
+        if (delay === 10_500) {
+          cleanup = handler as () => void
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return nativeTimeout(handler, delay, ...args)
+      })
+    let rejection!: Promise<void>
+    let catchSpy!: jest.SpyInstance
+    const unlisten = jest.fn(() => {
+      rejection = Promise.reject<void>(new TypeError("listeners[eventId].handlerId"))
+      catchSpy = jest.spyOn(rejection, "catch")
+      return rejection
+    })
+    jest.mocked(listen).mockImplementationOnce(async (_event, handler) => {
+      handler({ payload: undefined } as never)
+      return unlisten
+    })
+    try {
+      render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+      fireEvent.click(await screen.findByRole("button", { name: /verify reverse-ws reception/i }))
+      await waitFor(() => expect(cleanup).toBeDefined())
+      act(() => cleanup!())
+      const attached = catchSpy.mock.calls.length
+      await rejection.catch(() => {})
+      expect(attached).toBe(1)
+    } finally {
+      timer.mockRestore()
+    }
+  })
 
   it("renders 'Configure OneBot (QQ) Adapter' title for existing row", () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)

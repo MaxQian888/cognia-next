@@ -62,7 +62,7 @@ import type { ProviderName } from "@cognia/provider-types/provider"
 import {
   BUILTIN_EXECUTABLE_PRESET_IDS,
   getPresetDisplayInfo,
-} from "@/lib/ai/agent/external/presets"
+} from "@/lib/ai/agent/external/config/presets"
 import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent"
 import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
 
