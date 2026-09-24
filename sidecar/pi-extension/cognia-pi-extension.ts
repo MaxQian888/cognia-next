@@ -11,7 +11,7 @@
  *      prove the interception below is live. No handshake, no session.
  *   2. **Native tool interception.** `pi.on("tool_call")` applies a policy
  *      TABLE handed to it by Cognia. The table is computed and tested in
- *      `lib/ai/agent/external/pi-permission.ts`; nothing here re-derives it,
+ *      `lib/ai/agent/external/runtimes/pi/pi-permission.ts`; nothing here re-derives it,
  *      because `sidecar/` is outside the root tsconfig and Jest and any logic
  *      living here would be permanently unverified.
  *   3. **Tool projection.** Registers Cognia's tools and relays each call to
@@ -82,7 +82,7 @@ interface PiExtensionApi {
 }
 
 // ---------------------------------------------------------------------------
-// Policy (data only — see lib/ai/agent/external/pi-permission.ts)
+// Policy (data only — see lib/ai/agent/external/runtimes/pi/pi-permission.ts)
 // ---------------------------------------------------------------------------
 
 type PiToolDecision = "allow" | "ask" | "deny"
@@ -124,7 +124,7 @@ export const COGNIA_PI_EXTENSION_VERSION = 2
 /**
  * Marker prefixing the title of a native-tool approval dialog.
  *
- * Mirror of `PI_PERMISSION_MARKER` in `lib/ai/agent/external/pi-permission.ts`.
+ * Mirror of `PI_PERMISSION_MARKER` in `lib/ai/agent/external/runtimes/pi/pi-permission.ts`.
  * Exported so the parity test can assert the two are identical: if they drift,
  * every approval silently degrades into a generic elicitation form and the
  * allow/deny/allow-always affordances disappear.
@@ -132,7 +132,7 @@ export const COGNIA_PI_EXTENSION_VERSION = 2
 export const COGNIA_PERMISSION_MARKER = "cognia-permission/v1"
 
 /**
- * Exported ONLY so `lib/ai/agent/external/pi-permission.test.ts` can pin this
+ * Exported ONLY so `lib/ai/agent/external/runtimes/pi/pi-permission.test.ts` can pin this
  * reader against the app-side decoder. `sidecar/` has no test discovery of its
  * own, and an unverified copy of a security decision is exactly what that test
  * exists to prevent.
@@ -247,7 +247,7 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
       // The title carries a versioned marker so the adapter's mapper can tell
       // a NATIVE-TOOL APPROVAL from an ordinary extension dialog and route it
       // to the tool approval UI instead of a generic form. Mirror of
-      // `encodePiPermissionTitle` in `lib/ai/agent/external/pi-permission.ts`;
+      // `encodePiPermissionTitle` in `lib/ai/agent/external/runtimes/pi/pi-permission.ts`;
       // the parity test pins the two together. The marker never reaches the
       // user — the mapper rebuilds a clean title — and `message` stays
       // human-readable so an unrecognised version degrades to a real question.
@@ -271,7 +271,7 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
 
 /**
  * Serialized input ceiling, mirroring `PI_PERMISSION_INPUT_LIMIT` in
- * `lib/ai/agent/external/pi-permission.ts` (the parity test pins the pair).
+ * `lib/ai/agent/external/runtimes/pi/pi-permission.ts` (the parity test pins the pair).
  */
 const COGNIA_PERMISSION_INPUT_LIMIT = 16_000
 
@@ -367,7 +367,9 @@ function safeText(value: string): string {
  * `tool_call` event Pi reports matches what was registered.
  */
 export function sanitizePiToolName(name: string): string {
-  return name.replace(/\./g, "_")
+  // Cognia plugin tools are namespaced `pluginId:toolName`; `:` is as legal in
+  // the catalog as the dotted names above, and both map to `_` on the wire.
+  return name.replace(/[.:]/g, "_")
 }
 
 /** Pi supports text and image tool blocks. Preserve resource text explicitly. */
@@ -484,8 +486,8 @@ export function createMcpProjection(pi: PiExtensionApi, servers: McpServerConfig
             throw new Error("MCP tool catalog blocked by the PII gate")
           for (const tool of page.tools) {
             const name = sanitizePiToolName(`mcp__${server}__${tool.name}`)
-            if (!/^[a-zA-Z0-9_.-]+$/.test(tool.name) || next.has(name))
-              throw new Error("Invalid or duplicate MCP tool name")
+            if (!/^[a-zA-Z0-9_.:-]+$/.test(tool.name) || next.has(name))
+              throw new Error(`Invalid or duplicate MCP tool name: ${server}/${tool.name}`)
             next.set(name, { server, client, tool })
           }
           cursor = page.nextCursor

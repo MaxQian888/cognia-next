@@ -51,6 +51,27 @@ export const PLAN_STEP_STATUSES = [
 
 export const PLAN_EXECUTION_MODES = ["in_session", "orchestrated", "auto"]
 
+/**
+ * Plan statuses (mirror of `PlanStatus` in `types/agent/plan.ts`). The tools
+ * never receive them — the renderer owns the plan row — but the descriptions
+ * below tell the model how to read the terminal ones, and this list is what
+ * keeps that wording honest when a status is added.
+ */
+export const PLAN_STATUSES = [
+  "draft",
+  "awaiting_approval",
+  "approved",
+  "executing",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+  "rejected",
+]
+
+/** Statuses a plan never leaves — `update_plan` has no effect on these. */
+export const TERMINAL_PLAN_STATUSES = ["completed", "failed", "cancelled", "rejected"]
+
 const stepShape = z.object({
   title: z.string().min(1).describe("One short imperative sentence naming the step."),
   description: z.string().optional().describe("Optional detail for this step."),
@@ -90,7 +111,9 @@ const updatePlanShape = {
   planId: z
     .string()
     .optional()
-    .describe("Plan to update. Omit to update this session's open plan (the usual case)."),
+    .describe(
+      "Plan to update. Omit to update this session's open plan (the usual case). A plan the user REJECTED (or that was cancelled / finished) is closed: updates to it are ignored."
+    ),
   title: z.string().optional().describe("Rename the plan."),
   description: z.string().optional().describe("Replace the plan summary."),
   steps: z
@@ -127,14 +150,14 @@ export function createPlanTools() {
   return [
     tool(
       CREATE_PLAN_TOOL_NAME,
-      "Create a structured, trackable plan for a multi-step job. The user sees it as a live checklist and can approve, edit, or run it. Use this when the work has several distinct steps worth tracking — not for a single action, and not to ask a question.",
+      "Create a structured, trackable plan for a multi-step job. The user sees it as a live checklist and can approve, edit, or reject it. A rejected plan is closed for good — if the user then asks for another attempt, create a new plan that addresses their reason rather than updating the rejected one. Use this when the work has several distinct steps worth tracking — not for a single action, and not to ask a question.",
       createPlanShape,
       execCreatePlan,
       { alwaysLoad: true }
     ),
     tool(
       UPDATE_PLAN_TOOL_NAME,
-      "Update the plan you created: rename it, replace its steps while it is still a draft, or report progress (`stepUpdates`) as you finish each step. Keep it current — the user is watching this checklist.",
+      "Update the plan you created: rename it, replace its steps while it is still a draft, or report progress (`stepUpdates`) as you finish each step. Keep it current — the user is watching this checklist. This acknowledgement only means the update was received: it has no effect on a plan the user rejected or cancelled.",
       updatePlanShape,
       execUpdatePlan,
       { alwaysLoad: true }

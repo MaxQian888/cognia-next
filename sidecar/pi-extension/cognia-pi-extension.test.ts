@@ -239,6 +239,36 @@ test("advertises dotted tool names sanitized while dispatching the real MCP name
   assert.deepEqual(calls, ["ocr.extract"])
 })
 
+test("advertises colon-namespaced plugin tool names sanitized while dispatching the real MCP name", async (t) => {
+  const calls: string[] = []
+  const f = await fixture(t, {
+    list: () => ({
+      tools: [
+        {
+          name: "ripgrep-tools:ripgrep_search",
+          description: "Plugin tool",
+          inputSchema: { type: "object", properties: { pattern: { type: "string" } } },
+        },
+      ],
+    }),
+    call: (params) => {
+      calls.push(params.name)
+      return { content: [{ type: "text", text: "done" }] }
+    },
+  })
+  await f.projection.start(f.ctx)
+  assert.equal(f.tools.has("mcp__custom__ripgrep-tools:ripgrep_search"), false)
+  assert.ok(f.tools.has("mcp__custom__ripgrep-tools_ripgrep_search"))
+  assert.ok(f.projection.owns("mcp__custom__ripgrep-tools_ripgrep_search"))
+  assert.deepEqual(
+    await f.tools
+      .get("mcp__custom__ripgrep-tools_ripgrep_search")
+      .execute("call", { pattern: "x" }, new AbortController().signal),
+    { content: [{ type: "text", text: "done" }], details: {} }
+  )
+  assert.deepEqual(calls, ["ripgrep-tools:ripgrep_search"])
+})
+
 test("rejects tool names that collide once sanitized for the provider", async (t) => {
   const f = await fixture(t, {
     list: () => ({

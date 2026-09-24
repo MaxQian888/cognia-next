@@ -64,7 +64,7 @@ const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
  * Built-in file-edit-class tools auto-approved in `acceptEdits` mode — the
  * write/edit family a user who "accepted edits" implicitly trusts. Mirrors the
  * Anthropic SDK's native `acceptEdits` and the ACP client's edit auto-approval
- * (`lib/ai/agent/external/acp-client.ts`) so the AI-SDK path stops prompting for
+ * (`lib/ai/agent/external/runtimes/acp/acp-client.ts`) so the AI-SDK path stops prompting for
  * every edit. DELIBERATELY excludes exec/process/git-mutation tools (bash,
  * shell, start_process, git_commit, …) — those
  * still route through the normal approval policy. Read-only tools are already

@@ -8,7 +8,8 @@
 // explicit allowlist and the spec-approved `sendOptions.env` overlay.
 //
 // COMPAT GATE (load-bearing): legacy sessions — no `execution` — keep the
-// historical `{ ...process.env, ...env }` spread, because the desktop host
+// historical `{ ...process.env, ...env }` spread unless an explicit session
+// credential is supplied, because the desktop host
 // injects ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN into the SIDECAR
 // process env and the spread is how they reach Claude Code today. Flipping
 // legacy sessions would break every current desktop install. Phase 6 moves
@@ -83,6 +84,15 @@ export const ENV_STRIP_PATTERNS = [
 
 const PROXY_ENV_RE = /^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i
 const MANAGED_PROXY_MARKER = "COGNIA_MANAGED_NETWORK_PROXY"
+const CLAUDE_CREDENTIAL_NAMES = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+]
+// Cloud selectors and API keys outrank OAuth in Claude Code. Profiles/WIF,
+// credential FDs, custom headers and base URLs must not cross account boundaries
+// either. Keep unrelated Claude telemetry/temp settings and host proxy policy.
+const CLAUDE_AUTH_ENV_RE = /^(ANTHROPIC_|CLAUDE_CODE_(OAUTH_|API_KEY_|USE_))/i
 
 export function isStrippedName(name) {
   return ENV_STRIP_PATTERNS.some((pattern) => pattern.test(name))
@@ -160,7 +170,8 @@ export function childTelemetryEnv(sendOptions, parentEnv = process.env) {
  * `sendOptions.env` overlay. Provider credentials remain spec-authoritative,
  * while network proxy vars come only from a Rust-host-marked process policy;
  * the renderer cannot introduce a per-session proxy override. Without one:
- * the legacy spread.
+ * the legacy spread, excluding inherited Claude auth/routing when a session
+ * explicitly selects a credential.
  *
  * The telemetry block sits BETWEEN the allowlist and the overlay: it is a host
  * decision, so it beats whatever leaked through the allowlist, and the
@@ -183,7 +194,17 @@ export function buildSubprocessEnv(sendOptions, parentEnv = process.env) {
     // spread already passes the parent's OTEL_* through anyway. On macOS,
     // redirect Claude's hard-coded /tmp base to the app's writable per-user
     // temp directory; an explicit session overlay remains authoritative.
-    return { ...parentEnv, ...claudeTempEnv, ...rawOverlay }
+    const hasExplicitCredential = CLAUDE_CREDENTIAL_NAMES.some(
+      (name) => typeof rawOverlay[name] === "string" && rawOverlay[name] !== ""
+    )
+    const base = hasExplicitCredential
+      ? Object.fromEntries(
+          Object.entries(parentEnv).filter(([name]) => !CLAUDE_AUTH_ENV_RE.test(name))
+        )
+      : parentEnv
+    // Preserve CLAUDE_CONFIG_DIR unless the overlay replaces it. Removing it
+    // would make Claude fall back to the user's real default credential store.
+    return { ...base, ...claudeTempEnv, ...rawOverlay }
   }
   // The renderer is not allowed to select a one-off proxy or shuttle proxy
   // credentials back into the sidecar. Only the Rust host can mark the
