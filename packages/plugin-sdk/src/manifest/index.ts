@@ -188,6 +188,18 @@ export {
   validatePluginManifest,
 } from "@/lib/plugin/core/validation"
 
+/**
+ * Host-version compatibility — the same check the manager applies before it
+ * enables a plugin (`engines.cognia`, `minAppVersion`, `maxAppVersion`). Pure:
+ * pass the host version you want to test against.
+ */
+export { evaluatePluginCompatibility } from "@/lib/plugin/core/compatibility"
+export type {
+  CompatibilityDiagnostic,
+  CompatibilityEvaluation,
+  CompatibilityRuntime,
+} from "@/lib/plugin/core/compatibility"
+
 export type {
   ConfigValidationResult,
   ManifestDiagnostic,

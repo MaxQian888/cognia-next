@@ -85,6 +85,17 @@ export interface PluginSurfaceProps {
   /** Restore the host's inline content if the plugin crashes. */
   fallback?: ReactNode
   /**
+   * Block / panel surfaces only: what to show INSTEAD of the plugin's UI after
+   * it crashes, with a small "card failed · Retry" strip under it.
+   *
+   * Without this a crashed block surface replaces the content with the error
+   * card, which is right for a panel the plugin owns outright. It is wrong for
+   * a contribution that DECORATES host content, like a tool-result card: the
+   * tool's result is the user's data and must not vanish because the plugin's
+   * renderer threw.
+   */
+  blockFallback?: ReactNode
+  /**
    * Notified when the compact boundary removes a crashed child — the signal a
    * slot needs to count the contribution as absent (and fall back) rather than
    * keep a dead declared-width box.
@@ -101,6 +112,7 @@ interface BoundaryProps {
   formFactor: PluginSurfaceFormFactor
   inline?: boolean
   fallback?: ReactNode
+  blockFallback?: ReactNode
   diagnosticMessage: (errorMessage: string) => string
   compactDiagnosticHint: string
   retryDiagnosticHint: string
@@ -139,6 +151,34 @@ function PluginSurfaceError({
       </p>
       <Button type="button" size="sm" variant="outline" onClick={retry}>
         <RotateCcwIcon className="size-4" />
+        {t("retry")}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * The strip under a `blockFallback`: says the plugin's card failed and offers
+ * to try it again. Deliberately small — the host content above it is what the
+ * user came for.
+ */
+function PluginSurfaceCrashStrip({ pluginName, retry }: { pluginName: string; retry: () => void }) {
+  const t = useTranslations("plugins.surface")
+  return (
+    <div
+      role="status"
+      data-plugin-surface-fallback
+      className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground"
+    >
+      <span className="min-w-0 flex-1 break-words">{t("fallbackStrip", { pluginName })}</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 px-2 text-xs pointer-coarse:h-9"
+        onClick={retry}
+      >
+        <RotateCcwIcon className="size-3.5" aria-hidden="true" />
         {t("retry")}
       </Button>
     </div>
@@ -206,6 +246,14 @@ export class PluginSurfaceBoundary extends Component<BoundaryProps, BoundaryStat
     if (this.props.inline || this.props.formFactor === "icon" || this.props.formFactor === "row") {
       return this.props.fallback ?? null
     }
+    if (this.props.blockFallback !== undefined) {
+      return (
+        <>
+          {this.props.blockFallback}
+          <PluginSurfaceCrashStrip pluginName={this.props.pluginName} retry={this.retry} />
+        </>
+      )
+    }
     return (
       <PluginSurfaceError pluginName={this.props.pluginName} error={error} retry={this.retry} />
     )
@@ -223,6 +271,7 @@ export function PluginSurface({
   container = true,
   inline = false,
   fallback,
+  blockFallback,
   onSilentFailure,
   className,
   children,
@@ -246,6 +295,7 @@ export function PluginSurface({
         formFactor={formFactor}
         inline={inline}
         fallback={fallback}
+        blockFallback={blockFallback}
         diagnosticMessage={(errorMessage) =>
           diagnosticT("message", { surfaceId, error: errorMessage })
         }

@@ -127,13 +127,85 @@ export function toTaskTrigger(input: z.infer<typeof triggerSchema>): TaskTrigger
 export const payloadSchema = z
   .record(z.string(), z.unknown())
   .describe(
-    "Type-specific configuration. chat/agent/skill: { prompt, characterId?, skillId?, sessionTitle?, model?, maxTurns? }. goal: { objective, characterId? }. plan: { planId }. agent-team: { teamId }. workflow: { workflowId }. external-agent: { prompt, agentId }. im-push: { adapterId, conversationKey, text }. background-command: { command, cwd, maxRuntimeMs? } (maxRuntimeMs kills the spawned process once it has run that long; omit for no limit). backup: { backupType?, destination? }."
+    "Type-specific configuration. chat: { prompt, characterId?, sessionTitle?, model?, maxTurns? }. agent: { prompt, characterId (required) }. skill: { prompt, skillId (required), characterId? }. goal: { objective, characterId? }. plan: { planId }. agent-team: { teamId }. workflow: { workflowId }. external-agent: { prompt, agentId }. im-push: { adapterId, conversationKey, text }. background-command: { command, cwd, maxRuntimeMs? } (maxRuntimeMs kills the spawned process once it has run that long; omit for no limit). backup: { backupType?, destination? }."
   )
+
+/**
+ * Reject a payload the executor would reject, before anyone is asked to
+ * confirm it.
+ *
+ * The four conversational types go through the scheduler's own normalizer,
+ * which `TaskScheduler.createTask` runs anyway, so this only moves the failure
+ * earlier. The rest mirror the check at the top of each executor (named per
+ * line) rather than inventing stricter rules the scheduler itself would not
+ * enforce.
+ */
+export async function assertAgentTaskPayload(
+  taskType: AgentSchedulableTaskType,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const text = (key: string): boolean =>
+    typeof payload[key] === "string" && (payload[key] as string).trim().length > 0
+  const requireKey = (key: string, executor: string): void => {
+    if (!text(key)) {
+      throw new Error(`A ${taskType} task needs "${key}" in its payload (${executor}).`)
+    }
+  }
+  switch (taskType) {
+    case "chat":
+    case "agent":
+    case "skill":
+    case "external-agent": {
+      const { normalizeConversationalTaskPayload } =
+        await import("@/lib/scheduler/conversational-task-authoring")
+      normalizeConversationalTaskPayload(taskType, payload as never)
+      // The normalizer accepts an agent task without a character; the
+      // executor does not (`executeAgentTask` in executors/index.ts).
+      if (taskType === "agent") requireKey("characterId", "executors/index.ts")
+      return
+    }
+    case "goal":
+      return requireKey("objective", "goal-executor.ts")
+    case "plan":
+      return requireKey("planId", "plan-executor.ts")
+    case "agent-team":
+      return requireKey("teamId", "team-executor.ts")
+    case "workflow":
+      return requireKey("workflowId", "workflow-executor.ts")
+    case "im-push": {
+      requireKey("conversationKey", "im-push-executor.ts")
+      const segments = payload.segments
+      if (!text("text") && !(Array.isArray(segments) && segments.length > 0)) {
+        throw new Error('An im-push task needs a non-empty "text" or "segments" in its payload.')
+      }
+      return
+    }
+    case "background-command":
+      requireKey("command", "background-job-executor.ts")
+      return requireKey("cwd", "background-job-executor.ts")
+    case "backup":
+      return
+  }
+}
+
+/**
+ * Reject a trigger the scheduler would reject: an unparseable cron, an unknown
+ * timezone, a one-off time already in the past. Same normalizer
+ * `TaskScheduler.createTask` / `updateTask` run.
+ */
+export async function assertAgentTaskTrigger(
+  trigger: z.infer<typeof triggerSchema>,
+  now: Date = new Date()
+): Promise<void> {
+  const { normalizeTaskTrigger } = await import("@/lib/scheduler/trigger-normalizer")
+  normalizeTaskTrigger(toTaskTrigger(trigger), { now })
+}
 
 /** A task as the agent sees it. Trimmed: no serialized blobs, no internals. */
 export interface AgentVisibleTask {
   id: string
   name: string
+  description?: string
   type: string
   status: string
   trigger: TaskTrigger
@@ -146,12 +218,15 @@ export interface AgentVisibleTask {
   lastTerminalReason?: string
   createdBy?: string
   tags?: string[]
+  /** Owning workspace, so the assistant can tell the user where it lives. */
+  projectId?: string
 }
 
 export function toAgentVisibleTask(task: ScheduledTask): AgentVisibleTask {
   return {
     id: task.id,
     name: task.name,
+    ...(task.description ? { description: task.description } : {}),
     type: task.type,
     status: task.status,
     trigger: task.trigger,
@@ -164,6 +239,7 @@ export function toAgentVisibleTask(task: ScheduledTask): AgentVisibleTask {
     ...(task.lastTerminalReason ? { lastTerminalReason: task.lastTerminalReason } : {}),
     ...(task.createdBy ? { createdBy: task.createdBy.kind } : {}),
     ...(task.tags?.length ? { tags: task.tags } : {}),
+    ...(task.projectId ? { projectId: task.projectId } : {}),
   }
 }
 
@@ -174,29 +250,56 @@ export function toAgentVisibleTask(task: ScheduledTask): AgentVisibleTask {
  * turns a thrown error into a `{ status: "error", message }` the assistant can
  * read and relay. A refusal is information the user needs, not a silent no-op.
  *
- * `requiresConfirmation` is NOT a refusal here, unlike in the plugin API: the
- * dispatcher has already shown this skill's `hitlSurface` and had the user
- * press Confirm by the time `execute` runs, for any skill whose `mutation` is
- * not `read`. Treating it as a second refusal would make a confirmed write
- * fail after the user had already said yes.
+ * `humanConfirmed` comes from the dispatcher (`ctx.humanConfirmed`): true when
+ * the user pressed Confirm on THIS write. It satisfies both "may agents act
+ * unattended" (`agentAutoCreate`) and "which kinds always need me"
+ * (`confirmationRequired`). Without it, a verdict that still needs a person is
+ * a refusal: an IM channel that turned write confirmations off must not slip a
+ * `goal` or `agent-team` task through that the user said always needs them.
+ *
+ * `operation` scopes the quota to creation, so an agent at its limit can still
+ * pause, amend, run or delete what it already owns.
  */
 export async function resolveTaskWrite(input: {
   taskType: ScheduledTaskType
   sessionId?: string
+  humanConfirmed?: boolean
+  operation: "create" | "mutate"
 }): Promise<{ source: TaskWriteSource }> {
   const { authorizeTaskWrite, verdictNeedsConfirmation } =
     await import("@/lib/scheduler/write-authority")
   const verdict = await authorizeTaskWrite({
     taskType: input.taskType,
     source: "agent",
+    operation: input.operation,
+    humanConfirmed: input.humanConfirmed === true,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
   })
   if (!verdict.allowed) throw new Error(verdict.message)
   if (verdictNeedsConfirmation(verdict)) {
-    // Reached only when the dispatcher already collected a confirmation. Left
-    // as an explicit no-op branch so the reasoning is visible at the site.
+    throw new Error(
+      `${verdict.message} This conversation did not ask you to confirm it, so it was not added. Confirm writes for this channel, or add it from the scheduler panel.`
+    )
   }
   return { source: "agent" }
+}
+
+/**
+ * The read verbs' half of the "may agents manage the schedule" switch.
+ *
+ * `build-options.ts` withholds the whole family while the switch is off, and
+ * `authorizeTaskWrite` refuses every agent write; this covers the reads for a
+ * turn that was handed the tools before the user turned it off. Writes are
+ * gated in `resolveTaskWrite`, so only `list` and `inspect` call this.
+ */
+export async function assertAgentMayRead(): Promise<void> {
+  const { loadSchedulerPolicy } = await import("@/lib/scheduler/write-authority")
+  const policy = await loadSchedulerPolicy()
+  if (policy.agentToolsEnabled === false) {
+    throw new Error(
+      'Agents are not allowed to manage your schedule. Turn on "Allow agents to manage scheduled tasks" in the scheduler settings.'
+    )
+  }
 }
 
 /** Load one task, or throw a message naming the id the agent passed. */
@@ -207,16 +310,65 @@ export async function requireTask(taskId: string): Promise<ScheduledTask> {
   return task
 }
 
+/** A one-off time as confirm cards show it: local wall clock, zone named. */
+const ONCE_TIME_FORMAT: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short",
+}
+
 /** Short human summary of a trigger, for confirm cards. */
 export function describeTrigger(trigger: z.infer<typeof triggerSchema>): string {
   switch (trigger.type) {
     case "cron":
       return `cron ${trigger.cronExpression}${trigger.timezone ? ` (${trigger.timezone})` : ""}`
     case "interval":
-      return `every ${Math.round(trigger.intervalMs / 1000)}s`
-    case "once":
-      return `once at ${trigger.runAt}`
+      return `every ${formatDuration(trigger.intervalMs)}`
+    case "once": {
+      // The wall clock of the device that will run it, zone named, so the
+      // person confirming reads the time they asked for rather than GMT.
+      const at = new Date(trigger.runAt)
+      return `once at ${Number.isNaN(at.getTime()) ? trigger.runAt : at.toLocaleString("en-US", ONCE_TIME_FORMAT)}`
+    }
     case "event":
       return `on event ${trigger.eventType}`
   }
+}
+
+/** "90 min" → "1 h 30 min"; "45000 ms" → "45 s". For confirm cards only. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(1, Math.round(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours} h`)
+  if (minutes > 0) parts.push(`${minutes} min`)
+  if (seconds > 0 && hours === 0) parts.push(`${seconds} s`)
+  return parts.join(" ")
+}
+
+/**
+ * Preflight for the verbs that act on an existing task: the id names a task,
+ * and the policy would let this write through once the user confirms it. Run
+ * by the dispatcher before the confirmation, so "no such task", "agents may
+ * not manage your schedule" and "cannot run on this host" arrive as answers,
+ * not as a dialog the user approves only to see the write fail.
+ */
+export async function preflightExistingTaskWrite(
+  taskId: string,
+  ctx: { sessionId?: string; humanConfirmed?: boolean }
+): Promise<ScheduledTask> {
+  const task = await requireTask(taskId)
+  await resolveTaskWrite({
+    taskType: task.type,
+    sessionId: ctx.sessionId,
+    humanConfirmed: ctx.humanConfirmed,
+    operation: "mutate",
+  })
+  return task
 }

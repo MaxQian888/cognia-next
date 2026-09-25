@@ -87,6 +87,15 @@ export interface BuiltInSkillContext {
    * The bus path sets this; assistant-driven first invocations never set it.
    */
   hitlBypass?: boolean
+  /**
+   * A person approved THIS invocation: the IM confirm card's callback
+   * (`hitlBypass`) or a click on the desktop approval dialog. Owned by the
+   * dispatcher, which overwrites whatever a caller passed, so an agent cannot
+   * claim it. A remembered "allow for session" grant is NOT a confirmation of
+   * this call and leaves it false. Skills that consult a standing policy about
+   * unattended writes (the scheduler's `agentAutoCreate`) read it.
+   */
+  humanConfirmed?: boolean
   /** Wall-clock for audit rows; defaults to `Date.now()`. */
   now?: number
 }
@@ -171,6 +180,17 @@ export interface BuiltInSkill<Args extends ZodTypeAny = ZodTypeAny> {
    * OpenAPI directly, may read from Dexie via `lib/db/*` helpers.
    */
   execute: (args: z.infer<Args>, ctx: BuiltInSkillContext) => Promise<unknown>
+  /**
+   * Checks that need I/O, run after the schema and PII gates and BEFORE the
+   * HITL confirmation. Throw to refuse: the message is returned to the
+   * assistant as `{ status: "error" }` and no confirmation is shown. This is
+   * where a skill rejects a write that would fail anyway (an invalid trigger,
+   * a policy that refuses it, an id that names nothing), so the user is never
+   * asked to approve something that cannot succeed. In preflight,
+   * `ctx.humanConfirmed` means "a person will have confirmed this before it
+   * executes" (a confirmation is about to be requested, or already was).
+   */
+  preflight?: (args: z.infer<Args>, ctx: BuiltInSkillContext) => Promise<void>
   /**
    * Build the A2UI confirm surface for HITL. Required when
    * `mutation !== "read"`; the dispatcher refuses to register a write

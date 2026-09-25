@@ -16,9 +16,12 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
 import {
+  assertAgentTaskPayload,
+  assertAgentTaskTrigger,
   describeTrigger,
   payloadSchema,
   resolveTaskWrite,
@@ -53,10 +56,29 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "write",
   imAccess: "always",
-  mcpToolName: "scheduler_create_task",
+  mcpToolName: SCHEDULE_TOOL.create,
   inputSchema: schema,
+  // Everything that would make the write fail is asked before the user is:
+  // an unparseable trigger, a payload the executor would reject, a policy
+  // that refuses it. Confirming a task only to be told it was refused was the
+  // one outcome worse than not being asked.
+  preflight: async (args, ctx) => {
+    await assertAgentTaskTrigger(args.trigger)
+    await assertAgentTaskPayload(args.type, args.payload)
+    await resolveTaskWrite({
+      taskType: args.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "create",
+    })
+  },
   execute: async (args, ctx) => {
-    await resolveTaskWrite({ taskType: args.type, sessionId: ctx.sessionId })
+    await resolveTaskWrite({
+      taskType: args.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "create",
+    })
     const trigger = toTaskTrigger(args.trigger)
 
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")

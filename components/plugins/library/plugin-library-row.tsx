@@ -24,14 +24,21 @@
 //      window, so at the default split that gate never opened and the row
 //      degraded to name / version / status on an ordinary desktop. Line two
 //      has the whole row width, so 384px is enough for three chips.
+//
+//   3. **Below `@sm/plugin-list` the NAME gets line one.** On a 375px phone
+//      the version chip, dev/update badges, signature icon and the
+//      error icon (which only repeats the status pill) shared line one with
+//      the name and truncated it to three or four characters. At that width
+//      the version and badges move to line two, and the redundant icons drop
+//      out (the detail header still shows the signature).
 
 import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { CircleAlertIcon, ShieldCheckIcon, TriangleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
+import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 import { getAllContributions } from "@/lib/plugin/contracts/capability-contributions"
 import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
@@ -42,6 +49,7 @@ import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import { PluginAvatar } from "../plugin-avatar"
+import { PluginContributionChip } from "../_shared/plugin-contribution-chip"
 
 interface Props {
   plugin: PluginRow
@@ -79,6 +87,8 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
   onRollback,
 }: Props) {
   const t = useTranslations("plugins.card")
+  // The manifest's own localized name (nameKey), for enabled and disabled rows alike.
+  const { name: displayName } = useLocalizedPluginText(plugin)
   const errored = plugin.status === "error"
   const isLoading =
     plugin.status === "loading" || plugin.status === "enabling" || plugin.status === "updating"
@@ -101,6 +111,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
 
   return (
     <div
+      role="listitem"
       className={cn(
         // `min-w-0` + `overflow-hidden`: the row is a flex child of a column
         // that must never grow past the pane. Without both, a plugin with long
@@ -123,12 +134,17 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
       data-active={active}
       data-errored={errored || undefined}
     >
-      <Checkbox
-        checked={selected}
-        onCheckedChange={() => onToggleSelect(plugin.id)}
-        aria-label={t("selectAria", { name: plugin.name })}
-        className="relative z-10 shrink-0"
-      />
+      {/* The label is the hit area: a 16px box on a phone is a miss, so the
+          label pads it to 36px on a coarse pointer and the negative margin
+          keeps the row's painted layout unchanged. */}
+      <label className="relative z-10 -m-1.5 flex shrink-0 cursor-pointer items-center p-1.5 pointer-coarse:-m-2.5 pointer-coarse:p-2.5">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect(plugin.id)}
+          aria-label={t("selectAria", { name: displayName })}
+          className="shrink-0"
+        />
+      </label>
       <PluginAvatar
         name={plugin.name}
         icon={(plugin.manifest as { icon?: string })?.icon}
@@ -148,17 +164,28 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             className="min-w-0 truncate text-left font-medium after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
             data-testid={`plugin-library-row-${plugin.id}`}
           >
-            {plugin.name}
+            {displayName}
           </button>
-          <PluginVersionBadge version={plugin.version} className="shrink-0" />
+          <PluginVersionBadge
+            version={plugin.version}
+            className="hidden shrink-0 @sm/plugin-list:inline-flex"
+          />
           {/*
             Only development origins are badged here. Every row saying
             "Marketplace" is noise, but a dev or local build sitting in the
             list unmarked is how an author ends up debugging the wrong copy.
           */}
-          {developmentSource && <PluginSourceBadge source={plugin.source} className="shrink-0" />}
+          {developmentSource && (
+            <PluginSourceBadge
+              source={plugin.source}
+              className="hidden shrink-0 @sm/plugin-list:inline-flex"
+            />
+          )}
           {updateAvailable && (
-            <Badge variant="secondary" className="shrink-0 text-xs">
+            <Badge
+              variant="secondary"
+              className="hidden shrink-0 text-xs @sm/plugin-list:inline-flex"
+            >
               {t("updateBadge")}
             </Badge>
           )}
@@ -175,11 +202,17 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             <PluginCompatibilityBadge
               manifest={plugin.manifest}
               labelClassName="hidden @xl/plugin-list:inline"
+              className="relative z-10"
             />
-            <PluginSignatureBadge state={signatureState} compact />
+            <PluginSignatureBadge
+              state={signatureState}
+              compact
+              className="relative z-10 hidden @sm/plugin-list:inline-flex"
+            />
             {errored && (
               <TriangleAlertIcon
-                className="size-3.5 shrink-0 text-destructive"
+                className="hidden size-3.5 shrink-0 text-destructive @sm/plugin-list:block"
+                role="img"
                 aria-label={t("erroredAria")}
               />
             )}
@@ -187,6 +220,19 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           </div>
         </div>
         <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
+          {/* Narrow rows: line one belongs to the name, so these live here. */}
+          <PluginVersionBadge
+            version={plugin.version}
+            className="shrink-0 @sm/plugin-list:hidden"
+          />
+          {developmentSource && (
+            <PluginSourceBadge source={plugin.source} className="shrink-0 @sm/plugin-list:hidden" />
+          )}
+          {updateAvailable && (
+            <Badge variant="secondary" className="shrink-0 text-xs @sm/plugin-list:hidden">
+              {t("updateBadge")}
+            </Badge>
+          )}
           {author && <span className="max-w-[40%] shrink-0 truncate">{author}</span>}
           {author && contributions.length > 0 && (
             <span aria-hidden className="shrink-0">
@@ -209,7 +255,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             data-testid="plugin-library-row-capabilities"
           >
             {contributions.slice(0, 3).map((contribution) => (
-              <CapabilityHoverChip
+              <PluginContributionChip
                 key={contribution.capability}
                 capability={String(contribution.capability)}
                 count={contribution.count}
@@ -247,7 +293,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           anything. */}
       <PluginActivationProgress
         pluginId={plugin.id}
-        pluginName={plugin.name}
+        pluginName={displayName}
         variant="row"
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 mt-0"
       />
@@ -264,54 +310,3 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
     </div>
   )
 })
-
-interface CapabilityHoverChipProps {
-  capability: string
-  count: number
-  entries: ReadonlyArray<{ id: string; label?: string }>
-}
-
-// Capability badge that, when hovered or focused, surfaces the concrete
-// contributions for that capability (e.g. capability="tools" gives the ids of
-// every declared tool). Falls back to a plain badge when the manifest exposes
-// no contribution surface for the tag (entries.length === 0).
-function CapabilityHoverChip({ capability, count, entries }: CapabilityHoverChipProps) {
-  const t = useTranslations("plugins.card")
-  const label = count > 0 ? `${capability} · ${count}` : capability
-  if (entries.length === 0) {
-    return (
-      <Badge variant="outline" className="shrink-0 text-xs">
-        {label}
-      </Badge>
-    )
-  }
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <Badge
-          variant="outline"
-          className="shrink-0 cursor-help text-xs"
-          tabIndex={0}
-          aria-label={t("capabilityChipAria", { capability, count })}
-        >
-          {label}
-        </Badge>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-72 p-3" align="start">
-        <div className="space-y-2">
-          <div className="text-xs font-semibold">{label}</div>
-          <ul className="space-y-0.5 text-xs">
-            {entries.map((entry) => (
-              <li key={entry.id} className="flex items-baseline gap-1.5">
-                <code className="font-mono text-[10px] text-muted-foreground">{entry.id}</code>
-                {entry.label && entry.label !== entry.id && (
-                  <span className="text-muted-foreground">{entry.label}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  )
-}

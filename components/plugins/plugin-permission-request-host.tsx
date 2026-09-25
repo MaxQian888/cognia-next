@@ -20,6 +20,11 @@
  * Mounted at the app root next to the other plugin hosts: a plugin can ask
  * from any page, so a host that only exists on `/plugins` would reintroduce
  * the hang everywhere else.
+ *
+ * The prompt names the plugin by its manifest name and says what the
+ * permission lets it do, in the user's language. It used to print the plugin
+ * id and the bare permission key, which asks a user to grant something they
+ * cannot read.
  */
 
 import { useEffect, useState } from "react"
@@ -37,6 +42,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
+import { usePluginDisplayName } from "@/hooks/plugins/use-plugin-display-name"
 import {
   resolvePluginPermission,
   subscribePermissionRequests,
@@ -48,11 +55,14 @@ const EMPTY: PermissionRequestState = { current: null, queue: [] }
 export function PluginPermissionRequestHost() {
   const t = useTranslations("plugins.permissionRequest")
   const [state, setState] = useState<PermissionRequestState>(EMPTY)
+  const describePermission = usePermissionDescription()
 
   useEffect(() => subscribePermissionRequests(setState), [])
 
   const request = state.current
+  const pluginName = usePluginDisplayName(request?.pluginId)
   if (!request) return null
+  const description = describePermission(request.permission)
 
   return (
     <AlertDialog
@@ -68,7 +78,7 @@ export function PluginPermissionRequestHost() {
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <KeyRoundIcon className="size-4 shrink-0" />
-            {t("title", { plugin: request.pluginId })}
+            <span className="min-w-0 break-words">{t("title", { plugin: pluginName })}</span>
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2 text-sm">
@@ -78,6 +88,14 @@ export function PluginPermissionRequestHost() {
                   {request.permission}
                 </Badge>
               </div>
+              {description !== request.permission ? (
+                <p className="text-xs break-words" data-testid="plugin-permission-description">
+                  {description}
+                </p>
+              ) : null}
+              {pluginName !== request.pluginId ? (
+                <p className="text-[11px] break-all text-muted-foreground">{request.pluginId}</p>
+              ) : null}
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground">{t("reasonLabel")}</span>
                 <p className="text-xs">{request.reason || t("noReason")}</p>

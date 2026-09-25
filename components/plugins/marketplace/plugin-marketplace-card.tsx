@@ -30,7 +30,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginSourceBadge } from "../plugin-source-badge"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
@@ -39,6 +38,7 @@ import { cn } from "@/lib/utils"
 import { CapabilityChips } from "../_shared/capability-chips"
 import { InstallButton } from "../_shared/install-button"
 import { InstalledMarker } from "../_shared/installed-marker"
+import { PluginHint } from "../_shared/plugin-hint"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 
 interface Props {
@@ -82,7 +82,12 @@ interface Props {
   onUninstall: (id: string) => void
 }
 
-/** Badge + tooltip. Local because these three claims each need their caveat. */
+/**
+ * Badge + its caveat. Local because these three claims each need their
+ * caveat. The caveat is a `PluginHint` (hover, focus AND tap) rather than a
+ * hover-only Tooltip: a claim like "publisher verified" without its caveat is
+ * exactly what a phone user was left with.
+ */
 function ExplainedBadge({
   icon: Icon,
   label,
@@ -97,19 +102,12 @@ function ExplainedBadge({
   testId: string
 }) {
   return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant={variant} className="text-xs gap-1" data-testid={testId}>
-            <Icon className="size-3" />
-            {label}
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="text-xs max-w-64">{tooltip}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <PluginHint label={label} content={<p>{tooltip}</p>}>
+      <Badge variant={variant} className="text-xs gap-1" data-testid={testId}>
+        <Icon className="size-3" aria-hidden="true" />
+        {label}
+      </Badge>
+    </PluginHint>
   )
 }
 
@@ -249,7 +247,7 @@ export function PluginMarketplaceCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className={cn("size-7", inComparison && "text-primary")}
+                className={cn("size-7 pointer-coarse:size-9", inComparison && "text-primary")}
                 onClick={() =>
                   inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
                 }

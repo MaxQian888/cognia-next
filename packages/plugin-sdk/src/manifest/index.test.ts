@@ -245,3 +245,18 @@ describe("plugin-sdk: manifest", () => {
     }
   })
 })
+
+describe("evaluatePluginCompatibility (re-exported)", () => {
+  it("answers whether a manifest runs on a given host version", async () => {
+    const { evaluatePluginCompatibility } = await import("./index")
+    const manifest = {
+      id: "acme",
+      name: "Acme",
+      version: "1.0.0",
+      type: "frontend",
+      engines: { cognia: ">=9.0.0" },
+    } as never
+    expect(evaluatePluginCompatibility(manifest, { cogniaVersion: "1.0.0" }).compatible).toBe(false)
+    expect(evaluatePluginCompatibility(manifest, { cogniaVersion: "9.1.0" }).compatible).toBe(true)
+  })
+})

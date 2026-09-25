@@ -20,9 +20,19 @@
  * the ledger existed.
  *
  * Mounted once near the app root (alongside `<PluginModalRoot />`).
+ *
+ * The card names the plugin by its manifest NAME (the id is secondary) and
+ * says what the permission means in the user's language; it used to print the
+ * bare id and the bare permission key. It is an `alertdialog`: focus moves to
+ * it when a prompt arrives, and a polite live region announces who is asking
+ * for what, since the prompt appears unbidden over whatever the user is doing.
+ *
+ * Placement: a full-width sheet above the phone's tab bar and home indicator,
+ * a bottom-right card from `sm` up. The old `fixed right-6 max-w-sm` card sat
+ * partly off-screen on a 375px phone.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldAlertIcon, XIcon } from "lucide-react"
 
@@ -31,6 +41,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
+import { usePluginDisplayName } from "@/hooks/plugins/use-plugin-display-name"
 import { cn } from "@/lib/utils"
 import {
   PLUGIN_CONSENT_REQUEST_EVENT,
@@ -54,6 +66,19 @@ export function PluginConsentOverlay() {
   // set-state-in-effect).
   const [rememberFor, setRememberFor] = useState<{ requestId: string; value: boolean } | null>(null)
   const broker = useMemo(() => getPluginConsentBroker(), [])
+  const describePermission = usePermissionDescription()
+  const cardRef = useRef<HTMLDivElement>(null)
+  const current = queue[0] as PendingPrompt | undefined
+  const pluginName = usePluginDisplayName(current?.pluginId)
+  const currentRequestId = current?.requestId
+
+  // A prompt appears over whatever the user was doing; move focus to it so a
+  // keyboard or screen-reader user is not left answering it blind. Keyed on
+  // the request id, so each queued prompt takes focus when it becomes current.
+  useEffect(() => {
+    if (!currentRequestId) return
+    cardRef.current?.focus()
+  }, [currentRequestId])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -90,54 +115,81 @@ export function PluginConsentOverlay() {
     [broker]
   )
 
-  if (queue.length === 0) return null
+  if (!current) return null
 
-  const current = queue[0]
   const remaining = queue.length - 1
   const secondsLeft = Math.max(0, Math.ceil((current.expiresAt - now) / 1000))
   const reasonText = current.reason?.trim() || t("fields.defaultReason")
   // Off unless the user ticked the box on *this* prompt.
   const remember = rememberFor?.requestId === current.requestId && rememberFor.value
+  const permissionDescription = describePermission(current.permission)
+  const titleId = `plugin-consent-title-${current.requestId}`
+  const bodyId = `plugin-consent-body-${current.requestId}`
 
   return (
     <div
-      role="dialog"
-      aria-label={t("ariaLabel")}
-      className={cn("pointer-events-none fixed bottom-6 right-6 z-[100]", "max-w-sm")}
+      className={cn(
+        "pointer-events-none fixed z-[100]",
+        // Phone: a full-width sheet above the tab bar and the home indicator.
+        "inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)]",
+        // `sm` and up: the bottom-right card it always was on the desktop.
+        "sm:inset-x-auto sm:right-6 sm:bottom-6 sm:w-full sm:max-w-sm"
+      )}
     >
-      <Card className="pointer-events-auto shadow-xl border-amber-500/30">
+      {/* Announced once per prompt; the countdown ticking is NOT in here. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {t("announce", { plugin: pluginName, permission: permissionDescription })}
+      </p>
+      <Card
+        ref={cardRef}
+        role="alertdialog"
+        aria-modal="false"
+        aria-labelledby={titleId}
+        aria-describedby={bodyId}
+        tabIndex={-1}
+        className="pointer-events-auto max-h-[70dvh] overflow-y-auto border-amber-500/30 shadow-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="plugin-consent-card"
+      >
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <ShieldAlertIcon className="size-4 text-amber-500" />
-              {t("title")}
+            <CardTitle id={titleId} className="flex min-w-0 items-center gap-2 text-sm">
+              <ShieldAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
+              <span className="min-w-0">{t("titleNamed", { plugin: pluginName })}</span>
             </CardTitle>
             <Button
               size="icon"
               variant="ghost"
-              className="size-6"
+              className="size-7 shrink-0 pointer-coarse:size-9"
               onClick={() => respond(current, false, false)}
               aria-label={t("actions.close")}
             >
-              <XIcon className="size-3" />
+              <XIcon className="size-3.5" />
             </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3 pt-0">
-          <div className="space-y-1.5 text-xs">
-            <div className="flex items-center gap-2">
+          <div id={bodyId} className="space-y-1.5 text-xs">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
               <span className="text-muted-foreground">{t("fields.plugin")}</span>
-              <code className="font-mono text-[11px]">{current.pluginId}</code>
+              <span className="min-w-0 font-medium break-words">{pluginName}</span>
+              {pluginName !== current.pluginId ? (
+                <code className="min-w-0 break-all font-mono text-[10px] text-muted-foreground">
+                  {current.pluginId}
+                </code>
+              ) : null}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-muted-foreground">{t("fields.permission")}</span>
               <Badge variant="secondary" className="text-[10px]">
                 {current.permission}
               </Badge>
+              {permissionDescription !== current.permission ? (
+                <span className="basis-full break-words text-[11px]">{permissionDescription}</span>
+              ) : null}
             </div>
-            <div className="flex items-start gap-2">
-              <span className="text-muted-foreground">{t("fields.reason")}</span>
-              <span className="text-[11px]">{reasonText}</span>
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="shrink-0 text-muted-foreground">{t("fields.reason")}</span>
+              <span className="min-w-0 break-words text-[11px]">{reasonText}</span>
             </div>
             {current.binary && (
               <div className="flex items-start gap-2">

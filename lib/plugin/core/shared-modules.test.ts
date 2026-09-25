@@ -6,6 +6,8 @@ import {
   createPluginRequire,
   isSharedModuleSpecifier,
   primeSharedModules,
+  primeSharedModulesFor,
+  sharedModulesReferencedBy,
 } from "./shared-modules"
 
 beforeEach(() => {
@@ -26,17 +28,21 @@ describe("PLUGIN_SHARED_MODULES", () => {
   })
 
   /**
-   * The match is exact, so the bare package does not cover its subpaths. This
-   * one is listed because it READS the host's settings and agent-runtime
-   * stores: a bundled copy answers from state the host never writes, so the
-   * offered tier ladder ignores the user's hidden tiers and the subscription
-   * never fires. The SDK's other `api/*` subpaths are types and pure helpers
-   * and stay off this list deliberately.
+   * `api/effort-surface` READS the host's settings and agent-runtime stores,
+   * and most other subpaths are registries (`api/skill` exports
+   * `registerSkill`, `api/i18n` exports `registerPluginI18n`): a copy inlined
+   * into a bundle answers from, and writes into, state the host never sees.
+   * So every published subpath binds to the host instance — and only the
+   * published ones: an unpublished deep path is still refused.
    */
-  it("shares the one SDK subpath that reads host stores", () => {
+  it("shares every published SDK subpath and nothing else under the package", () => {
     expect(PLUGIN_SHARED_MODULES).toContain("@cognia/plugin-sdk/api/effort-surface")
     expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/effort-surface")).toBe(true)
-    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/skill")).toBe(false)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/skill")).toBe(true)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/i18n")).toBe(true)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/manifest")).toBe(true)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/src/api/skill")).toBe(false)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/not-a-subpath")).toBe(false)
   })
 
   it("does NOT share react-dom", () => {
@@ -148,5 +154,26 @@ describe("primeSharedModules", () => {
     for (const specifier of PLUGIN_SHARED_MODULES) {
       expect(() => req(specifier)).not.toThrow()
     }
+  })
+})
+
+describe("SDK subpaths referenced by a bundle", () => {
+  it("finds exactly the published subpaths an esbuild CJS bundle requires", () => {
+    const code = [
+      'var i18n = require("@cognia/plugin-sdk/api/i18n");',
+      "var sdk = require('@cognia/plugin-sdk');",
+      'var nope = require("@cognia/plugin-sdk/api/not-a-subpath");',
+      'var again = require( "@cognia/plugin-sdk/api/i18n" );',
+    ].join("\n")
+    expect(sharedModulesReferencedBy(code)).toEqual(["@cognia/plugin-sdk/api/i18n"])
+  })
+
+  it("primes a referenced subpath so require() returns the host's own module", async () => {
+    await primeSharedModulesFor('require("@cognia/plugin-sdk/api/i18n")')
+    const hostModule = await import("@cognia/plugin-sdk/api/i18n")
+    const required = createPluginRequire("/plugins/x/index.js")(
+      "@cognia/plugin-sdk/api/i18n"
+    ) as typeof hostModule
+    expect(required.registerPluginI18n).toBe(hostModule.registerPluginI18n)
   })
 })

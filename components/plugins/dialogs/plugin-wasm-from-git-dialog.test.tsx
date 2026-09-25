@@ -104,6 +104,30 @@ describe("PluginWasmFromGitDialog", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("clone failed"))
   })
 
+  // A multi-line clone/build error under a phone keyboard used to push the
+  // buttons off screen. The content is capped at the dynamic viewport and the
+  // stage body is the one scroller between a fixed header and footer.
+  it("bounds DialogContent to the viewport with one scroll body", async () => {
+    installFromGitMock.mockRejectedValue(
+      new Error("clone failed: https://github.com/owner/a-very-long-unbroken-repository-name")
+    )
+    render(<PluginWasmFromGitDialog open onOpenChange={jest.fn()} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("flex", "flex-col", "max-h-[85dvh]")
+    const body = screen.getByTestId("wasm-from-git-dialog-body")
+    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto")
+    expect(dialog.querySelector("[data-slot='dialog-header']")).toHaveClass("shrink-0")
+    expect(dialog.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
+
+    fireEvent.change(screen.getByLabelText("repoUrlLabel"), {
+      target: { value: "https://github.com/owner/repo" },
+    })
+    fireEvent.click(screen.getByText("install"))
+    const alert = await screen.findByRole("alert")
+    expect(body).toContainElement(alert)
+    expect(screen.getByText(/unbroken-repository-name/)).toHaveClass("break-words", "min-w-0")
+  })
+
   it("omits branch when left blank", async () => {
     installFromGitMock.mockResolvedValue(sampleResult)
     render(<PluginWasmFromGitDialog open onOpenChange={jest.fn()} />)

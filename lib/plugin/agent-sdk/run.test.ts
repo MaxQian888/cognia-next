@@ -97,13 +97,27 @@ describe("runPluginAgent", () => {
   })
 
   it("fails closed before execution when a context provider contributes PII", async () => {
-    registerContextProvider("contacts", {
-      id: "contacts",
-      provide: () => "Contact alice@example.com before continuing",
-    })
+    registerContextProvider(
+      "contacts",
+      { id: "contacts", provide: () => "Contact alice@example.com before continuing" },
+      { pluginId: "acme" }
+    )
 
-    await expect(runPluginAgent("hi")).rejects.toThrow("outbound PII gate")
+    await expect(runPluginAgent("hi", {}, { pluginId: "acme" })).rejects.toThrow(
+      "outbound PII gate"
+    )
     expect(mockExecute).not.toHaveBeenCalled()
+  })
+
+  it("does not append another plugin's provider context to this plugin's run", async () => {
+    registerContextProvider(
+      "contacts",
+      { id: "contacts", provide: () => "Contact alice@example.com before continuing" },
+      { pluginId: "other" }
+    )
+
+    await expect(runPluginAgent("hi", {}, { pluginId: "acme" })).resolves.toBeDefined()
+    expect(mockExecute).toHaveBeenCalled()
   })
 
   it("fails closed before execution when the prompt or system input contains PII", async () => {

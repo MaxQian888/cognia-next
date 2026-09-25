@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("@/lib/native/utils", () => ({
   ...jest.requireActual("@/lib/native/utils"),
@@ -181,6 +182,24 @@ describe("PluginMarketplaceCard", () => {
       expect(container.querySelector(".lucide-shield-check")).toBeNull()
     })
 
+    // The caveat behind a claim badge was a hover-only tooltip; a phone user
+    // saw "Publisher verified" with no way to read what it does and does not
+    // mean.
+    it("opens a claim badge's caveat on tap", async () => {
+      const user = userEvent.setup()
+      render(
+        <PluginMarketplaceCard
+          entry={{ ...baseEntry, signed: undefined, signatureState: "unknown" as const }}
+          installed={false}
+          installing={false}
+          verifiedPublisher
+          {...callbacks()}
+        />
+      )
+      await user.click(screen.getByRole("button", { name: "publisherVerified" }))
+      expect(await screen.findByText("publisherVerifiedTooltip")).toBeInTheDocument()
+    })
+
     it("renders the unsupported-API warning so it survives past install", () => {
       const cb = callbacks()
       render(
@@ -232,5 +251,19 @@ describe("PluginMarketplaceCard", () => {
     expect(region).not.toBeNull()
     expect(region).toHaveAttribute("type", "button")
     expect(region).toHaveAttribute("data-slot", "button")
+  })
+
+  it("gives the compare toggle a 36px target on a coarse pointer", () => {
+    render(
+      <PluginMarketplaceCard
+        entry={baseEntry}
+        installed={false}
+        installing={false}
+        {...callbacks()}
+      />
+    )
+    expect(screen.getByTestId("plugin-marketplace-compare-toggle-p1")).toHaveClass(
+      "pointer-coarse:size-9"
+    )
   })
 })

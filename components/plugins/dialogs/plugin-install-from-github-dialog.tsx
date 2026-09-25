@@ -136,16 +136,18 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
         onOpenChange(next)
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] flex flex-col">
-        <DialogHeader>
+      {/* `dvh`, not `vh`: on a phone `vh` is the viewport with the browser
+          chrome retracted, so a `vh` cap can still run under the toolbar. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] flex-col sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <GitBranchIcon className="size-4" />
+            <GitBranchIcon className="size-4 shrink-0" />
             {t("title")}
           </DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
+        <div className="shrink-0 space-y-2">
           <Label htmlFor="plugin-github-url">{t("label")}</Label>
           <div className="flex gap-2">
             <Input
@@ -163,9 +165,9 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
             </Button>
           </div>
           {error && (
-            <p role="alert" className="flex items-center gap-1.5 text-sm text-destructive">
-              <AlertTriangleIcon className="size-3.5 shrink-0" />
-              {error}
+            <p role="alert" className="flex items-start gap-1.5 text-sm text-destructive">
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">{error}</span>
             </p>
           )}
         </div>
@@ -175,13 +177,17 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
             <div className="space-y-3" data-testid="plugin-github-preview">
               <Card className="p-3 space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm">{preview.manifest.name}</span>
-                  <span className="text-xs text-muted-foreground font-mono">
+                  <span className="min-w-0 font-medium text-sm break-words">
+                    {preview.manifest.name}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground font-mono">
                     v{preview.manifest.version}
                   </span>
                 </div>
                 {preview.manifest.description && (
-                  <p className="text-xs text-muted-foreground">{preview.manifest.description}</p>
+                  <p className="text-xs break-words text-muted-foreground">
+                    {preview.manifest.description}
+                  </p>
                 )}
                 <PluginLicense
                   license={preview.manifest.license}
@@ -216,7 +222,7 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
           </ScrollArea>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={preInstall.busy}>
             {t("cancel")}
           </Button>

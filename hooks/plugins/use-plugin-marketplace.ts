@@ -80,23 +80,67 @@ export interface MarketplaceClient {
    * only need `version` here, so the looser shape is intentional.
    */
   getVersions?: (pluginId: string) => Promise<Array<{ version: string } & Record<string, unknown>>>
+  /**
+   * Download + install. Rejects on failure: the registry client reports a
+   * failed install as a resolved `{ success: false }`, and every caller
+   * (`runMarketplaceInstall`, `install` below) treats resolution as success,
+   * so the adapter turns that result into a rejection.
+   *
+   * There is deliberately no `uninstallPlugin` here. The registry client never
+   * had one, and uninstalling is not a registry operation: it is the plugin
+   * manager's (`uninstallPluginForHost`).
+   */
   installPlugin: (id: string, version?: string) => Promise<unknown>
-  uninstallPlugin: (id: string) => Promise<unknown>
 }
 
 let cachedClient: MarketplaceClient | null = null
 
+type RegistryClient = ReturnType<
+  (typeof import("@/lib/plugin/package/marketplace"))["getPluginMarketplace"]
+>
+type RegistryEntry = Awaited<ReturnType<RegistryClient["getFeaturedPlugins"]>>[number]
+
+/** A registry entry as the plugin marketplace surfaces render it. */
+function toEntry(entry: RegistryEntry): PluginMarketplaceEntry & RegistryEntry {
+  return { ...entry, type: "plugin" }
+}
+
+/**
+ * Adapt the registry client to `MarketplaceClient` explicitly.
+ *
+ * This used to be `import(...) as unknown as { getPluginMarketplace: () =>
+ * MarketplaceClient }`, which told the compiler the registry client had
+ * methods it does not (`uninstallPlugin`) and so let a call to one ship. Each
+ * method is now mapped by hand and type-checked against the real client.
+ */
+function adaptRegistryClient(market: RegistryClient): MarketplaceClient {
+  return {
+    searchPlugins: async ({ query }) => {
+      const result = await market.searchPlugins({ query })
+      return { plugins: result.plugins.map(toEntry) }
+    },
+    getFeaturedPlugins: async () => (await market.getFeaturedPlugins()).map(toEntry),
+    getPopularPlugins: async (limit) => (await market.getPopularPlugins(limit)).map(toEntry),
+    getRecentPlugins: async (limit) => (await market.getRecentPlugins(limit)).map(toEntry),
+    getPlugin: (id) => market.getPlugin(id),
+    getVersions: async (id) => (await market.getVersions(id)).map((version) => ({ ...version })),
+    installPlugin: async (id, version) => {
+      const result = await market.installPlugin(id, version)
+      if (!result.success) throw new Error(result.error || `Failed to install plugin: ${id}`)
+      return result
+    },
+  }
+}
+
 export async function loadPluginMarketplaceClient(): Promise<MarketplaceClient> {
   if (cachedClient) return cachedClient
-  const mod = (await import("@/lib/plugin/package/marketplace")) as unknown as {
-    getPluginMarketplace: () => MarketplaceClient
-  }
-  cachedClient = mod.getPluginMarketplace()
+  const mod = await import("@/lib/plugin/package/marketplace")
+  cachedClient = adaptRegistryClient(mod.getPluginMarketplace())
   return cachedClient
 }
 
 // Kept as the historical short name used inside this hook so the install /
-// uninstall / refresh paths keep working unchanged.
+// refresh paths keep working unchanged.
 const loadClient = loadPluginMarketplaceClient
 
 export function __resetPluginMarketplaceClientForTests(client: MarketplaceClient | null) {
@@ -184,11 +228,17 @@ export function usePluginMarketplace(options?: UsePluginMarketplaceOptions): Use
     }
   }, [])
 
+  /**
+   * Unconfirmed uninstall for callers that confirm on their own. The plugin
+   * panels route through the confirm dialog (`setDeleteTarget`) instead; both
+   * end in the same `uninstallPluginForHost`. Lazy so this hook does not drag
+   * the plugin manager into every marketplace consumer's module graph.
+   */
   const uninstall = useCallback(async (id: string) => {
     setInstallingId(id)
     try {
-      const client = await loadClient()
-      await client.uninstallPlugin(id)
+      const { uninstallPluginForHost } = await import("./use-plugin-uninstall")
+      await uninstallPluginForHost(id)
     } finally {
       setInstallingId(null)
     }

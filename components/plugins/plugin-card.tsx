@@ -8,13 +8,13 @@
 
 import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 import { getAllContributions } from "@/lib/plugin/contracts/capability-contributions"
 import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
@@ -24,6 +24,7 @@ import { PluginCompatibilityBadge } from "./_shared/plugin-compatibility-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 import { PluginAvatar } from "./plugin-avatar"
+import { PluginContributionChip } from "./_shared/plugin-contribution-chip"
 
 interface Props {
   plugin: PluginRow
@@ -51,6 +52,7 @@ export const PluginCard = memo(function PluginCard({
   onRollback,
 }: Props) {
   const t = useTranslations("plugins.card")
+  const { name: displayName } = useLocalizedPluginText(plugin)
   const status = plugin.status
   const errored = status === "error"
   const isLoading = status === "loading" || status === "enabling" || status === "updating"
@@ -92,12 +94,16 @@ export const PluginCard = memo(function PluginCard({
       data-errored={errored || undefined}
     >
       <div className="flex items-start gap-2">
-        <Checkbox
-          checked={selected}
-          onCheckedChange={() => onToggleSelect(plugin.id)}
-          className="mt-0.5"
-          aria-label={t("selectAria", { name: plugin.name })}
-        />
+        {/* Padded label = a 36px hit area on a coarse pointer without
+            changing the card's painted layout. */}
+        <label className="-m-1.5 flex shrink-0 cursor-pointer p-1.5 pointer-coarse:-m-2.5 pointer-coarse:p-2.5">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => onToggleSelect(plugin.id)}
+            className="mt-0.5"
+            aria-label={t("selectAria", { name: displayName })}
+          />
+        </label>
         <PluginAvatar
           name={plugin.name}
           icon={(plugin.manifest as { icon?: string })?.icon}
@@ -116,7 +122,7 @@ export const PluginCard = memo(function PluginCard({
              *  a second line in narrow grid columns instead of overflowing
              *  the card; the name still truncates on its own line. */}
             <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-              <span className="font-medium truncate">{plugin.name}</span>
+              <span className="font-medium truncate">{displayName}</span>
               <PluginVersionBadge version={plugin.version} className="shrink-0" />
               {updateAvailable && (
                 <Badge variant="secondary" className="text-xs shrink-0">
@@ -142,11 +148,11 @@ export const PluginCard = memo(function PluginCard({
       <div className="flex flex-wrap items-center gap-1">
         {/* Unified 3-chip cap matches the marketplace card so the same
          *  plugin renders consistently across "browse" and "installed"
-         *  surfaces. The richer per-contribution hover preview lives in
-         *  the bespoke CardCapabilityChip below — _shared/capability-chips
-         *  doesn't carry the count + entries axis. */}
+         *  surfaces. The per-contribution preview is the shared
+         *  PluginContributionChip (the Library row renders the same one) —
+         *  _shared/capability-chips doesn't carry the count + entries axis. */}
         {contributions.slice(0, 3).map((contribution) => (
-          <CardCapabilityChip
+          <PluginContributionChip
             key={contribution.capability}
             capability={String(contribution.capability)}
             count={contribution.count}
@@ -174,13 +180,19 @@ export const PluginCard = memo(function PluginCard({
               <ShieldCheckIcon className="size-3 shrink-0" />
               {t("permissionCount", { count: permissionCount })}
               {dangerousPermissions.length > 0 && (
-                <AlertTriangleIcon className="size-3 shrink-0 text-destructive" />
+                <AlertTriangleIcon
+                  className="size-3 shrink-0 text-destructive"
+                  role="img"
+                  aria-label={t("dangerousPermissionsAria", {
+                    count: dangerousPermissions.length,
+                  })}
+                />
               )}
             </span>
           )}
         </div>
         <PluginStatusPill status={status} enabled={plugin.enabled} loading={isLoading} />
-        <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="card" />
+        <PluginActivationProgress pluginId={plugin.id} pluginName={displayName} variant="card" />
       </div>
 
       <PluginCompatibilityBadge manifest={plugin.manifest} />
@@ -195,53 +207,3 @@ export const PluginCard = memo(function PluginCard({
     </Card>
   )
 })
-
-interface CardCapabilityChipProps {
-  capability: string
-  count: number
-  entries: ReadonlyArray<{ id: string; label?: string }>
-}
-
-// Mirror of PluginLibraryRow's capability chip — same surface so the two
-// views stay consistent. Plain chip when no contribution surface is mapped,
-// hover-card with id list otherwise.
-function CardCapabilityChip({ capability, count, entries }: CardCapabilityChipProps) {
-  const t = useTranslations("plugins.card")
-  const label = count > 0 ? `${capability} · ${count}` : capability
-  if (entries.length === 0) {
-    return (
-      <Badge variant="outline" className="text-xs">
-        {label}
-      </Badge>
-    )
-  }
-  return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <Badge
-          variant="outline"
-          className="text-xs cursor-help"
-          tabIndex={0}
-          aria-label={t("capabilityChipAria", { capability, count })}
-        >
-          {label}
-        </Badge>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-72 p-3" align="start">
-        <div className="space-y-2">
-          <div className="text-xs font-semibold">{label}</div>
-          <ul className="space-y-0.5 text-xs">
-            {entries.map((entry) => (
-              <li key={entry.id} className="flex items-baseline gap-1.5">
-                <code className="font-mono text-[10px] text-muted-foreground">{entry.id}</code>
-                {entry.label && entry.label !== entry.id && (
-                  <span className="text-muted-foreground">— {entry.label}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  )
-}

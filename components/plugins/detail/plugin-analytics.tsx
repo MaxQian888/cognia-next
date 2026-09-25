@@ -4,7 +4,7 @@
 // `plugin-panel.tsx` but presented per-plugin (when `pluginId` is set) or
 // across all plugins. Mirrors `components/skills/skill-analytics.tsx`.
 
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BarChart3Icon, ZapIcon, TimerIcon, AlertCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -25,8 +25,19 @@ interface Props {
   pluginId?: string
 }
 
+/** Local date + time to the second, the precision the column always carried. */
+const LAST_EVENT_FORMAT = { dateStyle: "medium", timeStyle: "medium" } as const
+
+/** A usable instant, or null for a missing (0) or unparseable one. */
+function toEventDate(at: number | undefined): Date | null {
+  if (!at) return null
+  const date = new Date(at)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 export function PluginAnalytics({ pluginId }: Props) {
   const t = useTranslations("plugins.analyticsPanel")
+  const format = useFormatter()
   const analytics = usePluginAnalytics()
   const plugins = useLiveQuery(() => listPlugins(), [])
 
@@ -85,6 +96,7 @@ export function PluginAnalytics({ pluginId }: Props) {
               <TableBody>
                 {filtered.map((entry) => {
                   const plugin = plugins.find((p) => p.id === entry.pluginId)
+                  const lastEvent = toEventDate(entry.lastEventAt)
                   return (
                     <TableRow key={entry.pluginId}>
                       <TableCell>
@@ -104,7 +116,13 @@ export function PluginAnalytics({ pluginId }: Props) {
                         {Object.keys(entry.byKey).length}
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-right text-xs text-muted-foreground">
-                        {new Date(entry.lastEventAt).toISOString().slice(0, 19).replace("T", " ")}
+                        {lastEvent ? (
+                          <time dateTime={lastEvent.toISOString()}>
+                            {format.dateTime(lastEvent, LAST_EVENT_FORMAT)}
+                          </time>
+                        ) : (
+                          "—"
+                        )}
                       </TableCell>
                     </TableRow>
                   )

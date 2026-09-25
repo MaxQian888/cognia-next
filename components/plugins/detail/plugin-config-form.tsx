@@ -14,10 +14,22 @@
 // Persists through `setPluginConfig` so the manager picks up the change
 // on next activation. Schema shapes the parser can't recognise still
 // degrade to a manifest preview (the existing fallback path).
+//
+// `useConfigSchemaForm` + `ConfigSchemaFields` are exported so the
+// marketplace pre-install step renders a plugin's settings with THIS renderer
+// (nested objects, enums, secrets, validation) instead of a second, weaker
+// parser that only knew string / number / boolean.
+//
+// Save reports its outcome (a success toast, or a localized error toast with
+// the reason) and Cancel really cancels: it resets the form to the saved
+// values and is only enabled once something has changed. Before, Save failed
+// silently and Cancel was wired to a no-op.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { useLiveQuery } from "dexie-react-hooks"
+import { toast } from "sonner"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   loadConfigComponent,
@@ -37,7 +49,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Surface } from "@/components/surface/surface"
 import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
 import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
@@ -83,7 +94,7 @@ interface OneOfVariant {
   fields: Record<string, SchemaField>
 }
 
-interface SchemaField {
+export interface SchemaField {
   type: FieldType
   default?: unknown
   description?: string
@@ -96,7 +107,7 @@ interface SchemaField {
   raw: Record<string, unknown>
 }
 
-interface SchemaShape {
+export interface SchemaShape {
   fields: Record<string, SchemaField>
   unknown: boolean
 }
@@ -363,6 +374,93 @@ function collectErrors(
   }
   return out
 }
+export interface ConfigSchemaFormState {
+  schema: SchemaShape
+  values: Record<string, unknown>
+  setField: (key: string, value: unknown) => void
+  /** Flat `path → message` map of validation failures. */
+  errors: Record<string, string>
+  hasErrors: boolean
+  /** The values differ from the saved (or default) ones. */
+  dirty: boolean
+  /** Back to the saved (or default) values. */
+  reset: () => void
+}
+
+/**
+ * Form state for a raw `configSchema`: parsing, default-seeding over the
+ * persisted values, validation, and the dirty / reset pair Cancel needs.
+ * `persisted` is the saved config; when it changes (a save landed) the
+ * baseline moves with it, so a just-saved form is clean again.
+ */
+export function useConfigSchemaForm(
+  rawSchema: unknown,
+  persisted: Record<string, unknown> | undefined
+): ConfigSchemaFormState {
+  const t = useTranslations("plugins.configForm")
+  const schema = useMemo(() => parseSchema(rawSchema), [rawSchema])
+  const baseline = useMemo(
+    () => seedValues(schema.fields, persisted ?? {}),
+    [schema.fields, persisted]
+  )
+  const [values, setValues] = useState<Record<string, unknown>>(baseline)
+  const errors = useMemo(() => collectErrors(schema.fields, values, t), [schema.fields, values, t])
+  const dirty = useMemo(
+    () => JSON.stringify(values) !== JSON.stringify(baseline),
+    [values, baseline]
+  )
+  const setField = useCallback(
+    (key: string, value: unknown) => setValues((prev) => ({ ...prev, [key]: value })),
+    []
+  )
+  const reset = useCallback(() => setValues(baseline), [baseline])
+  return {
+    schema,
+    values,
+    setField,
+    errors,
+    hasErrors: Object.keys(errors).length > 0,
+    dirty,
+    reset,
+  }
+}
+
+/**
+ * The field list for a parsed schema. `idPrefix` keeps input ids unique when
+ * two forms can be on screen at once (the detail pane behind a pre-install
+ * dialog, say).
+ */
+export function ConfigSchemaFields({
+  fields,
+  values,
+  errors,
+  onChange,
+  idPrefix = "plugin-config",
+}: {
+  fields: Record<string, SchemaField>
+  values: Record<string, unknown>
+  errors: Record<string, string>
+  onChange: (key: string, value: unknown) => void
+  idPrefix?: string
+}) {
+  return (
+    <div className="space-y-4">
+      {orderedFieldEntries(fields).map(([key, field]) => (
+        <FieldRow
+          key={key}
+          fieldKey={key}
+          fieldPath={key}
+          field={field}
+          value={values[key] ?? field.default ?? ""}
+          errors={errors}
+          idPrefix={idPrefix}
+          onChange={(v) => onChange(key, v)}
+        />
+      ))}
+    </div>
+  )
+}
+
 export function PluginConfigFormContent({
   pluginId,
   onClose,
@@ -446,18 +544,13 @@ function SchemaConfigBody({
 }) {
   const t = useTranslations("plugins.configForm")
   const tDetail = useTranslations("plugins.detail")
-  const schema = useMemo(
-    () =>
-      parseSchema((plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema),
-    [plugin]
+  const { name: displayName } = useLocalizedPluginText(plugin)
+  const form = useConfigSchemaForm(
+    (plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema,
+    plugin.config
   )
-
-  const [values, setValues] = useState<Record<string, unknown>>(() =>
-    seedValues(schema.fields, plugin.config ?? {})
-  )
+  const { schema, values, errors, hasErrors, dirty, reset } = form
   const [saving, setSaving] = useState(false)
-  const errors = useMemo(() => collectErrors(schema.fields, values, t), [schema.fields, values, t])
-  const hasErrors = Object.keys(errors).length > 0
 
   const handleSave = async () => {
     if (hasErrors) return
@@ -465,7 +558,12 @@ function SchemaConfigBody({
     try {
       await setPluginConfig(pluginId, values)
       await notifyConfigChanged(pluginId, values)
+      toast.success(t("saved", { name: displayName }))
       onClose()
+    } catch (error) {
+      toast.error(t("saveFailed", { name: displayName }), {
+        description: error instanceof Error ? error.message : String(error),
+      })
     } finally {
       setSaving(false)
     }
@@ -498,29 +596,32 @@ function SchemaConfigBody({
 
   return (
     <>
-      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
+      <FormHeader description={t("description")} />
 
-      <ScrollArea className="max-h-[60vh]">
-        <div className="space-y-4 pr-3">
-          {orderedFieldEntries(schema.fields).map(([key, field]) => (
-            <FieldRow
-              key={key}
-              fieldKey={key}
-              fieldPath={key}
-              field={field}
-              value={values[key] ?? field.default ?? ""}
-              errors={errors}
-              onChange={(v) => setValues((prev) => ({ ...prev, [key]: v }))}
-            />
-          ))}
-        </div>
-      </ScrollArea>
+      {/* No inner scroller: this form is inline in the detail pane, which is
+          already the scroller. A nested `max-h-[60vh]` box gave a phone two
+          scroll regions stacked inside one drawer. */}
+      <ConfigSchemaFields
+        fields={schema.fields}
+        values={values}
+        errors={errors}
+        onChange={form.setField}
+      />
 
       <FormFooter>
-        <Button variant="outline" onClick={onClose} disabled={saving}>
+        <Button
+          variant="outline"
+          onClick={reset}
+          disabled={saving || !dirty}
+          data-testid="plugin-config-cancel"
+        >
           {t("cancel")}
         </Button>
-        <Button onClick={handleSave} disabled={saving || hasErrors}>
+        <Button
+          onClick={handleSave}
+          disabled={saving || hasErrors}
+          data-testid="plugin-config-save"
+        >
           {saving ? t("saving") : t("save")}
         </Button>
       </FormFooter>
@@ -555,6 +656,7 @@ function CustomConfigBody({
   onClose: () => void
 }) {
   const t = useTranslations("plugins.configForm")
+  const { name: displayName } = useLocalizedPluginText(plugin)
   const [state, setState] = useState<CustomLoadState>({ status: "loading" })
 
   useEffect(() => {
@@ -581,11 +683,20 @@ function CustomConfigBody({
 
   const handleSave = useCallback(
     async (next: Record<string, unknown>) => {
-      await setPluginConfig(pluginId, next)
-      await notifyConfigChanged(pluginId, next)
+      try {
+        await setPluginConfig(pluginId, next)
+        await notifyConfigChanged(pluginId, next)
+      } catch (error) {
+        toast.error(t("saveFailed", { name: displayName }), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+        // The plugin's own settings UI awaited this; let it see the failure.
+        throw error
+      }
+      toast.success(t("saved", { name: displayName }))
       onClose()
     },
-    [pluginId, onClose]
+    [pluginId, onClose, t, displayName]
   )
 
   if (state.status === "fallback") {
@@ -595,7 +706,7 @@ function CustomConfigBody({
   if (state.status === "loading") {
     return (
       <>
-        <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
+        <FormHeader description={t("description")} />
         <p className="text-sm text-muted-foreground p-4">{t("loadingComponent")}</p>
       </>
     )
@@ -604,7 +715,7 @@ function CustomConfigBody({
   const { Component } = state
   return (
     <>
-      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
+      <FormHeader description={t("description")} />
       <PluginSurface
         pluginId={pluginId}
         surfaceId={`${pluginId}:configComponent`}
@@ -617,23 +728,16 @@ function CustomConfigBody({
 }
 
 interface HeaderProps {
-  title: string
-  version: string | null
   description: string
 }
 
-function FormHeader({ title, version, description }: HeaderProps) {
+/**
+ * The plugin's name and version are NOT repeated here: this form renders
+ * inside the detail pane, whose header already opens with both.
+ */
+function FormHeader({ description }: HeaderProps) {
   return (
-    <header className="space-y-1 pb-2 border-b">
-      <h2 className="text-base font-semibold">
-        {title}
-        {version ? (
-          <>
-            {" "}
-            <span className="text-muted-foreground text-sm font-normal">v{version}</span>
-          </>
-        ) : null}
-      </h2>
+    <header className="pb-2 border-b">
       <p className="text-xs text-muted-foreground">{description}</p>
     </header>
   )
@@ -650,6 +754,7 @@ function FieldRow({
   value,
   errors,
   onChange,
+  idPrefix = "plugin-config",
 }: {
   fieldKey: string
   fieldPath: string
@@ -657,28 +762,50 @@ function FieldRow({
   value: unknown
   errors: Record<string, string>
   onChange: (v: unknown) => void
+  idPrefix?: string
 }) {
   const t = useTranslations("plugins.configForm")
-  const id = `plugin-config-${fieldPath.replace(/[.[\]]/g, "_")}`
+  const id = `${idPrefix}-${fieldPath.replace(/[.[\]]/g, "_")}`
   const error = errors[fieldPath]
   const title = typeof field.raw.title === "string" ? field.raw.title : fieldKey
   const deprecation =
     typeof field.raw.deprecationMessage === "string" ? field.raw.deprecationMessage : undefined
+  const descriptionId = field.description ? `${id}-description` : undefined
+  const errorId = error ? `${id}-error` : undefined
+  // The error and the description are tied to the input, so a screen reader
+  // hears why a field is invalid when it lands on it rather than never.
+  const a11y: FieldA11y = {
+    "aria-invalid": error ? true : undefined,
+    "aria-describedby": [errorId, descriptionId].filter(Boolean).join(" ") || undefined,
+  }
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-xs font-medium">
         {title}
       </Label>
-      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+      {field.description && (
+        <p id={descriptionId} className="text-xs text-muted-foreground">
+          {field.description}
+        </p>
+      )}
       {deprecation && (
         <p className="text-[10px] text-amber-600 dark:text-amber-400">
           {t("deprecated")}: {deprecation}
         </p>
       )}
-      {renderInput({ field, fieldPath, id, value, errors, onChange, t })}
-      {error && <p className="text-[10px] text-destructive">{error}</p>}
+      {renderInput({ field, fieldPath, id, value, errors, onChange, t, a11y, idPrefix })}
+      {error && (
+        <p id={errorId} className="text-[10px] text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   )
+}
+
+interface FieldA11y {
+  "aria-invalid"?: boolean
+  "aria-describedby"?: string
 }
 
 interface RenderArgs {
@@ -689,10 +816,12 @@ interface RenderArgs {
   errors: Record<string, string>
   onChange: (v: unknown) => void
   t: (key: string) => string
+  a11y: FieldA11y
+  idPrefix: string
 }
 
 function renderInput(args: RenderArgs) {
-  const { field, fieldPath, id, value, errors, onChange, t } = args
+  const { field, fieldPath, id, value, errors, onChange, t, a11y, idPrefix } = args
   switch (field.type) {
     case "string": {
       // `configSchema.properties[].secret` was validated in full
@@ -707,6 +836,7 @@ function renderInput(args: RenderArgs) {
             value={typeof value === "string" ? value : ""}
             onChange={onChange}
             t={t}
+            a11y={a11y}
           />
         )
       }
@@ -717,6 +847,7 @@ function renderInput(args: RenderArgs) {
           id={id}
           value={typeof value === "string" ? value : ""}
           onChange={(e) => onChange(e.target.value)}
+          {...a11y}
         />
       )
     }
@@ -725,8 +856,10 @@ function renderInput(args: RenderArgs) {
         <Input
           id={id}
           type="number"
+          inputMode="decimal"
           value={typeof value === "number" ? value : Number(value ?? 0)}
           onChange={(e) => onChange(Number(e.target.value))}
+          {...a11y}
         />
       )
     case "boolean":
@@ -736,7 +869,7 @@ function renderInput(args: RenderArgs) {
     case "enum":
       return (
         <Select value={typeof value === "string" ? value : ""} onValueChange={(v) => onChange(v)}>
-          <SelectTrigger id={id}>
+          <SelectTrigger id={id} {...a11y}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -776,6 +909,7 @@ function renderInput(args: RenderArgs) {
             )
           }
           placeholder={t("arrayPlaceholder")}
+          {...a11y}
         />
       )
     case "object":
@@ -786,6 +920,7 @@ function renderInput(args: RenderArgs) {
           value={(value as Record<string, unknown>) ?? {}}
           errors={errors}
           onChange={onChange}
+          idPrefix={idPrefix}
         />
       )
     case "objectArray":
@@ -797,6 +932,7 @@ function renderInput(args: RenderArgs) {
           errors={errors}
           onChange={onChange}
           t={t}
+          idPrefix={idPrefix}
         />
       )
     case "oneOf":
@@ -808,6 +944,7 @@ function renderInput(args: RenderArgs) {
           errors={errors}
           onChange={onChange}
           t={t}
+          idPrefix={idPrefix}
         />
       )
     default:
@@ -821,12 +958,14 @@ function ObjectGroup({
   value,
   errors,
   onChange,
+  idPrefix,
 }: {
   field: SchemaField
   fieldPath: string
   value: Record<string, unknown>
   errors: Record<string, string>
   onChange: (v: unknown) => void
+  idPrefix: string
 }) {
   if (!field.children) return null
   return (
@@ -839,6 +978,7 @@ function ObjectGroup({
           field={childField}
           value={value[childKey] ?? childField.default ?? ""}
           errors={errors}
+          idPrefix={idPrefix}
           onChange={(v) => onChange({ ...value, [childKey]: v })}
         />
       ))}
@@ -853,6 +993,7 @@ function ObjectArray({
   errors,
   onChange,
   t,
+  idPrefix,
 }: {
   field: SchemaField
   fieldPath: string
@@ -860,6 +1001,7 @@ function ObjectArray({
   errors: Record<string, string>
   onChange: (v: unknown) => void
   t: (key: string) => string
+  idPrefix: string
 }) {
   if (!field.children) return null
   const emptyRow = (): Record<string, unknown> =>
@@ -899,6 +1041,7 @@ function ObjectArray({
               field={childField}
               value={row[childKey] ?? childField.default ?? ""}
               errors={errors}
+              idPrefix={idPrefix}
               onChange={(v) => {
                 const next = [...value]
                 next[idx] = { ...row, [childKey]: v }
@@ -927,6 +1070,7 @@ function OneOfGroup({
   errors,
   onChange,
   t,
+  idPrefix,
 }: {
   field: SchemaField
   fieldPath: string
@@ -934,6 +1078,7 @@ function OneOfGroup({
   errors: Record<string, string>
   onChange: (v: unknown) => void
   t: (key: string) => string
+  idPrefix: string
 }) {
   const variants = field.variants ?? []
   const variantKey =
@@ -977,6 +1122,7 @@ function OneOfGroup({
           field={childField}
           value={value[childKey] ?? childField.default ?? ""}
           errors={errors}
+          idPrefix={idPrefix}
           onChange={(v) => onChange({ ...value, __variant: variantKey, [childKey]: v })}
         />
       ))}
@@ -999,11 +1145,13 @@ function SecretInput({
   value,
   onChange,
   t,
+  a11y,
 }: {
   id: string
   value: string
   onChange: (next: string) => void
   t: (key: string) => string
+  a11y: FieldA11y
 }) {
   const [revealed, setRevealed] = useState(false)
   return (
@@ -1017,12 +1165,13 @@ function SecretInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           data-testid={`config-secret-${id}`}
+          {...a11y}
         />
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 shrink-0"
+          className="size-8 shrink-0 pointer-coarse:size-9"
           aria-label={revealed ? t("secretHide") : t("secretShow")}
           onClick={() => setRevealed((prev) => !prev)}
           data-testid={`config-secret-toggle-${id}`}

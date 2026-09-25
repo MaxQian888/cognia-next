@@ -6,7 +6,8 @@ import { render, screen } from "@testing-library/react"
 import PluginAuthCallbackPage from "./page"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
 describe("PluginAuthCallbackPage", () => {
@@ -47,5 +48,28 @@ describe("PluginAuthCallbackPage", () => {
     Object.defineProperty(window, "opener", { value: null, configurable: true })
     window.history.replaceState({}, "", "/plugin-auth/callback?code=c&state=s")
     expect(() => render(<PluginAuthCallbackPage />)).not.toThrow()
+  })
+
+  // It said "Authorization complete" even when the provider sent an error.
+  it("shows the provider's error instead of claiming success", () => {
+    Object.defineProperty(window, "opener", { value: null, configurable: true })
+    window.history.replaceState(
+      {},
+      "",
+      "/plugin-auth/callback?error=access_denied&error_description=User%20cancelled"
+    )
+    render(<PluginAuthCallbackPage />)
+    expect(screen.getByRole("alert")).toHaveTextContent("failed")
+    expect(
+      screen.getByText('failedDetail:{"error":"access_denied","description":"User cancelled"}')
+    ).toBeInTheDocument()
+    expect(screen.queryByText("done")).toBeNull()
+  })
+
+  it("says nothing came back for a bare visit", () => {
+    Object.defineProperty(window, "opener", { value: null, configurable: true })
+    window.history.replaceState({}, "", "/plugin-auth/callback")
+    render(<PluginAuthCallbackPage />)
+    expect(screen.getByRole("alert")).toHaveTextContent("missing")
   })
 })

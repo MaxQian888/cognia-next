@@ -111,6 +111,23 @@ describe("PluginInstallFromGithubDialog", () => {
     makeClientMock.mockReturnValue({ getPlugin: jest.fn(), installPlugin: jest.fn() })
   })
 
+  // `dvh`, not `vh`: on a phone `vh` is measured with the browser chrome
+  // retracted, so a `vh` cap can still run under the toolbar. The preview is
+  // the one scroller; the header, repo input and footer hold their size.
+  it("caps DialogContent at the dynamic viewport with one scroll body", async () => {
+    fetchPreviewMock.mockResolvedValue(PREVIEW)
+    renderDialog()
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("flex", "flex-col", "max-h-[85dvh]")
+    expect(dialog).not.toHaveClass("max-h-[90vh]")
+    expect(dialog.querySelector("[data-slot='dialog-header']")).toHaveClass("shrink-0")
+    expect(dialog.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
+    fireEvent.change(screen.getByLabelText("GitHub repository"), { target: { value: "acme/demo" } })
+    fireEvent.click(screen.getByText("Fetch"))
+    const preview = await screen.findByTestId("plugin-github-preview")
+    expect(preview.closest("[data-slot='scroll-area']")).toHaveClass("min-h-0", "flex-1")
+  })
+
   it("validates an empty repository input", () => {
     renderDialog()
     fireEvent.click(screen.getByText("Fetch"))

@@ -3,6 +3,7 @@ import { render, waitFor } from "@testing-library/react"
 
 import { PluginRuntimeInitializer } from "./plugin-runtime-initializer"
 import { detectPlatform } from "@/lib/platform/detect"
+import { requestPluginNavigation } from "@/lib/plugin/api/navigation-request"
 
 // Preserve the real module's other exports (isTauri/isCapacitor/…) so any
 // transitive importer keeps working; only `detectPlatform` is driven per-test.
@@ -67,6 +68,11 @@ jest.mock("@tauri-apps/api/path", () => ({
   join: (...parts: string[]) => mockJoin(...parts),
 }))
 
+const mockRouterPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockRouterPush }),
+}))
+
 const mockDetectPlatform = detectPlatform as jest.MockedFunction<typeof detectPlatform>
 let mockUnlockedAccountId: string | null = "acct_test"
 let mockAccountRevision = 1
@@ -94,6 +100,15 @@ describe("PluginRuntimeInitializer", () => {
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
     window.history.replaceState({}, "", "/")
+  })
+
+  it("performs a plugin's ctx.ui.navigate request with the app router", () => {
+    const { unmount } = render(<PluginRuntimeInitializer />)
+    expect(requestPluginNavigation("acme", "/settings?section=mcp")).toBe(true)
+    expect(mockRouterPush).toHaveBeenCalledWith("/settings?section=mcp")
+    unmount()
+    requestPluginNavigation("acme", "/plugins")
+    expect(mockRouterPush).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the pre-account E2E runtime off unrelated browser routes", () => {

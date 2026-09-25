@@ -422,6 +422,113 @@ describe("runBuiltInSkill — write tier HITL routing", () => {
   })
 })
 
+describe("runBuiltInSkill — preflight and humanConfirmed", () => {
+  function writeSkill(overrides: Partial<BuiltInSkill> = {}) {
+    return mkSkill({
+      id: "lark.calendar.create_event",
+      mutation: "write",
+      hitlSurface,
+      mcpToolName: "lark_calendar_create_event",
+      ...overrides,
+    })
+  }
+
+  it("refuses in preflight before any confirmation is asked for", async () => {
+    const execute = jest.fn(async () => ({ ok: true }))
+    registerBuiltInSkill(
+      writeSkill({
+        execute,
+        preflight: async () => {
+          throw new Error("invalid cron")
+        },
+      })
+    )
+    const r = await runBuiltInSkill("lark.calendar.create_event", { calendarId: "c" }, desktopCtx)
+    expect(r).toEqual({ status: "error", message: "invalid cron" })
+    expect(mockDesktopApproval).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
+    await expect(
+      getDb().connectorAudit.where("kind").equals("builtin_skill_denied").first()
+    ).resolves.toMatchObject({ reason: "preflight_refused" })
+  })
+
+  it("tells preflight a confirmation is coming when one will be asked for", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: true, reason: "user" })
+    const preflight = jest.fn(async () => undefined)
+    registerBuiltInSkill(writeSkill({ preflight }))
+    await runBuiltInSkill("lark.calendar.create_event", { calendarId: "c" }, desktopCtx)
+    expect(preflight).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: true })
+    )
+  })
+
+  it("tells preflight nobody will confirm an unattended IM write", async () => {
+    const preflight = jest.fn(async () => undefined)
+    registerBuiltInSkill(writeSkill({ preflight }))
+    await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "c" },
+      { ...imCtx, imOverrideRow: mkOverride({ requireHitlForWrites: false }) }
+    )
+    expect(preflight).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: false })
+    )
+  })
+
+  it("marks the execute context confirmed after the user clicks allow", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: true, reason: "user" })
+    const execute = jest.fn(async () => ({ ok: true }))
+    registerBuiltInSkill(writeSkill({ execute }))
+    await runBuiltInSkill("lark.calendar.create_event", { calendarId: "c" }, desktopCtx)
+    expect(execute).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: true })
+    )
+  })
+
+  it("does not count a remembered session grant as a confirmation", async () => {
+    mockDesktopApproval.mockResolvedValueOnce({ approved: true, reason: "session_bypass" })
+    const execute = jest.fn(async () => ({ ok: true }))
+    registerBuiltInSkill(writeSkill({ execute }))
+    const r = await runBuiltInSkill("lark.calendar.create_event", { calendarId: "c" }, desktopCtx)
+    expect(r.status).toBe("ok")
+    expect(execute).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: false })
+    )
+  })
+
+  it("counts the IM confirm card's callback re-fire as a confirmation", async () => {
+    const execute = jest.fn(async () => ({ ok: true }))
+    registerBuiltInSkill(writeSkill({ execute }))
+    await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "c" },
+      { ...imCtx, hitlBypass: true }
+    )
+    expect(execute).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: true })
+    )
+  })
+
+  it("overwrites a humanConfirmed the caller tried to pass", async () => {
+    const execute = jest.fn(async () => ({ ok: true }))
+    registerBuiltInSkill(writeSkill({ execute }))
+    await runBuiltInSkill(
+      "lark.calendar.create_event",
+      { calendarId: "c" },
+      { ...imCtx, imOverrideRow: mkOverride({ requireHitlForWrites: false }), humanConfirmed: true }
+    )
+    expect(execute).toHaveBeenCalledWith(
+      { calendarId: "c" },
+      expect.objectContaining({ humanConfirmed: false })
+    )
+  })
+})
+
 describe("runBuiltInSkill — destructive tier", () => {
   it("requires explicit allowlist opt-in", async () => {
     registerBuiltInSkill(

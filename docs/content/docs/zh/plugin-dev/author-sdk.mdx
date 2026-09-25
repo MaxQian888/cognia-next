@@ -71,7 +71,26 @@ cognia plugin contract --plugin-type frontend --plugin-type hybrid --json
 
 编写组件前先查询准确的 UI point。返回的 `formFactor` 是宿主布局契约：`icon` 表示方形控件，`row` 表示紧凑操作行，`block` 表示纵向堆叠区块，`panel` 表示自带滚动的完整区域。UI primitive 必须从 `@cognia/plugin-ui` 导入；`cognia plugin build` 会把它与 React 保持为 external，使插件复用宿主的 shared React 与主题。不要导入宿主组件，也不要使用 `react-dom` portal。
 
-插件自行负责展示文案。必须提供 manifest i18n，以及本地化的 accessible name、placeholder、空态/错误态和 dialog close label。`@cognia/plugin-ui` 无法读取宿主的 `next-intl` catalog。
+插件自行负责展示文案。必须提供 manifest i18n（`i18n.locales`，使用扁平、不带前缀的 key），以及本地化的 accessible name、placeholder、空态/错误态和 dialog close label。非 React 代码用 `ctx.i18n.t(key, params)` 翻译；组件中使用 `@cognia/plugin-sdk/api/i18n` 的 `usePluginTranslations(pluginId)`——key 与回退顺序（当前语言 → 英文 → key）完全相同，切换语言时会自动重新渲染。
+
+### 宿主共享与不共享的模块
+
+已安装的插件是一个在宿主内求值的 CommonJS bundle。宿主会把自己的 `react`、`@cognia/plugin-ui`、`lucide-react`、`@cognia/plugin-sdk` **以及每一个已发布的 `@cognia/plugin-sdk/<subpath>`** 实例交给插件——大多数 subpath 是注册表，打包进插件的副本会注册到宿主永远读不到的 map 里。`cognia plugin build` 会把它们全部标记为 external。
+
+其余依赖都会打进插件本身。普通库（`docx`、`exceljs`）这样没问题；宿主框架模块则不行，它们只有绑定到宿主自己的实例才能工作。`pnpm plugin:author-imports` 会拒绝运行时代码导入它们：
+
+| 不要导入 | 改用 |
+| --- | --- |
+| `next-intl` | `usePluginTranslations(pluginId)`（`@cognia/plugin-sdk/api/i18n`）或 `ctx.i18n.t` |
+| `next/navigation` | `ctx.ui.navigate("/settings?section=mcp")`，仅限应用内路径 |
+| `dexie-react-hooks`、`dexie` | `@cognia/plugin-ui` 的 `useLiveQuery`，查询 `ctx.dexie` 的表 |
+| `@tauri-apps/*`、`@capacitor/*` | 对应的 `ctx.*` API（`ctx.clipboard`、`ctx.fs`、`ctx.files`、`ctx.capabilities`） |
+
+`ctx.files.save({ suggestedName, mimeType, bytes })` 在每个外壳上都会把文件存到用户找得到的位置——桌面端弹出保存对话框，移动端写入 `Documents/cognia/exports/`，Web 端触发下载——并返回 `{ saved, platform, location }`，工具可以据此告诉用户文件在哪。
+
+### 测试
+
+`@cognia/plugin-sdk/testing` 的 `createTestPluginContext()` 会按契约目录构建一个完整挂载的 context：每个方法都有记录调用的 stub，`storage` 与 `secrets` 是内存实现，`lifecycle.onDispose` 收集的清理函数可以执行，并支持按命名空间 `overrides`。请用它代替手写的 `{ … } as never` 局部 context——对始终存在的 API 使用可选链，正是这样混进插件代码的。
 
 `engines.cognia` 是兼容性权威。lint/install 会拒绝未知能力，也会拒绝低于任何已声明能力目录最低版本的下界。
 
@@ -89,7 +108,9 @@ Character pack 头像仅接受 `webDataUrl`。原 `avatarImage.tauriPath` 没有
 
 ## Context 表面
 
-`PluginContext` 描述有意保留为部分能力的基础 context；`FullPluginContext` 描述宿主创建的完整运行时表面。完整 context 中的 `memory`、`pet`、`webview`、`auth`、`uri` 均为必需字段，核心 logger、storage、UI、agent 和其他全部可调用 API 也由宿主挂载。实现与 `create*API` 工厂仍然只属于宿主。
+`PluginContext` 是宿主传给 `activate` 与 `deactivate` 的完整表面：每个命名空间都已挂载，所以请写 `ctx.agent.registerTool(…)`，而不是 `ctx.agent?.registerTool?.(…)`——这里的可选链只会掩盖失败。（`ctx.dexie` 是唯一的可选成员，manifest 声明了 `dexie` 块时才存在。）`ctx.config` 每次访问都读取插件当前的设置。`FullPluginContext` 是已废弃的别名。实现与 `create*API` 工厂仍然只属于宿主。
+
+manifest 请用 `definePluginManifest({ ...manifestJson, …带类型的贡献 })` 编写，工具用 `definePluginTool(…)`；`as never` 之类的类型断言会抹掉 manifest 类型，拼错的贡献字段也能编译通过，却什么都不会贡献。没有声明 `definition.timeoutMs` 的工具只有 30 秒预算——凡是要等待网络、模型、沙箱或文件对话框的工具都应声明。
 
 ```ts
 import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"

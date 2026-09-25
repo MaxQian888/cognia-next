@@ -81,4 +81,20 @@ describe("PluginUpdateDialog", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
   })
+
+  // `dvh`, not `vh`: on a phone `vh` is measured with the browser chrome
+  // retracted, so a `vh` cap can still run under the toolbar.
+  it("caps DialogContent at the dynamic viewport with a fixed header and footer", async () => {
+    const client = makeClient([])
+    __resetPluginUpdateClientForTests(client)
+    render(<PluginUpdateDialog open onClose={() => {}} />)
+    await waitFor(() => expect(client.checkForUpdates).toHaveBeenCalled())
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("flex", "flex-col", "max-h-[85dvh]")
+    expect(dialog).not.toHaveClass("max-h-[85vh]")
+    expect(dialog.querySelector("[data-slot='dialog-header']")).toHaveClass("shrink-0")
+    expect(dialog.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
+    // The list keeps its own `min-h-0 flex-1` scroller, the one that flexes.
+    expect(dialog.querySelector("[data-slot='scroll-area']")).toHaveClass("min-h-0", "flex-1")
+  })
 })

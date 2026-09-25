@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { upsertPlugin } from "@/lib/db/plugins"
 import { usePluginsStore } from "@/stores/plugins"
@@ -85,109 +84,109 @@ export function PluginImportDialog() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setStaging(null)}>
-      <DialogContent className="w-[95vw] max-w-2xl">
+      {/* Bounded to the viewport: header and footer stay put and the review
+          body is the one scroller, so a long draft list or parse-error list
+          can't push the confirm button off a phone screen. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] max-w-2xl flex-col">
         {staging ? (
           <>
-            <DialogHeader>
+            <DialogHeader className="shrink-0">
               <DialogTitle>{t("title")}</DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="break-words">
                 {t("description", { source: staging.sourceLabel })}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3">
+            <div
+              className="min-h-0 flex-1 space-y-3 overflow-y-auto"
+              data-testid="plugin-import-dialog-body"
+            >
               <Card className="p-0">
-                <ScrollArea className="max-h-[40vh]">
-                  <ul className="divide-y">
-                    {staging.drafts.length === 0 ? (
-                      <li className="p-3 text-sm text-muted-foreground">{t("emptyDrafts")}</li>
-                    ) : (
-                      staging.drafts.map((draft) => {
-                        const manifest = (draft.manifest ?? {}) as ReviewableManifest
-                        const declared = asStringList(manifest.permissions) as PluginPermission[]
-                        const optional = asStringList(
-                          manifest.optionalPermissions
-                        ) as PluginPermission[]
-                        const capabilities = asStringList(manifest.capabilities)
-                        return (
-                          <li key={draft.id} className="px-3 py-2 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <FilePlusIcon className="size-4 text-muted-foreground shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{draft.name}</div>
-                                <div className="text-xs text-muted-foreground truncate">
-                                  {draft.id} · v{draft.version}
-                                </div>
+                <ul className="divide-y">
+                  {staging.drafts.length === 0 ? (
+                    <li className="p-3 text-sm text-muted-foreground">{t("emptyDrafts")}</li>
+                  ) : (
+                    staging.drafts.map((draft) => {
+                      const manifest = (draft.manifest ?? {}) as ReviewableManifest
+                      const declared = asStringList(manifest.permissions) as PluginPermission[]
+                      const optional = asStringList(
+                        manifest.optionalPermissions
+                      ) as PluginPermission[]
+                      const capabilities = asStringList(manifest.capabilities)
+                      return (
+                        <li key={draft.id} className="px-3 py-2 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <FilePlusIcon className="size-4 text-muted-foreground shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{draft.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {draft.id} · v{draft.version}
                               </div>
-                              <Badge variant="outline" className="text-xs">
-                                {manifest.type ?? "—"}
-                              </Badge>
                             </div>
+                            <Badge variant="outline" className="text-xs">
+                              {manifest.type ?? "—"}
+                            </Badge>
+                          </div>
 
-                            {/* What accepting this manifest actually grants. */}
-                            <div
-                              className="space-y-1.5 pl-6"
-                              data-testid={`import-grants-${draft.id}`}
-                            >
-                              {declared.length === 0 &&
-                              optional.length === 0 &&
-                              capabilities.length === 0 ? (
-                                <p className="text-xs text-muted-foreground">
-                                  {tPre("permissionsNone")}
-                                </p>
-                              ) : (
-                                <>
-                                  {declared.length > 0 && (
-                                    <PermissionListCard
-                                      title={tPre("permissionsDeclared")}
-                                      perms={declared}
-                                    />
-                                  )}
-                                  {optional.length > 0 && (
-                                    <PermissionListCard
-                                      title={tPre("permissionsOptional")}
-                                      perms={optional}
-                                    />
-                                  )}
-                                  {capabilities.length > 0 && (
-                                    <div className="flex flex-wrap items-center gap-1">
-                                      <span className="text-xs text-muted-foreground">
-                                        {t("capabilitiesLabel")}
-                                      </span>
-                                      {capabilities.map((cap) => (
-                                        <Badge
-                                          key={cap}
-                                          variant="secondary"
-                                          className="text-[10px]"
-                                        >
-                                          {cap}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          </li>
-                        )
-                      })
-                    )}
-                  </ul>
-                </ScrollArea>
+                          {/* What accepting this manifest actually grants. */}
+                          <div
+                            className="space-y-1.5 pl-6"
+                            data-testid={`import-grants-${draft.id}`}
+                          >
+                            {declared.length === 0 &&
+                            optional.length === 0 &&
+                            capabilities.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                {tPre("permissionsNone")}
+                              </p>
+                            ) : (
+                              <>
+                                {declared.length > 0 && (
+                                  <PermissionListCard
+                                    title={tPre("permissionsDeclared")}
+                                    perms={declared}
+                                  />
+                                )}
+                                {optional.length > 0 && (
+                                  <PermissionListCard
+                                    title={tPre("permissionsOptional")}
+                                    perms={optional}
+                                  />
+                                )}
+                                {capabilities.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span className="text-xs text-muted-foreground">
+                                      {t("capabilitiesLabel")}
+                                    </span>
+                                    {capabilities.map((cap) => (
+                                      <Badge key={cap} variant="secondary" className="text-[10px]">
+                                        {cap}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </li>
+                      )
+                    })
+                  )}
+                </ul>
               </Card>
 
               {staging.parseErrors.length > 0 && (
                 <Card className="p-3 border-destructive space-y-1.5">
                   <div className="flex items-center gap-1.5 text-destructive">
-                    <AlertTriangleIcon className="size-4" />
+                    <AlertTriangleIcon className="size-4 shrink-0" />
                     <span className="text-sm font-medium">
                       {t("errorsTitle", { count: staging.parseErrors.length })}
                     </span>
                   </div>
                   <ul className="space-y-0.5 text-xs">
                     {staging.parseErrors.map((err, idx) => (
-                      <li key={idx} className="text-muted-foreground">
-                        <code className="font-mono">{err.name}</code> — {err.error}
+                      <li key={idx} className="min-w-0 break-words text-muted-foreground">
+                        <code className="break-all font-mono">{err.name}</code> — {err.error}
                       </li>
                     ))}
                   </ul>
@@ -195,7 +194,7 @@ export function PluginImportDialog() {
               )}
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="shrink-0">
               <Button variant="outline" onClick={() => setStaging(null)} disabled={importing}>
                 {t("cancel")}
               </Button>

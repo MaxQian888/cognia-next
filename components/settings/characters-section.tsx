@@ -39,6 +39,7 @@ import {
 import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
+import { usePluginSkills } from "@/hooks/skills/use-plugin-skills"
 import {
   createKnowledgeBase,
   getKnowledgeBaseReferences,
@@ -625,6 +626,7 @@ export function CharactersSection() {
             disallowedTools: [],
             mcpServerIds: undefined,
             skillIds: [],
+            pluginSkillIds: [],
             knowledgeBaseIds: [],
             memoryRecall: true,
             memoryCreate: true,
@@ -901,6 +903,7 @@ function CharacterRow({
           disallowedTools: character.disallowedTools ?? [],
           mcpServerIds: character.mcpServerIds,
           skillIds: character.skillIds ?? [],
+          pluginSkillIds: character.pluginSkillIds ?? [],
           knowledgeBaseIds: character.knowledgeBaseIds ?? [],
           memoryRecall: character.memoryPolicy?.operations.recall ?? true,
           memoryCreate: character.memoryPolicy?.operations.create ?? true,
@@ -1537,6 +1540,8 @@ export type EditorState = {
   disallowedTools: string[]
   mcpServerIds: string[] | undefined
   skillIds: string[]
+  /** Plugin skill registry ids (`character.pluginSkillIds`). */
+  pluginSkillIds: string[]
   knowledgeBaseIds: string[]
   memoryRecall: boolean
   memoryCreate: boolean
@@ -1692,6 +1697,7 @@ type EditorOutput = {
   disallowedTools?: string[]
   mcpServerIds?: string[]
   skillIds?: string[]
+  pluginSkillIds?: string[]
   knowledgeBaseIds?: string[]
   memoryPolicy?: Character["memoryPolicy"]
   workingDir?: string
@@ -1738,6 +1744,7 @@ export function CharacterEditor({
 }: EditorProps) {
   const t = useTranslations("settings.characters")
   const tEditor = useTranslations("settings.characters.editor")
+  const pluginSkillOptions = usePluginSkills("character")
   const tGeneral = useTranslations("settings.general")
   const tSandbox = useTranslations("settings.characters.editor.sandbox")
   const tAccount = useTranslations("settings.characters.editor.account")
@@ -1895,6 +1902,9 @@ export function CharacterEditor({
         disallowedTools: disallowed.length > 0 ? disallowed : undefined,
         mcpServerIds: s.mcpServerIds,
         skillIds: s.skillIds.length > 0 ? s.skillIds : undefined,
+        // Empty array, not undefined: clearing the last plugin skill must
+        // overwrite the stored list rather than leave it untouched.
+        pluginSkillIds: s.pluginSkillIds,
         knowledgeBaseIds: s.knowledgeBaseIds.length > 0 ? s.knowledgeBaseIds : undefined,
         memoryPolicy: {
           operations: {
@@ -2567,6 +2577,18 @@ export function CharacterEditor({
         selectedIds={s.skillIds}
         onChange={(ids) => setS({ ...s, skillIds: ids })}
       />
+
+      {(pluginSkillOptions.length > 0 || s.pluginSkillIds.length > 0) && (
+        <ItemMultiSelect
+          label={tEditor("pluginSkills")}
+          helpText={tEditor("pluginSkillsHint")}
+          items={pluginSkillOptions}
+          // Ids of plugins that are currently disabled stay selected (and are
+          // kept on save) — they resolve again when the plugin is re-enabled.
+          selectedIds={s.pluginSkillIds}
+          onChange={(ids) => setS({ ...s, pluginSkillIds: ids })}
+        />
+      )}
 
       <ItemMultiSelect
         label={tEditor("mcpServers")}

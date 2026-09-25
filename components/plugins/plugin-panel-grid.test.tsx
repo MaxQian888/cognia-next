@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string) => key,
 }))
 
@@ -21,6 +22,7 @@ const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolea
 jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: (id: string, enabled: boolean) =>
     setPluginEnabledForHostMock(id, enabled),
+  isMirroredPluginClient: () => false,
 }))
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => mockRows),

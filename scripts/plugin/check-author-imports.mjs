@@ -86,6 +86,59 @@ export function findForbiddenAuthorImports(source) {
 }
 
 /**
+ * Host framework modules a plugin's RUNTIME code must not import.
+ *
+ * The loader shares a closed set of modules with plugin bundles
+ * (`lib/plugin/core/shared-modules.ts`); everything else a bundle imports is
+ * inlined. For ordinary libraries that is fine — a plugin may bundle `docx` or
+ * `exceljs`. These are different: each only works bound to the HOST's own
+ * instance, so a bundled copy fails at runtime, silently or loudly:
+ *
+ * - `next`, `next/*`, `next-intl` — no App Router / intl provider context in a
+ *   second copy (`useRouter()` / `useLocale()` throw). Use `ctx.ui.navigate`
+ *   and `usePluginTranslations` (`@cognia/plugin-sdk/api/i18n`).
+ * - `dexie`, `dexie-react-hooks` — Dexie's change tracking is module-level, so
+ *   a copy never observes writes through `ctx.dexie`. Use `useLiveQuery` from
+ *   `@cognia/plugin-ui`.
+ * - `@tauri-apps/*`, `@capacitor/*` — native calls that skip the permission
+ *   guard, the rate limiter and the audit trail every `ctx.*` API goes
+ *   through (ADR-0155: one door).
+ *
+ * Type-only imports erase at build time and stay allowed, as do tests, which
+ * are never bundled.
+ */
+export const UNSHARED_HOST_FRAMEWORK_MODULES = [
+  "next",
+  "next-intl",
+  "dexie",
+  "dexie-react-hooks",
+  "@tauri-apps",
+  "@capacitor",
+]
+
+function isUnsharedHostFrameworkModule(specifier) {
+  return UNSHARED_HOST_FRAMEWORK_MODULES.some(
+    (name) => specifier === name || specifier.startsWith(`${name}/`)
+  )
+}
+
+export function findUnsharedFrameworkImports(source) {
+  const code = stripComments(source)
+    // `import type …` / `export type …` erase at build time.
+    .replace(/\b(?:import|export)\s+type\s+[^;]*?from\s*["'][^"']+["']/g, " ")
+  const matches = []
+  const pattern = /(?:from\s*|import\s*\(|require\s*\(|import\s+(?=["']))\s*["']([^"']+)["']/g
+  for (const match of code.matchAll(pattern)) {
+    if (isUnsharedHostFrameworkModule(match[1])) matches.push(match[1])
+  }
+  return matches
+}
+
+function isTestFile(path) {
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+}
+
+/**
  * First-party plugins may carry explicit host-integration tests next to their
  * portable unit tests. Those files are not author code and are never shipped,
  * but the opt-in must be unmistakable and cannot suppress checks in runtime
@@ -135,6 +188,13 @@ export function checkAuthorImports(repoRoot = process.cwd(), roots = AUTHOR_ROOT
       if (isHostIntegrationTest(file, source)) continue
       for (const specifier of findForbiddenAuthorImports(source)) {
         violations.push(`${relative(repoRoot, file)} imports ${specifier}`)
+      }
+      if (!isTestFile(file)) {
+        for (const specifier of findUnsharedFrameworkImports(source)) {
+          violations.push(
+            `${relative(repoRoot, file)} imports ${specifier}, which the plugin loader does not share`
+          )
+        }
       }
     }
   }

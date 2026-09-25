@@ -6,6 +6,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
@@ -13,9 +14,20 @@ jest.mock("next-intl", () => ({
 const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
   ok: true,
 }))
+const mockMirrored = jest.fn(() => false)
 jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: (id: string, enabled: boolean) =>
     setPluginEnabledForHostMock(id, enabled),
+  isMirroredPluginClient: () => mockMirrored(),
+}))
+
+const mockProfile = jest.fn(() => "tauri")
+jest.mock("@/hooks/plugins/use-plugin-runtime-profile", () => ({
+  usePluginRuntimeProfile: () => mockProfile(),
+}))
+
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn(), message: jest.fn() },
 }))
 
 const recoverPluginRuntimeMock = jest.fn(async () => true)
@@ -33,6 +45,7 @@ jest.mock("@/hooks/plugins", () => ({
   usePluginDiagnostics: () => mockDiagnostics,
 }))
 
+import { toast } from "sonner"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { PluginDetailHeader } from "./plugin-detail-header"
 import { usePluginsStore } from "@/stores/plugins"
@@ -61,6 +74,9 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 }
 
 beforeEach(() => {
+  jest.mocked(toast.message).mockClear()
+  mockMirrored.mockReturnValue(false)
+  mockProfile.mockReturnValue("tauri")
   setPluginEnabledForHostMock.mockClear()
   recoverPluginRuntimeMock.mockClear()
   mockDiagnostics = []
@@ -197,5 +213,77 @@ describe("PluginDetailHeader", () => {
     fireEvent.click(screen.getByText(/showMore/))
     const region = screen.getByTestId("plugin-detail-diagnostics-preview")
     expect(region.textContent).toContain("older entry")
+  })
+
+  describe("enable gate", () => {
+    const browserBlocked = makePlugin({
+      enabled: false,
+      manifest: {
+        id: "alpha",
+        runtimeCompatibility: {
+          browser: { availability: "unsupported", reason: "Needs the desktop shell" },
+        },
+      },
+    })
+
+    it("disables Enable for a plugin this host cannot run and says why inline", () => {
+      mockProfile.mockReturnValue("browser")
+      render(<PluginDetailHeader plugin={browserBlocked} />)
+      const toggle = screen.getByTestId("plugin-detail-enable-toggle")
+      expect(toggle).toBeDisabled()
+      const reason = screen.getByTestId("plugin-detail-enable-blocked")
+      expect(reason).toHaveTextContent("blockedTooltip")
+      expect(reason).toHaveTextContent("Needs the desktop shell")
+      expect(toggle).toHaveAttribute("aria-describedby", reason.id)
+    })
+
+    it("still lets an enabled-but-incompatible plugin be switched off", () => {
+      mockProfile.mockReturnValue("browser")
+      render(<PluginDetailHeader plugin={{ ...browserBlocked, enabled: true }} />)
+      const toggle = screen.getByTestId("plugin-detail-enable-toggle")
+      expect(toggle).not.toBeDisabled()
+      fireEvent.click(toggle)
+      expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("alpha", false)
+    })
+
+    it("judges a mirrored phone against the desktop and labels where it runs", () => {
+      mockMirrored.mockReturnValue(true)
+      mockProfile.mockReturnValue("mobile")
+      render(<PluginDetailHeader plugin={browserBlocked} />)
+      expect(screen.getByTestId("plugin-detail-enable-toggle")).not.toBeDisabled()
+      expect(screen.queryByTestId("plugin-detail-enable-blocked")).toBeNull()
+      expect(screen.getByTestId("plugin-detail-runs-on-desktop")).toHaveTextContent("runsOnDesktop")
+    })
+  })
+
+  describe("uninstall gate", () => {
+    it("explains instead of confirming for a built-in plugin", () => {
+      render(<PluginDetailHeader plugin={makePlugin({ source: "builtin" })} />)
+      const button = screen.getByRole("button", { name: "uninstall" })
+      expect(button).toHaveAttribute("aria-disabled", "true")
+      fireEvent.click(button)
+      expect(usePluginsStore.getState().deleteTarget).toBeNull()
+      expect(toast.message).toHaveBeenCalledWith("uninstallBlocked.builtin")
+    })
+
+    it("explains instead of confirming on a mirrored client", () => {
+      mockMirrored.mockReturnValue(true)
+      render(<PluginDetailHeader plugin={makePlugin()} />)
+      fireEvent.click(screen.getByRole("button", { name: "uninstall" }))
+      expect(usePluginsStore.getState().deleteTarget).toBeNull()
+      expect(toast.message).toHaveBeenCalledWith("uninstallBlocked.mirrored")
+    })
+  })
+
+  // The in-flow bar pushed the whole pane down whenever an activation
+  // started. It is pinned to the header's bottom edge now.
+  it("pins the activation bar out of the header's flow", () => {
+    render(<PluginDetailHeader plugin={makePlugin()} />)
+    expect(screen.getByTestId("plugin-detail-header")).toHaveClass("relative")
+  })
+
+  it("gives header actions a 36px target on a coarse pointer", () => {
+    render(<PluginDetailHeader plugin={makePlugin()} />)
+    expect(screen.getByRole("button", { name: "uninstall" })).toHaveClass("pointer-coarse:h-9")
   })
 })

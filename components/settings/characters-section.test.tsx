@@ -161,6 +161,7 @@ type SavePayload = {
   avatarImage?: { webDataUrl?: string }
   availableOnPlatforms?: unknown
   knowledgeBaseIds?: string[]
+  pluginSkillIds?: string[]
   memoryPolicy?: Character["memoryPolicy"]
 }
 
@@ -183,6 +184,7 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     disallowedTools: [],
     mcpServerIds: undefined,
     skillIds: [],
+    pluginSkillIds: [],
     knowledgeBaseIds: [],
     memoryRecall: true,
     memoryCreate: true,
@@ -414,6 +416,32 @@ describe("CharacterEditor — Agent profile", () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(onSave.mock.calls[0][0].knowledgeBaseIds).toEqual(["kb-product", "kb-support"])
+  })
+
+  it("attaches a plugin skill and keeps ids of plugins that are currently off", async () => {
+    const { registerSkill, unregisterSkillsByPlugin } = jest.requireActual<
+      typeof import("@/lib/plugin/registries/skill-registry")
+    >("@/lib/plugin/registries/skill-registry")
+    registerSkill(
+      "acme:review",
+      {
+        id: "acme:review",
+        name: "Acme review",
+        description: "Reviews a diff",
+        source: { kind: "inline", markdown: "# review" },
+      },
+      { pluginId: "acme" }
+    )
+    try {
+      const { onSave } = renderEditor(baseInitial({ pluginSkillIds: ["offline:skill"] }))
+      fireEvent.click(screen.getByRole("button", { name: "Acme review" }))
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+      expect(onSave.mock.calls[0][0].pluginSkillIds).toEqual(["offline:skill", "acme:review"])
+    } finally {
+      unregisterSkillsByPlugin("acme")
+    }
   })
 
   it("saves semantic model targets and Agent execution defaults", async () => {

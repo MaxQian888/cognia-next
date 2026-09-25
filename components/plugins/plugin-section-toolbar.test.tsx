@@ -60,6 +60,50 @@ describe("PluginSectionToolbar", () => {
     expect(onChange).toHaveBeenCalledWith("clipb")
   })
 
+  // `type="search"` is what gives a phone keyboard its Search key and what
+  // opts the field into the coarse-pointer 16px / 40px guard in globals.css.
+  it("renders a real search field", () => {
+    render(
+      <PluginSectionToolbar
+        search={{
+          value: "",
+          onChange: jest.fn(),
+          placeholder: "Search installed",
+          testId: "search",
+        }}
+      />
+    )
+    const input = screen.getByRole("searchbox", { name: "Search installed" })
+    expect(input).toHaveAttribute("type", "search")
+    expect(input).toHaveAttribute("enterkeyhint", "search")
+    expect(input).toHaveAttribute("autocomplete", "off")
+    // The engine's unlabeled ~14px cancel glyph is replaced by the button below.
+    expect(input).toHaveClass("[&::-webkit-search-cancel-button]:hidden")
+  })
+
+  it("offers no clear button while the field is empty", () => {
+    render(
+      <PluginSectionToolbar
+        search={{ value: "", onChange: jest.fn(), placeholder: "Search", testId: "search" }}
+      />
+    )
+    expect(screen.queryByTestId("search-clear")).not.toBeInTheDocument()
+  })
+
+  it("clears the query from a labeled, touch-sized button", () => {
+    const onChange = jest.fn()
+    render(
+      <PluginSectionToolbar
+        search={{ value: "clip", onChange, placeholder: "Search", testId: "search" }}
+      />
+    )
+    const clear = screen.getByRole("button", { name: /clear\s*search/i })
+    expect(clear).toHaveAttribute("data-testid", "search-clear")
+    expect(clear).toHaveClass("pointer-coarse:size-9")
+    fireEvent.click(clear)
+    expect(onChange).toHaveBeenCalledWith("")
+  })
+
   it("renders only the surviving segments, with their counts", () => {
     render(
       <PluginSectionToolbar

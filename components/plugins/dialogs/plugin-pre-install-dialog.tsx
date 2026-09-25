@@ -10,8 +10,16 @@
 //
 // Three step components are rendered conditionally based on `target.step`.
 // When `target` is null the dialog stays closed.
+//
+// Layout: the dialog is capped at 85dvh and is a flex column. The header and
+// each step's footer stay put, and the step body between them is the one
+// scroller, so a long permission list never pushes Continue off a phone
+// screen. Permissions read the same as in the review dialog
+// (`PermissionIdentity`: id, labelled sensitive marker, localized
+// description), and the configuration step uses the real config-form renderer
+// instead of a second parser that only understood string / number / boolean.
 
-import { useMemo, useState } from "react"
+import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
@@ -31,10 +39,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
 import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 import { openUrl } from "@/lib/native/opener"
@@ -44,6 +49,8 @@ import type {
   PreInstallConfigPayload,
   PreInstallBinaryPayload,
 } from "@/lib/plugin/marketplace/install-flow"
+import { ConfigSchemaFields, useConfigSchemaForm } from "../detail/plugin-config-form"
+import { PermissionIdentity } from "../plugin-permission-review"
 
 export type PreInstallStepId = "conflict" | "permission" | "binaries" | "config"
 
@@ -86,12 +93,17 @@ export function PluginPreInstallDialog({ target, notice, onContinue, onCancel }:
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="w-[95vw] max-w-xl" data-testid="plugin-pre-install-dialog">
+      <DialogContent
+        className="flex max-h-[85dvh] w-[95vw] max-w-xl min-w-0 flex-col"
+        data-testid="plugin-pre-install-dialog"
+      >
         {target && (
           <>
-            <DialogHeader>
-              <div className="flex items-center justify-between gap-2">
-                <DialogTitle>{t("title", { name: target.pluginName })}</DialogTitle>
+            <DialogHeader className="shrink-0">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <DialogTitle className="min-w-0 break-words">
+                  {t("title", { name: target.pluginName })}
+                </DialogTitle>
                 <Badge variant="outline" className="text-xs whitespace-nowrap">
                   {t("stepBadge", {
                     current: target.stepNumber,
@@ -138,6 +150,25 @@ export function PluginPreInstallDialog({ target, notice, onContinue, onCancel }:
   )
 }
 
+/**
+ * The scroll region between the pinned header and a step's pinned footer.
+ * `-mx-1 px-1` keeps focus rings on the edge controls from being clipped.
+ */
+function StepBody({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1"
+      data-testid="pre-install-step-body"
+    >
+      {children}
+    </div>
+  )
+}
+
+function StepFooter({ children }: { children: ReactNode }) {
+  return <DialogFooter className="shrink-0">{children}</DialogFooter>
+}
+
 // =============================================================================
 // Step 1 — Conflict
 // =============================================================================
@@ -155,9 +186,9 @@ function ConflictStep({
 
   return (
     <>
-      <p className="text-sm text-muted-foreground">{t("conflictHint")}</p>
-      <Card className="p-0">
-        <ScrollArea className="max-h-[40vh]">
+      <StepBody>
+        <p className="text-sm text-muted-foreground">{t("conflictHint")}</p>
+        <Card className="p-0">
           <ul className="divide-y" data-testid="pre-install-conflict-list">
             {conflict.reasons.map((reason, idx) => {
               // The orchestrator emits `alreadyInstalled:<version>` so the
@@ -172,27 +203,36 @@ function ConflictStep({
               return (
                 <li key={idx} className="flex items-start gap-2 px-3 py-2 text-sm">
                   {reason.severity === "high" ? (
-                    <AlertTriangleIcon className="size-4 text-destructive mt-0.5 shrink-0" />
+                    <AlertTriangleIcon
+                      className="size-4 text-destructive mt-0.5 shrink-0"
+                      aria-hidden="true"
+                    />
                   ) : reason.severity === "medium" ? (
-                    <AlertCircleIcon className="size-4 text-orange-500 mt-0.5 shrink-0" />
+                    <AlertCircleIcon
+                      className="size-4 text-orange-500 mt-0.5 shrink-0"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <InfoIcon className="size-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <InfoIcon
+                      className="size-4 text-muted-foreground mt-0.5 shrink-0"
+                      aria-hidden="true"
+                    />
                   )}
-                  <span>{display}</span>
+                  <span className="min-w-0 break-words">{display}</span>
                 </li>
               )
             })}
           </ul>
-        </ScrollArea>
-      </Card>
-      <DialogFooter>
+        </Card>
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onCancel}>
           {t("cancel")}
         </Button>
         <Button onClick={onContinue} data-testid="pre-install-conflict-continue">
           {t("next")}
         </Button>
-      </DialogFooter>
+      </StepFooter>
     </>
   )
 }
@@ -219,58 +259,69 @@ function PermissionStep({
 
   return (
     <>
-      <p className="text-sm text-muted-foreground">{t("permissionsHint")}</p>
-      {notice && (
-        <Card
-          className="flex flex-row items-start gap-2 p-3"
-          data-testid="pre-install-permission-notice"
-        >
-          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-          <p className="text-xs text-muted-foreground">{notice}</p>
-        </Card>
-      )}
-      {!hasAny ? (
-        <p className="text-sm text-muted-foreground">{t("permissionsNone")}</p>
-      ) : (
-        <div className="space-y-3">
-          {permission.declared.length > 0 && (
-            <PermissionListCard title={t("permissionsDeclared")} perms={permission.declared} />
-          )}
-          {permission.optional.length > 0 && (
-            <PermissionListCard title={t("permissionsOptional")} perms={permission.optional} />
-          )}
-          {domains && domains.length > 0 && (
-            <Card className="p-3 space-y-2" data-testid="pre-install-network-access">
-              <div className="flex items-center gap-2 text-xs font-semibold">
-                {anyHost && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
-                {t("networkAccessTitle")}
-              </div>
-              <ul className="space-y-1 text-xs">
-                {domains.map((d) => (
-                  <li key={d}>
-                    <code className="font-mono">
-                      {anyHost && d.trim() === "*" ? t("networkAnyHost") : d}
-                    </code>
-                  </li>
-                ))}
-              </ul>
-              {permission.networkAccess?.reasoning && (
-                <p className="text-xs text-muted-foreground">
-                  {permission.networkAccess.reasoning}
-                </p>
-              )}
-            </Card>
-          )}
-        </div>
-      )}
-      <DialogFooter>
+      <StepBody>
+        <p className="text-sm text-muted-foreground">{t("permissionsHint")}</p>
+        {notice && (
+          <Card
+            className="flex flex-row items-start gap-2 p-3"
+            data-testid="pre-install-permission-notice"
+          >
+            <AlertTriangleIcon
+              className="mt-0.5 size-4 shrink-0 text-destructive"
+              aria-hidden="true"
+            />
+            <p className="min-w-0 break-words text-xs text-muted-foreground">{notice}</p>
+          </Card>
+        )}
+        {!hasAny ? (
+          <p className="text-sm text-muted-foreground">{t("permissionsNone")}</p>
+        ) : (
+          <div className="space-y-3">
+            {permission.declared.length > 0 && (
+              <PermissionListCard title={t("permissionsDeclared")} perms={permission.declared} />
+            )}
+            {permission.optional.length > 0 && (
+              <PermissionListCard title={t("permissionsOptional")} perms={permission.optional} />
+            )}
+            {domains && domains.length > 0 && (
+              <Card className="p-3 space-y-2" data-testid="pre-install-network-access">
+                <div className="flex items-center gap-2 text-xs font-semibold">
+                  {anyHost && (
+                    <AlertTriangleIcon
+                      className="size-3 text-destructive shrink-0"
+                      role="img"
+                      aria-label={t("networkAnyHost")}
+                    />
+                  )}
+                  {t("networkAccessTitle")}
+                </div>
+                <ul className="space-y-1 text-xs">
+                  {domains.map((d) => (
+                    <li key={d} className="min-w-0">
+                      <code className="break-all font-mono">
+                        {anyHost && d.trim() === "*" ? t("networkAnyHost") : d}
+                      </code>
+                    </li>
+                  ))}
+                </ul>
+                {permission.networkAccess?.reasoning && (
+                  <p className="break-words text-xs text-muted-foreground">
+                    {permission.networkAccess.reasoning}
+                  </p>
+                )}
+              </Card>
+            )}
+          </div>
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onCancel}>
           {t("cancel")}
         </Button>
         <Button onClick={onContinue} data-testid="pre-install-permission-continue">
           {t("next")}
         </Button>
-      </DialogFooter>
+      </StepFooter>
     </>
   )
 }
@@ -282,20 +333,30 @@ function PermissionStep({
  * plugin declares, with the dangerous ones flagged" must look identical
  * wherever the user is asked to accept a manifest.
  */
-export function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
+export function PermissionListCard({
+  title,
+  perms,
+  justifications,
+}: {
+  title: string
+  perms: PluginPermission[]
+  /** Manifest `permissionJustifications`: the author's own reason, when given. */
+  justifications?: Partial<Record<string, string>>
+}) {
+  const describePermission = usePermissionDescription()
   return (
     <Card className="p-3 space-y-2">
       <div className="text-xs font-semibold">{title}</div>
-      <ul className="space-y-1.5">
-        {perms.map((perm) => {
-          const dangerous = DANGEROUS_PERMISSIONS.includes(perm)
-          return (
-            <li key={perm} className="flex items-center gap-2 text-xs">
-              {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
-              <code className="font-mono">{perm}</code>
-            </li>
-          )
-        })}
+      <ul className="space-y-2">
+        {perms.map((perm) => (
+          <li key={perm} className="min-w-0 text-xs">
+            <PermissionIdentity
+              perm={perm}
+              dangerous={DANGEROUS_PERMISSIONS.includes(perm)}
+              description={justifications?.[perm] ?? describePermission(perm)}
+            />
+          </li>
+        ))}
       </ul>
     </Card>
   )
@@ -317,9 +378,9 @@ function BinariesStep({
   const t = useTranslations("plugins.preInstall")
   return (
     <>
-      <p className="text-sm text-muted-foreground">{t("binariesHint")}</p>
-      <Card className="p-0">
-        <ScrollArea className="max-h-[40vh]">
+      <StepBody>
+        <p className="text-sm text-muted-foreground">{t("binariesHint")}</p>
+        <Card className="p-0">
           <ul className="divide-y" data-testid="pre-install-binaries-list">
             {binaries.missing.map((bin) => (
               <li key={bin.name} className="flex items-start gap-2 px-3 py-2 text-sm">
@@ -328,8 +389,8 @@ function BinariesStep({
                   aria-hidden="true"
                 />
                 <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <code className="font-mono">{bin.name}</code>
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <code className="break-all font-mono">{bin.name}</code>
                     {bin.minVersion && (
                       <Badge variant="outline" className="text-[10px]">
                         ≥ {bin.minVersion}
@@ -358,16 +419,16 @@ function BinariesStep({
               </li>
             ))}
           </ul>
-        </ScrollArea>
-      </Card>
-      <DialogFooter>
+        </Card>
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onCancel} data-testid="pre-install-binaries-cancel">
           {t("cancel")}
         </Button>
         <Button onClick={onContinue} data-testid="pre-install-binaries-continue">
           {t("binariesRetry")}
         </Button>
-      </DialogFooter>
+      </StepFooter>
     </>
   )
 }
@@ -376,29 +437,12 @@ function BinariesStep({
 // Step 3 — Config
 // =============================================================================
 
-interface ParsedField {
-  name: string
-  type: "string" | "number" | "boolean"
-  default: unknown
-  description?: string
-}
-
-function parseConfigFields(schema: Record<string, unknown>): ParsedField[] {
-  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>
-  const fields: ParsedField[] = []
-  for (const [name, prop] of Object.entries(properties)) {
-    const type = prop.type
-    if (type !== "string" && type !== "number" && type !== "boolean") continue
-    fields.push({
-      name,
-      type,
-      default: prop.default,
-      description: typeof prop.description === "string" ? prop.description : undefined,
-    })
-  }
-  return fields
-}
-
+/**
+ * The plugin's settings, rendered by the same field renderer the detail
+ * pane's Configure section uses: nested objects, arrays, enums, secrets and
+ * the schema's validation rules all behave the same before install as after.
+ * Confirm is held while a field is invalid, exactly like Save is there.
+ */
 function ConfigStep({
   config,
   onContinue,
@@ -409,101 +453,39 @@ function ConfigStep({
   onCancel: () => void
 }) {
   const t = useTranslations("plugins.preInstall")
-  const fields = useMemo(() => parseConfigFields(config.configSchema), [config.configSchema])
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const init: Record<string, unknown> = {}
-    for (const f of fields) {
-      if (f.default !== undefined) init[f.name] = f.default
-    }
-    return init
-  })
-
-  const handleContinue = () => {
-    onContinue({ ...values })
-  }
+  const form = useConfigSchemaForm(config.configSchema, undefined)
+  const hasFields = !form.schema.unknown && Object.keys(form.schema.fields).length > 0
 
   return (
     <>
-      <p className="text-sm text-muted-foreground">{t("configHint")}</p>
-      {fields.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("configNone")}</p>
-      ) : (
-        <div className="space-y-3" data-testid="pre-install-config-fields">
-          {fields.map((field) => (
-            <ConfigField
-              key={field.name}
-              field={field}
-              value={values[field.name]}
-              onChange={(v) => setValues((s) => ({ ...s, [field.name]: v }))}
+      <StepBody>
+        <p className="text-sm text-muted-foreground">{t("configHint")}</p>
+        {!hasFields ? (
+          <p className="text-sm text-muted-foreground">{t("configNone")}</p>
+        ) : (
+          <div data-testid="pre-install-config-fields">
+            <ConfigSchemaFields
+              fields={form.schema.fields}
+              values={form.values}
+              errors={form.errors}
+              onChange={form.setField}
+              idPrefix="pre-install-config"
             />
-          ))}
-        </div>
-      )}
-      <DialogFooter>
+          </div>
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onCancel}>
           {t("cancel")}
         </Button>
-        <Button onClick={handleContinue} data-testid="pre-install-config-confirm">
+        <Button
+          onClick={() => onContinue({ ...form.values })}
+          disabled={form.hasErrors}
+          data-testid="pre-install-config-confirm"
+        >
           {t("confirm")}
         </Button>
-      </DialogFooter>
+      </StepFooter>
     </>
-  )
-}
-
-function ConfigField({
-  field,
-  value,
-  onChange,
-}: {
-  field: ParsedField
-  value: unknown
-  onChange: (v: unknown) => void
-}) {
-  if (field.type === "boolean") {
-    return (
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-0.5 min-w-0">
-          <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-            {field.name}
-          </Label>
-          {field.description && (
-            <p className="text-xs text-muted-foreground">{field.description}</p>
-          )}
-        </div>
-        <Switch id={`pre-install-${field.name}`} checked={!!value} onCheckedChange={onChange} />
-      </div>
-    )
-  }
-  if (field.type === "number") {
-    return (
-      <div className="space-y-1">
-        <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-          {field.name}
-        </Label>
-        <Input
-          id={`pre-install-${field.name}`}
-          type="number"
-          value={typeof value === "number" ? value : ""}
-          onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-        />
-        {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-      </div>
-    )
-  }
-  // string fallback
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={`pre-install-${field.name}`} className="text-xs">
-        {field.name}
-      </Label>
-      <Input
-        id={`pre-install-${field.name}`}
-        type="text"
-        value={typeof value === "string" ? value : ""}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-    </div>
   )
 }

@@ -12,23 +12,23 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
-| `ctx.agent` | 28 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
+| `ctx.agent` | 29 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
 | `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid, python | sensitive |
-| `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
+| `ctx.artifact` | 12 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
-| `ctx.automation` | 24 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
+| `ctx.automation` | 27 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
 | `ctx.bots` | 16 | `agent:control` | frontend, hybrid, python | sensitive |
 | `ctx.browser` | 4 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
 | `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
-| `ctx.chat` | 5 | `session:write`, `extension:ui` | frontend, hybrid, python | internal |
+| `ctx.chat` | 6 | `session:write`, `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
 | `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid, python | internal |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
 | `ctx.configuration` | 5 | `settings:read`, `settings:write` | frontend, hybrid | internal |
-| `ctx.connectors` | 48 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
+| `ctx.connectors` | 64 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
 | `ctx.contextMenu` | 2 | None | frontend, hybrid | internal |
 | `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
@@ -43,9 +43,9 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.git` | 33 | `git:read`, `git:write` | frontend, hybrid, python | internal |
 | `ctx.goals` | 17 | `goal:write`, `goal:read` | frontend, hybrid | internal |
 | `ctx.issues` | 10 | `issue:write`, `issue:read` | frontend, hybrid | internal |
-| `ctx.i18n` | 10 | None | frontend, hybrid, python | internal |
+| `ctx.i18n` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
-| `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid, python | sensitive |
+| `ctx.integrations` | 21 | `integrations:execute`, `integrations:read`, `integrations:manage`, `integrations:events` | frontend, hybrid, python | sensitive |
 | `ctx.lifecycle` | 1 | None | frontend, hybrid | internal |
 | `ctx.logger` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.logs` | 14 | `logs:read`, `trace:read` | frontend, hybrid | sensitive |
@@ -78,12 +78,12 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
 | `ctx.team` | 30 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
-| `ctx.templates` | 11 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid, python | internal |
+| `ctx.templates` | 18 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid, python | internal |
 | `ctx.terminal` | 11 | `terminal:safety`, `terminal:spawn`, `terminal:kill`, `terminal:completion`, `terminal:write` | frontend, hybrid | internal |
 | `ctx.theme` | 16 | `theme:write`, `theme:read` | frontend, hybrid | internal |
 | `ctx.toolResult` | 1 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.tray` | 2 | None | frontend, hybrid | internal |
-| `ctx.ui` | 5 | None | frontend, hybrid, python | internal |
+| `ctx.ui` | 6 | None | frontend, hybrid, python | internal |
 | `ctx.userScheduler` | 5 | `database:write`, `settings:read`, `database:read`, `agent:control` | frontend, hybrid | sensitive |
 | `ctx.uri` | 1 | None | frontend, hybrid | internal |
 | `ctx.vector` | 13 | `vector:write`, `vector:read` | frontend, hybrid | internal |
@@ -136,6 +136,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `agent.guardrails.register` | None | low | No |
 | `agent.guardrails.unregister` | None | low | No |
 | `agent.invokeTool` | `agent:control` | high | No |
+| `agent.invokeDependencyTool` | `agent:control` | high | No |
 | `agent.registerExternalAgentAdapter` | None | low | No |
 | `agent.registerExternalAgentPreset` | None | low | No |
 | `agent.registerMcpServerPreset` | None | low | No |
@@ -175,9 +176,11 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `artifact.getActiveArtifact` | `artifact:read` | medium | Yes |
 | `artifact.getArtifact` | `artifact:read` | medium | Yes |
 | `artifact.listArtifacts` | `artifact:read` | medium | Yes |
+| `artifact.listVersions` | `artifact:read` | low | Yes |
 | `artifact.onArtifactChange` | `artifact:read` | medium | No |
 | `artifact.openArtifact` | `artifact:write` | high | No |
 | `artifact.registerRenderer` | `artifact:write` | high | No |
+| `artifact.restoreVersion` | `artifact:write` | medium | No |
 | `artifact.updateArtifact` | `artifact:write` | high | No |
 
 ## `ctx.auth`
@@ -197,9 +200,11 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `automation.capabilities` | `automation:read` | medium | Yes |
 | `automation.captureDisplay` | `automation:screenshot` | medium | No |
 | `automation.click` | `automation:click` | high | No |
+| `automation.clickText` | `automation:read`, `automation:screenshot`, `automation:click` | high | No |
 | `automation.cursorPosition` | `automation:read` | high | Yes |
 | `automation.drag` | `automation:pointer` | high | No |
 | `automation.find` | `automation:read` | medium | Yes |
+| `automation.findText` | `automation:read`, `automation:screenshot` | medium | Yes |
 | `automation.expandElement` | `automation:read` | medium | Yes |
 | `automation.getAppState` | `automation:read`, `automation:screenshot` | medium | No |
 | `automation.getFocus` | `automation:read` | high | Yes |
@@ -218,6 +223,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `automation.scroll` | `automation:pointer` | high | No |
 | `automation.type` | `automation:type` | high | No |
 | `automation.windowOp` | `automation:window` | high | No |
+| `automation.zoom` | `automation:read`, `automation:screenshot` | medium | Yes |
 
 ## `ctx.backup`
 
@@ -310,6 +316,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
 | `chat.addContextSelection` | `session:write` | low | No |
+| `chat.appendMessagePart` | `session:write` | low | No |
 | `chat.appendToComposer` | `session:write` | low | No |
 | `chat.stageIntent` | `session:write` | medium | No |
 | `chat.registerLinkMatcher` | `extension:ui` | medium | No |
@@ -416,6 +423,22 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `connectors.updateInstance` | `connectors:manage` | medium | No |
 | `connectors.uploadFile` | `connectors:send` | high | No |
 | `connectors.waitForDelivery` | `connectors:send` | high | No |
+| `connectors.a2ui.surface` | None | low | Yes |
+| `connectors.a2ui.segment` | None | low | Yes |
+| `connectors.a2ui.message` | None | low | Yes |
+| `connectors.a2ui.component.text` | None | low | Yes |
+| `connectors.a2ui.component.button` | None | low | Yes |
+| `connectors.a2ui.component.card` | None | low | Yes |
+| `connectors.a2ui.component.row` | None | low | Yes |
+| `connectors.a2ui.component.column` | None | low | Yes |
+| `connectors.a2ui.component.alert` | None | low | Yes |
+| `connectors.a2ui.component.image` | None | low | Yes |
+| `connectors.a2ui.component.link` | None | low | Yes |
+| `connectors.a2ui.component.select` | None | low | Yes |
+| `connectors.a2ui.component.textField` | None | low | Yes |
+| `connectors.a2ui.component.list` | None | low | Yes |
+| `connectors.a2ui.component.divider` | None | low | Yes |
+| `connectors.a2ui.component.badge` | None | low | Yes |
 
 ## `ctx.contextMenu`
 
@@ -641,8 +664,10 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `i18n.formatRelativeTime` | None | low | No |
 | `i18n.getAvailableLocales` | None | low | Yes |
 | `i18n.getCurrentLocale` | None | low | Yes |
+| `i18n.getLocale` | None | low | Yes |
 | `i18n.getLocaleName` | None | low | Yes |
 | `i18n.hasTranslation` | None | low | Yes |
+| `i18n.hasKey` | None | low | Yes |
 | `i18n.onLocaleChange` | None | low | No |
 | `i18n.registerTranslations` | None | low | No |
 | `i18n.t` | None | low | No |
@@ -663,18 +688,23 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | --- | --- | --- | --- |
 | `integrations.authenticatedRequest` | `integrations:execute` | high | No |
 | `integrations.cancelAction` | `integrations:execute` | high | No |
+| `integrations.checkAccountHealth` | `integrations:read` | low | Yes |
 | `integrations.createAccount` | `integrations:manage` | medium | No |
 | `integrations.createSubscription` | `integrations:manage` | medium | No |
 | `integrations.executeAction` | `integrations:execute` | high | No |
 | `integrations.getActionJob` | `integrations:read` | medium | Yes |
+| `integrations.getIngressDeadletter` | `integrations:read` | low | Yes |
 | `integrations.getIngressPublicUrl` | `integrations:read` | medium | Yes |
 | `integrations.listAccounts` | `integrations:read` | medium | Yes |
 | `integrations.listDefinitions` | `integrations:read` | medium | Yes |
+| `integrations.listIngressDeadletters` | `integrations:read` | low | Yes |
+| `integrations.listResources` | `integrations:read` | low | Yes |
 | `integrations.listSubscriptions` | `integrations:read` | medium | Yes |
 | `integrations.migrateLegacy` | `integrations:execute` | high | No |
 | `integrations.publishEvent` | `integrations:events` | medium | No |
 | `integrations.removeAccount` | `integrations:manage` | medium | No |
 | `integrations.removeSubscription` | `integrations:manage` | medium | No |
+| `integrations.requeueIngressDeadletter` | `integrations:manage` | medium | No |
 | `integrations.rollbackMigration` | `integrations:execute` | high | No |
 | `integrations.updateAccount` | `integrations:manage` | medium | No |
 
@@ -1144,6 +1174,13 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `templates.createDraft` | `templates:library:write` | high | No |
 | `templates.preflight` | `templates:read` | medium | Yes |
 | `templates.instantiate` | `templates:instantiate` | high | No |
+| `templates.saveDraft` | `templates:library:write` | high | No |
+| `templates.publish` | `templates:library:write` | high | No |
+| `templates.fork` | `templates:library:write` | high | No |
+| `templates.deprecate` | `templates:library:write` | high | No |
+| `templates.deleteDraft` | `templates:library:write` | high | No |
+| `templates.exportPackage` | `templates:library:write` | high | No |
+| `templates.importPackage` | `templates:library:write` | high | No |
 
 ## `ctx.terminal`
 
@@ -1204,6 +1241,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `ui.showInputDialog` | None | low | Yes |
 | `ui.showNotification` | None | low | Yes |
 | `ui.showToast` | None | low | Yes |
+| `ui.navigate` | None | low | Yes |
 
 ## `ctx.userScheduler`
 

@@ -5,13 +5,21 @@
 // primary actions that the row menu otherwise hides (Configure / Review
 // permissions / Uninstall). Also surfaces the latest plugin-point
 // diagnostic entries inline so failures aren't buried behind the Data tab.
+//
+// The Switch consults `usePluginEnableGate`: a plugin this host cannot run is
+// not offered an Enable it could only fail, and the reason is printed under
+// the header instead of hiding in a tooltip. On a mirrored phone the plugin is
+// judged against the desktop that runs it, and the header says so.
 
 import { useState, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import { useLocalizedPluginText } from "@/hooks/plugins/use-localized-plugin-text"
+import { toast } from "sonner"
 import {
   AlertCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  MonitorIcon,
   SettingsIcon,
   ShieldCheckIcon,
   RotateCcwIcon,
@@ -21,9 +29,11 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import { usePluginDiagnostics } from "@/hooks/plugins"
+import { usePluginEnableAction } from "@/hooks/plugins/use-plugin-enable-action"
+import { usePluginEnableGate } from "@/hooks/plugins/use-plugin-enable-gate"
+import { pluginUninstallBlockReason } from "@/hooks/plugins/use-plugin-uninstall"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
@@ -33,6 +43,7 @@ import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-b
 import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
 import { PluginAvatar } from "../plugin-avatar"
+import { PluginHint } from "../_shared/plugin-hint"
 
 interface Props {
   plugin: PluginRow
@@ -41,6 +52,13 @@ interface Props {
 export function PluginDetailHeader({ plugin }: Props) {
   const t = useTranslations("plugins.detail")
   const tCard = useTranslations("plugins.card")
+  const tLifecycle = useTranslations("plugins.lifecycleFeedback")
+  const gate = usePluginEnableGate(plugin)
+  const enablePlugin = usePluginEnableAction()
+  const uninstallBlocked = pluginUninstallBlockReason(plugin)
+  // Turning OFF an incompatible plugin stays possible: it is always safe and
+  // is how a user clears a stale "enabled" left from another host.
+  const enableBlocked = !plugin.enabled && gate.blocked
   const openConfigure = usePluginsStore((s) => s.openConfigure)
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
@@ -65,7 +83,8 @@ export function PluginDetailHeader({ plugin }: Props) {
   const hasConfigSchema = !!(plugin.manifest as { configSchema?: unknown }).configSchema
   const declaredPermissions = (plugin.manifest as { permissions?: unknown[] }).permissions ?? []
   const hasPermissions = declaredPermissions.length > 0
-  const description = (plugin.manifest as { description?: string }).description
+  // Name and description in the user's language (manifest nameKey / descriptionKey).
+  const { name: displayName, description } = useLocalizedPluginText(plugin)
   const lifecycleActual = plugin.lifecycle?.actual
 
   const recoverRuntime = async () => {
@@ -83,7 +102,7 @@ export function PluginDetailHeader({ plugin }: Props) {
 
   return (
     <header
-      className="@container/plugin-detail-header shrink-0 space-y-1.5 border-b px-2.5 py-2"
+      className="@container/plugin-detail-header relative shrink-0 space-y-1.5 border-b px-2.5 py-2"
       data-testid="plugin-detail-header"
     >
       <div className="flex items-start gap-2">
@@ -97,7 +116,7 @@ export function PluginDetailHeader({ plugin }: Props) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-1.5">
-            <h2 className="min-w-0 truncate text-sm leading-tight font-semibold">{plugin.name}</h2>
+            <h2 className="min-w-0 truncate text-sm leading-tight font-semibold">{displayName}</h2>
             <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
               v{plugin.version}
             </span>
@@ -113,12 +132,27 @@ export function PluginDetailHeader({ plugin }: Props) {
         </div>
         <Switch
           checked={plugin.enabled}
-          onCheckedChange={(next) => void setPluginEnabledForHost(plugin.id, next)}
+          disabled={enableBlocked}
+          onCheckedChange={(next) => void enablePlugin(plugin, next)}
           aria-label={plugin.enabled ? tCard("disable") : tCard("enable")}
+          aria-describedby={enableBlocked ? `plugin-enable-blocked-${plugin.id}` : undefined}
           data-testid="plugin-detail-enable-toggle"
           className="mt-0.5 shrink-0"
         />
       </div>
+
+      {/* Inline, not a tooltip: a disabled Switch cannot be hovered on a
+          phone, and the reason is the whole point of disabling it. */}
+      {enableBlocked && gate.reason ? (
+        <div
+          id={`plugin-enable-blocked-${plugin.id}`}
+          className="space-y-0.5 text-xs text-muted-foreground"
+          data-testid="plugin-detail-enable-blocked"
+        >
+          <p>{gate.reason}</p>
+          {gate.authorReason ? <p className="break-words">{gate.authorReason}</p> : null}
+        </div>
+      ) : null}
 
       {/*
         Badges and actions share ONE wrapping row.
@@ -147,6 +181,18 @@ export function PluginDetailHeader({ plugin }: Props) {
             compatibility diagnostic had no reader at all, and the loader's
             degraded-runtime markers were rendered only by the card grid. */}
         <PluginCompatibilityBadge manifest={plugin.manifest} />
+        {gate.runsOnDesktop ? (
+          <PluginHint
+            label={tLifecycle("runsOnDesktop")}
+            content={<p>{tLifecycle("runsOnDesktopHint")}</p>}
+            testId="plugin-detail-runs-on-desktop"
+          >
+            <Badge variant="outline" className="gap-1 text-xs">
+              <MonitorIcon className="size-3" aria-hidden />
+              {tLifecycle("runsOnDesktop")}
+            </Badge>
+          </PluginHint>
+        ) : null}
         <PluginRuntimeWarnings plugin={plugin} />
 
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
@@ -177,14 +223,32 @@ export function PluginDetailHeader({ plugin }: Props) {
             icon={Trash2Icon}
             label={tCard("uninstall")}
             destructive
-            onClick={() => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
+            // Not `disabled`: a disabled button cannot be tapped to learn WHY.
+            // It stays focusable, reads as unavailable, and answers with the
+            // reason instead of the confirm dialog.
+            unavailable={uninstallBlocked !== null}
+            onClick={() => {
+              if (uninstallBlocked) {
+                toast.message(tLifecycle(`uninstallBlocked.${uninstallBlocked}`))
+                return
+              }
+              setDeleteTarget({ pluginId: plugin.id, name: displayName })
+            }}
           />
         </div>
       </div>
 
-      {/* The activation bar spans the header rather than sitting between two
-          badges, where its own width fought the badges for the row. */}
-      <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="detail" />
+      {/* Pinned to the header's bottom border, out of flow. In flow, the bar
+          (and its phase line) pushed the badges, the diagnostics and the whole
+          pane body down the moment an activation started and pulled them back
+          up when it ended. The status pill above already says "Loading", and
+          the bar's live region still announces the phase and count. */}
+      <PluginActivationProgress
+        pluginId={plugin.id}
+        pluginName={displayName}
+        variant="row"
+        className="pointer-events-none absolute inset-x-0 bottom-0 mt-0"
+      />
 
       {recoveryFailed && (
         <p className="text-xs text-destructive" role="status">
@@ -202,6 +266,8 @@ interface HeaderActionProps {
   label: string
   onClick: () => void
   disabled?: boolean
+  /** Reads as unavailable but stays focusable and tappable (to explain why). */
+  unavailable?: boolean
   destructive?: boolean
   iconClassName?: string
 }
@@ -220,6 +286,7 @@ function HeaderAction({
   label,
   onClick,
   disabled,
+  unavailable,
   destructive,
   iconClassName,
 }: HeaderActionProps) {
@@ -232,12 +299,15 @@ function HeaderAction({
       size="sm"
       variant="ghost"
       disabled={disabled}
+      aria-disabled={unavailable || undefined}
       onClick={onClick}
       aria-label={label}
       title={label}
       className={cn(
-        "h-6 gap-1 px-1.5 text-xs",
-        destructive && "text-destructive hover:text-destructive"
+        // 36px on a coarse pointer: 24px icon buttons were a miss on a phone.
+        "h-6 gap-1 px-1.5 text-xs pointer-coarse:h-9 pointer-coarse:min-w-9",
+        destructive && !unavailable && "text-destructive hover:text-destructive",
+        unavailable && "text-muted-foreground opacity-60"
       )}
     >
       <Icon className={cn("size-3.5 shrink-0", iconClassName)} />
@@ -284,7 +354,7 @@ function DiagnosticsPreview({ entries, t }: DiagnosticsPreviewProps) {
             type="button"
             variant="ghost"
             size="sm"
-            className="h-5 px-1.5 ml-auto text-xs"
+            className="h-5 px-1.5 ml-auto text-xs pointer-coarse:h-9"
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
           >

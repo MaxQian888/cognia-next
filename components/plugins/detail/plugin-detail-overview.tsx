@@ -17,7 +17,8 @@
 //      surface and switching between them costs one click and no context.
 
 import { useState } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
+import { localizePluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { CheckCircle2Icon, CodeIcon, InfoIcon, RotateCcwIcon, ShieldAlertIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -27,7 +28,7 @@ import { Surface } from "@/components/surface/surface"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { usePluginRow } from "@/hooks/plugins"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
-import type { PluginVerificationSnapshot } from "@/types/plugin"
+import type { PluginStatus, PluginVerificationSnapshot } from "@/types/plugin"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginLicense } from "../_shared/plugin-license"
 import { PluginScreenshotGallery } from "../_shared/plugin-screenshot-gallery"
@@ -50,6 +51,7 @@ type OverviewView = "info" | "manifest"
 
 export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
   const t = useTranslations("plugins.detail")
+  const locale = useLocale()
   const rowState = usePluginRow(pluginId)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
   const setFilters = usePluginsStore((s) => s.setFilters)
@@ -59,6 +61,10 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
   // directly. That is what lets the Overview surface "last successful state"
   // without a schema change to PluginRow.
   const verificationSnapshot = usePluginStore((s) => s.plugins[pluginId]?.verificationSnapshot)
+  // The row's `status` is written at discovery and never follows the runtime
+  // (enable writes `enabled` / `lifecycle`), so an enabled plugin read
+  // "discovered" here. The runtime store is the live value.
+  const liveStatus = usePluginStore((s) => s.plugins[pluginId]?.status)
   const lastKnownGoodVerification = usePluginStore(
     (s) => s.plugins[pluginId]?.lastKnownGoodVerification
   )
@@ -75,6 +81,8 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
     return <p className="text-sm text-muted-foreground">{t("notFound")}</p>
   }
   const plugin = rowState.row
+  // A status the host knows gets its label; anything else prints as stored.
+  const status = liveStatus ?? plugin.status
   const manifest = plugin.manifest as OverviewManifestMeta
   const author =
     typeof manifest.author === "string" ? manifest.author : (manifest.author?.name ?? "")
@@ -112,7 +120,7 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
           variant="ghost"
           className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-xs"
           onClick={() => setRollbackTarget(plugin.id)}
-          aria-label={t("rollbackAria", { name: plugin.name })}
+          aria-label={t("rollbackAria", { name: localizePluginText(plugin, locale).name })}
           title={t("rollback")}
         >
           <RotateCcwIcon className="size-3.5 shrink-0" />
@@ -139,7 +147,10 @@ export function PluginDetailOverview({ pluginId }: { pluginId: string }) {
             <PluginMetaRow label={t("metaVersion")} value={plugin.version} mono />
             <PluginMetaRow label={t("metaType")} value={plugin.type} />
             <PluginMetaRow label={t("metaSource")} value={plugin.source} />
-            <PluginMetaRow label={t("metaStatus")} value={plugin.status} />
+            <PluginMetaRow
+              label={t("metaStatus")}
+              value={RUNTIME_STATUSES.has(status) ? t(`runtimeStatus.${status}` as never) : status}
+            />
             {author ? <PluginMetaRow label={t("metaAuthor")} value={author} /> : null}
             {manifest.homepage ? (
               <PluginMetaRow label={t("metaHomepage")} value={manifest.homepage} mono />
@@ -358,3 +369,18 @@ function PluginKeywordChips({
     </PluginDetailGroup>
   )
 }
+
+const RUNTIME_STATUSES: ReadonlySet<string> = new Set<PluginStatus>([
+  "discovered",
+  "installed",
+  "loading",
+  "loaded",
+  "enabling",
+  "enabled",
+  "disabling",
+  "disabled",
+  "suspended",
+  "unloading",
+  "error",
+  "updating",
+])

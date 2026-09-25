@@ -45,7 +45,7 @@ describe("plugin runtime (real bootstrap)", () => {
   it("loads in-tree plugins, builds a tools manifest, and resolves a tool handler", async () => {
     const result = await ensurePluginRuntime()
     expect(result.ok).toBe(true)
-    // web-tools (2) + workspace-tools (4) + others, comfortably > 5.
+    // web-tools (2) + clipboard / eval / documents / … — comfortably > 5.
     expect(result.toolCount).toBeGreaterThan(5)
 
     const { buildPluginToolsManifest } = await import("@/lib/plugin/bridge/sidecar-tools-bridge")
@@ -64,8 +64,11 @@ describe("plugin runtime (real bootstrap)", () => {
     // handlePluginToolExec → invokePluginTool can run it) without a consent stall.
     const { resolvePluginToolByName, invokePluginTool } =
       await import("@/lib/plugin/core/invoke-plugin-tool")
-    const resolved = await resolvePluginToolByName("workspace_list_files")
-    expect(resolved?.pluginId).toBe("cognia-workspace-tools")
+    // workspace-tools is desktop-only (its tools read the project through the
+    // desktop filesystem) and is correctly not loaded here; a read-only tool
+    // with no approval gate exercises the same execution path.
+    const resolved = await resolvePluginToolByName("clipboard_history_list")
+    expect(resolved?.pluginId).toBe("cognia-clipboard-history")
 
     // A session-scoped invocation resolves its sandbox placement from the
     // runtime registry, and refuses outright when the session has none. The
@@ -85,8 +88,8 @@ describe("plugin runtime (real bootstrap)", () => {
     const exec = await Promise.race([
       invokePluginTool(
         resolved!.pluginId,
-        "workspace_list_files",
-        { path: "." },
+        "clipboard_history_list",
+        {},
         {
           sessionId: "it",
           reason: "integration-test",
@@ -95,7 +98,7 @@ describe("plugin runtime (real bootstrap)", () => {
       new Promise<string>((r) => setTimeout(() => r("stalled"), 5000)),
     ])
     // It executes (returns) rather than stalling on the consent gate; the tool's
-    // own result may be a desktop-only error, which is fine — we assert no stall.
+    // own result may be an error on this host, which is fine — we assert no stall.
     expect(exec).toBe("executed")
   }, 30000)
 })

@@ -3,11 +3,16 @@
 // Decorator badge for marketplace cards / detail headers — shows whether a
 // plugin's manifest has a verified publisher signature. Drives off the
 // `signature` blob inside the manifest (set by the marketplace at install).
+//
+// The explanation is behind a `PluginHint` (focusable button, tooltip on
+// hover, popover on tap). In `compact` mode the badge is a bare icon, so the
+// trigger's accessible name carries the state ("Publisher signature:
+// Unverified") that the icon alone cannot.
 
 import { useTranslations } from "next-intl"
 import { ShieldCheckIcon, ShieldAlertIcon, ShieldOffIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { PluginHint } from "./_shared/plugin-hint"
 
 export type SignatureState = "verified" | "unverified" | "failed" | "unknown"
 
@@ -17,6 +22,7 @@ interface Props {
   signer?: string
   /** When `compact`, render only the icon (no text). */
   compact?: boolean
+  /** Classes for the focusable hint trigger that wraps the badge. */
   className?: string
 }
 
@@ -57,24 +63,24 @@ export function PluginSignatureBadge({ state, signer, compact, className }: Prop
 
   const { Icon, variant, labelKey, tooltipKey } = visual
 
-  // Self-mounts a TooltipProvider so the badge works inside hosts that don't
-  // wrap one (e.g., dialogs, isolated test renders). Production callers under
-  // app/layout.tsx already have an outer provider; nested providers are fine
-  // per Radix.
+  const stateLabel = t(labelKey as never)
+
   return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant={variant} className={className}>
-            <Icon className="size-3" />
-            {!compact && <span className="ml-1 text-xs">{t(labelKey as never)}</span>}
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p className="text-xs">{t(tooltipKey as never)}</p>
-          {signer && <p className="text-xs text-muted-foreground mt-0.5">{signer}</p>}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <PluginHint
+      label={t("ariaLabel", { state: stateLabel })}
+      className={className}
+      testId="plugin-signature-hint"
+      content={
+        <>
+          <p>{t(tooltipKey as never)}</p>
+          {signer && <p className="text-muted-foreground">{signer}</p>}
+        </>
+      }
+    >
+      <Badge variant={variant}>
+        <Icon className="size-3" aria-hidden />
+        {!compact && <span className="ml-1 text-xs">{stateLabel}</span>}
+      </Badge>
+    </PluginHint>
   )
 }

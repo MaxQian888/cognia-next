@@ -190,6 +190,7 @@ export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
       | "disallowedTools"
       | "mcpServerIds"
       | "skillIds"
+      | "pluginSkillIds"
       | "workingDir"
       | "bareMode"
       | "debugMode"
@@ -227,6 +228,7 @@ export async function createCharacter(draft: CharacterDraft): Promise<Character>
     disallowedTools: draft.disallowedTools,
     mcpServerIds: draft.mcpServerIds,
     skillIds: draft.skillIds,
+    pluginSkillIds: draft.pluginSkillIds,
     workingDir: draft.workingDir,
     bareMode: draft.bareMode,
     debugMode: draft.debugMode,

@@ -13,8 +13,16 @@ jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: () => true,
 }))
 
+// Keys echo back so assertions stay locale-independent. The permission
+// description namespace resolves ids to a recognisable "localized" string, and
+// reports no entry for `custom:*` ids so the raw-id fallback can be asserted.
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: (namespace?: string) => {
+    const localized = namespace === "plugins.permissions.descriptions"
+    const t = (key: string) => (localized ? `localized:${key}` : key)
+    t.has = (key: string) => localized && !key.startsWith("custom:")
+    return t
+  },
 }))
 
 const getVersionsMock = jest.fn(async () => [] as Array<{ version: string }>)
@@ -113,6 +121,62 @@ describe("PluginMarketplaceDetail", () => {
     expect(screen.getByText("v1.0.0")).toBeInTheDocument()
     expect(screen.getByText("MIT")).toBeInTheDocument()
     expect(screen.getByText("install")).toBeInTheDocument()
+  })
+
+  it("describes declared and optional permissions in the active locale", () => {
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={detail}
+        installed={false}
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+    expect(screen.getByText("localized:clipboard:read")).toBeInTheDocument()
+    expect(screen.getByText("localized:shell:execute")).toBeInTheDocument()
+    expect(screen.getByText("localized:network:fetch")).toBeInTheDocument()
+  })
+
+  it("gives only the sensitive permissions a labelled warning icon", () => {
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={detail}
+        installed={false}
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+    // `shell:execute` and `network:fetch` are dangerous; `clipboard:read` is not.
+    const flagged = screen
+      .getAllByRole("img", { name: "dangerousAria" })
+      .map((icon) => icon.closest("li")?.querySelector("code")?.textContent)
+    expect(flagged.sort()).toEqual(["network:fetch", "shell:execute"])
+    const clipboardRow = screen.getByText("clipboard:read").closest("li")
+    expect(clipboardRow?.querySelector("svg")).toBeNull()
+  })
+
+  it("falls back to the raw id for a permission nobody describes", () => {
+    render(
+      <PluginMarketplaceDetail
+        open
+        entry={{ ...detail, permissions: ["custom:telemetry" as PluginPermission] }}
+        installed={false}
+        installing={false}
+        onClose={() => {}}
+        onInstall={() => {}}
+        onUninstall={() => {}}
+      />
+    )
+    const row = screen.getAllByText("custom:telemetry")[0]!.closest("li")
+    expect(row).not.toBeNull()
+    // The id renders twice: once as the code label, once as the description.
+    expect(row!.textContent).toBe("custom:telemetrycustom:telemetry")
   })
 
   it("install click invokes onInstall", () => {

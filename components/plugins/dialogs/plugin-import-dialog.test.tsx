@@ -185,4 +185,38 @@ describe("PluginImportDialog", () => {
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
   })
+
+  // A long draft list or parse-error list used to grow the dialog past a phone
+  // screen and push Confirm out of reach. The content is capped at the dynamic
+  // viewport and the review body is the single scroller between a fixed header
+  // and footer (the draft list's own nested ScrollArea is gone).
+  it("bounds DialogContent to the viewport with one scroll body", () => {
+    usePluginsStore.setState({
+      importStaging: {
+        drafts: [
+          {
+            id: "p1",
+            name: "Plugin 1",
+            version: "1.0.0",
+            manifest: { id: "p1" },
+            sourceLabel: "manifest.json",
+          },
+        ],
+        sourceLabel: "test bundle",
+        parseErrors: [
+          { name: "a-very/long/path/without/any/breaks/plugin.manifest.json", error: "syntax" },
+        ],
+      },
+    })
+    render(<PluginImportDialog />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("flex", "flex-col", "max-h-[85dvh]")
+    const body = screen.getByTestId("plugin-import-dialog-body")
+    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto")
+    expect(body.querySelector("[data-slot='scroll-area']")).toBeNull()
+    expect(dialog.querySelector("[data-slot='dialog-header']")).toHaveClass("shrink-0")
+    expect(dialog.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
+    // The parse-error file name is one unbreakable token; it must wrap.
+    expect(screen.getByText(/plugin\.manifest\.json/)).toHaveClass("break-all")
+  })
 })

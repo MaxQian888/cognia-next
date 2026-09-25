@@ -40,7 +40,23 @@ export interface PluginInvocationOptions {
 }
 
 /** Host tools a plugin may invoke by name. Everything else is host-private. */
-export const PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS = ["web_search", "web_fetch"] as const
+export const PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS = ["web_search", "web_fetch", "web_clone"] as const
+
+/**
+ * The manifest permissions each host tool requires, checked by
+ * `ctx.agent.invokeTool` before dispatch. The web-reading tools answer through
+ * the agent's own search/fetch policy, so they need `agent:control` like any
+ * tool invocation. `web_clone` downloads a site to disk: it needs exactly what
+ * that does — outbound fetches and a filesystem write — rather than the broad
+ * agent-control grant a snapshot plugin has no other use for.
+ */
+export const PLUGIN_HOST_TOOL_PERMISSIONS: Readonly<
+  Record<(typeof PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS)[number], readonly string[]>
+> = {
+  web_search: ["agent:control"],
+  web_fetch: ["agent:control"],
+  web_clone: ["network:fetch", "filesystem:write"],
+}
 
 /** Union of the author-callable host tool names. */
 export type PluginAuthorCallableHostTool = (typeof PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS)[number]
@@ -73,6 +89,8 @@ export type PluginHostToolErrorCode =
   | "blocked"
   /** The call reached the network/host and failed there. */
   | "execution-failed"
+  /** This host cannot run the tool (e.g. `web_clone` outside the desktop app). */
+  | "unsupported-host"
 
 /** The failure half of every author-callable host tool result. */
 export interface PluginHostToolFailure {
@@ -212,8 +230,38 @@ export function pluginWebFetchText(result: PluginWebFetchSuccess): string {
   return typeof result.body === "string" ? result.body : ""
 }
 
+/**
+ * `web_clone` input: the snapshot job the desktop engine runs. `snapshot`
+ * downloads `options.url` into `options.output`; `convert` turns an existing
+ * local snapshot (`options.convertLocal`) into framework code.
+ */
+export interface PluginWebCloneInput {
+  job: {
+    mode: "snapshot" | "convert"
+    url?: string
+    options: Record<string, unknown>
+  }
+}
+
+/** What the snapshot engine reports back, success or failure. */
+export interface PluginWebCloneEnvelope {
+  ok: boolean
+  result?: {
+    output: string
+    mode: string
+    stats: Record<string, number>
+    sourceUrl?: string
+    assets?: unknown
+  }
+  error?: { name: string; message: string; reason?: string }
+}
+
+export type PluginWebCloneResult =
+  { ok: true; envelope: PluginWebCloneEnvelope } | PluginHostToolFailure
+
 /** Input/result pairing for each author-callable host tool, keyed by name. */
 export interface PluginAuthorCallableHostToolMap {
   web_search: { input: PluginWebSearchInput; result: PluginWebSearchResult }
   web_fetch: { input: PluginWebFetchInput; result: PluginWebFetchResult }
+  web_clone: { input: PluginWebCloneInput; result: PluginWebCloneResult }
 }

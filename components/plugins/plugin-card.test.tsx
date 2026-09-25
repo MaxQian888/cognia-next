@@ -6,7 +6,12 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
+jest.mock("@/hooks/plugins/use-plugin-rollback-availability", () => ({
+  usePluginRollbackAvailable: () => true,
+}))
+
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`

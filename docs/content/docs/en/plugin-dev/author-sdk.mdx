@@ -71,7 +71,26 @@ After approval, scaffold new work with `cognia plugin new ... --json`, or preser
 
 Query the exact UI point before writing its component. The returned `formFactor` is the host layout contract: `icon` for a square control, `row` for compact actions, `block` for a stacked band, and `panel` for an owned scrolling region. Import UI primitives from `@cognia/plugin-ui`; `cognia plugin build` keeps both it and React external so the plugin uses the host's shared React and theme. Do not import host components or use `react-dom` portals.
 
-Plugins own their displayed copy. Provide manifest i18n entries and localized accessible names, placeholders, empty/error states, and dialog close labels. `@cognia/plugin-ui` cannot read the host's `next-intl` catalog.
+Plugins own their displayed copy. Provide manifest i18n entries (`i18n.locales`, flat unprefixed keys) and localized accessible names, placeholders, empty/error states, and dialog close labels. Translate in non-React code with `ctx.i18n.t(key, params)`, and in components with `usePluginTranslations(pluginId)` from `@cognia/plugin-sdk/api/i18n` — the same keys and the same locale → English → key fallback, re-rendering on a language switch.
+
+### Modules the host shares, and the ones it does not
+
+An installed plugin is a CommonJS bundle evaluated inside the host. The host hands it its own instance of `react`, `@cognia/plugin-ui`, `lucide-react`, `@cognia/plugin-sdk` **and every published `@cognia/plugin-sdk/<subpath>`** — most subpaths are registries, and a bundled copy would register into a map the host never reads. `cognia plugin build` marks all of them external.
+
+Everything else is bundled into the plugin. That is fine for ordinary libraries (`docx`, `exceljs`), and wrong for host framework modules, which only work bound to the host's own instance. `pnpm plugin:author-imports` rejects them in runtime code:
+
+| Do not import | Use instead |
+| --- | --- |
+| `next-intl` | `usePluginTranslations(pluginId)` (`@cognia/plugin-sdk/api/i18n`) or `ctx.i18n.t` |
+| `next/navigation` | `ctx.ui.navigate("/settings?section=mcp")` — in-app paths only |
+| `dexie-react-hooks`, `dexie` | `useLiveQuery` from `@cognia/plugin-ui` over `ctx.dexie` tables |
+| `@tauri-apps/*`, `@capacitor/*` | the matching `ctx.*` API (`ctx.clipboard`, `ctx.fs`, `ctx.files`, `ctx.capabilities`) |
+
+`ctx.files.save({ suggestedName, mimeType, bytes })` saves where the user can find the file on every shell — a dialog on desktop, `Documents/cognia/exports/` on mobile, a download on web — and returns `{ saved, platform, location }` so a tool can say where it went.
+
+### Testing
+
+`createTestPluginContext()` from `@cognia/plugin-sdk/testing` returns a fully mounted context built from the contract catalog: recording stubs for every method, in-memory `storage` and `secrets`, `lifecycle.onDispose` disposers you can run, and per-namespace `overrides`. Test against it instead of a partial `{ … } as never` context, which is how optional chaining on always-present APIs creeps into plugin code.
 
 `engines.cognia` is the compatibility authority. Lint and install reject unknown capabilities and a lower bound older than any declared capability's catalog minimum.
 
@@ -89,7 +108,9 @@ Invalid: `../outside.js`, `C:outside.js`, `C:\\outside.js`, `\\\\server\\share\\
 
 ## Context surface
 
-`PluginContext` describes the intentionally partial/base context. `FullPluginContext` describes the host-created runtime surface. In the full context, `memory`, `pet`, `webview`, `auth`, and `uri` are required, alongside the core logger, storage, UI, agent, and all other callable APIs. Implementations and `create*API` factories remain host-only.
+`PluginContext` is the complete surface the host passes to `activate` and `deactivate`: every namespace is mounted, so call `ctx.agent.registerTool(…)`, not `ctx.agent?.registerTool?.(…)` — optional chaining there only hides a failure. (`ctx.dexie` is the one optional member; it exists when the manifest declares a `dexie` block.) `ctx.config` reads the plugin's current settings on every access. `FullPluginContext` is a deprecated alias. Implementations and `create*API` factories remain host-only.
+
+Author the manifest with `definePluginManifest({ ...manifestJson, …typedContributions })` and tools with `definePluginTool(…)`; a cast such as `as never` erases the manifest type, so a misspelled contribution field compiles and contributes nothing. A tool without `definition.timeoutMs` gets a 30-second budget — declare one for anything that waits on the network, a model, a sandbox or a file dialog.
 
 ```ts
 import { definePlugin, type PluginContext } from "@cognia/plugin-sdk"

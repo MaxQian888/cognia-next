@@ -22,3 +22,11 @@ export {
 } from "@/lib/i18n/plugin-i18n-registry"
 
 export type { LocaleCode, PluginI18nBundle } from "@/lib/i18n/plugin-i18n-registry"
+
+/**
+ * React components receive no `ctx`; this hook is their `ctx.i18n.t` — same
+ * keys, same locale → English → key fallback, and it re-renders on a language
+ * switch or when the plugin's bundle registers.
+ */
+export { usePluginTranslations } from "@/lib/plugin/api/use-plugin-translations"
+export type { PluginTranslate } from "@/lib/plugin/api/use-plugin-translations"

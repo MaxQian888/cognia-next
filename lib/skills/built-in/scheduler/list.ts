@@ -10,8 +10,9 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
-import { AGENT_SCHEDULABLE_TASK_TYPES, toAgentVisibleTask } from "./_core"
+import { AGENT_SCHEDULABLE_TASK_TYPES, assertAgentMayRead, toAgentVisibleTask } from "./_core"
 
 const schema = z.object({
   status: z
@@ -38,9 +39,10 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "read",
   imAccess: "always",
-  mcpToolName: "scheduler_list_tasks",
+  mcpToolName: SCHEDULE_TOOL.list,
   inputSchema: schema,
   execute: async (args) => {
+    await assertAgentMayRead()
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const all = await getTaskScheduler().getAllTasks()
     const needle = args.search?.trim().toLowerCase()

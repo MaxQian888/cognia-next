@@ -104,6 +104,37 @@ describe("TriggersPane", () => {
     expect(screen.getByText("handler threw")).toBeInTheDocument()
   })
 
+  it("renders the dispatch time through the next-intl formatter", () => {
+    // Swap the global next-intl mock's formatter for a sentinel so the row is
+    // pinned to the locale-aware path (and its options), not a UTC ISO slice.
+    const intl = jest.requireMock("next-intl") as { useFormatter: () => unknown }
+    const spy = jest.spyOn(intl, "useFormatter").mockReturnValue({
+      dateTime: (value: Date | number, options?: Intl.DateTimeFormatOptions) =>
+        `fmt:${new Date(value).toISOString()}:${options?.dateStyle ?? "-"}/${options?.timeStyle ?? "-"}`,
+    })
+    try {
+      listAllTriggerAuditEntries.mockReturnValue([
+        entry({ timestamp: Date.UTC(2026, 4, 21, 14, 30, 45) }),
+      ])
+      renderPane()
+      const time = screen.getByText("fmt:2026-05-21T14:30:45.000Z:-/medium")
+      expect(time.tagName).toBe("TIME")
+      expect(time).toHaveAttribute("dateTime", "2026-05-21T14:30:45.000Z")
+      expect(time).toHaveAttribute("title", "fmt:2026-05-21T14:30:45.000Z:medium/medium")
+      expect(screen.queryByText("14:30:45")).not.toBeInTheDocument()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("leaves the time cell empty instead of rendering an invalid date", () => {
+    listAllTriggerAuditEntries.mockReturnValue([entry({ timestamp: Number.NaN })])
+    const { container } = renderPane()
+    expect(screen.getByText("wf-1")).toBeInTheDocument()
+    expect(container.querySelector("time")).toBeNull()
+    expect(container.textContent).not.toContain("Invalid Date")
+  })
+
   it("clears the ring from the clear button", async () => {
     listAllTriggerAuditEntries.mockReturnValue([entry()])
     renderPane()

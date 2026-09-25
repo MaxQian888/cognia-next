@@ -52,6 +52,9 @@ describe("PluginGovernanceHeader", () => {
 
   it("does not render a search box — governance aggregates are not searched here", () => {
     render(<PluginGovernanceHeader />)
+    // The plugin search input is `type="search"` (role `searchbox`), so asking
+    // for a `textbox` would pass whether or not a search box is rendered.
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 })

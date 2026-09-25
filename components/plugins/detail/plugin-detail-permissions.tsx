@@ -12,7 +12,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 
-import { usePluginPermissions, usePluginRow } from "@/hooks/plugins"
+import { usePermissionDescription, usePluginPermissions, usePluginRow } from "@/hooks/plugins"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PermissionRow } from "../plugin-permission-review"
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -28,6 +28,8 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   const tDetail = useTranslations("plugins.detail")
   const rowState = usePluginRow(pluginId)
   const perms = usePluginPermissions()
+  // Localized; `perms.descriptions` is the English-only source map.
+  const describePermission = usePermissionDescription()
 
   const manifest =
     rowState.state === "ready" ? (rowState.row.manifest as unknown as PluginManifest) : undefined
@@ -119,7 +121,7 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
                   onRevoke={() => perms.revoke(pluginId, perm)}
                   tier={perms.getTier(pluginId, perm)}
                   onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                  description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                  description={justifications[perm] ?? describePermission(perm)}
                   runtimeAvailable={support.available}
                   unavailableReason={unavailableReason}
                 />

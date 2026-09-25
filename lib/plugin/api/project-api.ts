@@ -135,15 +135,21 @@ export function createProjectAPI(pluginId: string): PluginProjectAPI {
         mimeType: file.mimeType,
       }
 
+      if (!store.projects.some((p) => p.id === projectId)) {
+        throw new Error(`Project not found: ${projectId}`)
+      }
       store.addKnowledgeFile(projectId, knowledgeFile)
 
-      // Get the newly added file
-      const project = store.projects.find((p) => p.id === projectId)
+      // Read AFTER the mutation. `store` is the pre-mutation snapshot: the store
+      // replaces the row immutably, so reading it returned the previous last
+      // file, or undefined for a workspace with no knowledge yet.
+      const project = useProjectStore.getState().projects.find((p) => p.id === projectId)
       const addedFile = project?.knowledgeBase[project.knowledgeBase.length - 1]
+      if (!addedFile) throw new Error(`Knowledge file was not added to project ${projectId}`)
 
       logger.info(`Added knowledge file to project ${projectId}: ${file.name}`)
 
-      return addedFile!
+      return addedFile
     },
 
     removeKnowledgeFile: async (projectId: string, fileId: string) => {

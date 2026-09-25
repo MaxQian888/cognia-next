@@ -468,6 +468,43 @@ describe("Project API", () => {
       expect(mockProjects[0].knowledgeBase.length).toBe(2)
     })
 
+    it("returns the file it added, read after the store replaced the row", async () => {
+      // The real store swaps the project object on every mutation, so the
+      // snapshot taken before the write still holds the old knowledge list.
+      const { useProjectStore } = jest.requireMock("@/stores/project/project-store") as {
+        useProjectStore: { getState: jest.Mock }
+      }
+      const live = useProjectStore.getState()
+      useProjectStore.getState.mockImplementationOnce(() => ({
+        ...live,
+        projects: [...mockProjects],
+        addKnowledgeFile: (projectId: string, input: Omit<KnowledgeFile, "id">) => {
+          const idx = mockProjects.findIndex((p) => p.id === projectId)
+          mockProjects[idx] = {
+            ...mockProjects[idx],
+            knowledgeBase: [
+              ...mockProjects[idx].knowledgeBase,
+              { ...input, id: "file-new", createdAt: new Date(), updatedAt: new Date() },
+            ],
+          }
+        },
+      }))
+      const api = createProjectAPI(testPluginId)
+
+      const file = await api.addKnowledgeFile("kb-proj", { name: "fresh.md", content: "x" })
+
+      expect(file.id).toBe("file-new")
+      expect(file.name).toBe("fresh.md")
+    })
+
+    it("refuses a knowledge file for a project that does not exist", async () => {
+      const api = createProjectAPI(testPluginId)
+
+      await expect(
+        api.addKnowledgeFile("no-such-project", { name: "a.md", content: "x" })
+      ).rejects.toThrow("Project not found")
+    })
+
     it("should infer file type from extension", async () => {
       const api = createProjectAPI(testPluginId)
 

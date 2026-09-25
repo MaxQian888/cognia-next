@@ -81,3 +81,34 @@ describe("useEffectiveSkills", () => {
     expect(result.current.activeCount).toBe(0)
   })
 })
+
+describe("useEffectiveSkills with plugin skills", () => {
+  const { registerSkill, unregisterSkillsByPlugin } = jest.requireActual<
+    typeof import("@/lib/plugin/registries/skill-registry")
+  >("@/lib/plugin/registries/skill-registry")
+
+  afterEach(() => {
+    unregisterSkillsByPlugin("acme")
+  })
+
+  it("hydrates a picked plugin skill from the registry so its chip renders", () => {
+    registerSkill(
+      "acme:review",
+      {
+        id: "acme:review",
+        name: "Code review",
+        description: "Reviews a diff",
+        source: { kind: "inline", markdown: "# review" },
+      },
+      { pluginId: "acme" }
+    )
+    rowsRef.current = [mkSkill("a", "Alpha")]
+    const { result } = renderHook(() =>
+      useEffectiveSkills({ ephemeralSkillIds: ["a", "acme:review", "gone"] })
+    )
+    expect(result.current.items.map((i) => [i.skill.id, i.skill.name, i.origin])).toEqual([
+      ["a", "Alpha", "chat"],
+      ["acme:review", "Code review", "plugin"],
+    ])
+  })
+})

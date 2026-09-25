@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -108,5 +110,18 @@ describe("schedule.list", () => {
   it("is a read, so it never touches the policy gate", async () => {
     await run("schedule.list", { limit: 25 })
     expect(authorizeTaskWrite).not.toHaveBeenCalled()
+  })
+})
+
+describe("schedule.list · agent access", () => {
+  it("refuses to read the schedule once agents may not manage it", async () => {
+    loadSchedulerPolicy.mockResolvedValueOnce({ agentToolsEnabled: false })
+    await expect(
+      getSharedBuiltInSkillRegistry()
+        .list()
+        .find((entry) => entry.id === "schedule.list")!
+        .execute({ limit: 20 } as never, { sessionId: "sess-1" } as BuiltInSkillContext)
+    ).rejects.toThrow(/not allowed to manage your schedule/)
+    expect(scheduler.getAllTasks).not.toHaveBeenCalled()
   })
 })

@@ -99,16 +99,23 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
         onOpenChange(next)
       }}
     >
-      <DialogContent className="w-[95vw] sm:max-w-md">
-        <DialogHeader>
+      {/* Bounded to the viewport: header and footer stay put and the form is
+          the one scroller, so a long manifest-validation error under a phone
+          keyboard can't push Fetch off screen. The body's `-m-1 p-1` keeps the
+          input's focus ring from being clipped by it. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] flex-col sm:max-w-md">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <GlobeIcon className="size-4" />
+            <GlobeIcon className="size-4 shrink-0" />
             {t("title")}
           </DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
+        <div
+          className="-m-1 min-h-0 flex-1 space-y-2 overflow-y-auto p-1"
+          data-testid="plugin-install-from-url-body"
+        >
           <Label htmlFor="plugin-install-url">{t("label")}</Label>
           <Input
             id="plugin-install-url"
@@ -122,14 +129,14 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
             disabled={busy}
           />
           {error && (
-            <p role="alert" className="flex items-center gap-1.5 text-sm text-destructive">
-              <AlertTriangleIcon className="size-3.5" />
-              {error}
+            <p role="alert" className="flex items-start gap-1.5 text-sm text-destructive">
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">{error}</span>
             </p>
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             {t("cancel")}
           </Button>

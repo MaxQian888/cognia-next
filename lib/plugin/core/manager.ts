@@ -89,7 +89,14 @@ const LIFECYCLE_HOOK_TIMEOUT_MS = 30_000
  * subprocess and provisions its own virtualenv, which is not a cost to impose
  * on someone who has never asked for a repository wiki.
  */
-const MANUAL_ENABLE_ONLY_BUILTINS = new Set(["github-delivery", "cognia-repowiki"])
+// Installer-seeded plugins whose activation provisions a Python venv (and, for
+// Laya, downloads a model checkpoint) stay dormant until the user opts in, so
+// shipping them costs nothing at startup for everyone else.
+const MANUAL_ENABLE_ONLY_BUILTINS = new Set([
+  "github-delivery",
+  "cognia-repowiki",
+  "cognia-laya-guard",
+])
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
@@ -652,6 +659,20 @@ export const CHAT_INTERCEPT_HOOKS = [
   "onMessageSend",
   "onMessageReceive",
 ] as const
+
+/**
+ * Hooks that sit on the IM connector pipeline, and the permission each needs.
+ * `onConnectorInbound` sees (and can drop or label) every inbound message from
+ * Lark / Slack / Discord / Telegram before an agent does; `onConnectorOutbound`
+ * rewrites what is sent. Both used to register with no permission at all, so a
+ * plugin could read every IM conversation without the permission review ever
+ * showing it. Enforced in `validateHookDeclarations`, for TypeScript and Python
+ * hook bags alike.
+ */
+export const CONNECTOR_HOOK_PERMISSIONS = {
+  onConnectorInbound: "connectors:read",
+  onConnectorOutbound: "connectors:send",
+} as const
 
 // =============================================================================
 // Plugin Manager Singleton + Factory (PR-E)
@@ -4286,11 +4307,16 @@ export class PluginManager {
         const { purgePluginExternalServices } = await import("@/lib/external-services/lifecycle")
         await purgePluginExternalServices(pluginId)
 
-        // Remove files via Tauri
-        await invoke("plugin_uninstall", {
-          pluginId,
-          pluginPath: plugin.path,
-        })
+        // Remove the install directory. Only a native host has one: a builtin
+        // lives in the bundle, and a browser / mobile host has no plugin
+        // directory to delete — invoking there threw, and a successful
+        // uninstall was recorded as a failure with the plugin left in error.
+        if (this.canInvokeNativeHost() && !plugin.path?.startsWith("builtin://")) {
+          await this.invokeNativeHost("plugin_uninstall", {
+            pluginId,
+            pluginPath: plugin.path,
+          })
+        }
 
         // Remove from store
         await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
@@ -5276,7 +5302,11 @@ export class PluginManager {
     const plugin = usePluginStore.getState().plugins[pluginId]
 
     const definition = this.loader.getDefinition(pluginId)
-    if (definition?.deactivate) {
+    // No context means activate() never ran, so there is nothing of the
+    // plugin's to tear down — and a deactivate() handed `undefined` is exactly
+    // what taught plugins to write `ctx?.` on a fully mounted context.
+    const deactivateContext = this.contexts.get(pluginId)
+    if (definition?.deactivate && deactivateContext) {
       // Swallow-and-record (W6.2): a throwing deactivate() must not abort the
       // teardown below, or the plugin leaks permissions/IPC/WASM grants.
       //
@@ -5290,7 +5320,7 @@ export class PluginManager {
       // `this.contexts.delete(pluginId)` runs AFTER this in every caller, so
       // the entry is still live here.
       try {
-        await Promise.resolve(definition.deactivate(this.contexts.get(pluginId)))
+        await Promise.resolve(definition.deactivate(deactivateContext))
       } catch (error) {
         const runtimeGeneration = this.loader.getRuntimeGeneration(pluginId)
         this.runtimeCleanupFailures.set(pluginId, {
@@ -5405,6 +5435,7 @@ export class PluginManager {
         // way to bill its model calls to the session the user typed in — and on
         // the CLI, where nothing is ambient, it simply cannot reach a provider.
         const result = await this.hooksManager.dispatchOnCommand(manifestCommand.id, argv, {
+          rawArgs: args,
           ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}),
           ...(ctx?.characterId ? { characterId: ctx.characterId } : {}),
           ...(ctx?.signal ? { signal: ctx.signal } : {}),
@@ -5424,6 +5455,9 @@ export class PluginManager {
         id: namespacedId,
         name: manifestCommand.name,
         description: manifestCommand.description || manifestCommand.name,
+        ...(manifestCommand.descriptionKey
+          ? { descriptionKey: manifestCommand.descriptionKey }
+          : {}),
         source: "plugin",
         pluginId,
         handler,
@@ -5449,6 +5483,9 @@ export class PluginManager {
           // suffix purely for registry bookkeeping (dedup + unregister).
           name: alias,
           description: manifestCommand.description || manifestCommand.name,
+          ...(manifestCommand.descriptionKey
+            ? { descriptionKey: manifestCommand.descriptionKey }
+            : {}),
           source: "plugin",
           pluginId,
           handler,
@@ -6806,6 +6843,17 @@ export class PluginManager {
         throw new Error(
           `Plugin "${pluginId}" declares chat-interception hook(s) ` +
             `${declaredIntercepts.join(", ")} without the "hooks:chat-intercept" permission.`
+        )
+      }
+    }
+
+    for (const [hookName, permission] of Object.entries(CONNECTOR_HOOK_PERMISSIONS)) {
+      if ((hooks as Record<string, unknown>)[hookName] === undefined) continue
+      const connectorPermissions: readonly string[] =
+        usePluginStore.getState().plugins[pluginId]?.manifest?.permissions ?? []
+      if (!connectorPermissions.includes(permission)) {
+        throw new Error(
+          `Plugin "${pluginId}" declares the ${hookName} hook without the "${permission}" permission.`
         )
       }
     }

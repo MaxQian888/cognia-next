@@ -157,9 +157,11 @@ jest.mock("../devtools/debugger", () => ({
 }))
 
 // Mock plugin store
+const mockStorePlugins: Record<string, { config?: Record<string, unknown> }> = {}
 jest.mock("@/stores/plugin-runtime", () => ({
   usePluginStore: {
     getState: () => ({
+      plugins: mockStorePlugins,
       emitEvent: jest.fn(),
       registerPluginTool: jest.fn(),
       unregisterPluginTool: jest.fn(),
@@ -1990,6 +1992,46 @@ describe("agent imperative API", () => {
       expect(result).toMatchObject({ ok: false, code: "blocked" })
     })
 
+    it("gates web_clone on network + filesystem write, not agent:control, and clamps its target", async () => {
+      const runHostTool = jest.fn(async () => ({ ok: true, envelope: { ok: true } }))
+      setAmbientHostRuntime(() => ({
+        runHostTool,
+        chat: async function* () {},
+        embed: async () => [],
+        getDefaultProvider: () => "openai",
+        getDefaultModel: () => "gpt-4o",
+      }))
+      const job = { mode: "snapshot", url: "https://docs.allowed.test/", options: { output: "/o" } }
+
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const withoutGrants = createPluginContext(createMockPlugin(), mockManager)
+      await expect(withoutGrants.agent.invokeTool("web_clone", { job } as never)).rejects.toThrow(
+        /requires the "filesystem:write" permission/
+      )
+
+      initializePluginPermissions(PLUGIN_ID, ["network:fetch", "filesystem:write"])
+      ;(mockManager.getPlugin as jest.Mock).mockImplementation(() =>
+        createMockPlugin({
+          manifest: {
+            ...mockManifest,
+            permissions: ["network:fetch", "filesystem:write"],
+            networkAccess: { allowedDomains: ["docs.allowed.test"] },
+          },
+        })
+      )
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(
+        ctx.agent.invokeTool("web_clone", {
+          job: { ...job, url: "https://elsewhere.example/" },
+        } as never)
+      ).resolves.toMatchObject({ ok: false, code: "blocked" })
+      expect(runHostTool).not.toHaveBeenCalled()
+
+      await ctx.agent.invokeTool("web_clone", { job } as never)
+      expect(runHostTool).toHaveBeenCalledWith("web_clone", { job }, {})
+      ;(mockManager.getPlugin as jest.Mock).mockImplementation(() => createMockPlugin())
+    })
+
     it("allows a promoted web_fetch to a host the manifest declared", async () => {
       initializePluginPermissions(PLUGIN_ID, ["agent:control"])
       const runHostTool = jest.fn(async () => ({ ok: true, status: 200 }))
@@ -2079,7 +2121,11 @@ describe("agent imperative API", () => {
 
     it("adds an instance from a preset then executes it", async () => {
       initializePluginPermissions(PLUGIN_ID, ["agent:dispatch-external"])
-      const execute = jest.fn(async () => ({ output: "done" }))
+      const execute = jest.fn(async () => ({
+        success: true,
+        finalResponse: "done",
+        tokenUsage: { input: 1, output: 2 },
+      }))
       const addAgent = jest.fn(async () => ({ config: { id: "ext-1" } }))
       mockGetExternalManager.mockReturnValue({
         getAgent: jest.fn(() => undefined),
@@ -2093,8 +2139,14 @@ describe("agent imperative API", () => {
 
       expect(mockCreateAgentFromPreset).toHaveBeenCalledWith("codex")
       expect(addAgent).toHaveBeenCalled()
-      expect(execute).toHaveBeenCalledWith("ext-1", "do it", undefined)
-      expect(result).toEqual({ output: "done" })
+      expect(execute).toHaveBeenCalledWith("ext-1", "do it", {})
+      // The raw manager result is normalized to the SDK's run shape.
+      expect(result).toMatchObject({
+        agentId: "ext-1",
+        text: "done",
+        status: "completed",
+        usage: { input: 1, output: 2 },
+      })
     })
 
     it("executes directly against a live instance id without re-adding", async () => {
@@ -2111,7 +2163,7 @@ describe("agent imperative API", () => {
       await ctx.agent.runExternalAgent("live-1", "ping")
 
       expect(addAgent).not.toHaveBeenCalled()
-      expect(execute).toHaveBeenCalledWith("live-1", "ping", undefined)
+      expect(execute).toHaveBeenCalledWith("live-1", "ping", {})
     })
 
     it("throws when neither a live agent nor a preset matches", async () => {
@@ -2283,7 +2335,12 @@ describe("python host-call parity (ADR-0145)", () => {
         // `contextPanels`, and hands selections back with `chat`.
         "a2ui",
         "agent",
+        // Opened to python deliberately: ctx.commands / ctx.templates on
+        // 2026-09-02, ctx.ai / ctx.bots / ctx.integrations on 2026-09-12.
+        "ai",
+        "bots",
         "chat",
+        "commands",
         "contextPanels",
         // ADR-0194: a python plugin both provides (laya) and consumes System-1
         // decisions through the same guarded ctx.decisions.
@@ -2292,10 +2349,12 @@ describe("python host-call parity (ADR-0145)", () => {
         "fs",
         "git",
         "i18n",
+        "integrations",
         "logger",
         "notifications",
         "secrets",
         "storage",
+        "templates",
         // A Python plugin could START a Squad through `ctx.agent.runTeam`, which
         // is python-open and needs only `agent:dispatch`, and could not READ
         // one, because `ctx.team` listed only frontend and hybrid. That inverts
@@ -2366,5 +2425,58 @@ describe("python host-call parity (ADR-0145)", () => {
     expect(pluginApiRuntimeForType("vscode-extension")).toBe("vscode")
     expect(pluginApiRuntimeForType("frontend")).toBe("frontend")
     expect(pluginApiRuntimeForType(undefined)).toBe("frontend")
+  })
+})
+
+describe("ctx → catalog parity", () => {
+  /**
+   * The governed context throws `unmapped` for any callable `ctx.*` path the
+   * contract catalog does not list, whatever the plugin's permissions. The
+   * python suite above checks catalog → context; this is the other direction,
+   * so a method added to a `create*API()` without a catalog row fails here
+   * instead of failing every plugin that calls it at runtime.
+   */
+  const catalogMethodIds = new Set(
+    PLUGIN_API_NAMESPACE_CONTRACTS.flatMap((namespace) =>
+      namespace.methods.map((method) => method.id)
+    )
+  )
+
+  const callablePaths = (root: unknown, prefix: string, seen = new Set<unknown>()): string[] => {
+    if (root === null || typeof root !== "object" || seen.has(root)) return []
+    seen.add(root)
+    const prototype = Object.getPrototypeOf(root)
+    if (prototype !== Object.prototype && prototype !== null) return []
+    return Object.entries(root as Record<string, unknown>).flatMap(([key, value]) => {
+      const path = `${prefix}.${key}`
+      if (typeof value === "function") return [path]
+      return callablePaths(value, path, seen)
+    })
+  }
+
+  it.each(PLUGIN_API_NAMESPACE_CONTRACTS.map((namespace) => [namespace.id] as const))(
+    "every function on ctx.%s has a catalog row",
+    (id) => {
+      const context = createFullPluginContext(createMockPlugin(), mockManager)
+      const surface = (context as unknown as Record<string, unknown>)[id]
+      const unmapped = callablePaths(surface, id).filter((path) => !catalogMethodIds.has(path))
+      expect(unmapped).toEqual([])
+    }
+  )
+})
+
+describe("ctx.config", () => {
+  afterEach(() => {
+    delete mockStorePlugins["test-plugin"]
+  })
+
+  it("reads the plugin's current settings, not the activation-time snapshot", () => {
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, mockManager)
+    expect(context.config).toEqual(plugin.config)
+
+    // The store replaces the config object on every settings change.
+    mockStorePlugins["test-plugin"] = { config: { privacyMode: true } }
+    expect(context.config).toEqual({ privacyMode: true })
   })
 })

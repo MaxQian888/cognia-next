@@ -5,6 +5,7 @@ import {
   checkAuthorImports,
   checkPluginGovernance,
   findForbiddenAuthorImports,
+  findUnsharedFrameworkImports,
   isHostIntegrationTest,
   readGovernanceBaseline,
   stripComments,
@@ -137,5 +138,22 @@ test("a URL's // is not a comment", () => {
   assert.deepEqual(
     findForbiddenAuthorImports('const u = "https://x.dev"; import { a } from "@/lib/x"'),
     ["@/lib/x"]
+  )
+})
+
+test("flags host framework modules a bundled plugin cannot use, but not their types", () => {
+  assert.deepEqual(
+    findUnsharedFrameworkImports(`
+      import { useLocale } from "next-intl"
+      import { useRouter } from "next/navigation"
+      import { useLiveQuery } from "dexie-react-hooks"
+      const fs = await import("@tauri-apps/plugin-fs")
+      import type { Table } from "dexie"
+      import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime"
+      import { Document } from "docx"
+      import { useLiveQuery as ok } from "@cognia/plugin-ui"
+      // import { nope } from "next-intl"
+    `),
+    ["next-intl", "next/navigation", "dexie-react-hooks", "@tauri-apps/plugin-fs"]
   )
 })

@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -158,5 +160,122 @@ describe("schedule.create", () => {
     expect(rendered).toContain("0 9 * * *")
     // A card that hides the payload is not a confirmation of anything.
     expect(rendered).toContain("summarise my inbox")
+  })
+})
+
+describe("schedule.create · preflight and confirmation", () => {
+  const future = new Date(Date.now() + 86_400_000).toISOString()
+  function preflight(args: Record<string, unknown>, humanConfirmed = true) {
+    return skill("schedule.create").preflight!(args as never, { ...ctx, humanConfirmed })
+  }
+
+  it("rejects an unparseable cron before the user is asked", async () => {
+    await expect(
+      preflight({
+        name: "n",
+        type: "chat",
+        trigger: { type: "cron", cronExpression: "every morning" },
+        payload: { prompt: "hi" },
+      })
+    ).rejects.toThrow()
+    expect(authorizeTaskWrite).not.toHaveBeenCalled()
+  })
+
+  it("rejects a one-off time already in the past", async () => {
+    await expect(
+      preflight({
+        name: "n",
+        type: "chat",
+        trigger: { type: "once", runAt: "2020-01-01T00:00:00Z" },
+        payload: { prompt: "hi" },
+      })
+    ).rejects.toThrow(/future/)
+  })
+
+  it("rejects a payload the executor would reject", async () => {
+    await expect(
+      preflight({
+        name: "n",
+        type: "agent",
+        trigger: { type: "once", runAt: future },
+        payload: { prompt: "hi" },
+      })
+    ).rejects.toThrow(/characterId/)
+    await expect(
+      preflight({
+        name: "n",
+        type: "workflow",
+        trigger: { type: "once", runAt: future },
+        payload: {},
+      })
+    ).rejects.toThrow(/workflowId/)
+  })
+
+  it("asks the policy with the confirmation that is coming, as a create", async () => {
+    await preflight({
+      name: "n",
+      type: "chat",
+      trigger: { type: "cron", cronExpression: "0 9 * * 1-5" },
+      payload: { prompt: "hi" },
+    })
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "agent", operation: "create", humanConfirmed: true })
+    )
+  })
+
+  it("surfaces a policy refusal in preflight, so no dialog is shown for it", async () => {
+    authorizeTaskWrite.mockResolvedValue({
+      allowed: false,
+      reason: "agent-tools-disabled",
+      message: "Agents are not allowed to manage your schedule.",
+    })
+    await expect(
+      preflight({
+        name: "n",
+        type: "chat",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        payload: { prompt: "hi" },
+      })
+    ).rejects.toThrow(/not allowed to manage/)
+  })
+
+  it("executes a confirmed write with humanConfirmed, which the policy counts", async () => {
+    scheduler.createTask.mockResolvedValue(task())
+    await skill("schedule.create").execute(
+      {
+        name: "n",
+        type: "chat",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        payload: { prompt: "hi" },
+        paused: false,
+      } as never,
+      { ...ctx, humanConfirmed: true }
+    )
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ humanConfirmed: true, operation: "create" })
+    )
+    expect(scheduler.createTask).toHaveBeenCalled()
+  })
+
+  it("refuses an unattended write the policy says needs a person", async () => {
+    authorizeTaskWrite.mockResolvedValue({
+      allowed: true,
+      requiresConfirmation: true,
+      reason: "confirmation-required",
+      message: 'Scheduling a "goal" task needs your confirmation.',
+    })
+    await expect(
+      skill("schedule.create").execute(
+        {
+          name: "n",
+          type: "goal",
+          trigger: { type: "interval", intervalMs: 60_000 },
+          payload: { objective: "x" },
+          paused: false,
+        } as never,
+        { ...ctx, humanConfirmed: false }
+      )
+    ).rejects.toThrow(/did not ask you to confirm/)
+    expect(scheduler.createTask).not.toHaveBeenCalled()
   })
 })

@@ -71,9 +71,10 @@ describe("permission catalog parity", () => {
   })
 
   it("gives the consent screen something to say about every catalogued permission", () => {
-    // `PERMISSION_DESCRIPTIONS[perm] ?? perm` is what the marketplace detail
-    // view and the WASM grant sheet render — a missing entry means the user is
-    // asked to approve a raw permission string.
+    // Every consent surface localizes `plugins.permissions.descriptions.<perm>`
+    // and falls back to `PERMISSION_DESCRIPTIONS[perm]` (then the raw id) —
+    // a missing entry means the user is asked to approve a raw permission
+    // string. The i18n keys are pinned per locale by the i18n parity gate.
     const undescribed = [...catalog].filter(
       (permission) => !(permission in PERMISSION_DESCRIPTIONS)
     )

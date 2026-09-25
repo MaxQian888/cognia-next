@@ -159,6 +159,35 @@ describe("PluginSurface", () => {
     }
   )
 
+  // A tool-result card decorates host data. When the plugin's card throws, the
+  // plain result must come back instead of an error card replacing it.
+  it("shows the host fallback plus a small retry strip for a crashed block surface", async () => {
+    let shouldThrow = true
+    const Recoverable = () => <Boom enabled={shouldThrow} />
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    render(
+      <PluginSurface
+        pluginId="acme.reference"
+        pluginName="Reference Plugin"
+        surfaceId="tool-renderer:web_fetch"
+        formFactor="block"
+        blockFallback={<pre>plain tool output</pre>}
+      >
+        <Recoverable />
+      </PluginSurface>
+    )
+    expect(screen.getByText("plain tool output")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Reference Plugin's card failed to render, so the plain result is shown."
+    )
+    shouldThrow = false
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(await screen.findByText("recovered content")).toBeInTheDocument()
+    expect(screen.queryByText("plain tool output")).toBeNull()
+    errorSpy.mockRestore()
+  })
+
   it("uses the registered manifest name when a host omits pluginName", () => {
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
     render(

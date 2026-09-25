@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string) => key,
 }))
 

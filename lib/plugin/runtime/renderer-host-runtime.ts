@@ -30,8 +30,13 @@ import {
 } from "@cognia/vector/embedding"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { AIChatChunk, AIChatMessage, AIChatOptions, AIEmbedOptions } from "@/types/plugin"
-import type { PluginAuthorCallableHostTool } from "@/types/plugin/plugin-host-tools"
+import type {
+  PluginAuthorCallableHostTool,
+  PluginWebCloneEnvelope,
+} from "@/types/plugin/plugin-host-tools"
+import { isTauri } from "@/lib/platform/detect"
 
+import { getActiveWorkspaceRoot } from "@/lib/plugin/api/workspace-root"
 import { runAuthorCallableHostTool } from "./author-host-tools"
 import type { PluginHostRuntime, PluginHostRuntimeRequest } from "./host-runtime"
 
@@ -220,7 +225,23 @@ export function createRendererHostRuntime(_request: PluginHostRuntimeRequest): P
       options?: { signal?: AbortSignal }
     ) => {
       const { resolveWebToolDeps } = await import("@/lib/claude/plugin-tool-ipc")
-      return runAuthorCallableHostTool(name, args, await resolveWebToolDeps(), options)
+      return runAuthorCallableHostTool(name, args, await resolveWebToolDeps(), {
+        ...options,
+        // The snapshot engine is vendored into the desktop app only.
+        ...(isTauri()
+          ? {
+              native: {
+                webCloneSnapshot: async (job) => {
+                  const { invoke } = await import("@tauri-apps/api/core")
+                  return invoke<{ envelope: PluginWebCloneEnvelope }>("web_clone_snapshot", {
+                    job,
+                  })
+                },
+                workspaceRoot: getActiveWorkspaceRoot,
+              },
+            }
+          : {}),
+      })
     },
     chat: (messages: AIChatMessage[], options?: AIChatOptions) =>
       streamBuiltInChat(messages, options),

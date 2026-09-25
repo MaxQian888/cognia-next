@@ -3,6 +3,7 @@ import {
   PLUGIN_CAPABILITY_CONTRACTS,
   CANONICAL_EXTENSION_POINTS,
   CANONICAL_RUNTIME_POINTS,
+  EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS,
   auditPluginCapabilityContracts,
   getExtensionPointContract,
   getAllContributions,
@@ -13,6 +14,10 @@ import {
 } from "./index"
 
 describe("plugin-sdk: contracts", () => {
+  it("publishes the vscode RPC methods the Host refuses", () => {
+    expect(EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS).toContain("window:createOutputChannel")
+  })
+
   it("re-exports capability contract metadata for all canonical capabilities", () => {
     expect(CANONICAL_PLUGIN_CAPABILITIES).toContain("auth-provider")
     expect(CANONICAL_PLUGIN_CAPABILITIES).toContain("quick-action")

@@ -4084,6 +4084,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "agent.invokeDependencyTool",
+                "name": "invokeDependencyTool",
+                "requiredPermissions": [
+                    "agent:control",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "agent.registerExternalAgentAdapter",
                 "name": "registerExternalAgentAdapter",
                 "requiredPermissions": [],
@@ -4515,6 +4529,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "artifact.listVersions",
+                "name": "listVersions",
+                "requiredPermissions": [
+                    "artifact:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "artifact.onArtifactChange",
                 "name": "onArtifactChange",
                 "requiredPermissions": [
@@ -4554,6 +4582,20 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "returned-disposer",
+                },
+            },
+            {
+                "id": "artifact.restoreVersion",
+                "name": "restoreVersion",
+                "requiredPermissions": [
+                    "artifact:write",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
                 },
             },
             {
@@ -4733,6 +4775,22 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "automation.clickText",
+                "name": "clickText",
+                "requiredPermissions": [
+                    "automation:read",
+                    "automation:screenshot",
+                    "automation:click",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "automation.cursorPosition",
                 "name": "cursorPosition",
                 "requiredPermissions": [
@@ -4765,6 +4823,21 @@ API_NAMESPACE_CONTRACTS = [
                 "name": "find",
                 "requiredPermissions": [
                     "automation:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "automation.findText",
+                "name": "findText",
+                "requiredPermissions": [
+                    "automation:read",
+                    "automation:screenshot",
                 ],
                 "consentTier": "policy",
                 "risk": "medium",
@@ -5025,6 +5098,21 @@ API_NAMESPACE_CONTRACTS = [
                 "consentTier": "policy",
                 "risk": "high",
                 "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "automation.zoom",
+                "name": "zoom",
+                "requiredPermissions": [
+                    "automation:read",
+                    "automation:screenshot",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
@@ -6066,6 +6154,20 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "chat.addContextSelection",
                 "name": "addContextSelection",
+                "requiredPermissions": [
+                    "session:write",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "chat.appendMessagePart",
+                "name": "appendMessagePart",
                 "requiredPermissions": [
                     "session:write",
                 ],
@@ -7335,6 +7437,198 @@ API_NAMESPACE_CONTRACTS = [
                 "consentTier": "policy",
                 "risk": "high",
                 "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.surface",
+                "name": "a2ui.surface",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.segment",
+                "name": "a2ui.segment",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.message",
+                "name": "a2ui.message",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.text",
+                "name": "a2ui.component.text",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.button",
+                "name": "a2ui.component.button",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.card",
+                "name": "a2ui.component.card",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.row",
+                "name": "a2ui.component.row",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.column",
+                "name": "a2ui.component.column",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.alert",
+                "name": "a2ui.component.alert",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.image",
+                "name": "a2ui.component.image",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.link",
+                "name": "a2ui.component.link",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.select",
+                "name": "a2ui.component.select",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.textField",
+                "name": "a2ui.component.textField",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.list",
+                "name": "a2ui.component.list",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.divider",
+                "name": "a2ui.component.divider",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "connectors.a2ui.component.badge",
+                "name": "a2ui.component.badge",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",
@@ -9788,6 +10082,18 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "i18n.getLocale",
+                "name": "getLocale",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "i18n.getLocaleName",
                 "name": "getLocaleName",
                 "requiredPermissions": [],
@@ -9802,6 +10108,18 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "i18n.hasTranslation",
                 "name": "hasTranslation",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "i18n.hasKey",
+                "name": "hasKey",
                 "requiredPermissions": [],
                 "consentTier": "none",
                 "risk": "low",
@@ -9989,6 +10307,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "integrations.checkAccountHealth",
+                "name": "checkAccountHealth",
+                "requiredPermissions": [
+                    "integrations:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "integrations.createAccount",
                 "name": "createAccount",
                 "requiredPermissions": [
@@ -10045,6 +10377,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "integrations.getIngressDeadletter",
+                "name": "getIngressDeadletter",
+                "requiredPermissions": [
+                    "integrations:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "integrations.getIngressPublicUrl",
                 "name": "getIngressPublicUrl",
                 "requiredPermissions": [
@@ -10080,6 +10426,34 @@ API_NAMESPACE_CONTRACTS = [
                 ],
                 "consentTier": "policy",
                 "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "integrations.listIngressDeadletters",
+                "name": "listIngressDeadletters",
+                "requiredPermissions": [
+                    "integrations:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "integrations.listResources",
+                "name": "listResources",
+                "requiredPermissions": [
+                    "integrations:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
                 "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
@@ -10145,6 +10519,20 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "integrations.removeSubscription",
                 "name": "removeSubscription",
+                "requiredPermissions": [
+                    "integrations:manage",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "integrations.requeueIngressDeadletter",
+                "name": "requeueIngressDeadletter",
                 "requiredPermissions": [
                     "integrations:manage",
                 ],
@@ -15076,6 +15464,104 @@ API_NAMESPACE_CONTRACTS = [
                     "kind": "none",
                 },
             },
+            {
+                "id": "templates.saveDraft",
+                "name": "saveDraft",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.publish",
+                "name": "publish",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.fork",
+                "name": "fork",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.deprecate",
+                "name": "deprecate",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.deleteDraft",
+                "name": "deleteDraft",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.exportPackage",
+                "name": "exportPackage",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "templates.importPackage",
+                "name": "importPackage",
+                "requiredPermissions": [
+                    "templates:library:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
         ],
     },
     {
@@ -15674,6 +16160,18 @@ API_NAMESPACE_CONTRACTS = [
             {
                 "id": "ui.showToast",
                 "name": "showToast",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "ui.navigate",
+                "name": "navigate",
                 "requiredPermissions": [],
                 "consentTier": "none",
                 "risk": "low",

@@ -7,6 +7,10 @@ import type { PermissionAuditEntry } from "@/lib/plugin/security/permission-guar
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  // Rows render their time through `<AuditLogEntry>`'s next-intl formatter.
+  useFormatter: () => ({
+    dateTime: (value: Date | number) => `fmt:${new Date(value).toISOString()}`,
+  }),
 }))
 
 let mockAuditLog: PermissionAuditEntry[] = []
@@ -63,6 +67,14 @@ describe("PluginAuditLog", () => {
     render(<PluginAuditLog />)
     const list = screen.getByTestId("plugin-audit-log-list")
     expect(list.querySelectorAll("li").length).toBe(3)
+    // Localized through the formatter, machine-readable ISO kept on <time>.
+    const times = Array.from(list.querySelectorAll("time"))
+    expect(times.map((el) => el.getAttribute("dateTime"))).toEqual([
+      "2026-01-01T10:10:00.000Z",
+      "2026-01-01T10:05:00.000Z",
+      "2026-01-01T10:00:00.000Z",
+    ])
+    expect(times[0]).toHaveTextContent("fmt:2026-01-01T10:10:00.000Z")
   })
 
   it("renders the empty state when there are no entries", () => {

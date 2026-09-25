@@ -1,14 +1,24 @@
+jest.mock("@/lib/files/save-export", () => ({ saveExport: jest.fn() }))
+jest.mock("@/lib/platform/detect", () => ({
+  isCapacitor: jest.fn(() => false),
+  isTauri: jest.fn(() => false),
+}))
 jest.mock("@/lib/files/file-bridge", () => ({
   pickAndReadBinaryFiles: jest.fn(),
   saveBinaryFileAs: jest.fn(),
 }))
 
 import { pickAndReadBinaryFiles, saveBinaryFileAs } from "@/lib/files/file-bridge"
+import { saveExport } from "@/lib/files/save-export"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { initializePluginPermissions } from "./permission-api"
 import { authorizePluginAttachment, createFilesAPI, revokePluginFileHandles } from "./files-api"
 
 const pick = jest.mocked(pickAndReadBinaryFiles)
 const save = jest.mocked(saveBinaryFileAs)
+const saveMobile = jest.mocked(saveExport)
+const onCapacitor = jest.mocked(isCapacitor)
+const onTauri = jest.mocked(isTauri)
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -76,7 +86,54 @@ it("saves bytes through the cross-platform bridge", async () => {
       mimeType: "application/octet-stream",
       bytes: new Uint8Array([9]),
     })
-  ).resolves.toEqual({ saved: true })
+  ).resolves.toEqual({ saved: true, platform: "web", location: "downloads" })
+})
+
+it("reports a cancelled desktop save dialog as not saved", async () => {
+  onTauri.mockReturnValueOnce(true)
+  save.mockResolvedValue(false)
+  await expect(
+    createFilesAPI("office").save({
+      suggestedName: "book.xlsx",
+      mimeType: "application/octet-stream",
+      bytes: new Uint8Array([9]),
+    })
+  ).resolves.toEqual({ saved: false })
+})
+
+it("writes into Documents on mobile instead of a download anchor the WebView ignores", async () => {
+  onCapacitor.mockReturnValue(true)
+  saveMobile.mockResolvedValue({
+    kind: "saved",
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/book.xlsx",
+    filename: "book.xlsx",
+  })
+  await expect(
+    createFilesAPI("office").save({
+      suggestedName: "book.xlsx",
+      mimeType: "application/octet-stream",
+      bytes: new Uint8Array([9]),
+    })
+  ).resolves.toEqual({
+    saved: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/book.xlsx",
+  })
+  expect(saveMobile).toHaveBeenCalledWith(
+    expect.objectContaining({ filename: "book.xlsx", mimeType: "application/octet-stream" })
+  )
+  expect(save).not.toHaveBeenCalled()
+
+  saveMobile.mockResolvedValue({ kind: "error", message: "disk full" })
+  await expect(
+    createFilesAPI("office").save({
+      suggestedName: "book.xlsx",
+      mimeType: "application/octet-stream",
+      bytes: new Uint8Array([9]),
+    })
+  ).rejects.toThrow("disk full")
+  onCapacitor.mockReturnValue(false)
 })
 
 it("rejects save suggestions that try to expose a filesystem path", async () => {

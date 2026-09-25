@@ -3202,6 +3202,12 @@ describe("PluginManager", () => {
       ).loader.loadedModules.set("disable-failure", {
         definition: { deactivate },
       })
+      // An activated plugin has a context; deactivate() receives it.
+      const activatedContext = { pluginId: "disable-failure" }
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set(
+        "disable-failure",
+        activatedContext
+      )
 
       // W6.2: a throwing deactivate() is swallowed-and-recorded — the
       // teardown continues and the disable SUCCEEDS, so the plugin can't
@@ -3209,6 +3215,7 @@ describe("PluginManager", () => {
       await expect(manager.disablePlugin("disable-failure")).resolves.toBeUndefined()
 
       expect(deactivate).toHaveBeenCalledTimes(1)
+      expect(deactivate).toHaveBeenCalledWith(activatedContext)
       expect(store.disablePlugin).toHaveBeenCalledWith("disable-failure", { viaManager: false })
       // The failure is not surfaced as a plugin ERROR state — the success
       // path clears the error field (null); it lands in the silent-failure
@@ -3685,6 +3692,27 @@ describe("PluginManager", () => {
 
       expect(enableSpy).not.toHaveBeenCalled()
     })
+
+    it.each(["cognia-repowiki", "cognia-laya-guard"])(
+      "does not automatically activate the installer-seeded %s plugin",
+      async (id) => {
+        const seeded: Plugin = {
+          manifest: { ...createManifest(id), activationEvents: ["startup"] },
+          status: "installed",
+          source: "local",
+          path: `/plugins/${id}`,
+          config: {},
+        }
+        mockGetState.mockReturnValue({ plugins: { [id]: seeded } })
+
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+        await manager.handleActivationEvent("startup")
+
+        expect(enableSpy).not.toHaveBeenCalled()
+      }
+    )
 
     it("still activates a browser-blocked plugin on the tauri profile (desktop unaffected)", async () => {
       // Runtime-profile gating is browser-only; on desktop the same builtin
@@ -4505,13 +4533,15 @@ describe("PluginManager", () => {
 
       const controller = new AbortController()
       const reportProgress = jest.fn()
-      const result = await registration!.handler("deep dive", {
+      const result = await registration!.handler("deep  dive\nsecond line", {
         sessionId: "s-1",
         characterId: "c-1",
         signal: controller.signal,
         reportProgress,
       })
-      expect(onCommand).toHaveBeenCalledWith("cmd-plugin.run", ["deep", "dive"], {
+      expect(onCommand).toHaveBeenCalledWith("cmd-plugin.run", ["deep", "dive", "second", "line"], {
+        // The body as typed survives for commands whose argument is text.
+        rawArgs: "deep  dive\nsecond line",
         sessionId: "s-1",
         characterId: "c-1",
         signal: controller.signal,
@@ -7164,6 +7194,16 @@ describe("chat-intercept hook permission gate", () => {
   it("leaves non-intercept hooks ungated", () => {
     seed([])
     expect(() => validate({ onLoad: jest.fn(), onEnable: jest.fn() })).not.toThrow()
+  })
+
+  it.each([
+    ["onConnectorInbound", "connectors:read"],
+    ["onConnectorOutbound", "connectors:send"],
+  ])("refuses %s without %s, and accepts it once declared", (hookName, permission) => {
+    seed([])
+    expect(() => validate({ [hookName]: jest.fn() })).toThrow(permission)
+    seed([permission])
+    expect(() => validate({ [hookName]: jest.fn() })).not.toThrow()
   })
 })
 

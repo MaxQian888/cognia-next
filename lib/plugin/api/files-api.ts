@@ -1,4 +1,6 @@
 import { pickAndReadBinaryFiles, saveBinaryFileAs } from "@/lib/files/file-bridge"
+import { saveExport } from "@/lib/files/save-export"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import type { PluginFileHandle, PluginFilesAPI } from "@/types/plugin"
 import { createApiGuardedAPI } from "./api-permission-gate"
 
@@ -113,14 +115,26 @@ export function createFilesAPI(pluginId: string): PluginFilesAPI {
         throw new Error("files.save suggestedName must be a filename without a path")
       }
       if (!mimeType.includes("/")) throw new Error("files.save mimeType is invalid")
-      return {
-        saved: await saveBinaryFileAs({
-          defaultName: suggestedName,
-          mimeType,
-          bytes,
-          filters: normalizeAccept([`.${suggestedName.split(".").pop() ?? "bin"}`]),
-        }),
+      // A WebView has no download handler: the `<a download>` fallback below
+      // does nothing inside WKWebView / Android WebView yet reports success,
+      // so every plugin export "worked" on a phone and wrote no file. The
+      // Capacitor saver writes into Documents, where the Files app shows it.
+      if (isCapacitor()) {
+        const outcome = await saveExport({ filename: suggestedName, data: bytes, mimeType })
+        if (outcome.kind === "error") throw new Error(`files.save failed: ${outcome.message}`)
+        if (outcome.kind === "cancelled") return { saved: false }
+        return { saved: true, platform: "mobile", location: outcome.location }
       }
+      const saved = await saveBinaryFileAs({
+        defaultName: suggestedName,
+        mimeType,
+        bytes,
+        filters: normalizeAccept([`.${suggestedName.split(".").pop() ?? "bin"}`]),
+      })
+      if (!saved) return { saved: false }
+      return isTauri()
+        ? { saved: true, platform: "desktop" }
+        : { saved: true, platform: "web", location: "downloads" }
     },
     readAttachment: async (handle) => {
       const entry = attachmentHandles.get(handle)

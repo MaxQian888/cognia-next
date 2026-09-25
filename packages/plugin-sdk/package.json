@@ -327,6 +327,12 @@
       "import": "./dist/templates.js",
       "require": "./dist/templates.cjs",
       "default": "./dist/templates.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "require": "./dist/testing.cjs",
+      "default": "./dist/testing.js"
     }
   },
   "files": [

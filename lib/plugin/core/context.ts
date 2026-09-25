@@ -85,6 +85,7 @@ import type {
 } from "@/types/plugin"
 import {
   isAuthorCallableHostTool,
+  PLUGIN_HOST_TOOL_PERMISSIONS,
   type PluginHostToolFailure,
   type PluginInvocationOptions,
 } from "@/types/plugin/plugin-host-tools"
@@ -206,6 +207,7 @@ import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
+import { requestPluginNavigation } from "@/lib/plugin/api/navigation-request"
 import { prefixPluginKind } from "../bridge/kind-prefix"
 import { dispatchPluginTrigger } from "../bridge/plugin-trigger-dispatch"
 import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
@@ -468,6 +470,15 @@ export function createFullPluginContext(
     resources: createResourcesAPI(pluginId),
     sites: createSitesAPI(),
   } satisfies PublicFullPluginContext
+  // `config` was the object the context was built with, and the store replaces
+  // (never mutates) a plugin's config on every settings change — so a plugin
+  // reading `ctx.config` saw its activation-time values forever: privacy mode
+  // turned on in Settings kept capturing until a restart. Read it live.
+  Object.defineProperty(fullContext, "config", {
+    enumerable: true,
+    configurable: true,
+    get: () => usePluginStore.getState().plugins[pluginId]?.config ?? plugin.config,
+  })
   const governedContext = withGovernedPluginContext(fullContext, {
     pluginId,
     // Classify by manifest type rather than defaulting to "frontend": a python
@@ -676,6 +687,7 @@ function createUIAPI(pluginId: string): PluginUIAPI {
   }
 
   return {
+    navigate: (href: string) => requestPluginNavigation(pluginId, href),
     showNotification: async (options: PluginNotification) => {
       try {
         // `plugin_show_notification(app, args: ShowNotificationArgs)` takes a
@@ -822,8 +834,11 @@ function deniedHostToolEgress(
   name: string,
   args: Record<string, unknown> | undefined
 ): PluginHostToolFailure | null {
-  if (name !== "web_fetch") return null
-  const url = args?.url
+  // `web_fetch` and `web_clone` reach a target the PLUGIN picks; `web_search`
+  // only reaches the user's configured providers.
+  if (name !== "web_fetch" && name !== "web_clone") return null
+  const job = args?.job as { url?: unknown } | undefined
+  const url = name === "web_clone" ? job?.url : args?.url
   if (typeof url !== "string" || !url) return null
   const host = hostFromUrl(url)
   // Unparseable target: not a domain question. `runWebBuiltinTool`'s guard
@@ -836,8 +851,8 @@ function deniedHostToolEgress(
     ok: false,
     code: "blocked",
     error: domains
-      ? `web_fetch to ${host} is outside plugin ${pluginId}'s networkAccess.allowedDomains.`
-      : `web_fetch is refused: plugin ${pluginId} declares no networkAccess.`,
+      ? `${name} to ${host} is outside plugin ${pluginId}'s networkAccess.allowedDomains.`
+      : `${name} is refused: plugin ${pluginId} declares no networkAccess.`,
   }
 }
 
@@ -918,13 +933,34 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       args: Record<string, unknown>,
       opts?: PluginInvocationOptions
     ) => {
-      if (!pluginHasApiPermission(pluginId, "agent:control")) {
-        throw new Error(
-          'agent.invokeTool requires the "agent:control" permission — declare it in the plugin manifest.'
-        )
-      }
       if (typeof name !== "string" || !name) {
         throw new Error("agent.invokeTool requires a tool name")
+      }
+      // A promoted host tool carries its own requirement (`web_clone` needs
+      // network + filesystem write, not agent control); everything else —
+      // the plugin's own tools — needs `agent:control`.
+      const required = isAuthorCallableHostTool(name)
+        ? PLUGIN_HOST_TOOL_PERMISSIONS[name]
+        : (["agent:control"] as const)
+      // `network:fetch` has no runtime grant (egress is enforced by the
+      // manifest's networkAccess allowlist, checked below), so it counts as
+      // held when the manifest declares it; every other permission must be
+      // granted at runtime.
+      const declared = (): readonly string[] =>
+        manager.getPlugin(pluginId)?.manifest.permissions ?? []
+      const missing = required.filter((permission) =>
+        permission === "network:fetch"
+          ? !declared().includes(permission)
+          : !pluginHasApiPermission(
+              pluginId,
+              permission as Parameters<typeof pluginHasApiPermission>[1]
+            )
+      )
+      if (missing.length > 0) {
+        throw new Error(
+          `agent.invokeTool("${name}") requires the ${missing.map((p) => `"${p}"`).join(", ")} ` +
+            "permission — declare it in the plugin manifest."
+        )
       }
       // ── 1. Author-callable host tools ─────────────────────────────────────
       // Resolved FIRST so a plugin cannot shadow a promoted host tool by

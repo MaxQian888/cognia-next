@@ -206,6 +206,28 @@ describe("createAutomationAPI", () => {
       expect(desktop.performAction).toHaveBeenCalledWith({ kind: "click" }, expectedContext)
     })
 
+    it("places the call on the send's own runtime ref, not the session's current binding", async () => {
+      const activeRefForSession = jest.fn(() => "rebound-later")
+      const decorateComputerUseContext = jest.fn(async (_ref, context) => context)
+      const runtime = {
+        desktop,
+        captureDisplay: jest.fn(),
+        getComputerUseSettings: jest.fn(() => undefined),
+        focusedSessionId: jest.fn(() => undefined),
+        sandbox: {
+          hostFallbackRuntimeRef: "host-fallback",
+          activeRefForSession,
+          decorateComputerUseContext,
+        },
+      }
+      const api = createAutomationAPI(PLUGIN, runtime as never)
+
+      await api.listApps({ sessionId: "chat-1", sandboxRuntimeRef: "send-ref" })
+
+      expect(decorateComputerUseContext).toHaveBeenCalledWith("send-ref", expect.anything())
+      expect(activeRefForSession).not.toHaveBeenCalled()
+    })
+
     it("still upgrades consent from the focused session when the caller has no sessionId", async () => {
       const getComputerUseSettings = jest.fn(() => ({ requireConsent: true }))
       const activeRefForSession = jest.fn(() => undefined)

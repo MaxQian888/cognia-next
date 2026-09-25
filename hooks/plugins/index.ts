@@ -11,6 +11,7 @@
 export { usePlugins, type PluginsView } from "./use-plugins"
 export { PluginsViewProvider } from "./use-plugins-provider"
 export { usePluginPermissions, type UsePluginPermissions } from "./use-plugin-permissions"
+export { usePermissionDescription, type DescribePermission } from "./use-permission-description"
 export {
   usePluginAnalytics,
   type UsePluginAnalytics,

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 import { PluginConsentOverlay } from "./plugin-consent-overlay"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import {
   PLUGIN_CONSENT_REQUEST_EVENT,
   getPluginConsentBroker,
@@ -274,5 +275,62 @@ describe("PluginConsentOverlay — remember this binary", () => {
     expect(screen.getByRole("checkbox", { name: /Remember this binary/i })).not.toBeChecked()
     await user.click(screen.getByRole("button", { name: /Allow once/i }))
     await expect(second).resolves.toEqual({ granted: true, remember: false })
+  })
+})
+
+describe("PluginConsentOverlay identity, a11y and placement", () => {
+  beforeEach(() => {
+    consentFlags.__PLUGIN_CONSENT_AUTO = "off"
+    resetPluginConsentBroker()
+    usePluginStore.setState({
+      plugins: { "com.acme.tools": { manifest: { name: "Acme Tools" } } } as never,
+    })
+  })
+
+  afterEach(() => {
+    usePluginStore.setState({ plugins: {} } as never)
+  })
+
+  const request = {
+    requestId: "req-named",
+    pluginId: "com.acme.tools",
+    permission: "clipboard:read" as const,
+    reason: "paste a snippet",
+    timeoutMs: 30_000,
+  }
+
+  it("names the plugin and explains the permission instead of printing raw ids", () => {
+    renderOverlay()
+    fireRequestEvent(request)
+    expect(screen.getByText("Acme Tools is asking to use a permission")).toBeInTheDocument()
+    // The id stays visible as secondary detail.
+    expect(screen.getByText("com.acme.tools")).toBeInTheDocument()
+    expect(screen.getByText("Read from the clipboard")).toBeInTheDocument()
+  })
+
+  it("is an alertdialog that takes focus and announces the request", () => {
+    renderOverlay()
+    fireRequestEvent(request)
+    const card = screen.getByRole("alertdialog", {
+      name: "Acme Tools is asking to use a permission",
+    })
+    expect(card).toHaveFocus()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Acme Tools is asking for permission: Read from the clipboard"
+    )
+  })
+
+  it("sits above the phone's tab bar full-width and bottom-right from sm up", () => {
+    renderOverlay()
+    fireRequestEvent(request)
+    const wrapper = screen.getByTestId("plugin-consent-card").parentElement as HTMLElement
+    expect(wrapper).toHaveClass(
+      "inset-x-3",
+      "bottom-[calc(env(safe-area-inset-bottom)+4.5rem)]",
+      "sm:inset-x-auto",
+      "sm:right-6",
+      "sm:bottom-6"
+    )
+    expect(screen.getByRole("button", { name: /Close/i })).toHaveClass("pointer-coarse:size-9")
   })
 })

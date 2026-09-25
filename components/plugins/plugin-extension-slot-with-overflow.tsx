@@ -4,11 +4,8 @@ import { useState, useSyncExternalStore, type ReactNode } from "react"
 import { MoreHorizontalIcon } from "lucide-react"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   getExtensionRevision,
@@ -38,6 +35,19 @@ interface Props {
   overflowLabel: string
   /** Fallback rendered when there are no extensions registered. */
   fallback?: ReactNode
+  /**
+   * Host context handed to every contribution as its `context` prop — inline
+   * and overflowed alike (see `ExtensionProps.context`).
+   */
+  context?: Readonly<Record<string, unknown>>
+  /**
+   * The host folded this slot to glyph size (a narrow composer toolbar). The
+   * contributions' declared `minWidth`/`maxWidth` are dropped for inline
+   * entries so a control can shrink to an icon the way the host's own chip
+   * does; the slot's `context` should carry the same flag so the control knows
+   * to render its compact form.
+   */
+  compact?: boolean
 }
 
 export function PluginExtensionSlotWithOverflow({
@@ -47,6 +57,8 @@ export function PluginExtensionSlotWithOverflow({
   overflowClassName,
   overflowLabel,
   fallback,
+  context,
+  compact = false,
 }: Props) {
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
   const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(EMPTY_FAILED_IDS)
@@ -95,32 +107,45 @@ export function PluginExtensionSlotWithOverflow({
           pluginId={ext.pluginId}
           surfaceId={ext.id}
           formFactor={formFactor}
-          minWidth={ext.options.minWidth}
-          maxWidth={ext.options.maxWidth}
+          minWidth={compact ? undefined : ext.options.minWidth}
+          maxWidth={compact ? undefined : ext.options.maxWidth}
           onSilentFailure={() => markFailed(ext.id)}
         >
-          <ext.component pluginId={ext.pluginId} extensionId={ext.id} formFactor={formFactor} />
+          <ext.component
+            pluginId={ext.pluginId}
+            extensionId={ext.id}
+            formFactor={formFactor}
+            context={context}
+          />
         </PluginSurface>
       ))}
       {overflow.length > 0 && (
-        <DropdownMenu>
+        // A popover, not a menu: overflowed contributions are arbitrary plugin
+        // controls, not menu items, and a Radix menu's roving focus left the
+        // keyboard no way to reach them.
+        <Popover>
           <Tooltip>
             <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
+              <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
                   aria-label={overflowLabel}
                   data-testid={`plugin-extension-overflow-${point}`}
-                  className="size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
+                  className="touch-hit size-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground dark:hover:bg-muted/60"
                 >
                   <MoreHorizontalIcon className="size-4" />
                 </Button>
-              </DropdownMenuTrigger>
+              </PopoverTrigger>
             </TooltipTrigger>
             <TooltipContent side="top">{overflowLabel}</TooltipContent>
           </Tooltip>
-          <DropdownMenuContent align="end" sideOffset={4} className={overflowClassName}>
+          <PopoverContent
+            align="end"
+            sideOffset={4}
+            aria-label={overflowLabel}
+            className={cn("flex w-auto flex-col gap-1 p-1", overflowClassName)}
+          >
             {overflow.map((ext) => (
               <PluginSurface
                 key={ext.id}
@@ -135,11 +160,12 @@ export function PluginExtensionSlotWithOverflow({
                   pluginId={ext.pluginId}
                   extensionId={ext.id}
                   formFactor={formFactor}
+                  context={context}
                 />
               </PluginSurface>
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </PopoverContent>
+        </Popover>
       )}
     </div>
   )

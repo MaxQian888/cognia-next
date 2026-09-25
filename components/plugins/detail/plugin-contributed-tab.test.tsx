@@ -2,13 +2,25 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return String(vars.count)
+    if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
   },
+}))
+
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+}))
+
+const mockRequestCommandPalette = jest.fn()
+jest.mock("@/lib/shell/command-palette-request", () => ({
+  requestCommandPalette: (detail: unknown) => mockRequestCommandPalette(detail),
 }))
 
 const mockGetToolsByPlugin = jest.fn<unknown[], [string]>()
@@ -76,6 +88,22 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginLifecycleHooks: () => ({ getHooksByPlugin: mockGetHooksByPlugin }),
 }))
 
+import { registerCommand, __resetCommandRegistryForTesting } from "@/lib/plugin/commands/registry"
+import {
+  registerViewContainer,
+  __resetViewContainersForTesting,
+} from "@/lib/plugin/registries/view-container-registry"
+import { registerBot, __resetBotsForTesting } from "@/lib/plugin/registries/bot-registry"
+import {
+  registerSubagent,
+  __resetSubagentsForTesting,
+} from "@/lib/plugin/registries/subagent-registry"
+import {
+  registerToolResultRenderer,
+  clearAllToolResultRenderers,
+} from "@/lib/plugin/api/tool-result-renderers"
+import { useUIStore } from "@/stores/ui"
+
 import { PluginContributedTab } from "./plugin-contributed-tab"
 
 beforeEach(() => {
@@ -93,6 +121,13 @@ beforeEach(() => {
   mockGetPluginConnectorKinds.mockReturnValue([])
   mockGetPluginCatalogSnapshot.mockReturnValue([])
   mockGetHooksByPlugin.mockReturnValue([])
+  mockPush.mockClear()
+  mockRequestCommandPalette.mockClear()
+  __resetCommandRegistryForTesting()
+  __resetViewContainersForTesting()
+  __resetBotsForTesting()
+  __resetSubagentsForTesting()
+  clearAllToolResultRenderers()
 })
 
 describe("PluginContributedTab", () => {
@@ -215,5 +250,67 @@ describe("PluginContributedTab", () => {
     expect(screen.getByTestId("contributed-workflowTriggers")).toBeInTheDocument()
     expect(screen.getByText("Foo trigger")).toBeInTheDocument()
     expect(screen.queryByText("Other")).not.toBeInTheDocument()
+  })
+
+  describe("the registries the tab used to miss", () => {
+    it("names commands by their title and opens the command palette on them", async () => {
+      const user = userEvent.setup()
+      mockGetCommandsByPlugin.mockReturnValue([{ id: "p1.greet", name: "Say hello" }])
+      render(<PluginContributedTab pluginId="p1" />)
+      const chip = screen.getByRole("button", { name: "actionAria.palette:Say hello" })
+      expect(chip).toHaveAttribute("title", "p1.greet")
+      await user.click(chip)
+      expect(mockRequestCommandPalette).toHaveBeenCalledWith({ query: "Say hello" })
+    })
+
+    it("lists a titled command from the command registry once", () => {
+      registerCommand({ id: "p1.open", title: "Open things", pluginId: "p1", handler: () => {} })
+      registerCommand({ id: "other.x", title: "Not mine", pluginId: "other", handler: () => {} })
+      render(<PluginContributedTab pluginId="p1" />)
+      expect(screen.getByTestId("contributed-commands")).toHaveTextContent("Open things")
+      expect(screen.queryByText("Not mine")).toBeNull()
+    })
+
+    it("switches the shell to a contributed view container", async () => {
+      const user = userEvent.setup()
+      registerViewContainer({ id: "explorer", title: "Explorer" }, { pluginId: "p1" })
+      render(<PluginContributedTab pluginId="p1" />)
+      await user.click(screen.getByRole("button", { name: "actionAria.viewContainer:Explorer" }))
+      expect(useUIStore.getState().selectedGuild).toEqual({
+        kind: "plugin-view",
+        containerId: "p1:explorer",
+      })
+      expect(mockPush).toHaveBeenCalledWith("/")
+    })
+
+    it("lists subagents, Bots and tool-result cards", async () => {
+      const user = userEvent.setup()
+      registerSubagent(
+        "p1:reviewer",
+        { id: "reviewer", name: "Reviewer", description: "d" } as never,
+        { pluginId: "p1" }
+      )
+      registerBot("p1:digest", { id: "p1:digest", definition: { name: "Daily digest" } } as never, {
+        pluginId: "p1",
+      })
+      registerToolResultRenderer("p1", "web_fetch", () => null)
+      render(<PluginContributedTab pluginId="p1" />)
+      expect(screen.getByTestId("contributed-subagents")).toHaveTextContent("Reviewer")
+      expect(screen.getByTestId("contributed-toolRenderers")).toHaveTextContent("web_fetch")
+      await user.click(screen.getByRole("button", { name: "actionAria.route:Daily digest" }))
+      expect(mockPush).toHaveBeenCalledWith("/bots")
+    })
+
+    // It used to be read once: enabling the plugin with its detail open showed
+    // "no contributions" until the pane was reopened.
+    it("updates when a registry changes while the tab is open", async () => {
+      render(<PluginContributedTab pluginId="p1" />)
+      expect(screen.getByTestId("plugin-contributed-empty")).toBeInTheDocument()
+      await act(async () => {
+        registerCommand({ id: "p1.late", title: "Late command", pluginId: "p1", handler: () => {} })
+        await Promise.resolve()
+      })
+      expect(await screen.findByText("Late command")).toBeInTheDocument()
+    })
   })
 })

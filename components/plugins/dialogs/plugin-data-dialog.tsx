@@ -23,6 +23,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 import type { PluginModalProps } from "@/types/plugin/plugin-modal"
 import type { PluginDialog, PluginInputDialog, PluginConfirmDialog } from "@/types/plugin"
 
@@ -31,6 +32,19 @@ export type PluginDataDialogArgs =
   | { kind: "dialog"; options: PluginDialog; settle: (value: unknown) => void }
   | { kind: "input"; options: PluginInputDialog; settle: (value: string | null) => void }
   | { kind: "confirm"; options: PluginConfirmDialog; settle: (value: boolean) => void }
+
+/**
+ * Layout frame for every kind. `<PluginModalRoot />` puts this component inside
+ * `DialogContent` (`p-6`) but through a `PluginSurface` wrapper div, so the
+ * content's own grid gap never reaches these children and nothing bounds their
+ * height. The frame does both here: header and footer stay put, the body
+ * between them is the one scroller, so a long plugin-supplied message can't
+ * push the actions off a phone screen. `3rem` is `DialogContent`'s vertical
+ * padding, keeping the whole dialog inside `85dvh`.
+ */
+const FRAME_CLASS = "flex max-h-[calc(85dvh-3rem)] min-h-0 flex-col gap-4"
+/** The scroller. `-m-1 p-1` keeps a focused input's ring from being clipped. */
+const BODY_CLASS = "-m-1 min-h-0 flex-1 space-y-2 overflow-y-auto p-1 break-words"
 
 /** Dismiss default per dialog kind — used when the user closes without acting. */
 function dismissValue(kind: PluginDataDialogArgs["kind"]): unknown {
@@ -86,12 +100,15 @@ export function PluginDataDialog({ args, onClose }: PluginModalProps): React.Rea
   if (data.kind === "confirm") {
     const { title, message, confirmLabel, cancelLabel, variant } = data.options
     return (
-      <>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{message}</DialogDescription>
+      <div className={FRAME_CLASS} data-testid="plugin-data-dialog-frame">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="break-words">{title}</DialogTitle>
         </DialogHeader>
-        <DialogFooter>
+        <div className={BODY_CLASS} data-testid="plugin-data-dialog-body">
+          {/* Out of the header so it scrolls; keeps the header's alignment. */}
+          <DialogDescription className="text-center sm:text-left">{message}</DialogDescription>
+        </div>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => close(false)}>
             {cancelLabel ?? t("cancel")}
           </Button>
@@ -102,7 +119,7 @@ export function PluginDataDialog({ args, onClose }: PluginModalProps): React.Rea
             {confirmLabel ?? t("confirm")}
           </Button>
         </DialogFooter>
-      </>
+      </div>
     )
   }
 
@@ -119,44 +136,51 @@ export function PluginDataDialog({ args, onClose }: PluginModalProps): React.Rea
       close(inputValue)
     }
     return (
-      <>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {message ? <DialogDescription>{message}</DialogDescription> : null}
+      <div className={FRAME_CLASS} data-testid="plugin-data-dialog-frame">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="break-words">{title}</DialogTitle>
         </DialogHeader>
-        <Input
-          autoFocus
-          value={inputValue}
-          placeholder={placeholder}
-          aria-label={title}
-          onChange={(e) => {
-            setInputValue(e.target.value)
-            if (inputError) setInputError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit()
-          }}
-        />
-        {inputError ? <p className="text-sm text-destructive">{inputError}</p> : null}
-        <DialogFooter>
+        <div className={BODY_CLASS} data-testid="plugin-data-dialog-body">
+          {message ? (
+            <DialogDescription className="text-center sm:text-left">{message}</DialogDescription>
+          ) : null}
+          <Input
+            autoFocus
+            value={inputValue}
+            placeholder={placeholder}
+            aria-label={title}
+            onChange={(e) => {
+              setInputValue(e.target.value)
+              if (inputError) setInputError(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSubmit()
+            }}
+          />
+          {inputError ? <p className="text-sm text-destructive">{inputError}</p> : null}
+        </div>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => close(null)}>
             {t("cancel")}
           </Button>
           <Button onClick={onSubmit}>{t("confirm")}</Button>
         </DialogFooter>
-      </>
+      </div>
     )
   }
 
   // kind === "dialog"
   const { title, content, actions } = data.options
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
+    <div className={FRAME_CLASS} data-testid="plugin-data-dialog-frame">
+      <DialogHeader className="shrink-0">
+        <DialogTitle className="break-words">{title}</DialogTitle>
       </DialogHeader>
-      <div className="text-sm">{content}</div>
-      <DialogFooter>
+      <div className={cn(BODY_CLASS, "text-sm")} data-testid="plugin-data-dialog-body">
+        {content}
+      </div>
+      {/* A plugin can pass any number of actions; let them wrap on a row. */}
+      <DialogFooter className="shrink-0 sm:flex-wrap">
         {actions && actions.length > 0 ? (
           actions.map((action, i) => (
             <Button
@@ -171,6 +195,6 @@ export function PluginDataDialog({ args, onClose }: PluginModalProps): React.Rea
           <Button onClick={() => close(undefined)}>{t("confirm")}</Button>
         )}
       </DialogFooter>
-    </>
+    </div>
   )
 }

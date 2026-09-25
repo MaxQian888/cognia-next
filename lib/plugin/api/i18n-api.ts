@@ -15,13 +15,39 @@ import {
 } from "@/lib/i18n/plugin-i18n-registry"
 import { createPluginSystemLogger } from "../core/logger"
 
+/** A plugin's own key, namespaced the way the manager registers its bundle. */
+export function pluginMessageKey(pluginId: string, key: string): string {
+  return key.startsWith(`plugin.${pluginId}.`) ? key : `plugin.${pluginId}.${key}`
+}
+
+/**
+ * The one lookup rule for a plugin string: the active locale, then English,
+ * then the raw key, with `{name}` interpolation. `ctx.i18n.t` and the
+ * `usePluginTranslations` hook both answer through here, so a component and
+ * its command handler can never disagree on the same key.
+ */
+export function translatePluginMessage(
+  pluginId: string,
+  locale: string,
+  key: string,
+  params?: TranslationParams
+): string {
+  const resolvedKey = pluginMessageKey(pluginId, key)
+  const value =
+    lookupPluginMessage(locale, resolvedKey) ?? lookupPluginMessage("en", resolvedKey) ?? key
+  if (!params || value === key) return value
+  return value.replace(/\{(\w+)\}/g, (match, paramName: string) => {
+    const paramValue = params[paramName]
+    return paramValue !== undefined ? String(paramValue) : match
+  })
+}
+
 /**
  * Create the I18n API for a plugin
  */
 export function createI18nAPI(pluginId: string): PluginI18nAPI {
   const logger = createPluginSystemLogger(pluginId)
-  const fullKey = (key: string) =>
-    key.startsWith(`plugin.${pluginId}.`) ? key : `plugin.${pluginId}.${key}`
+  const fullKey = (key: string) => pluginMessageKey(pluginId, key)
 
   return {
     getCurrentLocale: (): PluginLocale => {
@@ -36,24 +62,8 @@ export function createI18nAPI(pluginId: string): PluginI18nAPI {
       return localeNames[locale as Locale] || locale
     },
 
-    t: (key: string, params?: TranslationParams): string => {
-      const currentLocale = useSettingsStore.getState().language as Locale
-      const resolvedKey = fullKey(key)
-      const value =
-        lookupPluginMessage(currentLocale, resolvedKey) ??
-        lookupPluginMessage("en", resolvedKey) ??
-        key
-
-      // Handle parameter interpolation
-      if (params && value !== key) {
-        return value.replace(/\{(\w+)\}/g, (match, paramName) => {
-          const paramValue = params[paramName]
-          return paramValue !== undefined ? String(paramValue) : match
-        })
-      }
-
-      return value
-    },
+    t: (key: string, params?: TranslationParams): string =>
+      translatePluginMessage(pluginId, useSettingsStore.getState().language, key, params),
 
     registerTranslations: (locale: PluginLocale, translations: Record<string, string>) => {
       const existing = getPluginI18nBundle(pluginId)?.messages ?? {}

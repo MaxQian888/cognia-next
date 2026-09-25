@@ -3,6 +3,7 @@
  */
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
@@ -14,6 +15,8 @@ import {
   clearPermissionRequests,
   requestPluginPermission,
 } from "@/lib/plugin/security/permission-requests"
+
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
 import { PluginPermissionRequestHost } from "./plugin-permission-request-host"
 
@@ -108,5 +111,27 @@ describe("PluginPermissionRequestHost", () => {
     await userEvent.click(screen.getByTestId("plugin-permission-allow"))
     await act(async () => {})
     expect(settled).toEqual([true, true])
+  })
+
+  // It printed the plugin id and the bare permission key: a grant request the
+  // user could not read.
+  it("names the plugin and says what the permission allows", async () => {
+    usePluginStore.setState({
+      plugins: { "acme.widgets": { manifest: { name: "Acme Widgets" } } } as never,
+    })
+    render(<PluginPermissionRequestHost />)
+    act(() => {
+      void requestPluginPermission({
+        pluginId: "acme.widgets",
+        permission: "clipboard:read",
+        kind: "api",
+      })
+    })
+    expect(await screen.findByText('title:{"plugin":"Acme Widgets"}')).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-permission-description")).toHaveTextContent(
+      "Read from the clipboard"
+    )
+    expect(screen.getByText("acme.widgets")).toBeInTheDocument()
+    usePluginStore.setState({ plugins: {} } as never)
   })
 })

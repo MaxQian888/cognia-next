@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
@@ -24,6 +25,7 @@ jest.mock("@/lib/db/plugins", () => ({
 // to no snapshot so existing tests still see the original Overview shape.
 let mockPluginInMemory:
   | {
+      status?: string
       verificationSnapshot?: unknown
       lastKnownGoodVerification?: unknown
     }
@@ -232,5 +234,34 @@ describe("manifest metadata that had no renderer", () => {
   it("renders no keyword block when the manifest advertises none", () => {
     renderOverview({})
     expect(screen.queryByTestId("plugin-keyword-chips")).toBeNull()
+  })
+})
+
+describe("status row", () => {
+  beforeEach(() => {
+    mockPluginInMemory = undefined
+  })
+
+  // The row's `status` is written at discovery; enabling a plugin changes the
+  // runtime store and `enabled`, not that column, so it used to read
+  // "discovered" beside an "Enabled" switch.
+  it("shows the runtime status over the row's discovery-time value", () => {
+    mockPlugin = makePlugin({ status: "discovered" })
+    mockPluginInMemory = { status: "enabled" }
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByText("runtimeStatus.enabled")).toBeInTheDocument()
+    expect(screen.queryByText("runtimeStatus.discovered")).not.toBeInTheDocument()
+  })
+
+  it("falls back to the row's status, labelled, when the runtime has no entry", () => {
+    mockPlugin = makePlugin({ status: "discovered" })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByText("runtimeStatus.discovered")).toBeInTheDocument()
+  })
+
+  it("prints a status it does not know as stored", () => {
+    mockPlugin = makePlugin({ status: "from-the-future" as never })
+    render(<PluginDetailOverview pluginId="alpha" />)
+    expect(screen.getByText("from-the-future")).toBeInTheDocument()
   })
 })

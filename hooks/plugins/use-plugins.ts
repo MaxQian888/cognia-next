@@ -6,9 +6,14 @@
 
 import { createContext, useContext, useDeferredValue, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useLocale } from "next-intl"
 import { listPlugins } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { pluginExposesConfig } from "@/lib/plugin/core/plugin-config-detect"
+import {
+  localizePluginText,
+  type LocalizedPluginText,
+} from "@/hooks/plugins/use-localized-plugin-text"
 import { usePluginsStore, type PluginFilters } from "@/stores/plugins"
 
 export interface PluginsView {
@@ -51,6 +56,7 @@ export function usePlugins(): PluginsView {
   // duplicate subscription.
   const rows = useLiveQuery(() => (hasShared ? undefined : listPlugins()), [hasShared])
   const filters = usePluginsStore((s) => s.filters)
+  const locale = useLocale()
   // Defer filter application so fast keystrokes in the search input update
   // the input immediately and re-filter the (potentially large) list at
   // lower priority.
@@ -58,11 +64,24 @@ export function usePlugins(): PluginsView {
   // Pass `rows` (possibly undefined) straight through so buildView can
   // distinguish "no live-query response yet" (loading) from "rows resolved
   // to []" (empty database) — `rows ?? null` collapsed both cases.
-  const standalone = useMemo(() => buildView(rows, deferredFilters), [rows, deferredFilters])
+  const standalone = useMemo(
+    () => buildView(rows, deferredFilters, locale),
+    [rows, deferredFilters, locale]
+  )
   return shared ?? standalone
 }
 
-export function buildView(rows: PluginRow[] | undefined, filters: PluginFilters): PluginsView {
+/**
+ * `locale` is the UI language the rows are shown in. Rows display their
+ * manifest's localized name (`nameKey`), so search has to find that name and
+ * the name sort has to order by it, or a zh-CN user searching for the name on
+ * screen finds nothing and sees a list sorted by names they cannot see.
+ */
+export function buildView(
+  rows: PluginRow[] | undefined,
+  filters: PluginFilters,
+  locale = "en"
+): PluginsView {
   const all = rows ?? []
   const countsBySource: Record<string, number> = {}
   const countsByCapability: Record<string, number> = {}
@@ -88,7 +107,15 @@ export function buildView(rows: PluginRow[] | undefined, filters: PluginFilters)
     }
   }
 
-  const filtered = applyFilters(all, filters).sort(sortFor(filters.sort))
+  const localized = new Map(
+    all.map((row) => [
+      row.id,
+      localizePluginText({ name: row.name, manifest: row.manifest }, locale),
+    ])
+  )
+  const filtered = applyFilters(all, filters, localized).sort(
+    sortFor(filters.sort, localized, locale)
+  )
 
   return {
     all,
@@ -120,7 +147,11 @@ function readKeywords(manifest: PluginRow["manifest"]): string[] {
   return raw.filter((k): k is string => typeof k === "string").map((k) => k.toLowerCase())
 }
 
-function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
+function applyFilters(
+  rows: PluginRow[],
+  filters: PluginFilters,
+  localized: ReadonlyMap<string, LocalizedPluginText>
+): PluginRow[] {
   const q = filters.query.trim().toLowerCase()
   return rows.filter((row) => {
     if (filters.source !== "all" && row.source !== filters.source) return false
@@ -162,9 +193,14 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       ).toLowerCase()
       const author = readAuthor(row.manifest)
       const keywords = readKeywords(row.manifest)
+      // The shown (localized) text and the manifest's own, so a name found
+      // in either language still matches.
+      const shown = localized.get(row.id)
       if (
         !row.name.toLowerCase().includes(q) &&
+        !(shown?.name.toLowerCase().includes(q) ?? false) &&
         !description.includes(q) &&
+        !(shown?.description.toLowerCase().includes(q) ?? false) &&
         !row.id.toLowerCase().includes(q) &&
         !author.includes(q) &&
         !keywords.some((keyword) => keyword.includes(q))
@@ -176,7 +212,11 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
   })
 }
 
-function sortFor(mode: PluginFilters["sort"]) {
+function sortFor(
+  mode: PluginFilters["sort"],
+  localized: ReadonlyMap<string, LocalizedPluginText>,
+  locale: string
+) {
   return (a: PluginRow, b: PluginRow): number => {
     if (mode === "updated") return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
     if (mode === "usage") return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)
@@ -185,6 +225,8 @@ function sortFor(mode: PluginFilters["sort"]) {
       const br = (b.manifest as { rating?: number })?.rating ?? 0
       return br - ar
     }
-    return a.name.localeCompare(b.name)
+    const aName = localized.get(a.id)?.name || a.name
+    const bName = localized.get(b.id)?.name || b.name
+    return aName.localeCompare(bName, locale)
   }
 }

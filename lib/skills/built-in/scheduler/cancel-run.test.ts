@@ -15,7 +15,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -153,4 +155,23 @@ describe("refusals are returned, not thrown", () => {
 it("carries a confirm card naming the run and the task", () => {
   const surface = skill().hitlSurface?.({ taskId: "task-1", runId: "run-9" } as never)
   expect(JSON.stringify(surface)).toContain("run-9")
+})
+
+describe("schedule.cancel_run · preflight", () => {
+  it("names an unknown task before any confirmation is asked for", async () => {
+    scheduler.getTask.mockResolvedValue(null)
+    await expect(
+      skill().preflight!({ taskId: "ghost", runId: "r" } as never, { ...ctx, humanConfirmed: true })
+    ).rejects.toThrow(/ghost/)
+  })
+
+  it("asks the policy as a change to an existing task", async () => {
+    await skill().preflight!({ taskId: "task-1", runId: "r" } as never, {
+      ...ctx,
+      humanConfirmed: true,
+    })
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "mutate", humanConfirmed: true })
+    )
+  })
 })

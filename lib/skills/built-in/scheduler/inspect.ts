@@ -17,8 +17,9 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
-import { requireTask, toAgentVisibleTask } from "./_core"
+import { assertAgentMayRead, requireTask, toAgentVisibleTask } from "./_core"
 
 const schema = z.object({
   taskId: z.string().min(1).describe("Task id from scheduler_list_tasks."),
@@ -43,9 +44,10 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "read",
   imAccess: "always",
-  mcpToolName: "scheduler_inspect_task",
+  mcpToolName: SCHEDULE_TOOL.inspect,
   inputSchema: schema,
   execute: async (args) => {
+    await assertAgentMayRead()
     const task = await requireTask(args.taskId)
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const runs =
@@ -59,6 +61,14 @@ const skill: BuiltInSkill<typeof schema> = {
     const processes = taskTypeSpawnsProcesses(task.type)
       ? await listTaskProcesses({ id: task.id, type: task.type })
       : undefined
+    // "When does it run next" is the first question asked about a schedule,
+    // and `nextRunAt` alone answers only the first of them.
+    const { projectTriggerFireTimes } = await import("@/lib/scheduler/upcoming-occurrences")
+    const nextRuns =
+      task.status === "active"
+        ? projectTriggerFireTimes(task.trigger, 3, { nextRunAt: task.nextRunAt })
+        : []
+    const { runArtifactLinks } = await import("@/lib/scheduler/run-artifact-link")
 
     return {
       task: {
@@ -68,6 +78,7 @@ const skill: BuiltInSkill<typeof schema> = {
         config: task.config,
         notification: task.notification,
         projectId: task.projectId,
+        ...(nextRuns.length > 0 ? { nextRuns: nextRuns.map((date) => date.toISOString()) } : {}),
       },
       runs: runs.map((run) => ({
         id: run.id,
@@ -81,6 +92,13 @@ const skill: BuiltInSkill<typeof schema> = {
         // all look identical in a plain failure count.
         ...(run.terminalReason ? { terminalReason: run.terminalReason } : {}),
         ...(run.error ? { error: run.error } : {}),
+        // What the run produced (the session a chat task ran in, the goal or
+        // plan it drove), so the assistant can point the user at it instead of
+        // only reporting that it finished.
+        ...(() => {
+          const links = runArtifactLinks(run.output).map(({ kind, id }) => ({ kind, id }))
+          return links.length > 0 ? { links } : {}
+        })(),
       })),
       // Absent for a task type that cannot spawn one, which is different from
       // an empty list, which is different again from a host that cannot answer.

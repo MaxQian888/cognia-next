@@ -227,7 +227,36 @@ export async function runBuiltInSkill(
     ctx.hitlBypass === true
   )
 
+  // 6b — Skill preflight: checks that need I/O and must refuse BEFORE the user
+  // is asked to confirm anything, so nobody approves a write that would fail
+  // anyway. `humanConfirmed` here answers "will a person have confirmed this
+  // by the time it executes": yes when a confirmation is about to be asked
+  // for, or already was (the IM callback re-fire).
+  if (skill.preflight) {
+    try {
+      await skill.preflight(validArgs as never, {
+        ...ctx,
+        humanConfirmed: hitlRequired || ctx.hitlBypass === true,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await safeAppendAudit({
+        adapterId: ctx.imBinding?.adapterId ?? "<no-adapter>",
+        kind: "builtin_skill_denied",
+        at: now,
+        conversationKey: ctx.imBinding?.conversationKey,
+        reason: "preflight_refused",
+        message,
+        fields: { skillId },
+      })
+      return { status: "error", message }
+    }
+  }
+
   let desktopApproved = false
+  // Only an explicit click on THIS request counts; a remembered session grant
+  // approves the call without a person having looked at it.
+  let desktopConfirmedByUser = false
   if (hitlRequired) {
     // We MUST have a hitlSurface — `registry.register()` enforces this for
     // write/destructive skills, but guard anyway in case a future runtime
@@ -298,6 +327,7 @@ export async function runBuiltInSkill(
       }
     }
     desktopApproved = true
+    desktopConfirmedByUser = outcome.reason === "user"
   }
 
   // Audit pending → execute → audit done.
@@ -317,7 +347,10 @@ export async function runBuiltInSkill(
   })
 
   try {
-    const data = await skill.execute(validArgs as never, ctx)
+    const data = await skill.execute(validArgs as never, {
+      ...ctx,
+      humanConfirmed: ctx.hitlBypass === true || desktopConfirmedByUser,
+    })
     return { status: "ok", data }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

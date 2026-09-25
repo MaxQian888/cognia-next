@@ -6,8 +6,11 @@ import {
   MOBILE_DURATION,
   MOBILE_EASE,
   STAGGER_CHILD,
-  STAGGER_CONTAINER,
   STAGGER_INTERVAL,
+  STAGGER_MAX_SPREAD,
+  readReducedMotion,
+  staggerContainerFor,
+  subscribeReducedMotion,
   type MobileDurationKey,
 } from "./motion-tokens"
 
@@ -42,8 +45,12 @@ export const motionTokens = {
   ease: MOBILE_EASE,
   /** Base durations in seconds, before the user's speed multiplier. */
   duration: MOBILE_DURATION,
-  /** Gap between consecutive children inside a `<Stagger>`. */
-  stagger: { interval: STAGGER_INTERVAL },
+  /**
+   * Gap between consecutive children inside a `<Stagger>`, and the longest the
+   * children's starts may be spread over — past `maxSpread / interval + 1`
+   * children the gap tightens so a long list still arrives at once.
+   */
+  stagger: { interval: STAGGER_INTERVAL, maxSpread: STAGGER_MAX_SPREAD },
 } as const
 
 export interface MotionPrefs {
@@ -57,38 +64,7 @@ export interface MotionPrefs {
   reduced: boolean
 }
 
-/** Class the host puts on `<html>` when animation should be suppressed. */
-const REDUCE_MOTION_CLASS = "reduce-motion"
-
 const DEFAULT_PREFS: MotionPrefs = { durationScale: 1, reduced: false }
-
-/**
- * Probe the OS-level hint. Wrapped in try/catch because jsdom and some
- * embedded webviews implement `matchMedia` only partially — a throwing probe
- * must degrade to "animate", never crash inside a plugin's render.
- */
-function reducedMotionQuery(): MediaQueryList | null {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null
-  try {
-    return window.matchMedia("(prefers-reduced-motion: reduce)")
-  } catch {
-    return null
-  }
-}
-
-/**
- * Two independent sources, and missing either one is a real accessibility bug:
- * the in-app toggle writes the `reduce-motion` class on `<html>`, while the
- * OS-level `prefers-reduced-motion` is handled purely by a media query in the
- * host's stylesheet and is never mirrored into the DOM. This is the same pair
- * `lib/plugin/api/theme-tokens.ts` checks for the `ThemeState` it hands
- * plugins; re-derived here because this package may not import from the app.
- */
-function isReduced(): boolean {
-  if (typeof document === "undefined") return false
-  if (document.documentElement.classList.contains(REDUCE_MOTION_CLASS)) return true
-  return reducedMotionQuery()?.matches === true
-}
 
 // `useSyncExternalStore` re-renders whenever `getSnapshot` returns a value that
 // isn't `Object.is`-equal to the previous one, so handing back a fresh object
@@ -103,7 +79,10 @@ function readPrefs(): MotionPrefs {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--motion-duration-scale")
   const parsed = Number.parseFloat(raw)
   const durationScale = Number.isFinite(parsed) && parsed >= 0 ? parsed : 1
-  const reduced = isReduced()
+  // The class, the `data-reduce-motion` attribute and the OS hint (unless
+  // `data-motion-respect="off"`) — the same three paths the host's CSS guard
+  // honours, read by the one helper the host's own motion hooks use.
+  const reduced = readReducedMotion()
   if (durationScale === cachedPrefs.durationScale && reduced === cachedPrefs.reduced) {
     return cachedPrefs
   }
@@ -112,30 +91,27 @@ function readPrefs(): MotionPrefs {
 }
 
 /**
- * Both preference sources are DOM state the host rewrites at runtime (the
- * settings applier toggles the class and the custom property on `<html>`), so
- * a one-shot read would leave every mounted plugin animating at whatever the
+ * Both preferences are DOM state the host rewrites at runtime (the settings
+ * appliers toggle the reduce markers and the custom property on `<html>`), so a
+ * one-shot read would leave every mounted plugin animating at whatever the
  * setting happened to be when it mounted.
+ *
+ * Reduced motion rides the shared subscription in `./motion-tokens` (one
+ * observer on `class` / `data-reduce-motion` / `data-motion-respect` plus the
+ * OS media query, for the whole page). The duration scale is an inline custom
+ * property, so `style` is watched here.
  */
 function subscribePrefs(onChange: () => void): () => void {
-  const cleanups: Array<() => void> = []
+  const unsubscribeReduced = subscribeReducedMotion(onChange)
+  let disconnectStyle: () => void = () => {}
   if (typeof document !== "undefined" && typeof MutationObserver === "function") {
     const observer = new MutationObserver(onChange)
-    // `class` carries the reduce toggle; `style` carries the duration scale,
-    // which the applier writes as an inline custom property on <html>.
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style"],
-    })
-    cleanups.push(() => observer.disconnect())
-  }
-  const media = reducedMotionQuery()
-  if (media && typeof media.addEventListener === "function") {
-    media.addEventListener("change", onChange)
-    cleanups.push(() => media.removeEventListener("change", onChange))
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
+    disconnectStyle = () => observer.disconnect()
   }
   return () => {
-    for (const cleanup of cleanups) cleanup()
+    unsubscribeReduced()
+    disconnectStyle()
   }
 }
 
@@ -258,10 +234,15 @@ export type StaggerProps = AnimatedProps
  *
  * The stagger interval is *not* scaled by `durationScale`: it is a rhythm
  * between elements rather than the length of any one animation, and the host's
- * own staggered lists use `STAGGER_CONTAINER` unscaled.
+ * own staggered lists use `STAGGER_CONTAINER` unscaled. It is, however, capped
+ * by child count (`staggerContainerFor`): the last child starts at most
+ * `STAGGER_MAX_SPREAD` after the first, so a 50-row list arrives in a fifth of
+ * a second instead of taking two.
  */
 function Stagger({ duration = "normal", children, ...props }: StaggerProps) {
   const { durationScale, reduced } = useMotionPrefs()
+  const count = React.Children.count(children)
+  const containerVariants = React.useMemo(() => staggerContainerFor(count), [count])
 
   if (reduced) {
     return (
@@ -276,7 +257,7 @@ function Stagger({ duration = "normal", children, ...props }: StaggerProps) {
   return (
     <motion.div
       data-slot="stagger"
-      variants={STAGGER_CONTAINER}
+      variants={containerVariants}
       initial="initial"
       animate="animate"
       {...props}

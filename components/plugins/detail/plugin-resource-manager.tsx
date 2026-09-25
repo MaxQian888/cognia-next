@@ -5,7 +5,7 @@
 // per-call hook from the limiter, we render the configured ceiling and
 // the most recent analytics counter for the matching key.
 
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { GaugeIcon } from "lucide-react"
@@ -25,8 +25,19 @@ interface Props {
   limits: RateLimitMeta[]
 }
 
+/** Local date + time to the second, the precision the line always carried. */
+const LAST_EVENT_FORMAT = { dateStyle: "medium", timeStyle: "medium" } as const
+
+/** A usable instant, or null for a missing (0) or unparseable one. */
+function toEventDate(at: number | undefined): Date | null {
+  if (!at) return null
+  const date = new Date(at)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 export function PluginResourceManager({ pluginId, limits }: Props) {
   const t = useTranslations("plugins.resourceManager")
+  const format = useFormatter()
   const analytics = usePluginAnalytics()
   const entry = analytics.byPlugin.find((p) => p.pluginId === pluginId)
 
@@ -50,7 +61,7 @@ export function PluginResourceManager({ pluginId, limits }: Props) {
         {limits.map((rule) => {
           const used = entry?.byKey[rule.key]?.count ?? 0
           const ratio = rule.limit > 0 ? Math.min(used / rule.limit, 1) : 0
-          const lastEventAt = entry?.byKey[rule.key]?.lastEventAt
+          const lastEvent = toEventDate(entry?.byKey[rule.key]?.lastEventAt)
           return (
             <li key={rule.key} className="space-y-1">
               <div className="flex items-center justify-between gap-2 text-xs">
@@ -60,9 +71,11 @@ export function PluginResourceManager({ pluginId, limits }: Props) {
                 </Badge>
               </div>
               <Progress value={ratio * 100} className="h-1.5" />
-              {lastEventAt && (
+              {lastEvent && (
                 <div className="text-xs text-muted-foreground text-right">
-                  {new Date(lastEventAt).toISOString().slice(0, 19).replace("T", " ")}
+                  <time dateTime={lastEvent.toISOString()}>
+                    {format.dateTime(lastEvent, LAST_EVENT_FORMAT)}
+                  </time>
                 </div>
               )}
             </li>

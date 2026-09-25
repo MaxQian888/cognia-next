@@ -4,13 +4,23 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react"
 
+jest.mock("./use-plugin-uninstall", () => ({
+  uninstallPluginForHost: jest.fn(async () => {}),
+}))
+jest.mock("@/lib/plugin/package/marketplace", () => ({
+  getPluginMarketplace: jest.fn(),
+}))
+
+import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
 import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 
 import {
+  loadPluginMarketplaceClient,
   usePluginMarketplace,
   __resetPluginMarketplaceClientForTests,
   type PluginMarketplaceEntry,
 } from "./use-plugin-marketplace"
+import { uninstallPluginForHost } from "./use-plugin-uninstall"
 
 const SAMPLE: PluginMarketplaceEntry[] = [
   { id: "p1", name: "Plugin 1", version: "1.0.0", type: "plugin" },
@@ -21,7 +31,6 @@ function makeClient(
   over: Partial<{
     search: jest.Mock
     install: jest.Mock
-    uninstall: jest.Mock
     featured: jest.Mock
     popular: jest.Mock
     recent: jest.Mock
@@ -34,7 +43,6 @@ function makeClient(
     getRecentPlugins: over.recent ?? jest.fn(async () => SAMPLE.slice(1)),
     getPlugin: jest.fn(async () => null),
     installPlugin: over.install ?? jest.fn(async () => ({ ok: true })),
-    uninstallPlugin: over.uninstall ?? jest.fn(async () => ({ ok: true })),
   }
 }
 
@@ -60,10 +68,9 @@ describe("usePluginMarketplace", () => {
     expect(result.current.state.kind === "ready" && result.current.state.results.length).toBe(2)
   })
 
-  it("install / uninstall toggle installingId and call client", async () => {
+  it("install / uninstall toggle installingId; uninstall goes through the host path", async () => {
     const install = jest.fn(async () => ({ ok: true }))
-    const uninstall = jest.fn(async () => ({ ok: true }))
-    const client = makeClient({ install, uninstall })
+    const client = makeClient({ install })
     __resetPluginMarketplaceClientForTests(client)
 
     const { result } = renderHook(() => usePluginMarketplace())
@@ -78,7 +85,8 @@ describe("usePluginMarketplace", () => {
     await act(async () => {
       await result.current.uninstall("p1")
     })
-    expect(uninstall).toHaveBeenCalledWith("p1")
+    // The registry client has no uninstall; the manager-backed path does it.
+    expect(uninstallPluginForHost).toHaveBeenCalledWith("p1")
     expect(result.current.installingId).toBeNull()
   })
 
@@ -195,7 +203,6 @@ describe("source mode reporting", () => {
       searchPlugins: jest.fn(async () => []),
       getPlugin: jest.fn(async () => null),
       installPlugin: jest.fn(async () => undefined),
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
     await act(async () => {
@@ -211,7 +218,6 @@ describe("source mode reporting", () => {
       }),
       getPlugin: jest.fn(async () => null),
       installPlugin: jest.fn(async () => undefined),
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
     await act(async () => {
@@ -222,5 +228,52 @@ describe("source mode reporting", () => {
     expect(state.sourceState.lastFailureCategory).toBe("network")
     expect(state.latestDiagnostic?.operation).toBe("search")
     expect(state.latestDiagnostic?.message).toContain("registry unreachable")
+  })
+})
+
+describe("loadPluginMarketplaceClient", () => {
+  const registryEntry = { id: "r1", name: "Registry One", version: "1.0.0", source: "marketplace" }
+  const market = {
+    searchPlugins: jest.fn(async () => ({ plugins: [registryEntry], total: 1, hasMore: false })),
+    getFeaturedPlugins: jest.fn(async () => [registryEntry]),
+    getPopularPlugins: jest.fn(async () => []),
+    getRecentPlugins: jest.fn(async () => []),
+    getPlugin: jest.fn(async () => null),
+    getVersions: jest.fn(async () => [{ version: "1.0.0", changelog: "first" }]),
+    installPlugin: jest.fn(),
+  }
+
+  beforeEach(() => {
+    __resetPluginMarketplaceClientForTests(null)
+    jest.clearAllMocks()
+    ;(getPluginMarketplace as jest.Mock).mockReturnValue(market)
+  })
+
+  it("adapts registry entries into marketplace entries", async () => {
+    const client = await loadPluginMarketplaceClient()
+    expect(await client.searchPlugins({ query: "q" })).toEqual({
+      plugins: [{ ...registryEntry, type: "plugin" }],
+    })
+    expect(market.searchPlugins).toHaveBeenCalledWith({ query: "q" })
+    expect(await client.getFeaturedPlugins?.()).toEqual([{ ...registryEntry, type: "plugin" }])
+    expect(await client.getVersions?.("r1")).toEqual([{ version: "1.0.0", changelog: "first" }])
+  })
+
+  it("turns a resolved install failure into a rejection", async () => {
+    market.installPlugin.mockResolvedValueOnce({ success: false, error: "checksum mismatch" })
+    const client = await loadPluginMarketplaceClient()
+    await expect(client.installPlugin("r1")).rejects.toThrow("checksum mismatch")
+  })
+
+  it("resolves a successful install", async () => {
+    market.installPlugin.mockResolvedValueOnce({ success: true })
+    const client = await loadPluginMarketplaceClient()
+    await expect(client.installPlugin("r1", "1.0.0")).resolves.toEqual({ success: true })
+    expect(market.installPlugin).toHaveBeenCalledWith("r1", "1.0.0")
+  })
+
+  it("exposes no uninstall on the registry client", async () => {
+    const client = await loadPluginMarketplaceClient()
+    expect("uninstallPlugin" in client).toBe(false)
   })
 })

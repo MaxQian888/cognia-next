@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type React from "react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
@@ -42,7 +42,12 @@ jest.mock("@/components/plugins/plugin-surface", () => ({
 }))
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string) => key,
+}))
+
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn() },
 }))
 
 jest.mock("dexie-react-hooks", () => ({
@@ -54,7 +59,14 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginConfig: (id: string, cfg: Record<string, unknown>) => setPluginConfigMock(id, cfg),
 }))
 
-import { PluginConfigFormContent } from "./plugin-config-form"
+import { renderHook } from "@testing-library/react"
+import { toast } from "sonner"
+
+import {
+  ConfigSchemaFields,
+  PluginConfigFormContent,
+  useConfigSchemaForm,
+} from "./plugin-config-form"
 
 function renderForm() {
   return render(<PluginConfigFormContent pluginId="p_conf" onClose={() => undefined} />)
@@ -99,7 +111,10 @@ const configComponentPlugin: PluginRow = {
 beforeEach(() => {
   mockPlugin = schemaPlugin
   mockConfigComponentResult = null
+  jest.mocked(toast.success).mockClear()
+  jest.mocked(toast.error).mockClear()
   setPluginConfigMock.mockClear()
+  setPluginConfigMock.mockImplementation(async () => undefined)
   importPluginEntryMock.mockClear()
 })
 
@@ -539,5 +554,99 @@ describe("PluginConfigFormContent", () => {
       renderForm()
       expect(screen.queryByTestId("config-secret-plugin-config-nickname")).toBeNull()
     })
+  })
+})
+
+// Save used to fail silently and Cancel was wired to a no-op in the detail
+// pane. These pin the feedback and the real cancel.
+describe("PluginConfigFormContent save / cancel", () => {
+  it("confirms a save with a toast", async () => {
+    renderForm()
+    fireEvent.click(screen.getByTestId("plugin-config-save"))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("saved"))
+  })
+
+  it("reports a failed save and keeps the form usable", async () => {
+    setPluginConfigMock.mockRejectedValueOnce(new Error("quota exceeded"))
+    renderForm()
+    fireEvent.click(screen.getByTestId("plugin-config-save"))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "saveFailed",
+        expect.objectContaining({ description: "quota exceeded" })
+      )
+    )
+    expect(screen.getByTestId("plugin-config-save")).not.toBeDisabled()
+  })
+
+  it("Cancel is disabled until something changes, then restores the saved values", () => {
+    renderForm()
+    const cancel = screen.getByTestId("plugin-config-cancel")
+    expect(cancel).toBeDisabled()
+    const token = screen.getByLabelText("token") as HTMLInputElement
+    fireEvent.change(token, { target: { value: "edited" } })
+    expect(cancel).not.toBeDisabled()
+    fireEvent.click(cancel)
+    expect((screen.getByLabelText("token") as HTMLInputElement).value).toBe("abc")
+    expect(cancel).toBeDisabled()
+  })
+
+  it("does not repeat the plugin name the detail header already shows", () => {
+    renderForm()
+    expect(screen.queryByText("Config Plugin")).toBeNull()
+  })
+
+  it("ties a validation error to its input", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: { token: { type: "string", minLength: 5, description: "API token" } },
+        },
+      },
+      config: { token: "ab" },
+    }
+    renderForm()
+    const input = screen.getByLabelText("token")
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    const describedBy = input.getAttribute("aria-describedby")?.split(" ") ?? []
+    const texts = describedBy.map((id) => document.getElementById(id)?.textContent)
+    expect(texts).toContain("validation.minLength")
+    expect(texts).toContain("API token")
+  })
+})
+
+describe("useConfigSchemaForm + ConfigSchemaFields", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      region: { type: "string", enum: ["eu", "us"], default: "eu" },
+      nested: { type: "object", properties: { depth: { type: "number", default: 2 } } },
+    },
+  }
+
+  it("seeds defaults for a plugin with no saved config", () => {
+    const { result } = renderHook(() => useConfigSchemaForm(schema, undefined))
+    expect(result.current.values).toEqual({ region: "eu", nested: { depth: 2 } })
+    expect(result.current.dirty).toBe(false)
+  })
+
+  it("renders nested fields under a caller-chosen id prefix", () => {
+    function Harness() {
+      const form = useConfigSchemaForm(schema, undefined)
+      return (
+        <ConfigSchemaFields
+          fields={form.schema.fields}
+          values={form.values}
+          errors={form.errors}
+          onChange={form.setField}
+          idPrefix="pre-install-config"
+        />
+      )
+    }
+    render(<Harness />)
+    expect(document.getElementById("pre-install-config-nested_depth")).not.toBeNull()
   })
 })

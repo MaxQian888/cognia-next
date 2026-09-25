@@ -4,10 +4,30 @@
 // summary in the panel by giving the user a real grant / revoke surface,
 // with `manifest declared` vs `runtime granted` columns and an audit log.
 // Driven through the `usePluginPermissions` hook (no direct guard access).
+//
+// Descriptions come from `usePermissionDescription` (localized), not the
+// English-only `PERMISSION_DESCRIPTIONS` map. "Revoke all" asks first: it
+// drops every grant at once, including the manifest-declared ones the plugin
+// needs to run, and there is no undo.
+//
+// `PermissionIdentity` (id + sensitive marker + description) is exported so
+// the pre-install and import dialogs show a permission the same way this
+// review does.
 
-import { useMemo } from "react"
-import { useTranslations } from "next-intl"
+import { useMemo, useState } from "react"
+import { useLocale, useTranslations } from "next-intl"
+import { localizePluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { useLiveQuery } from "dexie-react-hooks"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -38,7 +58,7 @@ import {
 import { getPlugin } from "@/lib/db/plugins"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 import type { PluginPermissionTier } from "@/lib/plugin/security/permission-guard"
-import { usePluginPermissions } from "@/hooks/plugins"
+import { usePermissionDescription, usePluginPermissions } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { nodePermissionSupport } from "@/lib/plugin/launcher/launchPluginJs"
 import { AuditLogEntry } from "./audit-log-entry"
@@ -50,7 +70,7 @@ export function PluginPermissionReview() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] min-w-0 max-w-3xl flex-col sm:max-w-3xl">
+      <DialogContent className="flex max-h-[85dvh] w-[calc(100%-2rem)] min-w-0 max-w-3xl flex-col sm:max-w-3xl">
         {target ? <PermissionReviewContent pluginId={target.pluginId} onClose={close} /> : null}
       </DialogContent>
     </Dialog>
@@ -60,7 +80,11 @@ export function PluginPermissionReview() {
 function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onClose: () => void }) {
   const t = useTranslations("plugins.permissionReview")
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+  const locale = useLocale()
+  const pluginName = plugin ? localizePluginText(plugin, locale).name || pluginId : pluginId
   const perms = usePluginPermissions()
+  const describePermission = usePermissionDescription()
+  const [confirmRevokeAll, setConfirmRevokeAll] = useState(false)
 
   const manifest = plugin?.manifest as PluginManifest | undefined
   const declared = useMemo(() => manifest?.permissions ?? [], [manifest])
@@ -87,7 +111,7 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
     <>
       <DialogHeader>
         <DialogTitle>
-          {plugin ? plugin.name : pluginId}{" "}
+          {pluginName}{" "}
           <span className="text-muted-foreground text-sm font-normal">v{plugin?.version}</span>
         </DialogTitle>
         <DialogDescription>{t("description")}</DialogDescription>
@@ -133,7 +157,7 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
                       onRevoke={() => perms.revoke(pluginId, perm)}
                       tier={perms.getTier(pluginId, perm)}
                       onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                      description={justifications[perm] ?? describePermission(perm)}
                       runtimeAvailable={support.available}
                       unavailableReason={unavailableReason}
                     />
@@ -163,12 +187,70 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
       </div>
 
       <DialogFooter>
-        <Button variant="outline" onClick={() => perms.revokeAll(pluginId)}>
+        <Button
+          variant="outline"
+          onClick={() => setConfirmRevokeAll(true)}
+          disabled={granted.size === 0}
+        >
           {t("revokeAll")}
         </Button>
         <Button onClick={onClose}>{t("close")}</Button>
       </DialogFooter>
+
+      <AlertDialog open={confirmRevokeAll} onOpenChange={setConfirmRevokeAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("revokeAllConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("revokeAllConfirmBody", {
+                name: pluginName,
+                count: granted.size,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => perms.revokeAll(pluginId)}>
+              {t("revokeAll")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
+  )
+}
+
+/**
+ * How one permission reads anywhere the user is asked about it: the id, a
+ * labelled sensitive marker, and the localized description (or the plugin's
+ * own justification, which is more specific when the author wrote one).
+ */
+export function PermissionIdentity({
+  perm,
+  dangerous,
+  description,
+}: {
+  perm: string
+  dangerous: boolean
+  description: string
+}) {
+  const tPermissions = useTranslations("plugins.permissions")
+  return (
+    <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <code className="break-all font-mono text-xs">{perm}</code>
+        {dangerous && (
+          <AlertTriangleIcon
+            className="size-3 shrink-0 text-destructive"
+            role="img"
+            aria-label={tPermissions("dangerousAria")}
+          />
+        )}
+      </div>
+      {description && description !== perm ? (
+        <p className="break-words text-xs text-muted-foreground">{description}</p>
+      ) : null}
+    </div>
   )
 }
 
@@ -203,11 +285,7 @@ export function PermissionRow({
   return (
     <TableRow className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,auto)] gap-x-3 gap-y-2 p-3 sm:table-row sm:p-0">
       <TableCell className="col-span-2 min-w-0 space-y-1 p-0 whitespace-normal sm:p-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <code className="break-all font-mono text-xs">{perm}</code>
-          {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
-        </div>
-        <p className="break-words text-xs text-muted-foreground">{description}</p>
+        <PermissionIdentity perm={perm} dangerous={dangerous} description={description} />
         {!runtimeAvailable && unavailableReason ? (
           <p className="break-words text-xs text-amber-600">{unavailableReason}</p>
         ) : null}

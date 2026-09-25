@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import type { ContextResource } from "@/types/context-workbench"
 import type {
   PluginA2UIContextPanelDef,
@@ -19,16 +20,24 @@ jest.mock("@/components/plugins/plugin-surface", () => ({
 }))
 
 jest.mock("@/components/a2ui/a2ui-surface", () => ({
-  A2UISurface: ({ surfaceId }: { surfaceId: string }) => (
-    <div data-testid="a2ui-surface">{surfaceId}</div>
+  A2UISurface: ({ surfaceId, className }: { surfaceId: string; className?: string }) => (
+    <div data-testid="a2ui-surface" className={className}>
+      {surfaceId}
+    </div>
   ),
 }))
 
-let chatPanelProps: { getResourceContext?: () => string | Promise<string> } = {}
+let chatPanelProps: {
+  getResourceContext?: () => string | Promise<string>
+  selectionHeader?: React.ReactNode
+} = {}
 jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => ({
-  ResourceWorkbenchChatPanel: (props: { getResourceContext?: () => string | Promise<string> }) => {
+  ResourceWorkbenchChatPanel: (props: {
+    getResourceContext?: () => string | Promise<string>
+    selectionHeader?: React.ReactNode
+  }) => {
     chatPanelProps = props
-    return <div data-testid="chat-panel" />
+    return <div data-testid="chat-panel">{props.selectionHeader}</div>
   },
 }))
 
@@ -58,6 +67,17 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: { getState: () => ({ addContextSelection: (ref: unknown) => staged.push(ref) }) },
 }))
 
+let sessions: Array<{ id: string; title?: string }> = []
+jest.mock("@/stores/chat/session-store", () => ({
+  useSessionStore: { getState: () => ({ sessions }) },
+}))
+
+let artifacts: Record<string, { title?: string }> = {}
+let canvasDocuments: Record<string, { title?: string }> = {}
+jest.mock("@/stores/artifact", () => ({
+  useArtifactStore: { getState: () => ({ artifacts, canvasDocuments }) },
+}))
+
 const existingSurfaces = new Set<string>()
 jest.mock("@/stores/a2ui", () => ({
   useA2UIStore: (selector: (state: { surfaces: Record<string, unknown> }) => unknown) =>
@@ -67,12 +87,25 @@ jest.mock("@/stores/a2ui", () => ({
 }))
 
 import {
+  clampSelectionToolbar,
   createA2UIContextPanelRenderer,
   createChatContextPanelRenderer,
   declarativeFirstActivate,
   readToolText,
   resolvePanelSurfaceId,
+  selectionTitleForResource,
 } from "./plugin-declarative-context-panel"
+
+/**
+ * A host string by its English text or its bare key. The jest next-intl mock
+ * reads the generated `en.json` aggregate and echoes a key it cannot find, so
+ * a key added to the split sources reads as the key until `pnpm i18n:build`
+ * regenerates the aggregate — and as the English text afterwards.
+ */
+function hostText(english: string, key: string): RegExp {
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return new RegExp(`^(${escape(english)}|${escape(key)})$`)
+}
 
 const resource: ContextResource = {
   kind: "canvas-document",
@@ -111,6 +144,9 @@ beforeEach(() => {
   appended.length = 0
   staged.length = 0
   selectionText = null
+  sessions = []
+  artifacts = {}
+  canvasDocuments = {}
 })
 
 describe("resolvePanelSurfaceId", () => {
@@ -152,6 +188,71 @@ describe("A2UI panel renderer", () => {
     render(<Panel {...renderProps} />)
     expect(screen.getByTestId("a2ui-surface")).toHaveTextContent("wiki:canvas:doc-1")
   })
+
+  it("fills the panel slot instead of the free-standing panel's width and border", () => {
+    existingSurfaces.add("wiki:canvas:doc-1")
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", a2uiDef)
+    render(<Panel {...renderProps} />)
+    const surface = screen.getByTestId("a2ui-surface")
+    expect(surface).toHaveClass("h-full", "max-w-none", "border-l-0")
+  })
+})
+
+describe("a failed build", () => {
+  const failing: ContextResource = {
+    kind: "canvas-document",
+    documentId: "doc-failing",
+    revision: "1",
+    capabilities: [],
+  }
+
+  it("says so and retries the build tool for the same surface", async () => {
+    const user = userEvent.setup()
+    invokePluginTool.mockRejectedValueOnce(new Error("python host is not running"))
+    await declarativeFirstActivate("wiki-plugin", a2uiDef)!(failing)
+
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", a2uiDef)
+    render(<Panel workbenchInstanceId="wb" resource={failing} active />)
+
+    // No more "waiting for the plugin" forever: the failure is the state.
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(/This panel couldn't be built\.|pluginPanel\.buildFailed/)
+    expect(screen.queryByText(/waiting for the plugin/i)).not.toBeInTheDocument()
+
+    invokePluginTool.mockResolvedValueOnce({ result: null })
+    await user.click(screen.getByRole("button", { name: hostText("Retry", "pluginPanel.retry") }))
+
+    expect(invokePluginTool).toHaveBeenLastCalledWith("wiki-plugin", "build_surface", {
+      resource: failing,
+      surfaceId: "wiki:canvas:doc-failing",
+    })
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
+    expect(screen.getByText(/waiting for the plugin/i)).toBeInTheDocument()
+  })
+
+  it("shows the plugin's own error text as the detail", async () => {
+    invokePluginTool.mockRejectedValueOnce(new Error("boom"))
+    const resource: ContextResource = { ...failing, documentId: "doc-detail" }
+    await declarativeFirstActivate("wiki-plugin", a2uiDef)!(resource)
+
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", a2uiDef)
+    render(<Panel workbenchInstanceId="wb" resource={resource} active />)
+    expect(
+      screen.getByText(hostText("The plugin reported: boom", "pluginPanel.buildFailedDetail"))
+    ).toBeInTheDocument()
+  })
+
+  it("is scoped to its own surface", async () => {
+    invokePluginTool.mockRejectedValueOnce(new Error("boom"))
+    await declarativeFirstActivate("wiki-plugin", a2uiDef)!({
+      ...failing,
+      documentId: "doc-other",
+    })
+
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", a2uiDef)
+    render(<Panel {...renderProps} />)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
 })
 
 describe("declarativeFirstActivate", () => {
@@ -192,7 +293,46 @@ describe("chat panel renderer", () => {
     invokePluginTool.mockRejectedValue(new Error("boom"))
     const Panel = createChatContextPanelRenderer("wiki-plugin", chatDef)
     render(<Panel {...renderProps} />)
-    await expect(chatPanelProps.getResourceContext!()).resolves.toBe("")
+    await act(async () => {
+      await expect(chatPanelProps.getResourceContext!()).resolves.toBe("")
+    })
+  })
+
+  it("says the answer was not grounded instead of failing silently", async () => {
+    const user = userEvent.setup()
+    invokePluginTool.mockRejectedValueOnce(new Error("boom"))
+    const Panel = createChatContextPanelRenderer("wiki-plugin", chatDef)
+    render(<Panel {...renderProps} />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+    await act(async () => {
+      await chatPanelProps.getResourceContext!()
+    })
+    const notice = screen.getByRole("status")
+    expect(notice).toHaveTextContent(
+      /The plugin couldn't provide this resource's context|pluginPanel\.contextFailed/
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: hostText("Dismiss", "pluginPanel.dismiss") })
+    )
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("clears the notice once a later send is grounded again", async () => {
+    invokePluginTool.mockRejectedValueOnce(new Error("boom"))
+    const Panel = createChatContextPanelRenderer("wiki-plugin", chatDef)
+    render(<Panel {...renderProps} />)
+    await act(async () => {
+      await chatPanelProps.getResourceContext!()
+    })
+    expect(screen.getByRole("status")).toBeInTheDocument()
+
+    invokePluginTool.mockResolvedValueOnce({ result: "the overview" })
+    await act(async () => {
+      await expect(chatPanelProps.getResourceContext!()).resolves.toBe("the overview")
+    })
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
   })
 
   it("passes no resolver at all when the panel declares no tool", () => {
@@ -231,22 +371,59 @@ describe("panel selection", () => {
 
   it("stages a plugin-attributed selection into the main conversation", async () => {
     const user = userEvent.setup()
+    sessions = [{ id: "s-1", title: "Design review" }]
     selectionText = "the reverse RPC channel"
     renderReader({ selectionLabel: "wiki page" })
 
     await user.click(screen.getByRole("button", { name: /Add to chat/i }))
 
     // Attribution is the host's to stamp: a plugin cannot claim another
-    // plugin's name, and the chip has to say where the excerpt came from.
+    // plugin's name, and the chip has to say where the excerpt came from —
+    // by the resource's title, not its internal address.
     expect(staged).toEqual([
       {
         kind: "plugin",
         pluginId: "wiki-plugin",
         sourceLabel: "wiki page",
-        title: "session:s-1",
+        title: "Design review",
+        ref: "session:s-1",
         snapshot: "the reverse RPC channel",
         comment: "",
       },
+    ])
+  })
+
+  it("keeps two panels' selections distinct even when their titles match", async () => {
+    // The chip shows a file name; the address that identifies the reference
+    // stays the resource key, so two README.md files are two references.
+    const user = userEvent.setup()
+    existingSurfaces.add("wiki:project:p:r:a/README.md")
+    existingSurfaces.add("wiki:project:p:r:b/README.md")
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", {
+      ...a2uiDef,
+      resourceKinds: ["project-file"],
+    })
+    const file = (relPath: string): ContextResource => ({
+      kind: "project-file",
+      projectId: "p",
+      rootId: "r",
+      relPath,
+      contentHash: "h",
+      draftVersion: 0,
+      capabilities: [],
+    })
+    selectionText = "install steps"
+    const first = render(<Panel workbenchInstanceId="wb" resource={file("a/README.md")} active />)
+    await user.click(screen.getByRole("button", { name: /Add to chat/i }))
+    first.unmount()
+    render(<Panel workbenchInstanceId="wb" resource={file("b/README.md")} active />)
+    await user.click(screen.getByRole("button", { name: /Add to chat/i }))
+
+    const refs = staged as Array<{ title: string; ref: string }>
+    expect(refs.map((ref) => ref.title)).toEqual(["README.md", "README.md"])
+    expect(refs.map((ref) => ref.ref)).toEqual([
+      "project:p:r:a/README.md",
+      "project:p:r:b/README.md",
     ])
   })
 
@@ -256,6 +433,54 @@ describe("panel selection", () => {
     renderReader()
     await user.click(screen.getByRole("button", { name: /Add to chat/i }))
     expect((staged[0] as { sourceLabel: string }).sourceLabel).toBe("Wiki")
+  })
+
+  it("resolves that fallback through the plugin's labelKey", async () => {
+    const user = userEvent.setup()
+    registerPluginI18n({
+      pluginId: "wiki-plugin",
+      messages: { en: { "plugin.wiki-plugin.panels.reader": "Wiki reader (localized)" } },
+    })
+    try {
+      selectionText = "some prose"
+      renderReader()
+      await user.click(screen.getByRole("button", { name: /Add to chat/i }))
+      expect((staged[0] as { sourceLabel: string }).sourceLabel).toBe("Wiki reader (localized)")
+    } finally {
+      unregisterPluginI18n("wiki-plugin")
+    }
+  })
+
+  it("is a labelled toolbar with touch-sized buttons", () => {
+    selectionText = "some prose"
+    renderReader()
+    const toolbar = screen.getByRole("toolbar", {
+      name: hostText("Selection actions", "pluginPanel.selectionToolbar"),
+    })
+    for (const button of Array.from(toolbar.querySelectorAll("button"))) {
+      // 36px on touch, compact from `sm` up.
+      expect(button).toHaveClass("h-9", "sm:h-7")
+    }
+  })
+
+  it("is dismissed by Escape for the current selection", async () => {
+    const user = userEvent.setup()
+    const removeAllRanges = jest.fn()
+    const getSelection = jest
+      .spyOn(window, "getSelection")
+      .mockReturnValue({ removeAllRanges } as unknown as Selection)
+    try {
+      selectionText = "some prose"
+      renderReader()
+      expect(screen.getByRole("toolbar")).toBeInTheDocument()
+
+      await user.keyboard("{Escape}")
+
+      expect(screen.queryByRole("toolbar")).not.toBeInTheDocument()
+      expect(removeAllRanges).toHaveBeenCalled()
+    } finally {
+      getSelection.mockRestore()
+    }
   })
 
   it("quotes the selection into the resource's own side chat, un-sent", async () => {
@@ -273,5 +498,109 @@ describe("panel selection", () => {
       { text: "> first line\n> second line\n\n", sessionId: "resource-workbench:session:s-1" },
     ])
     expect(staged).toEqual([])
+  })
+})
+
+describe("selectionTitleForResource", () => {
+  it("names a project file by its file name", () => {
+    expect(
+      selectionTitleForResource({
+        kind: "project-file",
+        projectId: "p",
+        rootId: "r",
+        relPath: "src/lib/engine.py",
+        contentHash: "h",
+        draftVersion: 0,
+        capabilities: [],
+      })
+    ).toBe("engine.py")
+  })
+
+  it("names a conversation, artifact or canvas document by its title", () => {
+    sessions = [{ id: "s-1", title: "Design review" }]
+    artifacts = { a1: { title: "Launch plan" } }
+    canvasDocuments = { doc: { title: "Spec draft" } }
+    expect(selectionTitleForResource({ kind: "session", sessionId: "s-1", capabilities: [] })).toBe(
+      "Design review"
+    )
+    expect(
+      selectionTitleForResource({
+        kind: "artifact",
+        artifactId: "a1",
+        version: "1",
+        capabilities: [],
+      })
+    ).toBe("Launch plan")
+    expect(
+      selectionTitleForResource({
+        kind: "canvas-document",
+        documentId: "doc",
+        revision: "1",
+        capabilities: [],
+      })
+    ).toBe("Spec draft")
+  })
+
+  it("falls back to the resource key only when the host has no name for it", () => {
+    expect(
+      selectionTitleForResource({ kind: "session", sessionId: "gone", capabilities: [] })
+    ).toBe("session:gone")
+  })
+})
+
+describe("clampSelectionToolbar", () => {
+  const bounds = { left: 100, top: 0, right: 500, bottom: 400 }
+  const size = { width: 120, height: 36 }
+
+  it("centres under the selection when there is room", () => {
+    expect(
+      clampSelectionToolbar({ left: 250, top: 100, right: 350, bottom: 120 }, size, bounds)
+    ).toEqual({ left: 240, top: 128 })
+  })
+
+  it("keeps the right edge inside the panel", () => {
+    const { left } = clampSelectionToolbar(
+      { left: 470, top: 100, right: 499, bottom: 120 },
+      size,
+      bounds
+    )
+    expect(left + size.width).toBeLessThanOrEqual(bounds.right - 8)
+  })
+
+  it("keeps the left edge inside the panel", () => {
+    const { left } = clampSelectionToolbar(
+      { left: 100, top: 100, right: 110, bottom: 120 },
+      size,
+      bounds
+    )
+    expect(left).toBe(bounds.left + 8)
+  })
+
+  it("flips above the selection when there is no room below", () => {
+    const { top } = clampSelectionToolbar(
+      { left: 250, top: 370, right: 350, bottom: 390 },
+      size,
+      bounds
+    )
+    expect(top).toBe(370 - 8 - size.height)
+  })
+
+  it("stays inside the bottom edge when it can go neither above nor below", () => {
+    const { top } = clampSelectionToolbar({ left: 250, top: 10, right: 350, bottom: 390 }, size, {
+      ...bounds,
+      bottom: 420,
+    })
+    expect(top + size.height).toBeLessThanOrEqual(420 - 8)
+    expect(top).toBeGreaterThanOrEqual(8)
+  })
+
+  it("pins to the start edge when the panel is narrower than the toolbar", () => {
+    expect(
+      clampSelectionToolbar(
+        { left: 110, top: 10, right: 130, bottom: 30 },
+        { width: 400, height: 36 },
+        { left: 100, top: 0, right: 300, bottom: 400 }
+      ).left
+    ).toBe(108)
   })
 })

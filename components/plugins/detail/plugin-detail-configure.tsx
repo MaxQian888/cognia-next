@@ -5,10 +5,10 @@
 // renders with plain `<header>` / `<div>` chrome so the form blends into the
 // surrounding pane.
 //
-// `onClose` is wired to a no-op (there's no host to close); the form's
-// internal "Save" still calls `setPluginConfig`, the manager picks the
-// change up on next activation, and the live-query in the body reflects
-// the new persisted state.
+// `onClose` is a no-op here (there is no dialog to close). The form owns
+// its own Save (persists via `setPluginConfig`, toasts the outcome) and
+// Cancel (resets to the saved values; disabled until something changed), and
+// the live-query in the body reflects the new persisted state.
 
 import { usePluginRow } from "@/hooks/plugins"
 import { PluginConfigFormContent } from "./plugin-config-form"

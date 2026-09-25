@@ -60,6 +60,8 @@ describe("PluginComparisonSheet", () => {
       />
     )
     expect(screen.getByTestId("plugin-comparison-remove-a")).toBeInTheDocument()
+    // 28px painted, 36px on a coarse pointer.
+    expect(screen.getByTestId("plugin-comparison-remove-a")).toHaveClass("pointer-coarse:size-9")
     expect(screen.getByTestId("plugin-comparison-remove-b")).toBeInTheDocument()
     expect(screen.queryByTestId("plugin-comparison-remove-c")).not.toBeInTheDocument()
     expect(document.querySelectorAll("[data-slot='card-header']")).toHaveLength(2)

@@ -11,18 +11,18 @@
         },
         {
           "path": "README.md",
-          "bytes": 9894,
-          "sha256": "07d9bb805d5d405149d2a9e4767daac767a3c7b394a1dfb01316949a6d6568e6"
+          "bytes": 10745,
+          "sha256": "b3660ab386eaa91cdb1944b36eece5edd72290295967dfd51b5cec8f063ad004"
         },
         {
           "path": "main.py",
-          "bytes": 52289,
-          "sha256": "c0e88827cf36aa46bb0ba857ba407dd14c622b8485acb0740a520637b4c4560a"
+          "bytes": 55989,
+          "sha256": "f75574b395d9d719219f7f45af6d8fef88d07f4e5033fc575ffdbaa7f9b056ad"
         },
         {
           "path": "plugin.json",
-          "bytes": 6139,
-          "sha256": "d9f82af5c56e34d1ec6aaf53deeec92cc32dbd2e30fafd54545da4e3b7686031"
+          "bytes": 7144,
+          "sha256": "a147c48e11a4d70062aa2430a5ef9a56ee9fb04e34eeab93b67894d5244ad866"
         },
         {
           "path": "pyproject.toml",
@@ -161,8 +161,8 @@
         },
         {
           "path": "repowiki/panel.py",
-          "bytes": 10078,
-          "sha256": "dd9b544eca22522731438deed387ae037658747cb97a67578e10557deb3786fe"
+          "bytes": 11063,
+          "sha256": "e0a38c8332dcab83b590d2e7e3c5c540d31b98e19ba4fef30e3aabcd07ee6676"
         },
         {
           "path": "repowiki/pipeline.py",
@@ -173,6 +173,42 @@
           "path": "repowiki/project.py",
           "bytes": 3863,
           "sha256": "2f63776818c29f35cfb49953aade79557def2f2d5ee91c9b901a446e54d83951"
+        }
+      ]
+    },
+    "cognia-laya-guard": {
+      "id": "cognia-laya-guard",
+      "version": "0.1.0",
+      "files": [
+        {
+          "path": "README.md",
+          "bytes": 11381,
+          "sha256": "3ce753373152f9a0fe6a43f9ab881cf0d17c37e6b69d378cdab3b20d9370cbf9"
+        },
+        {
+          "path": "layaguard/__init__.py",
+          "bytes": 293,
+          "sha256": "14898ce11d3c70244929b531be52d9a5fd7df835aaac7be31b058d480f49f90e"
+        },
+        {
+          "path": "layaguard/engine.py",
+          "bytes": 30463,
+          "sha256": "c814aee6376b56ea42da979a3bc60085a6d668e27c9522aeb10f351da0e51431"
+        },
+        {
+          "path": "main.py",
+          "bytes": 13945,
+          "sha256": "757d9bb181d002cdacf6521d93792a7b4742978da221186ed840b85a8c5609cd"
+        },
+        {
+          "path": "plugin.json",
+          "bytes": 7537,
+          "sha256": "8785c5b5588910893898db25d5681ec48d2d6178882de7766f028430bf0f52d5"
+        },
+        {
+          "path": "pyproject.toml",
+          "bytes": 564,
+          "sha256": "2adbb145d7c299652e9e324e21b0faef9b8f2c0d13814cb0e8112d1c9583e0c1"
         }
       ]
     }

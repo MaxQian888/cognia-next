@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 
@@ -39,5 +40,20 @@ describe("InstalledMarker", () => {
   it("does not render the desktop-only marker by default", () => {
     renderWithIntl(<InstalledMarker />)
     expect(screen.queryByTestId("installed-marker-desktop-only")).not.toBeInTheDocument()
+  })
+
+  // The explanation was a hover-only tooltip — on the very device (a phone)
+  // the marker exists to explain itself on.
+  it("explains the desktop-only state on tap", async () => {
+    const user = userEvent.setup()
+    renderWithIntl(<InstalledMarker desktopOnly />)
+    await user.click(
+      screen.getByRole("button", { name: enMessages.plugins.shared.installedDesktopOnly })
+    )
+    expect(
+      await screen.findByText(
+        (enMessages.plugins.shared as Record<string, string>).installedDesktopOnlyHint!
+      )
+    ).toBeInTheDocument()
   })
 })

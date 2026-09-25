@@ -51,6 +51,31 @@ describe("pluginSlashCommandsToSlashCommands", () => {
     expect(typeof cmd.handler).toBe("function")
   })
 
+  it("describes through the caller's resolver, falling back to the declared text", () => {
+    const mapped = pluginSlashCommandsToSlashCommands(
+      [
+        {
+          id: "p.a",
+          name: "A",
+          description: "Declared",
+          descriptionKey: "commands.a.description",
+          source: "plugin",
+          pluginId: "p",
+          handler: () => ({}),
+        },
+        {
+          id: "p.b",
+          name: "B",
+          description: "Only declared",
+          source: "plugin",
+          handler: () => ({}),
+        },
+      ],
+      (def) => (def.descriptionKey ? "已本地化" : undefined)
+    )
+    expect(mapped.map((cmd) => cmd.description)).toEqual(["已本地化", "Only declared"])
+  })
+
   it("defaults category to 'plugins' and tolerates a missing description", () => {
     const [cmd] = pluginSlashCommandsToSlashCommands([
       { id: "x.y", name: "Y", source: "plugin", handler: () => ({}) },

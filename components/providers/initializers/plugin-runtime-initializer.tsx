@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useSyncExternalStore } from "react"
+import { useRouter } from "next/navigation"
 
 import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
@@ -8,6 +9,7 @@ import { installPluginRuntimeLogBridge } from "@/lib/plugin/devtools/plugin-log-
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
+import { onPluginNavigationRequest } from "@/lib/plugin/api/navigation-request"
 import {
   markBootCapabilityFailed,
   markBootCapabilityReady,
@@ -83,6 +85,15 @@ export function PluginRuntimeInitializer({
     if (!shouldRun) return
     return installPackWarningRefreshWiring()
   }, [shouldRun])
+
+  // `ctx.ui.navigate(href)` lands here: plugin bundles cannot share the
+  // host's `next/navigation`, so the request arrives as an event and the real
+  // App Router performs it (`lib/plugin/api/navigation-request.ts`).
+  const router = useRouter()
+  useEffect(() => {
+    if (!shouldRun) return
+    return onPluginNavigationRequest(({ href }) => router.push(href))
+  }, [shouldRun, router])
 
   // A plugin's own output only reaches `/logs` because this forwards it. The
   // detail pane's Logs entry is a link into that panel filtered to the plugin

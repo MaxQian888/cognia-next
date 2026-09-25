@@ -7,6 +7,7 @@
 
 import { useDeferredValue, useMemo, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useLocale } from "next-intl"
 import { listPlugins } from "@/lib/db/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginsViewContext, buildView } from "./use-plugins"
@@ -14,9 +15,13 @@ import { PluginsViewContext, buildView } from "./use-plugins"
 export function PluginsViewProvider({ children }: { children: ReactNode }) {
   const rows = useLiveQuery(() => listPlugins(), [])
   const filters = usePluginsStore((s) => s.filters)
+  const locale = useLocale()
   // Keystrokes update the search input at normal priority; the O(n)
   // re-filter of every consumer happens at deferred priority.
   const deferredFilters = useDeferredValue(filters)
-  const view = useMemo(() => buildView(rows, deferredFilters), [rows, deferredFilters])
+  const view = useMemo(
+    () => buildView(rows, deferredFilters, locale),
+    [rows, deferredFilters, locale]
+  )
   return <PluginsViewContext.Provider value={view}>{children}</PluginsViewContext.Provider>
 }

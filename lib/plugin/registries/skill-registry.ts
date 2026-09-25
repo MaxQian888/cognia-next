@@ -42,5 +42,9 @@ export const getSkillEntry = registry.getEntry
 export const listSkillIds = registry.list
 /** List every registered entry (id + skill + pluginId) in registration order. */
 export const listSkillEntries = registry.entries
+/** Subscribe to register/unregister; pair with `getSkillsRevision` in `useSyncExternalStore`. */
+export const subscribeToSkills = registry.subscribe
+/** Monotonic revision, bumped whenever the registered skill set changes. */
+export const getSkillsRevision = registry.getRevision
 /** Test-only: clear every dynamically registered skill. */
 export const __resetSkillsForTesting = registry.__resetForTesting

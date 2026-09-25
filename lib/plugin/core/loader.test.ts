@@ -5,6 +5,7 @@
  */
 
 import { PluginLoader } from "./loader"
+import { createTestPluginContext } from "@cognia/plugin-sdk/testing"
 import type { Plugin, PluginManifest, PluginDefinition } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 
@@ -84,6 +85,10 @@ afterAll(() => {
   global.document = originalDocument
   global.fetch = originalFetch
 })
+
+// deactivate() receives the context activate() was given; these loader paths
+// ignore it, so any fully mounted context will do.
+const deactivateContext = createTestPluginContext().ctx
 
 describe("PluginLoader", () => {
   let loader: PluginLoader
@@ -406,7 +411,7 @@ describe("PluginLoader", () => {
 
       const definition = await loader.load(plugin)
       await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
-      await definition.deactivate?.()
+      await definition.deactivate?.(deactivateContext)
 
       expect(kill).toHaveBeenCalledTimes(1)
     })
@@ -452,7 +457,7 @@ describe("PluginLoader", () => {
       plugin.manifest.engines = { node: ">=24" }
       const definition = await loader.load(plugin)
 
-      await expect(definition.deactivate?.()).resolves.toBeUndefined()
+      await expect(definition.deactivate?.(deactivateContext)).resolves.toBeUndefined()
 
       const kill = jest.fn()
       launcherModule.launchPluginJs.mockResolvedValueOnce({
@@ -464,7 +469,7 @@ describe("PluginLoader", () => {
         deactivate: jest.fn(),
       })
       await definition.activate({ logger: { info: jest.fn(), warn: jest.fn() } } as never)
-      await definition.deactivate?.()
+      await definition.deactivate?.(deactivateContext)
 
       expect(kill).not.toHaveBeenCalled()
     })
@@ -524,7 +529,7 @@ describe("PluginLoader", () => {
       const logger = { info: jest.fn(), warn: jest.fn() }
 
       await expect(definition.activate({ logger } as never)).resolves.toEqual({})
-      await expect(definition.deactivate?.()).resolves.toBeUndefined()
+      await expect(definition.deactivate?.(deactivateContext)).resolves.toBeUndefined()
       expect(invoke).not.toHaveBeenCalled()
       expect(logger.warn).not.toHaveBeenCalled()
       expect(updatePlugin).not.toHaveBeenCalled()
@@ -587,7 +592,7 @@ describe("PluginLoader", () => {
 
       const hooks = await definition.activate({ logger } as never)
       await hooks?.onLoad?.()
-      await definition.deactivate?.()
+      await definition.deactivate?.(deactivateContext)
 
       expect(invoke).toHaveBeenNthCalledWith(1, "plugin_load_python", {
         pluginId: "python-native",

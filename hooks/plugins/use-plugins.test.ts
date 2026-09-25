@@ -234,3 +234,57 @@ describe("search and tag reach", () => {
     expect(view.filtered).toHaveLength(2)
   })
 })
+
+describe("localized names", () => {
+  // Rows show their manifest's `nameKey` text in the UI language, so search
+  // and the name sort have to see the same text the user does.
+  const localizedRow = (name: string, zhName: string) =>
+    row({
+      name,
+      manifest: {
+        id: "p_" + name,
+        nameKey: "manifest.name",
+        i18n: {
+          locales: {
+            en: { "manifest.name": name },
+            "zh-CN": { "manifest.name": zhName },
+          },
+        },
+      } as never,
+    })
+
+  const rows = () => [
+    localizedRow("Clipboard History", "剪贴板历史"),
+    localizedRow("Browser Tools", "浏览器工具"),
+    localizedRow("Agent Eval", "Agent 评测"),
+  ]
+
+  it("finds a plugin by the name shown in the UI language", () => {
+    const view = buildView(rows(), { ...DEFAULT_PLUGIN_FILTERS, query: "剪贴板" }, "zh-CN")
+    expect(view.filtered.map((r) => r.name)).toEqual(["Clipboard History"])
+  })
+
+  it("still finds it by the manifest's own name", () => {
+    const view = buildView(rows(), { ...DEFAULT_PLUGIN_FILTERS, query: "clipboard" }, "zh-CN")
+    expect(view.filtered.map((r) => r.name)).toEqual(["Clipboard History"])
+  })
+
+  it("sorts by the shown name with the locale's collation", () => {
+    const byShown: Record<string, string> = {
+      剪贴板历史: "Clipboard History",
+      浏览器工具: "Browser Tools",
+      "Agent 评测": "Agent Eval",
+    }
+    const expected = Object.keys(byShown)
+      .sort((a, b) => a.localeCompare(b, "zh-CN"))
+      .map((shown) => byShown[shown])
+    const zh = buildView(rows(), DEFAULT_PLUGIN_FILTERS, "zh-CN").filtered.map((r) => r.name)
+    expect(zh).toEqual(expected)
+    // …and the English order is still alphabetical by the English name.
+    expect(buildView(rows(), DEFAULT_PLUGIN_FILTERS).filtered.map((r) => r.name)).toEqual([
+      "Agent Eval",
+      "Browser Tools",
+      "Clipboard History",
+    ])
+  })
+})

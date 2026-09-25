@@ -23,7 +23,7 @@ describe("promotion allowlist", () => {
   })
 
   it("names the callable tools in the refusal so authors can self-correct", () => {
-    expect(notAuthorCallable("spawn_task").error).toContain("web_search, web_fetch")
+    expect(notAuthorCallable("spawn_task").error).toContain("web_search, web_fetch, web_clone")
   })
 })
 
@@ -116,5 +116,84 @@ describe("web_fetch", () => {
     )
     expect(result).toMatchObject({ ok: false, code: "blocked" })
     expect(fetchImpl).not.toHaveBeenCalled()
+  })
+})
+
+describe("web_clone", () => {
+  const job = { mode: "snapshot", url: "https://x.test/", options: { output: "/repo/snap" } }
+
+  it("refuses a malformed job with a stable code", async () => {
+    await expect(
+      runAuthorCallableHostTool("web_clone", { job: { mode: "snapshot" } }, deps())
+    ).resolves.toMatchObject({ ok: false, code: "invalid-arguments" })
+  })
+
+  it("answers unsupported-host where no snapshot engine is wired (web, mobile, CLI)", async () => {
+    await expect(runAuthorCallableHostTool("web_clone", { job }, deps())).resolves.toMatchObject({
+      ok: false,
+      code: "unsupported-host",
+    })
+  })
+
+  it("runs the host's native snapshot runner and returns its envelope", async () => {
+    const envelope = { ok: true, result: { output: "/repo/snap", mode: "bundle", stats: {} } }
+    const webCloneSnapshot = jest.fn(async () => ({ envelope }))
+    await expect(
+      runAuthorCallableHostTool("web_clone", { job }, deps(), {
+        native: { webCloneSnapshot, workspaceRoot: () => "/repo" },
+      })
+    ).resolves.toEqual({ ok: true, envelope })
+    expect(webCloneSnapshot).toHaveBeenCalledWith({
+      ...job,
+      options: { output: "/repo/snap", url: "https://x.test/", allowPrivateHosts: false },
+    })
+  })
+
+  it.each([
+    ["an output outside the workspace", { output: "/Users/u/.zshrc" }],
+    ["an output that walks out with ..", { output: "/repo/../etc/x" }],
+    ["a relative output", { output: "snap" }],
+    ["a convert input outside the workspace", { output: "/repo/out", convertLocal: "/etc/passwd" }],
+  ])("refuses %s", async (_label, options) => {
+    const webCloneSnapshot = jest.fn()
+    await expect(
+      runAuthorCallableHostTool("web_clone", { job: { ...job, options } }, deps(), {
+        native: { webCloneSnapshot, workspaceRoot: () => "/repo" },
+      })
+    ).resolves.toMatchObject({ ok: false, code: "blocked" })
+    expect(webCloneSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("refuses a job when no workspace is open", async () => {
+    const webCloneSnapshot = jest.fn()
+    await expect(
+      runAuthorCallableHostTool("web_clone", { job }, deps(), { native: { webCloneSnapshot } })
+    ).resolves.toMatchObject({ ok: false, code: "blocked" })
+    expect(webCloneSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("honours a private-host request only with the user's opt-in, and pins the checked url", async () => {
+    const envelope = { ok: true }
+    const webCloneSnapshot = jest.fn(async () => ({ envelope }))
+    const request = {
+      ...job,
+      options: { output: "/repo/snap", url: "http://127.0.0.1/", allowPrivateHosts: true },
+    }
+    const native = { webCloneSnapshot, workspaceRoot: () => "/repo" }
+    await runAuthorCallableHostTool("web_clone", { job: request }, deps(), { native })
+    expect(webCloneSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ url: "https://x.test/", allowPrivateHosts: false }),
+      })
+    )
+    await runAuthorCallableHostTool(
+      "web_clone",
+      { job: request },
+      deps({ allowPrivateHosts: true }),
+      { native }
+    )
+    expect(webCloneSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ options: expect.objectContaining({ allowPrivateHosts: true }) })
+    )
   })
 })

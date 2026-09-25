@@ -194,6 +194,92 @@ describe("Plugin Validation", () => {
       )
     })
 
+    it("accepts theme packs whose motion speed is one the accessibility picker offers", () => {
+      for (const motionSpeed of [0.5, 1, 1.5, undefined]) {
+        const manifest = {
+          ...createValidManifest(),
+          themePacks: [
+            {
+              id: "calm",
+              name: "Calm",
+              applies: { themeId: "ocean", radius: 0.5, motionSpeed },
+            },
+          ],
+        }
+        expect(validatePluginManifest(manifest).errors).toEqual([])
+      }
+    })
+
+    it("rejects a theme pack motion speed outside the user's three-step preference", () => {
+      // 0.75 is what 16 first-party packs shipped: `applyThemePack` persisted
+      // it into the motion setting, where no picker option matched it.
+      const manifest = {
+        ...createValidManifest(),
+        themePacks: [
+          { id: "odd", name: "Odd", applies: { motionSpeed: 0.75 } },
+          { id: "text", name: "Text", applies: { motionSpeed: "fast", radius: "big" } },
+        ],
+      }
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "themePacks[0].applies.motionSpeed",
+            code: "manifest.themePacks.applies.motionSpeed.invalid",
+          }),
+          expect.objectContaining({
+            field: "themePacks[1].applies.motionSpeed",
+            code: "manifest.themePacks.applies.motionSpeed.invalid",
+          }),
+          expect.objectContaining({
+            field: "themePacks[1].applies.radius",
+            code: "manifest.themePacks.applies.radius.invalid_type",
+          }),
+        ])
+      )
+    })
+
+    it("rejects theme packs without an id, a name, or an applies map", () => {
+      const manifest = {
+        ...createValidManifest(),
+        themePacks: [{ name: "" }, "not-a-pack"],
+      }
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "themePacks[0].id",
+            code: "manifest.themePacks.id.missing",
+          }),
+          expect.objectContaining({
+            field: "themePacks[0].name",
+            code: "manifest.themePacks.name.missing",
+          }),
+          expect.objectContaining({
+            field: "themePacks[0].applies",
+            code: "manifest.themePacks.applies.invalid_type",
+          }),
+          expect.objectContaining({
+            field: "themePacks[1]",
+            code: "manifest.themePacks.invalid_item",
+          }),
+        ])
+      )
+      expect(
+        validatePluginManifest({ ...createValidManifest(), themePacks: {} }).diagnostics
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.themePacks.invalid_type" }),
+        ])
+      )
+    })
+
     it("rejects malformed unified template package contributions", () => {
       const manifest = createValidManifest()
       manifest.capabilities = ["template-package"]
@@ -2645,6 +2731,53 @@ describe("Plugin Validation", () => {
               field: "quickActions[0].labelKey",
               code: "manifest.i18n.key.missing",
               severity: "error",
+            }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.nameKey / descriptionKey", () => {
+      it("accepts keys every declared locale carries", () => {
+        const manifest = createValidManifest()
+        manifest.nameKey = "plugin.name"
+        manifest.descriptionKey = "plugin.description"
+        manifest.i18n = {
+          locales: {
+            en: { "plugin.name": "Acme", "plugin.description": "Does acme things." },
+            "zh-CN": { "plugin.name": "Acme", "plugin.description": "做 acme 的事。" },
+          },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+      })
+
+      it("rejects a name key a locale is missing", () => {
+        const manifest = createValidManifest()
+        manifest.nameKey = "plugin.name"
+        manifest.i18n = { locales: { en: { "plugin.name": "Acme" }, "zh-CN": {} } }
+        const result = validatePluginManifest(manifest)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ field: "nameKey", code: "manifest.i18n.key.missing" }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.commands[].descriptionKey", () => {
+      it("rejects a command description key a locale is missing", () => {
+        const manifest = createValidManifest()
+        manifest.commands = [
+          { id: "run", name: "/run", description: "Run", descriptionKey: "commands.run" },
+        ]
+        manifest.i18n = { locales: { en: { "commands.run": "Run" }, "zh-CN": {} } }
+        const result = validatePluginManifest(manifest)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field: "commands[0].descriptionKey",
+              code: "manifest.i18n.key.missing",
             }),
           ])
         )

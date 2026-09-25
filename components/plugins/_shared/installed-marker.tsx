@@ -1,18 +1,21 @@
 "use client"
 
 /**
- * "Installed" badge with optional desktop-only tooltip. Replaces the
+ * "Installed" badge with optional desktop-only explanation. Replaces the
  * mismatched inline indicators in marketplace card, discover sheet
  * row, and library row. On Capacitor (mobile) the install action is
- * disabled, so this marker is also reused to explain why.
+ * disabled, so this marker is also reused to explain why — through a
+ * `PluginHint`, because the old hover-only Tooltip was exactly the
+ * disclosure a phone cannot open.
  */
 
 import { useTranslations } from "next-intl"
 import { CheckIcon, InfoIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+
+import { PluginHint } from "./plugin-hint"
 
 interface Props {
   /** Render the desktop-only explanation instead of the success state. */
@@ -31,19 +34,19 @@ export function InstalledMarker({
   const t = useTranslations("plugins.shared")
   if (desktopOnly) {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            variant="outline"
-            className={cn("text-xs gap-1", className)}
-            data-testid={dataTestId ?? "installed-marker-desktop-only"}
-          >
-            <InfoIcon className="size-3" aria-hidden="true" />
-            {t("installedDesktopOnly")}
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>{t("installedDesktopOnly")}</TooltipContent>
-      </Tooltip>
+      <PluginHint
+        label={t("installedDesktopOnly")}
+        content={<p>{t("installedDesktopOnlyHint")}</p>}
+      >
+        <Badge
+          variant="outline"
+          className={cn("text-xs gap-1", className)}
+          data-testid={dataTestId ?? "installed-marker-desktop-only"}
+        >
+          <InfoIcon className="size-3" aria-hidden="true" />
+          {t("installedDesktopOnly")}
+        </Badge>
+      </PluginHint>
     )
   }
   return (

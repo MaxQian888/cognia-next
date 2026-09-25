@@ -17,7 +17,7 @@
  * refuses exactly what the Host refuses, and asserts the activation is clean.
  */
 
-import { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "@/lib/plugin/vscode-shim/runtime-handlers"
+import { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "@cognia/plugin-sdk/contracts"
 
 /**
  * How each `vscode` API this double implements reaches the Host.

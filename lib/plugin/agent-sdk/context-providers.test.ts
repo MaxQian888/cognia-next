@@ -40,26 +40,37 @@ beforeEach(() => {
 })
 
 describe("resolveContextContributions", () => {
+  it("feeds a plugin's run only its own providers", async () => {
+    registerContextProvider("mine", { id: "mine", provide: () => "mine" }, { pluginId: "p" })
+    registerContextProvider("theirs", { id: "theirs", provide: () => "secret" }, { pluginId: "q" })
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("mine")
+    expect(await resolveContextContributions({ prompt: "hi" }, undefined)).toBe("")
+  })
+
   it("returns empty string with no providers", async () => {
-    expect(await resolveContextContributions({ prompt: "hi" })).toBe("")
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("")
   })
 
   it("joins non-empty provider outputs", async () => {
-    registerContextProvider("a", { id: "a", provide: () => "alpha" })
-    registerContextProvider("b", { id: "b", provide: () => "  " })
-    registerContextProvider("c", { id: "c", provide: async () => "gamma" })
-    expect(await resolveContextContributions({ prompt: "hi" })).toBe("alpha\n\ngamma")
+    registerContextProvider("a", { id: "a", provide: () => "alpha" }, { pluginId: "p" })
+    registerContextProvider("b", { id: "b", provide: () => "  " }, { pluginId: "p" })
+    registerContextProvider("c", { id: "c", provide: async () => "gamma" }, { pluginId: "p" })
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("alpha\n\ngamma")
   })
 
   it("skips a throwing provider", async () => {
-    registerContextProvider("ok", { id: "ok", provide: () => "kept" })
-    registerContextProvider("bad", {
-      id: "bad",
-      provide: () => {
-        throw new Error("boom")
+    registerContextProvider("ok", { id: "ok", provide: () => "kept" }, { pluginId: "p" })
+    registerContextProvider(
+      "bad",
+      {
+        id: "bad",
+        provide: () => {
+          throw new Error("boom")
+        },
       },
-    })
-    expect(await resolveContextContributions({ prompt: "hi" })).toBe("kept")
+      { pluginId: "p" }
+    )
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("kept")
   })
 
   it("preserves registration order even when providers resolve out of order", async () => {
@@ -69,9 +80,9 @@ describe("resolveContextContributions", () => {
     const aPromise = new Promise<string>((r) => {
       resolveA = r
     })
-    registerContextProvider("a", { id: "a", provide: () => aPromise })
-    registerContextProvider("c", { id: "c", provide: async () => "gamma" })
-    const resultPromise = resolveContextContributions({ prompt: "hi" })
+    registerContextProvider("a", { id: "a", provide: () => aPromise }, { pluginId: "p" })
+    registerContextProvider("c", { id: "c", provide: async () => "gamma" }, { pluginId: "p" })
+    const resultPromise = resolveContextContributions({ prompt: "hi" }, "p")
     resolveA!("alpha")
     expect(await resultPromise).toBe("alpha\n\ngamma")
   })
@@ -88,14 +99,14 @@ describe("resolveContextContributions", () => {
       active--
       return id
     }
-    registerContextProvider("p1", { id: "p1", provide: make("p1") })
-    registerContextProvider("p2", { id: "p2", provide: make("p2") })
-    expect(await resolveContextContributions({ prompt: "hi" })).toBe("p1\n\np2")
+    registerContextProvider("p1", { id: "p1", provide: make("p1") }, { pluginId: "p" })
+    registerContextProvider("p2", { id: "p2", provide: make("p2") }, { pluginId: "p" })
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("p1\n\np2")
     expect(maxActive).toBeGreaterThan(1)
   })
 
   it("isolates a rejecting and a synchronously-throwing provider under parallelism", async () => {
-    registerContextProvider("good1", { id: "good1", provide: () => "one" })
+    registerContextProvider("good1", { id: "good1", provide: () => "one" }, { pluginId: "p" })
     registerContextProvider("asyncBad", {
       id: "asyncBad",
       provide: async () => {
@@ -108,8 +119,8 @@ describe("resolveContextContributions", () => {
         throw new Error("sync boom")
       },
     })
-    registerContextProvider("good2", { id: "good2", provide: async () => "two" })
-    expect(await resolveContextContributions({ prompt: "hi" })).toBe("one\n\ntwo")
+    registerContextProvider("good2", { id: "good2", provide: async () => "two" }, { pluginId: "p" })
+    expect(await resolveContextContributions({ prompt: "hi" }, "p")).toBe("one\n\ntwo")
   })
 })
 

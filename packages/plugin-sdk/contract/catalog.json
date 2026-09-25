@@ -1675,6 +1675,18 @@
           }
         },
         {
+          "id": "agent.invokeDependencyTool",
+          "name": "invokeDependencyTool",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "agent.registerExternalAgentAdapter",
           "name": "registerExternalAgentAdapter",
           "requiredPermissions": [],
@@ -2061,6 +2073,18 @@
           }
         },
         {
+          "id": "artifact.listVersions",
+          "name": "listVersions",
+          "requiredPermissions": ["artifact:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "artifact.onArtifactChange",
           "name": "onArtifactChange",
           "requiredPermissions": ["artifact:read"],
@@ -2094,6 +2118,18 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "artifact.restoreVersion",
+          "name": "restoreVersion",
+          "requiredPermissions": ["artifact:write"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
           }
         },
         {
@@ -2243,6 +2279,18 @@
           }
         },
         {
+          "id": "automation.clickText",
+          "name": "clickText",
+          "requiredPermissions": ["automation:read", "automation:screenshot", "automation:click"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "automation.cursorPosition",
           "name": "cursorPosition",
           "requiredPermissions": ["automation:read"],
@@ -2270,6 +2318,18 @@
           "id": "automation.find",
           "name": "find",
           "requiredPermissions": ["automation:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "automation.findText",
+          "name": "findText",
+          "requiredPermissions": ["automation:read", "automation:screenshot"],
           "consentTier": "policy",
           "risk": "medium",
           "idempotent": true,
@@ -2494,6 +2554,18 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "automation.zoom",
+          "name": "zoom",
+          "requiredPermissions": ["automation:read", "automation:screenshot"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
@@ -3367,6 +3439,18 @@
         {
           "id": "chat.addContextSelection",
           "name": "addContextSelection",
+          "requiredPermissions": ["session:write"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "chat.appendMessagePart",
+          "name": "appendMessagePart",
           "requiredPermissions": ["session:write"],
           "consentTier": "policy",
           "risk": "low",
@@ -4438,6 +4522,198 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.surface",
+          "name": "a2ui.surface",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.segment",
+          "name": "a2ui.segment",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.message",
+          "name": "a2ui.message",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.text",
+          "name": "a2ui.component.text",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.button",
+          "name": "a2ui.component.button",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.card",
+          "name": "a2ui.component.card",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.row",
+          "name": "a2ui.component.row",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.column",
+          "name": "a2ui.component.column",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.alert",
+          "name": "a2ui.component.alert",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.image",
+          "name": "a2ui.component.image",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.link",
+          "name": "a2ui.component.link",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.select",
+          "name": "a2ui.component.select",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.textField",
+          "name": "a2ui.component.textField",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.list",
+          "name": "a2ui.component.list",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.divider",
+          "name": "a2ui.component.divider",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "connectors.a2ui.component.badge",
+          "name": "a2ui.component.badge",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
@@ -6530,6 +6806,18 @@
           }
         },
         {
+          "id": "i18n.getLocale",
+          "name": "getLocale",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "i18n.getLocaleName",
           "name": "getLocaleName",
           "requiredPermissions": [],
@@ -6544,6 +6832,18 @@
         {
           "id": "i18n.hasTranslation",
           "name": "hasTranslation",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "i18n.hasKey",
+          "name": "hasKey",
           "requiredPermissions": [],
           "consentTier": "none",
           "risk": "low",
@@ -6712,6 +7012,18 @@
           }
         },
         {
+          "id": "integrations.checkAccountHealth",
+          "name": "checkAccountHealth",
+          "requiredPermissions": ["integrations:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "integrations.createAccount",
           "name": "createAccount",
           "requiredPermissions": ["integrations:manage"],
@@ -6760,6 +7072,18 @@
           }
         },
         {
+          "id": "integrations.getIngressDeadletter",
+          "name": "getIngressDeadletter",
+          "requiredPermissions": ["integrations:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "integrations.getIngressPublicUrl",
           "name": "getIngressPublicUrl",
           "requiredPermissions": ["integrations:read"],
@@ -6789,6 +7113,30 @@
           "requiredPermissions": ["integrations:read"],
           "consentTier": "policy",
           "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "integrations.listIngressDeadletters",
+          "name": "listIngressDeadletters",
+          "requiredPermissions": ["integrations:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "integrations.listResources",
+          "name": "listResources",
+          "requiredPermissions": ["integrations:read"],
+          "consentTier": "policy",
+          "risk": "low",
           "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
@@ -6846,6 +7194,18 @@
         {
           "id": "integrations.removeSubscription",
           "name": "removeSubscription",
+          "requiredPermissions": ["integrations:manage"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "integrations.requeueIngressDeadletter",
+          "name": "requeueIngressDeadletter",
           "requiredPermissions": ["integrations:manage"],
           "consentTier": "policy",
           "risk": "medium",
@@ -11138,6 +11498,90 @@
           "resourceEffect": {
             "kind": "none"
           }
+        },
+        {
+          "id": "templates.saveDraft",
+          "name": "saveDraft",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.publish",
+          "name": "publish",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.fork",
+          "name": "fork",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.deprecate",
+          "name": "deprecate",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.deleteDraft",
+          "name": "deleteDraft",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.exportPackage",
+          "name": "exportPackage",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "templates.importPackage",
+          "name": "importPackage",
+          "requiredPermissions": ["templates:library:write"],
+          "consentTier": "confirm",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
         }
       ]
     },
@@ -11645,6 +12089,18 @@
         {
           "id": "ui.showToast",
           "name": "showToast",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "ui.navigate",
+          "name": "navigate",
           "requiredPermissions": [],
           "consentTier": "none",
           "risk": "low",

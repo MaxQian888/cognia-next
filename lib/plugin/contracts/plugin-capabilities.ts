@@ -990,7 +990,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "packages/plugin-sdk/src/define/define-character-pack.ts",
     ],
     pythonSdk: ["plugin-sdk/python/src/cognia/agent.py"],
-    builtinContributionPaths: ["plugins/cognia-character-seeds/src/index.ts"],
+    builtinContributionPaths: ["plugins/cognia-builtin-characters/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: [
       "lib/plugin/registries/character-pack-registry.test.ts",

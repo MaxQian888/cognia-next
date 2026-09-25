@@ -95,10 +95,12 @@ describe("createCharacter", () => {
       disallowedTools: ["bash"],
       mcpServerIds: ["mcp_1"],
       skillIds: ["skill_1"],
+      pluginSkillIds: ["acme:review"],
       workingDir: "/tmp",
       description: "small fox",
     })
     expect(c.avatarEmoji).toBe("🦊")
+    expect(c.pluginSkillIds).toEqual(["acme:review"])
     expect(c.model).toBe("claude-haiku")
     expect(c.allowedTools).toEqual(["fs"])
     expect(c.workingDir).toBe("/tmp")

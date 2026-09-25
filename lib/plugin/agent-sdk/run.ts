@@ -177,14 +177,15 @@ async function executeThroughAuthority(
 }
 
 /**
- * Append every registered context provider's contribution to `appendSystem`
+ * Append the running plugin's context-provider contributions to `appendSystem`
  * (Package E). Returns the options unchanged when nothing is contributed.
  */
 async function withContextContributions(
   prompt: string,
-  options: PluginAgentRunOptions
+  options: PluginAgentRunOptions,
+  pluginId: string | undefined
 ): Promise<PluginAgentRunOptions> {
-  const contribution = await resolveContextContributions({ prompt })
+  const contribution = await resolveContextContributions({ prompt }, pluginId)
   if (!contribution) return options
   const appendSystem = [options.appendSystem, contribution].filter(Boolean).join("\n\n")
   if (!hasNoLeakingPii(appendSystem)) {
@@ -254,7 +255,7 @@ export async function runPluginAgent(
 
   try {
     await runInputGuardrails(prompt, options.guardrails, signal)
-    const opts = await withContextContributions(prompt, options)
+    const opts = await withContextContributions(prompt, options, meta.pluginId)
     const result = await executeWithRobustness(
       prompt,
       opts,
@@ -307,7 +308,7 @@ export function runPluginAgentStreamed(
   void (async () => {
     try {
       await runInputGuardrails(prompt, options.guardrails, signal)
-      const opts = await withContextContributions(prompt, options)
+      const opts = await withContextContributions(prompt, options, meta.pluginId)
       const result = await executeWithRobustness(
         prompt,
         opts,

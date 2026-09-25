@@ -11,8 +11,13 @@ const mockProfile = jest.fn(() => "browser")
 jest.mock("@/hooks/plugins/use-plugin-runtime-profile", () => ({
   usePluginRuntimeProfile: () => mockProfile(),
 }))
+const mockMirrored = jest.fn(() => false)
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  isMirroredPluginClient: () => mockMirrored(),
+}))
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginManifest } from "@/types/plugin"
 
 import { PluginCompatibilityBadge } from "./plugin-compatibility-badge"
@@ -30,6 +35,7 @@ const manifest = (over: Partial<PluginManifest> = {}): PluginManifest =>
 
 beforeEach(() => {
   mockProfile.mockReturnValue("browser")
+  mockMirrored.mockReturnValue(false)
 })
 
 describe("PluginCompatibilityBadge", () => {
@@ -93,5 +99,24 @@ describe("PluginCompatibilityBadge", () => {
       "data-severity",
       "error"
     )
+  })
+
+  // A paired phone queues the toggle to the desktop, which runs the plugin on
+  // the tauri profile; judging it against the phone flagged every row.
+  it("judges a mirrored client against the desktop and renders nothing", () => {
+    mockProfile.mockReturnValue("mobile")
+    mockMirrored.mockReturnValue(true)
+    render(<PluginCompatibilityBadge manifest={manifest()} />)
+    expect(screen.queryByTestId("plugin-compatibility-badge")).toBeNull()
+  })
+
+  // The reason used to live in a hover-only tooltip on a span: unreachable by
+  // keyboard and by touch. jsdom has no hover, so this is the tap path.
+  it("exposes the reason through a focusable, tappable trigger", async () => {
+    const user = userEvent.setup()
+    render(<PluginCompatibilityBadge manifest={manifest()} />)
+    const trigger = screen.getByRole("button", { name: "blockedLabel" })
+    await user.click(trigger)
+    expect(await screen.findByText(/blockedTooltip/)).toBeInTheDocument()
   })
 })

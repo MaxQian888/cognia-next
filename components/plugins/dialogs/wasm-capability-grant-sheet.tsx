@@ -28,9 +28,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
   DANGEROUS_PERMISSIONS,
-  PERMISSION_DESCRIPTIONS,
   WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "@/lib/plugin/security/permission-guard"
+import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
 import { cn } from "@/lib/utils"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 
@@ -300,6 +300,7 @@ interface PermissionGroupListProps {
 
 function PermissionGroupList({ title, groups, granted, onToggle }: PermissionGroupListProps) {
   const t = useTranslations("plugins.wasmInstall.capabilityGrantSheet")
+  const describePermission = usePermissionDescription()
   return (
     <div className="space-y-3">
       <div className="text-sm font-semibold">{title}</div>
@@ -346,7 +347,7 @@ function PermissionGroupList({ title, groups, granted, onToggle }: PermissionGro
                       {perm}
                     </label>
                     <p className="text-xs text-muted-foreground">
-                      {PERMISSION_DESCRIPTIONS[perm] ?? t("customPermission")}
+                      {describePermission(perm, t("customPermission"))}
                     </p>
                     {unimplemented && (
                       <p className="text-xs text-amber-600 dark:text-amber-500">

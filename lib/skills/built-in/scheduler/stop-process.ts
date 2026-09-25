@@ -22,9 +22,10 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { requireTask, resolveTaskWrite } from "./_core"
+import { preflightExistingTaskWrite, requireTask, resolveTaskWrite } from "./_core"
 
 const schema = z.object({
   taskId: z.string().min(1).describe("Task that owns the process, from scheduler_list_tasks."),
@@ -53,11 +54,19 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "destructive",
   imAccess: "opt-in",
-  mcpToolName: "scheduler_stop_task_process",
+  mcpToolName: SCHEDULE_TOOL.stopProcess,
   inputSchema: schema,
+  preflight: async (args, ctx) => {
+    await preflightExistingTaskWrite(args.taskId, ctx)
+  },
   execute: async (args, ctx) => {
     const task = await requireTask(args.taskId)
-    await resolveTaskWrite({ taskType: task.type, sessionId: ctx.sessionId })
+    await resolveTaskWrite({
+      taskType: task.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "mutate",
+    })
 
     const { cancelTaskMonitor, killTaskJob, listTaskProcesses, taskTypeSpawnsProcesses } =
       await import("@/lib/scheduler/task-processes")

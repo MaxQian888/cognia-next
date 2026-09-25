@@ -25,8 +25,12 @@ jest.mock("@/stores/scheduler/scheduler-store", () => ({
 // stay about the pass-through contract. `assertTaskWriteAllowed` is stubbed
 // per-test where the refusal itself is the subject.
 const assertTaskWriteAllowed = jest.fn(async () => undefined)
+// The policy loader reads AppSettings; stubbed so the suite can tell a fresh
+// read apart from the store's snapshot.
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: false }) as unknown)
 jest.mock("@/lib/scheduler/write-authority", () => ({
   assertTaskWriteAllowed: (...args: unknown[]) => assertTaskWriteAllowed(...(args as [])),
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
 }))
 
 import {
@@ -73,8 +77,12 @@ describe("plugin scheduler-tasks API", () => {
     expect(state.runTaskNow).toHaveBeenCalledWith("t1", { triggerSource: "run-now" })
   })
 
-  it("reads the persisted permission policy from the store", async () => {
-    await expect(getSchedulerPermissionPolicy()).resolves.toEqual({ agentAutoCreate: true })
+  it("reads the permission policy fresh from settings, not the store snapshot", async () => {
+    // The store's `permissionPolicy` is `DEFAULT_PERMISSION_POLICY` until it is
+    // hydrated, which says agents may manage the schedule. A plugin gating its
+    // agent tools on that snapshot let them through after the user said no.
+    await expect(getSchedulerPermissionPolicy()).resolves.toEqual({ agentToolsEnabled: false })
+    expect(loadSchedulerPolicy).toHaveBeenCalledTimes(1)
   })
 
   it("loads before reading, so a fresh renderer never reports an empty schedule", async () => {

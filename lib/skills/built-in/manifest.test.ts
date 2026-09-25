@@ -354,3 +354,47 @@ describe("summariseSkillCapabilities", () => {
     expect(summariseSkillCapabilities("telegram")).toEqual([])
   })
 })
+
+describe("buildBuiltInSkillManifest · families", () => {
+  beforeEach(() => {
+    __resetSharedBuiltInSkillRegistry()
+  })
+
+  it("keeps only the requested families", () => {
+    registerBuiltInSkill(mkSkill({ platforms: "any" }))
+    registerBuiltInSkill(
+      mkSkill({
+        id: "schedule.list",
+        family: "schedule",
+        platforms: "any",
+        mcpToolName: "scheduler_list_tasks",
+      })
+    )
+    const entries = buildBuiltInSkillManifest({ families: ["schedule"] })
+    expect(entries.map((entry) => entry.skillId)).toEqual(["schedule.list"])
+  })
+
+  it("never consults the Lark CLI for a family it is about to drop", () => {
+    // A fresh module graph with the probe replaced, so the test can see
+    // whether the Lark gate ran at all (a namespace export cannot be spied).
+    const probe = jest.fn()
+    jest.isolateModules(() => {
+      jest.doMock("./lark/capabilities", () => ({
+        ...jest.requireActual<typeof import("./lark/capabilities")>("./lark/capabilities"),
+        getCachedLarkCliCapabilityDiagnostics: () => null,
+        probeLarkCliCapabilities: probe,
+      }))
+      const manifest = jest.requireActual<typeof import("./manifest")>("./manifest")
+      const registry = jest.requireActual<typeof import("./registry")>("./registry")
+      registry.registerBuiltInSkill(mkSkill({ platforms: "any" }))
+
+      manifest.buildBuiltInSkillManifest({ families: ["schedule"] })
+      expect(probe).not.toHaveBeenCalled()
+
+      // Control: without the family filter the same Lark skill does reach it.
+      manifest.buildBuiltInSkillManifest({})
+      expect(probe).toHaveBeenCalled()
+    })
+    jest.dontMock("./lark/capabilities")
+  })
+})

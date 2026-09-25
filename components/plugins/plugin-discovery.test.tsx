@@ -38,7 +38,6 @@ beforeEach(() => {
     getRecentPlugins: jest.fn(async () => SAMPLE),
     getPlugin: jest.fn(async () => null),
     installPlugin: jest.fn(async () => undefined),
-    uninstallPlugin: jest.fn(async () => undefined),
   })
 })
 
@@ -68,7 +67,6 @@ describe("PluginDiscovery", () => {
       getRecentPlugins: jest.fn(async () => SAMPLE),
       getPlugin: jest.fn(async () => null),
       installPlugin: directInstall,
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     const onInstall = jest.fn()
     render(<PluginDiscovery onInstall={onInstall} />)

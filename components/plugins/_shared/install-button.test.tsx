@@ -97,14 +97,28 @@ describe("desktop host gate", () => {
   it("disables install off the desktop shell and marks why", async () => {
     const onInstall = jest.fn()
     renderWithIntl(<InstallButton installed={false} installing={false} onInstall={onInstall} />)
-    const button = screen.getByRole("button")
+    const button = screen.getByText("Install").closest("button") as HTMLButtonElement
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("data-host-blocked", "true")
     await userEvent.click(button)
     expect(onInstall).not.toHaveBeenCalled()
   })
 
-  // Removing a row is a Dexie delete, which works on every host.
+  // The reason lived in a hover-only tooltip around the disabled button — on a
+  // phone, the host that is actually blocked, it could never be read.
+  it("explains the block through a focusable, tappable hint", async () => {
+    renderWithIntl(<InstallButton installed={false} installing={false} onInstall={jest.fn()} />)
+    const hint = screen.getByRole("button", { name: "Why install isn't available here" })
+    await userEvent.click(hint)
+    expect(
+      await screen.findByText(
+        "Installing plugins runs in the desktop backend, so it needs the Cognia desktop app."
+      )
+    ).toBeInTheDocument()
+  })
+
+  // Uninstall goes through the shared confirm dialog, which applies its own
+  // host rules; the install gate does not apply to it.
   it("leaves uninstall alone", async () => {
     const onUninstall = jest.fn()
     render(

@@ -21,9 +21,10 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { requireTask, resolveTaskWrite } from "./_core"
+import { preflightExistingTaskWrite, requireTask, resolveTaskWrite } from "./_core"
 
 const schema = z.object({
   taskId: z
@@ -50,14 +51,22 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "write",
   imAccess: "always",
-  mcpToolName: "scheduler_cancel_task_run",
+  mcpToolName: SCHEDULE_TOOL.cancelRun,
   inputSchema: schema,
+  preflight: async (args, ctx) => {
+    await preflightExistingTaskWrite(args.taskId, ctx)
+  },
   execute: async (args, ctx) => {
     // The task is loaded first so a bad id is named as such, and so the policy
     // gate is asked about a real task type rather than about a run id that may
     // belong to nothing.
     const task = await requireTask(args.taskId)
-    await resolveTaskWrite({ taskType: task.type, sessionId: ctx.sessionId })
+    await resolveTaskWrite({
+      taskType: task.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "mutate",
+    })
 
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const outcome = await getTaskScheduler().cancelExecution(args.runId)

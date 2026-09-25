@@ -106,6 +106,7 @@ describe("barrel", () => {
       "cn",
       "parseToolOutput",
       "useCopy",
+      "useLiveQuery",
       "useParsedToolOutput",
     ]) {
       expect(kit).toHaveProperty(name)

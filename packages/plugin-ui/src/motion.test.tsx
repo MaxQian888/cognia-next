@@ -1,7 +1,13 @@
 import { act, render, renderHook, screen } from "@testing-library/react"
 
 import { Collapse, Fade, SlideUp, Stagger, motionTokens, useMotionPrefs } from "./motion"
-import { MOBILE_DURATION, MOBILE_EASE, STAGGER_CHILD, STAGGER_CONTAINER } from "./motion-tokens"
+import {
+  MOBILE_DURATION,
+  MOBILE_EASE,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  STAGGER_MAX_SPREAD,
+} from "./motion-tokens"
 
 /**
  * The repo-wide `motion/react` stub folds `animate` into inline style and drops
@@ -55,6 +61,8 @@ afterEach(() => {
   mockMotionRenders.length = 0
   root().className = ""
   root().removeAttribute("style")
+  root().removeAttribute("data-reduce-motion")
+  root().removeAttribute("data-motion-respect")
   window.matchMedia = originalMatchMedia
 })
 
@@ -75,6 +83,24 @@ function stubMatchMedia(matches: boolean) {
   })) as unknown as typeof window.matchMedia
 }
 
+/** Like `stubMatchMedia`, but the OS answer can change after mount and is broadcast. */
+function stubChangingMatchMedia(initial: boolean) {
+  const state = { matches: initial }
+  const listeners = new Set<() => void>()
+  window.matchMedia = ((query: string) => ({
+    get matches() {
+      return state.matches
+    },
+    media: query,
+    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+  })) as unknown as typeof window.matchMedia
+  return (matches: boolean) => {
+    state.matches = matches
+    for (const listener of Array.from(listeners)) listener()
+  }
+}
+
 function renderOf(slot: string): MotionRender | undefined {
   return mockMotionRenders.find((entry) => entry.props["data-slot"] === slot)
 }
@@ -89,6 +115,7 @@ describe("motionTokens", () => {
       (STAGGER_CONTAINER.animate as { transition: { staggerChildren: number } }).transition
         .staggerChildren
     )
+    expect(motionTokens.stagger.maxSpread).toBe(STAGGER_MAX_SPREAD)
   })
 })
 
@@ -116,8 +143,31 @@ describe("useMotionPrefs", () => {
     expect(result.current.reduced).toBe(true)
   })
 
+  it('reports reduced when the persisted setting wrote data-reduce-motion="true"', () => {
+    // SettingsSyncProvider's marker — the second of the two app-side paths the
+    // host's CSS guard honours. Missing it animates a plugin the host has stilled.
+    root().setAttribute("data-reduce-motion", "true")
+    const { result } = renderHook(() => useMotionPrefs())
+    expect(result.current.reduced).toBe(true)
+  })
+
   it("reports reduced from the OS hint alone", () => {
     stubMatchMedia(true)
+    const { result } = renderHook(() => useMotionPrefs())
+    expect(result.current.reduced).toBe(true)
+  })
+
+  it('keeps animating under the OS hint when the user set data-motion-respect="off"', () => {
+    stubMatchMedia(true)
+    root().setAttribute("data-motion-respect", "off")
+    const { result } = renderHook(() => useMotionPrefs())
+    expect(result.current.reduced).toBe(false)
+  })
+
+  it("still honours the app's own switch when the OS hint is opted out of", () => {
+    stubMatchMedia(false)
+    root().setAttribute("data-motion-respect", "off")
+    reduceViaSettings()
     const { result } = renderHook(() => useMotionPrefs())
     expect(result.current.reduced).toBe(true)
   })
@@ -159,6 +209,44 @@ describe("useMotionPrefs", () => {
       reduceViaSettings()
     })
     expect(result.current.reduced).toBe(true)
+    await act(async () => {
+      root().classList.remove("reduce-motion")
+    })
+    expect(result.current.reduced).toBe(false)
+  })
+
+  it("follows the data-reduce-motion attribute changing after mount", async () => {
+    const { result } = renderHook(() => useMotionPrefs())
+    await act(async () => {
+      root().setAttribute("data-reduce-motion", "true")
+    })
+    expect(result.current.reduced).toBe(true)
+  })
+
+  it("follows the respect opt-out being written after mount", async () => {
+    stubMatchMedia(true)
+    const { result } = renderHook(() => useMotionPrefs())
+    expect(result.current.reduced).toBe(true)
+    await act(async () => {
+      root().setAttribute("data-motion-respect", "off")
+    })
+    expect(result.current.reduced).toBe(false)
+  })
+
+  it("follows the OS preference changing after mount", () => {
+    const setOs = stubChangingMatchMedia(false)
+    const { result } = renderHook(() => useMotionPrefs())
+    expect(result.current.reduced).toBe(false)
+    act(() => setOs(true))
+    expect(result.current.reduced).toBe(true)
+  })
+
+  it("follows the duration scale changing after mount", async () => {
+    const { result } = renderHook(() => useMotionPrefs())
+    await act(async () => {
+      setDurationScale("0.5")
+    })
+    expect(result.current.durationScale).toBe(0.5)
   })
 })
 
@@ -240,6 +328,26 @@ describe("animated surfaces", () => {
     expect(screen.getByRole("button", { name: "Two" })).toBeInTheDocument()
   })
 
+  it("Stagger caps the spread so a long list does not take seconds to arrive", () => {
+    render(
+      <Stagger>
+        {Array.from({ length: 40 }, (_, index) => (
+          <span key={index}>row {index}</span>
+        ))}
+      </Stagger>
+    )
+    const variants = renderOf("stagger")?.props.variants as {
+      animate: { transition: { staggerChildren: number } }
+    }
+    // Uncapped this would be 39 × 40ms ≈ 1.6s before the last row moved.
+    expect(variants.animate.transition.staggerChildren * 39).toBeLessThanOrEqual(
+      STAGGER_MAX_SPREAD + 1e-9
+    )
+    expect(
+      mockMotionRenders.filter((entry) => entry.props["data-slot"] === "stagger-item")
+    ).toHaveLength(40)
+  })
+
   it("Collapse animates height under a clip", () => {
     render(<Collapse>body</Collapse>)
     const collapse = renderOf("collapse")
@@ -281,6 +389,18 @@ describe("animated surfaces", () => {
  */
 describe("reduced motion", () => {
   beforeEach(reduceViaSettings)
+
+  it("drops to plain elements when the setting is flipped while mounted", async () => {
+    root().classList.remove("reduce-motion")
+    render(<Fade>body</Fade>)
+    expect(renderOf("fade")).toBeDefined()
+    mockMotionRenders.length = 0
+    await act(async () => {
+      root().setAttribute("data-reduce-motion", "true")
+    })
+    expect(screen.getByText("body")).toHaveAttribute("data-slot", "fade")
+    expect(mockMotionRenders).toHaveLength(0)
+  })
 
   it("Fade renders a plain element", () => {
     render(

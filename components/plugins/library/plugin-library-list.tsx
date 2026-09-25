@@ -13,11 +13,12 @@
 // only; this matches the wiring already done by `plugin-panel-grid.tsx`.
 
 import { useCallback } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { BoxesIcon, CompassIcon } from "lucide-react"
-import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
+import { usePluginEnableAction } from "@/hooks/plugins/use-plugin-enable-action"
+import { localizePluginText } from "@/hooks/plugins/use-localized-plugin-text"
 import { usePluginsStore } from "@/stores/plugins"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -36,6 +37,7 @@ import { PluginLibraryListSkeleton, PluginLibraryGridSkeleton } from "./plugin-l
 
 export function PluginLibraryList() {
   const t = useTranslations("plugins.grid")
+  const locale = useLocale()
   const tEmpty = useTranslations("plugins")
   const { filtered, totals, loading } = usePlugins()
   const viewMode = usePluginsStore((s) => s.listViewMode)
@@ -54,13 +56,18 @@ export function PluginLibraryList() {
   // Stable handlers so the memoized rows only re-render when their own
   // plugin / selected / active props change (matters for 50+ plugin lists
   // where every keystroke used to re-render every row).
+  // Through the feedback hook, not straight to `setPluginEnabledForHost`: the
+  // user is told whether the toggle applied, was queued for the desktop, or
+  // failed (and why), instead of the result being dropped.
+  const enablePlugin = usePluginEnableAction()
   const handleToggleEnabled = useCallback(
-    (plugin: PluginRow) => void setPluginEnabledForHost(plugin.id, !plugin.enabled),
-    []
+    (plugin: PluginRow) => void enablePlugin(plugin, !plugin.enabled),
+    [enablePlugin]
   )
   const handleUninstall = useCallback(
-    (plugin: PluginRow) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name }),
-    [setDeleteTarget]
+    (plugin: PluginRow) =>
+      setDeleteTarget({ pluginId: plugin.id, name: localizePluginText(plugin, locale).name }),
+    [setDeleteTarget, locale]
   )
 
   if (loading) {

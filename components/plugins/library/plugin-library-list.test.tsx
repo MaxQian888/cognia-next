@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
@@ -21,6 +22,7 @@ jest.mock("../plugin-panel-grid", () => ({
 // Avoid Dexie writes in toggle handlers.
 jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: jest.fn(async () => ({ ok: true, queued: false })),
+  isMirroredPluginClient: () => false,
 }))
 
 jest.mock("@/lib/db/plugins", () => ({}))

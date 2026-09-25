@@ -108,69 +108,84 @@ export function PluginWasmFromGitDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-md" data-testid="wasm-from-git-dialog">
-          <DialogHeader>
+        {/* Bounded to the viewport: header and footer stay put and the stage
+            body is the one scroller, so a multi-line clone/build error under a
+            phone keyboard can't push Install off screen. The body's `-m-1 p-1`
+            keeps input focus rings from being clipped by it. */}
+        <DialogContent
+          className="flex max-h-[85dvh] w-[95vw] flex-col sm:max-w-md"
+          data-testid="wasm-from-git-dialog"
+        >
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
-              <GitBranchIcon className="size-4" />
+              <GitBranchIcon className="size-4 shrink-0" />
               {t("title")}
             </DialogTitle>
             <DialogDescription>{t("description")}</DialogDescription>
           </DialogHeader>
 
-          {stage !== "installing" && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="wasm-git-url">{t("repoUrlLabel")}</Label>
-                <Input
-                  id="wasm-git-url"
-                  type="url"
-                  placeholder={t("repoUrlPlaceholder")}
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="wasm-git-branch">{t("branchLabel")}</Label>
-                <Input
-                  id="wasm-git-branch"
-                  type="text"
-                  placeholder={t("branchPlaceholder")}
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                />
-              </div>
-              {stage === "toolchain-missing" && (
-                <div
-                  className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm"
-                  role="alert"
-                >
-                  <WrenchIcon className="size-4 text-amber-600 mt-0.5" aria-hidden />
-                  <div className="space-y-1">
-                    <p className="font-medium">{t("toolchainMissingTitle")}</p>
-                    <p className="text-xs text-muted-foreground">{t("toolchainMissingHint")}</p>
+          <div
+            className="-m-1 min-h-0 flex-1 overflow-y-auto p-1"
+            data-testid="wasm-from-git-dialog-body"
+          >
+            {stage !== "installing" && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="wasm-git-url">{t("repoUrlLabel")}</Label>
+                  <Input
+                    id="wasm-git-url"
+                    type="url"
+                    placeholder={t("repoUrlPlaceholder")}
+                    value={repoUrl}
+                    onChange={(e) => setRepoUrl(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="wasm-git-branch">{t("branchLabel")}</Label>
+                  <Input
+                    id="wasm-git-branch"
+                    type="text"
+                    placeholder={t("branchPlaceholder")}
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                  />
+                </div>
+                {stage === "toolchain-missing" && (
+                  <div
+                    className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-sm"
+                    role="alert"
+                  >
+                    <WrenchIcon className="size-4 shrink-0 text-amber-600 mt-0.5" aria-hidden />
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-medium">{t("toolchainMissingTitle")}</p>
+                      <p className="text-xs text-muted-foreground">{t("toolchainMissingHint")}</p>
+                    </div>
                   </div>
-                </div>
-              )}
-              {stage === "error" && errorMessage && (
-                <div
-                  className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm"
-                  role="alert"
-                >
-                  <AlertCircleIcon className="size-4 text-destructive mt-0.5" aria-hidden />
-                  <span>{errorMessage}</span>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+                {stage === "error" && errorMessage && (
+                  <div
+                    className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-sm"
+                    role="alert"
+                  >
+                    <AlertCircleIcon
+                      className="size-4 shrink-0 text-destructive mt-0.5"
+                      aria-hidden
+                    />
+                    <span className="min-w-0 break-words">{errorMessage}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
-          {stage === "installing" && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2Icon className="size-5 animate-spin text-muted-foreground" aria-hidden />
-              <span className="ml-2 text-sm">{t("installing")}</span>
-            </div>
-          )}
+            {stage === "installing" && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2Icon className="size-5 animate-spin text-muted-foreground" aria-hidden />
+                <span className="ml-2 text-sm">{t("installing")}</span>
+              </div>
+            )}
+          </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button
               variant="outline"
               onClick={() => handleOpenChange(false)}

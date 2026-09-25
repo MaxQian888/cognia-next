@@ -13,11 +13,16 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
 import {
+  AGENT_SCHEDULABLE_TASK_TYPES,
+  assertAgentTaskPayload,
+  assertAgentTaskTrigger,
   describeTrigger,
   payloadSchema,
+  preflightExistingTaskWrite,
   requireTask,
   resolveTaskWrite,
   toAgentVisibleTask,
@@ -50,13 +55,27 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "write",
   imAccess: "always",
-  mcpToolName: "scheduler_update_task",
+  mcpToolName: SCHEDULE_TOOL.update,
   inputSchema: schema,
+  preflight: async (args, ctx) => {
+    const existing = await preflightExistingTaskWrite(args.taskId, ctx)
+    if (args.trigger) await assertAgentTaskTrigger(args.trigger)
+    // A replacement payload is checked against the task's EXISTING type (this
+    // skill cannot change it). A type an agent cannot author (a user's script
+    // task, a subsystem's own) is left to its executor.
+    const type = AGENT_SCHEDULABLE_TASK_TYPES.find((candidate) => candidate === existing.type)
+    if (args.payload && type) await assertAgentTaskPayload(type, args.payload)
+  },
   execute: async (args, ctx) => {
     const existing = await requireTask(args.taskId)
     // Gated on the EXISTING type: this skill cannot change a task's type, so
     // that is the type whose host support and policy standing matter.
-    await resolveTaskWrite({ taskType: existing.type, sessionId: ctx.sessionId })
+    await resolveTaskWrite({
+      taskType: existing.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "mutate",
+    })
 
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const updated = await getTaskScheduler().updateTask(args.taskId, {

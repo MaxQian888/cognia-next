@@ -6,17 +6,18 @@
  * detail Sheet, discover sheet rows. Replaces 4 bespoke renderers.
  *
  * Honors a uniform `limit` (default 3) with an "+N more" overflow
- * badge. When `hoverable` is set, the overflow badge opens a
- * HoverCard listing every capability so the user can inspect the
- * full set without leaving the surface.
+ * badge. When `hoverable` is set, the overflow badge discloses every
+ * capability (tooltip on hover, popover on tap — `PluginHint`) so the user
+ * can inspect the full set without leaving the surface. It used to be a
+ * hover-only HoverCard a phone could not open.
  */
 
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
+
+import { PluginHint } from "./plugin-hint"
 
 interface Props {
   capabilities: readonly string[]
@@ -53,31 +54,28 @@ export function CapabilityChips({
       ))}
       {overflow > 0 &&
         (hoverable ? (
-          <HoverCard openDelay={200} closeDelay={100}>
-            <HoverCardTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                className="h-auto rounded-full p-0"
-                aria-label={t("capabilityOverflow", { count: overflow })}
-              >
-                {overflowBadge}
-              </Button>
-            </HoverCardTrigger>
-            <HoverCardContent className="w-72 p-3" align="start">
-              <div className="mb-1 text-xs font-medium">
-                {t("capabilityCount", { count: capabilities.length })}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {capabilities.map((cap) => (
-                  <Badge key={cap} variant={variant} className="text-xs">
-                    {cap}
-                  </Badge>
-                ))}
-              </div>
-            </HoverCardContent>
-          </HoverCard>
+          <PluginHint
+            label={t("capabilityOverflow", { count: overflow })}
+            side="bottom"
+            align="start"
+            contentClassName="w-72"
+            content={
+              <>
+                <div className="mb-1 text-xs font-medium">
+                  {t("capabilityCount", { count: capabilities.length })}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {capabilities.map((cap) => (
+                    <Badge key={cap} variant={variant} className="text-xs">
+                      {cap}
+                    </Badge>
+                  ))}
+                </div>
+              </>
+            }
+          >
+            {overflowBadge}
+          </PluginHint>
         ) : (
           overflowBadge
         ))}

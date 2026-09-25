@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -91,5 +93,25 @@ describe("schedule.delete", () => {
   it("warns on the card that this cannot be undone", async () => {
     const rendered = JSON.stringify(skill("schedule.delete").hitlSurface!({ taskId: "t" } as never))
     expect(rendered).toContain("cannot be undone")
+  })
+})
+
+describe("schedule.delete · preflight and quota scope", () => {
+  const del = () =>
+    getSharedBuiltInSkillRegistry()
+      .list()
+      .find((entry) => entry.id === "schedule.delete")!
+
+  it("names an unknown task before the irreversible confirmation is shown", async () => {
+    scheduler.getTask.mockResolvedValue(null)
+    await expect(del().preflight!({ taskId: "ghost" } as never, ctx)).rejects.toThrow(/ghost/)
+  })
+
+  it("is a change to an existing task, so an agent at its quota can still delete", async () => {
+    scheduler.deleteTask.mockResolvedValue(true)
+    await del().execute({ taskId: "task-1" } as never, { ...ctx, humanConfirmed: true })
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "mutate", humanConfirmed: true })
+    )
   })
 })

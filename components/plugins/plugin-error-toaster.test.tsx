@@ -17,6 +17,11 @@ const sonner = require("sonner") as {
   toast: { error: jest.Mock; warning: jest.Mock }
 }
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+}))
+
 function renderToaster(locale: "en" | "zh-CN" = "en") {
   return render(
     <NextIntlClientProvider locale={locale} messages={locale === "en" ? enMessages : zhMessages}>
@@ -127,5 +132,22 @@ describe("PluginErrorToaster", () => {
       )
     })
     expect(sonner.toast.error).not.toHaveBeenCalled()
+  })
+
+  it("links the failure to the plugin's details", () => {
+    renderToaster("en")
+    fireEvent(baseDetail)
+    const [, options] = sonner.toast.error.mock.calls[0]
+    expect(options.action.label).toBe("View details")
+    options.action.onClick()
+    expect(mockPush).toHaveBeenCalledWith("/plugins?plugin=com.example.foo")
+  })
+
+  it("localizes a known manager failure and keeps unknown ones verbatim", () => {
+    renderToaster("en")
+    fireEvent({ ...baseDetail, message: 'Cannot stop plugin "a": required by "b"' })
+    expect(sonner.toast.error.mock.calls[0][1].description).toBe(
+      "Other plugins depend on it: b. Disable or uninstall them first."
+    )
   })
 })

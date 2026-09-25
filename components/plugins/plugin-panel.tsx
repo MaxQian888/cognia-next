@@ -16,25 +16,16 @@
 // Dialog hosts (delete, permission review, import, conflict, update,
 // rollback) are mounted once at the root.
 //
-// URL deep links: `?section=` / `?sub=` / `?gov=` / `?subtab=` drive the
-// layout. Legacy `?tab=` deep links are translated once to the canonical
-// section vocabulary via `router.replace` (see `TAB_REDIRECT`), so old
-// external links keep landing on the right view without a parallel store
-// concept.
+// URL deep links (`?section=` / `?sub=` / `?gov=` / `?subtab=` / `?plugin=`
+// and legacy `?tab=`) are applied by `usePluginsUrlSync`, the same hook the
+// phone body runs, so a link lands identically on both shells.
 
-import { useEffect, useState } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useState } from "react"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
-import {
-  usePluginsStore,
-  type PluginDetailSubTab,
-  type PluginGovernanceView,
-  type PluginLibrarySubFilter,
-  type PluginNavSection,
-} from "@/stores/plugins"
+import { usePluginsStore } from "@/stores/plugins"
 import { usePluginMarketplace, usePluginRegistrySync, PluginsViewProvider } from "@/hooks/plugins"
+import { usePluginsUrlSync } from "@/hooks/plugins/use-plugins-url-sync"
 import { useTranslations } from "next-intl"
-import { toast } from "sonner"
 import { PlugIcon } from "lucide-react"
 
 import { PLUGIN_RAIL_WIDTH } from "./plugin-rail-width"
@@ -63,150 +54,9 @@ import {
   pluginSectionHasControls,
   useVisiblePluginSection,
 } from "./plugin-section-pane"
-import { useDeveloperMode } from "@/lib/plugin/devtools/developer-mode"
-
-// One-time translation of legacy `?tab=` deep links into the canonical
-// `?section=/&sub=/&gov=/&subtab=` vocabulary. The redirect rewrites the URL
-// and the section/sub/gov/subtab effect below applies it to the store.
-const TAB_REDIRECT: Record<
-  string,
-  {
-    section: PluginNavSection
-    sub?: PluginLibrarySubFilter
-    gov?: PluginGovernanceView
-    subtab?: PluginDetailSubTab
-  }
-> = {
-  installed: { section: "library" },
-  browse: { section: "discover" },
-  configure: { section: "library", sub: "configurable", subtab: "configure" },
-  permissions: { section: "governance", gov: "permissions" },
-  scheduled: { section: "governance", gov: "scheduled" },
-  analytics: { section: "governance", gov: "analytics" },
-  devtools: { section: "devtools" },
-}
-
-const VALID_SECTIONS: ReadonlySet<PluginNavSection> = new Set([
-  "library",
-  "discover",
-  "agent-packages",
-  "governance",
-  "devtools",
-])
-const VALID_LIBRARY_SUB: ReadonlySet<PluginLibrarySubFilter> = new Set([
-  "all",
-  "enabled",
-  "updates",
-  "configurable",
-  "errored",
-])
-const VALID_GOVERNANCE: ReadonlySet<PluginGovernanceView> = new Set([
-  "permissions",
-  "scheduled",
-  "analytics",
-  "audit",
-  "policy",
-])
-const VALID_DETAIL_SUBTAB: ReadonlySet<PluginDetailSubTab> = new Set([
-  "overview",
-  "capabilities",
-  "configure",
-  "permissions",
-  "data",
-])
-
-function isValidSection(value: string | null): value is PluginNavSection {
-  return value !== null && VALID_SECTIONS.has(value as PluginNavSection)
-}
 
 export function PluginPanel() {
-  const setActiveSection = usePluginsStore((s) => s.setActiveSection)
-  const setLibrarySubFilter = usePluginsStore((s) => s.setLibrarySubFilter)
-  const setGovernanceView = usePluginsStore((s) => s.setGovernanceView)
-  const setDetailSubTab = usePluginsStore((s) => s.setDetailSubTab)
-  const developerMode = useDeveloperMode()
-  const tPage = useTranslations("plugins")
-
-  // URL sync — `?section=`, `?sub=`, `?gov=`, `?subtab=` drive the layout.
-  // We adopt the URL value on mount AND whenever the URL changes; local
-  // clicks don't touch the URL, so this effect stays a no-op for in-app
-  // navigation.
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const pathname = usePathname()
-  const requestedTabParam = searchParams?.get("tab") ?? null
-  const requestedSectionParam = searchParams?.get("section") ?? null
-  const requestedSubParam = searchParams?.get("sub") ?? null
-  const requestedGovParam = searchParams?.get("gov") ?? null
-  const requestedSubtabParam = searchParams?.get("subtab") ?? null
-
-  // Legacy `?tab=` → canonical params, then strip `tab`. The section effect
-  // below picks up the rewritten URL.
-  useEffect(() => {
-    if (!requestedTabParam) return
-    const mapped = TAB_REDIRECT[requestedTabParam]
-    if (!mapped) return
-    const next = new URLSearchParams(searchParams?.toString() ?? "")
-    next.delete("tab")
-    next.set("section", mapped.section)
-    if (mapped.sub) next.set("sub", mapped.sub)
-    if (mapped.gov) next.set("gov", mapped.gov)
-    if (mapped.subtab) next.set("subtab", mapped.subtab)
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedTabParam])
-
-  useEffect(() => {
-    if (requestedSectionParam === "devtools" && !developerMode) {
-      setActiveSection("library")
-      const next = new URLSearchParams(searchParams?.toString() ?? "")
-      next.set("section", "library")
-      router.replace(`${pathname}?${next.toString()}`, { scroll: false })
-      toast.message(tPage("devtoolsDisabled.title"), {
-        description: tPage("devtoolsDisabled.description"),
-        action: {
-          label: tPage("devtoolsDisabled.openSettings"),
-          onClick: () => router.push("/settings?section=plugins"),
-        },
-      })
-      return
-    }
-    if (isValidSection(requestedSectionParam)) {
-      setActiveSection(requestedSectionParam)
-    }
-    if (
-      requestedSubParam !== null &&
-      VALID_LIBRARY_SUB.has(requestedSubParam as PluginLibrarySubFilter)
-    ) {
-      setLibrarySubFilter(requestedSubParam as PluginLibrarySubFilter)
-    }
-    if (
-      requestedGovParam !== null &&
-      VALID_GOVERNANCE.has(requestedGovParam as PluginGovernanceView)
-    ) {
-      setGovernanceView(requestedGovParam as PluginGovernanceView)
-    }
-    if (
-      requestedSubtabParam !== null &&
-      VALID_DETAIL_SUBTAB.has(requestedSubtabParam as PluginDetailSubTab)
-    ) {
-      setDetailSubTab(requestedSubtabParam as PluginDetailSubTab)
-    }
-  }, [
-    requestedSectionParam,
-    requestedSubParam,
-    requestedGovParam,
-    requestedSubtabParam,
-    developerMode,
-    pathname,
-    router,
-    searchParams,
-    setActiveSection,
-    setDetailSubTab,
-    setGovernanceView,
-    setLibrarySubFilter,
-    tPage,
-  ])
+  usePluginsUrlSync()
 
   const [updateOpen, setUpdateOpen] = useState(false)
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)

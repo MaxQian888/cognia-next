@@ -2,14 +2,23 @@
  * @jest-environment jsdom
  */
 
+// Keys echo back (with vars) so assertions stay locale-independent. The
+// permission-description namespace resolves ids to a recognisable
+// "localized" string, and reports no entry for `custom:*` ids so the sheet's
+// own fallback copy can be asserted.
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: (namespace?: string) => {
+    const localized = namespace === "plugins.permissions.descriptions"
+    const t = (key: string, vars?: Record<string, unknown>) =>
+      localized ? `localized:${key}` : vars ? `${key}:${JSON.stringify(vars)}` : key
+    t.has = (key: string) => localized && !key.startsWith("custom:")
+    return t
+  },
 }))
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { WasmCapabilityGrantSheet } from "./wasm-capability-grant-sheet"
-import type { PluginManifest } from "@/types/plugin"
+import type { PluginManifest, PluginPermission } from "@/types/plugin"
 
 const baseManifest: PluginManifest = {
   id: "demo.wasm",
@@ -184,6 +193,42 @@ describe("WasmCapabilityGrantSheet", () => {
     const decision = onConfirm.mock.calls[0][0]
     expect(decision.grantedPermissions).toContain("notification")
     expect(decision.grantedPermissions).toContain("clipboard:read")
+  })
+
+  it("describes each permission in the active locale", () => {
+    render(
+      <WasmCapabilityGrantSheet
+        manifest={baseManifest}
+        authorFingerprint=""
+        open
+        onOpenChange={() => {}}
+        onConfirm={() => {}}
+      />
+    )
+    expect(screen.getByText("localized:notification")).toBeInTheDocument()
+    expect(screen.getByText("localized:filesystem:read")).toBeInTheDocument()
+    expect(screen.getByText("localized:process:spawn")).toBeInTheDocument()
+    expect(screen.getByText("localized:secrets:read")).toBeInTheDocument()
+    expect(screen.queryByText("customPermission")).not.toBeInTheDocument()
+  })
+
+  it("labels a permission nobody describes with the custom-permission copy", () => {
+    const manifest: PluginManifest = {
+      ...baseManifest,
+      permissions: ["notification", "custom:telemetry" as PluginPermission],
+      optionalPermissions: [],
+    }
+    render(
+      <WasmCapabilityGrantSheet
+        manifest={manifest}
+        authorFingerprint=""
+        open
+        onOpenChange={() => {}}
+        onConfirm={() => {}}
+      />
+    )
+    expect(screen.getByText("custom:telemetry")).toBeInTheDocument()
+    expect(screen.getByText("customPermission")).toBeInTheDocument()
   })
 
   it("calls onCancel and closes when the user backs out", () => {

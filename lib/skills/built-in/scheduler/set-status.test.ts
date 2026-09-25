@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -100,5 +102,25 @@ describe("schedule.set_status", () => {
     await expect(
       run("schedule.set_status", { taskId: "task-1", status: "paused" })
     ).rejects.toThrow(/task-1/)
+  })
+})
+
+describe("schedule.set_status · quota scope", () => {
+  it("is a change to an existing task, so an agent at its quota can still pause", async () => {
+    scheduler.pauseTask.mockResolvedValue(true)
+    await skill("schedule.set_status").execute({ taskId: "task-1", status: "paused" } as never, {
+      ...ctx,
+      humanConfirmed: true,
+    })
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "mutate", humanConfirmed: true })
+    )
+  })
+
+  it("preflights the task id and policy before the confirmation", async () => {
+    scheduler.getTask.mockResolvedValue(null)
+    await expect(
+      skill("schedule.set_status").preflight!({ taskId: "ghost", status: "paused" } as never, ctx)
+    ).rejects.toThrow(/ghost/)
   })
 })

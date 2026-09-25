@@ -15,7 +15,7 @@
  */
 
 import { useMemo, useState, useSyncExternalStore } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useTranslations } from "next-intl"
 import { Trash2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -48,6 +48,11 @@ import {
 /** Sentinel for entries a built-in trigger produced, which carry no plugin id. */
 export const BUILTIN_TRIGGER_FILTER = "__builtin__"
 export const ALL_TRIGGER_FILTER = "all"
+
+// The ring is session-scoped, so a row shows the local time of day to the
+// second; the full date rides along as the hover title.
+const TIME_OF_DAY = { timeStyle: "medium" } as const
+const FULL_TIMESTAMP = { dateStyle: "medium", timeStyle: "medium" } as const
 
 /**
  * Pure so it can be pinned without driving the two Radix selects, which do not
@@ -157,8 +162,8 @@ export function TriggersPane() {
             <TableBody>
               {filtered.map((e: TriggerAuditEntry) => (
                 <TableRow key={e.id}>
-                  <TableCell className="font-mono text-[10px]">
-                    {new Date(e.timestamp).toISOString().split("T")[1]?.slice(0, 8)}
+                  <TableCell className="whitespace-nowrap font-mono text-[10px]">
+                    <TriggerTime timestamp={e.timestamp} />
                   </TableCell>
                   <TableCell className="text-xs">{e.pluginId ?? "—"}</TableCell>
                   <TableCell className="text-xs">
@@ -191,5 +196,21 @@ export function TriggersPane() {
         )}
       </ScrollArea>
     </Card>
+  )
+}
+
+/**
+ * One dispatch instant in the viewer's locale and time zone, with the ISO
+ * instant on `<time dateTime>`. An unparseable timestamp renders nothing
+ * rather than "Invalid Date".
+ */
+function TriggerTime({ timestamp }: { timestamp: number }) {
+  const format = useFormatter()
+  const at = new Date(timestamp)
+  if (Number.isNaN(at.getTime())) return null
+  return (
+    <time dateTime={at.toISOString()} title={format.dateTime(at, FULL_TIMESTAMP)}>
+      {format.dateTime(at, TIME_OF_DAY)}
+    </time>
   )
 }

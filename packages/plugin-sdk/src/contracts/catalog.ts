@@ -14,6 +14,14 @@ export {
 import { PLUGIN_API_WIRE_OPS as GENERATED_WIRE_OPS } from "./generated"
 export type { CanonicalPluginErrorCode, CanonicalPluginPermission } from "./generated"
 
+/**
+ * `vscode` API calls the Host refuses with a deterministic capability error
+ * (no host-neutral adapter yet). A VS Code-extension plugin that calls one on
+ * activation raises an unhandled rejection inside the extension host, so a
+ * scaffold or test can check its API use against this list.
+ */
+export { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "@/lib/plugin/vscode-shim/unavailable-methods"
+
 export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
 export type PluginRuntimeKind = "javascript" | "python" | "wasm" | "vscode" | "asset"
 export type PluginContributionExecution =

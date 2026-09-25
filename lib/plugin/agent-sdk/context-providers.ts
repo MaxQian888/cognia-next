@@ -23,9 +23,14 @@ import type {
 } from "@/types/plugin/plugin-context-provider"
 
 /**
- * Run every registered context provider and join their contributions. Returns
- * an empty string when nothing is contributed. A throwing provider is skipped
- * (best-effort — one bad provider never breaks the run).
+ * Run the context providers the RUNNING plugin registered and join their
+ * contributions. A provider feeds its own plugin's agent runs: this used to
+ * run every plugin's providers for every run, so one plugin's ambient context
+ * (its notes, its shared-memory projection, its twin chunks) was appended to
+ * the system prompt of another plugin's model call. A run with no owning
+ * plugin gets no provider context. Returns an empty string when nothing is
+ * contributed. A throwing provider is skipped (best-effort — one bad provider
+ * never breaks the run).
  *
  * Providers run concurrently (each turn, independent reads). `Promise.all`
  * resolves to results in registration order regardless of which provider
@@ -33,9 +38,11 @@ import type {
  * keeps a failing provider from rejecting the whole batch.
  */
 export async function resolveContextContributions(
-  input: PluginContextProviderInput
+  input: PluginContextProviderInput,
+  pluginId: string | undefined
 ): Promise<string> {
-  const entries = listContextProviderEntries()
+  if (!pluginId) return ""
+  const entries = listContextProviderEntries().filter((entry) => entry.pluginId === pluginId)
   if (entries.length === 0) return ""
   const results = await Promise.all(
     entries.map(async ({ entry }) => {

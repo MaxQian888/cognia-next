@@ -37,6 +37,27 @@ bundle contains neither. At load time the host resolves
   colors, so they track the user's theme, color preset, density preset and
   reduce-motion setting without the plugin reading anything.
 
+## Reactive data
+
+`useLiveQuery` re-renders a component when the plugin's own Dexie tables
+change:
+
+```tsx
+import { useLiveQuery } from "@cognia/plugin-ui"
+
+const runs = useLiveQuery(() => ctx.dexie.table("runs").reverse().toArray(), [], [])
+```
+
+Import it from here, not from `dexie-react-hooks`. Dexie tracks changes in a
+module-level registry, so a copy bundled into your plugin never hears about
+writes made through the host's Dexie instance (the one `ctx.dexie` hands out),
+and the list quietly stops updating.
+
+Translate strings in a component with `usePluginTranslations(pluginId)` from
+`@cognia/plugin-sdk/api/i18n` — the same keys and fallback as `ctx.i18n.t`.
+Do not import `next-intl` or `next/navigation`: the host does not share them
+with plugins; use `ctx.ui.navigate("/settings?…")` to change route.
+
 ## Why this is a fork, not a re-export
 
 The host has ~59 shadcn/ui primitives in `components/ui/`. This package carries

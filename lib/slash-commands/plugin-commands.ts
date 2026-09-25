@@ -73,8 +73,14 @@ export function slashCommandToken(def: SlashCommandDefinition): string {
   return declared.length > 0 && !/\s/.test(declared) ? declared : def.id
 }
 
+/**
+ * `describe` lets a caller that knows the UI language resolve a command's
+ * `descriptionKey` from the owning plugin's bundle (the composer's hook does).
+ * Without it, or when it returns nothing, the declared `description` shows.
+ */
 export function pluginSlashCommandsToSlashCommands(
-  defs: readonly SlashCommandDefinition[]
+  defs: readonly SlashCommandDefinition[],
+  describe?: (def: SlashCommandDefinition) => string | undefined
 ): SlashCommand[] {
   // First-wins on a colliding token, mirroring the registry's own conflict
   // policy. The loser keeps its (unique) id as the token so it stays reachable
@@ -90,7 +96,7 @@ export function pluginSlashCommandsToSlashCommands(
     })
     .map(({ def, name }) => ({
       name,
-      description: def.description ?? "",
+      description: describe?.(def) || def.description || "",
       scope: "plugin" as const,
       category: def.category ?? "plugins",
       argumentHint: def.shortcut ?? undefined,
@@ -99,6 +105,8 @@ export function pluginSlashCommandsToSlashCommands(
 }
 
 /** Convenience snapshot for non-reactive callers (tests, submit-time map). */
-export function getPluginSlashCommands(): SlashCommand[] {
-  return pluginSlashCommandsToSlashCommands(listSlashCommands())
+export function getPluginSlashCommands(
+  describe?: (def: SlashCommandDefinition) => string | undefined
+): SlashCommand[] {
+  return pluginSlashCommandsToSlashCommands(listSlashCommands(), describe)
 }

@@ -142,6 +142,44 @@ describe("PluginDataDialog", () => {
     })
   })
 
+  // The modal root reaches this component through a `PluginSurface` wrapper
+  // div, so `DialogContent`'s own layout never applies to these children. The
+  // component bounds itself: a frame capped at the dynamic viewport (minus
+  // `DialogContent`'s padding) with a fixed header / footer and one scroller,
+  // so a long plugin-supplied message can't push the actions off a phone.
+  describe("containment", () => {
+    const LONG = "word ".repeat(400)
+
+    it.each([
+      ["confirm", { kind: "confirm", options: { title: "t", message: LONG } }],
+      ["input", { kind: "input", options: { title: "t", message: LONG } }],
+      ["dialog", { kind: "dialog", options: { title: "t", content: LONG } }],
+    ] as const)("bounds the %s kind with one scroll body", (_kind, partial) => {
+      renderDialog({ ...partial, settle: jest.fn() } as PluginDataDialogArgs)
+      const frame = screen.getByTestId("plugin-data-dialog-frame")
+      expect(frame).toHaveClass("flex", "flex-col", "min-h-0", "max-h-[calc(85dvh-3rem)]")
+      const body = screen.getByTestId("plugin-data-dialog-body")
+      expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto", "break-words")
+      expect(body).toHaveTextContent(LONG.trim())
+      expect(frame.querySelector("[data-slot='dialog-header']")).toHaveClass("shrink-0")
+      expect(frame.querySelector("[data-slot='dialog-footer']")).toHaveClass("shrink-0")
+      // Every kind keeps its accessible title.
+      expect(screen.getByRole("dialog", { name: "t" })).toBeInTheDocument()
+    })
+
+    it("keeps the input and its validation error inside the scroller", () => {
+      renderDialog({
+        kind: "input",
+        options: { title: "Name", message: "m", validate: () => "Too short" },
+        settle: jest.fn(),
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Confirm" }))
+      const body = screen.getByTestId("plugin-data-dialog-body")
+      expect(body).toContainElement(screen.getByRole("textbox"))
+      expect(body).toContainElement(screen.getByText("Too short"))
+    })
+  })
+
   describe("dismiss", () => {
     it("settles the dismiss default when unmounted without an action", () => {
       const settle = jest.fn()

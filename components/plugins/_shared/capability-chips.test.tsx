@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event"
 import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
@@ -49,6 +50,16 @@ describe("CapabilityChips", () => {
     )
     const trigger = screen.getByRole("button", { name: /\+2 more/i })
     expect(trigger).toBeInTheDocument()
-    expect(trigger).toHaveAttribute("data-variant", "ghost")
+    expect(trigger).toHaveAttribute("type", "button")
+  })
+
+  // The full list used to be a hover-only HoverCard; a tap now opens it.
+  it("lists every capability when the overflow is tapped", async () => {
+    const user = userEvent.setup()
+    renderWithIntl(
+      <CapabilityChips capabilities={["a", "b", "c", "d", "e"]} limit={3} hoverable={true} />
+    )
+    await user.click(screen.getByRole("button", { name: /\+2 more/i }))
+    expect(await screen.findByText("e")).toBeInTheDocument()
   })
 })

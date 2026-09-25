@@ -20,6 +20,8 @@
 
 import { loggers } from "@cognia/logging"
 
+import { PLUGIN_SDK_SUBPATH_LOADERS } from "./sdk-subpath-loaders"
+
 const sharedModuleLogger = loggers.plugin.child("shared-modules")
 
 /**
@@ -47,26 +49,51 @@ export const PLUGIN_SHARED_MODULES = [
   "lucide-react",
 ] as const
 
-export type PluginSharedModule = (typeof PLUGIN_SHARED_MODULES)[number]
+/**
+ * A shared specifier: one of the fixed modules above, or any published
+ * `@cognia/plugin-sdk/<subpath>` (see `sdk-subpath-loaders.ts` for why every
+ * subpath, not just `api/effort-surface`, must bind to the host's instance).
+ */
+export type PluginSharedModule =
+  (typeof PLUGIN_SHARED_MODULES)[number] | `@cognia/plugin-sdk/${string}`
 
 export function isSharedModuleSpecifier(specifier: string): specifier is PluginSharedModule {
-  return (PLUGIN_SHARED_MODULES as readonly string[]).includes(specifier)
+  return (
+    (PLUGIN_SHARED_MODULES as readonly string[]).includes(specifier) ||
+    Object.prototype.hasOwnProperty.call(PLUGIN_SDK_SUBPATH_LOADERS, specifier)
+  )
+}
+
+/**
+ * The SDK subpaths a CJS bundle `require()`s. esbuild emits a literal
+ * `require("@cognia/plugin-sdk/api/i18n")` for an external import, so a scan
+ * of the code is exact — and it lets the loader prime only what the bundle
+ * uses rather than every subpath the host publishes.
+ */
+export function sharedModulesReferencedBy(code: string): PluginSharedModule[] {
+  const found = new Set<PluginSharedModule>()
+  for (const match of code.matchAll(/require\(\s*["'](@cognia\/plugin-sdk\/[^"']+)["']\s*\)/g)) {
+    const specifier = match[1]!
+    if (isSharedModuleSpecifier(specifier)) found.add(specifier)
+  }
+  return [...found]
 }
 
 const registry = new Map<string, unknown>()
 const priming = new Map<PluginSharedModule, Promise<void>>()
 let allPriming: Promise<void> | null = null
 
-const sharedModuleLoaders: Record<PluginSharedModule, () => Promise<unknown>> = {
-  react: () => import("react"),
-  "react/jsx-runtime": () => import("react/jsx-runtime"),
-  "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
-  "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
-  "@cognia/plugin-sdk/api/effort-surface": () => import("@cognia/plugin-sdk/api/effort-surface"),
-  "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
-  "lucide-react": () =>
-    import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),
-}
+const sharedModuleLoaders: Record<(typeof PLUGIN_SHARED_MODULES)[number], () => Promise<unknown>> =
+  {
+    react: () => import("react"),
+    "react/jsx-runtime": () => import("react/jsx-runtime"),
+    "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
+    "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
+    "@cognia/plugin-sdk/api/effort-surface": () => import("@cognia/plugin-sdk/api/effort-surface"),
+    "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
+    "lucide-react": () =>
+      import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),
+  }
 
 /**
  * Load every shared module into a synchronous lookup table.
@@ -77,6 +104,11 @@ const sharedModuleLoaders: Record<PluginSharedModule, () => Promise<unknown>> = 
  * must not deny the others, and the plugin that actually reaches for the
  * missing one gets a specific error at `require()` time instead.
  */
+function loaderFor(specifier: PluginSharedModule): () => Promise<unknown> {
+  const fixed = (sharedModuleLoaders as Record<string, () => Promise<unknown>>)[specifier]
+  return fixed ?? PLUGIN_SDK_SUBPATH_LOADERS[specifier]!
+}
+
 export function primeSharedModules(
   specifiers: readonly PluginSharedModule[] = PLUGIN_SHARED_MODULES
 ): Promise<void> {
@@ -88,7 +120,7 @@ export function primeSharedModules(
 
       const pending = (async () => {
         try {
-          registry.set(specifier, normalizeInterop(await sharedModuleLoaders[specifier]()))
+          registry.set(specifier, normalizeInterop(await loaderFor(specifier)()))
         } catch (error) {
           sharedModuleLogger.warn("shared module unavailable", {
             specifier,
@@ -125,6 +157,13 @@ function normalizeInterop(mod: unknown): unknown {
   return mod
 }
 
+/** Prime the fixed modules plus every SDK subpath `code` requires. */
+export function primeSharedModulesFor(code: string): Promise<void> {
+  const referenced = sharedModulesReferencedBy(code)
+  if (referenced.length === 0) return primeSharedModules()
+  return Promise.all([primeSharedModules(), primeSharedModules(referenced)]).then(() => undefined)
+}
+
 /**
  * Build the `require` a plugin bundle is invoked with. Non-whitelisted
  * specifiers keep throwing — the diagnostic names the offending specifier and
@@ -143,7 +182,8 @@ export function createPluginRequire(originalPath: string): (specifier: string) =
     }
     throw new Error(
       `require("${specifier}") is not available to plugins. Bundle it into your plugin, ` +
-        `or use one of the host-shared modules: ${PLUGIN_SHARED_MODULES.join(", ")}. ` +
+        `or use one of the host-shared modules: ${PLUGIN_SHARED_MODULES.join(", ")}, ` +
+        `or any published @cognia/plugin-sdk/<subpath>. ` +
         `Path: ${originalPath}`
     )
   }

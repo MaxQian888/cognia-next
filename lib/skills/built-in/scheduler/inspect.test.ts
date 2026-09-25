@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -102,5 +104,61 @@ describe("schedule.inspect", () => {
     }
     expect(result.task.payload).toEqual({ prompt: "hi" })
     expect(result.task.config).toEqual({ timeout: 5 })
+  })
+})
+
+describe("schedule.inspect · when next, and what a run produced", () => {
+  it("lists the next three fire times of an active task", async () => {
+    scheduler.getTask.mockResolvedValue(
+      task({ trigger: { type: "interval", intervalMs: 3_600_000 } })
+    )
+    const out = (await run("schedule.inspect", { taskId: "task-1", runLimit: 0 })) as {
+      task: { nextRuns?: string[] }
+    }
+    expect(out.task.nextRuns).toHaveLength(3)
+    const [first, second] = out.task.nextRuns!.map((iso) => new Date(iso).getTime())
+    expect(second - first).toBe(3_600_000)
+  })
+
+  it("has no next runs for a paused task", async () => {
+    scheduler.getTask.mockResolvedValue(task({ status: "paused" }))
+    const out = (await run("schedule.inspect", { taskId: "task-1", runLimit: 0 })) as {
+      task: { nextRuns?: string[] }
+    }
+    expect(out.task.nextRuns).toBeUndefined()
+  })
+
+  it("points at the session a run produced", async () => {
+    scheduler.getTaskExecutions.mockResolvedValue([
+      {
+        id: "run-1",
+        taskId: "task-1",
+        status: "completed",
+        startedAt: new Date("2026-09-02T09:00:00Z"),
+        output: { sessionId: "sess-run-1" },
+      },
+      {
+        id: "run-2",
+        taskId: "task-1",
+        status: "failed",
+        startedAt: new Date("2026-09-03T09:00:00Z"),
+        error: "boom",
+      },
+    ])
+    const out = (await run("schedule.inspect", { taskId: "task-1", runLimit: 5 })) as {
+      runs: Array<{ id: string; links?: Array<{ kind: string; id: string }> }>
+    }
+    expect(out.runs[0].links).toEqual([{ kind: "session", id: "sess-run-1" }])
+    expect(out.runs[1].links).toBeUndefined()
+  })
+})
+
+describe("schedule.inspect · agent access", () => {
+  it("refuses to read a task once agents may not manage the schedule", async () => {
+    loadSchedulerPolicy.mockResolvedValueOnce({ agentToolsEnabled: false })
+    await expect(run("schedule.inspect", { taskId: "task-1", runLimit: 0 })).rejects.toThrow(
+      /not allowed to manage your schedule/
+    )
+    expect(scheduler.getTask).not.toHaveBeenCalled()
   })
 })

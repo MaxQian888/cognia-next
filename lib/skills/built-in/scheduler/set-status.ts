@@ -10,9 +10,15 @@
 import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
+import { SCHEDULE_TOOL } from "./tool-names"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
-import { requireTask, resolveTaskWrite, toAgentVisibleTask } from "./_core"
+import {
+  preflightExistingTaskWrite,
+  requireTask,
+  resolveTaskWrite,
+  toAgentVisibleTask,
+} from "./_core"
 
 const schema = z.object({
   taskId: z.string().min(1).describe("Task id from scheduler_list_tasks."),
@@ -35,11 +41,19 @@ const skill: BuiltInSkill<typeof schema> = {
   platforms: "any",
   mutation: "write",
   imAccess: "always",
-  mcpToolName: "scheduler_set_task_status",
+  mcpToolName: SCHEDULE_TOOL.setStatus,
   inputSchema: schema,
+  preflight: async (args, ctx) => {
+    await preflightExistingTaskWrite(args.taskId, ctx)
+  },
   execute: async (args, ctx) => {
     const existing = await requireTask(args.taskId)
-    await resolveTaskWrite({ taskType: existing.type, sessionId: ctx.sessionId })
+    await resolveTaskWrite({
+      taskType: existing.type,
+      sessionId: ctx.sessionId,
+      humanConfirmed: ctx.humanConfirmed,
+      operation: "mutate",
+    })
 
     const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
     const scheduler = getTaskScheduler()

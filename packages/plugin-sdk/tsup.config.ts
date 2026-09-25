@@ -10,6 +10,7 @@ const runtimeEntries = {
   permissions: "src/permissions/index.ts",
   extensions: "src/extensions/index.ts",
   templates: "src/templates/index.ts",
+  testing: "src/testing/index.ts",
   connector: "src/api/connector.ts",
   i18n: "src/api/i18n.ts",
   integration: "src/api/integration.ts",

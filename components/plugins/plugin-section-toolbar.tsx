@@ -24,8 +24,10 @@
 // leaves the search input a few characters wide.
 
 import type { ReactNode } from "react"
-import { SearchIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { SearchIcon, XIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
@@ -100,20 +102,46 @@ export function PluginSectionToolbar({
   className,
   testId = "plugin-section-toolbar",
 }: PluginSectionToolbarProps) {
+  const t = useTranslations("plugins.toolbar")
   const shownSegments = segments ? visibleSegments(segments.items, segments.value) : []
   const stacked = layout === "stacked"
 
+  // `type="search"` gives a phone keyboard its Search key, lets Escape clear
+  // the field, and opts the field into the coarse-pointer guard in
+  // `app/globals.css` (16px text so iOS doesn't zoom on focus, 40px floor) —
+  // a type-less input matched none of that guard's selectors. The engine's own
+  // cancel glyph is hidden: it is unlabeled and ~14px, under the touch floor,
+  // so the labeled button below replaces it and grows to 36px on touch.
   const searchNode = search ? (
     <div className={cn("relative min-w-0", stacked ? "w-full" : "flex-1")}>
-      <SearchIcon className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <SearchIcon
+        className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden
+      />
       <Input
+        type="search"
+        enterKeyHint="search"
+        autoComplete="off"
         value={search.value}
         onChange={(e) => search.onChange(e.target.value)}
         placeholder={search.placeholder}
         aria-label={search.placeholder}
-        className="h-8 pl-7 text-sm"
+        className="h-8 pl-7 pr-8 text-sm pointer-coarse:pr-10 [&::-webkit-search-cancel-button]:hidden"
         data-testid={search.testId}
       />
+      {search.value ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => search.onChange("")}
+          aria-label={t("clearSearch")}
+          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground pointer-coarse:right-0.5 pointer-coarse:size-9"
+          data-testid={search.testId ? `${search.testId}-clear` : undefined}
+        >
+          <XIcon className="size-3.5" aria-hidden />
+        </Button>
+      ) : null}
     </div>
   ) : null
 

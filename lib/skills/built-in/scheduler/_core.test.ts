@@ -9,7 +9,10 @@
 
 import {
   AGENT_SCHEDULABLE_TASK_TYPES,
+  assertAgentTaskPayload,
+  assertAgentTaskTrigger,
   describeTrigger,
+  formatDuration,
   toAgentVisibleTask,
   toTaskTrigger,
 } from "./_core"
@@ -125,10 +128,140 @@ describe("toAgentVisibleTask", () => {
 describe("describeTrigger", () => {
   it("reads as something a person can check", () => {
     expect(describeTrigger({ type: "cron", cronExpression: "0 9 * * *" })).toBe("cron 0 9 * * *")
-    expect(describeTrigger({ type: "interval", intervalMs: 90_000 })).toBe("every 90s")
+    expect(describeTrigger({ type: "interval", intervalMs: 90_000 })).toBe("every 1 min 30 s")
+    expect(describeTrigger({ type: "interval", intervalMs: 3_600_000 })).toBe("every 1 h")
     expect(describeTrigger({ type: "once", runAt: "2026-09-05T09:00:00Z" })).toContain("once at")
     expect(describeTrigger({ type: "event", eventType: "chat:completed" })).toBe(
       "on event chat:completed"
     )
+  })
+
+  it("shows a one-off time on the local clock with its zone, not as GMT", () => {
+    const runAt = "2026-09-26T01:00:00Z"
+    const text = describeTrigger({ type: "once", runAt })
+    expect(text).not.toContain(new Date(runAt).toUTCString())
+    expect(text).toBe(
+      `once at ${new Date(runAt).toLocaleString("en-US", {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "short",
+      })}`
+    )
+    expect(describeTrigger({ type: "once", runAt: "not a date" })).toBe("once at not a date")
+  })
+})
+
+describe("assertAgentTaskPayload", () => {
+  it("accepts the documented shape for every agent-schedulable type", async () => {
+    const good: Record<string, Record<string, unknown>> = {
+      chat: { prompt: "hi" },
+      agent: { prompt: "hi", characterId: "c1" },
+      skill: { prompt: "hi", skillId: "s1" },
+      "external-agent": { prompt: "hi", agentId: "a1" },
+      goal: { objective: "ship it" },
+      plan: { planId: "p1" },
+      "agent-team": { teamId: "t1" },
+      workflow: { workflowId: "w1" },
+      "im-push": { conversationKey: "lark:1:oc", text: "hello" },
+      "background-command": { command: "pnpm build", cwd: "/repo" },
+      backup: {},
+    }
+    for (const type of AGENT_SCHEDULABLE_TASK_TYPES) {
+      await expect(assertAgentTaskPayload(type, good[type])).resolves.toBeUndefined()
+    }
+  })
+
+  it("names the missing key, mirroring the executor that would fail", async () => {
+    await expect(assertAgentTaskPayload("chat", {})).rejects.toThrow(/prompt/)
+    await expect(assertAgentTaskPayload("agent", { prompt: "hi" })).rejects.toThrow(/characterId/)
+    await expect(assertAgentTaskPayload("skill", { prompt: "hi" })).rejects.toThrow(/skillId/)
+    await expect(assertAgentTaskPayload("goal", { objective: "  " })).rejects.toThrow(/objective/)
+    await expect(assertAgentTaskPayload("plan", {})).rejects.toThrow(/planId/)
+    await expect(assertAgentTaskPayload("agent-team", {})).rejects.toThrow(/teamId/)
+    await expect(assertAgentTaskPayload("background-command", { command: "ls" })).rejects.toThrow(
+      /cwd/
+    )
+  })
+
+  it("accepts an im-push with segments instead of text, and refuses one with neither", async () => {
+    await expect(
+      assertAgentTaskPayload("im-push", {
+        conversationKey: "k",
+        segments: [{ type: "text", text: "hi" }],
+      })
+    ).resolves.toBeUndefined()
+    await expect(assertAgentTaskPayload("im-push", { conversationKey: "k" })).rejects.toThrow(
+      /text/
+    )
+  })
+})
+
+describe("assertAgentTaskTrigger", () => {
+  const now = new Date("2026-09-25T00:00:00Z")
+
+  it("accepts every valid shape", async () => {
+    await expect(
+      assertAgentTaskTrigger(
+        { type: "cron", cronExpression: "0 9 * * 1-5", timezone: "Asia/Shanghai" },
+        now
+      )
+    ).resolves.toBeUndefined()
+    await expect(
+      assertAgentTaskTrigger({ type: "interval", intervalMs: 60_000 }, now)
+    ).resolves.toBeUndefined()
+    await expect(
+      assertAgentTaskTrigger({ type: "once", runAt: "2026-09-26T09:00:00Z" }, now)
+    ).resolves.toBeUndefined()
+    await expect(
+      assertAgentTaskTrigger({ type: "event", eventType: "chat:completed" }, now)
+    ).resolves.toBeUndefined()
+  })
+
+  it("rejects what the scheduler would reject", async () => {
+    await expect(
+      assertAgentTaskTrigger({ type: "cron", cronExpression: "nope" }, now)
+    ).rejects.toThrow()
+    await expect(
+      assertAgentTaskTrigger(
+        { type: "cron", cronExpression: "0 9 * * *", timezone: "Mars/Olympus" },
+        now
+      )
+    ).rejects.toThrow()
+    await expect(
+      assertAgentTaskTrigger({ type: "once", runAt: "2026-09-24T09:00:00Z" }, now)
+    ).rejects.toThrow(/future/)
+  })
+})
+
+describe("formatDuration", () => {
+  it("reads the way a person says it", () => {
+    expect(formatDuration(45_000)).toBe("45 s")
+    expect(formatDuration(30 * 60_000)).toBe("30 min")
+    expect(formatDuration(90 * 60_000)).toBe("1 h 30 min")
+    expect(formatDuration(24 * 3_600_000)).toBe("24 h")
+  })
+})
+
+describe("toAgentVisibleTask · workspace and description", () => {
+  it("carries the description and owning workspace when the task has them", () => {
+    const visible = toAgentVisibleTask({
+      id: "t",
+      name: "n",
+      description: "why it exists",
+      projectId: "proj-1",
+      type: "chat",
+      status: "active",
+      trigger: { type: "interval", intervalMs: 60_000 },
+      runCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    } as never)
+    expect(visible).toMatchObject({ description: "why it exists", projectId: "proj-1" })
   })
 })

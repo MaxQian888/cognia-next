@@ -110,6 +110,14 @@ describe("buildPythonCommandInvocation", () => {
       buildPythonCommandInvocation("hello", [], { sessionId: "s1", characterId: "c1" })
     ).toEqual({ command: "hello", args: [], sessionId: "s1", characterId: "c1" })
   })
+
+  it("carries the text as typed for commands whose argument is a body", () => {
+    expect(buildPythonCommandInvocation("add", ["a", "b"], { rawArgs: "a\n  b" })).toEqual({
+      command: "add",
+      args: ["a", "b"],
+      rawArgs: "a\n  b",
+    })
+  })
 })
 
 describe("normalizePythonCommandOutcome", () => {

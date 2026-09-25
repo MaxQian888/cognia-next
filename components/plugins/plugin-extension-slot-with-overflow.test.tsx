@@ -244,3 +244,40 @@ describe("PluginExtensionSlotWithOverflow", () => {
     errorSpy.mockRestore()
   })
 })
+
+describe("PluginExtensionSlotWithOverflow host context", () => {
+  const contextProbe = (id: string): FakeExt => ({
+    id,
+    pluginId: "p1",
+    component: (props) => (
+      <button type="button" data-testid={id}>
+        {JSON.stringify((props as { context?: unknown }).context)}
+      </button>
+    ),
+    options: {},
+  })
+
+  it("hands the same context to inline and overflowed contributions, which the keyboard can reach", async () => {
+    ;(getExtensionsForPoint as jest.Mock).mockReturnValue([
+      contextProbe("inline"),
+      contextProbe("overflowed"),
+    ])
+    const context = { sessionId: "s-1", disabled: true, compact: false }
+    renderUI(
+      <PluginExtensionSlotWithOverflow
+        point={POINT}
+        limit={1}
+        overflowLabel="More"
+        context={context}
+      />
+    )
+    expect(screen.getByTestId("inline")).toHaveTextContent(JSON.stringify(context))
+
+    screen.getByTestId(`plugin-extension-overflow-${POINT}`).click()
+    const overflowed = await screen.findByTestId("overflowed")
+    expect(overflowed).toHaveTextContent(JSON.stringify(context))
+    // A popover, not a menu: the plugin's own control takes focus normally.
+    overflowed.focus()
+    expect(overflowed).toHaveFocus()
+  })
+})

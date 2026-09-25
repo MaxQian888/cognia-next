@@ -145,7 +145,6 @@ beforeEach(() => {
     getRecentPlugins: jest.fn(async () => ENTRIES),
     getPlugin: jest.fn(async () => null),
     installPlugin: jest.fn(async () => undefined),
-    uninstallPlugin: jest.fn(async () => undefined),
   })
 })
 
@@ -227,13 +226,19 @@ describe("PluginMarketplace", () => {
         name: "Alpha",
       })),
       installPlugin: install,
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
     const installButtons = screen.getAllByText("install")
     fireEvent.click(installButtons[0])
     await waitFor(() => expect(install).toHaveBeenCalled())
+    // The success toast points at what was just installed.
+    await waitFor(() =>
+      expect(mockToast.success).toHaveBeenCalledWith(
+        "installSucceeded",
+        expect.objectContaining({ action: expect.objectContaining({ label: "viewDetails" }) })
+      )
+    )
   })
 
   it("renders Load more when results exceed PAGE_SIZE and expands on click", async () => {
@@ -253,7 +258,6 @@ describe("PluginMarketplace", () => {
       getRecentPlugins: jest.fn(async () => []),
       getPlugin: jest.fn(async () => null),
       installPlugin: jest.fn(async () => undefined),
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     render(<PluginMarketplace />)
     await waitFor(() =>
@@ -281,7 +285,6 @@ describe("PluginMarketplace", () => {
       getRecentPlugins: jest.fn(async () => []),
       getPlugin: jest.fn(async () => null),
       installPlugin: jest.fn(async () => undefined),
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getByText("SearchOne")).toBeInTheDocument())
@@ -302,7 +305,6 @@ describe("PluginMarketplace", () => {
       getRecentPlugins: jest.fn(async () => []),
       getPlugin: jest.fn(async () => null),
       installPlugin: jest.fn(async () => undefined),
-      uninstallPlugin: jest.fn(async () => undefined),
     })
     render(<PluginMarketplace />)
     // Default "all" merges both sources.
@@ -348,7 +350,6 @@ describe("PluginMarketplace", () => {
         getRecentPlugins: jest.fn(async () => []),
         getPlugin: jest.fn(async () => null),
         installPlugin: jest.fn(async () => undefined),
-        uninstallPlugin: jest.fn(async () => undefined),
       })
 
       render(<PluginMarketplace />)
@@ -437,7 +438,6 @@ describe("PluginMarketplace", () => {
         getRecentPlugins: jest.fn(async () => []),
         getPlugin: jest.fn(async () => null),
         installPlugin: jest.fn(async () => undefined),
-        uninstallPlugin: jest.fn(async () => undefined),
       })
 
       render(<PluginMarketplace />)
@@ -570,6 +570,34 @@ describe("PluginMarketplace", () => {
       expect(mockToast.error).toHaveBeenCalledWith("presets.desktopOnly")
       expect(runPresetInstallMock).not.toHaveBeenCalled()
       mockCanUseTauriInvoke.mockReturnValue(true)
+    })
+  })
+})
+
+// The marketplace Uninstall used to call `client.uninstallPlugin`, a method the
+// registry client never had, so it threw on every click. It now asks for the
+// same confirmation the Library does, and the dialog host runs the real
+// (manager-backed) uninstall.
+describe("PluginMarketplace uninstall", () => {
+  beforeEach(() => {
+    usePluginsStore.setState({ deleteTarget: null, deleteQueue: [] })
+  })
+
+  it("routes an installed card's Uninstall through the shared confirm dialog", async () => {
+    installedRows.push({
+      id: "alpha",
+      name: "Alpha (installed)",
+      version: "1.0.0",
+      source: "marketplace",
+      capabilities: [],
+      manifest: {},
+    } as never)
+    render(<PluginMarketplace />)
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+    fireEvent.click(screen.getAllByRole("button", { name: "uninstall" })[0]!)
+    expect(usePluginsStore.getState().deleteTarget).toEqual({
+      pluginId: "alpha",
+      name: "Alpha (installed)",
     })
   })
 })

@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
@@ -54,7 +55,9 @@ describe("PluginLibraryRow", () => {
     const h = handlers()
     render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
     expect(screen.getByText("Test Plugin")).toBeInTheDocument()
-    expect(screen.getByText("v1.0.0")).toBeInTheDocument()
+    // Rendered once per width tier (line one on wide rows, line two on narrow
+    // ones); CSS shows exactly one, jsdom sees both.
+    expect(screen.getAllByText("v1.0.0")).toHaveLength(2)
     expect(screen.getByText("Acme Labs")).toBeInTheDocument()
   })
 
@@ -129,7 +132,7 @@ describe("PluginLibraryRow", () => {
         {...h}
       />
     )
-    expect(screen.getByText("updateBadge")).toBeInTheDocument()
+    expect(screen.getAllByText("updateBadge").length).toBeGreaterThan(0)
   })
 
   it("highlights the row when active is true via data-active=true", () => {
@@ -270,7 +273,7 @@ describe("PluginLibraryRow", () => {
         {...handlers()}
       />
     )
-    expect(screen.getByTestId(`plugin-source-badge-${source}`)).toBeInTheDocument()
+    expect(screen.getAllByTestId(`plugin-source-badge-${source}`).length).toBeGreaterThan(0)
   })
 
   it.each(["marketplace", "builtin"] as const)("does not badge a released %s build", (source) => {
@@ -332,5 +335,40 @@ describe("PluginLibraryRow", () => {
     // Clipping instead would hide capabilities with no way to reach them.
     expect(strip.className).toContain("overflow-x-auto")
     expect(strip.className).toContain("min-w-0")
+  })
+
+  it("is a list item of the library list", () => {
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...handlers()} />)
+    expect(screen.getByRole("listitem")).toBeInTheDocument()
+  })
+
+  // On a 375px phone the name used to share line one with the version chip,
+  // badges and a redundant error icon, and truncated to a few characters.
+  it("gives the name line one on a narrow list", () => {
+    render(
+      <PluginLibraryRow
+        plugin={{
+          ...baseRow,
+          status: "error",
+          manifest: { ...baseRow.manifest, updateAvailable: true },
+        }}
+        selected={false}
+        active={false}
+        {...handlers()}
+      />
+    )
+    const [wide, narrow] = screen
+      .getAllByText("v1.0.0")
+      .map((el) => el.closest("[data-slot=badge]"))
+    expect(wide).toHaveClass("hidden", "@sm/plugin-list:inline-flex")
+    expect(narrow).toHaveClass("@sm/plugin-list:hidden")
+    // The status pill already says "Error"; the icon only returns with room.
+    expect(screen.getByLabelText("erroredAria")).toHaveClass("hidden", "@sm/plugin-list:block")
+  })
+
+  it("pads the selection checkbox to a 36px target on coarse pointers", () => {
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...handlers()} />)
+    const label = screen.getByRole("checkbox").closest("label")
+    expect(label).toHaveClass("pointer-coarse:p-2.5")
   })
 })

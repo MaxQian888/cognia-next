@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
@@ -250,7 +251,8 @@ describe("PluginPanel (3-pane shell)", () => {
   it("renders the active plugin row inside the library list center", () => {
     render(<PluginPanel />)
     expect(screen.getByText("Test Plugin")).toBeInTheDocument()
-    expect(screen.getByText("v1.2.3")).toBeInTheDocument()
+    // The row prints the version once per width tier; CSS shows one.
+    expect(screen.getAllByText("v1.2.3").length).toBeGreaterThan(0)
   })
 
   it("swaps the center pane to Discover when activeSection=discover", () => {
@@ -385,6 +387,19 @@ describe("PluginPanel (3-pane shell)", () => {
     mockSearchString = "section=garbage"
     rerender(<PluginPanel />)
     expect(usePluginsStore.getState().activeSection).toBe("library")
+  })
+
+  // ⌘K plugin results and every "View details" toast link here. The panel
+  // used to ignore the param and land on the Library with nothing selected.
+  it("opens the plugin named by ?plugin= and strips the one-shot param", () => {
+    usePluginsStore.setState({ activeSection: "discover" })
+    mockSearchString = "plugin=plugin_x&subtab=capabilities"
+    render(<PluginPanel />)
+    const state = usePluginsStore.getState()
+    expect(state.activeSection).toBe("library")
+    expect(state.detailPluginId).toBe("plugin_x")
+    expect(state.detailSubTab).toBe("capabilities")
+    expect(mockReplace).toHaveBeenCalledWith("/plugins", { scroll: false })
   })
 
   it("Sync Registry never sends VS Code extension ids to the cognia registry", async () => {

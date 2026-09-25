@@ -64,6 +64,7 @@ jest.mock("@/hooks/plugins", () => ({
       ? { state: "not-found" as const }
       : { state: "ready" as const, row: mockPlugin },
   usePluginDiagnostics: () => [],
+  usePermissionDescription: () => (perm: string) => `described:${perm}`,
 }))
 
 // PermissionRow is what we're verifying we reuse.
@@ -105,6 +106,12 @@ describe("PluginDetailPermissions", () => {
     // `getAllByText` returns 2 nodes per permission.
     expect(screen.getAllByText("clipboard:read").length).toBeGreaterThan(0)
     expect(screen.getAllByText("shell:execute").length).toBeGreaterThan(0)
+  })
+
+  it("describes each permission with the localized description", () => {
+    mockPlugin = makePlugin(["clipboard:read"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByText("described:clipboard:read")).toBeInTheDocument()
   })
 
   it("marks unsupported Node network and subprocess grants unavailable", () => {

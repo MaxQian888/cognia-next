@@ -5,9 +5,13 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { listSkillsByIds, resolveEffectiveSkills, type EffectiveSkillRef } from "@/lib/db/skills"
 import type { Skill } from "@cognia/agent-config-types"
 
-/** A resolved effective-skill entry with its hydrated Dexie row. */
+import { usePluginSkillsById } from "./use-plugin-skills"
+
+/** A resolved effective-skill entry with the fields a chip or badge shows. */
 export interface EffectiveSkillItem extends EffectiveSkillRef {
-  skill: Skill
+  skill: Pick<Skill, "id" | "name" | "description">
+  /** A chat skill (Dexie row) or a skill an enabled plugin contributes. */
+  origin: "chat" | "plugin"
 }
 
 export interface EffectiveSkillsView {
@@ -27,7 +31,8 @@ export interface EffectiveSkillsView {
  * including which attachments are inert because the session disabled them.
  *
  * Rows that no longer exist (e.g. a skill deleted from the panel while still
- * referenced by a stale id) are dropped from `items`.
+ * referenced by a stale id, or a plugin skill whose plugin was disabled) are
+ * dropped from `items`.
  */
 export function useEffectiveSkills(input: {
   characterSkillIds?: readonly string[]
@@ -49,14 +54,25 @@ export function useEffectiveSkills(input: {
     () => (ids.length > 0 ? listSkillsByIds(ids) : Promise.resolve([])),
     [idsKey]
   )
+  // A picked plugin skill carries its registry id, not a Dexie id; without
+  // this lookup its chip would vanish although the send still injects it.
+  const pluginSkills = usePluginSkillsById()
 
   return useMemo(() => {
     const rows = liveRows ?? []
     const byId = new Map(rows.map((s) => [s.id, s]))
     const items = refs
-      .map((r) => {
+      .map((r): EffectiveSkillItem | null => {
         const skill = byId.get(r.id)
-        return skill ? { ...r, skill } : null
+        if (skill) return { ...r, skill, origin: "chat" }
+        const plugin = pluginSkills.get(r.id)
+        return plugin
+          ? {
+              ...r,
+              skill: { id: plugin.id, name: plugin.name, description: plugin.description },
+              origin: "plugin",
+            }
+          : null
       })
       .filter((r): r is EffectiveSkillItem => r != null)
     return {
@@ -64,5 +80,5 @@ export function useEffectiveSkills(input: {
       activeCount: items.filter((i) => !i.inert).length,
       totalCount: items.length,
     }
-  }, [refs, liveRows])
+  }, [refs, liveRows, pluginSkills])
 }

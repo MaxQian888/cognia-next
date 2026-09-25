@@ -1009,7 +1009,8 @@ describe("handlePluginToolExec — desktop pet built-ins", () => {
       listAchievements: async () => [],
       listInventory: async () => [],
       bubblesMuted: () => false,
-      isAvailable: () => true,
+      availability: () => ({ available: true }),
+      cooldownMs: () => 0,
       now: () => 0,
     }))
     const res = await handlePluginToolExec({

@@ -78,6 +78,13 @@ export interface BuildBuiltInSkillManifestInput {
    * the filter only runs when `imBinding` is set.
    */
   channelCapabilities?: readonly Capability[]
+  /**
+   * Restrict the manifest to these families (`skill.family`). Checked before
+   * anything else, the Lark CLI probe included, so a family-only build (the
+   * scheduler family offered to desktop chat) never spawns lark-cli or renders
+   * JSON Schema for skills it is about to drop.
+   */
+  families?: readonly string[]
 }
 
 export function buildBuiltInSkillManifest(
@@ -87,7 +94,9 @@ export function buildBuiltInSkillManifest(
   const out: BuiltInSkillManifestEntry[] = []
 
   const isImSession = input.imBinding != null
+  const families = input.families ? new Set(input.families) : null
   for (const skill of registry.list()) {
+    if (families && !families.has(skill.family)) continue
     if (skill.id in LARK_CLI_CAPABILITY_MANIFEST) {
       if (!getCachedLarkCliCapabilityDiagnostics()) void probeLarkCliCapabilities()
       if (!isLarkSkillCapabilityAvailable(skill.id)) continue

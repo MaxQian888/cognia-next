@@ -20,6 +20,11 @@ jest.mock("sonner", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const sonner = require("sonner") as { toast: { error: jest.Mock } }
 
+const mockPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+}))
+
 function renderToaster(locale: "en" | "zh-CN" = "en") {
   return render(
     <NextIntlClientProvider locale={locale} messages={locale === "en" ? enMessages : zhMessages}>
@@ -113,5 +118,21 @@ describe("PluginEnableFailureToaster", () => {
       )
     })
     expect(sonner.toast.error).not.toHaveBeenCalled()
+  })
+
+  it("links the failure to the plugin's details", () => {
+    renderToaster("en")
+    fireEvent(sampleDetail)
+    const [, options] = sonner.toast.error.mock.calls[0]
+    expect(options.action.label).toBe("View details")
+    options.action.onClick()
+    expect(mockPush).toHaveBeenCalledWith("/plugins?plugin=com.example.foo")
+  })
+
+  it("localizes a known manager failure instead of printing it raw", () => {
+    renderToaster("zh-CN")
+    fireEvent({ ...sampleDetail, errorMessage: "Plugin not found: com.example.foo" })
+    const [, options] = sonner.toast.error.mock.calls[0]
+    expect(options.description).not.toContain("Plugin not found")
   })
 })

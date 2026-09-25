@@ -37,6 +37,24 @@ describe("PluginActiveFilters", () => {
     expect(usePluginsStore.getState().filters.query).toBe("")
   })
 
+  it("names a curated capability the way the category rail does", () => {
+    usePluginsStore.setState({ filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "commands" } })
+    render(<PluginActiveFilters />)
+    expect(screen.getByTestId("plugin-active-filter-capability").textContent).toContain(
+      'chip.capability:{"value":"capability.commands"}'
+    )
+  })
+
+  it("keeps an uncurated capability id as is", () => {
+    usePluginsStore.setState({
+      filters: { ...DEFAULT_PLUGIN_FILTERS, capability: "made-up-capability" },
+    })
+    render(<PluginActiveFilters />)
+    expect(screen.getByTestId("plugin-active-filter-capability").textContent).toContain(
+      'chip.capability:{"value":"made-up-capability"}'
+    )
+  })
+
   it("renders capability, permission, source chips when set", () => {
     usePluginsStore.setState({
       filters: {

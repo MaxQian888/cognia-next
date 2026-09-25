@@ -29,7 +29,12 @@ import {
   type PluginJsHostInvoker,
 } from "../launcher/launchPluginJs"
 import { resolvePluginPath } from "./plugin-path"
-import { createPluginRequire, primeSharedModules } from "./shared-modules"
+import {
+  createPluginRequire,
+  primeSharedModules,
+  primeSharedModulesFor,
+  sharedModulesReferencedBy,
+} from "./shared-modules"
 import { assertNoHostPrivateImports } from "../security/import-boundary"
 import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
@@ -339,7 +344,10 @@ export class PluginLoader {
           builtinRegistryEntry.asset,
           this.builtinAssetFetcher
         )
-        await primeSharedModules(builtinRegistryEntry.asset.sharedModules)
+        await primeSharedModules([
+          ...builtinRegistryEntry.asset.sharedModules,
+          ...sharedModulesReferencedBy(code),
+        ])
         const moduleExports = this.evaluatePluginCode(code, builtinRegistryEntry.asset.url)
         const definition = this.extractDefinition(moduleExports, manifest)
         this.loadedModules.set(manifest.id, {
@@ -637,7 +645,7 @@ export class PluginLoader {
 
         return allHooks
       },
-      deactivate: async (ctx?: PluginContext) => {
+      deactivate: async (ctx: PluginContext) => {
         // Deactivate both parts, Python first to clean up native resources.
         // Forward the context: plugin teardown routinely guards on
         // `ctx?.pluginId` (slash-command unregistration, interval cleanup),
@@ -702,7 +710,7 @@ export class PluginLoader {
     }
 
     const code = await response.text()
-    await primeSharedModules()
+    await primeSharedModulesFor(code)
     return this.evaluatePluginCode(code, originalPath)
   }
 
@@ -712,7 +720,7 @@ export class PluginLoader {
    * `require` resolves the host's shared-module whitelist (React and friends)
    * and throws for everything else — see `shared-modules.ts` for why sharing
    * React is load-bearing rather than a convenience. Callers must have awaited
-   * `primeSharedModules()` first: `require` is synchronous, so the instances
+   * `primeSharedModulesFor(code)` first: `require` is synchronous, so the instances
    * have to already be in hand by the time the bundle runs.
    */
   private evaluatePluginCode(code: string, originalPath: string): unknown {
@@ -761,7 +769,7 @@ export class PluginLoader {
       pluginPath: pluginRoot,
       entry: relativeEntry,
     })
-    await primeSharedModules()
+    await primeSharedModulesFor(code)
     return this.evaluatePluginCode(code, absolutePath)
   }
 

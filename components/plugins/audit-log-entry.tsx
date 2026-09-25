@@ -8,6 +8,7 @@
 // font/spacing. Keeping a single source of truth here prevents the two
 // surfaces from drifting visually.
 
+import { useFormatter } from "next-intl"
 import type { PermissionAuditEntry } from "@/lib/plugin/security/permission-guard"
 import { Badge } from "@/components/ui/badge"
 
@@ -23,9 +24,10 @@ export interface AuditLogEntryProps {
   showPlugin?: boolean
 }
 
-function formatHms(timestamp: number): string {
-  return new Date(timestamp).toISOString().split("T")[1]?.slice(0, 8) ?? ""
-}
+// The audit ring is session-scoped, so the row shows the local time of day to
+// the second; the full date rides along as the hover title.
+const TIME_OF_DAY = { timeStyle: "medium" } as const
+const FULL_TIMESTAMP = { dateStyle: "medium", timeStyle: "medium" } as const
 
 function badgeVariantForAction(action: PermissionAuditEntry["action"]) {
   if (action === "grant") return "secondary" as const
@@ -34,6 +36,9 @@ function badgeVariantForAction(action: PermissionAuditEntry["action"]) {
 }
 
 export function AuditLogEntry({ entry, showPlugin = false }: AuditLogEntryProps) {
+  const format = useFormatter()
+  const at = new Date(entry.timestamp)
+  const hasTime = !Number.isNaN(at.getTime())
   return (
     <li className="flex items-center gap-2 px-3 py-1.5 text-xs">
       <Badge variant={badgeVariantForAction(entry.action)} className="text-xs">
@@ -43,7 +48,15 @@ export function AuditLogEntry({ entry, showPlugin = false }: AuditLogEntryProps)
         <code className="font-mono shrink-0 text-muted-foreground">{entry.pluginId}</code>
       ) : null}
       <code className="font-mono flex-1 truncate">{entry.permission}</code>
-      <span className="text-muted-foreground shrink-0">{formatHms(entry.timestamp)}</span>
+      {hasTime ? (
+        <time
+          dateTime={at.toISOString()}
+          title={format.dateTime(at, FULL_TIMESTAMP)}
+          className="text-muted-foreground shrink-0 tabular-nums"
+        >
+          {format.dateTime(at, TIME_OF_DAY)}
+        </time>
+      ) : null}
     </li>
   )
 }

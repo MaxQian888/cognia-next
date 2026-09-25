@@ -17,8 +17,14 @@
  */
 
 import { useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+
+// Leaf imports only: this toaster is mounted in the root layout, and the
+// plugin manager must stay out of the first-paint module graph.
+import { pluginDetailHref } from "@/hooks/plugins/plugin-links"
+import { usePluginErrorMessage } from "@/hooks/plugins/use-plugin-error-message"
 
 import { subscribePluginError, type PluginErrorEventDetail } from "@/lib/plugin/error-bus"
 
@@ -27,6 +33,9 @@ const DEDUPE_WINDOW_MS = 2_000
 
 export function PluginErrorToaster() {
   const t = useTranslations("plugins.errors")
+  const tLifecycle = useTranslations("plugins.lifecycleFeedback")
+  const describe = usePluginErrorMessage()
+  const router = useRouter()
   const recentRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
@@ -41,15 +50,21 @@ export function PluginErrorToaster() {
       recent.set(key, now)
       const display = detail.pluginName ?? detail.pluginId
       const title = translateStageTitle(t, detail.stage, display)
-      const description = detail.message
+      // Manager messages are English; the known shapes are localized and the
+      // rest fall through verbatim (still the most specific text we have).
+      const description = describe(detail.message)
       const toastFn = detail.severity === "warning" ? toast.warning : toast.error
       toastFn(title, {
         description,
         id: key,
         duration: detail.recoverable ? 6_000 : 8_000,
+        action: {
+          label: tLifecycle("viewDetails"),
+          onClick: () => router.push(pluginDetailHref(detail.pluginId)),
+        },
       })
     })
-  }, [t])
+  }, [t, tLifecycle, describe, router])
 
   return null
 }

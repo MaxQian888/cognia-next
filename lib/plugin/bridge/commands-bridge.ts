@@ -48,6 +48,8 @@ import { loggers } from "@/lib/plugin/core/logger"
 export interface PythonCommandInvocation {
   command: string
   args: string[]
+  /** The text after the command name, exactly as typed (see `PluginCommandContext.rawArgs`). */
+  rawArgs?: string
   sessionId?: string
   characterId?: string
 }
@@ -143,6 +145,7 @@ export function buildPythonCommandInvocation(
   return {
     command,
     args: [...args],
+    ...(context?.rawArgs !== undefined ? { rawArgs: context.rawArgs } : {}),
     ...(context?.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context?.characterId ? { characterId: context.characterId } : {}),
   }

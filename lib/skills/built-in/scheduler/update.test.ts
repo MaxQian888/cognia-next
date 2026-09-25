@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -93,5 +95,36 @@ describe("schedule.update", () => {
   it("reports a refusal from the scheduler instead of claiming success", async () => {
     scheduler.updateTask.mockResolvedValue(null)
     await expect(run("schedule.update", { taskId: "task-1", name: "x" })).rejects.toThrow(/task-1/)
+  })
+})
+
+describe("schedule.update · preflight", () => {
+  const preflight = (args: Record<string, unknown>) =>
+    skill("schedule.update").preflight!(args as never, { ...ctx, humanConfirmed: true })
+
+  it("names an id that points at nothing before the user is asked", async () => {
+    scheduler.getTask.mockResolvedValue(null)
+    await expect(preflight({ taskId: "ghost", name: "x" })).rejects.toThrow(/ghost/)
+  })
+
+  it("asks the policy as a change to an existing task, not a create", async () => {
+    await preflight({ taskId: "task-1", name: "x" })
+    expect(authorizeTaskWrite).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "mutate", humanConfirmed: true, taskType: "chat" })
+    )
+  })
+
+  it("checks a replacement trigger and payload against the existing type", async () => {
+    await expect(
+      preflight({ taskId: "task-1", trigger: { type: "cron", cronExpression: "bad" } })
+    ).rejects.toThrow()
+    await expect(preflight({ taskId: "task-1", payload: { nope: 1 } })).rejects.toThrow(/prompt/)
+  })
+
+  it("leaves a type agents cannot author to its own executor", async () => {
+    scheduler.getTask.mockResolvedValue(task({ type: "script" }))
+    await expect(
+      preflight({ taskId: "task-1", payload: { anything: true } })
+    ).resolves.toBeUndefined()
   })
 })

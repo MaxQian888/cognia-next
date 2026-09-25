@@ -3,13 +3,33 @@
  */
 
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 let mockPlugin: PluginRow | undefined
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+// Resolves the permission descriptions against the split source so the test
+// sees the localized sentence, while every other key echoes itself.
+jest.mock("next-intl", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const permissions = require("@/i18n/messages/en/plugins/permissions.json") as {
+    descriptions: Record<string, string>
+  }
+  return {
+    useTranslations: (namespace?: string) => {
+      const t = (key: string) =>
+        namespace === "plugins.permissions.descriptions"
+          ? (permissions.descriptions[key] ?? key)
+          : key
+      ;(t as unknown as { has: (k: string) => boolean }).has = (key: string) =>
+        namespace === "plugins.permissions.descriptions" && key in permissions.descriptions
+      return t
+    },
+    // Audit rows format their time through next-intl.
+    useFormatter: () => ({ dateTime: (v: Date | number) => new Date(v).toISOString() }),
+    useLocale: () => "en",
+  }
+})
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockPlugin,
@@ -72,12 +92,38 @@ describe("PluginPermissionReview", () => {
     expect(guard.getPluginPermissions("p_review").length).toBeGreaterThan(0)
   })
 
-  it("revokeAll empties the plugin's grants", () => {
+  // Revoke-all drops every grant (the manifest-declared ones included) with no
+  // undo, so it asks first.
+  it("revokeAll asks for confirmation, then empties the plugin's grants", async () => {
+    const user = userEvent.setup()
     const guard = getPermissionGuard()
     guard.registerPlugin("p_review", ["clipboard:read"])
     render(<PluginPermissionReview />)
-    fireEvent.click(screen.getByText("revokeAll"))
+    await user.click(screen.getByRole("button", { name: "revokeAll" }))
+    expect(guard.getPluginPermissions("p_review")).not.toEqual([])
+    const confirm = await screen.findByRole("alertdialog")
+    expect(confirm).toHaveTextContent("revokeAllConfirmTitle")
+    await user.click(within(confirm).getByRole("button", { name: "revokeAll" }))
     expect(guard.getPluginPermissions("p_review")).toEqual([])
+  })
+
+  it("cancelling the revoke-all confirmation keeps the grants", async () => {
+    const user = userEvent.setup()
+    const guard = getPermissionGuard()
+    guard.registerPlugin("p_review", ["clipboard:read"])
+    render(<PluginPermissionReview />)
+    await user.click(screen.getByRole("button", { name: "revokeAll" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "cancel" })
+    )
+    expect(guard.getPluginPermissions("p_review")).not.toEqual([])
+  })
+
+  it("shows the localized description and labels the sensitive marker", () => {
+    render(<PluginPermissionReview />)
+    expect(screen.getByText("Read from the clipboard")).toBeInTheDocument()
+    const shellRow = screen.getByText("shell:execute").closest("tr") as HTMLElement
+    expect(within(shellRow).getByRole("img", { name: "dangerousAria" })).toBeInTheDocument()
   })
 
   it("keeps the dialog within the viewport while allowing a wider desktop layout", () => {

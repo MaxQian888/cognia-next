@@ -18,7 +18,9 @@ const scheduler = {
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
 const authorizeTaskWrite = jest.fn()
+const loadSchedulerPolicy = jest.fn(async () => ({ agentToolsEnabled: true }))
 jest.mock("@/lib/scheduler/write-authority", () => ({
+  loadSchedulerPolicy: () => loadSchedulerPolicy(),
   authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
   verdictNeedsConfirmation: (v: { allowed?: boolean; requiresConfirmation?: boolean }) =>
     Boolean(v?.allowed && v?.requiresConfirmation),
@@ -112,5 +114,28 @@ describe("schedule.run_now", () => {
   it("says so when the scheduler did not start it at all", async () => {
     scheduler.runTaskNow.mockResolvedValue(null)
     await expect(run("schedule.run_now", { taskId: "task-1" })).rejects.toThrow(/task-1/)
+  })
+})
+
+describe("schedule.run_now · preflight", () => {
+  const runNow = () =>
+    getSharedBuiltInSkillRegistry()
+      .list()
+      .find((entry) => entry.id === "schedule.run_now")!
+
+  it("names an unknown task before any confirmation is asked for", async () => {
+    scheduler.getTask.mockResolvedValue(null)
+    await expect(runNow().preflight!({ taskId: "ghost" } as never, ctx)).rejects.toThrow(/ghost/)
+  })
+
+  it("surfaces a policy refusal before the dialog", async () => {
+    authorizeTaskWrite.mockResolvedValue({
+      allowed: false,
+      reason: "agent-tools-disabled",
+      message: "Agents are not allowed to manage your schedule.",
+    })
+    await expect(runNow().preflight!({ taskId: "task-1" } as never, ctx)).rejects.toThrow(
+      /not allowed to manage/
+    )
   })
 })

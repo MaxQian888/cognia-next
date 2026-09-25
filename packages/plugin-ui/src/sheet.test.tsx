@@ -1,5 +1,5 @@
 import type * as React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -34,6 +34,41 @@ function renderSheet(props: Partial<React.ComponentProps<typeof SheetContent>> =
     </Sheet>
   )
 }
+
+const root = () => document.documentElement
+const originalMatchMedia = window.matchMedia
+
+function stubOsReducedMotion(matches: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  })) as unknown as typeof window.matchMedia
+}
+
+afterEach(() => {
+  root().classList.remove("reduce-motion")
+  root().removeAttribute("data-reduce-motion")
+  root().removeAttribute("data-motion-respect")
+  window.matchMedia = originalMatchMedia
+})
+
+async function openSheet(props: Partial<React.ComponentProps<typeof SheetContent>> = {}) {
+  const user = userEvent.setup()
+  renderSheet(props)
+  await user.click(screen.getByRole("button", { name: "Open panel" }))
+  return screen.findByRole("dialog")
+}
+
+const OPEN_TIMING = [
+  "data-[state=open]:ease-out",
+  "data-[state=open]:[animation-duration:calc(250ms*var(--motion-duration-scale,1))]",
+]
+const CLOSE_TIMING = [
+  "data-[state=closed]:ease-in",
+  "data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]",
+]
 
 describe("Sheet", () => {
   it("stays closed until the trigger is activated, then names the dialog from its title", async () => {
@@ -90,6 +125,15 @@ describe("Sheet", () => {
     await user.click(screen.getByRole("button", { name: "Open panel" }))
     expect(await screen.findByRole("button", { name: "关闭" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
+  })
+
+  it("gives the close button a 36px target on a coarse pointer and a keyboard-only ring", async () => {
+    const user = userEvent.setup()
+    renderSheet()
+    await user.click(screen.getByRole("button", { name: "Open panel" }))
+    const close = await screen.findByRole("button", { name: "Close" })
+    expect(close).toHaveClass("size-7", "pointer-coarse:size-9", "focus-visible:ring-2")
+    expect(close.className).not.toMatch(/(^|\s)focus:ring-2/)
   })
 
   it("omits the close button when showCloseButton is false", async () => {
@@ -175,5 +219,65 @@ describe("Sheet", () => {
     // the reason a plugin's sheet visually owns the whole window even though
     // the plugin itself is confined to one slot.
     expect(document.querySelector("[data-slot=sheet-overlay]")).not.toBeNull()
+  })
+})
+
+/**
+ * Timing is part of the plugin contract: a plugin's sheet opens beside the
+ * host's own, and a slower one reads as lag. Open ≈250ms decelerating, close
+ * ≈200ms, both through the host's speed variable so the user's setting holds.
+ */
+describe("Sheet motion", () => {
+  it("opens in 250ms ease-out and closes in 200ms, scaled by the host speed", async () => {
+    const tokens = (await openSheet()).className.split(/\s+/)
+    for (const token of [...OPEN_TIMING, ...CLOSE_TIMING]) expect(tokens).toContain(token)
+    // The old 500ms / 300ms pair must not linger alongside the new one.
+    expect(tokens.join(" ")).not.toMatch(/500ms|300ms/)
+  })
+
+  it("times the overlay with the panel so the scrim and sheet land together", async () => {
+    await openSheet()
+    const overlay = document.querySelector("[data-slot=sheet-overlay]") as HTMLElement
+    const tokens = overlay.className.split(/\s+/)
+    for (const token of [...OPEN_TIMING, ...CLOSE_TIMING]) expect(tokens).toContain(token)
+  })
+
+  it("slides in from its edge when motion is allowed", async () => {
+    const dialog = await openSheet({ side: "left" })
+    expect(dialog.className).toContain("data-[state=open]:slide-in-from-left")
+    expect(dialog.className).toContain("data-[state=closed]:slide-out-to-left")
+    expect(dialog.className).not.toContain("fade-in-0")
+  })
+
+  it.each([
+    ["the in-app class", () => root().classList.add("reduce-motion")],
+    ["data-reduce-motion", () => root().setAttribute("data-reduce-motion", "true")],
+    ["the OS hint", () => stubOsReducedMotion(true)],
+  ])("fades instead of sliding under %s", async (_label, reduce) => {
+    reduce()
+    const dialog = await openSheet({ side: "bottom" })
+    expect(dialog.className).not.toContain("slide-in-from-bottom")
+    expect(dialog.className).not.toContain("slide-out-to-bottom")
+    expect(dialog.className).toContain("data-[state=open]:fade-in-0")
+    expect(dialog.className).toContain("data-[state=closed]:fade-out-0")
+    // Anchoring is layout, not motion — it must not move with the preference.
+    expect(dialog.className).toContain("bottom-0")
+  })
+
+  it('keeps the slide under the OS hint when data-motion-respect="off"', async () => {
+    stubOsReducedMotion(true)
+    root().setAttribute("data-motion-respect", "off")
+    const dialog = await openSheet()
+    expect(dialog.className).toContain("data-[state=open]:slide-in-from-right")
+  })
+
+  it("drops the slide when the setting flips while the sheet is open", async () => {
+    const dialog = await openSheet()
+    expect(dialog.className).toContain("slide-in-from-right")
+    await act(async () => {
+      root().classList.add("reduce-motion")
+    })
+    expect(dialog.className).not.toContain("slide-in-from-right")
+    expect(dialog.className).toContain("data-[state=open]:fade-in-0")
   })
 })

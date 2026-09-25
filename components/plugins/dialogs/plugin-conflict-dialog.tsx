@@ -18,7 +18,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePluginsStore } from "@/stores/plugins"
 
 interface Props {
@@ -48,32 +47,39 @@ export function PluginConflictDialog({ onContinue }: Props = {}) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setTarget(null)}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{t("title", { id: pluginId })}</DialogTitle>
+      {/* Bounded to the viewport: header and footer stay put and the
+          severity summary + conflict list share the one scroller, so a long
+          conflict report can't push Abort / Continue off a phone screen. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] max-w-xl flex-col">
+        <DialogHeader className="shrink-0">
+          {/* The title carries the plugin id, one long unbreakable token. */}
+          <DialogTitle className="break-words">{t("title", { id: pluginId })}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {high.length > 0 && (
-            <Badge variant="destructive" className="text-xs">
-              {t("highCount", { count: high.length })}
-            </Badge>
-          )}
-          {medium.length > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {t("mediumCount", { count: medium.length })}
-            </Badge>
-          )}
-          {low.length > 0 && (
-            <Badge variant="outline" className="text-xs">
-              {t("lowCount", { count: low.length })}
-            </Badge>
-          )}
-        </div>
+        <div
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto"
+          data-testid="plugin-conflict-dialog-body"
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            {high.length > 0 && (
+              <Badge variant="destructive" className="text-xs">
+                {t("highCount", { count: high.length })}
+              </Badge>
+            )}
+            {medium.length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {t("mediumCount", { count: medium.length })}
+              </Badge>
+            )}
+            {low.length > 0 && (
+              <Badge variant="outline" className="text-xs">
+                {t("lowCount", { count: low.length })}
+              </Badge>
+            )}
+          </div>
 
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
+          <Card className="p-0">
             <ul className="divide-y">
               {conflicts.map((c, idx) => (
                 <li key={idx} className="flex items-start gap-2 px-3 py-2">
@@ -85,20 +91,21 @@ export function PluginConflictDialog({ onContinue }: Props = {}) {
                     <InfoIcon className="size-4 text-muted-foreground mt-0.5 shrink-0" />
                   )}
                   <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="text-sm">{c.message}</div>
+                    <div className="text-sm break-words">{c.message}</div>
                     {c.relatedPluginId && (
                       <div className="text-xs text-muted-foreground">
-                        {t("relatedPlugin")} <code className="font-mono">{c.relatedPluginId}</code>
+                        {t("relatedPlugin")}{" "}
+                        <code className="break-all font-mono">{c.relatedPluginId}</code>
                       </div>
                     )}
                   </div>
                 </li>
               ))}
             </ul>
-          </ScrollArea>
-        </Card>
+          </Card>
+        </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => setTarget(null)}>
             {t("abort")}
           </Button>

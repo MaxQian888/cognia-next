@@ -34,13 +34,20 @@ export function isBuiltInSkillApprovalRequestId(requestId: string): boolean {
 
 export interface DesktopSkillApprovalInput {
   sessionId: string
-  skill: Pick<BuiltInSkill, "id" | "mcpToolName" | "label" | "mutation">
+  skill: Pick<BuiltInSkill, "id" | "family" | "mcpToolName" | "label" | "mutation">
   args: unknown
 }
 
 export interface DesktopSkillApprovalOutcome {
   approved: boolean
   reason: "user" | "expired" | "session_bypass"
+}
+
+/** Families whose writes must be approved one at a time. */
+const PER_CALL_APPROVAL_FAMILIES: ReadonlySet<string> = new Set(["schedule"])
+
+export function isSessionGrantWithheld(skill: Pick<BuiltInSkill, "family" | "mutation">): boolean {
+  return skill.mutation !== "read" && PER_CALL_APPROVAL_FAMILIES.has(skill.family)
 }
 
 /**
@@ -51,7 +58,10 @@ export interface DesktopSkillApprovalOutcome {
 export async function requestDesktopSkillApproval(
   input: DesktopSkillApprovalInput
 ): Promise<DesktopSkillApprovalOutcome> {
-  if (hasSessionBypass(input.sessionId, input.skill.mcpToolName)) {
+  if (
+    !isSessionGrantWithheld(input.skill) &&
+    hasSessionBypass(input.sessionId, input.skill.mcpToolName)
+  ) {
     return { approved: true, reason: "session_bypass" }
   }
 
@@ -69,6 +79,11 @@ export async function requestDesktopSkillApproval(
     input: (input.args ?? {}) as Record<string, unknown>,
     displayName: input.skill.label.en,
     description: `Built-in skill ${input.skill.id} (${input.skill.mutation}) requests confirmation.`,
+    // A schedule write outlives the conversation: each one runs unattended
+    // later, so each one is shown. "Allow for session" would also approve
+    // writes nobody looked at, which the scheduler's confirmation rule
+    // (`humanConfirmed`) deliberately does not count.
+    ...(isSessionGrantWithheld(input.skill) ? { suppressAlwaysAllowRule: true } : {}),
   })
 
   const decision = await awaitApproval(input.sessionId, requestId, {

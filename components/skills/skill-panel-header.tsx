@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, FilterIcon, LayersIcon } from "lucide-react"
+import { ArrowLeftIcon, FilterIcon, LayersIcon, LayoutListIcon } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
@@ -62,8 +62,12 @@ export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot, embedded
               className="size-8 shrink-0 lg:hidden"
               onClick={() => setCategorySheetOpen(true)}
               aria-label={t("panel.openCategoriesAria")}
+              data-testid="skill-panel-open-categories"
             >
-              <LayersIcon className="size-4" />
+              {/* Not `LayersIcon`: that is the page's own identity glyph one
+                  slot to the right, and two of it side by side read as a
+                  rendering glitch. Same glyph as the plugin category sheet. */}
+              <LayoutListIcon className="size-4" />
             </Button>
           )}
         </div>

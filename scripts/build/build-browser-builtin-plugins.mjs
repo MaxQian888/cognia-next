@@ -31,6 +31,10 @@ const sharedModules = [
   "lucide-react",
 ]
 
+// Every published SDK subpath is host-shared (`lib/plugin/core/sdk-subpath-loaders.ts`):
+// most are registries, and an inlined copy registers into a Map the host never reads.
+const SDK_SUBPATH_PREFIX = "@cognia/plugin-sdk/"
+
 function rejectHostPrivateImports() {
   return {
     name: "reject-host-private-imports",
@@ -80,7 +84,7 @@ async function buildPlugin(pluginId, { pdfWorkerUrl }) {
         ? { __COGNIA_PDF_WORKER_URL__: JSON.stringify(pdfWorkerUrl) }
         : undefined,
     entryPoints: [path.join(pluginRoot, "src/index.ts")],
-    external: sharedModules,
+    external: [...sharedModules, `${SDK_SUBPATH_PREFIX}*`],
     format: "cjs",
     legalComments: "none",
     metafile: true,
@@ -113,7 +117,10 @@ async function buildPlugin(pluginId, { pdfWorkerUrl }) {
   const externalImports = new Set()
   for (const output of Object.values(result.metafile?.outputs ?? {})) {
     for (const imported of output.imports ?? []) {
-      if (imported.external && sharedModules.includes(imported.path)) {
+      if (
+        imported.external &&
+        (sharedModules.includes(imported.path) || imported.path.startsWith(SDK_SUBPATH_PREFIX))
+      ) {
         externalImports.add(imported.path)
       }
     }

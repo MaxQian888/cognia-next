@@ -33,7 +33,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   commitVscodeExtension,
   prepareVscodeExtension,
@@ -113,50 +112,59 @@ export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="w-[95vw] max-w-2xl">
-        <DialogHeader>
+      {/* Bounded to the viewport: header and footer stay put and whichever
+          stage body is showing is the one scroller, so a long review (LSP
+          binaries, notes, themes) can't push Install off a phone screen. The
+          body's `-m-1 p-1` keeps focus rings from being clipped by it. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] max-w-2xl flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <FileArchiveIcon className="size-4" />
+            <FileArchiveIcon className="size-4 shrink-0" />
             {t("title")}
           </DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        {stage.kind === "idle" && (
-          <div className="flex flex-col items-center justify-center gap-2 py-6">
-            <Button onClick={() => void handlePick()}>
-              <FilePlus2Icon className="size-4 mr-2" />
-              {t("choose")}
-            </Button>
-            <p className="text-xs text-muted-foreground">{t("hint")}</p>
-          </div>
-        )}
-
-        {stage.kind === "parsing" && (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" />
-            {t("parsing")}
-          </div>
-        )}
-
-        {stage.kind === "error" && (
-          <Card className="flex items-start gap-2 border-destructive p-3 text-sm" role="alert">
-            <AlertTriangleIcon className="size-4 text-destructive shrink-0" />
-            <div className="space-y-1">
-              <p className="font-medium">{t("parseError")}</p>
-              <p className="text-xs text-muted-foreground break-all">{stage.message}</p>
-              <Button size="sm" variant="outline" onClick={reset}>
-                {t("retry")}
+        <div
+          className="-m-1 min-h-0 flex-1 overflow-y-auto p-1"
+          data-testid="plugin-vsix-install-dialog-body"
+        >
+          {stage.kind === "idle" && (
+            <div className="flex flex-col items-center justify-center gap-2 py-6">
+              <Button onClick={() => void handlePick()}>
+                <FilePlus2Icon className="size-4 mr-2" />
+                {t("choose")}
               </Button>
+              <p className="text-xs text-muted-foreground">{t("hint")}</p>
             </div>
-          </Card>
-        )}
+          )}
 
-        {(stage.kind === "ready" || stage.kind === "installing") && (
-          <VsixReviewBody prepared={stage.prepared} installing={stage.kind === "installing"} />
-        )}
+          {stage.kind === "parsing" && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" />
+              {t("parsing")}
+            </div>
+          )}
 
-        <DialogFooter>
+          {stage.kind === "error" && (
+            <Card className="flex items-start gap-2 border-destructive p-3 text-sm" role="alert">
+              <AlertTriangleIcon className="size-4 text-destructive shrink-0" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium">{t("parseError")}</p>
+                <p className="text-xs text-muted-foreground break-all">{stage.message}</p>
+                <Button size="sm" variant="outline" onClick={reset}>
+                  {t("retry")}
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {(stage.kind === "ready" || stage.kind === "installing") && (
+            <VsixReviewBody prepared={stage.prepared} installing={stage.kind === "installing"} />
+          )}
+        </div>
+
+        <DialogFooter className="shrink-0">
           <Button
             variant="outline"
             onClick={() => handleClose(false)}
@@ -202,8 +210,10 @@ function VsixReviewBody({
   return (
     <div aria-busy={installing} className="space-y-3">
       <Card className="p-3 text-sm space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{pkgJson.displayName || pkgJson.name}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 font-medium break-words">
+            {pkgJson.displayName || pkgJson.name}
+          </span>
           <Badge variant="secondary">v{pkgJson.version}</Badge>
           {bundleFormat && (
             <Badge variant="outline" className="text-xs">
@@ -212,10 +222,10 @@ function VsixReviewBody({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("publisherLabel")}: <code className="font-mono">{adapted.manifest.id}</code>
+          {t("publisherLabel")}: <code className="break-all font-mono">{adapted.manifest.id}</code>
         </p>
         {pkgJson.description && (
-          <p className="text-xs text-muted-foreground">{pkgJson.description}</p>
+          <p className="text-xs break-words text-muted-foreground">{pkgJson.description}</p>
         )}
       </Card>
 
@@ -225,20 +235,18 @@ function VsixReviewBody({
             <ShieldAlertIcon className="size-4" />
             {t("sectionLspBinaries", { count: lspBinaryCandidates.length })}
           </div>
-          <ScrollArea className="max-h-[20vh]">
-            <ul className="divide-y text-xs">
-              {lspBinaryCandidates.map((c) => (
-                <li key={c.path} className="flex items-center gap-2 py-1.5">
-                  <Badge variant="outline" className="text-xs">
-                    {t(`lspBinaryKind.${c.kind}`)}
-                  </Badge>
-                  <code className="font-mono flex-1 truncate" title={c.path}>
-                    {c.path}
-                  </code>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
+          {/* Full paths, wrapped rather than truncated: a hover tooltip is the
+              only way to read a truncated one, and touch has no hover. */}
+          <ul className="divide-y text-xs">
+            {lspBinaryCandidates.map((c) => (
+              <li key={c.path} className="flex items-start gap-2 py-1.5">
+                <Badge variant="outline" className="text-xs">
+                  {t(`lspBinaryKind.${c.kind}`)}
+                </Badge>
+                <code className="min-w-0 flex-1 break-all font-mono">{c.path}</code>
+              </li>
+            ))}
+          </ul>
           <p className="text-xs text-muted-foreground">{t("lspBinaryNote")}</p>
         </Card>
       )}
@@ -272,7 +280,9 @@ function VsixReviewBody({
           <div className="font-medium">{t("sectionNotes", { count: adapted.warnings.length })}</div>
           <ul className="text-xs text-muted-foreground space-y-0.5">
             {adapted.warnings.map((w) => (
-              <li key={w}>{w}</li>
+              <li key={w} className="break-words">
+                {w}
+              </li>
             ))}
           </ul>
         </Card>
@@ -283,7 +293,7 @@ function VsixReviewBody({
           <div className="font-medium">{t("sectionThemes", { count: themes.length })}</div>
           <ul className="text-xs space-y-0.5">
             {themes.map((th) => (
-              <li key={th.path} className="flex items-center gap-2">
+              <li key={th.path} className="flex min-w-0 items-center gap-2">
                 <Badge variant="outline" className="text-xs">
                   {th.uiTheme ?? "—"}
                 </Badge>

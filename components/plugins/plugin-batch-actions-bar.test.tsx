@@ -6,22 +6,32 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
+    if (vars) return `${key}:${JSON.stringify(vars)}`
     return key
   },
 }))
 
-const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
-  ok: true,
+const mockProfile = jest.fn(() => "tauri")
+jest.mock("@/hooks/plugins/use-plugin-runtime-profile", () => ({
+  usePluginRuntimeProfile: () => mockProfile(),
 }))
+
+const setPluginEnabledForHostMock = jest.fn(
+  async (
+    _id: string,
+    _enabled: boolean
+  ): Promise<{ ok: boolean; queued: boolean; error?: string }> => ({ ok: true, queued: false })
+)
 const mockRows: PluginRow[] = [
   {
     id: "a",
     name: "A",
     version: "1.0.0",
     status: "enabled",
-    source: "builtin",
+    source: "marketplace",
     type: "frontend",
     enabled: true,
     capabilities: [],
@@ -35,7 +45,7 @@ const mockRows: PluginRow[] = [
     name: "B",
     version: "1.0.0",
     status: "enabled",
-    source: "builtin",
+    source: "marketplace",
     type: "frontend",
     enabled: true,
     capabilities: [],
@@ -57,10 +67,20 @@ jest.mock("@/lib/db/plugins", () => ({
 jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
   setPluginEnabledForHost: (id: string, enabled: boolean) =>
     setPluginEnabledForHostMock(id, enabled),
+  isMirroredPluginClient: () => false,
 }))
 
 const toastMock = jest.fn()
-jest.mock("sonner", () => ({ toast: (...args: unknown[]) => toastMock(...args) }))
+const toastSuccess = jest.fn()
+const toastError = jest.fn()
+const toastMessage = jest.fn()
+jest.mock("sonner", () => ({
+  toast: Object.assign((...args: unknown[]) => toastMock(...args), {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+    message: (...args: unknown[]) => toastMessage(...args),
+  }),
+}))
 
 const checkForUpdatesMock = jest.fn(async (_ids?: string[]) => [
   { pluginId: "a", latestVersion: "2.0.0" },
@@ -79,7 +99,15 @@ import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 
 beforeEach(() => {
   setPluginEnabledForHostMock.mockClear()
+  setPluginEnabledForHostMock.mockImplementation(async () => ({ ok: true, queued: false }))
+  mockProfile.mockReturnValue("tauri")
   toastMock.mockClear()
+  toastSuccess.mockClear()
+  toastError.mockClear()
+  toastMessage.mockClear()
+  mockRows[0].source = "marketplace"
+  mockRows[0].enabled = true
+  mockRows[1].enabled = true
   checkForUpdatesMock.mockClear()
   installUpdateMock.mockClear()
   // Reset the update flag mutated by the batch-update tests.
@@ -115,6 +143,71 @@ describe("PluginBatchActionsBar", () => {
     await waitFor(() => expect(setPluginEnabledForHostMock).toHaveBeenCalledTimes(2))
     expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("a", false)
     expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("b", false)
+  })
+
+  it("reports one summary toast once the whole batch settles", async () => {
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByText("disableAll"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1))
+    expect(toastSuccess.mock.calls[0][0]).toBe(
+      'toggleResult:{"applied":2,"queued":0,"failed":0,"skipped":0}'
+    )
+  })
+
+  it("aggregates failures by name instead of dropping them", async () => {
+    setPluginEnabledForHostMock.mockImplementation(async (id: string) =>
+      id === "b" ? { ok: false, queued: false, error: "boom" } : { ok: true, queued: false }
+    )
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByText("disableAll"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    expect(toastError.mock.calls[0][0]).toBe(
+      'toggleResult:{"applied":1,"queued":0,"failed":1,"skipped":0}'
+    )
+    expect(toastError.mock.calls[0][1].description).toBe('toggleFailedNames:{"names":"B"}')
+  })
+
+  it("disables the bar while the batch runs", async () => {
+    let release!: () => void
+    setPluginEnabledForHostMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true, queued: false })
+        })
+    )
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByTestId("plugin-batch-toggle"))
+    await waitFor(() => expect(screen.getByTestId("plugin-batch-toggle")).toBeDisabled())
+    expect(screen.getByLabelText("uninstall")).toBeDisabled()
+    expect(screen.getByLabelText("clearSelection")).toBeDisabled()
+    expect(screen.getByRole("region", { name: "ariaLabel" })).toHaveAttribute("aria-busy", "true")
+    release()
+    await waitFor(() => expect(setPluginEnabledForHostMock).toHaveBeenCalledTimes(2))
+    release()
+    await waitFor(() => expect(screen.getByTestId("plugin-batch-toggle")).not.toBeDisabled())
+  })
+
+  it("skips plugins this host cannot run when enabling, and says so", async () => {
+    mockProfile.mockReturnValue("browser")
+    mockRows[0].enabled = false
+    mockRows[1].enabled = false
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByText("enableAll"))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1))
+    expect(setPluginEnabledForHostMock).not.toHaveBeenCalled()
+    expect(toastSuccess.mock.calls[0][0]).toBe(
+      'toggleResult:{"applied":0,"queued":0,"failed":0,"skipped":2}'
+    )
+  })
+
+  it("leaves built-ins out of a batch uninstall", () => {
+    mockRows[0].source = "builtin"
+    render(<PluginBatchActionsBar />)
+    fireEvent.click(screen.getByLabelText("uninstall"))
+    const state = usePluginsStore.getState()
+    expect(state.deleteTarget).toEqual({ pluginId: "b", name: "B" })
+    expect(state.deleteQueue).toEqual([])
+    expect(toastMessage).toHaveBeenCalledWith("uninstallSkipped:1")
   })
 
   it("clear-selection button empties the selection", () => {

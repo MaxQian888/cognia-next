@@ -12,9 +12,13 @@
 // and why picking a registry silently threw away the chosen ranking.
 //
 // Install path goes through the unified hook so both the storefront card and
-// the detail CTA share state.
+// the detail CTA share state. Uninstall goes through the SAME confirmed path
+// as the Library (`setDeleteTarget` → `PluginDeleteDialogHost` →
+// `uninstallPluginForHost`): it used to call a registry method that never
+// existed, so every marketplace Uninstall click threw.
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
@@ -45,6 +49,8 @@ import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
 import { PluginEmptyState } from "../_shared/plugin-empty-state"
 import { PluginErrorCard } from "../_shared/plugin-error-card"
 import { useOpenVsxMarketplace } from "@/hooks/plugins/use-openvsx-marketplace"
+import { pluginDetailHref } from "@/hooks/plugins/plugin-links"
+import { pluginUninstallBlockReason } from "@/hooks/plugins/use-plugin-uninstall"
 import { usePluginsStore } from "@/stores/plugins"
 
 const PAGE_SIZE = 12
@@ -52,6 +58,15 @@ const PAGE_SIZE = 12
 export function PluginMarketplace() {
   const t = useTranslations("plugins.marketplace")
   const tv = useTranslations("plugins.openVsx")
+  const tLifecycle = useTranslations("plugins.lifecycleFeedback")
+  const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
+  const router = useRouter()
+  // Every successful install points at what was just installed, so the user
+  // can go straight to its details (and enable / configure it) from the toast.
+  const viewInstalled = (pluginId: string) => ({
+    label: tLifecycle("viewDetails"),
+    onClick: () => router.push(pluginDetailHref(pluginId)),
+  })
   const market = usePluginMarketplace()
   const builtinEntries = useBuiltinPluginEntries()
   const curation = usePluginsStore((s) => s.discoverCuration)
@@ -110,6 +125,21 @@ export function PluginMarketplace() {
   )
 
   /**
+   * Ask for the uninstall confirmation, exactly like the Library row does. A
+   * host that cannot uninstall (mirrored client, built-in) says why instead of
+   * opening a dialog whose confirm could only fail.
+   */
+  const requestUninstall = (id: string, fallbackName: string) => {
+    const row = installedRows?.find((r) => r.id === id)
+    const blocked = pluginUninstallBlockReason(row ?? null)
+    if (blocked) {
+      toast.message(tLifecycle(`uninstallBlocked.${blocked}`))
+      return
+    }
+    setDeleteTarget({ pluginId: id, name: row?.name ?? fallbackName })
+  }
+
+  /**
    * Unsupported-API warnings for already-installed VS Code extensions, read
    * back from the manifest the adapter persisted. This is what keeps the
    * "uses APIs cognia doesn't implement" warning on the card after install —
@@ -166,7 +196,9 @@ export function PluginMarketplace() {
     if (!client) return
     void preInstall.install(entry.id, version, entry.name).then((result) => {
       if (result.status === "installed") {
-        toast.success(t("installSucceeded", { name: entry.name }))
+        toast.success(t("installSucceeded", { name: entry.name }), {
+          action: viewInstalled(entry.id),
+        })
         void market.refresh()
       } else if (result.status === "cancelled") {
         toast.message(t(`installCancelled.${result.stage}` as never))
@@ -402,7 +434,7 @@ export function PluginMarketplace() {
                   unsupportedApis={unsupportedApisById.get(entry.id)}
                   onView={() => setSelectedEntry(entry)}
                   onInstall={(id, version) => onInstallById(id, version)}
-                  onUninstall={(id) => void market.uninstall(id)}
+                  onUninstall={(id) => requestUninstall(id, entry.name)}
                 />
               ))}
             </div>
@@ -442,7 +474,7 @@ export function PluginMarketplace() {
         }
         onClose={() => setSelectedEntry(null)}
         onInstall={(id, version) => onInstallById(id, version)}
-        onUninstall={(id) => void market.uninstall(id)}
+        onUninstall={(id) => requestUninstall(id, selectedEntry?.name ?? id)}
       />
 
       <PluginComparisonSheet
@@ -506,7 +538,9 @@ export function PluginMarketplace() {
       if (!vscodeClient) return
       void vscodePreInstall.install(id, version, vscodeEntry.name).then((result) => {
         if (result.status === "installed") {
-          toast.success(t("installSucceeded", { name: vscodeEntry.name }))
+          toast.success(t("installSucceeded", { name: vscodeEntry.name }), {
+            action: viewInstalled(id),
+          })
         } else if (result.status === "cancelled") {
           toast.message(t(`installCancelled.${result.stage}` as never))
         } else if (result.status === "failed") {

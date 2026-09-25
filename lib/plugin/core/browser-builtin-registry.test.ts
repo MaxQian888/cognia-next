@@ -182,7 +182,7 @@ describe("browser-builtin-registry", () => {
   it("injects the tactical mind dial stylesheet through the host's own gate", async () => {
     const entry = getBrowserBuiltinRegistryEntry("cognia-anime-effort")
     expect(entry?.manifest.extensions).toEqual(
-      expect.arrayContaining([expect.objectContaining({ point: "chat.input.actions" })])
+      expect.arrayContaining([expect.objectContaining({ point: "chat.input.effort" })])
     )
 
     const injected = await loadPluginStyles({

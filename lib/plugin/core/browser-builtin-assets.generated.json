@@ -5,8 +5,10 @@
       "manifest": {
         "id": "cognia-office",
         "name": "Cognia Office",
+        "nameKey": "manifest.name",
         "version": "0.1.0",
         "description": "Plugin-owned native XLSX authoring, preview, validation, export, and Lark Sheets synchronization.",
+        "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [
           "tools",
@@ -42,6 +44,88 @@
         "activationEvents": [
           "startup"
         ],
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "Cognia Office",
+              "manifest.description": "Plugin-owned native XLSX authoring, preview, validation, export, and Lark Sheets synchronization.",
+              "renderer.name": "Cognia Office Workbook",
+              "preview.sheets": "Workbook sheets",
+              "preview.validation": "Validation",
+              "preview.empty": "This sheet is empty.",
+              "preview.corner": "Row numbers",
+              "preview.filtered": "Filtered",
+              "preview.frozen": "Frozen",
+              "preview.truncatedRows": "Showing first {count} of {total} rows",
+              "preview.truncatedColumns": "Showing first {count} of {total} columns",
+              "preview.loading": "Loading workbook preview…",
+              "preview.parseError": "This artifact is not a valid Cognia workbook: {error}",
+              "preview.loadError": "The workbook preview could not load: {error}",
+              "preview.grid": "Sheet {name}",
+              "importer.name": "Excel workbook",
+              "importer.description": "Import an XLSX workbook into the Cognia Office workbook model.",
+              "importer.binaryRequired": "XLSX import requires binary content.",
+              "importer.failed": "XLSX import failed.",
+              "import.untitled": "Workbook",
+              "finding.featureUnsupported.remediation": "Export to a new file only after confirming that this feature may be lost.",
+              "feature.macros": "Macros are present and will not be preserved when this workbook is exported.",
+              "feature.pivotTables": "Pivot tables are present and cannot be edited or preserved losslessly.",
+              "feature.charts": "Complex charts are present and cannot be edited or preserved losslessly.",
+              "feature.externalLinks": "External workbook links are present and will not be preserved.",
+              "feature.drawings": "Embedded images or drawing shapes are present and will not be preserved.",
+              "feature.comments": "Cell comments are present and will not be preserved.",
+              "feature.tables": "Structured tables are present and will be flattened to plain cell ranges.",
+              "feature.slicers": "Slicers or timelines are present and will not be preserved.",
+              "feature.connections": "External data connections are present and will not be preserved.",
+              "feature.controls": "Form or ActiveX controls are present and will not be preserved.",
+              "feature.conditionalFormatting": "Conditional formatting is present and will not be preserved.",
+              "feature.dataValidation": "Cell data validation rules are present and will not be preserved.",
+              "feature.hyperlinks": "Cell hyperlinks are present and will not be preserved.",
+              "feature.sheetProtection": "Sheet protection is present and will not be preserved.",
+              "feature.legacyDrawings": "Legacy comment drawings are present and will not be preserved.",
+              "feature.uninspectable": "The workbook package could not be inspected for unsupported OOXML features."
+            },
+            "zh-CN": {
+              "manifest.name": "Cognia 表格",
+              "manifest.description": "插件自带的原生 XLSX 撰写、预览、校验、导出，以及飞书表格同步。",
+              "renderer.name": "Cognia Office 工作簿",
+              "preview.sheets": "工作表",
+              "preview.validation": "校验",
+              "preview.empty": "此工作表为空。",
+              "preview.corner": "行号",
+              "preview.filtered": "已筛选",
+              "preview.frozen": "已冻结",
+              "preview.truncatedRows": "仅显示前 {count}/{total} 行",
+              "preview.truncatedColumns": "仅显示前 {count}/{total} 列",
+              "preview.loading": "正在加载工作簿预览…",
+              "preview.parseError": "此 artifact 不是有效的 Cognia 工作簿：{error}",
+              "preview.loadError": "无法加载工作簿预览：{error}",
+              "preview.grid": "工作表 {name}",
+              "importer.name": "Excel 工作簿",
+              "importer.description": "将 XLSX 工作簿导入为 Cognia Office 工作簿模型。",
+              "importer.binaryRequired": "XLSX 导入需要二进制内容。",
+              "importer.failed": "XLSX 导入失败。",
+              "import.untitled": "工作簿",
+              "finding.featureUnsupported.remediation": "请先确认可能丢失此功能，再导出为新文件。",
+              "feature.macros": "包含宏，导出此工作簿时不会保留。",
+              "feature.pivotTables": "包含数据透视表，无法编辑或无损保留。",
+              "feature.charts": "包含复杂图表，无法编辑或无损保留。",
+              "feature.externalLinks": "包含外部工作簿链接，不会保留。",
+              "feature.drawings": "包含嵌入的图片或绘图形状，不会保留。",
+              "feature.comments": "包含单元格批注，不会保留。",
+              "feature.tables": "包含结构化表格，将被展平为普通单元格区域。",
+              "feature.slicers": "包含切片器或日程表，不会保留。",
+              "feature.connections": "包含外部数据连接，不会保留。",
+              "feature.controls": "包含表单或 ActiveX 控件，不会保留。",
+              "feature.conditionalFormatting": "包含条件格式，不会保留。",
+              "feature.dataValidation": "包含单元格数据验证规则，不会保留。",
+              "feature.hyperlinks": "包含单元格超链接，不会保留。",
+              "feature.sheetProtection": "包含工作表保护，不会保留。",
+              "feature.legacyDrawings": "包含旧版批注绘图，不会保留。",
+              "feature.uninspectable": "无法检查此工作簿文件是否包含不受支持的 OOXML 功能。"
+            }
+          }
+        },
         "runtimeCompatibility": {
           "browser": {
             "availability": "supported",
@@ -56,26 +140,30 @@
             "reason": "Office file open/save requires an interactive browser or Tauri file port."
           },
           "mobile": {
-            "availability": "degraded",
+            "availability": "supported",
             "entrypoint": "src/index.ts",
-            "reason": "Workbook creation, preview, and download are available; native file dialogs depend on the connected shell."
+            "reason": "Workbook authoring, preview, and Lark sync work on mobile; XLSX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
           }
         }
       },
       "path": "builtin://cognia-office",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-office/373287dcd227d5568fa06580adf3cdd07d4a1799beca2cafbe9dcc281228ed5f.cjs",
-        "sha256": "373287dcd227d5568fa06580adf3cdd07d4a1799beca2cafbe9dcc281228ed5f",
-        "sharedModules": []
+        "url": "/_cognia/builtin-plugins/cognia-office/364ae3e9d78c46a1f51bb0c39743ae835afe4d3cc32a697d1c899376962c0f90.cjs",
+        "sha256": "364ae3e9d78c46a1f51bb0c39743ae835afe4d3cc32a697d1c899376962c0f90",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ]
       }
     },
     "cognia-pdf": {
       "manifest": {
         "id": "cognia-pdf",
         "name": "Cognia PDF",
+        "nameKey": "manifest.name",
         "version": "0.1.0",
         "description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
+        "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [
           "tools",
@@ -101,6 +189,62 @@
         "activationEvents": [
           "startup"
         ],
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "Cognia PDF",
+              "manifest.description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
+              "renderer.name": "Cognia PDF",
+              "preview.title": "PDF preview",
+              "preview.loading": "Rendering PDF…",
+              "preview.error": "Unable to render this PDF: {error}",
+              "preview.encrypted": "This PDF is password-protected, so it cannot be previewed here. Save it and open it with its password.",
+              "preview.previous": "Previous page",
+              "preview.next": "Next page",
+              "preview.pageOf": "Page {page} of {total}",
+              "preview.pageImage": "{title}, page {page} of {total}",
+              "preview.save": "Save PDF",
+              "preview.saving": "Saving…",
+              "preview.savedDesktop": "Saved {name}.",
+              "preview.savedMobile": "Saved {name} to Documents/cognia/exports.",
+              "preview.savedWeb": "Downloaded {name}.",
+              "preview.saveCancelled": "Save cancelled.",
+              "preview.saveFailed": "Could not save the PDF: {error}",
+              "importer.name": "PDF document",
+              "importer.description": "Import a PDF into the Cognia PDF model.",
+              "importer.binaryRequired": "PDF import requires binary content.",
+              "importer.failed": "PDF import failed.",
+              "import.untitled": "PDF document",
+              "history.fill": "Fill PDF form fields"
+            },
+            "zh-CN": {
+              "manifest.name": "Cognia PDF",
+              "manifest.description": "插件自带的原生 PDF 检查、表单填写、页面提取、预览、校验与导出。",
+              "renderer.name": "Cognia PDF",
+              "preview.title": "PDF 预览",
+              "preview.loading": "正在渲染 PDF…",
+              "preview.error": "无法渲染此 PDF：{error}",
+              "preview.encrypted": "此 PDF 受密码保护，无法在此预览。请保存后使用密码打开。",
+              "preview.previous": "上一页",
+              "preview.next": "下一页",
+              "preview.pageOf": "第 {page} 页，共 {total} 页",
+              "preview.pageImage": "{title}，第 {page} 页，共 {total} 页",
+              "preview.save": "保存 PDF",
+              "preview.saving": "正在保存…",
+              "preview.savedDesktop": "已保存 {name}。",
+              "preview.savedMobile": "已将 {name} 保存到 Documents/cognia/exports。",
+              "preview.savedWeb": "已下载 {name}。",
+              "preview.saveCancelled": "已取消保存。",
+              "preview.saveFailed": "无法保存 PDF：{error}",
+              "importer.name": "PDF 文档",
+              "importer.description": "将 PDF 导入 Cognia PDF 模型。",
+              "importer.binaryRequired": "PDF 导入需要二进制内容。",
+              "importer.failed": "PDF 导入失败。",
+              "import.untitled": "PDF 文档",
+              "history.fill": "填写 PDF 表单字段"
+            }
+          }
+        },
         "runtimeCompatibility": {
           "browser": {
             "availability": "supported",
@@ -115,26 +259,30 @@
             "reason": "PDF.js processing and preview require a browser Worker and UI shell."
           },
           "mobile": {
-            "availability": "degraded",
+            "availability": "supported",
             "entrypoint": "src/index.ts",
-            "reason": "PDF operations and download are available; native preview depends on the connected WebView."
+            "reason": "Inspection, form filling, page extraction, and the canvas page preview work on mobile; import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
           }
         }
       },
       "path": "builtin://cognia-pdf",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-pdf/01028a725ee62a921e7903ad68ad9be4c5a1392ddace1e26c8ff99e75d0e0c20.cjs",
-        "sha256": "01028a725ee62a921e7903ad68ad9be4c5a1392ddace1e26c8ff99e75d0e0c20",
-        "sharedModules": []
+        "url": "/_cognia/builtin-plugins/cognia-pdf/fa4f841cc538ce8814e4491eb5eb12fd947ac1eb22296a0a117d2e9ef56de16b.cjs",
+        "sha256": "fa4f841cc538ce8814e4491eb5eb12fd947ac1eb22296a0a117d2e9ef56de16b",
+        "sharedModules": [
+          "@cognia/plugin-sdk"
+        ]
       }
     },
     "cognia-documents": {
       "manifest": {
         "id": "cognia-documents",
         "name": "Cognia Documents",
+        "nameKey": "manifest.name",
         "version": "0.1.0",
         "description": "Plugin-owned native DOCX authoring, import, editing, review, preview, validation, and export.",
+        "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [
           "tools",
@@ -160,6 +308,156 @@
         "activationEvents": [
           "startup"
         ],
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "Cognia Documents",
+              "manifest.description": "Plugin-owned native DOCX authoring, import, editing, review, preview, validation, and export.",
+              "renderer.name": "Cognia Document",
+              "preview.review": "Review",
+              "preview.comments": "Comments",
+              "preview.changes": "Tracked changes",
+              "preview.validation": "Validation",
+              "preview.empty": "This document is empty.",
+              "preview.wordCount": "{count} words",
+              "preview.source": "Source: {name}",
+              "preview.open": "Open",
+              "preview.resolved": "Resolved",
+              "preview.pending": "Pending",
+              "preview.accepted": "Accepted",
+              "preview.resolve": "Resolve",
+              "preview.reopen": "Reopen",
+              "preview.accept": "Accept",
+              "preview.reject": "Reject",
+              "preview.showBlock": "Show block",
+              "preview.working": "Saving review…",
+              "preview.table": "Table",
+              "preview.actionFailed": "Review action failed: {error}",
+              "preview.parseError": "This artifact is not a valid Cognia document: {error}",
+              "importer.name": "Word document",
+              "importer.description": "Import DOCX into the Cognia document model.",
+              "importer.binaryRequired": "DOCX import requires binary content.",
+              "importer.failed": "DOCX import failed.",
+              "exporter.name": "DOCX transcript",
+              "exporter.description": "Export this conversation as a Word document.",
+              "transcript.title": "Session transcript",
+              "transcript.user": "User",
+              "transcript.assistant": "Assistant",
+              "transcript.system": "System",
+              "import.emptyComment": "(empty comment)",
+              "import.unknownAuthor": "Unknown",
+              "import.untitled": "Document",
+              "review.changeDescription": "Review",
+              "history.edit": "Edit document",
+              "progress.readingDocx": "Reading DOCX file",
+              "progress.parsingDocx": "Parsing DOCX structure",
+              "progress.creatingArtifact": "Creating document artifact",
+              "progress.validatingModel": "Validating document model",
+              "progress.generatingDocx": "Generating DOCX package",
+              "progress.savingDocx": "Saving DOCX file",
+              "progress.generatingTranscript": "Generating DOCX transcript",
+              "progress.savingTranscript": "Saving DOCX transcript",
+              "finding.document.empty": "Document has no content.",
+              "finding.block.duplicate_id": "Duplicate block id: {id}",
+              "finding.block.heading_level": "Heading {id} has unsupported level {level}.",
+              "finding.table.empty": "Table {id} has no rows.",
+              "finding.table.ragged": "Table {id} rows have inconsistent column counts.",
+              "finding.comment.duplicate_id": "Duplicate comment id: {id}",
+              "finding.comment.orphan": "Comment {id} has no target block.",
+              "finding.change.duplicate_id": "Duplicate change id: {id}",
+              "finding.change.orphan": "Change {id} has no target block.",
+              "finding.import.feature": "Imported feature requires review: {feature}",
+              "feature.tracked-changes": "tracked changes",
+              "feature.document-protection": "document protection",
+              "feature.images": "images",
+              "feature.hyperlinks": "hyperlinks",
+              "feature.drawings": "drawings",
+              "feature.embedded-objects": "embedded objects",
+              "feature.footnotes": "footnotes",
+              "feature.endnotes": "endnotes",
+              "feature.headers-footers": "headers/footers",
+              "feature.fields": "fields (TOC, cross-references)",
+              "feature.content-controls": "content controls",
+              "feature.section-page-setup": "section page setup",
+              "feature.embedded-external-content": "embedded external content",
+              "feature.merged-table-cells": "merged table cells",
+              "feature.page-breaks": "page breaks"
+            },
+            "zh-CN": {
+              "manifest.name": "Cognia 文档",
+              "manifest.description": "插件自带的原生 DOCX 撰写、导入、编辑、审阅、预览、校验与导出。",
+              "renderer.name": "Cognia 文档",
+              "preview.review": "审阅",
+              "preview.comments": "批注",
+              "preview.changes": "修订",
+              "preview.validation": "校验",
+              "preview.empty": "此文档为空。",
+              "preview.wordCount": "{count} 字",
+              "preview.source": "来源：{name}",
+              "preview.open": "待处理",
+              "preview.resolved": "已解决",
+              "preview.pending": "待审",
+              "preview.accepted": "已接受",
+              "preview.resolve": "标记已解决",
+              "preview.reopen": "重新打开",
+              "preview.accept": "接受",
+              "preview.reject": "拒绝",
+              "preview.showBlock": "定位段落",
+              "preview.working": "正在保存审阅…",
+              "preview.table": "表格",
+              "preview.actionFailed": "审阅操作失败：{error}",
+              "preview.parseError": "此 artifact 不是有效的 Cognia 文档：{error}",
+              "importer.name": "Word 文档",
+              "importer.description": "将 DOCX 导入为 Cognia 文档。",
+              "importer.binaryRequired": "DOCX 导入需要二进制内容。",
+              "importer.failed": "DOCX 导入失败。",
+              "exporter.name": "DOCX 会话记录",
+              "exporter.description": "将当前会话导出为 Word 文档。",
+              "transcript.title": "会话记录",
+              "transcript.user": "用户",
+              "transcript.assistant": "助手",
+              "transcript.system": "系统",
+              "import.emptyComment": "（空批注）",
+              "import.unknownAuthor": "未知",
+              "import.untitled": "文档",
+              "review.changeDescription": "审阅",
+              "history.edit": "编辑文档",
+              "progress.readingDocx": "正在读取 DOCX 文件",
+              "progress.parsingDocx": "正在解析 DOCX 结构",
+              "progress.creatingArtifact": "正在创建文档",
+              "progress.validatingModel": "正在校验文档模型",
+              "progress.generatingDocx": "正在生成 DOCX 文件",
+              "progress.savingDocx": "正在保存 DOCX 文件",
+              "progress.generatingTranscript": "正在生成 DOCX 会话记录",
+              "progress.savingTranscript": "正在保存 DOCX 会话记录",
+              "finding.document.empty": "文档没有内容。",
+              "finding.block.duplicate_id": "段落 ID 重复：{id}",
+              "finding.block.heading_level": "标题 {id} 的级别 {level} 不受支持。",
+              "finding.table.empty": "表格 {id} 没有行。",
+              "finding.table.ragged": "表格 {id} 各行的列数不一致。",
+              "finding.comment.duplicate_id": "批注 ID 重复：{id}",
+              "finding.comment.orphan": "批注 {id} 没有对应的段落。",
+              "finding.change.duplicate_id": "修订 ID 重复：{id}",
+              "finding.change.orphan": "修订 {id} 没有对应的段落。",
+              "finding.import.feature": "导入的内容需要复核：{feature}",
+              "feature.tracked-changes": "修订记录",
+              "feature.document-protection": "文档保护",
+              "feature.images": "图片",
+              "feature.hyperlinks": "超链接",
+              "feature.drawings": "绘图",
+              "feature.embedded-objects": "嵌入对象",
+              "feature.footnotes": "脚注",
+              "feature.endnotes": "尾注",
+              "feature.headers-footers": "页眉/页脚",
+              "feature.fields": "域（目录、交叉引用）",
+              "feature.content-controls": "内容控件",
+              "feature.section-page-setup": "分节页面设置",
+              "feature.embedded-external-content": "嵌入的外部内容",
+              "feature.merged-table-cells": "合并的单元格",
+              "feature.page-breaks": "分页符"
+            }
+          }
+        },
         "runtimeCompatibility": {
           "browser": {
             "availability": "supported",
@@ -175,17 +473,17 @@
             "reason": "Authoring and validation are available; interactive preview and file pickers require a UI shell."
           },
           "mobile": {
-            "availability": "degraded",
+            "availability": "supported",
             "entrypoint": "src/index.ts",
-            "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+            "reason": "Authoring, review, and preview work on mobile; DOCX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
           }
         }
       },
       "path": "builtin://cognia-documents",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-documents/d73d7bcaf8d678b14c58762620263c2052f441b95c0ae87bb64629c5d55e0e41.cjs",
-        "sha256": "d73d7bcaf8d678b14c58762620263c2052f441b95c0ae87bb64629c5d55e0e41",
+        "url": "/_cognia/builtin-plugins/cognia-documents/eab330bce22e07172902e111f03afe0678bbd7d8b56f7879a2b0eaf090b36ea7.cjs",
+        "sha256": "eab330bce22e07172902e111f03afe0678bbd7d8b56f7879a2b0eaf090b36ea7",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ]
@@ -195,8 +493,10 @@
       "manifest": {
         "id": "cognia-presentations",
         "name": "Cognia Presentations",
+        "nameKey": "manifest.name",
         "version": "0.1.0",
         "description": "Plugin-owned native PPTX authoring, import, preview, validation, and export.",
+        "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [
           "tools",
@@ -223,6 +523,8 @@
         "i18n": {
           "locales": {
             "en": {
+              "manifest.name": "Cognia Presentations",
+              "manifest.description": "Plugin-owned native PPTX authoring, import, preview, validation, and export.",
               "renderer.name": "Cognia Presentation",
               "preview.slides": "Slides",
               "preview.slideOf": "Slide {index} of {total}",
@@ -242,9 +544,14 @@
               "card.warnings": "Warnings: {count}",
               "card.exported": "Exported {size}",
               "card.open": "Open",
-              "card.version": "v{version}"
+              "card.version": "v{version}",
+              "preview.slideRole": "slide",
+              "preview.parseError": "This artifact is not a valid Cognia presentation: {error}",
+              "history.edit": "Edit presentation"
             },
             "zh-CN": {
+              "manifest.name": "Cognia 演示文稿",
+              "manifest.description": "插件自带的原生 PPTX 撰写、导入、预览、校验与导出。",
               "renderer.name": "Cognia 演示文稿",
               "preview.slides": "幻灯片",
               "preview.slideOf": "第 {index} 张，共 {total} 张",
@@ -264,7 +571,10 @@
               "card.warnings": "警告：{count}",
               "card.exported": "已导出 {size}",
               "card.open": "打开",
-              "card.version": "版本 {version}"
+              "card.version": "版本 {version}",
+              "preview.slideRole": "幻灯片",
+              "preview.parseError": "此 artifact 不是有效的 Cognia 演示文稿：{error}",
+              "history.edit": "编辑演示文稿"
             }
           }
         },
@@ -283,19 +593,20 @@
             "reason": "Authoring and PPTX validation are available; interactive preview and file pickers require a UI shell."
           },
           "mobile": {
-            "availability": "degraded",
+            "availability": "supported",
             "entrypoint": "src/index.ts",
-            "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+            "reason": "Authoring, validation, and preview work on mobile; PPTX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
           }
         }
       },
       "path": "builtin://cognia-presentations",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-presentations/716a5e95eca56f2a46d3033c82e09784e1fb3c9ed2be44315ae389735ac43fe5.cjs",
-        "sha256": "716a5e95eca56f2a46d3033c82e09784e1fb3c9ed2be44315ae389735ac43fe5",
+        "url": "/_cognia/builtin-plugins/cognia-presentations/f0e28e5421ad71eff89d61e922e8d73125fc1fb53ece079b408c9b33e66b9558.cjs",
+        "sha256": "f0e28e5421ad71eff89d61e922e8d73125fc1fb53ece079b408c9b33e66b9558",
         "sharedModules": [
           "@cognia/plugin-sdk",
+          "@cognia/plugin-sdk/api/i18n",
           "@cognia/plugin-ui",
           "lucide-react",
           "react/jsx-runtime"
@@ -306,8 +617,10 @@
       "manifest": {
         "id": "cognia-visualize",
         "name": "Cognia Visualize",
+        "nameKey": "manifest.name",
         "version": "0.1.0",
         "description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+        "descriptionKey": "manifest.description",
         "type": "frontend",
         "capabilities": [
           "tools",
@@ -325,11 +638,76 @@
         "permissions": [
           "artifact:read",
           "artifact:write",
-          "filesystem:write"
+          "filesystem:write",
+          "export:session"
         ],
         "activationEvents": [
           "startup"
         ],
+        "i18n": {
+          "locales": {
+            "en": {
+              "manifest.name": "Cognia Visualize",
+              "manifest.description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+              "renderer.name": "Cognia Visualization",
+              "preview.data": "Data",
+              "preview.validation": "Validation",
+              "preview.meta": "{count} data points",
+              "preview.parseError": "This artifact is not a valid Cognia visualization: {error}",
+              "preview.col.label": "Label",
+              "preview.col.value": "Value",
+              "preview.col.group": "Group",
+              "preview.col.source": "Source",
+              "preview.col.target": "Target",
+              "preview.col.start": "Start",
+              "preview.col.end": "End",
+              "preview.col.x": "X",
+              "preview.col.y": "Y",
+              "exporter.name": "Visualization report",
+              "exporter.description": "Export every visualization in this session as one standalone HTML report.",
+              "report.title": "Visualization report",
+              "report.empty": "This session contains no Cognia visualizations.",
+              "summary.default": "{title}: {count} data points.",
+              "history.update": "Update visualization",
+              "finding.data.empty": "Visualization requires at least one data point.",
+              "finding.data.label": "Data point {index} requires a label.",
+              "finding.data.value": "Data point {index} has a non-finite value.",
+              "finding.a11y.summary": "An accessibility summary is required.",
+              "finding.graph.edge": "{profile} data points require source and target.",
+              "finding.time.start": "{profile} data points require start dates."
+            },
+            "zh-CN": {
+              "manifest.name": "Cognia 可视化",
+              "manifest.description": "插件自带的无障碍可视化推荐、创作、校验、响应式预览与导出。",
+              "renderer.name": "Cognia 可视化",
+              "preview.data": "数据",
+              "preview.validation": "校验",
+              "preview.meta": "{count} 个数据点",
+              "preview.parseError": "此 artifact 不是有效的 Cognia 可视化：{error}",
+              "preview.col.label": "标签",
+              "preview.col.value": "值",
+              "preview.col.group": "分组",
+              "preview.col.source": "来源",
+              "preview.col.target": "目标",
+              "preview.col.start": "开始",
+              "preview.col.end": "结束",
+              "preview.col.x": "X",
+              "preview.col.y": "Y",
+              "exporter.name": "可视化报告",
+              "exporter.description": "将会话中的全部可视化导出为一份独立的 HTML 报告。",
+              "report.title": "可视化报告",
+              "report.empty": "此会话中没有 Cognia 可视化。",
+              "summary.default": "{title}：{count} 个数据点。",
+              "history.update": "更新可视化",
+              "finding.data.empty": "可视化至少需要一个数据点。",
+              "finding.data.label": "第 {index} 个数据点缺少标签。",
+              "finding.data.value": "第 {index} 个数据点的值不是有限数字。",
+              "finding.a11y.summary": "需要提供无障碍摘要。",
+              "finding.graph.edge": "{profile} 的数据点需要 source 和 target。",
+              "finding.time.start": "{profile} 的数据点需要开始日期。"
+            }
+          }
+        },
         "runtimeCompatibility": {
           "browser": {
             "availability": "supported",
@@ -345,17 +723,17 @@
             "reason": "Authoring, validation, listing, and JSON export are available; the artifact preview panel and file save pickers require a UI shell."
           },
           "mobile": {
-            "availability": "degraded",
+            "availability": "supported",
             "entrypoint": "src/index.ts",
-            "reason": "Authoring, preview, and report export are available; native save dialogs depend on the connected shell."
+            "reason": "Authoring and the preview (with a phone-width chart layout) work on mobile; SVG/HTML/JSON and session-report exports are saved to Documents/cognia/exports on the device."
           }
         }
       },
       "path": "builtin://cognia-visualize",
       "compatibilityDiagnostics": [],
       "asset": {
-        "url": "/_cognia/builtin-plugins/cognia-visualize/068fc22af9ac33e02bb657988baad15801f30cccb012ea6048acb396201376e2.cjs",
-        "sha256": "068fc22af9ac33e02bb657988baad15801f30cccb012ea6048acb396201376e2",
+        "url": "/_cognia/builtin-plugins/cognia-visualize/1a45b8635e1977544da6a95e7ea62ebb139f65496e8ae76b66c7126ab91a7686.cjs",
+        "sha256": "1a45b8635e1977544da6a95e7ea62ebb139f65496e8ae76b66c7126ab91a7686",
         "sharedModules": [
           "@cognia/plugin-sdk"
         ]

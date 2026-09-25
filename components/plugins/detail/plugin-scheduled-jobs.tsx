@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ClockIcon,
@@ -121,6 +121,8 @@ interface PluginScheduledJobsProps {
 
 export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJobsProps = {}) {
   const t = useTranslations("plugins.scheduledJobs")
+  // One reference instant for every row's "next run", refreshed each minute.
+  const now = useNow({ updateInterval: 60_000 })
   const live = useLiveQuery(
     () => (jobsOverride ? jobsOverride : listScheduledJobs()),
     [jobsOverride]
@@ -282,14 +284,10 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
                   <StatusBadge status={job.status} />
                 </TableCell>
                 <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                  {job.nextRunAt
-                    ? new Date(job.nextRunAt).toISOString().replace("T", " ").slice(0, 16)
-                    : "—"}
+                  <RunTime at={job.nextRunAt} relativeTo={now} />
                 </TableCell>
                 <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                  {job.lastRunAt
-                    ? new Date(job.lastRunAt).toISOString().replace("T", " ").slice(0, 16)
-                    : "—"}
+                  <RunTime at={job.lastRunAt} />
                 </TableCell>
               </TableRow>
             ))}
@@ -297,6 +295,28 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
         </Table>
       </div>
     </div>
+  )
+}
+
+/** Local date + time to the minute, the precision the run columns always carried. */
+const RUN_TIME_FORMAT = { dateStyle: "medium", timeStyle: "short" } as const
+
+/**
+ * One run instant in the viewer's locale and time zone. With `relativeTo` it
+ * reads relative ("in 5 minutes", or "3 minutes ago" when overdue) — what the
+ * next-run column is scanned for — with the absolute time as the hover title.
+ * Without it, the absolute time. The ISO instant stays on `<time dateTime>`.
+ * A missing or unparseable instant renders the em dash the columns always used.
+ */
+function RunTime({ at, relativeTo }: { at: number | undefined; relativeTo?: Date }) {
+  const format = useFormatter()
+  const date = at ? new Date(at) : null
+  if (!date || Number.isNaN(date.getTime())) return "—"
+  const absolute = format.dateTime(date, RUN_TIME_FORMAT)
+  return (
+    <time dateTime={date.toISOString()} title={relativeTo ? absolute : undefined}>
+      {relativeTo ? format.relativeTime(date, relativeTo) : absolute}
+    </time>
   )
 }
 

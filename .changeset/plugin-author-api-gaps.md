@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Plugin API: every `@cognia/plugin-sdk` subpath is now shared with the host, so an installed plugin's registrations reach the app instead of a private copy, and every context method a plugin can see is in the contract catalog (a test now enforces both directions). New for authors: `ctx.ui.navigate()` for in-app pages, `usePluginTranslations()`, localized plugin names through `nameKey` / `descriptionKey`, `useLiveQuery` from `@cognia/plugin-ui`, `createTestPluginContext()` from `@cognia/plugin-sdk/testing`, `evaluatePluginCompatibility`, the `web_clone` host tool, `rawArgs` for multi-line slash-command bodies, and a `context` prop for extension slots. `ctx.config` now reflects settings changes without reactivation, `deactivate()` receives the plugin context, context providers only run for their own plugin, `ctx.files.save` saves on mobile and reports where the file went, and connector hooks require the `connectors:read` / `connectors:send` permission. Plugins may no longer import `next`, `next-intl`, `dexie`, `@tauri-apps` or `@capacitor` directly.

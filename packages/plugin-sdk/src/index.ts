@@ -44,11 +44,17 @@ export { CANONICAL_EXTENSION_POINTS } from "./extensions"
  */
 export {
   PLUGIN_AUTHOR_CALLABLE_HOST_TOOLS,
+  PLUGIN_HOST_TOOL_PERMISSIONS,
   isAuthorCallableHostTool,
   isPluginHostToolFailure,
   isPluginWebFetchSuccess,
   isPluginWebSearchSuccess,
   pluginWebFetchText,
+} from "@/types/plugin/plugin-host-tools"
+export type {
+  PluginWebCloneEnvelope,
+  PluginWebCloneInput,
+  PluginWebCloneResult,
 } from "@/types/plugin/plugin-host-tools"
 
 /**

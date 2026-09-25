@@ -132,13 +132,15 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
-        <DialogHeader>
+      {/* `dvh`, not `vh`: on a phone `vh` is the viewport with the browser
+          chrome retracted, so a `vh` cap can still run under the toolbar. */}
+      <DialogContent className="flex max-h-[85dvh] w-[95vw] max-w-2xl flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Badge variant="secondary" className="text-xs">
             {t("availableCount", { count: updates.length })}
           </Badge>
@@ -187,7 +189,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
           </ScrollArea>
         </Card>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={onClose}>
             {t("close")}
           </Button>

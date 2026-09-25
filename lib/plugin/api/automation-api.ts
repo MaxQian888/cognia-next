@@ -193,6 +193,13 @@ export interface PluginAutomationAPI {
 export interface PluginComputerUseOrigin {
   sessionId?: string
   messageId?: string
+  /**
+   * The placement the originating send resolved — `PluginToolContext.sandboxRuntimeRef`,
+   * forwarded verbatim. A send is bound once, so this ref, not whatever the
+   * session happens to be bound to when the call lands, decides where the
+   * desktop runs. Omit it only for callers with no send envelope.
+   */
+  sandboxRuntimeRef?: string
 }
 
 interface AutomationRuntime {
@@ -256,8 +263,12 @@ async function buildComputerUseCallContext(
   // fine for scoping consent, but here it would borrow another conversation's
   // binding and drive the operator's own desktop for a session bound to a
   // remote target. Callers with no session keep the host/local placement.
+  // The send's own immutable binding wins; the session's current binding is
+  // the recovery for a ref that did not survive the hop (the CLI rail).
   const runtimeRef =
-    runtime.sandbox.activeRefForSession(origin?.sessionId) ?? runtime.sandbox.hostFallbackRuntimeRef
+    origin?.sandboxRuntimeRef ??
+    runtime.sandbox.activeRefForSession(origin?.sessionId) ??
+    runtime.sandbox.hostFallbackRuntimeRef
   return runtime.sandbox.decorateComputerUseContext(runtimeRef, context)
 }
 

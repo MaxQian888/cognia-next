@@ -9,10 +9,10 @@
  * decides whether an agent may create one at all.
  *
  * This module is that surface, published to authors as
- * `@cognia/plugin-sdk/api/scheduled-task`. Every function is a thin
- * pass-through to the renderer scheduler store: that store holds the persisted
- * permission policy and owns the scheduler-host binding, so re-deriving either
- * here would create a second source of truth for the same rows.
+ * `@cognia/plugin-sdk/api/scheduled-task`. The task functions are thin
+ * pass-throughs to the renderer scheduler store, which owns the
+ * scheduler-host binding; the policy is read through the write gate's own
+ * loader (`lib/scheduler/write-authority.ts`), so neither is re-derived here.
  *
  * The store is imported lazily on purpose. A plugin that never touches the
  * scheduler should not drag the scheduler system into its module graph, and the
@@ -54,15 +54,20 @@ export function createUserSchedulerAPI(): PluginUserSchedulerAPI {
 }
 
 /**
- * The user's current scheduler permission policy — `agentAutoCreate`,
- * `scriptTasksEnabled`, `confirmationRequired`, `maxTasksPerSource`.
+ * The user's current scheduler permission policy — `agentToolsEnabled`,
+ * `agentAutoCreate`, `scriptTasksEnabled`, `confirmationRequired`,
+ * `maxTasksPerSource`.
  *
- * A plugin that creates tasks on an agent's behalf MUST consult this first:
- * the policy is the user's standing answer to "may something other than me put
- * work on my schedule?", and the store does not enforce it on write.
+ * Read from `AppSettings` at call time through the same loader the write gate
+ * uses (`loadSchedulerPolicy`), NOT from the scheduler store. The store serves
+ * `DEFAULT_PERMISSION_POLICY` until something hydrates it, and that default has
+ * `agentToolsEnabled: true` — so a plugin tool asking a fresh renderer "may
+ * agents manage the schedule?" got "yes" even after the user had switched it
+ * off. A plugin exposing agent tools gates EVERY action on this answer.
  */
 export async function getSchedulerPermissionPolicy(): Promise<SchedulerPermissionPolicy> {
-  return (await store()).permissionPolicy
+  const { loadSchedulerPolicy } = await import("@/lib/scheduler/write-authority")
+  return loadSchedulerPolicy()
 }
 
 /**

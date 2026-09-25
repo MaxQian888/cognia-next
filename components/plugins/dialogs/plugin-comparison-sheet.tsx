@@ -139,7 +139,7 @@ function ComparisonColumn({ entry, installed, onRemove, onInstall }: ColumnProps
         <Button
           variant="ghost"
           size="icon"
-          className="size-7 shrink-0"
+          className="size-7 shrink-0 pointer-coarse:size-9"
           onClick={onRemove}
           aria-label={t("removeAria", { name: entry.name })}
           data-testid={`plugin-comparison-remove-${entry.id}`}

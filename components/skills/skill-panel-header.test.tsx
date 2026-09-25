@@ -81,6 +81,14 @@ describe("SkillPanelHeader", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("does not draw the category trigger with the page's own identity glyph", () => {
+    // Two layers icons side by side read as a rendering glitch on a phone.
+    render(<SkillPanelHeader totalCount={1} filteredCount={1} />)
+    const trigger = screen.getByLabelText("panel.openCategoriesAria")
+    expect(trigger.querySelector(".lucide-layers")).toBeNull()
+    expect(trigger.querySelector(".lucide-layout-list")).not.toBeNull()
+  })
+
   it("hides the category trigger when not on the My Skills tab", () => {
     useSkillsStore.setState({ activeTab: "browse" } as never)
     render(<SkillPanelHeader totalCount={1} filteredCount={1} />)

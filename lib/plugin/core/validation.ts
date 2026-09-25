@@ -1618,6 +1618,10 @@ export function validatePluginManifest(
     }
   }
 
+  if (m.themePacks !== undefined) {
+    validateThemePacks(m.themePacks, pushError)
+  }
+
   if (m.permissions && Array.isArray(m.permissions)) {
     for (const perm of m.permissions) {
       if (!VALID_PERMISSIONS.includes(perm as PluginPermission)) {
@@ -2996,6 +3000,8 @@ export function validatePluginManifest(
   }
 
   const localizedLabelPaths = [
+    "nameKey",
+    "descriptionKey",
     "views[].titleKey",
     "viewsContainers[].titleKey",
     "webviews[].titleKey",
@@ -3004,6 +3010,7 @@ export function validatePluginManifest(
     "contextPanels[].labelKey",
     "extensions[].labelKey",
     "trayItems[].labelKey",
+    "commands[].descriptionKey",
   ] as const
   const localeMaps =
     isPlainObject(m.i18n) && isPlainObject(m.i18n.locales)
@@ -3491,6 +3498,78 @@ function cliHasPathTraversal(relPath: string): boolean {
 }
 
 type PushDiagnostic = (field: string, code: string, message: string, hint?: string) => void
+
+/**
+ * The only values `applies.motionSpeed` may carry — the same three the
+ * Appearance → Accessibility motion-speed picker offers (`MotionSpeed`).
+ */
+const VALID_THEME_PACK_MOTION_SPEEDS: readonly number[] = [0.5, 1, 1.5]
+
+/**
+ * Structural validation for `manifest.themePacks[]` (ADR-0030).
+ *
+ * `applyThemePack` writes `applies.motionSpeed` straight into the user's
+ * motion setting, which is an accessibility preference with exactly three
+ * values. A pack carrying anything else (first-party packs shipped `0.75`)
+ * persisted a speed no picker option matches, so the user could not even see
+ * what they had been given, let alone put it back. Reference integrity
+ * (`themeId` / `wallpaperId` / `density`) stays with the applier, which can
+ * resolve host presets and surface a useful error at apply time.
+ */
+function validateThemePacks(themePacks: unknown, pushError: PushDiagnostic): void {
+  if (!Array.isArray(themePacks)) {
+    pushError("themePacks", "manifest.themePacks.invalid_type", '"themePacks" must be an array')
+    return
+  }
+  themePacks.forEach((pack: unknown, index) => {
+    const field = `themePacks[${index}]`
+    if (!isPlainObject(pack)) {
+      pushError(
+        field,
+        "manifest.themePacks.invalid_item",
+        `Theme pack at index ${index} must be an object`
+      )
+      return
+    }
+    for (const key of ["id", "name"] as const) {
+      const value = pack[key]
+      if (typeof value !== "string" || value.length === 0) {
+        pushError(
+          `${field}.${key}`,
+          `manifest.themePacks.${key}.missing`,
+          `Theme pack at index ${index} is missing a string "${key}"`
+        )
+      }
+    }
+    if (!isPlainObject(pack.applies)) {
+      pushError(
+        `${field}.applies`,
+        "manifest.themePacks.applies.invalid_type",
+        `Theme pack at index ${index} must declare an "applies" object`
+      )
+      return
+    }
+    const { motionSpeed, radius } = pack.applies
+    if (
+      motionSpeed !== undefined &&
+      (typeof motionSpeed !== "number" || !VALID_THEME_PACK_MOTION_SPEEDS.includes(motionSpeed))
+    ) {
+      pushError(
+        `${field}.applies.motionSpeed`,
+        "manifest.themePacks.applies.motionSpeed.invalid",
+        `"${field}.applies.motionSpeed" must be one of: ${VALID_THEME_PACK_MOTION_SPEEDS.join(", ")}`,
+        "Motion speed is the user's accessibility preference; omit it unless the pack is about motion."
+      )
+    }
+    if (radius !== undefined && (typeof radius !== "number" || !Number.isFinite(radius))) {
+      pushError(
+        `${field}.applies.radius`,
+        "manifest.themePacks.applies.radius.invalid_type",
+        `"${field}.applies.radius" must be a finite number (rem)`
+      )
+    }
+  })
+}
 
 /**
  * Structural validation for `manifest.cliTools[]`. Strict on purpose —

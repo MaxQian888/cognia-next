@@ -202,6 +202,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.agent.invokeTool": {
     kind: "none",
   },
+  "ctx.agent.invokeDependencyTool": {
+    kind: "none",
+  },
   "ctx.agent.registerExternalAgentAdapter": {
     kind: "returned-disposer",
   },
@@ -289,6 +292,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.artifact.listArtifacts": {
     kind: "none",
   },
+  "ctx.artifact.listVersions": {
+    kind: "none",
+  },
   "ctx.artifact.onArtifactChange": {
     kind: "returned-disposer",
   },
@@ -297,6 +303,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.artifact.registerRenderer": {
     kind: "returned-disposer",
+  },
+  "ctx.artifact.restoreVersion": {
+    kind: "none",
   },
   "ctx.artifact.updateArtifact": {
     kind: "none",
@@ -325,6 +334,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.automation.click": {
     kind: "none",
   },
+  "ctx.automation.clickText": {
+    kind: "none",
+  },
   "ctx.automation.cursorPosition": {
     kind: "none",
   },
@@ -332,6 +344,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.automation.find": {
+    kind: "none",
+  },
+  "ctx.automation.findText": {
     kind: "none",
   },
   "ctx.automation.expandElement": {
@@ -386,6 +401,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.automation.windowOp": {
+    kind: "none",
+  },
+  "ctx.automation.zoom": {
     kind: "none",
   },
   "ctx.backup.create": {
@@ -573,6 +591,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     disposeMethod: "unregister",
   },
   "ctx.chat.addContextSelection": {
+    kind: "none",
+  },
+  "ctx.chat.appendMessagePart": {
     kind: "none",
   },
   "ctx.chat.appendToComposer": {
@@ -816,6 +837,54 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.connectors.waitForDelivery": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.surface": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.segment": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.message": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.text": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.button": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.card": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.row": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.column": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.alert": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.image": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.link": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.select": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.textField": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.list": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.divider": {
+    kind: "none",
+  },
+  "ctx.connectors.a2ui.component.badge": {
     kind: "none",
   },
   "ctx.contextMenu.register": {
@@ -1269,10 +1338,16 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.i18n.getCurrentLocale": {
     kind: "none",
   },
+  "ctx.i18n.getLocale": {
+    kind: "none",
+  },
   "ctx.i18n.getLocaleName": {
     kind: "none",
   },
   "ctx.i18n.hasTranslation": {
+    kind: "none",
+  },
+  "ctx.i18n.hasKey": {
     kind: "none",
   },
   "ctx.i18n.onLocaleChange": {
@@ -1305,6 +1380,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.integrations.cancelAction": {
     kind: "none",
   },
+  "ctx.integrations.checkAccountHealth": {
+    kind: "none",
+  },
   "ctx.integrations.createAccount": {
     kind: "none",
   },
@@ -1317,6 +1395,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.integrations.getActionJob": {
     kind: "none",
   },
+  "ctx.integrations.getIngressDeadletter": {
+    kind: "none",
+  },
   "ctx.integrations.getIngressPublicUrl": {
     kind: "none",
   },
@@ -1324,6 +1405,12 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.integrations.listDefinitions": {
+    kind: "none",
+  },
+  "ctx.integrations.listIngressDeadletters": {
+    kind: "none",
+  },
+  "ctx.integrations.listResources": {
     kind: "none",
   },
   "ctx.integrations.listSubscriptions": {
@@ -1339,6 +1426,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.integrations.removeSubscription": {
+    kind: "none",
+  },
+  "ctx.integrations.requeueIngressDeadletter": {
     kind: "none",
   },
   "ctx.integrations.rollbackMigration": {
@@ -2257,6 +2347,27 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.templates.instantiate": {
     kind: "none",
   },
+  "ctx.templates.saveDraft": {
+    kind: "none",
+  },
+  "ctx.templates.publish": {
+    kind: "none",
+  },
+  "ctx.templates.fork": {
+    kind: "none",
+  },
+  "ctx.templates.deprecate": {
+    kind: "none",
+  },
+  "ctx.templates.deleteDraft": {
+    kind: "none",
+  },
+  "ctx.templates.exportPackage": {
+    kind: "none",
+  },
+  "ctx.templates.importPackage": {
+    kind: "none",
+  },
   "ctx.terminal.classifyCommand": {
     kind: "none",
   },
@@ -2360,6 +2471,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.ui.showToast": {
+    kind: "none",
+  },
+  "ctx.ui.navigate": {
     kind: "none",
   },
   "ctx.userScheduler.createTask": {

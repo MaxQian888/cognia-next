@@ -33,6 +33,7 @@ import {
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
 import { listPluginPermissions } from "@/lib/plugin/core/transport"
 import { registerMethod, type RpcContext } from "./rpc-dispatcher"
+import { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS } from "./unavailable-methods"
 
 type InvokeSidecar = (pluginId: string, method: string, payload: unknown) => Promise<unknown>
 
@@ -96,83 +97,9 @@ function providerKey(pluginId: string, type: string): string {
   return `${pluginId}::${type}`
 }
 
-/**
- * Every outbound request/notification currently exposed by the sidecar but
- * lacking a canonical host-neutral adapter. Registering these is intentional:
- * requests receive a deterministic JSON-RPC capability error immediately and
- * notifications are logged by the dispatcher rather than disappearing as
- * "method not found" noise.
- */
-export const EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS = [
-  "env:asExternalUri",
-  "env:clipboardReadText",
-  "env:clipboardWriteText",
-  "env:openExternal",
-  "extensions:activate",
-  "extensions:get",
-  "fs:copy",
-  "fs:createDirectory",
-  "fs:delete",
-  "fs:readDirectory",
-  "fs:readFile",
-  "fs:rename",
-  "fs:stat",
-  "fs:writeFile",
-  "languages:getDiagnostics",
-  "languages:setLanguageConfiguration",
-  "languages:setTextDocumentLanguage",
-  "terminal:create",
-  "terminal:dispose",
-  "terminal:hide",
-  "terminal:sendText",
-  "terminal:show",
-  "webview:dispose",
-  "webview:postMessage",
-  "webview:reveal",
-  "webview:setHtml",
-  "webview:setTitle",
-  "webview:show",
-  "window:clearStatusBarMessage",
-  "window:createOutputChannel",
-  "window:createStatusBarItem",
-  "window:createWebviewPanel",
-  "window:disposeDecorationType",
-  "window:disposeStatusBarItem",
-  "window:hideStatusBarItem",
-  "window:outputChannelAppend",
-  "window:outputChannelClear",
-  "window:outputChannelDispose",
-  "window:outputChannelHide",
-  "window:outputChannelShow",
-  "window:progressEnd",
-  "window:progressReport",
-  "window:progressStart",
-  "window:registerDecorationType",
-  "window:registerUriHandler",
-  "window:registerWebviewViewProvider",
-  "window:setStatusBarMessage",
-  "window:setStatusBarText",
-  "window:setStatusBarTooltip",
-  "window:showInputBox",
-  "window:showMessage",
-  "window:showOpenDialog",
-  "window:showQuickPick",
-  "window:showSaveDialog",
-  "window:showStatusBarItem",
-  "window:unregisterUriHandler",
-  "window:unregisterWebviewViewProvider",
-  "workspace:applyEdit",
-  "workspace:configurationGet",
-  "workspace:configurationHas",
-  "workspace:configurationInspect",
-  "workspace:configurationUpdate",
-  "workspace:createFileSystemWatcher",
-  "workspace:disposeFileSystemWatcher",
-  "workspace:findFiles",
-  "workspace:openTextDocument",
-  "workspace:registerTextDocumentContentProvider",
-  "workspace:unregisterTextDocumentContentProvider",
-] as const
+// Owned by a leaf module so the SDK can publish it; re-exported for the
+// handlers and their existing importers.
+export { EXPLICITLY_UNAVAILABLE_VSCODE_RPC_METHODS }
 
 export function installVscodeRuntimeRpcHandlers(): Array<() => void> {
   const disposers: Array<() => void> = []

@@ -49,7 +49,7 @@ interface Props {
    * the URL or store. The shape is freeform; each slot's docs should
    * describe the keys it provides.
    */
-  context?: Record<string, unknown>
+  context?: Readonly<Record<string, unknown>>
 }
 
 export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
@@ -125,7 +125,7 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
           pluginId: string
           extensionId: string
           formFactor: PluginPointFormFactor
-          context?: Record<string, unknown>
+          context?: Readonly<Record<string, unknown>>
         }>
         return (
           <PluginSurface

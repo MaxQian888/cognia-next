@@ -158,4 +158,5 @@ export type {
   ExtensionOptions,
   ExtensionRegistration,
   ExtensionProps,
+  ChatInputEffortSlotContext,
 } from "@/types/plugin/plugin"

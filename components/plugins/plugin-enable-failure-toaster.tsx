@@ -13,8 +13,14 @@
  */
 
 import { useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+
+// Leaf imports only: this toaster is mounted in the root layout, and the
+// plugin manager must stay out of the first-paint module graph.
+import { pluginDetailHref, pluginEnableFailureToastId } from "@/hooks/plugins/plugin-links"
+import { usePluginErrorMessage } from "@/hooks/plugins/use-plugin-error-message"
 
 import {
   PLUGIN_ENABLE_FAILED_EVENT,
@@ -26,6 +32,9 @@ const DEDUPE_WINDOW_MS = 2_000
 
 export function PluginEnableFailureToaster() {
   const t = useTranslations("plugins.enableFailure")
+  const tLifecycle = useTranslations("plugins.lifecycleFeedback")
+  const describe = usePluginErrorMessage()
+  const router = useRouter()
   // Each entry: key -> timestamp the toast was fired. We swap a Map
   // through a ref so the listener identity stays stable across renders.
   const recentRef = useRef<Map<string, number>>(new Map())
@@ -46,16 +55,23 @@ export function PluginEnableFailureToaster() {
       if (recent.has(key)) return
       recent.set(key, now)
       toast.error(t("title", { pluginName: detail.pluginName }), {
+        // The manager's message is English; the known shapes are localized.
         description: t("description", {
           pluginName: detail.pluginName,
-          errorMessage: detail.errorMessage,
+          errorMessage: describe(detail.errorMessage),
         }),
-        id: key,
+        // Same id the panel's own enable feedback uses for this failure, so
+        // the two reports collapse into one toast.
+        id: pluginEnableFailureToastId(detail.pluginId, detail.errorMessage),
+        action: {
+          label: tLifecycle("viewDetails"),
+          onClick: () => router.push(pluginDetailHref(detail.pluginId)),
+        },
       })
     }
     window.addEventListener(PLUGIN_ENABLE_FAILED_EVENT, handler)
     return () => window.removeEventListener(PLUGIN_ENABLE_FAILED_EVENT, handler)
-  }, [t])
+  }, [t, tLifecycle, describe, router])
 
   return null
 }

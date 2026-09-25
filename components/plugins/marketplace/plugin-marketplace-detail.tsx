@@ -40,10 +40,8 @@ import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import { PluginDependencyPanel } from "../_shared/plugin-dependency-panel"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import type { PluginManifest } from "@/types/plugin"
-import {
-  DANGEROUS_PERMISSIONS,
-  PERMISSION_DESCRIPTIONS,
-} from "@/lib/plugin/security/permission-guard"
+import { DANGEROUS_PERMISSIONS } from "@/lib/plugin/security/permission-guard"
+import { usePermissionDescription } from "@/hooks/plugins/use-permission-description"
 import type { PluginPermission } from "@/types/plugin"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginSourceBadge } from "../plugin-source-badge"
@@ -462,6 +460,8 @@ function PermissionList({
   title: string
   permissions: PluginPermission[]
 }) {
+  const t = useTranslations("plugins.permissions")
+  const describePermission = usePermissionDescription()
   return (
     <Card className="gap-2 py-0">
       <CardHeader className="px-3 pt-3">
@@ -474,12 +474,14 @@ function PermissionList({
             return (
               <li key={perm} className="flex items-start gap-2 text-xs">
                 {dangerous && (
-                  <AlertTriangleIcon className="mt-0.5 size-3 shrink-0 text-destructive" />
+                  <AlertTriangleIcon
+                    role="img"
+                    aria-label={t("dangerousAria")}
+                    className="mt-0.5 size-3 shrink-0 text-destructive"
+                  />
                 )}
                 <code className="shrink-0 font-mono">{perm}</code>
-                <span className="text-muted-foreground">
-                  {PERMISSION_DESCRIPTIONS[perm] ?? perm}
-                </span>
+                <span className="text-muted-foreground">{describePermission(perm)}</span>
               </li>
             )
           })}

@@ -5,8 +5,17 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key,
+  useTranslations: (namespace?: string) => {
+    const t = (key: string, vars?: Record<string, unknown>) =>
+      namespace === "plugins.permissions.descriptions"
+        ? `desc:${key}`
+        : vars
+          ? `${key}:${JSON.stringify(vars)}`
+          : key
+    ;(t as unknown as { has: (k: string) => boolean }).has = () =>
+      namespace === "plugins.permissions.descriptions"
+    return t
+  },
 }))
 
 const mockOpenUrl = jest.fn()
@@ -223,5 +232,71 @@ describe("PluginPreInstallDialog", () => {
     )
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
+  })
+
+  // The dialog had no height cap: on a phone a long permission list pushed
+  // Continue below the fold with nothing to scroll.
+  it("caps the dialog height and scrolls only the step body", () => {
+    render(
+      <PluginPreInstallDialog target={permissionTarget} onContinue={() => {}} onCancel={() => {}} />
+    )
+    expect(screen.getByRole("dialog")).toHaveClass("max-h-[85dvh]", "flex", "flex-col")
+    expect(screen.getByTestId("pre-install-step-body")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-y-auto"
+    )
+  })
+
+  // It listed bare permission ids; now each reads like the review dialog.
+  it("describes each permission and labels the sensitive ones", () => {
+    render(
+      <PluginPreInstallDialog
+        target={{
+          ...permissionTarget,
+          permission: { pluginId: "p", declared: ["shell:execute"], optional: [] },
+        }}
+        onContinue={() => {}}
+        onCancel={() => {}}
+      />
+    )
+    expect(screen.getByText("desc:shell:execute")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "dangerousAria" })).toBeInTheDocument()
+  })
+
+  // The step had its own parser that only knew string / number / boolean, so
+  // enums, nested objects and validation were silently lost before install.
+  it("renders the config step with the full config-form renderer", () => {
+    const onContinue = jest.fn()
+    render(
+      <PluginPreInstallDialog
+        target={{
+          ...configTarget,
+          config: {
+            pluginId: "p",
+            configSchema: {
+              type: "object",
+              properties: {
+                region: { type: "string", enum: ["eu", "us"], default: "us" },
+                nested: { type: "object", properties: { depth: { type: "number", default: 3 } } },
+                email: { type: "string", format: "email", default: "nope" },
+              },
+            },
+          },
+        }}
+        onContinue={onContinue}
+        onCancel={() => {}}
+      />
+    )
+    expect(screen.getByLabelText("depth")).toBeInTheDocument()
+    // Invalid email → Confirm is held, like Save in the detail pane.
+    expect(screen.getByTestId("pre-install-config-confirm")).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("email"), { target: { value: "a@b.co" } })
+    fireEvent.click(screen.getByTestId("pre-install-config-confirm"))
+    expect(onContinue).toHaveBeenCalledWith({
+      region: "us",
+      nested: { depth: 3 },
+      email: "a@b.co",
+    })
   })
 })

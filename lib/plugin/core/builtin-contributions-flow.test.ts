@@ -172,7 +172,7 @@ describe("builtin plugin contribution flow", () => {
     // the moment the plugin declared its `/zhihu` command
     // (`onCommand:zhihu`).
     expect(manifest.activationEvents).toEqual(zhihuPluginJson.activationEvents)
-    expect(manifest.activationEvents).toContain("startup")
+    expect(manifest.activationEvents).toContain("onCommand:zhihu")
     // …and the module manifest's declarative arrays ride along.
     expect(manifest.workflowTemplates?.length).toBe(1)
     expect(manifest.skills?.length).toBeGreaterThan(0)
@@ -302,7 +302,7 @@ describe("bundled Material Icon Theme lifecycle", () => {
     await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
     const restored = enableSpy.mock.calls.map(([id]) => id)
     // Sanity: the pass did run and enabled the startup built-ins…
-    expect(restored).toContain("cognia-genshin-theme")
+    expect(restored).toContain("cognia-builtin-characters")
     // …but the icon theme has no activation event and no recorded intent.
     expect(restored).not.toContain(MATERIAL_ID)
 

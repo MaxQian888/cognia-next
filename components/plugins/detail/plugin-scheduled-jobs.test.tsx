@@ -6,12 +6,23 @@ import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { PluginScheduledJobView } from "./plugin-scheduled-jobs"
 
 let mockJobs: PluginScheduledJobView[] | undefined
+const mockNow = new Date(Date.UTC(2026, 4, 21, 12, 0, 0))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
     return key
   },
+  // Sentinel formatter + fixed clock: pins the run columns to next-intl's
+  // locale-aware formatting (and the options / reference instant it uses),
+  // not a raw UTC ISO slice.
+  useFormatter: () => ({
+    dateTime: (value: Date | number, options?: Intl.DateTimeFormatOptions) =>
+      `fmt:${new Date(value).toISOString()}:${options?.dateStyle ?? "-"}/${options?.timeStyle ?? "-"}`,
+    relativeTime: (value: Date | number, now: Date | number) =>
+      `rel:${new Date(value).toISOString()}@${new Date(now).toISOString()}`,
+  }),
+  useNow: () => mockNow,
 }))
 
 jest.mock("next/link", () => ({
@@ -152,6 +163,34 @@ describe("PluginScheduledJobs", () => {
     render(<PluginScheduledJobs pluginId="alpha" />)
     expect(screen.getAllByText("alpha")).toHaveLength(2)
     expect(screen.queryByText("beta")).not.toBeInTheDocument()
+  })
+
+  it("renders next run relative to now and last run as a localized absolute time", () => {
+    const next = Date.UTC(2026, 4, 21, 12, 5, 0)
+    const last = Date.UTC(2026, 4, 21, 11, 0, 0)
+    mockJobs = [makeJob({ pluginId: "plugin_t", nextRunAt: next, lastRunAt: last })]
+    render(<PluginScheduledJobs />)
+
+    const nextTime = screen.getByText("rel:2026-05-21T12:05:00.000Z@2026-05-21T12:00:00.000Z")
+    expect(nextTime.tagName).toBe("TIME")
+    expect(nextTime).toHaveAttribute("dateTime", "2026-05-21T12:05:00.000Z")
+    expect(nextTime).toHaveAttribute("title", "fmt:2026-05-21T12:05:00.000Z:medium/short")
+
+    const lastTime = screen.getByText("fmt:2026-05-21T11:00:00.000Z:medium/short")
+    expect(lastTime.tagName).toBe("TIME")
+    expect(lastTime).toHaveAttribute("dateTime", "2026-05-21T11:00:00.000Z")
+    expect(lastTime).not.toHaveAttribute("title")
+
+    expect(screen.queryByText("2026-05-21 12:05")).not.toBeInTheDocument()
+  })
+
+  it("renders an em dash for a missing or unparseable run time", () => {
+    mockJobs = [makeJob({ pluginId: "plugin_d", nextRunAt: undefined, lastRunAt: Number.NaN })]
+    const { container } = render(<PluginScheduledJobs />)
+    const row = screen.getByText("plugin_d").closest("tr") as HTMLElement
+    expect(within(row).getAllByText("—")).toHaveLength(2)
+    expect(container.querySelector("time")).toBeNull()
+    expect(container.textContent).not.toContain("Invalid Date")
   })
 
   it("renders the empty state when pluginId has no jobs", () => {

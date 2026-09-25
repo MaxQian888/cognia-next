@@ -481,11 +481,21 @@ export interface PluginManifest {
   /** Human-readable name */
   name: string
 
+  /**
+   * Key into this manifest's own `i18n.locales` bundle for a localized name.
+   * Resolved straight from the manifest — so Library and Discover show it for
+   * a plugin that is not enabled yet — with `name` as the fallback.
+   */
+  nameKey?: string
+
   /** Semantic version (semver) */
   version: string
 
   /** Plugin description */
   description: string
+
+  /** Like `nameKey`, for `description`. */
+  descriptionKey?: string
 
   /** Author information */
   author?: {
@@ -1913,6 +1923,12 @@ export interface PluginManifestCommandDef {
   /** Description */
   description?: string
 
+  /**
+   * Key into this manifest's own `i18n.locales` bundle for `description`, so
+   * the `/` picker describes the command in the user's language.
+   */
+  descriptionKey?: string
+
   /** Icon (Lucide name) */
   icon?: PluginIconName
 
@@ -2090,6 +2106,13 @@ export interface PluginCommandContext {
   sessionId?: string
   /** Character bound to that session, when there is one. */
   characterId?: string
+  /**
+   * Everything the user typed after the command name, exactly as typed —
+   * newlines, runs of spaces and quotes intact. `args` is this split on
+   * whitespace, which is right for flags and wrong for a body (a multi-line
+   * prompt template, a snippet of code). Present on the slash-command path.
+   */
+  rawArgs?: string
 }
 
 /**
@@ -2742,6 +2765,13 @@ export interface PluginUIAPI {
   showDialog: (options: PluginDialog) => Promise<unknown>
   showInputDialog: (options: PluginInputDialog) => Promise<string | null>
   showConfirmDialog: (options: PluginConfirmDialog) => Promise<boolean>
+  /**
+   * Move the app to an in-app route (`"/settings?section=mcp"`). Plugin
+   * components cannot use `next/navigation` — the loader does not share it —
+   * so this is the supported way to send the user somewhere. Returns `false`
+   * and does nothing for anything that is not an in-app path.
+   */
+  navigate: (href: string) => boolean
 }
 
 export interface PluginNotification {
@@ -3592,7 +3622,7 @@ export interface PluginDefinition {
    * cleanup can release context-bound resources (subscriptions, secure
    * storage handles, registered commands).
    */
-  deactivate?: (context?: PluginContext) => Promise<void> | void
+  deactivate?: (context: PluginContext) => Promise<void> | void
   /** Parsed activation metadata resolved by runtime manager */
   activation?: {
     startup: boolean
@@ -4495,7 +4525,12 @@ export type ExportFormat =
  * Export options
  */
 export interface ExportOptions {
-  format: ExportFormat
+  /**
+   * A built-in format, or the id of an exporter THIS plugin registered with
+   * `registerExporter` (resolved as `<pluginId>:<id>`). Another plugin's
+   * exporter is not reachable.
+   */
+  format: ExportFormat | (string & {})
   theme?: "light" | "dark" | "system"
   showTimestamps?: boolean
   showTokens?: boolean
@@ -5001,11 +5036,18 @@ export interface PluginFilesAPI {
     multiple?: boolean
     maxBytes?: number
   }) => Promise<PluginFileHandle[]>
-  save: (options: {
-    suggestedName: string
-    mimeType: string
-    bytes: Uint8Array
-  }) => Promise<{ saved: boolean }>
+  /**
+   * Save bytes where the user can find them: a save dialog on desktop, the
+   * Documents folder (`cognia/exports/`) on mobile, a browser download on web.
+   * `saved: false` means the user cancelled; a failed write throws.
+   * `location` is where the file went when the platform can say (the mobile
+   * file URI, or `"downloads"` on web), so a tool can tell the user.
+   */
+  save: (options: { suggestedName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
+    saved: boolean
+    platform?: "desktop" | "mobile" | "web"
+    location?: string
+  }>
   readAttachment: (handle: string) => Promise<PluginFileHandle>
 }
 
@@ -5327,6 +5369,29 @@ export interface ExtensionProps {
   extensionId: string
   /** Host-declared shape of the slot receiving this contribution. */
   formFactor: PluginSurfaceFormFactor
+  /**
+   * What the host slot knows about where it is mounted — the conversation, the
+   * state of the surface around it — so a contribution does not re-derive it
+   * from global state (and get it wrong for a composer that is not the focused
+   * one). The keys are per point; see {@link ChatInputEffortSlotContext} and the
+   * inbox slots' docs. Absent when the slot provides none.
+   */
+  context?: Readonly<Record<string, unknown>>
+}
+
+/**
+ * `context` the `chat.input.effort` slot passes. A dial that replaces the
+ * host's effort chip must behave like it: act on THIS composer's session,
+ * stay inert while a reply streams, and collapse to a glyph when the toolbar
+ * is folded.
+ */
+export interface ChatInputEffortSlotContext {
+  /** The session of the composer the dial sits in. */
+  sessionId?: string
+  /** True while a reply streams — the host chip is disabled then too. */
+  disabled: boolean
+  /** True when the toolbar is folded to glyphs; render an icon-sized control. */
+  compact: boolean
 }
 
 /**

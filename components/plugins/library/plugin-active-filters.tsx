@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS, type PluginFilters } from "@/stores/plugins"
+import { CAPABILITY_META } from "../plugin-capabilities"
 
 interface ActiveChip {
   key: string
@@ -119,10 +120,20 @@ export function useHasActivePluginFilters(): boolean {
 
 export function PluginActiveFilters() {
   const t = useTranslations("plugins.activeFilters")
+  const tCategory = useTranslations("plugins.categorySidebar")
   const setFilters = usePluginsStore((s) => s.setFilters)
   const resetFilters = usePluginsStore((s) => s.resetFilters)
 
-  const chips = useActiveFilterChips()
+  // The capability chip names the capability the way the rail beside it does
+  // ("Commands"), not by its manifest id ("commands"). An uncurated id has no
+  // label in the rail either, so it stays as is.
+  const chips = useActiveFilterChips().map((chip) => {
+    if (chip.key !== "capability") return chip
+    const meta = CAPABILITY_META.find((entry) => entry.id === chip.vars?.value)
+    return meta
+      ? { ...chip, vars: { value: tCategory(`capability.${meta.i18nKey}` as never) } }
+      : chip
+  })
   if (chips.length === 0) return null
 
   return (
