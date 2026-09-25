@@ -17065,6 +17065,7 @@
       "label": "账号名称",
       "lastSync": "最近同步",
       "missingPermissions": "缺少权限",
+      "needsIntegration": "安装集成插件后即可添加账号。",
       "notConfigured": "未配置",
       "providerId": "认证提供方 ID",
       "rateLimitReset": "速率限制重置时间",
@@ -17095,6 +17096,7 @@
       "empty": "暂无 Integration 审计记录。",
       "title": "审计"
     },
+    "browsePlugins": "浏览插件",
     "description": "统一管理 Marketplace 账号、资源级事件订阅、审批、健康状态和审计，且不向插件暴露凭据。",
     "disable": "停用",
     "emptyPlugins": "请先安装支持 Integration 的 Marketplace 插件。",
@@ -17165,6 +17167,7 @@
       "failedDeliveries": "失败投递",
       "ingressSecret": "Webhook 密钥（启用 ingress 时必填）",
       "loadMore": "加载更多",
+      "needsAccount": "先添加账号，再订阅它的事件。",
       "noFailedDeliveries": "没有失败投递。",
       "projection": "收件箱投影",
       "projectionLabels": {

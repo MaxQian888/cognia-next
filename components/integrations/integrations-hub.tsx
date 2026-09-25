@@ -1,6 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import Link from "next/link"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { ActivityIcon, PlugZapIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
@@ -414,9 +415,12 @@ export function IntegrationsHub() {
               // Spans the grid. As a plain grid child it was a box one third of
               // the page wide holding a single sentence, which read as a card that
               // had failed to load rather than as "nothing installed".
-              <p className="rounded-panel border border-dashed p-4 text-sm text-muted-foreground md:col-span-3">
-                {t("emptyPlugins")}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-dashed p-4 text-sm text-muted-foreground md:col-span-3">
+                <p>{t("emptyPlugins")}</p>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/plugins?section=discover">{t("browsePlugins")}</Link>
+                </Button>
+              </div>
             )}
           </section>
 
@@ -428,147 +432,168 @@ export function IntegrationsHub() {
           <SettingsStack>
             <SettingsBlock title={t("accounts.title")} headingLevel={2}>
               <div className="space-y-4">
-                <form className="grid gap-3" onSubmit={addAccount}>
-                  <Label htmlFor="integration-definition">{t("accounts.integration")}</Label>
-                  <select
-                    id="integration-definition"
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={selectedKey}
-                    onChange={(event) => {
-                      setSelectedKey(event.target.value)
-                      setAuthStrategyId("")
-                      setAuthConfiguration({})
-                    }}
-                  >
-                    <option value="">{t("accounts.selectIntegration")}</option>
-                    {entries.map(({ pluginId, definition }) => (
-                      <option
-                        key={`${pluginId}:${definition.id}`}
-                        value={`${pluginId}:${definition.id}`}
-                      >
-                        {definition.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Input
-                    aria-label={t("accounts.label")}
-                    placeholder={t("accounts.label")}
-                    value={label}
-                    onChange={(event) => setLabel(event.target.value)}
-                  />
-                  <Label>{t("accounts.authStrategy")}</Label>
-                  <div className="grid gap-2">
-                    {(selected?.definition.authStrategies ?? []).map((strategy, index) => (
-                      <Button
-                        key={strategy.id}
-                        type="button"
-                        variant={authStrategyId === strategy.id ? "default" : "outline"}
-                        className="justify-between"
-                        onClick={() => {
-                          setAuthStrategyId(strategy.id)
+                {/* With nothing installed the select below had no options, so the
+                    form was a dead end: pick nothing, then a disabled button. */}
+                {entries.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("accounts.needsIntegration")}</p>
+                ) : (
+                  <form className="grid gap-3" onSubmit={addAccount}>
+                    {/* On web every field used to stay live above a disabled
+                      submit: a user could fill the whole form, then find out.
+                      A disabled fieldset makes the notice at the top true of
+                      every control at once. */}
+                    <fieldset disabled={!platformSupported} className="contents">
+                      <Label htmlFor="integration-definition">{t("accounts.integration")}</Label>
+                      <select
+                        id="integration-definition"
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        value={selectedKey}
+                        onChange={(event) => {
+                          setSelectedKey(event.target.value)
+                          setAuthStrategyId("")
                           setAuthConfiguration({})
                         }}
                       >
-                        <span>{strategy.label}</span>
-                        <span className="text-xs">
-                          {index === 0 ? t("accounts.recommended") : t("accounts.advanced")}
-                        </span>
-                      </Button>
-                    ))}
-                  </div>
-                  {Object.entries(configProperties)
-                    .filter(
-                      ([key]) =>
-                        !(selectedStrategy?.providerId === "github-app" && key === "installationId")
-                    )
-                    .map(([key, schema]) => {
-                      const translation =
-                        CONFIG_FIELD_TRANSLATIONS[key as keyof typeof CONFIG_FIELD_TRANSLATIONS]
-                      const fieldLabel = translation
-                        ? t(translation)
-                        : typeof schema.title === "string"
-                          ? schema.title
-                          : key
-                      const hint = CONFIG_FIELD_HINTS[key as keyof typeof CONFIG_FIELD_HINTS]
-                      return (
-                        <div key={key} className="grid gap-1">
-                          <Label htmlFor={`auth-${key}`}>{fieldLabel}</Label>
-                          <Input
-                            id={`auth-${key}`}
-                            type={
-                              schema.format === "secret"
-                                ? "password"
-                                : schema.type === "integer"
-                                  ? "number"
-                                  : "text"
-                            }
-                            required={requiredConfigFields.includes(key)}
-                            value={authConfiguration[key] ?? ""}
-                            onChange={(event) =>
-                              setAuthConfiguration((current) => ({
-                                ...current,
-                                [key]: event.target.value,
-                              }))
-                            }
-                          />
-                          {hint ? <p className="text-xs text-muted-foreground">{t(hint)}</p> : null}
-                        </div>
-                      )
-                    })}
-                  {selectedStrategy?.providerId === "github-app" && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={busy || !authConfiguration.appId || !authConfiguration.privateKey}
-                        onClick={discoverInstallations}
-                      >
-                        {t("accounts.discoverInstallations")}
-                      </Button>
-                      <select
-                        aria-label={t("accounts.installation")}
-                        className="h-9 rounded-md border bg-background px-3 text-sm"
-                        value={authConfiguration.installationId ?? ""}
-                        onChange={(event) => {
-                          const installation = installationOptions.find(
-                            (candidate) => candidate.id === event.target.value
-                          )
-                          setAuthConfiguration((current) => ({
-                            ...current,
-                            installationId: event.target.value,
-                            accountLabel: installation?.label ?? current.accountLabel,
-                          }))
-                        }}
-                      >
-                        <option value="">{t("accounts.selectInstallation")}</option>
-                        {installationOptions.map((installation) => (
-                          <option key={installation.id} value={installation.id}>
-                            {installation.label}
+                        <option value="">{t("accounts.selectIntegration")}</option>
+                        {entries.map(({ pluginId, definition }) => (
+                          <option
+                            key={`${pluginId}:${definition.id}`}
+                            value={`${pluginId}:${definition.id}`}
+                          >
+                            {definition.label}
                           </option>
                         ))}
                       </select>
-                    </>
-                  )}
-                  {selectedStrategy?.type === "app" && (
-                    <Label className="flex items-start gap-2 font-normal">
-                      <Checkbox
-                        checked={dedicatedAppConfirmed}
-                        onCheckedChange={(checked) => setDedicatedAppConfirmed(checked === true)}
+                      <Input
+                        aria-label={t("accounts.label")}
+                        placeholder={t("accounts.label")}
+                        value={label}
+                        onChange={(event) => setLabel(event.target.value)}
                       />
-                      <span>{t("accounts.dedicatedAppConfirmation")}</span>
-                    </Label>
-                  )}
-                  {/* A grid child stretches. At full column width a disabled
+                      {selected ? <Label>{t("accounts.authStrategy")}</Label> : null}
+                      <div className="grid gap-2">
+                        {(selected?.definition.authStrategies ?? []).map((strategy, index) => (
+                          <Button
+                            key={strategy.id}
+                            type="button"
+                            variant={authStrategyId === strategy.id ? "default" : "outline"}
+                            className="justify-between"
+                            onClick={() => {
+                              setAuthStrategyId(strategy.id)
+                              setAuthConfiguration({})
+                            }}
+                          >
+                            <span>{strategy.label}</span>
+                            <span className="text-xs">
+                              {index === 0 ? t("accounts.recommended") : t("accounts.advanced")}
+                            </span>
+                          </Button>
+                        ))}
+                      </div>
+                      {Object.entries(configProperties)
+                        .filter(
+                          ([key]) =>
+                            !(
+                              selectedStrategy?.providerId === "github-app" &&
+                              key === "installationId"
+                            )
+                        )
+                        .map(([key, schema]) => {
+                          const translation =
+                            CONFIG_FIELD_TRANSLATIONS[key as keyof typeof CONFIG_FIELD_TRANSLATIONS]
+                          const fieldLabel = translation
+                            ? t(translation)
+                            : typeof schema.title === "string"
+                              ? schema.title
+                              : key
+                          const hint = CONFIG_FIELD_HINTS[key as keyof typeof CONFIG_FIELD_HINTS]
+                          return (
+                            <div key={key} className="grid gap-1">
+                              <Label htmlFor={`auth-${key}`}>{fieldLabel}</Label>
+                              <Input
+                                id={`auth-${key}`}
+                                type={
+                                  schema.format === "secret"
+                                    ? "password"
+                                    : schema.type === "integer"
+                                      ? "number"
+                                      : "text"
+                                }
+                                required={requiredConfigFields.includes(key)}
+                                value={authConfiguration[key] ?? ""}
+                                onChange={(event) =>
+                                  setAuthConfiguration((current) => ({
+                                    ...current,
+                                    [key]: event.target.value,
+                                  }))
+                                }
+                              />
+                              {hint ? (
+                                <p className="text-xs text-muted-foreground">{t(hint)}</p>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                      {selectedStrategy?.providerId === "github-app" && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={
+                              busy || !authConfiguration.appId || !authConfiguration.privateKey
+                            }
+                            onClick={discoverInstallations}
+                          >
+                            {t("accounts.discoverInstallations")}
+                          </Button>
+                          <select
+                            aria-label={t("accounts.installation")}
+                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            value={authConfiguration.installationId ?? ""}
+                            onChange={(event) => {
+                              const installation = installationOptions.find(
+                                (candidate) => candidate.id === event.target.value
+                              )
+                              setAuthConfiguration((current) => ({
+                                ...current,
+                                installationId: event.target.value,
+                                accountLabel: installation?.label ?? current.accountLabel,
+                              }))
+                            }}
+                          >
+                            <option value="">{t("accounts.selectInstallation")}</option>
+                            {installationOptions.map((installation) => (
+                              <option key={installation.id} value={installation.id}>
+                                {installation.label}
+                              </option>
+                            ))}
+                          </select>
+                        </>
+                      )}
+                      {selectedStrategy?.type === "app" && (
+                        <Label className="flex items-start gap-2 font-normal">
+                          <Checkbox
+                            checked={dedicatedAppConfirmed}
+                            onCheckedChange={(checked) =>
+                              setDedicatedAppConfirmed(checked === true)
+                            }
+                          />
+                          <span>{t("accounts.dedicatedAppConfirmation")}</span>
+                        </Label>
+                      )}
+                      {/* A grid child stretches. At full column width a disabled
                       submit is a 1100px slab of muted fill, which outweighs
                       every field above it. */}
-                  <Button
-                    type="submit"
-                    className="justify-self-start"
-                    disabled={busy || !platformSupported}
-                  >
-                    {t("accounts.validateAndAdd")}
-                  </Button>
-                </form>
+                      <Button
+                        type="submit"
+                        className="justify-self-start"
+                        disabled={busy || !platformSupported}
+                      >
+                        {t("accounts.validateAndAdd")}
+                      </Button>
+                    </fieldset>
+                  </form>
+                )}
 
                 <div className="space-y-2">
                   {accounts.map((account) => {
@@ -666,139 +691,152 @@ export function IntegrationsHub() {
 
             <SettingsBlock title={t("subscriptions.title")} headingLevel={2}>
               <div className="space-y-4">
-                <form className="grid gap-3" onSubmit={addSubscription}>
-                  <select
-                    aria-label={t("subscriptions.account")}
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={subscriptionAccountId}
-                    onChange={(event) => {
-                      setSubscriptionAccountId(event.target.value)
-                      setResources([])
-                      setResourceId("")
-                      setSelectedEvents([])
-                    }}
-                  >
-                    <option value="">{t("subscriptions.selectAccount")}</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.label}
-                      </option>
-                    ))}
-                  </select>
-                  {resourceKind && (
-                    <>
-                      <div className="flex gap-2">
-                        <Input
-                          aria-label={t("subscriptions.searchResources")}
-                          placeholder={t("subscriptions.searchResources")}
-                          value={resourceSearch}
-                          onChange={(event) => setResourceSearch(event.target.value)}
-                        />
-                        <Button type="button" variant="outline" onClick={() => loadResources()}>
-                          {t("subscriptions.discover")}
-                        </Button>
-                      </div>
+                {accounts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{t("subscriptions.needsAccount")}</p>
+                ) : (
+                  <form className="grid gap-3" onSubmit={addSubscription}>
+                    <fieldset disabled={!platformSupported} className="contents">
                       <select
-                        aria-label={t("subscriptions.repository")}
+                        aria-label={t("subscriptions.account")}
                         className="h-9 rounded-md border bg-background px-3 text-sm"
-                        value={resourceId}
-                        onChange={(event) => setResourceId(event.target.value)}
+                        value={subscriptionAccountId}
+                        onChange={(event) => {
+                          setSubscriptionAccountId(event.target.value)
+                          setResources([])
+                          setResourceId("")
+                          setSelectedEvents([])
+                        }}
                       >
-                        <option value="">{t("subscriptions.allResources")}</option>
-                        {resources.map((resource) => (
-                          <option key={resource.id} value={resource.id}>
-                            {resource.name}
+                        <option value="">{t("subscriptions.selectAccount")}</option>
+                        {accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.label}
                           </option>
                         ))}
                       </select>
-                      {resourceCursor && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => loadResources(resourceCursor)}
-                        >
-                          {t("subscriptions.loadMore")}
-                        </Button>
+                      {resourceKind && (
+                        <>
+                          <div className="flex gap-2">
+                            <Input
+                              aria-label={t("subscriptions.searchResources")}
+                              placeholder={t("subscriptions.searchResources")}
+                              value={resourceSearch}
+                              onChange={(event) => setResourceSearch(event.target.value)}
+                            />
+                            <Button type="button" variant="outline" onClick={() => loadResources()}>
+                              {t("subscriptions.discover")}
+                            </Button>
+                          </div>
+                          <select
+                            aria-label={t("subscriptions.repository")}
+                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            value={resourceId}
+                            onChange={(event) => setResourceId(event.target.value)}
+                          >
+                            <option value="">{t("subscriptions.allResources")}</option>
+                            {resources.map((resource) => (
+                              <option key={resource.id} value={resource.id}>
+                                {resource.name}
+                              </option>
+                            ))}
+                          </select>
+                          {resourceCursor && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => loadResources(resourceCursor)}
+                            >
+                              {t("subscriptions.loadMore")}
+                            </Button>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                  <fieldset className="grid gap-2">
-                    <legend className="text-sm font-medium">{t("subscriptions.events")}</legend>
-                    {(subscriptionEntry?.definition.eventTypes ?? []).map((eventType) => {
-                      const translation =
-                        subscriptionEntry?.pluginId === "github-delivery"
-                          ? GITHUB_EVENT_TRANSLATIONS[
-                              eventType.id as keyof typeof GITHUB_EVENT_TRANSLATIONS
-                            ]
-                          : undefined
-                      return (
-                        <Label key={eventType.id} className="flex items-center gap-2 font-normal">
-                          <Checkbox
-                            checked={selectedEvents.includes(eventType.id)}
-                            onCheckedChange={(checked) =>
-                              setSelectedEvents((current) =>
-                                checked === true
-                                  ? [...new Set([...current, eventType.id])]
-                                  : current.filter((id) => id !== eventType.id)
-                              )
-                            }
-                          />
-                          <span>{translation ? t(translation) : eventType.label}</span>
-                        </Label>
-                      )
-                    })}
-                  </fieldset>
-                  {(subscriptionEntry?.definition.inboxProjections?.length ?? 0) > 0 && (
-                    <>
-                      <Label className="flex items-center gap-2 font-normal">
-                        <Checkbox
-                          checked={inboxEnabled}
-                          onCheckedChange={(checked) => setInboxEnabled(checked === true)}
-                        />
-                        <span>{t("subscriptions.deliverToInbox")}</span>
-                      </Label>
-                      {inboxEnabled && (
-                        <select
-                          aria-label={t("subscriptions.projection")}
-                          className="h-9 rounded-md border bg-background px-3 text-sm"
-                          value={projectionId}
-                          onChange={(event) => setProjectionId(event.target.value)}
-                        >
-                          <option value="">{t("subscriptions.selectProjection")}</option>
-                          {subscriptionEntry?.definition.inboxProjections?.map((projection) => {
+                      {subscriptionEntry ? (
+                        <fieldset className="grid gap-2">
+                          <legend className="text-sm font-medium">
+                            {t("subscriptions.events")}
+                          </legend>
+                          {(subscriptionEntry?.definition.eventTypes ?? []).map((eventType) => {
                             const translation =
-                              subscriptionEntry.pluginId === "github-delivery"
-                                ? GITHUB_PROJECTION_TRANSLATIONS[
-                                    projection.id as keyof typeof GITHUB_PROJECTION_TRANSLATIONS
+                              subscriptionEntry?.pluginId === "github-delivery"
+                                ? GITHUB_EVENT_TRANSLATIONS[
+                                    eventType.id as keyof typeof GITHUB_EVENT_TRANSLATIONS
                                   ]
                                 : undefined
                             return (
-                              <option key={projection.id} value={projection.id}>
-                                {translation ? t(translation) : projection.label}
-                              </option>
+                              <Label
+                                key={eventType.id}
+                                className="flex items-center gap-2 font-normal"
+                              >
+                                <Checkbox
+                                  checked={selectedEvents.includes(eventType.id)}
+                                  onCheckedChange={(checked) =>
+                                    setSelectedEvents((current) =>
+                                      checked === true
+                                        ? [...new Set([...current, eventType.id])]
+                                        : current.filter((id) => id !== eventType.id)
+                                    )
+                                  }
+                                />
+                                <span>{translation ? t(translation) : eventType.label}</span>
+                              </Label>
                             )
                           })}
-                        </select>
+                        </fieldset>
+                      ) : null}
+                      {(subscriptionEntry?.definition.inboxProjections?.length ?? 0) > 0 && (
+                        <>
+                          <Label className="flex items-center gap-2 font-normal">
+                            <Checkbox
+                              checked={inboxEnabled}
+                              onCheckedChange={(checked) => setInboxEnabled(checked === true)}
+                            />
+                            <span>{t("subscriptions.deliverToInbox")}</span>
+                          </Label>
+                          {inboxEnabled && (
+                            <select
+                              aria-label={t("subscriptions.projection")}
+                              className="h-9 rounded-md border bg-background px-3 text-sm"
+                              value={projectionId}
+                              onChange={(event) => setProjectionId(event.target.value)}
+                            >
+                              <option value="">{t("subscriptions.selectProjection")}</option>
+                              {subscriptionEntry?.definition.inboxProjections?.map((projection) => {
+                                const translation =
+                                  subscriptionEntry.pluginId === "github-delivery"
+                                    ? GITHUB_PROJECTION_TRANSLATIONS[
+                                        projection.id as keyof typeof GITHUB_PROJECTION_TRANSLATIONS
+                                      ]
+                                    : undefined
+                                return (
+                                  <option key={projection.id} value={projection.id}>
+                                    {translation ? t(translation) : projection.label}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          )}
+                        </>
                       )}
-                    </>
-                  )}
-                  {subscriptionEntry?.definition.ingress && (
-                    <Input
-                      type="password"
-                      aria-label={t("subscriptions.ingressSecret")}
-                      placeholder={t("subscriptions.ingressSecret")}
-                      value={ingressSecret}
-                      onChange={(event) => setIngressSecret(event.target.value)}
-                    />
-                  )}
-                  <Button
-                    type="submit"
-                    className="justify-self-start"
-                    disabled={busy || !platformSupported}
-                  >
-                    {t("subscriptions.add")}
-                  </Button>
-                </form>
+                      {subscriptionEntry?.definition.ingress && (
+                        <Input
+                          type="password"
+                          aria-label={t("subscriptions.ingressSecret")}
+                          placeholder={t("subscriptions.ingressSecret")}
+                          value={ingressSecret}
+                          onChange={(event) => setIngressSecret(event.target.value)}
+                        />
+                      )}
+                      <Button
+                        type="submit"
+                        className="justify-self-start"
+                        disabled={busy || !platformSupported}
+                      >
+                        {t("subscriptions.add")}
+                      </Button>
+                    </fieldset>
+                  </form>
+                )}
                 {subscriptions
                   .filter(
                     (subscription) =>
