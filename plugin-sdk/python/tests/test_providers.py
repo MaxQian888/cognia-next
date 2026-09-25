@@ -8,6 +8,7 @@ from cognia import (
     define_ai_provider,
     define_cli_tool,
     define_connector,
+    define_decision_provider,
     define_lsp_server,
     define_ocr_provider,
 )
@@ -169,3 +170,52 @@ def test_connector_minimal_and_full():
 def test_connector_requires_transport_modes():
     with pytest.raises(ValueError, match="transport mode"):
         define_connector("t", "f", {}, [])
+
+
+# -- decision-provider ------------------------------------------------------
+
+
+def test_decision_provider_python_backed_minimal():
+    d = define_decision_provider("laya-local", "Laya (local)").to_dict()
+    assert d == {"id": "laya-local", "label": "Laya (local)"}
+
+
+def test_decision_provider_full_js_backed():
+    d = define_decision_provider(
+        "cloud",
+        "Cloud judge",
+        label_key="provider.cloud",
+        backend="js",
+        entry="dist/p.js",
+        export="makeProvider",
+        description="remote",
+    ).to_dict()
+    assert d == {
+        "id": "cloud",
+        "label": "Cloud judge",
+        "labelKey": "provider.cloud",
+        "backend": "js",
+        "entry": "dist/p.js",
+        "export": "makeProvider",
+        "description": "remote",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"backend": "wasm"}, "backend"),
+        ({"entry": "p.js"}, "both entry and export"),
+        ({"backend": "python", "entry": "p.js", "export": "x"}, "python-backed"),
+    ],
+)
+def test_decision_provider_rejects_inconsistent_backing(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        define_decision_provider("x", "X", **kwargs)
+
+
+def test_decision_provider_requires_id_and_label():
+    with pytest.raises(ValueError):
+        define_decision_provider("", "X")
+    with pytest.raises(ValueError):
+        define_decision_provider("x", "")

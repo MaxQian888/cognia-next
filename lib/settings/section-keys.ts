@@ -250,6 +250,8 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "runStatusBar",
     "composerBehavior",
     "composerAssistance",
+    // ADR-0194: the decision provider card sits next to composer assistance.
+    "decisions",
   ],
   notifications: ["notificationPreferences"],
   terminal: ["terminal"],

@@ -115,6 +115,11 @@ export const SETTINGS_SYNC = {
   attentionRadar: { category: "desktop-only" },
   capture: { category: "desktop-only" },
   composerAssistance: { category: "desktop-only" },
+  decisions: {
+    category: "device-local",
+    rationale:
+      "The selected provider is often a plugin that exists on one device only (laya runs in the desktop Python host) and the endpoint key sits in that device's keyring.",
+  },
   composerBehavior: { category: "shared" },
   inlineQuestions: { category: "shared" },
   agentPermissions: { category: "desktop-only" },

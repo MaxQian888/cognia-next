@@ -14,6 +14,7 @@
     "connector-adapters",
     "lifecycle-hooks",
     "interceptors",
+    "decision-providers",
     "devtools",
     "packaging"
   ]

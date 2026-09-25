@@ -2524,8 +2524,8 @@ def rewrite(payload):
         )
         .await
         .unwrap();
-        // All four contributions registered from the manifest's declarations.
-        assert_eq!(info["contribution_count"], 4);
+        // All five contributions registered from the manifest's declarations.
+        assert_eq!(info["contribution_count"], 5);
 
         let dispatch = |contribution: &'static str, method: &'static str, args: Value| {
             let state = &state;
@@ -2549,6 +2549,28 @@ def rewrite(payload):
             .await
             .unwrap();
         assert_eq!(extracted["combinedText"], "recognized: a.png");
+
+        // Decision provider (ADR-0194): descriptor + typed answers. The host
+        // passes exactly one argument — the request — over the RPC.
+        let described = dispatch("echo-decision", "describe", json!([])).await.unwrap();
+        assert_eq!(described["locality"], "local");
+        assert_eq!(described["calibrated"], false);
+        let decided = dispatch(
+            "echo-decision",
+            "decide",
+            json!([{
+                "state": {"post": "hi"},
+                "questions": {
+                    "spam": {"type": "noul", "instructions": "?"},
+                    "intent": {"type": "choice", "instructions": "?", "criteria": {"chat": "c", "ask": "a"}}
+                }
+            }]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(decided["ok"], true);
+        assert_eq!(decided["answers"]["spam"]["noul"], 0.5);
+        assert_eq!(decided["answers"]["intent"]["choice"], "ask");
 
         // Workspace backend: clone → commitAndPush → remove round-trip.
         let handle = dispatch("memory-workspace", "clone", json!(["o/r", "main"]))

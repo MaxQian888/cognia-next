@@ -89,6 +89,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
       expect.arrayContaining([
         "ai-provider",
         "media",
+        "decision-provider",
         "workspace-backend",
         "message-renderer",
         "link-matcher",
@@ -126,7 +127,11 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     // `bot` (26th) was verified: only `executor: "handler"` imports anything,
     // and `bots-bridge.test.ts` covers the JS export, the python snapshot
     // boundary, the per-bot error isolation and the re-enable drop.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(27)
+    // `decision-provider` (28th) was verified: the dispatch loop is generic,
+    // the bridge gates on `decisions:provide` via ctx.hasPermission, and
+    // `decision-providers-bridge.test.ts` covers the python describe seam,
+    // the JS factory, per-entry error isolation and the re-enable clear.
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(28)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

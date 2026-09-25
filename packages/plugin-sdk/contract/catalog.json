@@ -57,6 +57,8 @@
     "vector:write",
     "ai:chat",
     "ai:embed",
+    "decisions:run",
+    "decisions:provide",
     "export:session",
     "export:project",
     "theme:read",
@@ -187,6 +189,13 @@
       "id": "ai-provider",
       "support": "supported",
       "manifestFields": ["aiProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "decision-provider",
+      "support": "supported",
+      "manifestFields": ["decisionProviders"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
     },
@@ -814,6 +823,12 @@
       "executable": true
     },
     {
+      "path": "decisionProviders[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
       "path": "modalMounts[].entry",
       "runtime": "javascript",
       "requiredFor": [],
@@ -1025,6 +1040,13 @@
       "execution": "javascript",
       "pythonExecution": "supported",
       "entryPath": "aiProviders[].entry"
+    },
+    {
+      "field": "decisionProviders",
+      "capabilities": ["decision-provider"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "decisionProviders[].entry"
     },
     {
       "field": "workspaceBackends",
@@ -4692,6 +4714,86 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "decisions",
+      "authorPath": "ctx.decisions",
+      "type": "PluginDecisionsAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid", "python"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.decisions",
+      "enforcement": "shadow",
+      "dataClassification": "sensitive",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "decisions.decide",
+          "name": "decide",
+          "requiredPermissions": ["decisions:run"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": true,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "decisions.getSelectedProviderId",
+          "name": "getSelectedProviderId",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "decisions.listProviders",
+          "name": "listProviders",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "decisions.listRegistered",
+          "name": "listRegistered",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "decisions.registerProvider",
+          "name": "registerProvider",
+          "requiredPermissions": ["decisions:provide"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-handle",
+            "disposeMethod": "unregister"
           }
         }
       ]

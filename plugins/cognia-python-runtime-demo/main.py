@@ -56,6 +56,39 @@ class EchoLlm:
                 yield piece
 
 
+@cognia.contribution("echo-decision")
+class EchoDecision:
+    """`decision-provider` capability (ADR-0194) — pythonExecution: supported.
+
+    Answers from the question schema alone: noul 0.5, the lexically smallest
+    choice key (key order does not survive every JSON transport), the lowest
+    score level. `calibrated: False` because nothing is judged.
+    """
+
+    def describe(self):
+        return {"locality": "local", "calibrated": False}
+
+    def decide(self, request=None):
+        questions = request.get("questions") if isinstance(request, dict) else None
+        if not isinstance(questions, dict) or not questions:
+            return {"ok": False, "error": {"kind": "invalid_request", "message": "no questions"}}
+        answers = {}
+        for qid, question in questions.items():
+            qtype = question.get("type") if isinstance(question, dict) else None
+            if qtype == "noul":
+                answers[qid] = {"type": "noul", "noul": 0.5}
+            elif qtype == "choice":
+                first = min(question.get("criteria") or {}, default=None)
+                if first is not None:
+                    answers[qid] = {"type": "choice", "choice": first, "confidence": 0.0, "probabilities": {first: 1.0}}
+            elif qtype == "score":
+                answers[qid] = {"type": "score", "score": 0, "confidence": 0.0}
+        return {"ok": True, "answers": answers, "latencyMs": 0}
+
+    def status(self):
+        return {"ready": True}
+
+
 @cognia.contribution("memory-workspace")
 class MemoryWorkspace:
     """`workspace-backend` capability — pythonExecution: supported."""

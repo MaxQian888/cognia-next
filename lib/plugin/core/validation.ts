@@ -2394,6 +2394,14 @@ export function validatePluginManifest(
     m.type
   )
 
+  validateLazyFactoryArray(
+    m.decisionProviders,
+    { field: "decisionProviders" },
+    pushError,
+    pushWarning,
+    m.type
+  )
+
   if (Array.isArray(m.subagents)) {
     m.subagents.forEach((entry, index) => {
       if (!entry || typeof entry !== "object") return

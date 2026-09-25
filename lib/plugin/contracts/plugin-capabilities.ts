@@ -204,6 +204,30 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: ["lib/plugin/api/ai-provider-api.test.ts"],
   },
   {
+    id: "decision-provider",
+    support: "supported",
+    manifestFields: ["decisionProviders"],
+    // A plugin may register imperatively via ctx.decisions.registerProvider.
+    manifestFieldsOptional: true,
+    runtimeBinding:
+      "context.decisions + host decision registry (ADR-0194); python providers via @cognia.contribution",
+    hostBindings: [
+      "lib/plugin/api/decisions-api.ts",
+      "lib/plugin/bridge/decision-providers-bridge.ts",
+      "lib/plugin/core/context.ts",
+    ],
+    typescriptSdk: [
+      "packages/plugin-sdk/src/api/decision-provider.ts",
+      "packages/plugin-sdk/src/define/define-decision-provider.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/providers.py"],
+    docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
+    requiredTests: [
+      "lib/plugin/api/decisions-api.test.ts",
+      "lib/plugin/bridge/decision-providers-bridge.test.ts",
+    ],
+  },
+  {
     id: "themes",
     // Promoted partial→supported: the declarative `manifest.themes[]` is wired
     // through the themes bridge into the theme registry, and a typed

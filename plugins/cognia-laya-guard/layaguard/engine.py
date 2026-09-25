@@ -8,7 +8,7 @@ Two jobs share one checkpoint handle:
   validation showed the zero-shot checkpoint false-positives ~1.0 on ordinary
   technical text (system prompts, diffs, .env files).
 * **Typed decisions** (`decide`) — the host's local System-1 provider
-  (`ctx.decisions`, ADR-0193): arbitrary `noul` / `choice` / `score` questions
+  (`ctx.decisions`, ADR-0194): arbitrary `noul` / `choice` / `score` questions
   over a state object, answered in one forward pass.
 
 Properties that shape everything here:

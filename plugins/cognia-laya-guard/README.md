@@ -25,6 +25,18 @@ the checkpoint is cached.
 routing?, truncation?, stateTrimmed?}` or `{ok: false, error: {kind,
 message}}`.
 
+## Decision provider (`laya-local`)
+
+The plugin contributes `manifest.decisionProviders[laya-local]` (ADR-0194), so
+the host's `ctx.decisions` — and features built on it, such as the IM reply
+copilot — can answer typed questions on this machine. Select **Laya (local)**
+in Settings → Conversation → Decision provider. The host redacts and PII-gates
+every request before it reaches the plugin; `decide` honors `stateTrim`
+(drops the oldest list entries first to fit the checkpoint budget) and reports
+`truncation` / `stateTrimmed`. `describe()` advertises the configured
+checkpoint's token budgets (`headTokens` 192 english / 256 multilingual) so
+callers can choose compact question wording.
+
 ## Checkpoint routing
 
 Default `checkpoint: "auto"` uses laya's `Router` — it detects script/language

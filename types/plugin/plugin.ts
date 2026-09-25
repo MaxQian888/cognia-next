@@ -52,6 +52,7 @@ import type { PluginSubagentDef } from "./plugin-subagent"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
+import type { PluginDecisionProviderDef } from "./plugin-decisions"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
 import type { PluginLinkMatcherDef } from "./plugin-link-matcher"
 import type { PluginMessageRendererDef } from "./plugin-message-renderer"
@@ -167,6 +168,7 @@ export type PluginCapability =
   | "media" // Provides media processing and AI image workflows
   | "canvas" // Provides canvas editing and selection workflows
   | "ai-provider" // Provides AI provider fallback and routing helpers
+  | "decision-provider" // Provides System-1 decision providers for ctx.decisions (ADR-0194)
   | "themes" // Provides UI themes
   | "commands" // Provides slash commands
   | "hooks" // Provides lifecycle hooks
@@ -1083,6 +1085,14 @@ export interface PluginManifest {
    * `network:fetch` (+ optional `media:image:read`).
    */
   ocrProviders?: PluginOcrProviderDef[]
+
+  /**
+   * System-1 decision providers contributed by this plugin (ADR-0194).
+   * Registered in the host decision registry as `<pluginId>:<id>` via
+   * `lib/plugin/bridge/decision-providers-bridge.ts` on enable; dropped on
+   * disable. Permission gate: `decisions:provide`.
+   */
+  decisionProviders?: PluginDecisionProviderDef[]
 
   /**
    * Workspace execution backends contributed by this plugin (issue-loop /
@@ -2491,6 +2501,9 @@ export interface PluginBaseContext {
   /** OCR provider registration (ADR-0026 §2 §A). */
   ocr?: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
 
+  /** System-1 decisions + decision provider registration (ADR-0194). */
+  decisions?: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
+
   /** Workspace backend registration (ADR-0026 §2 §D). */
   workspace?: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
 
@@ -2579,6 +2592,7 @@ export interface PluginHostContextAPI {
   lifecycle: PluginLifecycleAPI
   services: PluginServicesAPI
   ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
+  decisions: import("@/lib/plugin/api/decisions-api").PluginDecisionsAPI
   workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
   modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
   webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI

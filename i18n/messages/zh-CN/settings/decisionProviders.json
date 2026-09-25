@@ -1,0 +1,72 @@
+{
+  "title": "决策模型",
+  "description": "System-1 决策模型用一次快速推理回答类型化问题（是非、单选、打分）。IM 回复副驾用它判断对方意图与风险并给候选回复排序；插件通过 ctx.decisions 调用。",
+  "builtinRemote": "远程决策接口",
+  "provider": {
+    "label": "提供方",
+    "none": "不使用",
+    "noneHint": "未选择提供方时，回复副驾仍会起草回复，但无法判断对话，也无法给候选排序。",
+    "hint": "每次请求在发给提供方之前都会先脱敏。",
+    "missing": "所选提供方未安装，或其插件已停用。",
+    "missingOption": "{id}（未安装）"
+  },
+  "traits": {
+    "local": "在本机运行",
+    "remote": "远程服务",
+    "calibrated": "概率已校准",
+    "uncalibrated": "概率未校准"
+  },
+  "status": {
+    "checking": "检查中…",
+    "ready": "就绪",
+    "loading": "模型加载中…",
+    "notReady": "未就绪：{reason}"
+  },
+  "http": {
+    "preset": "接口",
+    "presets": {
+      "openrouter": "OpenRouter（typesafe/jev）",
+      "bocha": "博查 Jev",
+      "typesafe": "TypeSafe",
+      "vercel": "Vercel AI Gateway",
+      "zen": "OpenCode Zen",
+      "custom": "自定义地址"
+    },
+    "url": "地址",
+    "urlRequired": "https://…（必填）",
+    "model": "模型",
+    "modelRequired": "模型 ID（必填）",
+    "key": "API 密钥",
+    "keyPlaceholder": "粘贴该接口的 API 密钥",
+    "keySaved": "已保存密钥 — 粘贴新密钥可替换",
+    "saveKey": "保存密钥",
+    "clearKey": "清除密钥",
+    "keyringUnavailable": "无法保存密钥：本设备的安全存储不可用。",
+    "keyHint": "在 {url} 获取密钥",
+    "problems": {
+      "no_preset": "请选择一个接口。",
+      "no_url": "自定义接口需要填写地址。",
+      "bad_url": "地址必须使用 https（仅 localhost 可用 http）。",
+      "no_model": "接口需要填写模型 ID。"
+    }
+  },
+  "test": {
+    "button": "测试连接",
+    "ok": "{latencyMs} 毫秒内完成回答"
+  },
+  "errors": {
+    "no_provider": "未选择提供方，或提供方未安装。",
+    "provider_unavailable": "提供方尚未就绪（模型可能仍在加载）。",
+    "not_configured": "接口缺少地址、模型或 API 密钥。",
+    "invalid_request": "提供方认为请求格式有误。",
+    "pii": "请求脱敏后仍含个人信息，已停止发送。",
+    "network": "无法连接到该接口。",
+    "http_status": "接口返回了错误状态码。",
+    "cors_unreachable": "浏览器版无法访问该接口，请使用桌面端或移动端。",
+    "timeout": "提供方未能按时回答。",
+    "aborted": "请求已取消。",
+    "recursive_provider": "插件不能通过自己的提供方发起决策。",
+    "provider_error": "提供方回答失败。"
+  },
+  "privacy": "用于决策的聊天文本会先把邮箱、手机号、证件号和密钥替换为占位符，远程接口只会收到脱敏后的文本。"
+}

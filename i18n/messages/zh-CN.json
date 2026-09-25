@@ -21515,9 +21515,9 @@
       "httpError": {
         "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
         "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
-        "404": "服务器未暴露配对接口，请确认桌面运行的是开启 Companion 的 cognia v0.2+。",
         "403Identity": "Host 拒绝了这个账户——它记录的绑定或租户与本设备对不上。用同一个账户再发一份邀请也会被同样拒绝。",
         "403Spent": "Host 拒绝的是这份邀请本身——它已过期或已被用掉。请重新签发一份；再发同一串是不可能成功的。",
+        "404": "服务器未暴露配对接口，请确认桌面运行的是开启 Companion 的 cognia v0.2+。",
         "5xx": "服务器错误（HTTP {status}），请查看桌面日志后重试。",
         "generic": "配对失败（HTTP {status}）。"
       },
@@ -32666,12 +32666,12 @@
         "installedRestartRequired": "更新已安装，重启 Cognia 后生效。",
         "installing": "正在安装…",
         "intervals": {
-          "15": "每 15 分钟",
-          "60": "每小时",
-          "360": "每 6 小时",
-          "720": "每 12 小时",
+          "10080": "每周",
           "1440": "每天",
-          "10080": "每周"
+          "15": "每 15 分钟",
+          "360": "每 6 小时",
+          "60": "每小时",
+          "720": "每 12 小时"
         },
         "lastChecked": "上次检查",
         "relaunchAfterInstallDescription": "安装后立即重启。在 Windows 上，安装程序仍可能自动关闭应用。",
@@ -33826,8 +33826,8 @@
             "label": "行内公式复制按钮"
           },
           "mathFontScale": {
-            "1": "标准",
             "0_8": "小",
+            "1": "标准",
             "1_2": "大",
             "label": "公式字号"
           },
@@ -38512,6 +38512,78 @@
         "runNow": "运行工作区维护",
         "running": "运行中…",
         "title": "受管工作区维护"
+      }
+    },
+    "decisionProviders": {
+      "builtinRemote": "远程决策接口",
+      "description": "System-1 决策模型用一次快速推理回答类型化问题（是非、单选、打分）。IM 回复副驾用它判断对方意图与风险并给候选回复排序；插件通过 ctx.decisions 调用。",
+      "errors": {
+        "aborted": "请求已取消。",
+        "cors_unreachable": "浏览器版无法访问该接口，请使用桌面端或移动端。",
+        "http_status": "接口返回了错误状态码。",
+        "invalid_request": "提供方认为请求格式有误。",
+        "network": "无法连接到该接口。",
+        "no_provider": "未选择提供方，或提供方未安装。",
+        "not_configured": "接口缺少地址、模型或 API 密钥。",
+        "pii": "请求脱敏后仍含个人信息，已停止发送。",
+        "provider_error": "提供方回答失败。",
+        "provider_unavailable": "提供方尚未就绪（模型可能仍在加载）。",
+        "recursive_provider": "插件不能通过自己的提供方发起决策。",
+        "timeout": "提供方未能按时回答。"
+      },
+      "http": {
+        "clearKey": "清除密钥",
+        "key": "API 密钥",
+        "keyHint": "在 {url} 获取密钥",
+        "keyPlaceholder": "粘贴该接口的 API 密钥",
+        "keySaved": "已保存密钥 — 粘贴新密钥可替换",
+        "keyringUnavailable": "无法保存密钥：本设备的安全存储不可用。",
+        "model": "模型",
+        "modelRequired": "模型 ID（必填）",
+        "preset": "接口",
+        "presets": {
+          "bocha": "博查 Jev",
+          "custom": "自定义地址",
+          "openrouter": "OpenRouter（typesafe/jev）",
+          "typesafe": "TypeSafe",
+          "vercel": "Vercel AI Gateway",
+          "zen": "OpenCode Zen"
+        },
+        "problems": {
+          "bad_url": "地址必须使用 https（仅 localhost 可用 http）。",
+          "no_model": "接口需要填写模型 ID。",
+          "no_preset": "请选择一个接口。",
+          "no_url": "自定义接口需要填写地址。"
+        },
+        "saveKey": "保存密钥",
+        "url": "地址",
+        "urlRequired": "https://…（必填）"
+      },
+      "privacy": "用于决策的聊天文本会先把邮箱、手机号、证件号和密钥替换为占位符，远程接口只会收到脱敏后的文本。",
+      "provider": {
+        "hint": "每次请求在发给提供方之前都会先脱敏。",
+        "label": "提供方",
+        "missing": "所选提供方未安装，或其插件已停用。",
+        "missingOption": "{id}（未安装）",
+        "none": "不使用",
+        "noneHint": "未选择提供方时，回复副驾仍会起草回复，但无法判断对话，也无法给候选排序。"
+      },
+      "status": {
+        "checking": "检查中…",
+        "loading": "模型加载中…",
+        "notReady": "未就绪：{reason}",
+        "ready": "就绪"
+      },
+      "test": {
+        "button": "测试连接",
+        "ok": "{latencyMs} 毫秒内完成回答"
+      },
+      "title": "决策模型",
+      "traits": {
+        "calibrated": "概率已校准",
+        "local": "在本机运行",
+        "remote": "远程服务",
+        "uncalibrated": "概率未校准"
       }
     },
     "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",

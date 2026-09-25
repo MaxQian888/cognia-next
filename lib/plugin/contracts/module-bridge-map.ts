@@ -43,6 +43,10 @@ import {
   unregisterOcrProvidersForPlugin,
 } from "@/lib/plugin/bridge/ocr-providers-bridge"
 import {
+  registerDecisionProvidersForPlugin,
+  unregisterDecisionProvidersForPlugin,
+} from "@/lib/plugin/bridge/decision-providers-bridge"
+import {
   registerWorkspaceBackendsForPlugin,
   unregisterWorkspaceBackendsForPlugin,
 } from "@/lib/plugin/bridge/workspace-backend-bridge"
@@ -203,6 +207,19 @@ export const MODULE_BRIDGE_CAPABILITIES = {
       await registerOcrProvidersForPlugin(ctx.manifest, ctx.installRoot, { importer: ctx.importer })
     },
     unregister: unregisterOcrProvidersForPlugin,
+  },
+  "decision-provider": {
+    // ADR-0194: System-1 decision providers; python-backed entries resolve
+    // through the described-contribution seam.
+    key: "decision-provider",
+    manifestField: "decisionProviders",
+    register: async (ctx) => {
+      await registerDecisionProvidersForPlugin(ctx.manifest, ctx.installRoot, {
+        importer: ctx.importer,
+        hasPermission: ctx.hasPermission,
+      })
+    },
+    unregister: unregisterDecisionProvidersForPlugin,
   },
   "workspace-backend": {
     // Canonical field-driven capability. A plugin declaring

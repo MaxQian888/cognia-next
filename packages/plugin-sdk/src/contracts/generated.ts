@@ -44,6 +44,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "vector:write",
   "ai:chat",
   "ai:embed",
+  "decisions:run",
+  "decisions:provide",
   "export:session",
   "export:project",
   "theme:read",
@@ -869,6 +871,22 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   },
   "ctx.db.transaction": {
     kind: "none",
+  },
+  "ctx.decisions.decide": {
+    kind: "none",
+  },
+  "ctx.decisions.getSelectedProviderId": {
+    kind: "none",
+  },
+  "ctx.decisions.listProviders": {
+    kind: "none",
+  },
+  "ctx.decisions.listRegistered": {
+    kind: "none",
+  },
+  "ctx.decisions.registerProvider": {
+    kind: "returned-handle",
+    disposeMethod: "unregister",
   },
   "ctx.dexie.rawDb": {
     kind: "none",

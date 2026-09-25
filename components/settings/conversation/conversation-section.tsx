@@ -14,6 +14,7 @@ import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
 import { SessionPowerCard } from "./session-power-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
+import { DecisionProviderCard } from "../chat/decision-provider-card"
 import { InlineQuestionsCard } from "../chat/inline-questions-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -161,6 +162,10 @@ export function ConversationSection() {
           <EffortPreferencesCard />
           <SettingsDivider />
           <ComposerAssistanceCard />
+          <SettingsDivider />
+          {/* ADR-0194: the judge behind the IM reply copilot's intent / risk
+              read and draft ranking — assistance the composer consumes. */}
+          <DecisionProviderCard />
         </div>
       </SettingsCard>
 

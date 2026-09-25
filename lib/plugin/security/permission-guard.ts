@@ -108,6 +108,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   plan: ["plan:read", "plan:write"],
   issue: ["issue:read", "issue:write"],
   memory: ["memory:read", "memory:write"],
+  decisions: ["decisions:run", "decisions:provide"],
   team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
   share: ["share:read", "share:create"],
@@ -180,6 +181,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "vector:write": "Add to and delete from the vector store",
   "ai:chat": "Send prompts to a language model on your account (consumes your quota)",
   "ai:embed": "Generate embeddings on your account (consumes your quota)",
+  "decisions:run":
+    "Ask your selected decision provider typed questions (the request is redacted, then sent to that provider)",
+  "decisions:provide": "Offer a decision provider you can pick in Settings",
   "export:session": "Export chat sessions out of the app",
   "export:project": "Export whole projects out of the app",
   "theme:read": "Read the active theme",

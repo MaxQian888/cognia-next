@@ -4,12 +4,12 @@
   "version": "0.1.0",
   "description": "Local System-1 decisions via the laya checkpoint: moderates inbound connector (IM) messages for spam/threat/harassment/toxic in one ~60 ms forward pass — no LLM call, en+zh via the laya Router.",
   "type": "python",
-  "capabilities": ["python", "tools", "hooks"],
+  "capabilities": ["python", "tools", "hooks", "decision-provider"],
   "pythonMain": "main.py",
   "bundle_include": ["layaguard/__init__.py", "layaguard/engine.py", "README.md"],
   "pythonVenv": "isolated",
   "pythonDependencies": ["laya==0.3.5"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "author": {
     "name": "cognia-next"
   },
@@ -69,10 +69,19 @@
       }
     }
   ],
-  "permissions": ["python:execute", "network:fetch"],
+  "decisionProviders": [
+    {
+      "id": "laya-local",
+      "label": "Laya (local)",
+      "labelKey": "decisionProvider.label",
+      "description": "Answers typed questions with the local laya checkpoint (en + zh via the laya Router). Runs on this computer."
+    }
+  ],
+  "permissions": ["python:execute", "network:fetch", "decisions:provide"],
   "permissionJustifications": {
     "python:execute": "The plugin's hooks and tools run in the desktop Python host.",
-    "network:fetch": "First use downloads the laya checkpoint weights (~1.3 GB) from HuggingFace; they are cached locally afterwards."
+    "network:fetch": "First use downloads the laya checkpoint weights (~1.3 GB) from HuggingFace; they are cached locally afterwards.",
+    "decisions:provide": "Offers the local laya checkpoint as a System-1 decision provider you can select in Settings → Conversation; nothing is sent to it until you pick it."
   },
   "networkAccess": {
     "allowedDomains": ["huggingface.co", "*.huggingface.co", "*.hf.co", "hf-mirror.com"]
@@ -135,6 +144,16 @@
     "mobile": {
       "availability": "blocked",
       "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "decisionProvider.label": "Laya (local)"
+      },
+      "zh-CN": {
+        "decisionProvider.label": "Laya（本地）"
+      }
     }
   }
 }

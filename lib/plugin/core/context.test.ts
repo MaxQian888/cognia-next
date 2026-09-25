@@ -2285,6 +2285,9 @@ describe("python host-call parity (ADR-0145)", () => {
         "agent",
         "chat",
         "contextPanels",
+        // ADR-0194: a python plugin both provides (laya) and consumes System-1
+        // decisions through the same guarded ctx.decisions.
+        "decisions",
         "editor",
         "fs",
         "git",

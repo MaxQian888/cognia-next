@@ -171,6 +171,12 @@
       "require": "./dist/ocr-provider.cjs",
       "default": "./dist/ocr-provider.js"
     },
+    "./api/decision-provider": {
+      "types": "./dist/decision-provider.d.ts",
+      "import": "./dist/decision-provider.js",
+      "require": "./dist/decision-provider.cjs",
+      "default": "./dist/decision-provider.js"
+    },
     "./api/resources": {
       "types": "./dist/resources.d.ts",
       "import": "./dist/resources.js",

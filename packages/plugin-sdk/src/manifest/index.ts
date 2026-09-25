@@ -126,6 +126,7 @@ export type { PluginMessageRendererDef } from "@/types/plugin/plugin-message-ren
 export type { PluginModalMountDef } from "@/types/plugin/plugin-modal"
 export type { PluginNativeAnthropicToolDef } from "@/types/plugin/plugin-native-tool"
 export type { PluginOcrProviderDef } from "@/types/plugin/plugin-ocr"
+export type { PluginDecisionProviderDef } from "@/types/plugin/plugin-decisions"
 export type {
   PluginPetAchievementCondition,
   PluginPetAchievementDef,

@@ -1,0 +1,72 @@
+{
+  "title": "Decision provider",
+  "description": "A System-1 decision model answers typed questions (yes/no, pick one, score) in one fast pass. The IM reply copilot uses it to read intent and risk and to rank drafted replies; plugins reach it through ctx.decisions.",
+  "builtinRemote": "Remote decisions endpoint",
+  "provider": {
+    "label": "Provider",
+    "none": "None",
+    "noneHint": "Without a provider, the reply copilot still drafts replies but cannot judge the conversation or rank the drafts.",
+    "hint": "Every request is redacted before it reaches the provider.",
+    "missing": "The selected provider is not installed or its plugin is disabled.",
+    "missingOption": "{id} (not installed)"
+  },
+  "traits": {
+    "local": "Runs on this device",
+    "remote": "Remote service",
+    "calibrated": "Calibrated probabilities",
+    "uncalibrated": "Uncalibrated"
+  },
+  "status": {
+    "checking": "Checking…",
+    "ready": "Ready",
+    "loading": "Loading the model…",
+    "notReady": "Not ready: {reason}"
+  },
+  "http": {
+    "preset": "Endpoint",
+    "presets": {
+      "openrouter": "OpenRouter (typesafe/jev)",
+      "bocha": "Bocha Jev",
+      "typesafe": "TypeSafe",
+      "vercel": "Vercel AI Gateway",
+      "zen": "OpenCode Zen",
+      "custom": "Custom URL"
+    },
+    "url": "URL",
+    "urlRequired": "https://… (required)",
+    "model": "Model",
+    "modelRequired": "Model id (required)",
+    "key": "API key",
+    "keyPlaceholder": "Paste the endpoint's API key",
+    "keySaved": "A key is saved — paste a new one to replace it",
+    "saveKey": "Save key",
+    "clearKey": "Clear key",
+    "keyringUnavailable": "The key could not be stored: the secure store is unavailable on this device.",
+    "keyHint": "Get a key at {url}",
+    "problems": {
+      "no_preset": "Choose an endpoint.",
+      "no_url": "The custom endpoint needs a URL.",
+      "bad_url": "The URL must use https (plain http only for localhost).",
+      "no_model": "The endpoint needs a model id."
+    }
+  },
+  "test": {
+    "button": "Test connection",
+    "ok": "Answered in {latencyMs} ms"
+  },
+  "errors": {
+    "no_provider": "No provider is selected or it is not installed.",
+    "provider_unavailable": "The provider is not ready yet (the model may still be loading).",
+    "not_configured": "The endpoint is missing a URL, model or API key.",
+    "invalid_request": "The provider rejected the request as malformed.",
+    "pii": "The request still contained personal data after redaction, so nothing was sent.",
+    "network": "The endpoint could not be reached.",
+    "http_status": "The endpoint answered with an error status.",
+    "cors_unreachable": "The browser version cannot reach this endpoint. Use the desktop or mobile app.",
+    "timeout": "The provider did not answer in time.",
+    "aborted": "The request was cancelled.",
+    "recursive_provider": "A plugin cannot route decisions through its own provider.",
+    "provider_error": "The provider failed to answer."
+  },
+  "privacy": "Chat text sent for a decision has emails, phone numbers, IDs and keys replaced with placeholders first. Remote endpoints receive only that redacted text."
+}

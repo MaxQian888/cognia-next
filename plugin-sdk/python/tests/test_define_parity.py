@@ -91,6 +91,7 @@ PYTHON_MIRRORS: dict[str, str] = {
     # provider / language-server family
     "ai-provider": "define_ai_provider",
     "ocr-provider": "define_ocr_provider",
+    "decision-provider": "define_decision_provider",
     "lsp-server": "define_lsp_server",
     "cli-tool": "define_cli_tool",
     "connector": "define_connector",

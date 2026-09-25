@@ -152,6 +152,7 @@ import { createMessagePartAPI } from "../api/message-part-api"
 import { createToolResultAPI } from "../api/tool-result-api"
 import { createDexieAPI } from "../api/dexie-api"
 import { createOcrAPI } from "../api/ocr-api"
+import { createDecisionsAPI } from "../api/decisions-api"
 import { createWorkspaceAPI } from "../api/workspace-api"
 import { createModalAPI } from "../api/modal-api"
 import { createWebviewAPI } from "../api/webview-api"
@@ -422,6 +423,7 @@ export function createFullPluginContext(
     events: enhancedEvents,
     i18n: enhancedI18n,
     ocr: createOcrAPI(pluginId),
+    decisions: createDecisionsAPI(pluginId),
     workspace: createWorkspaceAPI(pluginId),
     modal: createModalAPI(pluginId),
     webview: createWebviewAPI(pluginId, plugin.manifest.networkAccess),

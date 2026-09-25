@@ -5,6 +5,7 @@ declarative provider contributions a plugin ships:
 
 * ``ai-provider``   → ``PluginAiProviderDef``  (manifest ``aiProviders``)
 * ``ocr-provider``  → ``PluginOcrProviderDef``  (manifest ``ocrProviders``)
+* ``decision-provider`` → ``PluginDecisionProviderDef`` (manifest ``decisionProviders``)
 * ``lsp-server``    → ``PluginLspServerDef`` / ``LspServerConfig`` (manifest ``lspServers``)
 * ``cli-tool``      → ``PluginCliToolDef``      (manifest ``cliTools``)
 * ``connector``     → ``PluginConnectorDef``    (manifest ``connectors``)
@@ -150,6 +151,74 @@ def define_ocr_provider(
     _require(export, "ocr provider export")
     return OcrProvider(
         id=id, label=label, entry=entry, export=export, description=description
+    )
+
+
+# -- decision-provider ------------------------------------------------------
+
+_CONTRIBUTION_BACKENDS = frozenset({"js", "python"})
+
+
+@dataclass(frozen=True)
+class DecisionProvider:
+    """A System-1 decision provider contribution (mirrors ``PluginDecisionProviderDef``).
+
+    A python-backed provider (the default for ``type: "python"`` plugins)
+    carries no ``entry``/``export``: the host calls ``describe()`` / ``decide()``
+    / ``status()`` on the object registered with ``@cognia.contribution(id)``.
+    A JS-backed one names a module + factory export instead.
+    """
+
+    id: str
+    label: str
+    label_key: Optional[str] = None
+    backend: Optional[str] = None
+    entry: Optional[str] = None
+    export: Optional[str] = None
+    description: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"id": self.id, "label": self.label}
+        if self.label_key is not None:
+            out["labelKey"] = self.label_key
+        if self.backend is not None:
+            out["backend"] = self.backend
+        if self.entry is not None:
+            out["entry"] = self.entry
+        if self.export is not None:
+            out["export"] = self.export
+        if self.description is not None:
+            out["description"] = self.description
+        return out
+
+
+def define_decision_provider(
+    id: str,
+    label: str,
+    *,
+    label_key: Optional[str] = None,
+    backend: Optional[str] = None,
+    entry: Optional[str] = None,
+    export: Optional[str] = None,
+    description: Optional[str] = None,
+) -> DecisionProvider:
+    """Construct a validated ``DecisionProvider``."""
+    _require(id, "decision provider id")
+    _require(label, "decision provider label")
+    if backend is not None and backend not in _CONTRIBUTION_BACKENDS:
+        raise ValueError(f"decision provider backend must be one of {sorted(_CONTRIBUTION_BACKENDS)}")
+    if (entry is None) != (export is None):
+        raise ValueError("a JS-backed decision provider needs both entry and export")
+    if backend == "python" and entry is not None:
+        raise ValueError("a python-backed decision provider cannot declare entry/export")
+    return DecisionProvider(
+        id=id,
+        label=label,
+        label_key=label_key,
+        backend=backend,
+        entry=entry,
+        export=export,
+        description=description,
     )
 
 

@@ -3996,6 +3996,14 @@ export interface AppSettings {
     model?: UtilityModelConfig
   }
   /**
+   * System-1 decisions (ADR-0194): which provider answers typed questions
+   * (`ctx.decisions`, the IM reply copilot's judge + rank) and the built-in
+   * remote endpoint's preset / url / model. The endpoint API key lives in the
+   * keyring (`lib/decisions/config.ts`). Absent → no provider; features that
+   * need one render an explicit "no judge" state.
+   */
+  decisions?: import("@/types/decisions").DecisionSettings
+  /**
    * Non-LLM composer / send-box behavior toggles. Every field defaults to the
    * historical hard-coded behavior (treated as `true` via `!== false`), so an
    * absent block leaves existing users unchanged. Read renderer-side in

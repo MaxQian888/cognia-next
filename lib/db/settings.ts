@@ -275,6 +275,7 @@ export const DEFAULTS: AppSettings = {
   runStatusBar: { ...DEFAULT_RUN_STATUS_BAR },
   composerBehavior: {},
   composerAssistance: {},
+  decisions: {},
 }
 
 function omitAgentFlowMode(

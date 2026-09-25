@@ -32,6 +32,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.contextMenu` | 2 | None | frontend, hybrid | internal |
 | `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
+| `ctx.decisions` | 5 | `decisions:run`, `decisions:provide` | frontend, hybrid, python | sensitive |
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid, python | internal |
 | `ctx.eval` | 5 | `tests:run`, `database:read`, `ai:chat`, `database:write` | frontend, hybrid | sensitive |
@@ -448,6 +449,16 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `db.query` | `database:read` | medium | Yes |
 | `db.tableExists` | `database:read` | medium | Yes |
 | `db.transaction` | `database:read` | medium | No |
+
+## `ctx.decisions`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `decisions.decide` | `decisions:run` | medium | Yes |
+| `decisions.getSelectedProviderId` | None | low | Yes |
+| `decisions.listProviders` | None | low | Yes |
+| `decisions.listRegistered` | None | low | Yes |
+| `decisions.registerProvider` | `decisions:provide` | medium | No |
 
 ## `ctx.dexie`
 

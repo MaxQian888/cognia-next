@@ -47,6 +47,8 @@ describe("lib/plugin/api barrel", () => {
     "revokePermission",
     "createOcrAPI",
     "clearOcrProvidersForPlugin",
+    "createDecisionsAPI",
+    "clearDecisionProvidersForPlugin",
     "createWorkspaceAPI",
     "clearWorkspaceBackendsForPluginContext",
     "createModalAPI",

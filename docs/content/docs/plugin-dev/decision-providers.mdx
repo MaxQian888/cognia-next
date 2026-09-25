@@ -1,0 +1,162 @@
+---
+title: Decision providers
+description: Ask typed yes/no, pick-one and score questions through ctx.decisions, or contribute a System-1 decision backend with decisionProviders.
+---
+
+# Decision providers
+
+A **decision** is a typed question answered in one pass by a System-1 model —
+not a paragraph of generated text. Cognia routes every decision through one
+host entry point (ADR-0194), so a plugin either **asks** questions or
+**answers** them, and the host owns validation, redaction, deadlines and typed
+errors in between.
+
+## Question types
+
+| `type`   | `criteria`                                   | Answer                                                  |
+| -------- | -------------------------------------------- | ------------------------------------------------------- |
+| `noul`   | optional `{ true?, false? }` descriptions    | `{ type: "noul", noul }` — P(true), 0..1                |
+| `choice` | `{ key: description }`, 2–255 entries        | `{ type: "choice", choice, probabilities, confidence }` |
+| `score`  | `["lowest level", …, "highest level"]`, ≥ 2  | `{ type: "score", score, levels, confidence }`          |
+
+Instructions reference `state` fields by name (`` `post` ``, `` `chat` ``).
+The wire format is the TypeSafe decisions protocol, so the same request works
+against the local laya provider and the remote endpoints.
+
+## Asking: `ctx.decisions.decide`
+
+Requires `decisions:run`. The user picks the provider in **Settings →
+Conversation → Decision provider**; your plugin never chooses where the data
+goes unless it passes an installed `providerId` explicitly.
+
+```ts
+const result = await ctx.decisions.decide({
+  state: { post: message.text },
+  questions: {
+    urgent: { type: "noul", instructions: "Does `post` communicate a deadline?" },
+    team: {
+      type: "choice",
+      instructions: "Which team should handle `post`?",
+      criteria: { billing: "invoices, refunds", technical: "bugs, outages", other: "anything else" },
+    },
+  },
+})
+
+if (!result.ok) {
+  // result.error.kind: no_provider | provider_unavailable | not_configured |
+  // invalid_request | pii | network | http_status | cors_unreachable |
+  // timeout | aborted | recursive_provider | provider_error
+  return
+}
+const urgent = result.answers.urgent // { type: "noul", noul: 0.91 }
+```
+
+Before anything leaves the host, every string **value** in `state` and in the
+question text is redacted (emails, phone numbers, IDs, keys become
+`<KIND_NNN>` placeholders) and the request is refused with `pii` if anything
+survives. This applies to every provider, local or remote. `result.redactions`
+counts the replacements.
+
+For long list-shaped state, pass `stateTrim` — the path to a list whose
+**oldest** entries a budget-limited provider may drop first:
+
+```ts
+await ctx.decisions.decide({
+  state: { chat: { messages } },
+  questions,
+  stateTrim: ["chat", "messages"],
+})
+// result.stateTrimmed: how many oldest entries were dropped
+// result.truncation: per-question instruction/option tokens a local encoder cut
+```
+
+Without it, a local encoder cuts the serialized state from the **tail**, which
+for a conversation silently drops the newest messages.
+
+## Answering: `decisionProviders`
+
+Requires `decisions:provide` and the `decision-provider` capability.
+Registering makes the provider **pickable**. Nothing is sent to it until the
+user selects it.
+
+### Python
+
+```json title="plugin.json"
+{
+  "type": "python",
+  "capabilities": ["python", "decision-provider"],
+  "permissions": ["python:execute", "decisions:provide"],
+  "decisionProviders": [{ "id": "local-judge", "label": "Local judge", "labelKey": "judge.label" }]
+}
+```
+
+```python title="main.py"
+import cognia
+
+@cognia.contribution("local-judge")
+class LocalJudge:
+    def describe(self):
+        # Read once at registration. `limits` lets callers pick compact wording.
+        return {"locality": "local", "calibrated": True,
+                "limits": {"headTokens": 192, "inputTokens": 512, "optionTokens": 48}}
+
+    def decide(self, request):
+        # request = {"state": ..., "questions": ..., "stateTrim"?: [...]}
+        try:
+            answers = run_model(request["state"], request["questions"])
+        except Exception as exc:
+            return {"ok": False, "error": {"kind": "provider_error", "message": str(exc)}}
+        return {"ok": True, "answers": answers, "latencyMs": 42}
+
+    def status(self):
+        return {"ready": True}
+```
+
+Reply with an envelope — never raise. Exceptions cross the RPC as bare
+strings, so the host could not tell "still loading" from "malformed question".
+Unknown `kind`s become `provider_error`. Only the request crosses the RPC: the
+host's abort signal stays on the host, which races your call against a
+deadline.
+
+`locality` is shown to the user but **does not** relax redaction — the host
+cannot verify it.
+
+### TypeScript
+
+```ts title="src/judge.ts"
+import { defineDecisionProvider } from "@cognia/plugin-sdk/api/decision-provider"
+import type { PluginDecisionProviderFactory } from "@cognia/plugin-sdk/api/decision-provider"
+
+export const judgeDef = defineDecisionProvider({
+  id: "cloud-judge",
+  label: "Cloud judge",
+  entry: "dist/judge.js",
+  export: "createJudge",
+})
+
+export const createJudge: PluginDecisionProviderFactory = () => ({
+  id: "cloud-judge",
+  label: "Cloud judge",
+  locality: "remote",
+  calibrated: true,
+  async decide(request, { signal } = {}) {
+    // …call your model, honoring signal…
+    return { ok: true, answers: {} }
+  },
+})
+```
+
+Or register imperatively from `activate()` with
+`ctx.decisions.registerProvider(provider)`; the returned handle's
+`unregister()` is idempotent and the host drops everything on disable.
+
+A plugin cannot route decisions through **its own** provider
+(`recursive_provider`) — call your model directly instead.
+
+## Reference
+
+- Built-in local backend: `plugins/cognia-laya-guard` (`laya-local`).
+- Minimal python reference: `plugins/cognia-python-runtime-demo` (`echo-decision`).
+- Pure helpers for providers: `validateDecisionRequest`,
+  `validateDecisionQuestions`, `scoreFraction` from
+  `@cognia/plugin-sdk/api/decision-provider`.

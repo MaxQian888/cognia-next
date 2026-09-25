@@ -35,6 +35,10 @@
 //!   Mirroring one device's policy onto another would silently weaken it, or lock out a device
 //!   with no biometric hardware at all.
 //!
+//! `decisions` — device-local (never crosses the wire).
+//!   The selected provider is often a plugin that exists on one device only (laya runs in the
+//!   desktop Python host) and the endpoint key sits in that device's keyring.
+//!
 //! `lockScreen` — device-local (never crosses the wire).
 //!   Lock-screen preferences can reference wallpapers stored only on this device.
 //!

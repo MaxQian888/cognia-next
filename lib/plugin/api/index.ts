@@ -47,6 +47,7 @@ export {
   revokePermission,
 } from "./permission-api"
 export { createOcrAPI, clearOcrProvidersForPlugin } from "./ocr-api"
+export { createDecisionsAPI, clearDecisionProvidersForPlugin } from "./decisions-api"
 export { createCharacterPacksAPI } from "./character-packs-api"
 export { createUserSchedulerAPI } from "./scheduler-tasks"
 export { createWorkspaceAPI, clearWorkspaceBackendsForPluginContext } from "./workspace-api"
@@ -124,6 +125,7 @@ export type {
 
 // Re-export mounted context API types.
 export type { PluginOcrAPI } from "./ocr-api"
+export type { PluginDecisionsAPI } from "./decisions-api"
 export type {
   PluginCharacterPackRegistration,
   PluginCharacterPacksAPI,

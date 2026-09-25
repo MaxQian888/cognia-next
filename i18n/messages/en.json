@@ -21515,9 +21515,9 @@
       "httpError": {
         "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
         "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
-        "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
         "403Identity": "The Host refused this account — its recorded binding or tenant doesn't match this device. A fresh invitation from the same account will be refused the same way.",
         "403Spent": "The Host refused the invitation itself — it has expired or was already redeemed. Issue a new one; re-sending this string cannot work.",
+        "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
         "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
         "generic": "Pairing failed (HTTP {status})."
       },
@@ -32666,12 +32666,12 @@
         "installedRestartRequired": "Update installed. Restart Cognia to finish.",
         "installing": "Installing…",
         "intervals": {
-          "15": "Every 15 minutes",
-          "60": "Every hour",
-          "360": "Every 6 hours",
-          "720": "Every 12 hours",
+          "10080": "Weekly",
           "1440": "Daily",
-          "10080": "Weekly"
+          "15": "Every 15 minutes",
+          "360": "Every 6 hours",
+          "60": "Every hour",
+          "720": "Every 12 hours"
         },
         "lastChecked": "Last checked",
         "relaunchAfterInstallDescription": "Restart immediately after installation. On Windows, the installer may close the app regardless.",
@@ -33826,8 +33826,8 @@
             "label": "Copy button on inline math"
           },
           "mathFontScale": {
-            "1": "Normal",
             "0_8": "Small",
+            "1": "Normal",
             "1_2": "Large",
             "label": "Math size"
           },
@@ -38512,6 +38512,78 @@
         "runNow": "Run workspace maintenance",
         "running": "Running…",
         "title": "Managed workspace maintenance"
+      }
+    },
+    "decisionProviders": {
+      "builtinRemote": "Remote decisions endpoint",
+      "description": "A System-1 decision model answers typed questions (yes/no, pick one, score) in one fast pass. The IM reply copilot uses it to read intent and risk and to rank drafted replies; plugins reach it through ctx.decisions.",
+      "errors": {
+        "aborted": "The request was cancelled.",
+        "cors_unreachable": "The browser version cannot reach this endpoint. Use the desktop or mobile app.",
+        "http_status": "The endpoint answered with an error status.",
+        "invalid_request": "The provider rejected the request as malformed.",
+        "network": "The endpoint could not be reached.",
+        "no_provider": "No provider is selected or it is not installed.",
+        "not_configured": "The endpoint is missing a URL, model or API key.",
+        "pii": "The request still contained personal data after redaction, so nothing was sent.",
+        "provider_error": "The provider failed to answer.",
+        "provider_unavailable": "The provider is not ready yet (the model may still be loading).",
+        "recursive_provider": "A plugin cannot route decisions through its own provider.",
+        "timeout": "The provider did not answer in time."
+      },
+      "http": {
+        "clearKey": "Clear key",
+        "key": "API key",
+        "keyHint": "Get a key at {url}",
+        "keyPlaceholder": "Paste the endpoint's API key",
+        "keySaved": "A key is saved — paste a new one to replace it",
+        "keyringUnavailable": "The key could not be stored: the secure store is unavailable on this device.",
+        "model": "Model",
+        "modelRequired": "Model id (required)",
+        "preset": "Endpoint",
+        "presets": {
+          "bocha": "Bocha Jev",
+          "custom": "Custom URL",
+          "openrouter": "OpenRouter (typesafe/jev)",
+          "typesafe": "TypeSafe",
+          "vercel": "Vercel AI Gateway",
+          "zen": "OpenCode Zen"
+        },
+        "problems": {
+          "bad_url": "The URL must use https (plain http only for localhost).",
+          "no_model": "The endpoint needs a model id.",
+          "no_preset": "Choose an endpoint.",
+          "no_url": "The custom endpoint needs a URL."
+        },
+        "saveKey": "Save key",
+        "url": "URL",
+        "urlRequired": "https://… (required)"
+      },
+      "privacy": "Chat text sent for a decision has emails, phone numbers, IDs and keys replaced with placeholders first. Remote endpoints receive only that redacted text.",
+      "provider": {
+        "hint": "Every request is redacted before it reaches the provider.",
+        "label": "Provider",
+        "missing": "The selected provider is not installed or its plugin is disabled.",
+        "missingOption": "{id} (not installed)",
+        "none": "None",
+        "noneHint": "Without a provider, the reply copilot still drafts replies but cannot judge the conversation or rank the drafts."
+      },
+      "status": {
+        "checking": "Checking…",
+        "loading": "Loading the model…",
+        "notReady": "Not ready: {reason}",
+        "ready": "Ready"
+      },
+      "test": {
+        "button": "Test connection",
+        "ok": "Answered in {latencyMs} ms"
+      },
+      "title": "Decision provider",
+      "traits": {
+        "calibrated": "Calibrated probabilities",
+        "local": "Runs on this device",
+        "remote": "Remote service",
+        "uncalibrated": "Uncalibrated"
       }
     },
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",

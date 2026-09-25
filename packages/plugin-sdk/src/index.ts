@@ -248,6 +248,7 @@ export type {
 } from "@/types/bot/run"
 export { defineMode } from "./define/define-mode"
 export { defineOcrProvider } from "./define/define-ocr-provider"
+export { defineDecisionProvider } from "./define/define-decision-provider"
 export { definePetAchievement } from "./define/define-pet-achievement"
 export { definePetItem } from "./define/define-pet-item"
 export { defineScheduledTask } from "./define/define-scheduled-task"

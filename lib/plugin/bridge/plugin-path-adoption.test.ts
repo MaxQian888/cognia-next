@@ -7,6 +7,7 @@ const PATH_CONSUMING_BRIDGES = [
   "config-component-bridge.ts",
   "context-panels-bridge.ts",
   "context-providers-bridge.ts",
+  "decision-providers-bridge.ts",
   "deployment-filters-bridge.ts",
   "external-agent-adapters-bridge.ts",
   "message-renderer-bridge.ts",

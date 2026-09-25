@@ -13,6 +13,9 @@ Surface:
 * Tools — ``laya_status`` (readiness, optional retry), ``laya_moderate_check``
   (same verdict as the hook, on arbitrary text), ``laya_decide`` (raw typed
   questions).
+* Decision provider ``laya-local`` (ADR-0194) — the host's local System-1
+  backend for ``ctx.decisions`` and the IM reply copilot. The host redacts and
+  PII-gates every request before it reaches ``decide``.
 
 Everything fails open: while the checkpoint is still loading (first run pulls
 ~1.3 GB from HuggingFace) or on any error, messages are allowed through rather
@@ -30,7 +33,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import cognia
-from cognia import get_config, hook, tool
+from cognia import contribution, get_config, hook, tool
 
 from layaguard import GuardEngine
 
@@ -143,3 +146,46 @@ def laya_moderate_check(text: str) -> Dict[str, Any]:
 )
 def laya_decide(state: Dict[str, Any], questions: Dict[str, Any]) -> Dict[str, Any]:
     return ENGINE.decide(state, questions)
+
+
+# ---------------------------------------------------------------------------
+# decision provider (ADR-0194)
+# ---------------------------------------------------------------------------
+
+#: Head / sequence budgets per checkpoint (the checkpoints' rl_agent_config).
+#: `auto` routes to either, so it advertises the tighter english budget.
+_CHECKPOINT_LIMITS: Dict[str, Dict[str, int]] = {
+    "english": {"headTokens": 192, "inputTokens": 512, "optionTokens": 48},
+    "multilingual": {"headTokens": 256, "inputTokens": 1024, "optionTokens": 48},
+    "typed-decisions": {"headTokens": 256, "inputTokens": 1024, "optionTokens": 48},
+}
+
+
+def _limits() -> Dict[str, int]:
+    return dict(_CHECKPOINT_LIMITS.get(ENGINE.config["checkpoint"], _CHECKPOINT_LIMITS["english"]))
+
+
+@contribution("laya-local")
+class LayaDecisionProvider:
+    """``manifest.decisionProviders[laya-local]`` — typed decisions on this machine."""
+
+    def describe(self) -> Dict[str, Any]:
+        return {"locality": "local", "calibrated": True, "limits": _limits()}
+
+    def decide(self, request: Any) -> Dict[str, Any]:
+        if not isinstance(request, dict):
+            return {"ok": False, "error": {"kind": "invalid_request", "message": "request must be an object"}}
+        result = ENGINE.decide(request.get("state"), request.get("questions"), request.get("stateTrim"))
+        result.pop("status", None)  # host reads readiness through status()
+        return result
+
+    def status(self) -> Dict[str, Any]:
+        status = ENGINE.status()
+        if status["ready"]:
+            return {"ready": True}
+        if status["loading"]:
+            return {"ready": False, "loading": True, "message": "laya checkpoint is loading"}
+        message = status["error"] or "laya checkpoint is not loaded"
+        if status.get("retryInSeconds"):
+            message += f" (retrying in {int(status['retryInSeconds'])} s)"
+        return {"ready": False, "message": message}
