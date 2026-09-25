@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
-jest.mock("@/lib/tauri/events", () => ({ onTauriEvent: jest.fn() }))
+// Resolves by default: `agent-engine` builds its embedded engine at import time,
+// which subscribes (and chains `.catch`) before any `beforeEach` can run.
+jest.mock("@/lib/tauri/events", () => ({ onTauriEvent: jest.fn(async () => () => undefined) }))
 jest.mock("@/lib/tauri/safe-unlisten", () => ({ safeUnlisten: jest.fn((fn: () => void) => fn()) }))
 jest.mock("@/lib/browser/recording/replayer", () => ({ replayFlow: jest.fn() }))
 jest.mock("@/lib/browser/client", () => ({

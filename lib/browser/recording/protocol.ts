@@ -130,19 +130,6 @@ export interface RecordedFlow {
   steps: RecordedStep[]
 }
 
-/** Steps that address an element. Narrowing helper for exporters and the UI. */
-export function hasTarget(
-  step: RecordedStep
-): step is
-  | ClickStep
-  | DoubleClickStep
-  | HoverStep
-  | FillStep
-  | SelectStep
-  | (PressKeyStep & { target: RecordedTarget }) {
-  return "target" in step && step.target != null
-}
-
 /**
  * The step that survives when `next` collapses into `prev`, or null when the two
  * are distinct interactions that must both replay. Successive `fill`/`select` on
@@ -175,19 +162,6 @@ function collapsed(prev: RecordedStep, next: RecordedStep): RecordedStep | null 
   // model prompt in the agent export). Never downgrade; only ever latch on.
   const secret = (prev as FillStep).secret === true || (next as FillStep).secret === true
   return secret ? { ...(b as FillStep), secret: true, value: "" } : b
-}
-
-/**
- * True when `next` collapses into `prev` rather than following it.
- *
- * This is a predicate for callers that only need the yes/no (step-list UI,
- * tests). Never use it to build the survivor yourself — `supersedes(secret,
- * plain)` is true, and replacing the secret step with the plain one is exactly
- * the credential leak {@link collapsed} exists to prevent. {@link appendStep}
- * owns the merge.
- */
-export function supersedes(prev: RecordedStep, next: RecordedStep): boolean {
-  return collapsed(prev, next) !== null
 }
 
 /**

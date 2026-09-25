@@ -72,3 +72,15 @@ The capability is hard-gated by `COGNIA_REMOTE_BROWSER_ENABLED=false` by default
 - Use Playwright MCP as the product backend.
 - Replace `EmbeddedEngine` or delete the existing disposable runner in the same release.
 - Persist continuous frames, credentials, or browser traces by default.
+
+## Addendum (2026-09-25) — deleting a named profile erases it
+
+A named profile is a user-data directory on the workspace runtime. Settings
+could create and select one but never delete it, and `deleteBrowserProfile`
+only removed the client's row, which would have orphaned the directory.
+`browser_profile_delete { workspaceId, profileId }` now reaches the runtime's
+`browser.profile.delete` operation, which removes the directory. Both the
+gateway (per account and workspace) and the runtime refuse while a session holds
+the profile, and the runtime refuses any id that would resolve outside its
+profiles root. The client erases the runtime's copy first and forgets the row
+only afterwards, so a refusal leaves the profile listed and retryable.

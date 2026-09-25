@@ -124,11 +124,6 @@ export const browserClient = {
       labels: JSON.stringify(labels),
       ownerToken: requiredEmbedOwnerToken(),
     }),
-  embedSetFrozen: (on: boolean) =>
-    transport.call<void>("browser_embed_set_frozen", {
-      on,
-      ownerToken: requiredEmbedOwnerToken(),
-    }),
   /** Freeze dynamic content, wait for the paused frame to settle, then capture. */
   embedCapture: async (rect: ElementRect) => {
     const ownerToken = requiredEmbedOwnerToken()

@@ -131,3 +131,19 @@ MCP 预设可以连接用户通过 Microsoft 官方 Playwright 扩展明确选�
 
 Cookie 导入仍然是内嵌 WKWebView 的支持桥梁，继续保持显式启用、仅限 macOS、元数据脱敏和
 钥匙串授权边界。本 ADR 仍不覆盖 Firefox、Safari、任意 Chromium 分支或自动会话迁移。
+
+## 附录（2026-09-25）——可以移除导入的登录态
+
+此前没有任何办法移除导入到预览中的 Cookie：预览与主窗口共用网站数据存储，Cookie 会跨重启保留，
+关闭设置开关也不会清掉它们。
+
+- **在预览中退出登录。** `browser_cookie_clear(domain)` 删除预览当前所示站点的 Cookie（其可注册域及
+  所有子域，与导入读取的范围一致），只返回数量。它刻意不受导入开关与同意授权约束：同意针对的是读取
+  另一个浏览器的凭据，而不是移除预览自身的 Cookie。因此 Cookie 操作在任何公网页面上都可打开，
+  并在对话框内说明导入为何不可用（未启用、无配置、平台不支持），同时仍提供清除。
+- **清除全部数据。** `browser_cookie_clear_all` 移除所有*公网站点*的 Cookie（本地开发主机、IP 字面量与
+  应用自身的 `tauri.localhost` 源会保留）；`lib/data/clear.ts:clearAll` 会调用它，并同时清除浏览器的
+  `localStorage` 偏好（含导入同意）。这一步尽力而为：Cookie 存储不可达时只记录日志，不会让账户数据
+  停留在删了一半的状态。
+- 通过 WebView 自身 Cookie API 逐条删除是唯一安全的粒度；`clear_all_browsing_data` 会连同 Cognia
+  自身在共享数据存储中的数据一起清掉。

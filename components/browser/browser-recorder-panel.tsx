@@ -1,27 +1,9 @@
 "use client"
 
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  ChevronDown,
-  ChevronUp,
-  Circle,
-  Download,
-  Pencil,
-  Play,
-  Plus,
-  Save,
-  Square,
-  Trash2,
-} from "lucide-react"
+import { Circle, Download, Pencil, Play, Plus, Save, Square, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
-import {
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react"
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react"
 import { toast } from "sonner"
 
 import { useFlowRecorder, type UseFlowRecorder } from "@/hooks/browser/use-flow-recorder"
@@ -39,7 +21,6 @@ import {
   type RecordedStep,
 } from "@/lib/browser/recording/protocol"
 import { saveFileAs } from "@/lib/files/file-bridge"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -62,17 +43,17 @@ export interface BrowserRecorderPanelProps {
    * that time is assertable from a test.
    */
   now?: () => number
-  /** Re-measure the sibling native preview after this panel changes height. */
-  onLayoutChange?: () => void
   /** Host-specific recorder; absent keeps the embedded desktop recorder. */
   recorder?: UseFlowRecorder
   /**
-   * Draw the panel's own section wrapper, title and collapse toggle. Default
-   * true keeps the standalone usage (the remote preview mounts this directly)
-   * unchanged; {@link BrowserToolsDock} passes false because it owns one strip
-   * of chrome for every tool.
+   * Reports the live take: its step count while recording, `null` otherwise.
+   *
+   * The panel lives inside {@link BrowserToolsDock}, which is collapsed most of
+   * the time, so the only place a running take can be seen from is the dock's
+   * own header. Without this the dock's recording badge had no source and a
+   * take ran silently behind a closed strip.
    */
-  chrome?: boolean
+  onRecordingChange?: (steps: number | null) => void
 }
 
 /** Render a step as one human-readable line for the step list. */
@@ -374,14 +355,17 @@ function FlowReview({
  *
  * Three states, derived rather than stored: recording (a take is live),
  * reviewing (a finished flow is in hand), idle.
+ *
+ * A body only: the surrounding strip, its tab and its collapse state belong to
+ * {@link BrowserToolsDock}, which keeps this mounted while collapsed so a take
+ * in progress survives the strip being closed.
  */
 export function BrowserRecorderPanel({
   pageUrl,
   onSendToChat,
   now = Date.now,
-  onLayoutChange,
   recorder: providedRecorder,
-  chrome = true,
+  onRecordingChange,
 }: BrowserRecorderPanelProps) {
   const t = useTranslations("browser")
   const stepLabel = useStepLabel()
@@ -391,16 +375,18 @@ export function BrowserRecorderPanel({
   const [name, setName] = useState("")
   const [assertion, setAssertion] = useState("")
   const [secrets, setSecrets] = useState<Record<string, string>>({})
-  // Chrome-less means the dock decides what is visible, so the body is always
-  // rendered; standalone keeps its own toggle.
-  const [ownExpanded, setOwnExpanded] = useState(true)
-  const expanded = chrome ? ownExpanded : true
-  const previousExpandedRef = useRef(expanded)
-  useLayoutEffect(() => {
-    if (previousExpandedRef.current === expanded) return
-    previousExpandedRef.current = expanded
-    onLayoutChange?.()
-  }, [expanded, onLayoutChange])
+  const liveSteps = recorder.recording ? recorder.steps.length : null
+  const onRecordingChangeRef = useRef(onRecordingChange)
+  useEffect(() => {
+    onRecordingChangeRef.current = onRecordingChange
+  }, [onRecordingChange])
+  useEffect(() => {
+    onRecordingChangeRef.current?.(liveSteps)
+  }, [liveSteps])
+  // Unmounting cancels the take (see `useFlowRecorder`), so a host holding a
+  // copy of the count must not go on showing one — the pane switching backend
+  // unmounts this panel mid-take.
+  useEffect(() => () => onRecordingChangeRef.current?.(null), [])
   /**
    * The flows saved for the loaded origin. `useLiveQuery` re-runs this whenever
    * `browserRecordings` is written, so saving, renaming and deleting all land in
@@ -417,9 +403,6 @@ export function BrowserRecorderPanel({
 
   const start = useCallback(async () => {
     if (!pageUrl) return
-    // Standalone, arming a take reveals the step list. Inside the dock the
-    // surrounding strip owns visibility, so this is a no-op there.
-    setOwnExpanded(true)
     setFlow(null)
     await recorder.start(pageUrl)
   }, [pageUrl, recorder])
@@ -467,26 +450,7 @@ export function BrowserRecorderPanel({
 
   const header = (
     <header className="flex items-center gap-2">
-      {chrome && <h2 className="text-sm font-medium">{t("record.title")}</h2>}
-      {chrome && recorder.recording && (
-        <Badge variant="destructive" className="gap-1">
-          <Circle className="size-2 fill-current" aria-hidden />
-          {t("record.recording", { count: recorder.steps.length })}
-        </Badge>
-      )}
       <div className="ml-auto flex items-center gap-1">
-        {chrome && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            aria-label={expanded ? t("record.collapse") : t("record.expand")}
-            aria-expanded={expanded}
-            onClick={() => setOwnExpanded((value) => !value)}
-          >
-            {expanded ? <ChevronDown aria-hidden /> : <ChevronUp aria-hidden />}
-          </Button>
-        )}
         {recorder.recording ? (
           <Button size="sm" variant="secondary" onClick={() => void stop()}>
             <Square aria-hidden />
@@ -575,23 +539,15 @@ export function BrowserRecorderPanel({
     </>
   )
 
-  if (!chrome) {
-    return (
-      <div className="flex flex-col gap-2" data-testid="browser-recorder-panel">
-        {header}
-        {body}
-      </div>
-    )
-  }
-
   return (
-    <section
-      className="flex flex-col gap-2 border-t p-3"
+    <div
+      role="group"
       aria-label={t("record.title")}
+      className="flex flex-col gap-2"
       data-testid="browser-recorder-panel"
     >
       {header}
-      {expanded && body}
-    </section>
+      {body}
+    </div>
   )
 }

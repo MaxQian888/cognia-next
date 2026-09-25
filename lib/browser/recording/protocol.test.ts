@@ -1,20 +1,16 @@
 import {
   appendStep,
-  hasTarget,
   isReplayable,
   requiredSecrets,
   resolveStepUrl,
   secretKey,
-  supersedes,
   type ClickStep,
   type FillStep,
   type NavigateStep,
-  type PressKeyStep,
   type RecordedFlow,
   type RecordedStep,
   type RecordedTarget,
   type SelectStep,
-  type WaitForStep,
 } from "@/lib/browser/recording/protocol"
 
 function target(selector: string, over: Partial<RecordedTarget> = {}): RecordedTarget {
@@ -49,49 +45,19 @@ function flow(over: Partial<RecordedFlow> = {}): RecordedFlow {
   }
 }
 
-describe("hasTarget", () => {
-  it("narrows element-addressing steps", () => {
-    expect(hasTarget(click("#a"))).toBe(true)
-    expect(hasTarget(fill("#a", "x"))).toBe(true)
-    expect(hasTarget(select("#a", "x"))).toBe(true)
+// The collapse rules, pinned through `appendStep` — the one place that merges.
+describe("appendStep collapse rules", () => {
+  it("collapses a select on the same element into its last value", () => {
+    const steps = appendStep([select("#plan", "free")], select("#plan", "pro"))
+    expect(steps).toEqual([select("#plan", "pro")])
   })
 
-  it("rejects steps with no element", () => {
-    expect(hasTarget(navigate("http://localhost:3000/"))).toBe(false)
-    expect(hasTarget({ act: "wait_for", at: 1, text: "Welcome" } satisfies WaitForStep)).toBe(false)
+  it("does not collapse across different acts on one element", () => {
+    expect(appendStep([fill("#email", "x")], click("#email"))).toHaveLength(2)
   })
 
-  it("treats a targetless press_key as untargeted", () => {
-    const bare: PressKeyStep = { act: "press_key", at: 1, key: "Enter" }
-    const aimed: PressKeyStep = { act: "press_key", at: 1, key: "Enter", target: target("#a") }
-    expect(hasTarget(bare)).toBe(false)
-    expect(hasTarget(aimed)).toBe(true)
-  })
-})
-
-describe("supersedes", () => {
-  it("supersedes a fill on the same element", () => {
-    expect(supersedes(fill("#email", "a@"), fill("#email", "a@b.c"))).toBe(true)
-  })
-
-  it("supersedes a select on the same element", () => {
-    expect(supersedes(select("#plan", "free"), select("#plan", "pro"))).toBe(true)
-  })
-
-  it("does not supersede across different elements", () => {
-    expect(supersedes(fill("#email", "x"), fill("#password", "y"))).toBe(false)
-  })
-
-  it("does not supersede across different acts", () => {
-    expect(supersedes(fill("#email", "x"), click("#email"))).toBe(false)
-  })
-
-  it("never supersedes clicks — two clicks are two real interactions", () => {
-    expect(supersedes(click("#submit"), click("#submit"))).toBe(false)
-  })
-
-  it("never supersedes navigations", () => {
-    expect(supersedes(navigate("http://a/"), navigate("http://a/"))).toBe(false)
+  it("never collapses clicks — two clicks are two real interactions", () => {
+    expect(appendStep([click("#submit")], click("#submit"))).toHaveLength(2)
   })
 })
 

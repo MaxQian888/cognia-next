@@ -1,44 +1,73 @@
 import { act, renderHook } from "@testing-library/react"
 
-import { MAX_BROWSER_HISTORY, useBrowserHistory } from "./use-browser-history"
+jest.mock("@/lib/db/browser-history", () => ({ recordBrowserVisit: jest.fn() }))
+jest.mock("@cognia/logging", () => ({ loggers: { store: { warn: jest.fn() } } }))
+
+import { loggers } from "@cognia/logging"
+import { recordBrowserVisit } from "@/lib/db/browser-history"
+import { useBrowserHistory } from "./use-browser-history"
+
+const record = recordBrowserVisit as jest.Mock
+
+beforeEach(() => {
+  record.mockReset().mockResolvedValue(undefined)
+  ;(loggers.store.warn as jest.Mock).mockClear()
+})
 
 describe("useBrowserHistory", () => {
-  it("keeps most-recent-first and collapses consecutive duplicates", () => {
-    const { result } = renderHook(() => useBrowserHistory())
-    act(() => result.current.push("a"))
-    act(() => result.current.push("a"))
-    act(() => result.current.push("b"))
-    expect(result.current.recent).toEqual(["b", "a"])
-  })
-
-  it("moves an already-seen url to the front", () => {
-    const { result } = renderHook(() => useBrowserHistory())
-    act(() => result.current.push("a"))
-    act(() => result.current.push("b"))
-    act(() => result.current.push("a"))
-    expect(result.current.recent).toEqual(["a", "b"])
-  })
-
-  it("ignores empty urls", () => {
-    const { result } = renderHook(() => useBrowserHistory())
-    act(() => result.current.push(""))
-    expect(result.current.recent).toEqual([])
-  })
-
-  it(`caps the list at ${MAX_BROWSER_HISTORY} entries`, () => {
-    const { result } = renderHook(() => useBrowserHistory())
-    act(() => {
-      for (let i = 0; i < MAX_BROWSER_HISTORY + 5; i++) result.current.push(`u${i}`)
+  // The stack is a position and dies with the pane; the places visited are
+  // what the history menu lists, so each arrival is written through.
+  describe("visit recording", () => {
+    it("records each page the pane arrives at", () => {
+      const { result } = renderHook(() => useBrowserHistory())
+      act(() => result.current.push("https://a.example/"))
+      act(() => result.current.push("https://b.example/"))
+      expect(record.mock.calls.map(([url]) => url)).toEqual([
+        "https://a.example/",
+        "https://b.example/",
+      ])
     })
-    expect(result.current.recent).toHaveLength(MAX_BROWSER_HISTORY)
-    expect(result.current.recent[0]).toBe(`u${MAX_BROWSER_HISTORY + 4}`)
-  })
 
-  it("clears the whole list", () => {
-    const { result } = renderHook(() => useBrowserHistory())
-    act(() => result.current.push("a"))
-    act(() => result.current.clear())
-    expect(result.current.recent).toEqual([])
+    it("does not record a repeat of the page it is already on", () => {
+      const { result } = renderHook(() => useBrowserHistory())
+      act(() => result.current.push("https://a.example/"))
+      act(() => result.current.push("https://a.example/"))
+      expect(record).toHaveBeenCalledTimes(1)
+    })
+
+    it("records an in-place replace and a step back as arrivals", () => {
+      const { result } = renderHook(() => useBrowserHistory())
+      act(() => result.current.push("https://a.example/"))
+      act(() => result.current.push("https://b.example/"))
+      act(() => result.current.replace("https://b.example/next"))
+      act(() => {
+        result.current.goBack()
+      })
+      expect(record.mock.calls.map(([url]) => url)).toEqual([
+        "https://a.example/",
+        "https://b.example/",
+        "https://b.example/next",
+        "https://a.example/",
+      ])
+    })
+
+    it("ignores empty urls", () => {
+      const { result } = renderHook(() => useBrowserHistory())
+      act(() => result.current.push(""))
+      expect(result.current.entries).toEqual([])
+      expect(record).not.toHaveBeenCalled()
+    })
+
+    it("keeps browsing when a history write fails", async () => {
+      record.mockRejectedValue(new Error("quota"))
+      const { result } = renderHook(() => useBrowserHistory())
+      await act(async () => {
+        result.current.push("https://a.example/")
+        await Promise.resolve()
+      })
+      expect(result.current.entries).toEqual(["https://a.example/"])
+      expect(loggers.store.warn).toHaveBeenCalled()
+    })
   })
 
   // Back/forward enablement has to be modelled here: neither webview exposes
@@ -127,16 +156,6 @@ describe("useBrowserHistory", () => {
       expect(result.current.index).toBe(2)
       act(() => result.current.traverseTo("zzz"))
       expect(result.current.index).toBe(2)
-    })
-
-    it("resets the position on clear", () => {
-      const { result } = renderHook(() => useBrowserHistory())
-      act(() => result.current.push("a"))
-      act(() => result.current.push("b"))
-      act(() => result.current.clear())
-      expect(result.current.entries).toEqual([])
-      expect(result.current.index).toBe(-1)
-      expect(result.current.canGoBack).toBe(false)
     })
   })
 })

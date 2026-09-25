@@ -6,7 +6,6 @@ import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "re
 
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
 
 export type FindResult = { matches: number; index: number }
 
@@ -35,11 +34,9 @@ export function isFindShortcut(event: {
 export function BrowserFindBar({
   onSearch,
   onClose,
-  className,
 }: {
   onSearch: (query: string, options: { forward: boolean }) => Promise<FindResult> | FindResult
   onClose: () => void
-  className?: string
 }) {
   const t = useTranslations("browser.find")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -87,10 +84,7 @@ export function BrowserFindBar({
   return (
     <div
       data-testid="browser-find-bar"
-      className={cn(
-        "flex max-w-full items-center gap-1 rounded-md border bg-background/95 p-1 shadow-md",
-        className
-      )}
+      className="flex min-w-0 max-w-full items-center gap-1 rounded-md border bg-background/95 p-1 shadow-md animate-in fade-in-0 slide-in-from-top-1 duration-150"
     >
       <Input
         ref={inputRef}
@@ -102,7 +96,7 @@ export function BrowserFindBar({
         onKeyDown={onKeyDown}
         placeholder={t("placeholder")}
         aria-label={t("placeholder")}
-        className="h-7 w-40 min-w-16 border-transparent bg-transparent text-sm shadow-none focus-visible:ring-0"
+        className="h-7 w-40 min-w-16 shrink border-transparent bg-transparent text-sm shadow-none focus-visible:ring-0"
       />
       <span className="min-w-12 shrink-0 px-1 text-center text-xs tabular-nums text-muted-foreground">
         {counter}

@@ -64,13 +64,19 @@ export function BrowserAgentIndicator({
   return (
     <div
       className={cn(
-        "flex min-w-0 shrink-0 items-center gap-1 rounded-md py-1 text-xs",
+        "flex min-w-0 shrink-0 items-center gap-1 rounded-md py-1 text-xs transition-colors duration-200",
         compact ? "px-1" : "px-2",
         isAgent ? "bg-primary/15 text-primary" : "text-muted-foreground"
       )}
       data-driver={driver}
       {...(compact
-        ? { role: "img", "aria-label": [label, action].filter(Boolean).join(" · ") }
+        ? {
+            role: "img",
+            "aria-label": [label, action].filter(Boolean).join(" · "),
+            // The labels move here when compact; without it a sighted user
+            // had nothing to read off the bare icon at all.
+            title: [label, action].filter(Boolean).join(" · "),
+          }
         : {})}
     >
       {isAgent ? <BotIcon className="size-3.5" /> : <MousePointerIcon className="size-3.5" />}

@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -20,7 +19,6 @@ import { Surface } from "@/components/surface/surface"
 import { executeCdpCommand, grantCdpAccess, revokeCdpAccess } from "@/lib/browser/cdp-client"
 import { listCdpAuditEvents } from "@/lib/db/browser-cdp"
 import type { CdpAuditEvent, CdpCapability, CdpGrant } from "@/types/browser-developer"
-import { ChevronDownIcon } from "lucide-react"
 
 const CAPABILITIES: CdpCapability[] = ["dom", "runtime"]
 /** Keep a returned value from flooding a 320px rail (and the DOM). */
@@ -40,6 +38,14 @@ function formatCdpValue(value: unknown): { text: string; truncated: boolean } {
     : { text, truncated: false }
 }
 
+/**
+ * Session-scoped local CDP access for the embedded preview (developer mode).
+ *
+ * A body only: it is the whole of the tools dock's "Developer" tab, which the
+ * toolbar's developer button opens directly. It used to sit behind a collapsed
+ * disclosure of its own inside that tab, so the button landed on a single
+ * closed header and needed a second click to show anything.
+ */
 export function BrowserCdpControls({
   sessionId,
   browserSessionId,
@@ -154,165 +160,164 @@ export function BrowserCdpControls({
   const evaluate = () => execute("runtime", "Runtime.evaluate", { expression })
 
   return (
-    <Collapsible className="group/collapsible border-b p-3" data-testid="browser-cdp-controls">
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1 text-xs">
-          {t("title")}
-          <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2 space-y-3">
+    <div
+      role="group"
+      aria-label={t("title")}
+      className="space-y-3"
+      data-testid="browser-cdp-controls"
+    >
+      <div className="space-y-1">
         <p className="text-[10px] text-muted-foreground">{t("description")}</p>
         <p className="text-[10px] text-muted-foreground">{t("localOnly")}</p>
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("capabilities")}</Label>
-          <div className="flex flex-wrap gap-2">
-            {CAPABILITIES.map((capability) => (
-              <label key={capability} className="flex items-center gap-1 text-[11px]">
-                <Checkbox
-                  checked={capabilities.has(capability)}
-                  disabled={Boolean(grant)}
-                  onCheckedChange={(checked) =>
-                    setCapabilities((current) => {
-                      const next = new Set(current)
-                      if (checked) next.add(capability)
-                      else next.delete(capability)
-                      return next
-                    })
-                  }
-                />
-                {t(capability)}
-              </label>
-            ))}
-          </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs">{t("capabilities")}</Label>
+        <div className="flex flex-wrap gap-2">
+          {CAPABILITIES.map((capability) => (
+            <label key={capability} className="flex items-center gap-1 text-[11px]">
+              <Checkbox
+                checked={capabilities.has(capability)}
+                disabled={Boolean(grant)}
+                onCheckedChange={(checked) =>
+                  setCapabilities((current) => {
+                    const next = new Set(current)
+                    if (checked) next.add(capability)
+                    else next.delete(capability)
+                    return next
+                  })
+                }
+              />
+              {t(capability)}
+            </label>
+          ))}
         </div>
-        {!grant ? (
-          <div className="flex items-center gap-2">
-            <Select value={durationMinutes} onValueChange={setDurationMinutes}>
-              <SelectTrigger className="w-36" aria-label={t("duration")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[5, 15, 60].map((minutes) => (
-                  <SelectItem key={minutes} value={String(minutes)}>
-                    {t("minutes", { count: minutes })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      </div>
+      {!grant ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={durationMinutes} onValueChange={setDurationMinutes}>
+            <SelectTrigger className="w-36" aria-label={t("duration")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 15, 60].map((minutes) => (
+                <SelectItem key={minutes} value={String(minutes)}>
+                  {t("minutes", { count: minutes })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            disabled={busy || capabilities.size === 0}
+            onClick={() => void createGrant()}
+          >
+            {t("grant")}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground">
+            {t("active", { time: new Date(grant.expiresAt).toLocaleTimeString() })}
+          </p>
+          <div className="flex gap-1.5">
             <Button
               size="sm"
-              disabled={busy || capabilities.size === 0}
-              onClick={() => void createGrant()}
+              disabled={busy || !grant.capabilities.includes("dom")}
+              onClick={() => void inspect()}
             >
-              {t("grant")}
+              {t("inspect")}
+            </Button>
+            <Button size="sm" variant="destructive" disabled={busy} onClick={() => void revoke()}>
+              {t("revoke")}
             </Button>
           </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-[11px] text-muted-foreground">
-              {t("active", { time: new Date(grant.expiresAt).toLocaleTimeString() })}
-            </p>
-            <div className="flex gap-1.5">
-              <Button
-                size="sm"
-                disabled={busy || !grant.capabilities.includes("dom")}
-                onClick={() => void inspect()}
-              >
-                {t("inspect")}
-              </Button>
-              <Button size="sm" variant="destructive" disabled={busy} onClick={() => void revoke()}>
-                {t("revoke")}
-              </Button>
-            </div>
-            {grant.capabilities.includes("runtime") && (
-              <div className="space-y-1.5">
-                <Label htmlFor="cdp-expression" className="text-xs">
-                  {t("expression")}
-                </Label>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    id="cdp-expression"
-                    value={expression}
-                    onChange={(event) => setExpression(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && expression.trim()) {
-                        event.preventDefault()
-                        void evaluate()
-                      }
-                    }}
-                    className="h-7 font-mono text-[11px]"
-                    placeholder={t("expressionPlaceholder")}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || !expression.trim()}
-                    onClick={() => void evaluate()}
-                  >
-                    {t("evaluate")}
-                  </Button>
-                </div>
+          {grant.capabilities.includes("runtime") && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cdp-expression" className="text-xs">
+                {t("expression")}
+              </Label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="cdp-expression"
+                  value={expression}
+                  onChange={(event) => setExpression(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && expression.trim()) {
+                      event.preventDefault()
+                      void evaluate()
+                    }
+                  }}
+                  className="h-7 font-mono text-[11px]"
+                  placeholder={t("expressionPlaceholder")}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !expression.trim()}
+                  onClick={() => void evaluate()}
+                >
+                  {t("evaluate")}
+                </Button>
               </div>
-            )}
-          </div>
-        )}
-        {result && (
-          <div className="space-y-1" data-testid="browser-cdp-result">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs">{t("resultTitle", { method: result.method })}</Label>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 px-1.5 text-[10px]"
-                onClick={() => {
-                  void navigator.clipboard
-                    ?.writeText(formatCdpValue(result.value).text)
-                    .then(() => setMessage({ kind: "success", text: t("copied") }))
-                    .catch(() => undefined)
-                }}
-              >
-                {t("copy")}
-              </Button>
             </div>
-            <Surface asChild layer="raised">
-              <ScrollArea className="max-h-40 rounded-md border">
-                <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px]">
-                  {formatCdpValue(result.value).text}
-                </pre>
-              </ScrollArea>
-            </Surface>
-            {formatCdpValue(result.value).truncated && (
-              <p className="text-[10px] text-muted-foreground">{t("valueTruncated")}</p>
-            )}
-          </div>
-        )}
-        {message && (
-          <Alert variant={message.kind === "error" ? "destructive" : "default"}>
-            <AlertDescription
-              role={message.kind === "error" ? "alert" : "status"}
-              className="text-xs"
-            >
-              {message.text}
-            </AlertDescription>
-          </Alert>
-        )}
-        <div className="space-y-1">
-          <Label className="text-xs">{t("audit")}</Label>
-          {audit.length === 0 ? (
-            <p className="text-[10px] text-muted-foreground">{t("noAudit")}</p>
-          ) : (
-            audit
-              .slice(-8)
-              .reverse()
-              .map((event) => (
-                <p key={event.id} className="text-[10px] text-muted-foreground">
-                  {t("auditEntry", { outcome: event.outcome, method: event.method ?? "—" })}
-                </p>
-              ))
           )}
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+      {result && (
+        <div className="space-y-1" data-testid="browser-cdp-result">
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">{t("resultTitle", { method: result.method })}</Label>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-1.5 text-[10px]"
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(formatCdpValue(result.value).text)
+                  .then(() => setMessage({ kind: "success", text: t("copied") }))
+                  .catch(() => undefined)
+              }}
+            >
+              {t("copy")}
+            </Button>
+          </div>
+          <Surface asChild layer="raised">
+            <ScrollArea className="max-h-40 rounded-md border">
+              <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px]">
+                {formatCdpValue(result.value).text}
+              </pre>
+            </ScrollArea>
+          </Surface>
+          {formatCdpValue(result.value).truncated && (
+            <p className="text-[10px] text-muted-foreground">{t("valueTruncated")}</p>
+          )}
+        </div>
+      )}
+      {message && (
+        <Alert variant={message.kind === "error" ? "destructive" : "default"}>
+          <AlertDescription
+            role={message.kind === "error" ? "alert" : "status"}
+            className="text-xs"
+          >
+            {message.text}
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="space-y-1">
+        <Label className="text-xs">{t("audit")}</Label>
+        {audit.length === 0 ? (
+          <p className="text-[10px] text-muted-foreground">{t("noAudit")}</p>
+        ) : (
+          audit
+            .slice(-8)
+            .reverse()
+            .map((event) => (
+              <p key={event.id} className="text-[10px] text-muted-foreground">
+                {t("auditEntry", { outcome: event.outcome, method: event.method ?? "—" })}
+              </p>
+            ))
+        )}
+      </div>
+    </div>
   )
 }

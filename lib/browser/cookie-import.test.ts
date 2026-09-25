@@ -2,6 +2,8 @@ jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
 
 import { transport } from "@/lib/tauri"
 import {
+  clearAllSiteCookies,
+  clearSiteCookies,
   cookieImportMessage,
   importChromeCookies,
   isChromeCookieImportAvailable,
@@ -72,4 +74,21 @@ it.each<[CookieImportResult, string]>([
   [{ kind: "no_matching_cookies" }, "result.noMatchingCookies"],
 ])("maps %j to the localized message key", (result, key) => {
   expect(cookieImportMessage(result).key).toBe(key)
+})
+
+// Removing an import must not depend on the setting that allowed it: turning
+// the feature off is exactly when someone wants the imported sign-in gone.
+it("clears the current site's cookies with the host alone, whatever the setting", async () => {
+  call.mockResolvedValueOnce({ removed: 3, domain: "github.com" })
+  await expect(clearSiteCookies("www.github.com")).resolves.toEqual({
+    removed: 3,
+    domain: "github.com",
+  })
+  expect(call).toHaveBeenCalledWith("browser_cookie_clear", { domain: "www.github.com" })
+})
+
+it("signs the preview out of every site through one native call", async () => {
+  call.mockResolvedValueOnce({ removed: 7 })
+  await expect(clearAllSiteCookies()).resolves.toEqual({ removed: 7 })
+  expect(call).toHaveBeenCalledWith("browser_cookie_clear_all", {})
 })

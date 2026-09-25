@@ -41,7 +41,6 @@ it("grants, uses, and revokes session-scoped local CDP access", async () => {
       pageUrl="http://localhost:3000/app?token=hidden"
     />
   )
-  fireEvent.click(screen.getByText("Developer mode"))
   fireEvent.click(screen.getByRole("button", { name: "Grant access" }))
   await waitFor(() =>
     expect(grantMock).toHaveBeenCalledWith(
@@ -71,7 +70,6 @@ it("shows what the bridge actually returned, not a fixed success string", async 
       pageUrl="http://localhost:3000/app"
     />
   )
-  fireEvent.click(screen.getByText("Developer mode"))
   fireEvent.click(screen.getByRole("button", { name: "Grant access" }))
   await screen.findByRole("button", { name: "Inspect document" })
   fireEvent.click(screen.getByRole("button", { name: "Inspect document" }))
@@ -99,7 +97,6 @@ it("evaluates an expression when the grant carries the runtime capability", asyn
       pageUrl="http://localhost:3000/app"
     />
   )
-  fireEvent.click(screen.getByText("Developer mode"))
   // The capability toggles are Radix checkboxes inside plain labels, so they
   // carry no accessible name; CAPABILITIES order is [dom, runtime].
   fireEvent.click(screen.getAllByRole("checkbox")[1]!)
@@ -126,7 +123,6 @@ it("hides the expression field when the grant has no runtime capability", async 
       pageUrl="http://localhost:3000/app"
     />
   )
-  fireEvent.click(screen.getByText("Developer mode"))
   fireEvent.click(screen.getByRole("button", { name: "Grant access" }))
   await screen.findByRole("button", { name: "Inspect document" })
   expect(screen.queryByLabelText("Expression")).toBeNull()
@@ -143,10 +139,23 @@ it("only offers the capabilities the bridge can actually serve", () => {
       pageUrl="http://localhost:3000/app"
     />
   )
-  fireEvent.click(screen.getByText("Developer mode"))
   expect(screen.getByText("DOM")).toBeInTheDocument()
   expect(screen.getByText("Runtime")).toBeInTheDocument()
   for (const retired of ["Console", "Network", "Performance"]) {
     expect(screen.queryByText(retired)).toBeNull()
   }
+})
+
+// The dock's Developer tab IS this panel; a disclosure of its own inside the
+// tab made the toolbar's developer button land on one closed header.
+it("shows its controls without a second disclosure", () => {
+  render(
+    <BrowserCdpControls
+      sessionId="session-1"
+      browserSessionId="browser-1"
+      pageUrl="http://localhost:3000/"
+    />
+  )
+  expect(screen.getByRole("group", { name: "Developer mode" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Grant access" })).toBeVisible()
 })

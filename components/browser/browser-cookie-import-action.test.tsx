@@ -6,14 +6,32 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: { count?: number }) =>
     values?.count == null ? key : `${key}:${values.count}`,
 }))
+jest.mock("next/link", () => ({
+  __esModule: true,
+  default: ({
+    href,
+    children,
+    onClick,
+  }: {
+    href: string
+    children: React.ReactNode
+    onClick?: () => void
+  }) => (
+    <a href={href} onClick={onClick}>
+      {children}
+    </a>
+  ),
+}))
 
 const availabilityMock = jest.fn()
 const importMock = jest.fn()
+const clearMock = jest.fn()
 jest.mock("@/lib/browser/cookie-import", () => ({
   ...jest.requireActual("@/lib/browser/cookie-import"),
   CHROMIUM_BROWSERS: ["chrome", "edge", "brave", "chromium"],
   isChromeCookieImportAvailable: (...args: unknown[]) => availabilityMock(...args),
   importChromeCookies: (...args: unknown[]) => importMock(...args),
+  clearSiteCookies: (...args: unknown[]) => clearMock(...args),
 }))
 
 let featureEnabled = true
@@ -22,7 +40,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector({ settings: { browserCookieImportEnabled: featureEnabled } }),
 }))
 
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
 import { toast } from "sonner"
 import { BrowserCookieImportAction } from "./browser-cookie-import-action"
@@ -54,14 +72,32 @@ beforeEach(() => {
     names: ["session"],
     domains: [".github.com"],
   })
+  clearMock.mockResolvedValue({ removed: 3, domain: "github.com" })
 })
 
-it("stays disabled and avoids native probes while the feature is off", () => {
+/** Wait for the probes to settle, then open the dialog. */
+async function openDialog() {
+  const trigger = screen.getByRole("button", { name: "action" })
+  await waitFor(() => expect(trigger).not.toBeDisabled())
+  fireEvent.click(trigger)
+}
+
+// Import needs the switch; clearing what an earlier import left behind must
+// not. Turning the feature off is exactly when someone wants the sign-in gone.
+it("explains import is switched off, links to Settings, and still offers clearing", async () => {
   featureEnabled = false
   renderAction()
-  expect(screen.getByRole("button", { name: "action" })).toBeDisabled()
-  expect(screen.getByText("reason.featureDisabled")).toBeInTheDocument()
+  await openDialog()
   expect(availabilityMock).not.toHaveBeenCalled()
+  expect(screen.getByTestId("browser-cookie-import-blocked")).toHaveTextContent(
+    "reason.featureDisabled"
+  )
+  expect(screen.getByRole("link", { name: "openSettings" })).toHaveAttribute(
+    "href",
+    "/settings?section=desktop"
+  )
+  expect(screen.queryByRole("button", { name: "import" })).toBeNull()
+  expect(screen.getByRole("button", { name: "clear.action" })).toBeEnabled()
 })
 
 it("requires local consent before importing and reloads after success", async () => {
@@ -114,11 +150,16 @@ it("supports selecting another available browser and profile", async () => {
   )
 })
 
-it("greys out the action with an explanation on unsupported platforms", async () => {
+it("explains why import is unavailable on unsupported platforms", async () => {
   availabilityMock.mockResolvedValue({ supported: false, profiles: [], reason: "macos_only" })
   renderAction()
-  await waitFor(() => expect(screen.getByRole("button", { name: "action" })).toBeDisabled())
-  expect(screen.getByText("reason.unsupported")).toBeInTheDocument()
+  await openDialog()
+  await waitFor(() =>
+    expect(screen.getByTestId("browser-cookie-import-blocked")).toHaveTextContent(
+      "reason.unsupported"
+    )
+  )
+  expect(screen.queryByRole("button", { name: "import" })).toBeNull()
 })
 
 it.each([
@@ -137,8 +178,8 @@ it.each([
 it("settles failed availability probes instead of staying in checking state", async () => {
   availabilityMock.mockRejectedValue(new Error("transport unavailable"))
   renderAction()
-  await waitFor(() => expect(screen.getByRole("button", { name: "action" })).toBeDisabled())
-  expect(screen.getByText("reason.checkFailed")).toBeInTheDocument()
+  await openDialog()
+  await waitFor(() => expect(screen.getByText("reason.checkFailed")).toBeInTheDocument())
   expect(screen.queryByText("reason.checking")).not.toBeInTheDocument()
 })
 
@@ -196,4 +237,46 @@ it("is inert with a stated reason on the cloud browser", () => {
   expect(screen.getByRole("button", { name: "action" })).toBeDisabled()
   // The reason is announced, not just implied by the disabled state.
   expect(screen.getByText("reason.remoteBackend")).toBeInTheDocument()
+})
+
+describe("signing out in the preview", () => {
+  it("clears the current site's cookies, reloads, and says how many went", async () => {
+    const { onReload } = renderAction()
+    await openDialog()
+    fireEvent.click(screen.getByRole("button", { name: "clear.action" }))
+
+    await waitFor(() => expect(clearMock).toHaveBeenCalledWith("www.github.com"))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("clear.done:3"))
+    expect(onReload).toHaveBeenCalled()
+  })
+
+  it("does not reload when the preview held nothing for the site", async () => {
+    clearMock.mockResolvedValue({ removed: 0, domain: "github.com" })
+    const { onReload } = renderAction()
+    await openDialog()
+    fireEvent.click(screen.getByRole("button", { name: "clear.action" }))
+
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith("clear.none"))
+    expect(onReload).not.toHaveBeenCalled()
+  })
+
+  it("reports a failed clear", async () => {
+    clearMock.mockRejectedValue(new Error("store unavailable"))
+    const { onReload } = renderAction()
+    await openDialog()
+    fireEvent.click(screen.getByRole("button", { name: "clear.action" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("clear.failed"))
+    expect(onReload).not.toHaveBeenCalled()
+  })
+
+  // Consent covers reading another browser's credentials, not removing the
+  // preview's own cookies.
+  it("needs no consent to clear", async () => {
+    renderAction()
+    await openDialog()
+    expect(screen.getByText("consent.description")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "clear.action" }))
+    await waitFor(() => expect(clearMock).toHaveBeenCalled())
+  })
 })

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { toast } from "sonner"
 
 import { BrowserWebFallback } from "./browser-web-fallback"
 
@@ -16,11 +17,28 @@ jest.mock("@/lib/tauri/opener", () => ({
 jest.mock("@/hooks/use-element-width", () => ({
   useElementWidth: () => mockFrameViewportWidth,
 }))
+// The history dropdown renders its items inline through the shared manual mock.
+jest.mock("@/components/ui/dropdown-menu")
+// The visit store, faked in memory: `useBrowserHistory` writes each arrival
+// through `recordBrowserVisit`, and the menu reads them back via `useRecentPages`.
+let mockVisited: string[] = []
+const mockClearRecent = jest.fn()
+jest.mock("@/lib/db/browser-history", () => ({
+  recordBrowserVisit: jest.fn(async (url: string) => {
+    mockVisited = [url, ...mockVisited.filter((visited) => visited !== url)]
+  }),
+}))
+jest.mock("@/hooks/browser/use-recent-pages", () => ({
+  useRecentPages: () => ({ recent: mockVisited, clear: mockClearRecent }),
+}))
+jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 describe("BrowserWebFallback", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockFrameViewportWidth = 1280
+    mockVisited = []
+    mockClearRecent.mockResolvedValue(true)
   })
 
   it("navigates submitted URLs and keeps browser history controls usable", () => {
@@ -146,7 +164,7 @@ describe("BrowserWebFallback", () => {
     expect(openExternal).toHaveBeenCalledWith("https://example.com/current")
     expect(screen.getByRole("link", { name: "browser.webFallback.enableRemote" })).toHaveAttribute(
       "href",
-      "/settings?section=companion"
+      "/settings?section=connectivity&connectivityPanel=cloud-relay"
     )
   })
 
@@ -190,5 +208,54 @@ describe("BrowserWebFallback", () => {
       height: "100%",
       transform: "scale(1)",
     })
+  })
+
+  // The other two surfaces draw the toolbar's bar while a page loads; this one
+  // showed nothing until the frame either rendered or silently did not.
+  it("draws the progress bar until the frame settles, and again on reload", () => {
+    render(<BrowserWebFallback initialUrl="https://example.com/one" />)
+    expect(screen.getByTestId("browser-progress")).toBeInTheDocument()
+
+    fireEvent.load(screen.getByTitle("browser.webFallback.frameTitle"))
+    expect(screen.queryByTestId("browser-progress")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "browser.actions.reload" }))
+    expect(screen.getByTestId("browser-progress")).toBeInTheDocument()
+    fireEvent.load(screen.getByTitle("browser.webFallback.frameTitle"))
+    expect(screen.queryByTestId("browser-progress")).toBeNull()
+  })
+
+  it("shows no progress for an empty pane", () => {
+    render(<BrowserWebFallback />)
+    expect(screen.queryByTestId("browser-progress")).toBeNull()
+  })
+
+  it("lists recent pages and re-opens one from the history menu", () => {
+    const view = render(<BrowserWebFallback initialUrl="https://example.com/one" />)
+    const address = screen.getByRole("textbox", { name: "browser.url.placeholder" })
+    fireEvent.change(address, { target: { value: "example.com/two" } })
+    fireEvent.submit(address.closest("form")!)
+    view.rerender(<BrowserWebFallback initialUrl="https://example.com/one" />)
+
+    fireEvent.click(screen.getByText("example.com/one"))
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/one"
+    )
+  })
+
+  it("clears the recent pages from the history menu, and says so when refused", async () => {
+    mockVisited = ["https://example.com/one"]
+    mockClearRecent.mockResolvedValue(false)
+    render(<BrowserWebFallback initialUrl="https://example.com/one" />)
+    fireEvent.click(screen.getByText("browser.history.clear"))
+    expect(mockClearRecent).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("browser.history.clearFailed"))
+  })
+
+  it("offers recent pages on an empty surface", () => {
+    mockVisited = ["https://docs.example.com/guide"]
+    render(<BrowserWebFallback />)
+    expect(screen.getByTestId("browser-empty-recent")).toHaveTextContent("docs.example.com/guide")
   })
 })

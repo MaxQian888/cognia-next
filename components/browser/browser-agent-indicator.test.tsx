@@ -32,6 +32,18 @@ describe("BrowserAgentIndicator", () => {
   })
 })
 
+describe("BrowserAgentIndicator (compact)", () => {
+  // Compact drops the words to fit a narrow rail; they have to go somewhere a
+  // pointer can find them, not only to assistive tech.
+  it("keeps the label readable on hover and to assistive tech", () => {
+    wrap(<BrowserAgentIndicator driver="agent" lastAction="click #go" compact />)
+    const badge = screen.getByRole("img")
+    expect(badge).toHaveAttribute("title", "Agent driving · Last action: click #go")
+    expect(badge).toHaveAccessibleName("Agent driving · Last action: click #go")
+    expect(screen.queryByText(/agent driving/i)).toBeNull()
+  })
+})
+
 describe("useBrowserAgentActivity", () => {
   beforeEach(() => jest.useFakeTimers())
   afterEach(() => jest.useRealTimers())

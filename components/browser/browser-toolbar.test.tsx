@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { createRef } from "react"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 
@@ -184,5 +186,26 @@ describe("addressDisplayParts", () => {
     expect(addressDisplayParts("exa")).toBeNull()
     expect(addressDisplayParts("file:///tmp/x")).toBeNull()
     expect(addressDisplayParts("")).toBeNull()
+  })
+})
+
+// The bar is status, not decoration. Under the blunt reduce-motion guard it ran
+// one 1ms sweep and froze as a third-width stub at the left edge; it has to be
+// exempted the way the policy in globals.css exempts other status motion — on
+// every one of its three guard paths.
+describe("progress bar under reduced motion", () => {
+  const css = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8")
+
+  it.each([
+    "html.reduce-motion .browser-progress-bar",
+    'html[data-reduce-motion="true"] .browser-progress-bar',
+    'html:not([data-motion-respect="off"]) .browser-progress-bar',
+  ])("keeps signalling under %s", (selector) => {
+    const start = css.indexOf(selector)
+    expect(start).toBeGreaterThan(-1)
+    const block = css.slice(start, css.indexOf("}", start))
+    expect(block).toContain("animation-name: motion-safe-fade-pulse")
+    expect(block).toContain("animation-iteration-count: infinite")
+    expect(block).toContain("width: 100%")
   })
 })

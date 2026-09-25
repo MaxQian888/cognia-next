@@ -151,10 +151,30 @@ describe("arming", () => {
     expect(rec.start).toHaveBeenCalledWith(BASE)
   })
 
-  it("shows a live step count while recording", () => {
+  // The panel sits in a dock that is collapsed most of the time; the live count
+  // is what lets the dock's header say a take is running behind it.
+  it("reports the live step count while recording", () => {
     recorderMock({ recording: true, steps: [{ act: "navigate", at: 0, url: BASE }] })
-    render(<BrowserRecorderPanel pageUrl={BASE} />)
-    expect(screen.getByText('record.recording:{"count":1}')).toBeInTheDocument()
+    const onRecordingChange = jest.fn()
+    render(<BrowserRecorderPanel pageUrl={BASE} onRecordingChange={onRecordingChange} />)
+    expect(onRecordingChange).toHaveBeenLastCalledWith(1)
+  })
+
+  it("reports no take when idle, and clears the count on unmount", () => {
+    recorderMock({ recording: true, steps: [{ act: "navigate", at: 0, url: BASE }] })
+    const onRecordingChange = jest.fn()
+    const view = render(
+      <BrowserRecorderPanel pageUrl={BASE} onRecordingChange={onRecordingChange} />
+    )
+    recorderMock({ recording: false, steps: [] })
+    view.rerender(<BrowserRecorderPanel pageUrl={BASE} onRecordingChange={onRecordingChange} />)
+    expect(onRecordingChange).toHaveBeenLastCalledWith(null)
+
+    recorderMock({ recording: true, steps: [{ act: "navigate", at: 0, url: BASE }] })
+    view.rerender(<BrowserRecorderPanel pageUrl={BASE} onRecordingChange={onRecordingChange} />)
+    expect(onRecordingChange).toHaveBeenLastCalledWith(1)
+    view.unmount()
+    expect(onRecordingChange).toHaveBeenLastCalledWith(null)
   })
 
   it("swaps to stop while recording", async () => {
@@ -168,36 +188,6 @@ describe("arming", () => {
 
   it("invites interaction when nothing is captured yet", () => {
     render(<BrowserRecorderPanel pageUrl={BASE} />)
-    expect(screen.getByText("record.empty")).toBeInTheDocument()
-  })
-
-  it("collapses and restores the recorder body while keeping its controls available", async () => {
-    const user = userEvent.setup()
-    const onLayoutChange = jest.fn()
-    render(<BrowserRecorderPanel pageUrl={BASE} onLayoutChange={onLayoutChange} />)
-    onLayoutChange.mockClear()
-
-    const toggle = screen.getByRole("button", { name: "record.collapse" })
-    expect(toggle).toHaveAttribute("aria-expanded", "true")
-    await user.click(toggle)
-    expect(onLayoutChange).toHaveBeenCalledTimes(1)
-    expect(toggle).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByText("record.empty")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "record.start" })).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "record.expand" }))
-    expect(screen.getByText("record.empty")).toBeInTheDocument()
-  })
-
-  it("expands the body when recording starts", async () => {
-    const user = userEvent.setup()
-    const rec = recorderMock()
-    render(<BrowserRecorderPanel pageUrl={BASE} />)
-    await user.click(screen.getByRole("button", { name: "record.collapse" }))
-
-    await user.click(screen.getByRole("button", { name: "record.start" }))
-
-    expect(rec.start).toHaveBeenCalledWith(BASE)
     expect(screen.getByText("record.empty")).toBeInTheDocument()
   })
 })

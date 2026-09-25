@@ -111,8 +111,6 @@ export interface BrowserToolbarProps {
    * "select mode is armed" / "zoom isn't 100%" can't hide inside the popover.
    */
   collapsedActive?: boolean
-  /** Reported on every tier change so a caller can re-measure a native webview. */
-  onTierChange?: (tier: BrowserToolbarTier) => void
 }
 
 export function BrowserToolbar({

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { BrowserNavigated, BrowserSelection, ElementRect } from "@/lib/browser/protocol"
@@ -26,6 +26,7 @@ jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => fa
 let mockActiveChatSessionId: string | null = "active-chat"
 let mockLoadedUrl: string | null = null
 let mockOwned = true
+let mockContended = false
 let mockDevtoolsOptions: Record<string, unknown> | undefined
 const mockTakeLease = jest.fn()
 
@@ -50,30 +51,17 @@ jest.mock("@/components/browser/remote-browser-preview", () => ({
 // The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
 // and pulls in the Dexie graph; stub it here and assert only that the pane
 // mounts it inside the dock and hands it the live URL.
+let mockRecordingChange: ((steps: number | null) => void) | undefined
 jest.mock("@/components/browser/browser-recorder-panel", () => ({
   BrowserRecorderPanel: ({
     pageUrl,
-    onLayoutChange,
+    onRecordingChange,
   }: {
     pageUrl: string | null
-    onLayoutChange?: () => void
+    onRecordingChange?: (steps: number | null) => void
   }) => {
-    const [expanded, setExpanded] = useState(true)
-    const previousExpandedRef = useRef(expanded)
-    useLayoutEffect(() => {
-      if (previousExpandedRef.current === expanded) return
-      previousExpandedRef.current = expanded
-      onLayoutChange?.()
-    }, [expanded, onLayoutChange])
-    return (
-      <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} data-expanded={expanded}>
-        <button
-          type="button"
-          aria-label="toggle recorder layout"
-          onClick={() => setExpanded(false)}
-        />
-      </div>
-    )
+    mockRecordingChange = onRecordingChange
+    return <div data-testid="recorder-panel" data-page-url={pageUrl ?? ""} />
   },
 }))
 jest.mock("@/components/browser/browser-cookie-import-action", () => ({
@@ -141,6 +129,7 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
       getRect: () => mockRect,
       refreshBounds: mockRefreshBounds,
       owned: mockOwned,
+      contended: mockContended,
       takeLease: mockTakeLease,
     }
   },
@@ -239,6 +228,18 @@ jest.mock("@/lib/browser/client", () => ({
   },
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+// The visit store, faked in memory: `useBrowserHistory` writes each arrival
+// through `recordBrowserVisit`, and the menu reads them back via `useRecentPages`.
+let mockVisited: string[] = []
+const mockClearRecent = jest.fn()
+jest.mock("@/lib/db/browser-history", () => ({
+  recordBrowserVisit: jest.fn(async (url: string) => {
+    mockVisited = [url, ...mockVisited.filter((visited) => visited !== url)]
+  }),
+}))
+jest.mock("@/hooks/browser/use-recent-pages", () => ({
+  useRecentPages: () => ({ recent: mockVisited, clear: mockClearRecent }),
+}))
 
 import { toast } from "sonner"
 import { listActionableBrowserAnnotations } from "@/lib/db/browser-annotations"
@@ -316,6 +317,9 @@ beforeEach(() => {
   mockActiveChatSessionId = "active-chat"
   mockLoadedUrl = null
   mockOwned = true
+  mockContended = false
+  mockVisited = []
+  mockClearRecent.mockReset().mockResolvedValue(true)
   mockDevtoolsOptions = undefined
   mockTakeLease.mockClear()
   ;(listActionableBrowserAnnotations as jest.Mock).mockClear()
@@ -962,7 +966,20 @@ describe("bottom tools dock", () => {
     commitUrl("localhost:3000")
     const dock = screen.getByTestId("browser-tools-dock")
     expect(dock).toHaveAttribute("data-expanded", "false")
-    expect(screen.queryByTestId("recorder-panel")).toBeNull()
+    // Mounted so a take survives the strip being closed, but not on screen.
+    expect(screen.getByTestId("recorder-panel")).not.toBeVisible()
+  })
+
+  // The recorder reports its take to the pane, which is the only way the
+  // collapsed strip can say one is running behind it.
+  it("shows a running take in the dock header", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    expect(screen.queryByTestId("browser-tools-recording")).toBeNull()
+    act(() => mockRecordingChange?.(3))
+    expect(screen.getByTestId("browser-tools-recording")).toHaveTextContent("3")
+    act(() => mockRecordingChange?.(null))
+    expect(screen.queryByTestId("browser-tools-recording")).toBeNull()
   })
 
   it("hands the recorder the live url once expanded", () => {
@@ -1150,6 +1167,32 @@ describe("history", () => {
     // The manual dropdown mock renders items inline; click the earlier page.
     fireEvent.click(screen.getByText("localhost:3000"))
     expect(urlBar()).toHaveValue("http://localhost:3000/")
+  })
+
+  // The menu lists the persisted visits, so a page from an earlier session is
+  // still there on a fresh pane.
+  it("lists pages visited before this pane existed", () => {
+    mockVisited = ["https://docs.example.com/guide"]
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    fireEvent.click(screen.getByText("docs.example.com/guide"))
+    expect(urlBar()).toHaveValue("https://docs.example.com/guide")
+  })
+
+  it("offers recent pages on the empty state", () => {
+    mockVisited = ["https://docs.example.com/guide"]
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByTestId("browser-empty-recent")).toHaveTextContent("docs.example.com/guide")
+  })
+
+  it("clears the persisted history, and says so when the store refuses", async () => {
+    mockVisited = ["https://docs.example.com/guide"]
+    mockClearRecent.mockResolvedValue(false)
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    fireEvent.click(screen.getByText("Clear history"))
+    expect(mockClearRecent).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Could not clear the browsing history")
+    )
   })
 })
 
@@ -1339,6 +1382,7 @@ describe("session binding without a sessionId prop", () => {
 describe("lease ownership", () => {
   it("explains itself and offers a takeover instead of a blank region", () => {
     mockOwned = false
+    mockContended = true
     renderPane(<BrowserPreviewPane />)
     const busy = screen.getByTestId("browser-lease-busy")
     expect(busy).toBeInTheDocument()
@@ -1349,14 +1393,36 @@ describe("lease ownership", () => {
 
   it("shows neither the empty state nor the loading placeholder while dispossessed", () => {
     mockOwned = false
+    mockContended = true
     mockHasPainted = false
     renderPane(<BrowserPreviewPane />)
     expect(screen.queryByTestId("browser-loading")).toBeNull()
     expect(screen.queryByText("Preview a web page")).toBeNull()
   })
 
+  // The lease is taken when the webview is created, so every pane is unowned
+  // until the user picks a page. That is not "someone else has it": a fresh
+  // `/browser` used to open on the takeover screen with nothing to take over.
+  it("opens a fresh, unowned pane on the empty state rather than the takeover screen", () => {
+    mockOwned = false
+    mockContended = false
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.queryByTestId("browser-lease-busy")).toBeNull()
+    expect(screen.getByTestId("browser-empty-state")).toBeInTheDocument()
+  })
+
+  it("shows the loading placeholder while a committed page is still taking the lease", () => {
+    mockOwned = false
+    mockContended = false
+    mockHasPainted = false
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    expect(screen.getByTestId("browser-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("browser-lease-busy")).toBeNull()
+  })
+
   it("disables every control that would drive the native webview", () => {
     mockOwned = false
+    mockContended = true
     renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
     for (const name of [
       "Send screenshot to chat",

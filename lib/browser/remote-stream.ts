@@ -40,6 +40,35 @@ export function decodeRemoteBrowserFrame(buffer: ArrayBuffer): RemoteBrowserFram
   }
 }
 
+/**
+ * Map a pointer on the canvas element to a point in the page's own pixels.
+ *
+ * The canvas is drawn `object-contain`, so whenever the pane's aspect ratio
+ * differs from the remote viewport's the picture is letterboxed inside the
+ * element. Scaling against the element's box instead of the drawn picture sent
+ * every click to the wrong spot — off by the letterbox and stretched along the
+ * other axis — which on a tall chat rail meant clicking a button hit whatever
+ * sat a few hundred pixels away from it. Points in the bars clamp to the edge.
+ */
+export function canvasPointToFrame(
+  client: { x: number; y: number },
+  box: { left: number; top: number; width: number; height: number },
+  frame: { width: number; height: number }
+): { x: number; y: number } {
+  if (box.width <= 0 || box.height <= 0 || frame.width <= 0 || frame.height <= 0) {
+    return { x: 0, y: 0 }
+  }
+  const scale = Math.min(box.width / frame.width, box.height / frame.height)
+  const drawnWidth = frame.width * scale
+  const drawnHeight = frame.height * scale
+  const left = box.left + (box.width - drawnWidth) / 2
+  const top = box.top + (box.height - drawnHeight) / 2
+  return {
+    x: Math.max(0, Math.min(frame.width, (client.x - left) / scale)),
+    y: Math.max(0, Math.min(frame.height, (client.y - top) / scale)),
+  }
+}
+
 export function remoteBrowserWebSocketUrl(
   serverBaseUrl: string,
   sessionId: string,

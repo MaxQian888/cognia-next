@@ -83,6 +83,7 @@ function createDispatcher(browser, supervisor, media, eventJournal) {
   const operations = {
     "browser.session.create": (payload) => browser.createSession(payload),
     "browser.session.close": ({ sessionId }) => browser.closeSession(sessionId),
+    "browser.profile.delete": ({ profileId }) => browser.deleteProfile(profileId),
     "browser.navigate": ({ sessionId, url }) => browser.navigate(sessionId, url),
     "browser.snapshot": ({ sessionId, options }) => browser.snapshot(sessionId, options),
     "browser.act": ({ sessionId, ref, action, args }) =>

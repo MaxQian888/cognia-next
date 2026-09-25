@@ -196,7 +196,7 @@ export function resetEmbeddedSnapshotCache(): void {
   snapshotInvalidationInstalled = false
 }
 
-/** Diagnostics for the PerfHud / tests. */
+/** Test seam: the snapshot cache's hit / miss counters. */
 export function embeddedSnapshotCacheStats() {
   return embeddedSnapshotCache.getStats()
 }

@@ -12,8 +12,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-/** Compact `host + path` label for a menu row; raw string when unparseable. */
-function historyLabel(url: string): string {
+/**
+ * Compact `host + path` label for a visited page; raw string when unparseable.
+ * Shared with the empty state's recent row so a page reads the same in both.
+ */
+export function historyLabel(url: string): string {
   try {
     const parsed = new URL(url)
     return parsed.host + (parsed.pathname === "/" ? "" : parsed.pathname)
@@ -42,13 +45,13 @@ export function BrowserHistoryMenu({
           <HistoryIcon />
         </TooltipIconButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-w-80">
+      <DropdownMenuContent align="start" className="max-h-80 max-w-80 overflow-y-auto">
         {recent.length === 0 ? (
           <DropdownMenuItem disabled>{t("empty")}</DropdownMenuItem>
         ) : (
           <>
             {recent.map((url) => (
-              <DropdownMenuItem key={url} onClick={() => onNavigate(url)}>
+              <DropdownMenuItem key={url} onClick={() => onNavigate(url)} title={url}>
                 <span className="truncate font-mono text-xs">{historyLabel(url)}</span>
               </DropdownMenuItem>
             ))}

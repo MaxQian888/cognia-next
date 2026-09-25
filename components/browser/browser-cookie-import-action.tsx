@@ -1,12 +1,14 @@
 "use client"
 
 import { CookieIcon } from "lucide-react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Separator } from "@/components/ui/separator"
 import {
   Dialog,
   DialogClose,
@@ -20,15 +22,20 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   CHROMIUM_BROWSERS,
+  clearSiteCookies,
   cookieImportMessage,
   importChromeCookies,
   isChromeCookieImportAvailable,
   type ChromiumBrowser,
   type CookieImportAvailability,
 } from "@/lib/browser/cookie-import"
+import { COOKIE_IMPORT_CONSENT_STORAGE_KEY } from "@/lib/browser/preview-data"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
-const CONSENT_STORAGE_KEY = "cognia.browser.cookie-import-consent.v1"
+const DESKTOP_SETTINGS_HREF = "/settings?section=desktop"
+
+/** Why import specifically cannot run — the dialog still offers clearing. */
+type ImportBlocker = "featureDisabled" | "checking" | "unsupported" | "checkFailed" | "noProfiles"
 
 type AvailabilityMap = Partial<Record<ChromiumBrowser, CookieImportAvailability>>
 
@@ -54,6 +61,17 @@ function publicHttpHostname(value: string | null): string | null {
   }
 }
 
+/**
+ * Sign-in for the site the embedded preview is showing (ADR-0073): reuse one
+ * from a local Chromium profile, or remove the site's cookies from the preview.
+ *
+ * The two halves are gated differently on purpose. Import reads another
+ * browser's credentials, so it needs the Settings switch, a supported platform,
+ * a profile and the user's consent. Clearing only removes what the preview
+ * already holds, so it is offered for any public page — including after the
+ * switch is turned off, which used to leave imported cookies in place with no
+ * way anywhere to remove them.
+ */
 export function BrowserCookieImportAction({
   currentUrl,
   onReload,
@@ -81,8 +99,11 @@ export function BrowserCookieImportAction({
   const [profile, setProfile] = useState("")
   const [open, setOpen] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const [consented, setConsented] = useState(() =>
-    typeof window === "undefined" ? false : window.localStorage.getItem(CONSENT_STORAGE_KEY) === "1"
+    typeof window === "undefined"
+      ? false
+      : window.localStorage.getItem(COOKIE_IMPORT_CONSENT_STORAGE_KEY) === "1"
   )
   const domain = publicHttpHostname(currentUrl)
 
@@ -121,23 +142,20 @@ export function BrowserCookieImportAction({
   const firstReason = CHROMIUM_BROWSERS.map((candidate) => availability[candidate]?.reason).find(
     Boolean
   )
-  const reason =
-    backend === "remote"
-      ? t("reason.remoteBackend")
-      : !featureEnabled
-        ? t("reason.featureDisabled")
-        : !domain
-          ? t("reason.openPage")
-          : Object.keys(availability).length === 0
-            ? t("reason.checking")
-            : !CHROMIUM_BROWSERS.some((candidate) => availability[candidate]?.profiles.length)
-              ? firstReason === "macos_only"
-                ? t("reason.unsupported")
-                : firstReason === "probe_failed"
-                  ? t("reason.checkFailed")
-                  : t("reason.noProfiles")
-              : null
-  const disabled = reason !== null
+  // Nothing to hold a sign-in for: the whole action is inert.
+  const unavailableReason =
+    backend === "remote" ? t("reason.remoteBackend") : !domain ? t("reason.openPage") : null
+  const importBlocker: ImportBlocker | null = !featureEnabled
+    ? "featureDisabled"
+    : Object.keys(availability).length === 0
+      ? "checking"
+      : !CHROMIUM_BROWSERS.some((candidate) => availability[candidate]?.profiles.length)
+        ? firstReason === "macos_only"
+          ? "unsupported"
+          : firstReason === "probe_failed"
+            ? "checkFailed"
+            : "noProfiles"
+        : null
   const profiles = selectedAvailability?.profiles ?? []
   const browserOptions = useMemo(
     () =>
@@ -149,7 +167,7 @@ export function BrowserCookieImportAction({
   )
 
   const grantConsent = () => {
-    window.localStorage.setItem(CONSENT_STORAGE_KEY, "1")
+    window.localStorage.setItem(COOKIE_IMPORT_CONSENT_STORAGE_KEY, "1")
     setConsented(true)
   }
 
@@ -183,6 +201,29 @@ export function BrowserCookieImportAction({
     }
   }
 
+  const runClear = async () => {
+    if (!domain || clearing) return
+    setClearing(true)
+    try {
+      const result = await clearSiteCookies(domain)
+      if (result.removed > 0) {
+        // The page still has the signed-in document; reloading is what makes
+        // "signed out" true on screen.
+        await onReload()
+        toast.success(t("clear.done", { count: result.removed, domain: result.domain }))
+      } else {
+        toast.info(t("clear.none", { domain: result.domain }))
+      }
+      setOpen(false)
+    } catch {
+      toast.error(t("clear.failed"))
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  const busy = importing || clearing
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Tooltip>
@@ -193,7 +234,7 @@ export function BrowserCookieImportAction({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                disabled={disabled}
+                disabled={unavailableReason !== null}
                 aria-label={t("action")}
               >
                 <CookieIcon />
@@ -201,76 +242,123 @@ export function BrowserCookieImportAction({
             </DialogTrigger>
           </span>
         </TooltipTrigger>
-        <TooltipContent>{reason ?? t("action")}</TooltipContent>
+        <TooltipContent>{unavailableReason ?? t("action")}</TooltipContent>
       </Tooltip>
-      {reason && <span className="sr-only">{reason}</span>}
+      {unavailableReason && <span className="sr-only">{unavailableReason}</span>}
 
-      <DialogContent>
-        {!consented ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("consent.title")}</DialogTitle>
-              <DialogDescription>{t("consent.description")}</DialogDescription>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">{t("consent.localOnly")}</p>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline">{t("cancel")}</Button>
-              </DialogClose>
-              <Button onClick={grantConsent}>{t("consent.continue")}</Button>
-            </DialogFooter>
-          </>
-        ) : (
-          <>
-            <DialogHeader>
-              <DialogTitle>{t("title")}</DialogTitle>
-              <DialogDescription>{t("description")}</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4">
-              <label className="grid gap-1.5 text-sm">
-                <span>{t("browserLabel")}</span>
-                <NativeSelect
-                  value={browser}
-                  onChange={(event) => selectBrowser(event.target.value as ChromiumBrowser)}
-                  wrapperClassName="w-full"
-                >
-                  {browserOptions.map((option) => (
-                    <NativeSelectOption
-                      key={option.browser}
-                      value={option.browser}
-                      disabled={option.profiles.length === 0}
-                    >
-                      {t(`browser.${option.browser}`)}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </label>
-              <label className="grid gap-1.5 text-sm">
-                <span>{t("profileLabel")}</span>
-                <NativeSelect
-                  value={profile}
-                  onChange={(event) => setProfile(event.target.value)}
-                  wrapperClassName="w-full"
-                >
-                  {profiles.map((candidate) => (
-                    <NativeSelectOption key={candidate} value={candidate}>
-                      {candidate}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </label>
-              <p className="text-xs text-muted-foreground">{t("keychainHint")}</p>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("dialogTitle", { host: domain ?? "" })}</DialogTitle>
+          <DialogDescription>{t("dialogDescription")}</DialogDescription>
+        </DialogHeader>
+
+        <section aria-labelledby="browser-cookie-import-heading" className="grid gap-3">
+          <div className="space-y-1">
+            <h3 id="browser-cookie-import-heading" className="text-sm font-medium">
+              {t("title")}
+            </h3>
+            <p className="text-xs text-muted-foreground">{t("description")}</p>
+          </div>
+          {importBlocker ? (
+            <div
+              role="status"
+              data-testid="browser-cookie-import-blocked"
+              className="flex flex-col items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground"
+            >
+              <p>{t(`reason.${importBlocker}`)}</p>
+              {importBlocker === "featureDisabled" && (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={DESKTOP_SETTINGS_HREF} onClick={() => setOpen(false)}>
+                    {t("openSettings")}
+                  </Link>
+                </Button>
+              )}
             </div>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline">{t("cancel")}</Button>
-              </DialogClose>
-              <Button disabled={!profile || importing} onClick={() => void runImport()}>
+          ) : !consented ? (
+            <div className="grid gap-2 rounded-md border p-3">
+              <p className="text-sm font-medium">{t("consent.title")}</p>
+              <p className="text-sm text-muted-foreground">{t("consent.description")}</p>
+              <p className="text-xs text-muted-foreground">{t("consent.localOnly")}</p>
+              <Button size="sm" className="justify-self-end" onClick={grantConsent}>
+                {t("consent.continue")}
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid min-w-0 gap-1.5 text-sm">
+                  <span>{t("browserLabel")}</span>
+                  <NativeSelect
+                    value={browser}
+                    onChange={(event) => selectBrowser(event.target.value as ChromiumBrowser)}
+                    wrapperClassName="w-full"
+                  >
+                    {browserOptions.map((option) => (
+                      <NativeSelectOption
+                        key={option.browser}
+                        value={option.browser}
+                        disabled={option.profiles.length === 0}
+                      >
+                        {t(`browser.${option.browser}`)}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <label className="grid min-w-0 gap-1.5 text-sm">
+                  <span>{t("profileLabel")}</span>
+                  <NativeSelect
+                    value={profile}
+                    onChange={(event) => setProfile(event.target.value)}
+                    wrapperClassName="w-full"
+                  >
+                    {profiles.map((candidate) => (
+                      <NativeSelectOption key={candidate} value={candidate}>
+                        {candidate}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("keychainHint")}</p>
+              <Button
+                size="sm"
+                className="justify-self-end"
+                disabled={!profile || busy}
+                onClick={() => void runImport()}
+              >
                 {importing ? t("importing") : t("import")}
               </Button>
-            </DialogFooter>
-          </>
-        )}
+            </div>
+          )}
+        </section>
+
+        <Separator />
+
+        <section aria-labelledby="browser-cookie-clear-heading" className="grid gap-2">
+          <div className="space-y-1">
+            <h3 id="browser-cookie-clear-heading" className="text-sm font-medium">
+              {t("clear.title")}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              {t("clear.description", { domain: domain ?? "" })}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="justify-self-end text-destructive hover:text-destructive"
+            disabled={!domain || busy}
+            onClick={() => void runClear()}
+          >
+            {clearing ? t("clear.clearing") : t("clear.action")}
+          </Button>
+        </section>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline">{t("close")}</Button>
+          </DialogClose>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

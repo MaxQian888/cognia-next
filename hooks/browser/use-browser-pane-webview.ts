@@ -33,6 +33,16 @@ export interface UseBrowserPaneWebview {
    */
   owned: boolean
   /**
+   * Whether ANOTHER mounted pane holds the lease right now.
+   *
+   * Not the negation of {@link owned}: the lease is only taken when the native
+   * webview is created, so a pane with no address committed yet owns nothing
+   * and is still free to take it the moment the user picks a page. Reading
+   * `!owned` as "someone else has it" is what showed a brand-new pane the
+   * "open in another panel" screen with nobody holding anything.
+   */
+  contended: boolean
+  /**
    * Take the lease from whichever pane currently holds it, tearing down its
    * webview first. Safe by construction: the native lease only rejects a
    * *different window label*, so swapping tokens inside one window re-claims
@@ -356,6 +366,7 @@ export function useBrowserPaneWebview(
   // pane reports itself as the owner and renders its own fallback surface.
   const holder = useSyncExternalStore(subscribeLease, currentLeaseToken, () => null)
   const owned = !isTauri() || holder === leaseToken
+  const contended = isTauri() && holder !== null && holder !== leaseToken
 
   const takeLease = useCallback(() => {
     if (!isTauri()) return
@@ -363,5 +374,5 @@ export function useBrowserPaneWebview(
     syncRef.current()
   }, [leaseToken])
 
-  return { getRect, refreshBounds, owned, takeLease }
+  return { getRect, refreshBounds, owned, contended, takeLease }
 }

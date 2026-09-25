@@ -417,6 +417,46 @@ describe("lease ownership", () => {
     second.unmount()
   })
 
+  // `owned` is false for a pane that has not created its webview yet, which is
+  // every pane before the user picks an address. Only `contended` may drive the
+  // "open in another panel" screen, or a fresh `/browser` opens on it.
+  it("does not report a pane with no address as contended", () => {
+    const { result, unmount } = renderHook(() =>
+      useBrowserPaneWebview(ref, { url: null, ownerId: "fresh" })
+    )
+    deliverRect()
+    expect(result.current.owned).toBe(false)
+    expect(result.current.contended).toBe(false)
+    unmount()
+  })
+
+  it("reports contention only to the pane that does not hold the lease", () => {
+    const first = mountPane("http://localhost:3000/", "first")
+    first.deliverRect()
+    const second = mountPane("http://localhost:4173/", "second")
+    second.deliverRect()
+
+    expect(first.result.current.contended).toBe(false)
+    expect(second.result.current.contended).toBe(true)
+
+    first.unmount()
+    second.unmount()
+  })
+
+  it("clears contention once the holder unmounts", async () => {
+    const first = mountPane("http://localhost:3000/", "first")
+    first.deliverRect()
+    const second = mountPane("http://localhost:4173/", "second")
+    second.deliverRect()
+    expect(second.result.current.contended).toBe(true)
+
+    first.unmount()
+    await settle()
+
+    expect(second.result.current.contended).toBe(false)
+    second.unmount()
+  })
+
   it("is a no-op for the pane that already holds it", () => {
     const only = mountPane("http://localhost:3000/", "only")
     only.deliverRect()

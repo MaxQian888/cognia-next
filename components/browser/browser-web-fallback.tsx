@@ -4,8 +4,10 @@ import { ExternalLinkIcon } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { type FormEvent, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
 import { WebPreview } from "@/components/ai-elements/web-preview"
@@ -13,6 +15,7 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
+import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { normalizePreviewUrl } from "@/lib/browser/protocol"
 import { openExternal } from "@/lib/tauri/opener"
@@ -38,6 +41,13 @@ export interface BrowserWebFallbackProps {
    */
   unreachableReason?: string
 }
+
+/**
+ * Where the cloud-browser switch lives. `?section=companion` is a retired
+ * section that now lands on the Connectivity overview, a panel away from the
+ * card the button promises.
+ */
+const REMOTE_BROWSER_SETTINGS_HREF = "/settings?section=connectivity&connectivityPanel=cloud-relay"
 
 // Cross-origin iframe CSS cannot be rewritten. Give desktop-only pages their
 // common minimum layout width, then fit that surface to the actual host pane.
@@ -70,15 +80,29 @@ export function BrowserWebFallback({
   // where the shape was first proven, so it now consumes the shared hook
   // instead of keeping a second copy of it.
   const { push, goBack, goForward, canGoBack, canGoForward } = useBrowserHistory()
+  const { recent, clear: clearRecent } = useRecentPages()
+  const clearHistory = () => {
+    void clearRecent().then((cleared) => {
+      if (!cleared) toast.error(t("history.clearFailed"))
+    })
+  }
   const [currentUrl, setCurrentUrl] = useState(normalizedInitialUrl ?? "")
   const [draftUrl, setDraftUrl] = useState(normalizedInitialUrl ?? "")
   const [reloadKey, setReloadKey] = useState(0)
+  /**
+   * An iframe document is in flight. The frame is re-keyed on every address and
+   * reload, so its `load` (which also fires for a page that refused framing) is
+   * the one signal that the navigation settled. This surface used to show no
+   * progress at all while the other two drew the toolbar's bar.
+   */
+  const [loading, setLoading] = useState(!!normalizedInitialUrl)
 
   /** Open a brand-new address (quick-open chip): a push, not a traversal. */
   const goToNew = (url: string) => {
     push(url)
     setCurrentUrl(url)
     setDraftUrl(url)
+    setLoading(true)
   }
 
   // Seed the stack with the initial address, then follow every address the host
@@ -107,14 +131,13 @@ export function BrowserWebFallback({
     if (!url) return
     setCurrentUrl(url)
     setDraftUrl(url)
+    setLoading(true)
   }
 
   const commitDraft = () => {
     const normalized = normalizeWebUrl(draftUrl)
     if (!normalized) return
-    push(normalized)
-    setCurrentUrl(normalized)
-    setDraftUrl(normalized)
+    goToNew(normalized)
   }
 
   const navigate = (event: FormEvent) => {
@@ -135,6 +158,7 @@ export function BrowserWebFallback({
           onUrlChange={setDraftUrl}
           onSubmit={navigate}
           addressDisplay={draftUrl === currentUrl ? addressDisplayParts(draftUrl) : null}
+          loading={loading}
           navigation={
             <BrowserNavigationControls
               backDisabled={!canGoBack}
@@ -142,7 +166,18 @@ export function BrowserWebFallback({
               reloadDisabled={!currentUrl}
               onBack={() => goTo(goBack())}
               onForward={() => goTo(goForward())}
-              onReload={() => setReloadKey((key) => key + 1)}
+              onReload={() => {
+                setReloadKey((key) => key + 1)
+                setLoading(true)
+              }}
+            />
+          }
+          inspectActions={
+            <BrowserHistoryMenu
+              recent={recent}
+              onNavigate={goToNew}
+              onClear={clearHistory}
+              disabled={recent.length === 0}
             />
           }
           pageActions={
@@ -162,7 +197,7 @@ export function BrowserWebFallback({
           </p>
           {!unreachableReason && (
             <Button asChild size="sm" variant="outline" className="shrink-0">
-              <Link href="/settings?section=companion">{t("webFallback.enableRemote")}</Link>
+              <Link href={REMOTE_BROWSER_SETTINGS_HREF}>{t("webFallback.enableRemote")}</Link>
             </Button>
           )}
         </div>
@@ -171,7 +206,7 @@ export function BrowserWebFallback({
           className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
           data-testid="browser-web-frame-viewport"
         >
-          {!currentUrl && <BrowserEmptyState onOpen={goToNew} />}
+          {!currentUrl && <BrowserEmptyState onOpen={goToNew} recent={recent} />}
           <iframe
             key={`${currentUrl}:${reloadKey}`}
             className="absolute left-0 top-0 max-w-none bg-background"
@@ -185,6 +220,8 @@ export function BrowserWebFallback({
               transformOrigin: "top left",
             }}
             title={t("webFallback.frameTitle")}
+            onLoad={() => setLoading(false)}
+            onError={() => setLoading(false)}
           />
         </div>
       </WebPreview>

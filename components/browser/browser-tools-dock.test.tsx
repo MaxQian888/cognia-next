@@ -23,7 +23,7 @@ describe("BrowserToolsDock", () => {
   it("starts collapsed, so an idle pane spends one row on chrome", () => {
     render(<BrowserToolsDock {...panels} {...counts} />)
     expect(screen.getByTestId("browser-tools-dock")).toHaveAttribute("data-expanded", "false")
-    expect(screen.queryByTestId("panel-recorder")).toBeNull()
+    expect(screen.getByTestId("browser-tools-body")).not.toBeVisible()
     expect(screen.queryByTestId("panel-console")).toBeNull()
   })
 
@@ -31,12 +31,63 @@ describe("BrowserToolsDock", () => {
     const user = userEvent.setup()
     render(<BrowserToolsDock {...panels} {...counts} />)
     fireEvent.click(screen.getByTestId("browser-tools-toggle"))
-    expect(screen.getByTestId("panel-recorder")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-recorder")).toBeVisible()
 
     await user.click(screen.getByRole("tab", { name: /Network/ }))
     expect(screen.getByTestId("browser-tools-dock")).toHaveAttribute("data-tab", "network")
-    expect(screen.getByTestId("panel-network")).toBeInTheDocument()
-    expect(screen.queryByTestId("panel-recorder")).toBeNull()
+    expect(screen.getByTestId("panel-network")).toBeVisible()
+    expect(screen.getByTestId("panel-recorder")).not.toBeVisible()
+  })
+
+  // A take in progress lives in the recorder body, and a CDP grant in the
+  // developer one. Unmounting either on collapse or on a tab switch cancelled
+  // the take and revoked the grant the moment the user looked at the console.
+  it("keeps the stateful bodies mounted while hidden", async () => {
+    const user = userEvent.setup()
+    const developer = <div data-testid="panel-developer">developer body</div>
+    render(<BrowserToolsDock {...panels} {...counts} developer={developer} />)
+    expect(screen.getByTestId("panel-recorder")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-developer")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+    await user.click(screen.getByRole("tab", { name: /Console/ }))
+    expect(screen.getByTestId("panel-console")).toBeVisible()
+    expect(screen.getByTestId("panel-recorder")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-developer")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+    expect(screen.getByTestId("panel-recorder")).toBeInTheDocument()
+    expect(screen.queryByTestId("panel-console")).toBeNull()
+  })
+
+  it("opens the dock from a tab click while collapsed", async () => {
+    const user = userEvent.setup()
+    render(<BrowserToolsDock {...panels} {...counts} />)
+
+    await user.click(screen.getByRole("tab", { name: /Console/ }))
+    expect(screen.getByTestId("browser-tools-dock")).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("panel-console")).toBeVisible()
+  })
+
+  // Radix reports no value change for the tab that is already selected.
+  it("opens the dock from the already-selected tab", async () => {
+    const user = userEvent.setup()
+    render(<BrowserToolsDock {...panels} {...counts} />)
+
+    await user.click(screen.getByRole("tab", { name: "Recorder" }))
+    expect(screen.getByTestId("browser-tools-dock")).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("panel-recorder")).toBeVisible()
+  })
+
+  it("reports whether the readouts are on screen", async () => {
+    const onExpandedChange = jest.fn()
+    render(<BrowserToolsDock {...panels} {...counts} onExpandedChange={onExpandedChange} />)
+    expect(onExpandedChange).toHaveBeenLastCalledWith(false)
+
+    fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+    expect(onExpandedChange).toHaveBeenLastCalledWith(true)
+    fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+    expect(onExpandedChange).toHaveBeenLastCalledWith(false)
   })
 
   // The native webview floats above React and is positioned from a measured
@@ -79,6 +130,14 @@ describe("BrowserToolsDock", () => {
     expect(screen.getByTestId("browser-devtools-failed")).toHaveTextContent("1 failed request")
     expect(screen.getByTestId("browser-tools-recording")).toHaveTextContent("7")
     expect(screen.getByRole("tab", { name: /Console \(3\)/ })).toBeInTheDocument()
+    // The narrow-width stand-ins: one mark per tab with something to report.
+    expect(screen.getAllByTestId("browser-tools-dot")).toHaveLength(3)
+  })
+
+  it("marks no tab when there is nothing to report", () => {
+    render(<BrowserToolsDock {...panels} {...counts} />)
+    expect(screen.queryByTestId("browser-tools-dot")).toBeNull()
+    expect(screen.queryByTestId("browser-tools-recording")).toBeNull()
   })
 
   it("hides the developer tab when there is no panel for it", () => {
@@ -99,12 +158,12 @@ describe("BrowserToolsDock", () => {
         openRequest={{ tab: "developer", nonce: 1 }}
       />
     )
-    expect(screen.getByTestId("panel-developer")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-developer")).toBeVisible()
 
     // Collapse by hand, then ask again with the SAME tab: a nonce is what makes
     // the repeat land, since the requested tab never changes.
     fireEvent.click(screen.getByTestId("browser-tools-toggle"))
-    expect(screen.queryByTestId("panel-developer")).toBeNull()
+    expect(screen.getByTestId("panel-developer")).not.toBeVisible()
     rerender(
       <BrowserToolsDock
         {...panels}
@@ -113,6 +172,6 @@ describe("BrowserToolsDock", () => {
         openRequest={{ tab: "developer", nonce: 2 }}
       />
     )
-    expect(screen.getByTestId("panel-developer")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-developer")).toBeVisible()
   })
 })

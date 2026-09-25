@@ -164,3 +164,27 @@ Cookie import remains the supported bridge for the embedded WKWebView. It is
 still opt-in, macOS-specific, metadata-redacted, and protected by Keychain
 authorization. This ADR does not cover Firefox, Safari, arbitrary Chromium
 forks, or automatic session migration.
+
+## Addendum (2026-09-25) — imported sign-ins can be removed
+
+Nothing could remove what an import had put in the preview: the preview shares
+the main window's website data store, cookies outlived restarts, and turning the
+Settings switch off left them in place.
+
+- **Sign out in the preview.** `browser_cookie_clear(domain)` deletes the
+  cookies of the site the preview is showing — its registrable domain and every
+  subdomain, the same scope an import reads — and returns a count only. It is
+  deliberately not gated on the import switch or on consent: consent covers
+  reading another browser's credentials, not removing the preview's own. The
+  cookie action therefore opens for any public page and states inline why import
+  is unavailable (switched off, no profile, unsupported platform) while still
+  offering the clear.
+- **Clear all data.** `browser_cookie_clear_all` removes every *public site's*
+  cookies (local development hosts, IP literals and the app's own
+  `tauri.localhost` origin are kept), and `lib/data/clear.ts:clearAll` calls it
+  together with forgetting the browser's `localStorage` preferences, including
+  the import consent. It is best-effort there: an unreachable cookie store is
+  logged rather than leaving the account half-deleted.
+- Per-cookie deletion through the webview's own cookie API is the only safe
+  grain. `clear_all_browsing_data` would also wipe Cognia's own storage in the
+  shared data store.

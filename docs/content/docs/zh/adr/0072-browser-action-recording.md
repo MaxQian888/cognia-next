@@ -213,3 +213,13 @@ human clicks in the pane ──► overlay.injected.js  [capture-phase passive l
 - 录制下来的登录流程刻意不是自足的：回放或导出时需要另行提供其密钥。这个摩擦正是目的所在。
 - flow 永不离开本机，且永不含凭据。
 - 新增第四种导出格式的成本是一个纯函数。
+
+## 附录（2026-09-25）——flow 进入备份，仍不同步
+
+已保存的 flow 是无法重建的用户作品，但此前备份与恢复会把它们丢掉。`browserRecordings` 现为可移植
+备份表（`BackupPayloadV3.browserRecordings`，属于核心数据范围）；以「保留两份」恢复时会生成新 id，
+使导入的 flow 与本地同 id 的 flow 并存。这只针对用户自己的备份文件修订了「flow 永不离开本机」：
+flow 依然没有注册到 `lib/sync`，也依然不含任何凭据。
+
+内置浏览器的访问记录恰好相反：`browserHistory`（schema v229，`lib/db/browser-history.ts`）记录预览
+到达过的页面，让历史菜单和空白预览在重启后仍可用；它按账户隔离、上限 500 行、不同步、不进备份。

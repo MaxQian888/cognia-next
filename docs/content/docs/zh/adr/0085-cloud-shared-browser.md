@@ -72,3 +72,12 @@ runtime secret 是 `COGNIA_WORKSPACE_RUNTIME_SECRET_DIR` 下以 workspace id 命
 - 把 Playwright MCP 当产品后端。
 - 同一版本替换 `EmbeddedEngine` 或删除旧的一次性 runner。
 - 默认持续保存 frame、凭据或 trace。
+
+## 附录（2026-09-25）——删除命名配置会清除其数据
+
+命名配置是 workspace runtime 上的一个用户数据目录。设置中此前可以创建和选择配置却无法删除，
+而 `deleteBrowserProfile` 只会删掉客户端的记录，目录会成为孤儿。现在
+`browser_profile_delete { workspaceId, profileId }` 会调用 runtime 的 `browser.profile.delete` 操作删除
+该目录。网关（按账户与工作区）与 runtime 都会在有会话持有该配置时拒绝，runtime 还会拒绝任何会解析
+到配置根目录之外的 id。客户端先清除 runtime 上的副本，再删除本地记录，因此被拒绝时配置仍会保留，
+可以重试。

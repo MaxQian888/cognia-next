@@ -880,6 +880,27 @@ export class RemoteChromiumService {
     }
   }
 
+  /**
+   * Erase a persistent profile's user-data directory — the sign-ins and site
+   * storage the cloud browser kept for it. Refused while a session has the
+   * profile open: Chromium holds the directory, and pulling it out from under
+   * a live context corrupts the session rather than signing it out.
+   */
+  async deleteProfile(profileId) {
+    assertProfileId(profileId)
+    if (this.profileOwners.has(profileId)) {
+      throw new RemoteBrowserError("browser_profile_in_use", "Browser profile is in use")
+    }
+    const profilePath = path.join(this.profilesRoot, profileId)
+    // `assertProfileId` admits `.` and `..`; the resolved path must still sit
+    // strictly inside the profiles root.
+    if (path.dirname(profilePath) !== this.profilesRoot) {
+      throw new RemoteBrowserError("browser_profile_invalid", "Browser profile id is invalid")
+    }
+    await fs.rm(profilePath, { recursive: true, force: true })
+    return { deleted: true }
+  }
+
   async handleConnectionClosed(session) {
     if (session.closing || !this.sessions.has(session.id)) return
     session.closing = true

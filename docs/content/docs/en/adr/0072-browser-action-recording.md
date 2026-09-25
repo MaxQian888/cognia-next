@@ -259,3 +259,17 @@ only a human knows what the flow was supposed to prove.
   supplied at replay or export time. That friction is the point.
 - Flows never leave the device, and never contain a credential.
 - A fourth export format costs one pure function.
+
+## Addendum (2026-09-25) — flows travel in backups, still not in sync
+
+Saved flows are authored work nothing can rebuild, yet a backup and restore
+dropped them. `browserRecordings` is now a portable backup table
+(`BackupPayloadV3.browserRecordings`, core-data scope); a "duplicate" restore
+mints a fresh id so an imported flow sits beside a local one. This supersedes
+"flows never leave the device" for the user's own backup file only: flows are
+still not registered in `lib/sync`, and still never carry a credential.
+
+The built-in browser's visit history is the opposite case: `browserHistory`
+(schema v229, `lib/db/browser-history.ts`) keeps the pages the preview arrived
+at so the history menu and the empty pane survive a restart, and it is
+account-local, capped at 500 rows, not synced and not in the backup.

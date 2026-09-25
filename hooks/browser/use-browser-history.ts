@@ -1,15 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
-/** Cap on the recent-URL list surfaced by the address-bar menu. */
-export const MAX_BROWSER_HISTORY = 25
+import { loggers } from "@cognia/logging"
+
+import { recordBrowserVisit } from "@/lib/db/browser-history"
 
 export interface BrowserHistory {
   /** The back/forward stack, oldest first. */
   entries: string[]
   /** Index of the current entry in {@link entries}, or -1 when empty. */
   index: number
-  /** Visited URLs, most-recent-first — what the address-bar menu lists. */
-  recent: string[]
   /** Whether there is an entry before the current one. */
   canGoBack: boolean
   /** Whether there is an entry after the current one. */
@@ -31,10 +30,6 @@ export interface BrowserHistory {
    * are ignored rather than guessed at.
    */
   traverseTo: (url: string) => void
-  /** Jump to `url` from the address-bar menu: a normal push. */
-  jumpTo: (url: string) => void
-  /** Drop the whole stack. */
-  clear: () => void
 }
 
 interface Stack {
@@ -43,20 +38,6 @@ interface Stack {
 }
 
 const EMPTY: Stack = { entries: [], index: -1 }
-
-/** Most-recent-first, deduped, capped — derived, so the menu is unchanged. */
-function toRecent(entries: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const url = entries[i]!
-    if (seen.has(url)) continue
-    seen.add(url)
-    out.push(url)
-    if (out.length === MAX_BROWSER_HISTORY) break
-  }
-  return out
-}
 
 /**
  * The preview's back/forward stack, plus the most-recent-first list the
@@ -71,7 +52,10 @@ function toRecent(entries: string[]): string[] {
  * already maintained inline for its iframe, so both now share one implementation.
  *
  * In memory and per pane by design: this carries a navigation *position*, which
- * must not outlive the pane or come back stale after a reload.
+ * must not outlive the pane or come back stale after a reload. What DOES
+ * outlive it is the list of places visited: every arrival is recorded into the
+ * account's `browserHistory` table (`lib/db/browser-history.ts`), which is what
+ * the address-bar menu reads through `useRecentPages`.
  */
 export function useBrowserHistory(): BrowserHistory {
   const [stack, setStack] = useState<Stack>(EMPTY)
@@ -142,14 +126,20 @@ export function useBrowserHistory(): BrowserHistory {
     [commit]
   )
 
-  const clear = useCallback(() => commit(EMPTY), [commit])
-
-  const recent = useMemo(() => toRecent(stack.entries), [stack.entries])
+  // Record each arrival once it has committed — never from inside `push`,
+  // which the web fallback calls while rendering to follow a host's request.
+  const current = stack.index >= 0 ? (stack.entries[stack.index] ?? null) : null
+  useEffect(() => {
+    if (!current) return
+    void recordBrowserVisit(current).catch((error: unknown) => {
+      // Losing one history row must never interrupt browsing.
+      loggers.store.warn("browser history write failed", { error: String(error) })
+    })
+  }, [current])
 
   return {
     entries: stack.entries,
     index: stack.index,
-    recent,
     canGoBack: stack.index > 0,
     canGoForward: stack.index >= 0 && stack.index < stack.entries.length - 1,
     push,
@@ -157,7 +147,5 @@ export function useBrowserHistory(): BrowserHistory {
     goBack,
     goForward,
     traverseTo,
-    jumpTo: push,
-    clear,
   }
 }

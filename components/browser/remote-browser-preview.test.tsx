@@ -135,7 +135,37 @@ jest.mock("@/lib/browser/remote-chromium-engine", () => ({
 }))
 // History dropdown renders inline via the shared manual mock.
 jest.mock("@/components/ui/dropdown-menu")
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+// The visit store, faked in memory: `useBrowserHistory` writes each arrival
+// through `recordBrowserVisit`, and the menu reads them back via `useRecentPages`.
+let mockVisited: string[] = []
+const mockClearRecent = jest.fn()
+jest.mock("@/lib/db/browser-history", () => ({
+  recordBrowserVisit: jest.fn(async (url: string) => {
+    mockVisited = [url, ...mockVisited.filter((visited) => visited !== url)]
+  }),
+}))
+jest.mock("@/hooks/browser/use-recent-pages", () => ({
+  useRecentPages: () => ({ recent: mockVisited, clear: mockClearRecent }),
+}))
+// The rings' own behaviour is use-browser-devtools.test.ts's; here only the
+// poll this surface asks for matters.
+let mockDevtoolsPoll: { intervalMs?: number } | null | undefined
+jest.mock("@/hooks/browser/use-browser-devtools", () => ({
+  useBrowserDevtools: (options?: { poll?: { intervalMs?: number } | null }) => {
+    mockDevtoolsPoll = options?.poll
+    return {
+      console: [],
+      network: [],
+      problemCount: 0,
+      failedRequests: 0,
+      clearConsole: jest.fn(),
+      clearNetwork: jest.fn(),
+    }
+  },
+}))
 
+import { toast } from "sonner"
 import type { RemoteBrowserStreamOptions } from "@/lib/browser/remote-stream"
 import { RemoteBrowserPreview } from "./remote-browser-preview"
 
@@ -158,6 +188,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockDevtoolsPoll = undefined
+  mockVisited = []
+  mockClearRecent.mockResolvedValue(true)
   streamOptions = null
   mockStreamEndpoint = { baseUrl: "https://cloud.example.com" }
   mockRuntimeStatus = { compiled: true, enabled: true, configured: true, healthy: true }
@@ -579,10 +612,17 @@ it("selects a remote element by snapshot ref and sends it through the shared com
 })
 
 it("switches and closes pages through the host-neutral engine", async () => {
-  listPages.mockResolvedValueOnce([
-    { id: "page-1", url: "https://example.com", title: "Example", active: true },
-    { id: "page-2", url: "https://example.com/two", title: "Two", active: false },
-  ])
+  // Two reads see both pages: the one on connect, and the refresh that follows
+  // the switch. Only then is there a second page left to close.
+  listPages
+    .mockResolvedValueOnce([
+      { id: "page-1", url: "https://example.com", title: "Example", active: true },
+      { id: "page-2", url: "https://example.com/two", title: "Two", active: false },
+    ])
+    .mockResolvedValueOnce([
+      { id: "page-1", url: "https://example.com", title: "Example", active: false },
+      { id: "page-2", url: "https://example.com/two", title: "Two", active: true },
+    ])
   render(
     <RemoteBrowserPreview
       chatSessionId="chat-1"
@@ -696,4 +736,184 @@ it("carries the same collapsible tools strip as the embedded pane", async () => 
   expect(dock).toHaveAttribute("data-expanded", "false")
   fireEvent.click(screen.getByTestId("browser-tools-toggle"))
   expect(screen.getByTestId("remote-browser-recorder")).toBeInTheDocument()
+})
+
+/** Connect, arm select mode, and pick the snapshot's button onto the canvas. */
+async function pickElement() {
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => streamOptions?.onState?.("connected"))
+  fireEvent.click(screen.getByRole("button", { name: "browser.actions.selectElement" }))
+  const canvas = screen.getByRole("application", { name: "browser.remote.canvas" })
+  Object.defineProperty(canvas, "getBoundingClientRect", {
+    value: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+  })
+  await act(async () => {
+    fireEvent(
+      canvas,
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 50, clientY: 50, button: 0 })
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  return screen.getByRole("textbox", { name: "browser.comment.title" })
+}
+
+// The same keyboard contract and the same outcomes as the embedded pane.
+describe("commenting on a remote element", () => {
+  it("sends with Ctrl+Enter, confirms, and closes the box", async () => {
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    const field = await pickElement()
+    expect(screen.getByText("browser.comment.hint")).toBeInTheDocument()
+    fireEvent.change(field, { target: { value: "Tighten this" } })
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true })
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("browser.comment.sent"))
+    expect(screen.queryByRole("textbox", { name: "browser.comment.title" })).toBeNull()
+  })
+
+  it("says why when the comment could not be delivered, and keeps the draft", async () => {
+    sendComment.mockResolvedValueOnce(false)
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    const field = await pickElement()
+    fireEvent.change(field, { target: { value: "Tighten this" } })
+    fireEvent.click(screen.getByRole("button", { name: "browser.comment.send" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("browser.comment.noSession"))
+    expect(screen.getByRole("textbox", { name: "browser.comment.title" })).toHaveValue(
+      "Tighten this"
+    )
+  })
+
+  it("reports a failed send instead of an unhandled rejection", async () => {
+    sendComment.mockRejectedValueOnce(new Error("offline"))
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    const field = await pickElement()
+    fireEvent.change(field, { target: { value: "Tighten this" } })
+    fireEvent.click(screen.getByRole("button", { name: "browser.comment.send" }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("browser.comment.failed"))
+  })
+
+  it("dismisses the box on Escape", async () => {
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    const field = await pickElement()
+    fireEvent.keyDown(field, { key: "Escape" })
+    expect(screen.queryByRole("textbox", { name: "browser.comment.title" })).toBeNull()
+  })
+})
+
+// The key existed in no locale, so the badge rendered its own lookup path.
+it("labels the connection state in words", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => streamOptions?.onState?.("reconnecting"))
+  expect(screen.getByText("browser.remote.connection.reconnecting")).toBeInTheDocument()
+})
+
+// A landscape frame letterboxed in a tall rail: the picture sits in the middle
+// band, and a click on its centre is the page's centre, not a point 3/4 down.
+it("maps pointer input through the letterbox to page pixels", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  act(() => {
+    streamOptions?.onLease?.({ epoch: 1, controller: { kind: "human", id: "device-1" } })
+  })
+  const canvas = screen.getByRole("application", { name: "browser.remote.canvas" })
+  Object.defineProperty(canvas, "getBoundingClientRect", {
+    value: () => ({ left: 0, top: 0, width: 300, height: 600 }),
+  })
+  // No frame has been drawn in jsdom, so the frame is still the 1×1 seed:
+  // drawn 300×300, centred with 150px bars above and below.
+  fireEvent(
+    canvas,
+    new MouseEvent("pointerdown", { bubbles: true, clientX: 150, clientY: 300, button: 0 })
+  )
+  expect(sendInput).toHaveBeenCalledWith({
+    kind: "mouse",
+    payload: expect.objectContaining({ type: "mousePressed", x: 0.5, y: 0.5 }),
+  })
+})
+
+describe("engine switch", () => {
+  it("offers the way back to the embedded engine when the host allows it", async () => {
+    const onBackendChange = jest.fn()
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+        onBackendChange={onBackendChange}
+      />
+    )
+    await waitFor(() => expect(streamOptions).not.toBeNull())
+    const select = within(screen.getByTestId("popover-content")).getByRole("combobox", {
+      name: "browser.backend.label",
+    })
+    expect(select).toHaveValue("remote")
+    fireEvent.change(select, { target: { value: "embedded" } })
+    expect(onBackendChange).toHaveBeenCalledWith("embedded")
+  })
+
+  // Off the desktop there is no other engine to go back to.
+  it("offers no switch when the host has nothing to switch to", async () => {
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    await waitFor(() => expect(streamOptions).not.toBeNull())
+    expect(screen.queryByRole("combobox", { name: "browser.backend.label" })).toBeNull()
+  })
+})
+
+it("polls the readouts at full rate only while the dock is open", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await screen.findByTestId("browser-tools-dock")
+  expect(mockDevtoolsPoll?.intervalMs).toBe(6_000)
+  fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+  expect(mockDevtoolsPoll?.intervalMs).toBe(1_500)
 })

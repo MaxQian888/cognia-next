@@ -13,10 +13,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[cfg(target_os = "macos")]
 use tauri::Manager;
 
-#[cfg(target_os = "macos")]
 use crate::browser::embedded::EMBED_LABEL;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -80,6 +78,24 @@ pub enum CookieImportResult {
     PermissionDenied,
     NoProfile,
     NoMatchingCookies,
+}
+
+/// What clearing a site's sign-in removed. Counts only: like the import, no
+/// cookie name or value crosses the IPC boundary.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CookieClearResult {
+    /// Cookies removed from the preview's store.
+    removed: usize,
+    /// The registrable domain they were matched against.
+    domain: String,
+}
+
+/// What signing the preview out of every site removed.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CookieClearAllResult {
+    removed: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,9 +280,170 @@ pub async fn browser_cookie_import(
     }
 }
 
+/// Whether a cookie stored under `cookie_domain` belongs to `site`, a
+/// registrable domain: the site itself or any subdomain, host-only (`a.b.com`)
+/// or domain (`.b.com`) alike. The same scope the import reads from, so a clear
+/// removes exactly what an import could have put there — and nothing of an
+/// unrelated site that merely ends in the same letters (`notexample.com`).
+fn cookie_belongs_to_site(cookie_domain: &str, site: &str) -> bool {
+    let domain = cookie_domain
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    !domain.is_empty()
+        && (domain == site
+            || domain
+                .strip_suffix(site)
+                .is_some_and(|prefix| prefix.ends_with('.')))
+}
+
+/// Remove the current site's cookies from the embedded preview — the way out
+/// of an import (ADR-0073), and a plain "sign out here" for any site.
+///
+/// Scoped like the import: `domain` must be the host the preview is showing,
+/// and only that host's registrable domain is touched. The preview shares the
+/// main window's website data store, so clearing *all* browsing data would wipe
+/// Cognia's own storage; per-cookie deletion is the only safe grain. The store
+/// is read off the async runtime because WebView2's cookie reads deadlock on a
+/// synchronous command thread.
+#[tauri::command]
+pub async fn browser_cookie_clear(
+    app: tauri::AppHandle,
+    domain: String,
+) -> Result<CookieClearResult, String> {
+    let site = chromium::registrable_domain(&domain).map_err(|error| error.to_string())?;
+    let webview = app
+        .get_webview(EMBED_LABEL)
+        .ok_or_else(|| "embedded browser is not open".to_string())?;
+    let current_host = webview
+        .url()
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned));
+    if current_host.as_deref() != Some(domain.as_str()) {
+        return Err(ImportError::InvalidDomain.to_string());
+    }
+    let matched_site = site.clone();
+    let removed = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let cookies = webview
+            .cookies()
+            .map_err(|_| "cookie store could not be read".to_string())?;
+        let mut removed = 0;
+        for cookie in cookies {
+            let belongs = cookie
+                .domain()
+                .is_some_and(|cookie_domain| cookie_belongs_to_site(cookie_domain, &matched_site));
+            if !belongs {
+                continue;
+            }
+            webview
+                .delete_cookie(cookie)
+                .map_err(|_| "cookie could not be removed".to_string())?;
+            removed += 1;
+        }
+        Ok(removed)
+    })
+    .await
+    .map_err(|_| "cookie clear worker failed".to_string())??;
+    Ok(CookieClearResult {
+        removed,
+        domain: site,
+    })
+}
+
+/// Whether a cookie stored under `cookie_domain` belongs to a public website —
+/// the only kind a sign-out-everywhere may remove. Local development hosts,
+/// IP literals and the app's own `tauri.localhost` origin share this store and
+/// are left alone: they are not "sites you are signed in to", and the app's
+/// own origin must not lose state it did not ask to lose.
+fn is_public_site_cookie(cookie_domain: &str) -> bool {
+    let host = cookie_domain
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty()
+        || host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+    {
+        return false;
+    }
+    chromium::registrable_domain(&host).is_ok()
+}
+
+/// Remove every public site's cookies from the preview — what "clear all data"
+/// does to the sign-ins it would otherwise leave behind, imported or typed in.
+///
+/// The preview shares its website data store with the main window, so any
+/// webview reaches the same cookies; the preview need not be open.
+#[tauri::command]
+pub async fn browser_cookie_clear_all(app: tauri::AppHandle) -> Result<CookieClearAllResult, String> {
+    let webview = app
+        .get_webview(EMBED_LABEL)
+        .or_else(|| app.get_webview("main"))
+        .or_else(|| app.webviews().into_values().next())
+        .ok_or_else(|| "no webview is available".to_string())?;
+    let removed = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let cookies = webview
+            .cookies()
+            .map_err(|_| "cookie store could not be read".to_string())?;
+        let mut removed = 0;
+        for cookie in cookies {
+            if !cookie.domain().is_some_and(is_public_site_cookie) {
+                continue;
+            }
+            webview
+                .delete_cookie(cookie)
+                .map_err(|_| "cookie could not be removed".to_string())?;
+            removed += 1;
+        }
+        Ok(removed)
+    })
+    .await
+    .map_err(|_| "cookie clear worker failed".to_string())??;
+    Ok(CookieClearAllResult { removed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clear_all_touches_public_sites_only() {
+        assert!(is_public_site_cookie(".github.com"));
+        assert!(is_public_site_cookie("accounts.google.com"));
+        assert!(!is_public_site_cookie("localhost"));
+        assert!(!is_public_site_cookie("tauri.localhost"));
+        assert!(!is_public_site_cookie("app.localhost"));
+        assert!(!is_public_site_cookie("printer.local"));
+        assert!(!is_public_site_cookie("127.0.0.1"));
+        assert!(!is_public_site_cookie("com"));
+        assert!(!is_public_site_cookie(""));
+    }
+
+    #[test]
+    fn clear_matches_the_site_and_its_subdomains_only() {
+        assert!(cookie_belongs_to_site("example.com", "example.com"));
+        assert!(cookie_belongs_to_site(".example.com", "example.com"));
+        assert!(cookie_belongs_to_site("www.example.com", "example.com"));
+        assert!(cookie_belongs_to_site(".Accounts.Example.com", "example.com"));
+        assert!(!cookie_belongs_to_site("notexample.com", "example.com"));
+        assert!(!cookie_belongs_to_site("example.com.evil.io", "example.com"));
+        assert!(!cookie_belongs_to_site("", "example.com"));
+        assert!(!cookie_belongs_to_site(".", "example.com"));
+    }
+
+    #[test]
+    fn clear_result_carries_counts_not_cookie_data() {
+        let json = serde_json::to_value(CookieClearResult {
+            removed: 3,
+            domain: "example.com".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "removed": 3, "domain": "example.com" })
+        );
+    }
 
     #[test]
     fn imported_cookie_debug_redacts_the_value() {

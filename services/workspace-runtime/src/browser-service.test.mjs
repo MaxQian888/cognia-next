@@ -698,3 +698,35 @@ test("reclaims idle and absolute-lifetime sessions while releasing profiles", as
   assert.deepEqual(await service.reapExpired(), ["absolute"])
   assert.equal(chromium.launches[1].context.closed, true)
 })
+
+test("deletes a closed profile's data, and refuses while a session holds it", async (t) => {
+  const { service } = await fixture(t)
+  await service.createSession({ id: "session-1", profileId: "qa-login", grants: [] })
+  const profilePath = path.join(service.profilesRoot, "qa-login")
+  await fs.writeFile(path.join(profilePath, "Cookies"), "signed-in")
+
+  await assert.rejects(
+    () => service.deleteProfile("qa-login"),
+    (error) => error.code === "browser_profile_in_use"
+  )
+  await service.closeSession("session-1")
+
+  assert.deepEqual(await service.deleteProfile("qa-login"), { deleted: true })
+  await assert.rejects(
+    () => fs.stat(profilePath),
+    (error) => error.code === "ENOENT"
+  )
+  // Deleting a profile that was never opened here is not an error.
+  assert.deepEqual(await service.deleteProfile("never-opened"), { deleted: true })
+})
+
+test("never deletes outside the profiles root", async (t) => {
+  const { service } = await fixture(t)
+  for (const profileId of ["..", ".", "../escape", "a/b", ""]) {
+    await assert.rejects(
+      () => service.deleteProfile(profileId),
+      (error) => error.code === "browser_profile_invalid"
+    )
+  }
+  await assert.doesNotReject(() => fs.stat(service.workspaceRoot))
+})

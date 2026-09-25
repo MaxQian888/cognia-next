@@ -39,12 +39,15 @@ import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
+import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useFlowRecorder } from "@/hooks/browser/use-flow-recorder"
 import { useSelectionToChat } from "@/hooks/browser/use-selection-to-chat"
 import { configureRemoteBrowserEngine } from "@/lib/browser/agent-engine"
+import type { BrowserBackend } from "@/lib/browser/backend-availability"
 import { RemoteChromiumEngine } from "@/lib/browser/remote-chromium-engine"
 import { createEngineRecordingDriver } from "@/lib/browser/recording/engine-recording-driver"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
@@ -56,6 +59,7 @@ import {
 } from "@/lib/db/browser-profiles"
 import {
   RemoteBrowserStream,
+  canvasPointToFrame,
   type RemoteBrowserConnectionState,
   type RemoteBrowserFrame,
   type RemoteBrowserLease,
@@ -118,6 +122,13 @@ export interface RemoteBrowserPreviewProps {
    * two requests; without this the second one deduplicated away.
    */
   requestNonce?: number
+  /**
+   * Switch this pane back to another engine. Present only on a desktop, where
+   * remote Chromium is an alternative to the embedded webview rather than the
+   * only engine; without it, choosing "cloud browser" was a one-way door until
+   * the pane remounted.
+   */
+  onBackendChange?: (backend: BrowserBackend) => void
   createStream?: (options: RemoteBrowserStreamOptions) => StreamLike
 }
 
@@ -137,6 +148,10 @@ async function resolveStreamEndpoint(): Promise<CompanionEndpoint | null> {
   return fallback ? ({ baseUrl: fallback } as CompanionEndpoint) : null
 }
 
+/** Console / network poll rate while the dock's readouts are open, and while not. */
+const DEVTOOLS_POLL_MS = 1_500
+const DEVTOOLS_IDLE_POLL_MS = 6_000
+
 function mouseButton(button: number): "left" | "middle" | "right" {
   if (button === 1) return "middle"
   if (button === 2) return "right"
@@ -147,10 +162,12 @@ function RemoteRecorder({
   engine,
   pageUrl,
   onSendToChat,
+  onRecordingChange,
 }: {
   engine: RemoteChromiumEngine
   pageUrl: string | null
   onSendToChat: (markdown: string) => void
+  onRecordingChange: (steps: number | null) => void
 }) {
   const driver = useMemo(() => createEngineRecordingDriver(engine), [engine])
   const recorder = useFlowRecorder({
@@ -168,10 +185,10 @@ function RemoteRecorder({
 
   return (
     <BrowserRecorderPanel
-      chrome={false}
       pageUrl={pageUrl}
       recorder={recorder}
       onSendToChat={onSendToChat}
+      onRecordingChange={onRecordingChange}
     />
   )
 }
@@ -185,12 +202,14 @@ export function RemoteBrowserPreview({
   initialUrl,
   requestedUrl,
   requestNonce,
+  onBackendChange,
   createStream = (options) => new RemoteBrowserStream(options),
 }: RemoteBrowserPreviewProps) {
   const t = useTranslations("browser.remote")
   const browserT = useTranslations("browser")
   const actionsT = useTranslations("browser.actions")
   const screenshotT = useTranslations("browser.screenshot")
+  const commentT = useTranslations("browser.comment")
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<StreamLike | null>(null)
   const engineRef = useRef<RemoteChromiumEngine | null>(null)
@@ -204,17 +223,24 @@ export function RemoteBrowserPreview({
   const [errorCode, setErrorCode] = useState<string | null>(null)
   /** Why the runtime is not usable, straight from the gateway. */
   const [runtimeReason, setRuntimeReason] = useState<string | null>(null)
-  const engineRefForDevtools = engine
+  /** Whether the dock's readouts are on screen; polling slows while they are not. */
+  const [toolsExpanded, setToolsExpanded] = useState(false)
+  /** The live take's step count, for the dock header; null when not recording. */
+  const [recordingSteps, setRecordingSteps] = useState<number | null>(null)
+  // A remote session has no push channel into this renderer, so the rings fill
+  // by polling — a network round-trip per tick. Full rate only while someone is
+  // reading them; a slow background tick keeps the collapsed badges honest.
   const devtools = useBrowserDevtools({
     poll: useMemo(
       () =>
-        engineRefForDevtools
+        engine
           ? {
-              readConsole: () => engineRefForDevtools.readConsole(),
-              readNetwork: () => engineRefForDevtools.readNetwork(),
+              readConsole: () => engine.readConsole(),
+              readNetwork: () => engine.readNetwork(),
+              intervalMs: toolsExpanded ? DEVTOOLS_POLL_MS : DEVTOOLS_IDLE_POLL_MS,
             }
           : null,
-      [engineRefForDevtools]
+      [engine, toolsExpanded]
     ),
   })
   const [urlInput, setUrlInput] = useState(initialUrl ?? "")
@@ -230,14 +256,18 @@ export function RemoteBrowserPreview({
   const [comment, setComment] = useState("")
   const [sendingComment, setSendingComment] = useState(false)
   const {
-    recent: recentHistory,
     push: pushHistory,
     goBack: historyGoBack,
     goForward: historyGoForward,
     canGoBack,
     canGoForward,
-    clear: clearHistory,
   } = useBrowserHistory()
+  const { recent: recentHistory, clear: clearRecentPages } = useRecentPages()
+  const clearHistory = () => {
+    void clearRecentPages().then((cleared) => {
+      if (!cleared) toast.error(browserT("history.clearFailed"))
+    })
+  }
   const { sendComment, sendScreenshotBytes, sendText } = useSelectionToChat()
   const activePage =
     pages.find((page) => page.id === activePageId) ?? pages.find((page) => page.active)
@@ -554,6 +584,13 @@ export function RemoteBrowserPreview({
     }
   }
 
+  const dismissSelection = () => {
+    setSelection(null)
+    setComment("")
+  }
+
+  // Same outcomes, and the same words for them, as the embedded pane: a send
+  // that could not be delivered used to leave the box open with no reason.
   const sendSelectionComment = async () => {
     if (!selection || !comment.trim()) return
     setSendingComment(true)
@@ -562,30 +599,37 @@ export function RemoteBrowserPreview({
         sessionId: chatSessionId,
       })
       if (sent) {
-        setSelection(null)
-        setComment("")
+        toast.success(commentT("sent"))
+        dismissSelection()
+      } else {
+        toast.error(commentT("noSession"))
       }
+    } catch {
+      toast.error(commentT("failed"))
     } finally {
       setSendingComment(false)
     }
   }
 
-  const pointerPayload = (event: PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const frame = frameSizeRef.current
-    return {
-      x: Math.max(
-        0,
-        Math.min(frame.width, ((event.clientX - rect.left) / rect.width) * frame.width)
-      ),
-      y: Math.max(
-        0,
-        Math.min(frame.height, ((event.clientY - rect.top) / rect.height) * frame.height)
-      ),
-      button: mouseButton(event.button),
-      clickCount: 1,
+  const onCommentKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault()
+      dismissSelection()
+    } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      void sendSelectionComment()
     }
   }
+
+  const pointerPayload = (event: PointerEvent<HTMLCanvasElement>) => ({
+    ...canvasPointToFrame(
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+      frameSizeRef.current
+    ),
+    button: mouseButton(event.button),
+    clickCount: 1,
+  })
 
   const showClickPointer = (event: PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -626,6 +670,28 @@ export function RemoteBrowserPreview({
             urlInput === (activePage?.url ?? "") ? addressDisplayParts(urlInput) : null
           }
           collapsedActive={selectMode || findOpen || zoom !== 1}
+          overflowExtras={
+            onBackendChange ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">{browserT("backend.label")}</span>
+                <NativeSelect
+                  value="remote"
+                  onChange={(event) => onBackendChange(event.target.value as BrowserBackend)}
+                  aria-label={browserT("backend.label")}
+                  size="sm"
+                  wrapperClassName="w-full"
+                  className="h-7 text-xs"
+                >
+                  <NativeSelectOption value="embedded">
+                    {browserT("backend.embedded")}
+                  </NativeSelectOption>
+                  <NativeSelectOption value="remote">
+                    {browserT("backend.remote")}
+                  </NativeSelectOption>
+                </NativeSelect>
+              </div>
+            ) : undefined
+          }
           navigation={
             <BrowserNavigationControls
               disabled={connection !== "connected"}
@@ -867,10 +933,7 @@ export function RemoteBrowserPreview({
                   tooltip={browserT("comment.cancel")}
                   aria-label={browserT("comment.cancel")}
                   size="icon-xs"
-                  onClick={() => {
-                    setSelection(null)
-                    setComment("")
-                  }}
+                  onClick={dismissSelection}
                 >
                   <XIcon />
                 </TooltipIconButton>
@@ -879,11 +942,13 @@ export function RemoteBrowserPreview({
                 autoFocus
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
+                onKeyDown={onCommentKeyDown}
                 placeholder={browserT("comment.placeholder")}
                 aria-label={browserT("comment.title")}
                 rows={2}
                 className="resize-none text-sm"
               />
+              <p className="mt-1 text-[11px] text-muted-foreground">{browserT("comment.hint")}</p>
               <div className="mt-2 flex justify-end">
                 <Button
                   size="sm"
@@ -902,6 +967,8 @@ export function RemoteBrowserPreview({
             this renderer, but the engine implements the same drains. */}
         {engine && (
           <BrowserToolsDock
+            recordingSteps={recordingSteps}
+            onExpandedChange={setToolsExpanded}
             consoleCount={devtools.console.length}
             networkCount={devtools.network.length}
             problemCount={devtools.problemCount}
@@ -911,6 +978,7 @@ export function RemoteBrowserPreview({
                 engine={engine}
                 pageUrl={activePage?.url ?? null}
                 onSendToChat={(markdown) => void sendText(markdown, { sessionId: chatSessionId })}
+                onRecordingChange={setRecordingSteps}
               />
             }
             console={

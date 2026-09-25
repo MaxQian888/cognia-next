@@ -16,6 +16,9 @@ export type CookieImportResult =
   | { kind: "no_profile" }
   | { kind: "no_matching_cookies" }
 
+/** What clearing a site's sign-in removed — counts only, never cookie data. */
+export type CookieClearResult = { removed: number; domain: string }
+
 export type CookieImportMessage = {
   key: string
   values?: { count: number }
@@ -49,6 +52,27 @@ export async function importChromeCookies(args: {
     profile: args.profile,
     domain: args.domain,
   })
+}
+
+/**
+ * Remove the current site's cookies from the embedded preview.
+ *
+ * The way out of {@link importChromeCookies}, and deliberately not gated on the
+ * import setting or consent: turning the feature off used to leave whatever it
+ * had imported in place, with nothing anywhere that could remove it. `domain`
+ * must be the host the preview is showing; its registrable domain is cleared.
+ */
+export function clearSiteCookies(domain: string): Promise<CookieClearResult> {
+  return transport.call<CookieClearResult>("browser_cookie_clear", { domain })
+}
+
+/**
+ * Remove every public site's cookies from the preview — "clear all data"'s
+ * sign-out-everywhere. Local development hosts and the app's own origin are
+ * left alone (see `browser_cookie_clear_all`).
+ */
+export function clearAllSiteCookies(): Promise<{ removed: number }> {
+  return transport.call<{ removed: number }>("browser_cookie_clear_all", {})
 }
 
 export function cookieImportMessage(result: CookieImportResult): CookieImportMessage {

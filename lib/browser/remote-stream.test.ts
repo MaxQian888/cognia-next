@@ -2,6 +2,7 @@ import {
   RemoteBrowserStream,
   decodeRemoteBrowserFrame,
   remoteBrowserWebSocketUrl,
+  canvasPointToFrame,
 } from "./remote-stream"
 
 function frameBytes(payload = new Uint8Array([0xff, 0xd8, 0xff])): ArrayBuffer {
@@ -121,4 +122,46 @@ it("does not send input before human takeover", async () => {
   await stream.connect()
   expect(stream.sendInput({ kind: "key", payload: { type: "keyDown", key: "x" } })).toBe(false)
   expect(socket.sent).toEqual([])
+})
+
+describe("canvasPointToFrame", () => {
+  const frame = { width: 1280, height: 720 }
+
+  it("maps straight through when the element matches the frame's aspect", () => {
+    const box = { left: 0, top: 0, width: 640, height: 360 }
+    expect(canvasPointToFrame({ x: 320, y: 180 }, box, frame)).toEqual({ x: 640, y: 360 })
+  })
+
+  // A tall chat rail letterboxes a landscape frame top and bottom. The picture
+  // occupies 300×168.75 in the middle of a 300×600 element.
+  it("accounts for the letterbox bars of a tall element", () => {
+    const box = { left: 0, top: 0, width: 300, height: 600 }
+    const top = (600 - 168.75) / 2
+    expect(canvasPointToFrame({ x: 150, y: top + 84.375 }, box, frame)).toEqual({
+      x: 640,
+      y: 360,
+    })
+    expect(canvasPointToFrame({ x: 0, y: top }, box, frame)).toEqual({ x: 0, y: 0 })
+  })
+
+  it("accounts for pillarbox bars of a wide element", () => {
+    const box = { left: 100, top: 50, width: 1000, height: 360 }
+    // Drawn 640×360, centred: 180px bars either side.
+    expect(canvasPointToFrame({ x: 100 + 180 + 320, y: 50 + 180 }, box, frame)).toEqual({
+      x: 640,
+      y: 360,
+    })
+  })
+
+  it("clamps a point in the bars to the nearest edge", () => {
+    const box = { left: 0, top: 0, width: 300, height: 600 }
+    expect(canvasPointToFrame({ x: -20, y: 5 }, box, frame)).toEqual({ x: 0, y: 0 })
+    expect(canvasPointToFrame({ x: 320, y: 595 }, box, frame)).toEqual({ x: 1280, y: 720 })
+  })
+
+  it("answers the origin rather than NaN before anything has been measured", () => {
+    expect(
+      canvasPointToFrame({ x: 5, y: 5 }, { left: 0, top: 0, width: 0, height: 0 }, frame)
+    ).toEqual({ x: 0, y: 0 })
+  })
 })

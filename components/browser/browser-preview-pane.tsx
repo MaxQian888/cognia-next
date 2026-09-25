@@ -54,6 +54,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
+import { useRecentPages } from "@/hooks/browser/use-recent-pages"
 import { useBrowserLoading } from "@/hooks/browser/use-browser-loading"
 import { useBrowserPaneWebview } from "@/hooks/browser/use-browser-pane-webview"
 import { useElementSelection } from "@/hooks/browser/use-element-selection"
@@ -69,6 +70,7 @@ import {
   type BrowserAnnotationStatus,
 } from "@/lib/db/browser-annotations"
 import { setActivePaneRect } from "@/lib/browser/pane-rect"
+import { BROWSER_DETAIL_STORAGE_KEY, BROWSER_ZOOM_STORAGE_KEY } from "@/lib/browser/preview-data"
 import {
   type ElementRect,
   type OutputDetailLevel,
@@ -87,8 +89,6 @@ import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
-const DETAIL_LEVEL_STORAGE_KEY = "cognia.browser.output-detail"
-const ZOOM_STORAGE_KEY = "cognia.browser.zoom"
 const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
 
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
@@ -112,9 +112,6 @@ export { addressDisplayParts }
  */
 export function BrowserPreviewPane({
   sessionId,
-  parentChatSessionId,
-  workspaceId,
-  profileId,
   initialUrl,
   requestedUrl,
   requestId,
@@ -122,9 +119,6 @@ export function BrowserPreviewPane({
   onRequestReveal,
 }: {
   sessionId?: string
-  parentChatSessionId?: string
-  workspaceId?: string
-  profileId?: string
   initialUrl?: string
   /**
    * An address a host is asking this pane to go to *now*, e.g. the link a user
@@ -218,14 +212,14 @@ export function BrowserPreviewPane({
     useState<BrowserAnnotationSeverity>("suggestion")
   const [detailLevel, setDetailLevel] = useState<OutputDetailLevel>(() => {
     if (typeof window === "undefined") return "standard"
-    const stored = window.localStorage.getItem(DETAIL_LEVEL_STORAGE_KEY)
+    const stored = window.localStorage.getItem(BROWSER_DETAIL_STORAGE_KEY)
     return DETAIL_LEVELS.includes(stored as OutputDetailLevel)
       ? (stored as OutputDetailLevel)
       : "standard"
   })
   const [zoom, setZoom] = useState<number>(() => {
     if (typeof window === "undefined") return 1
-    const stored = Number(window.localStorage.getItem(ZOOM_STORAGE_KEY))
+    const stored = Number(window.localStorage.getItem(BROWSER_ZOOM_STORAGE_KEY))
     return Number.isFinite(stored) && stored >= MIN_ZOOM && stored <= MAX_ZOOM ? stored : 1
   })
   const [webviewReady, setWebviewReady] = useState(false)
@@ -236,8 +230,9 @@ export function BrowserPreviewPane({
   // toggling a second surface in the side rail. `null` means "no outstanding
   // request", so the dock can be collapsed again without this re-opening it.
   const [developerRequest, setDeveloperRequest] = useState(0)
+  /** The live take's step count, for the dock header; null when not recording. */
+  const [recordingSteps, setRecordingSteps] = useState<number | null>(null)
   const {
-    recent: recentHistory,
     push: pushHistory,
     replace: replaceHistory,
     traverseTo: traverseHistory,
@@ -245,8 +240,13 @@ export function BrowserPreviewPane({
     goForward: historyGoForward,
     canGoBack,
     canGoForward,
-    clear: clearHistory,
   } = useBrowserHistory()
+  const { recent: recentHistory, clear: clearRecentPages } = useRecentPages()
+  const clearHistory = useCallback(() => {
+    void clearRecentPages().then((cleared) => {
+      if (!cleared) toast.error(t("history.clearFailed"))
+    })
+  }, [clearRecentPages, t])
   const activeChatSessionId = useChatStore((state) => state.activeSessionId)
   /**
    * The chat session this pane's annotations, CDP grants and Adjust drafts
@@ -313,19 +313,22 @@ export function BrowserPreviewPane({
     },
     [t]
   )
-  const { getRect, refreshBounds, owned, takeLease } = useBrowserPaneWebview(reservedRef, {
-    url: committedUrl,
-    ownerId,
-    onReady: handleWebviewReady,
-    onError: handleWebviewError,
-    onRectChange: handleRectChange,
-    visible: !!committedUrl && hasPainted && regionVisible,
-    // The same nonce the web and remote surfaces follow. `committedUrl` alone
-    // cannot express "go to A again": React bails out of the identical
-    // `setState`, so a pane whose page had drifted to B (an in-page navigation,
-    // a redirect) stayed on B while every other backend went back to A.
-    navigateNonce: surfaceRequest?.nonce ?? 0,
-  })
+  const { getRect, refreshBounds, owned, contended, takeLease } = useBrowserPaneWebview(
+    reservedRef,
+    {
+      url: committedUrl,
+      ownerId,
+      onReady: handleWebviewReady,
+      onError: handleWebviewError,
+      onRectChange: handleRectChange,
+      visible: !!committedUrl && hasPainted && regionVisible,
+      // The same nonce the web and remote surfaces follow. `committedUrl` alone
+      // cannot express "go to A again": React bails out of the identical
+      // `setState`, so a pane whose page had drifted to B (an in-page navigation,
+      // a redirect) stayed on B while every other backend went back to A.
+      navigateNonce: surfaceRequest?.nonce ?? 0,
+    }
+  )
   const devtools = useBrowserDevtools({ paneId: "browser-embed", enabled: owned })
   const { selection, selections, navigated, selectMode, setSelectMode, clearSelection } =
     useElementSelection({ driver: browserClient.embedSetSelectMode, enabled: owned })
@@ -356,10 +359,10 @@ export function BrowserPreviewPane({
   }, [committedUrl, getRect])
   useEffect(() => () => setActivePaneRect(null), [])
   useEffect(() => {
-    window.localStorage.setItem(DETAIL_LEVEL_STORAGE_KEY, detailLevel)
+    window.localStorage.setItem(BROWSER_DETAIL_STORAGE_KEY, detailLevel)
   }, [detailLevel])
   useEffect(() => {
-    window.localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom))
+    window.localStorage.setItem(BROWSER_ZOOM_STORAGE_KEY, String(zoom))
   }, [zoom])
   // Re-apply zoom whenever the page becomes live (covers webview recreation)
   // or the user changes it. Native zoom persists across in-page navigations.
@@ -731,12 +734,11 @@ export function BrowserPreviewPane({
     return (
       <RemoteBrowserPreview
         chatSessionId={effectiveSessionId ?? "browser-preview"}
-        parentChatSessionId={parentChatSessionId}
-        workspaceId={workspaceId ?? activeProjectId ?? "default"}
-        profileId={profileId}
+        workspaceId={activeProjectId ?? "default"}
         initialUrl={normalizedInitialUrl ?? undefined}
         requestedUrl={surfaceRequest?.url}
         requestNonce={surfaceRequest?.nonce}
+        onBackendChange={isTauri() && backend.remoteReachable ? setBackendPreference : undefined}
       />
     )
   }
@@ -963,7 +965,7 @@ export function BrowserPreviewPane({
           className="relative min-h-0 min-w-0 flex-1"
           data-testid="browser-reserved-region"
         >
-          {!owned && (
+          {contended && (
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background p-6 text-center animate-in fade-in duration-200"
               role="status"
@@ -982,7 +984,7 @@ export function BrowserPreviewPane({
               </Button>
             </div>
           )}
-          {owned && committedUrl && !hasPainted && (
+          {!contended && committedUrl && !hasPainted && (
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center animate-in fade-in duration-200"
               role="status"
@@ -1003,7 +1005,9 @@ export function BrowserPreviewPane({
               </div>
             </div>
           )}
-          {owned && !committedUrl && <BrowserEmptyState onOpen={openQuickUrl} />}
+          {!contended && !committedUrl && (
+            <BrowserEmptyState onOpen={openQuickUrl} recent={recentHistory} />
+          )}
         </div>
         {railRendered && (
           <aside
@@ -1127,15 +1131,15 @@ export function BrowserPreviewPane({
         <BrowserToolsDock
           onLayoutChange={refreshBounds}
           openRequest={developerRequest > 0 ? { tab: "developer", nonce: developerRequest } : null}
+          recordingSteps={recordingSteps}
           consoleCount={devtools.console.length}
           networkCount={devtools.network.length}
           problemCount={devtools.problemCount}
           failedRequests={devtools.failedRequests}
           recorder={
             <BrowserRecorderPanel
-              chrome={false}
               pageUrl={currentUrl ?? null}
-              onLayoutChange={refreshBounds}
+              onRecordingChange={setRecordingSteps}
               onSendToChat={(markdown) =>
                 void sendText(markdown, { sessionId: effectiveSessionId })
               }
