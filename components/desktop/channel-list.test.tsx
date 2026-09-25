@@ -3212,6 +3212,23 @@ describe("channel-list branch coverage top-ups", () => {
     expect(await screen.findByText("emptyFolder")).toBeInTheDocument()
   })
 
+  it("does not commit a folder rename on the Enter that confirms an IME candidate", async () => {
+    const onRenameFolder = jest.fn()
+    const user = userEvent.setup()
+    renderList([dmSession], {
+      folders: [{ id: "f-1", name: "Reading", order: 0, createdAt: 0, updatedAt: 0 }],
+      onRenameFolder,
+    })
+    await user.click(await screen.findByRole("button", { name: "folderActions" }))
+    await user.click(await screen.findByText("renameFolder"))
+    const input = await screen.findByLabelText("renameFolder")
+    fireEvent.change(input, { target: { value: "阅读" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    expect(onRenameFolder).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onRenameFolder).toHaveBeenCalledWith("f-1", "阅读")
+  })
+
   it("abandons a folder rename on Escape without persisting the draft", async () => {
     const onRenameFolder = jest.fn()
     const user = userEvent.setup()

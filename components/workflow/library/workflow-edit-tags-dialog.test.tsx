@@ -40,4 +40,16 @@ describe("WorkflowEditTagsDialog", () => {
     })
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+
+  it("saves on Enter, but not on the Enter that confirms an IME candidate", async () => {
+    const wf = await createWorkflow({ name: "X", tags: ["old"] })
+    render(<WorkflowEditTagsDialog workflow={wf as WorkflowRow} open onOpenChange={jest.fn()} />)
+    const input = await screen.findByTestId("workflow-tags-input")
+    fireEvent.change(input, { target: { value: "运维" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    await new Promise((r) => setTimeout(r, 20))
+    expect((await getWorkflow(wf.id))?.tags).toEqual(["old"])
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.tags).toEqual(["运维"]))
+  })
 })

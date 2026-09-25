@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { updateWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface WorkflowEditTagsDialogProps {
   workflow: WorkflowRow
@@ -88,7 +89,7 @@ function TagsBody({ workflow, onClose }: { workflow: WorkflowRow; onClose: () =>
         aria-label={t("tagsDialog.title")}
         autoFocus
         onKeyDown={(e) => {
-          if (e.key === "Enter") void submit()
+          if (e.key === "Enter" && !isImeComposing(e)) void submit()
         }}
         data-testid="workflow-tags-input"
       />

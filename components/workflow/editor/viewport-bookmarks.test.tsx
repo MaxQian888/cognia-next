@@ -79,6 +79,17 @@ describe("ViewportBookmarksContent", () => {
     })
   })
 
+  it("does not save on the Enter that confirms an IME candidate", async () => {
+    renderBookmarks()
+    fireEvent.click(screen.getByTestId("viewport-bookmarks-save"))
+    const input = await screen.findByTestId("viewport-bookmark-name-input")
+    fireEvent.change(input, { target: { value: "入口" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(await listBookmarks("wf_a")).toHaveLength(0)
+    expect(screen.getByTestId("viewport-bookmark-name-input")).toBeInTheDocument()
+  })
+
   it("closes the save dialog when cancel is clicked", async () => {
     renderBookmarks()
     fireEvent.click(screen.getByTestId("viewport-bookmarks-save"))

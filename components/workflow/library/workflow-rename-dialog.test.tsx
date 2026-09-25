@@ -34,6 +34,19 @@ describe("WorkflowRenameDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("saves on Enter, but not on the Enter that confirms an IME candidate", async () => {
+    const wf = await createWorkflow({ name: "Old name" })
+    render(<WorkflowRenameDialog workflow={wf as WorkflowRow} open onOpenChange={jest.fn()} />)
+    const input = await screen.findByTestId("workflow-rename-input")
+    fireEvent.change(input, { target: { value: "新名字" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+    await new Promise((r) => setTimeout(r, 20))
+    expect((await getWorkflow(wf.id))?.name).toBe("Old name")
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.name).toBe("新名字"))
+  })
+
   it("does not render its body when closed", async () => {
     const wf = await createWorkflow({ name: "X" })
     render(

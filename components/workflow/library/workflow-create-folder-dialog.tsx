@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { createFolder, renameFolder } from "@/lib/db/workflow-folders"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export function WorkflowCreateFolderDialog() {
   const createParentId = useWorkflowLibraryStore((s) => s.createFolderParentId)
@@ -109,7 +110,7 @@ function FolderDialogBody({
         autoFocus
         maxLength={120}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void submit()
+          if (e.key === "Enter" && !isImeComposing(e)) void submit()
         }}
         data-testid="workflow-folder-name-input"
       />

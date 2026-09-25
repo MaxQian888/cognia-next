@@ -180,6 +180,20 @@ describe("WorkspaceManageDialog", () => {
     expect(screen.queryByTestId("workspace-knowledge-after-create")).not.toBeInTheDocument()
   })
 
+  it("does not add a tag or root on the Enter that confirms an IME candidate", () => {
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    const tagInput = screen.getByLabelText("tagsLabel")
+    fireEvent.change(tagInput, { target: { value: "后端" } })
+    fireEvent.keyDown(tagInput, { key: "Enter", isComposing: true })
+    expect(tagInput).toHaveValue("后端")
+    const manual = screen.getByPlaceholderText("addRootManual")
+    fireEvent.change(manual, { target: { value: "/srv/项目" } })
+    fireEvent.keyDown(manual, { key: "Enter", keyCode: 229 })
+    expect(manual).toHaveValue("/srv/项目")
+    expect(screen.queryByText("/srv/项目", { selector: ":not(input)" })).not.toBeInTheDocument()
+  })
+
   it("opens on the workspace it was asked for, else on the active one", () => {
     const [a, b] = seed("Alpha", "Beta")
     act(() => useProjectStore.getState().setActiveProject(a))

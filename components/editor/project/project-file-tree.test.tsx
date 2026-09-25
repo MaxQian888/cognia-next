@@ -775,6 +775,26 @@ describe("ProjectFileTree", () => {
     expect(onOpenFile).toHaveBeenCalledWith("new.ts")
   })
 
+  it("does not create or rename on the Enter that confirms an IME candidate", async () => {
+    const deps = makeDeps()
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    await waitFor(() => expect(screen.getByTestId("tree-row-src")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText("newFile"))
+    const create = await screen.findByPlaceholderText("newFile")
+    fireEvent.change(create, { target: { value: "笔记.md" } })
+    fireEvent.keyDown(create, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(create, { key: "Escape" })
+    fireEvent.click(screen.getAllByText("rename")[1])
+    const rename = await screen.findByLabelText("rename")
+    fireEvent.change(rename, { target: { value: "说明.md" } })
+    fireEvent.keyDown(rename, { key: "Enter", keyCode: 229 })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(deps.writeFile).not.toHaveBeenCalled()
+    expect(deps.renameEntry).not.toHaveBeenCalled()
+  })
+
   it("creates a new folder from the toolbar", async () => {
     const deps = makeDeps()
     render(

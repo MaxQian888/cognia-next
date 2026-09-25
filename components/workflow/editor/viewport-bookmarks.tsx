@@ -37,6 +37,7 @@ import {
   saveBookmark,
 } from "@/lib/workflow/editor/viewport-bookmarks-db"
 import type { Viewport } from "@xyflow/react"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface ViewportBookmarksContentProps {
   workflowId: string
@@ -126,7 +127,7 @@ export function ViewportBookmarksContent({
               autoFocus
               data-testid="viewport-bookmark-name-input"
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !isImeComposing(e)) {
                   e.preventDefault()
                   void handleSave()
                 }

@@ -39,6 +39,20 @@ describe("WorkflowCreateFolderDialog", () => {
     expect(children.map((c) => c.name)).toContain("Reports")
   })
 
+  it("creates on Enter, but not on the Enter that confirms an IME candidate", async () => {
+    useWorkflowLibraryStore.setState({ createFolderParentId: ROOT_FOLDER_ID })
+    render(<WorkflowCreateFolderDialog />)
+    const input = await screen.findByTestId("workflow-folder-name-input")
+    fireEvent.change(input, { target: { value: "报告" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(await listChildFolders(ROOT_FOLDER_ID)).toHaveLength(0)
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(async () =>
+      expect((await listChildFolders(ROOT_FOLDER_ID)).map((c) => c.name)).toContain("报告")
+    )
+  })
+
   it("renames an existing folder", async () => {
     const existing = await createFolder({ name: "Old" })
     useWorkflowLibraryStore.setState({

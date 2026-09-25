@@ -90,6 +90,7 @@ import type {
   renameWorkspaceEntry,
 } from "@/lib/files/workspace-fs"
 import { FILE_TEMPLATES, templateById, type FileTemplate } from "./file-templates"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface ProjectFileTreeDeps {
   listDir: typeof listWorkspaceDir
@@ -1547,7 +1548,7 @@ function TreeRow({
                 onClick={(e) => e.stopPropagation()}
                 onBlur={onRenameSubmit}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") onRenameSubmit()
+                  if (e.key === "Enter" && !isImeComposing(e)) onRenameSubmit()
                   if (e.key === "Escape") onRenameCancel()
                 }}
                 className="h-5 py-0 text-sm"
@@ -1698,7 +1699,7 @@ function CreateInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onSubmit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit()
+          if (e.key === "Enter" && !isImeComposing(e)) onSubmit()
           if (e.key === "Escape") onCancel()
         }}
         className="h-5 py-0 text-sm"

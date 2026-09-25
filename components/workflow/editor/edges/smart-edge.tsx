@@ -24,6 +24,7 @@ import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useEdgeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { computeSmartRoute, type HandlePosition } from "@/lib/workflow/editor/edge-routing"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
+import { isImeComposing } from "@/lib/ui/ime"
 
 type EdgeKind =
   | "then"
@@ -282,7 +283,7 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commitLabel}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !isImeComposing(e)) {
                   e.preventDefault()
                   commitLabel()
                 } else if (e.key === "Escape") {

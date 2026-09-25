@@ -181,6 +181,16 @@ describe("AiShellPanel", () => {
     expect(actions.submit).toHaveBeenCalledWith("deploy")
   })
 
+  it("does not submit on the Enter that confirms an IME candidate", () => {
+    const actions = makeActions()
+    renderPanel(makeState(), actions)
+    const input = screen.getByTestId("ai-shell-input")
+    fireEvent.change(input, { target: { value: "部署" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
+    expect(actions.submit).not.toHaveBeenCalled()
+  })
+
   it("does not submit on Shift+Enter", () => {
     const actions = makeActions()
     renderPanel(makeState(), actions)

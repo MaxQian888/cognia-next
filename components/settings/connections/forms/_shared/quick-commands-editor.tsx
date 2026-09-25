@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { IMQuickCommand, IMQuickCommandActionType } from "@/lib/connectors/quick-commands"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface QuickCommandsEditorProps {
   value: IMQuickCommand[]
@@ -128,7 +129,7 @@ export function QuickCommandsEditor({
             disabled={disabled}
             onChange={(e) => setActionValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isImeComposing(e)) {
                 e.preventDefault()
                 handleAdd()
               }

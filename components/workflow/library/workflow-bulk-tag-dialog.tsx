@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { addTagToWorkflows } from "@/lib/db/workflows"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export function WorkflowBulkTagDialog() {
   const target = useWorkflowLibraryStore((s) => s.tagDialogTarget)
@@ -80,7 +81,7 @@ function TagBody({ ids, onDone }: { ids: string[]; onDone: () => void }) {
         aria-label={t("title")}
         autoFocus
         onKeyDown={(e) => {
-          if (e.key === "Enter") void submit()
+          if (e.key === "Enter" && !isImeComposing(e)) void submit()
         }}
         data-testid="workflow-bulk-tag-input"
       />

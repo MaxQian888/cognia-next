@@ -592,6 +592,17 @@ describe("CreateIssuePage v3", () => {
     expect(textarea).toHaveValue("see DEMO-2 ")
   })
 
+  it("leaves the Enter that confirms an IME candidate to the IME", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const textarea = screen.getByTestId("create-issue-description")
+    await user.type(textarea, "see #dark")
+    await screen.findByTestId("issue-ref-panel")
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true })
+    expect(textarea).toHaveValue("see #dark")
+    expect(screen.getByTestId("issue-ref-panel")).toBeInTheDocument()
+  })
+
   it("Escape dismisses the # panel without closing the sheet", async () => {
     const user = userEvent.setup()
     renderPage()

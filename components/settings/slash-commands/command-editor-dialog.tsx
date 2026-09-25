@@ -51,6 +51,7 @@ import {
   type SaveCustomCommandInput,
 } from "@/lib/slash-commands/custom"
 import type { ProjectCommandDir } from "@/lib/slash-commands/custom-workspace"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export type CommandEditorMode = "create" | "edit"
 
@@ -325,7 +326,7 @@ export function CommandEditorDialog({
                 value={form.allowedToolDraft}
                 onChange={(e) => setForm((f) => ({ ...f, allowedToolDraft: e.target.value }))}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !isImeComposing(e)) {
                     e.preventDefault()
                     addTool()
                   }

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { updateWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface WorkflowRenameDialogProps {
   workflow: WorkflowRow
@@ -70,7 +71,7 @@ function RenameBody({ workflow, onClose }: { workflow: WorkflowRow; onClose: () 
         autoFocus
         maxLength={120}
         onKeyDown={(e) => {
-          if (e.key === "Enter") void submit()
+          if (e.key === "Enter" && !isImeComposing(e)) void submit()
         }}
         data-testid="workflow-rename-input"
       />

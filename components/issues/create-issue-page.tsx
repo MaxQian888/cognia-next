@@ -109,6 +109,7 @@ import {
   resolveProjectIdentity,
   type ProjectIdentityState,
 } from "./projects/project-identity-fields"
+import { isImeComposing } from "@/lib/ui/ime"
 
 const NEW_PROJECT_VALUE = "__new__"
 const NO_CYCLE_VALUE = "__none__"
@@ -1172,7 +1173,8 @@ export function CreateIssuePage(props: CreateIssuePageProps) {
   }
 
   const onDescriptionKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!refPanelOpen) return
+    // Arrow keys and Enter belong to the IME's candidate list while composing.
+    if (!refPanelOpen || isImeComposing(event)) return
     if (event.key === "ArrowDown") {
       event.preventDefault()
       setRefIndex((i) => (i + 1) % refSuggestions.length)

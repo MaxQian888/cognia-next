@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 
 import type { UseAiShellState, UseAiShellActions } from "@/hooks/terminal/use-ai-shell"
 import { AiShellPlanView } from "./ai-shell-plan-view"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface AiShellPanelProps {
   state: UseAiShellState
@@ -42,7 +43,7 @@ export function AiShellPanel({ state, actions, className }: AiShellPanelProps) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
         e.preventDefault()
         handleSubmit()
       }

@@ -65,6 +65,7 @@ import {
 } from "@/lib/db/trusted-workspaces"
 import type { Project } from "@/types"
 import type { WorkspaceRoot } from "@/types/workspace"
+import { isImeComposing } from "@/lib/ui/ime"
 
 const log = loggers.shell
 
@@ -708,7 +709,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
                           placeholder={t("tagsPlaceholder")}
                           onChange={(e) => setTagInput(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === ",") {
+                            if ((e.key === "Enter" || e.key === ",") && !isImeComposing(e)) {
                               e.preventDefault()
                               addTag()
                             } else if (e.key === "Backspace" && !tagInput && tags.length > 0) {
@@ -932,7 +933,7 @@ export function WorkspaceManageDialog({ open, onOpenChange, initialId }: Props) 
                           aria-label={t("addRootManual")}
                           onChange={(e) => setManualDir(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") {
+                            if (e.key === "Enter" && !isImeComposing(e)) {
                               e.preventDefault()
                               handleAddManual()
                             }

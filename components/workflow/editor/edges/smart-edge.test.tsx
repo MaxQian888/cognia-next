@@ -153,6 +153,16 @@ describe("SmartEdge", () => {
     expect(store.getState().editingEdgeIdInline).toBeNull()
   })
 
+  it("keeps editing on the Enter that confirms an IME candidate", () => {
+    const store = seedStore()
+    store.getState().setEditingEdgeIdInline("e_1")
+    renderEdge({ data: { label: "old" } as Record<string, unknown> }, store)
+    const input = screen.getByTestId("smart-edge-label-input-e_1") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "成功" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    expect(store.getState().editingEdgeIdInline).toBe("e_1")
+  })
+
   it("Escape inside the inline input cancels without updating", () => {
     const store = seedStore()
     store.getState().setEditingEdgeIdInline("e_1")

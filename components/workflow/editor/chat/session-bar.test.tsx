@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -140,6 +140,18 @@ describe("WorkflowSessionBar", () => {
     await user.type(input, "Investigation Thread")
     await user.click(screen.getByTestId("workflow-session-rename-confirm"))
     expect(mUpdate).toHaveBeenCalledWith("workflow:wf_a", { title: "Investigation Thread" })
+  })
+
+  it("renames on Enter, but not on the Enter that confirms an IME candidate", async () => {
+    const user = userEvent.setup()
+    harness()
+    await user.click(screen.getByTestId("workflow-session-rename"))
+    const input = await screen.findByTestId("workflow-session-rename-input")
+    fireEvent.change(input, { target: { value: "排查" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    expect(mUpdate).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(mUpdate).toHaveBeenCalledWith("workflow:wf_a", { title: "排查" }))
   })
 
   it("clears the conversation via the trash button + confirm", async () => {

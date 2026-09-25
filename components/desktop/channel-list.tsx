@@ -243,6 +243,7 @@ import { ChannelListBulkActions } from "./channel-list-bulk-actions"
 import { useChannelListActions } from "./channel-list/use-channel-list-actions"
 import { createRowDecorations } from "./channel-list/row-decorations"
 import { SessionRow, sessionRowPropsEqual, type SessionRowMetadataItem } from "./session-row"
+import { isImeComposing } from "@/lib/ui/ime"
 
 const log = loggers.ui
 
@@ -4255,7 +4256,7 @@ function FolderSectionHeader({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isImeComposing(e)) {
                 e.preventDefault()
                 commit()
               } else if (e.key === "Escape") {

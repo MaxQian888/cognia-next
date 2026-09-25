@@ -97,6 +97,15 @@ describe("QuickCommandsEditor", () => {
     ])
   })
 
+  it("does not submit on the Enter that confirms an IME candidate", () => {
+    const onChange = jest.fn<void, [IMQuickCommand[]]>()
+    render(<QuickCommandsEditor value={[]} onChange={onChange} helpText="h" testIdPrefix="t" />)
+    fireEvent.change(screen.getByTestId("t-trigger-key"), { target: { value: "menu.x" } })
+    fireEvent.change(screen.getByTestId("t-value"), { target: { value: "做 x" } })
+    fireEvent.keyDown(screen.getByTestId("t-value"), { key: "Enter", isComposing: true })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("disables every control when disabled", () => {
     render(
       <QuickCommandsEditor

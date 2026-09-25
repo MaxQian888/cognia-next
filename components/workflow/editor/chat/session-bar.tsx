@@ -67,6 +67,7 @@ import {
 } from "@/hooks/chat/use-workflow-editor-session"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ui/ime"
 
 export interface SessionBarProps {
   workflowId: string
@@ -316,7 +317,7 @@ export function WorkflowSessionBar({
             data-testid="workflow-session-rename-input"
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isImeComposing(e)) {
                 e.preventDefault()
                 void handleRenameConfirm()
               }

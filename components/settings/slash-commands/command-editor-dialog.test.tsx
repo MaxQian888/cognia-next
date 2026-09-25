@@ -117,6 +117,14 @@ describe("CommandEditorDialog — allowed-tools chip group", () => {
     expect(screen.getByTestId("command-editor-tools")).not.toHaveTextContent("Bash")
   })
 
+  it("does not add a tool on the Enter that confirms an IME candidate", () => {
+    render(<Editor open onOpenChange={() => {}} />)
+    const draft = screen.getByTestId("command-editor-tool-draft")
+    fireEvent.change(draft, { target: { value: "工具" } })
+    fireEvent.keyDown(draft, { key: "Enter", isComposing: true })
+    expect(screen.getByTestId("command-editor-tools")).not.toHaveTextContent("工具")
+  })
+
   it("Add button is disabled until a non-empty draft is typed", () => {
     render(<Editor open onOpenChange={() => {}} />)
     expect(screen.getByTestId("command-editor-add-tool")).toBeDisabled()

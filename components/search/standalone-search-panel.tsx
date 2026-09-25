@@ -59,13 +59,17 @@ export function StandaloneSearchPanel({ searchOptions }: StandaloneSearchPanelPr
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            // Not while an IME is composing: that Enter picks the candidate
+            // (typing Chinese), and used to fire the search mid-word.
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               if (canRun) void run()
             }
           }}
           placeholder={t("placeholder")}
           aria-label={t("queryAria")}
+          // The page is this one box; land in it.
+          autoFocus
           rows={3}
           data-testid="standalone-search-input"
         />

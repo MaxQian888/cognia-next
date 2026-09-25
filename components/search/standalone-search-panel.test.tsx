@@ -72,6 +72,20 @@ describe("StandaloneSearchPanel", () => {
     expect(runImpl).not.toHaveBeenCalled()
   })
 
+  it("does not submit on the Enter that confirms an IME candidate", () => {
+    const runImpl = jest.fn().mockResolvedValue({ query: "q", sources: [], provider: "exa" })
+    renderPanel(runImpl)
+    const input = screen.getByTestId("standalone-search-input")
+    fireEvent.change(input, { target: { value: "你好" } })
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    expect(runImpl).not.toHaveBeenCalled()
+  })
+
+  it("lands focus in the question box", () => {
+    renderPanel(jest.fn())
+    expect(screen.getByTestId("standalone-search-input")).toHaveFocus()
+  })
+
   it("renders an error with a configure link for key-setup failures", async () => {
     const runImpl = jest
       .fn()
