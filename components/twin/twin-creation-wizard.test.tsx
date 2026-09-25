@@ -108,6 +108,22 @@ describe("TwinCreationWizard", () => {
     expect(screen.getByTestId("twin-wizard-next")).toBeDisabled()
   })
 
+  it("advances from the name field on Enter", async () => {
+    render(<TwinCreationWizard open onOpenChange={jest.fn()} onCreated={jest.fn()} />)
+    await userEvent.type(screen.getByTestId("twin-wizard-name"), "Keyboard twin{Enter}")
+    await screen.findByTestId("mock-add-source")
+    await waitFor(async () =>
+      expect((await listTwins()).map((r) => r.name)).toEqual(["Keyboard twin"])
+    )
+  })
+
+  it("ignores Enter while the name is empty", async () => {
+    render(<TwinCreationWizard open onOpenChange={jest.fn()} onCreated={jest.fn()} />)
+    await userEvent.type(screen.getByTestId("twin-wizard-name"), "{Enter}")
+    expect(screen.queryByTestId("mock-add-source")).not.toBeInTheDocument()
+    expect(await listTwins()).toHaveLength(0)
+  })
+
   it("creates a registry row on step 1 → 2 and applies the picked template color", async () => {
     render(<TwinCreationWizard open onOpenChange={jest.fn()} onCreated={jest.fn()} />)
     await userEvent.click(screen.getByTestId("twin-wizard-template-mentor"))

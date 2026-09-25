@@ -334,6 +334,14 @@ export function TwinCreationWizard({ open, onOpenChange, onCreated }: TwinCreati
                 data-testid="twin-wizard-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                // Enter advances like Next does — the one required field on
+                // this step used to swallow it. Not mid-IME-composition: that
+                // Enter commits the candidate, not the step.
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+                  e.preventDefault()
+                  if (!creating && name.trim()) void commitIdentity()
+                }}
                 placeholder={t("namePlaceholder")}
                 autoFocus
                 disabled={creating}
