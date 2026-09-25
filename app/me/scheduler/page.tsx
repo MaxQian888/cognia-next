@@ -597,7 +597,9 @@ function MobileSchedulerBody() {
               {createDraft?.summary ?? t("createTaskDescription")}
             </SheetDescription>
           </SheetHeader>
-          <div className="mt-4">
+          {/* Inset like the header above: flush, the form ran into the
+              screen edge on a phone. */}
+          <div className="px-4 pb-6" data-testid="mobile-scheduler-create-body">
             <TaskForm
               key={createDraft ? "draft" : JSON.stringify(taskDefaults ?? "no-defaults")}
               initialValues={createDraft?.input ?? seedTaskDefaults(taskDefaults)}
@@ -621,7 +623,7 @@ function MobileSchedulerBody() {
             <SheetTitle>{t("editTask")}</SheetTitle>
             <SheetDescription>{t("editTaskDescription")}</SheetDescription>
           </SheetHeader>
-          <div className="mt-4">
+          <div className="px-4 pb-6" data-testid="mobile-scheduler-edit-body">
             {selectedAppTask ? (
               <TaskForm
                 initialValues={{

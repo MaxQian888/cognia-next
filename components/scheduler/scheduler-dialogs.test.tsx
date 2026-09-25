@@ -164,6 +164,14 @@ describe("SchedulerDialogs", () => {
     expect(onCreateTask).toHaveBeenCalledWith({ name: "submitted" })
   })
 
+  it("insets the task form from the sheet edge", () => {
+    // It sat flush against the sheet edge, which on a phone is the screen edge.
+    render(<SchedulerDialogs {...buildProps({ showCreateSheet: true })} />)
+    const body = screen.getByTestId("create-task-sheet-body")
+    expect(body).toHaveClass("px-4")
+    expect(body).toContainElement(screen.getByTestId("task-form-stub"))
+  })
+
   it("cancels the create sheet via the form's cancel callback", () => {
     const onShowCreateSheetChange = jest.fn()
     render(<SchedulerDialogs {...buildProps({ showCreateSheet: true, onShowCreateSheetChange })} />)

@@ -146,7 +146,9 @@ export function SchedulerDialogs({
             </SheetTitle>
             <SheetDescription className="text-sm">{t("createTaskDescription")}</SheetDescription>
           </SheetHeader>
-          <div className="mt-6">
+          {/* Inset like the header above it. The form sat flush against
+              the sheet edge, which on a phone is the screen edge. */}
+          <div className="px-4 pb-6" data-testid="create-task-sheet-body">
             {createDraftSummary && (
               <Surface
                 asChild
@@ -185,7 +187,7 @@ export function SchedulerDialogs({
             </SheetTitle>
             <SheetDescription className="text-sm">{t("editTaskDescription")}</SheetDescription>
           </SheetHeader>
-          <div className="mt-6">
+          <div className="px-4 pb-6" data-testid="edit-task-sheet-body">
             {selectedTask && (
               <TaskForm
                 initialValues={{
@@ -224,7 +226,7 @@ export function SchedulerDialogs({
               {t("systemSchedulerDescription")}
             </SheetDescription>
           </SheetHeader>
-          <div className="mt-6">
+          <div className="px-4 pb-6" data-testid="create-system-task-sheet-body">
             <SystemTaskForm
               capabilities={systemCapabilities}
               onSubmit={onCreateSystemTask}
@@ -249,7 +251,7 @@ export function SchedulerDialogs({
               {t("systemSchedulerDescription")}
             </SheetDescription>
           </SheetHeader>
-          <div className="mt-6">
+          <div className="px-4 pb-6" data-testid="edit-system-task-sheet-body">
             {selectedSystemTask && (
               <SystemTaskForm
                 initialValues={{

@@ -311,6 +311,14 @@ describe("MobileSchedulerPage", () => {
     expect(routerReplace).toHaveBeenLastCalledWith("/me/scheduler?item=app%3Anew")
   })
 
+  it("insets the create form from the screen edge", async () => {
+    render(<MobileSchedulerPage />)
+    fireEvent.click(screen.getByTestId("mobile-scheduler-fab"))
+    const body = await screen.findByTestId("mobile-scheduler-create-body")
+    expect(body).toHaveClass("px-4")
+    expect(body).toContainElement(screen.getByTestId("task-form"))
+  })
+
   it("filters through the shared store", () => {
     act(() => {
       useSchedulerStore.getState().setListFilter({ search: "deploy" })
