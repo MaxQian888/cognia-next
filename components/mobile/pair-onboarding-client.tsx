@@ -44,12 +44,13 @@
  * disagreeing.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { canPopWithinApp, useMobileBack } from "@/components/mobile/shell/mobile-back-button"
 import { usePlatform } from "@/hooks/use-platform"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -179,6 +180,9 @@ export function resolveParamSelection(
   if (!params.payload) return null
   return { pairPayload: params.payload, autoScan: false, autoSubmit: true }
 }
+
+/** `canPopWithinApp` is a fact of this page load; there is nothing to subscribe to. */
+const subscribeNever = () => () => {}
 
 /** Reveal the manual-entry escape on the loading screen after this long. */
 const SLOW_HINT_MS = 2500
@@ -403,6 +407,22 @@ export function PairOnboardingClient() {
     router.push("/")
   }, [router])
 
+  // Leaving the flow. A browser can always leave: chat works without a Host,
+  // and the Inbox / Account / unavailable-surface buttons that open this page
+  // are detours, so Back pops in-app history or lands on `/`. A phone offers
+  // it only when it arrived from inside the app (Account → Pair a host): the
+  // cold-start gate replaces into `/pair` with nothing behind it, where Back
+  // would only bounce off the gate again. Before this the page had no exit at
+  // all, which on iOS (no system back) meant killing the app.
+  const tShell = useTranslations("mobile.shell")
+  const canPop = useSyncExternalStore(
+    subscribeNever,
+    () => canPopWithinApp(window),
+    () => false
+  )
+  const onLeave = useMobileBack("/")
+  const back = isWebHost || canPop ? { onBack: onLeave, label: tShell("back") } : undefined
+
   const onAfterSignOut = useCallback(() => {
     setPhase({ kind: "unpaired" })
     setSelection(unpairedSelection)
@@ -599,6 +619,8 @@ export function PairOnboardingClient() {
           ) : undefined
         }
         aside={isWebHost ? <HeadlessInvitationHelp /> : undefined}
+        back={back}
+        busy={activity === "pairing"}
       >
         {step === "discover" && !isWebHost ? (
           <DiscoverStep

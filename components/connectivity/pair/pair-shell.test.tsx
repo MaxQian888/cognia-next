@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { PairShell } from "./pair-shell"
 
@@ -59,6 +59,34 @@ it("draws the same window bar as the first-run flow, with the wordmark in it", (
   const bar = screen.getByTestId("pair-window-bar")
   expect(bar).toHaveTextContent("brandMark")
   expect(screen.getByTestId("pair-narrative-panel")).not.toHaveTextContent("brandMark")
+})
+
+it("has no Back unless the caller has somewhere to go", () => {
+  renderShell()
+  expect(screen.queryByTestId("pair-back")).not.toBeInTheDocument()
+})
+
+it("puts Back in the window bar, and holds it while a pairing is in flight", () => {
+  const onBack = jest.fn()
+  const { rerender } = renderShell({ back: { onBack, label: "Back" } })
+  const back = screen.getByTestId("pair-back")
+  expect(screen.getByTestId("pair-window-bar")).toContainElement(back)
+  expect(back).toHaveAccessibleName("Back")
+  fireEvent.click(back)
+  expect(onBack).toHaveBeenCalledTimes(1)
+  rerender(
+    <PairShell
+      client="web"
+      sceneState="pairing"
+      step="pair"
+      bodyKey="pair"
+      back={{ onBack, label: "Back" }}
+      busy
+    >
+      <p>body</p>
+    </PairShell>
+  )
+  expect(screen.getByTestId("pair-back")).toBeDisabled()
 })
 
 it("enters like the first-run flow and scrolls as one page below md", () => {

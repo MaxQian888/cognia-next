@@ -47,7 +47,7 @@ import { useTranslations } from "next-intl"
 import { GuideHeading } from "@/components/guide/guide-heading"
 import { GuideNarrativePanel } from "@/components/guide/guide-narrative-panel"
 import { GuideShell } from "@/components/guide/guide-shell"
-import { GuideWindowBar } from "@/components/guide/guide-window-bar"
+import { GuideWindowBar, type GuideWindowBarBack } from "@/components/guide/guide-window-bar"
 
 import { PairScene, type PairSceneState } from "./pair-scene"
 import { PairStepper, type PairStep } from "./pair-stepper"
@@ -73,6 +73,10 @@ export interface PairShellProps {
   notice?: ReactNode
   /** Keys the body's entrance so only it replays on a step change. */
   bodyKey: string
+  /** Leave the flow. Omitted where there is nowhere to go (a first-run gate). */
+  back?: GuideWindowBarBack
+  /** A pairing request is in flight; disables Back. */
+  busy?: boolean
   children: ReactNode
 }
 
@@ -86,6 +90,8 @@ export function PairShell({
   status,
   notice,
   bodyKey,
+  back,
+  busy,
   children,
 }: PairShellProps) {
   const t = useTranslations("mobile.pair")
@@ -96,7 +102,9 @@ export function PairShell({
       overflow="scroll"
       bodyKey={bodyKey}
       dataAttributes={{ "data-client": client, "data-scene-state": sceneState }}
-      windowBar={<GuideWindowBar wordmark={t("brandMark")} testIdPrefix="pair" />}
+      windowBar={
+        <GuideWindowBar wordmark={t("brandMark")} back={back} busy={busy} testIdPrefix="pair" />
+      }
       panel={
         <GuideNarrativePanel
           testIdPrefix="pair"

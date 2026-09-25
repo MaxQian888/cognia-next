@@ -162,9 +162,21 @@ jest.mock("@/lib/runtime/browser-vault", () => ({
 
 // next/navigation — useRouter().push is used after Continue-to-chat.
 const pushMock = jest.fn()
+const replaceMock = jest.fn()
+const backMock = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock, replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: pushMock, replace: replaceMock, back: backMock }),
 }))
+
+/** Stand in for the Navigation API: `canGoBack` is what the Back gate reads. */
+function withInAppHistory(canGoBack: boolean): () => void {
+  const win = window as Window & { navigation?: unknown }
+  const previous = win.navigation
+  win.navigation = { canGoBack }
+  return () => {
+    win.navigation = previous
+  }
+}
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
@@ -267,6 +279,8 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/pair")
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
   pushMock.mockReset()
+  replaceMock.mockReset()
+  backMock.mockReset()
   mockScanLan.mockReset()
   mockRegisterPairPayload.mockReset().mockResolvedValue({
     kind: "ok",
@@ -564,6 +578,26 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(screen.getByTestId("pair-payload")).toHaveValue("")
   })
 
+  it("offers no exit on the cold-start gate, where there is nothing to go back to", async () => {
+    // jsdom starts with a one-entry history and no Navigation API.
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-discover-step")
+    expect(screen.queryByTestId("pair-back")).not.toBeInTheDocument()
+  })
+
+  it("steps back into the app when it was opened from inside it", async () => {
+    const restore = withInAppHistory(true)
+    try {
+      const user = userEvent.setup()
+      render(<PairOnboardingClient />)
+      await user.click(await screen.findByTestId("pair-back"))
+      expect(backMock).toHaveBeenCalled()
+      expect(replaceMock).not.toHaveBeenCalledWith("/")
+    } finally {
+      restore()
+    }
+  })
+
   it("Back from pair step returns to discover", async () => {
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
@@ -667,6 +701,15 @@ describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
     expect(screen.getByTestId("pair-step-body")).not.toContainElement(
       screen.getByTestId("pair-headless-help")
     )
+  })
+
+  it("always offers a way back to the app, which works without a Host", async () => {
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    // A pasted link in a fresh tab has no in-app history: land on chat.
+    await user.click(screen.getByTestId("pair-back"))
+    expect(replaceMock).toHaveBeenCalledWith("/")
   })
 
   it("renders a two-step stepper (no Discover) and hides QR + back affordances", async () => {
