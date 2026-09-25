@@ -234,9 +234,16 @@ function MemoryRowImpl({
           <span className="tabular-nums">{t("importanceValue", { value: memory.importance })}</span>
           <span aria-hidden="true">·</span>
           <span>
-            {t("accessedRelative", {
-              time: format.relativeTime(new Date(memory.lastAccessedAt), now),
-            })}
+            {/* `lastAccessedAt` starts at creation, so an unused memory read
+                "used now" the moment it was added. Say when it was added
+                until something has actually recalled it. */}
+            {memory.accessCount > 0
+              ? t("accessedRelative", {
+                  time: format.relativeTime(new Date(memory.lastAccessedAt), now),
+                })
+              : t("createdRelative", {
+                  time: format.relativeTime(new Date(memory.createdAt), now),
+                })}
           </span>
           {memory.sourceSessionId ? (
             <Link

@@ -124,6 +124,7 @@
       "indexed": "Indexed",
       "key": "Key",
       "lastUsed": "Last used",
+      "neverUsed": "Never",
       "observedAt": "Observed",
       "pathScope": "Paths",
       "review": "Review",
@@ -235,6 +236,7 @@
   },
   "panel": {
     "accessedRelative": "used {time}",
+    "createdRelative": "added {time}",
     "add": "Add",
     "addFirst": "Add your first memory",
     "archive": "Archive",

@@ -53,6 +53,19 @@ async function openRowMenu() {
 }
 
 describe("MemoryRow", () => {
+  // `lastAccessedAt` starts at creation, so an unused row read "used now".
+  it("says when an unused memory was added, not that it was just used", () => {
+    setup({ accessCount: 0 })
+    const row = screen.getByTestId("memory-row").textContent ?? ""
+    expect(row).toContain("added")
+    expect(row).not.toContain("used")
+  })
+
+  it("says when a recalled memory was last used", () => {
+    setup({ accessCount: 2 })
+    expect(screen.getByTestId("memory-row").textContent).toContain("used")
+  })
+
   it("renders text, importance and type badge", () => {
     setup()
     expect(screen.getByText("The user prefers pnpm")).toBeTruthy()

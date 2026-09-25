@@ -109,6 +109,12 @@ describe("MemoryInspector", () => {
     expect(origin.textContent).toMatch(/\d{4}/)
   })
 
+  it("reads Never for a memory nothing has recalled yet", () => {
+    setup({ memory: mem({ accessCount: 0 }) })
+    const metrics = screen.getByRole("heading", { name: "Metrics" }).parentElement!
+    expect(metrics.textContent).toContain("Never")
+  })
+
   it("labels a pending_instruction review state", () => {
     setup({ memory: mem({ reviewStatus: "pending_instruction" }) })
     expect(screen.getByTestId("memory-inspector-review").textContent).toBe("Awaiting review")

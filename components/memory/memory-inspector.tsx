@@ -498,7 +498,12 @@ export function MemoryInspector({
               <Field label={t("fields.importance")} value={String(memory.importance)} />
               <Field label={t("fields.version")} value={String(memory.version)} />
               <Field label={t("fields.accessCount")} value={String(memory.accessCount)} />
-              <Field label={t("fields.lastUsed")} value={since(memory.lastAccessedAt)} />
+              <Field
+                label={t("fields.lastUsed")}
+                value={
+                  memory.accessCount > 0 ? since(memory.lastAccessedAt) : t("fields.neverUsed")
+                }
+              />
               <Field label={t("fields.indexed")} value={memory.vectorDocId ? t("yes") : t("no")} />
             </FieldGrid>
           </Section>
