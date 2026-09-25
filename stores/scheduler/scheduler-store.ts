@@ -308,6 +308,10 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
           if (task) {
             await get().refreshAll()
+          } else {
+            // A null here is "no such task", which the caller must be able to
+            // say out loud rather than closing the sheet as if it had saved.
+            set({ error: `Scheduled task ${taskId} was not found.` })
           }
 
           return task
@@ -333,6 +337,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
               set({ selectedTaskId: null, executions: [] })
             }
             await get().refreshAll()
+          } else {
+            set({ error: `Scheduled task ${taskId} was not found.` })
           }
 
           return deleted
@@ -349,32 +355,40 @@ export const useSchedulerStore = create<SchedulerStore>()(
       // ========== Task Actions ==========
 
       pauseTask: async (taskId) => {
+        set({ error: null })
         try {
           const taskType = get().tasks.find((task) => task.id === taskId)?.type
           const success = await getSchedulerDataSource().pauseTask(taskId, taskType)
 
           if (success) {
             await get().refreshAll()
+          } else {
+            set({ error: `Scheduled task ${taskId} could not be paused.` })
           }
 
           return success
         } catch (error) {
+          set({ error: error instanceof Error ? error.message : "Failed to pause task" })
           log.error("SchedulerStore: Pause task failed", error as Error)
           return false
         }
       },
 
       resumeTask: async (taskId) => {
+        set({ error: null })
         try {
           const taskType = get().tasks.find((task) => task.id === taskId)?.type
           const success = await getSchedulerDataSource().resumeTask(taskId, taskType)
 
           if (success) {
             await get().refreshAll()
+          } else {
+            set({ error: `Scheduled task ${taskId} could not be resumed.` })
           }
 
           return success
         } catch (error) {
+          set({ error: error instanceof Error ? error.message : "Failed to resume task" })
           log.error("SchedulerStore: Resume task failed", error as Error)
           return false
         }
@@ -440,6 +454,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
           if (execution) {
             await get().refreshAll()
+          } else {
+            set({ error: `Scheduled task ${taskId} was not found.` })
           }
 
           return execution
@@ -719,6 +735,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
       // ========== Maintenance ==========
 
       cleanupOldExecutions: async (maxAgeDays = 30) => {
+        set({ error: null })
         try {
           const deleted = await getSchedulerDataSource().cleanupOldExecutions(maxAgeDays)
           if (deleted > 0) {
@@ -727,8 +744,11 @@ export const useSchedulerStore = create<SchedulerStore>()(
           }
           return deleted
         } catch (error) {
+          // Rethrown: `0` is also "nothing was old enough", and the caller
+          // reports the count, so a failure must not read as a clean result.
+          set({ error: error instanceof Error ? error.message : "Failed to clean up old runs" })
           log.error("SchedulerStore: Cleanup old executions failed", error as Error)
-          return 0
+          throw error
         }
       },
 

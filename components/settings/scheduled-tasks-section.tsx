@@ -55,6 +55,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { isTauri } from "@/lib/tauri"
+import { cn } from "@/lib/utils"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { useCapability } from "@/hooks/use-host-profile"
@@ -103,6 +104,8 @@ export function ScheduledTasksSection() {
 
   const policy = useSchedulerStore((s) => s.permissionPolicy)
   const updatePolicy = useSchedulerStore((s) => s.updatePermissionPolicy)
+  // Absent on a policy saved before the switch existed; absent means on.
+  const agentToolsEnabled = policy.agentToolsEnabled !== false
   const autoRefreshInterval = useSchedulerStore((s) => s.autoRefreshInterval)
   const setAutoRefreshInterval = useSchedulerStore((s) => s.setAutoRefreshInterval)
   // In-flight text for the auto-refresh box; `null` means "show the store's
@@ -160,23 +163,57 @@ export function ScheduledTasksSection() {
 
       <WebhookSigningCard tSigning={tSigning} tSettings={tSettings} />
 
-      {/* Agent Auto-Create */}
+      {/* Agent access: the master switch, then the unattended-write rule under it */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("permissions.agentAutoCreate")}</CardTitle>
-          <CardDescription>{t("permissions.agentAutoCreateDesc")}</CardDescription>
+          <CardTitle className="text-sm font-medium">{t("permissions.agentTools")}</CardTitle>
+          <CardDescription>{t("permissions.agentToolsDesc")}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <Label htmlFor="agent-auto-create">{t("permissions.allowAgentAutoCreate")}</Label>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="agent-tools-enabled">{t("permissions.allowAgentTools")}</Label>
             <Switch
-              id="agent-auto-create"
-              checked={policy.agentAutoCreate}
+              id="agent-tools-enabled"
+              checked={agentToolsEnabled}
               onCheckedChange={(checked) => {
-                loggers.scheduler.info("settings.agentAutoCreateChanged", { enabled: checked })
-                updatePolicy({ agentAutoCreate: checked })
+                loggers.scheduler.info("settings.agentToolsEnabledChanged", { enabled: checked })
+                updatePolicy({ agentToolsEnabled: checked })
               }}
             />
+          </div>
+          <div className="space-y-1.5 border-t pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label
+                  htmlFor="agent-auto-create"
+                  className={cn(!agentToolsEnabled && "text-muted-foreground")}
+                >
+                  {t("permissions.allowAgentAutoCreate")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("permissions.agentAutoCreateDesc")}
+                </p>
+              </div>
+              <Switch
+                id="agent-auto-create"
+                checked={policy.agentAutoCreate}
+                disabled={!agentToolsEnabled}
+                aria-describedby={agentToolsEnabled ? undefined : "agent-auto-create-inert"}
+                onCheckedChange={(checked) => {
+                  loggers.scheduler.info("settings.agentAutoCreateChanged", { enabled: checked })
+                  updatePolicy({ agentAutoCreate: checked })
+                }}
+              />
+            </div>
+            {agentToolsEnabled ? null : (
+              <p
+                id="agent-auto-create-inert"
+                className="text-xs text-muted-foreground"
+                data-testid="agent-auto-create-inert"
+              >
+                {t("permissions.agentAutoCreateInert")}
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

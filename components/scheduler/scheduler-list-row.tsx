@@ -55,6 +55,13 @@ export function useAttentionLine(): (signal: AttentionSignal) => string {
     switch (signal.kind) {
       case "auto-paused":
         return t("row.autoPaused", { count: signal.count ?? 0 })
+      case "needs-approval":
+        if (signal.tools && signal.roots) {
+          return t("row.needsApprovalToolsAndTrust", { tools: signal.tools, roots: signal.roots })
+        }
+        if (signal.tools) return t("row.needsApprovalTools", { tools: signal.tools })
+        if (signal.roots) return t("row.needsApprovalTrust", { roots: signal.roots })
+        return t("row.needsApproval")
       case "consecutive-failures":
         return t("row.consecutiveFailures", { count: signal.count ?? 0 })
       case "last-run-failed":

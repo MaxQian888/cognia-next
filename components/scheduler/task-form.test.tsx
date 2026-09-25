@@ -15,6 +15,8 @@ jest.mock("@/lib/scheduler/cron-parser", () => ({
   describeCronExpression: (expr: string) => `desc:${expr}`,
   formatCronExpression: (parts: string[]) => parts.join(" "),
   parseCronExpression: () => null,
+  // The next-runs preview under the trigger fields expands the cron.
+  getNextCronTimes: () => [new Date(Date.now() + 3_600_000), new Date(Date.now() + 7_200_000)],
 }))
 
 jest.mock("@/lib/scheduler/notification-integration", () => ({
@@ -603,5 +605,14 @@ describe("TaskForm — webhook notification channel", () => {
       />
     )
     expect(screen.getByLabelText("webhookUrl")).toHaveValue("https://example.com/hook")
+  })
+})
+
+describe("TaskForm — next runs preview", () => {
+  it("shows when the trigger being written will fire", () => {
+    render(<TaskForm onSubmit={jest.fn(async () => undefined)} onCancel={jest.fn()} />)
+    const preview = screen.getByTestId("trigger-preview")
+    expect(preview).toHaveAttribute("data-state", "dates")
+    expect(screen.getAllByTestId("trigger-preview-date")).toHaveLength(2)
   })
 })

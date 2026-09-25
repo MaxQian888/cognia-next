@@ -10,7 +10,8 @@
  *   1. Resolve SendOptions for the session WITH `activeGoal` so build-options
  *      injects the goal system section, and with the session's owning
  *      workspace as `activeProject` so the turn gets that workspace's
- *      instructions, roots, knowledge and confinement.
+ *      instructions, roots, knowledge and confinement, gated by Workspace
+ *      Trust exactly as a scheduled chat turn is.
  *   2. Run one turn headlessly via `runAndCaptureAssistantReply` (captures the
  *      assistant text + per-turn usage).
  *   3. Feed the result to `handleTurnComplete` (the pure turn-driver), which
@@ -63,7 +64,7 @@ import {
   type UnattendedPermissionDenial,
   type UnattendedPermissionResponder,
 } from "@/lib/claude/unattended-permission-responder"
-import { loadOwningWorkspace } from "./owning-workspace"
+import { loadOwningWorkspace, resolveScheduledWorkspaceTrust } from "./owning-workspace"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
@@ -226,13 +227,20 @@ async function driveGoalLoop(
   // session itself. Nothing below rewrites the cwd or additional directories
   // `resolveSendOptions` returns, so the confinement roots it derives from
   // them already name the directories the turn works in.
-  const activeProject =
+  const owning =
     input.workspace === "none"
-      ? null
+      ? { project: null, readFailed: false }
       : await loadOwningWorkspace(session.projectId || session.executionContext?.projectId, {
           goalId,
           sessionId,
         })
+  const activeProject = owning.project
+  // The gate a scheduled chat run applies, over the same workspace: an
+  // untrusted checkout runs every goal turn in Restricted Mode.
+  const workspaceTrust = await resolveScheduledWorkspaceTrust(owning, appSettings, {
+    goalId,
+    sessionId,
+  })
 
   while (turns < hardCap) {
     if (signal.aborted) {
@@ -277,6 +285,8 @@ async function driveGoalLoop(
         appSettings,
         activeGoal: goal,
         activeProject,
+        workspaceRestricted: workspaceTrust.restricted,
+        trustedWorkspaceRoots: workspaceTrust.trustedRoots,
       })
     } catch (err) {
       return {

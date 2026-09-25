@@ -120,6 +120,87 @@ describe("RunDetailSheet", () => {
     expect(screen.queryByTestId("run-sheet-stack")).toBeNull()
   })
 
+  describe("a run that stopped for approval", () => {
+    const blocked = (result: unknown) =>
+      makeRun({
+        status: "failed",
+        terminalReason: "needs-approval",
+        error: { message: "needs approval: Bash; workspace not trusted (/repo)" },
+        result,
+      })
+
+    it("says what it waited on and how to clear it, instead of an error block", () => {
+      render(
+        <RunDetailSheet
+          open
+          onOpenChange={() => {}}
+          run={blocked({
+            sessionId: "session-1",
+            status: "needs_approval",
+            needsApproval: [{ toolName: "Bash" }, { toolName: "Edit" }],
+            workspaceTrust: { restricted: true, untrustedRoots: ["/repo", "/docs"] },
+          })}
+          onOpenSession={jest.fn()}
+        />
+      )
+      expect(screen.getByTestId("run-status-needs-approval")).toHaveTextContent("Needs approval")
+      expect(screen.queryByTestId("stub-pill")).toBeNull()
+      expect(screen.queryByTestId("run-sheet-error")).toBeNull()
+
+      const section = screen.getByTestId("run-sheet-approval")
+      expect(section).toHaveTextContent("Waiting for your approval")
+      expect(section).toHaveTextContent("It was not retried")
+      expect(screen.getByTestId("run-sheet-approval-tools")).toHaveTextContent("Bash, Edit")
+      expect(screen.getByTestId("run-sheet-approval-tools")).toHaveTextContent(
+        "allowed tools, or raise its permission mode"
+      )
+      const roots = screen.getByTestId("run-sheet-approval-roots")
+      expect(roots).toHaveTextContent("Untrusted workspace roots")
+      expect(roots).toHaveTextContent("/repo")
+      expect(roots).toHaveTextContent("/docs")
+      expect(roots).toHaveTextContent("Trust the workspace")
+    })
+
+    it("keeps the session link and result, where the user sees what it tried", () => {
+      const onOpenSession = jest.fn()
+      render(
+        <RunDetailSheet
+          open
+          onOpenChange={() => {}}
+          run={blocked({ sessionId: "session-1", status: "needs_approval", needsApproval: [] })}
+          onOpenSession={onOpenSession}
+        />
+      )
+      expect(screen.getByTestId("run-artifact-links")).toBeInTheDocument()
+      expect(screen.getByTestId("run-sheet-result")).toHaveTextContent("needs_approval")
+    })
+
+    it("labels roots whose trust could not be checked as such", () => {
+      render(
+        <RunDetailSheet
+          open
+          onOpenChange={() => {}}
+          run={blocked({
+            needsApproval: [],
+            workspaceTrust: { restricted: true, untrustedRoots: ["/repo"], unverified: true },
+          })}
+        />
+      )
+      expect(screen.queryByTestId("run-sheet-approval-tools")).toBeNull()
+      expect(screen.getByTestId("run-sheet-approval-roots")).toHaveTextContent(
+        "Roots whose trust could not be checked"
+      )
+    })
+
+    it("falls back to the recorded reason when the result was not kept", () => {
+      render(<RunDetailSheet open onOpenChange={() => {}} run={blocked(undefined)} />)
+      expect(screen.getByTestId("run-sheet-approval")).toHaveTextContent(
+        "needs approval: Bash; workspace not trusted (/repo)"
+      )
+      expect(screen.queryByTestId("run-sheet-result")).toBeNull()
+    })
+  })
+
   it("keeps a stack trace behind a closed, bounded disclosure", () => {
     render(
       <RunDetailSheet
@@ -205,5 +286,24 @@ describe("RunDetailSheet", () => {
     render(<RunDetailSheet open onOpenChange={onOpenChange} run={makeRun()} />)
     fireEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+describe("RunDetailSheet · stopping a run from where it is read", () => {
+  it("offers Stop on a running run and hands the run back", () => {
+    const onCancelRun = jest.fn()
+    const run = makeRun({ status: "running", finishedAt: undefined })
+    render(<RunDetailSheet open onOpenChange={jest.fn()} run={run} onCancelRun={onCancelRun} />)
+    fireEvent.click(screen.getByTestId("run-sheet-stop"))
+    expect(onCancelRun).toHaveBeenCalledWith(run)
+  })
+
+  it("has no Stop for a finished run, or without a way to stop", () => {
+    const { rerender } = render(
+      <RunDetailSheet open onOpenChange={jest.fn()} run={makeRun()} onCancelRun={jest.fn()} />
+    )
+    expect(screen.queryByTestId("run-sheet-stop")).not.toBeInTheDocument()
+    rerender(<RunDetailSheet open onOpenChange={jest.fn()} run={makeRun({ status: "running" })} />)
+    expect(screen.queryByTestId("run-sheet-stop")).not.toBeInTheDocument()
   })
 })

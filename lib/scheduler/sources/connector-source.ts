@@ -42,6 +42,7 @@ import {
   type UnifiedScheduledItem,
   type UnifiedItemStatus,
 } from "@/types/scheduler/unified"
+import { requireSourceOutcome } from "./outcome"
 import type {
   ScheduledItemSource,
   ScheduledItemSourceObserver,
@@ -238,27 +239,42 @@ export function createConnectorSource(
 
     async update(sourceId: string, input: UpdateScheduledTaskInput): Promise<void> {
       if (sourceId === CONNECTOR_QUEUE_SOURCE_ID) return
-      await scheduler.updateTask(sourceId, input)
+      requireSourceOutcome(
+        await scheduler.updateTask(sourceId, input),
+        `Scheduled task ${sourceId} was not found.`
+      )
     },
 
     async delete(sourceId: string): Promise<void> {
       if (sourceId === CONNECTOR_QUEUE_SOURCE_ID) return
-      await scheduler.deleteTask(sourceId)
+      requireSourceOutcome(
+        await scheduler.deleteTask(sourceId),
+        `Scheduled task ${sourceId} was not found.`
+      )
     },
 
     async pause(sourceId: string): Promise<void> {
       if (sourceId === CONNECTOR_QUEUE_SOURCE_ID) return
-      await scheduler.pauseTask(sourceId)
+      requireSourceOutcome(
+        await scheduler.pauseTask(sourceId),
+        `Scheduled task ${sourceId} could not be paused.`
+      )
     },
 
     async resume(sourceId: string): Promise<void> {
       if (sourceId === CONNECTOR_QUEUE_SOURCE_ID) return
-      await scheduler.resumeTask(sourceId)
+      requireSourceOutcome(
+        await scheduler.resumeTask(sourceId),
+        `Scheduled task ${sourceId} could not be resumed.`
+      )
     },
 
     async runNow(sourceId: string): Promise<void> {
       if (sourceId === CONNECTOR_QUEUE_SOURCE_ID) return
-      await scheduler.runTaskNow(sourceId)
+      requireSourceOutcome(
+        await scheduler.runTaskNow(sourceId),
+        `Scheduled task ${sourceId} was not found.`
+      )
     },
   }
 }

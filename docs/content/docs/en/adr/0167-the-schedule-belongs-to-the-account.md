@@ -176,3 +176,53 @@ it off.
 Not done, and deliberately: `monitor`, `backup`, `plugin` and `custom` still
 use the raw JSON payload editor. `monitor` needs a builder for a condition
 union type, and the other three have their own authoring surfaces elsewhere.
+
+## Amendment 2026-09-25 — reachable by default, and a confirmation counts
+
+The caveat above turned out to be the whole story: no UI set
+`enableBuiltInSkills`, so on the desktop the `schedule.*` family was shipped
+and unreachable. And where it was reachable, the default policy
+(`agentAutoCreate: false`) refused a `chat` task after the user had pressed
+Confirm on the approval dialog, because the gate could not tell an attended
+write from an unattended one.
+
+**1. The scheduler family has its own switch.** `SchedulerPermissionPolicy`
+gains `agentToolsEnabled` (default on; a policy saved before it existed reads
+as on). `resolveSendOptions` offers the `schedule.*` family alone, through
+`pluginTools` only, to turns whose context sets `interactiveChat`: turns a
+person typed into this app's chat pane, which the live chat controller marks
+through `buildSendOptions(…, { interactive: true })`. Scheduled runs, the CLI,
+teams, eval, twin and turns relayed from a paired phone leave it unset: nobody
+there can answer the desktop approval dialog, and a scheduled run must not grow
+its own schedule. The entries
+never widen an empty allowlist (that would turn "every tool" into "these
+nine"); a turn something else already narrowed gets them added like any skill.
+With the switch off, the family is stripped in every mode, the legacy IM
+scheduling tools are not offered, `authorizeTaskWrite` refuses any agent write
+with `agent-tools-disabled`, and `list` / `inspect` refuse to read. A policy
+module that cannot be loaded reads as off.
+
+**2. A person's confirmation satisfies the "is anyone there" rules.** The skill
+dispatcher sets `ctx.humanConfirmed` itself (a caller cannot claim it): true
+after a click on THIS request's desktop dialog or the IM confirm card's
+callback, false for a remembered "allow for session" grant. Schedule writes do
+not offer that grant at all (`suppressAlwaysAllowRule`), because each one runs
+unattended later. `authorizeTaskWrite` with `humanConfirmed` skips
+`agent-auto-create-disabled` and does not ask again for a
+`confirmationRequired` type; the host gate, the agent switch, the script switch
+and the quota still apply. Without it, a verdict that still needs a person is a
+refusal, which closes the reverse hole: an IM channel with write confirmations
+off could create `goal` and `agent-team` tasks the user had said always need
+them. `agentAutoCreate` now means exactly what its label says: may agents write
+unattended.
+
+**3. The quota counts what a source owns.** `TaskWriteRequest.operation` is
+`"create"` or `"mutate"`; the per-source quota gates creation only, so an agent
+at its limit can still pause, amend, run or delete what it put there.
+
+**4. Refusals come before the dialog.** `BuiltInSkill.preflight` runs after the
+schema and PII gates and before HITL. The scheduler skills use it to run the
+scheduler's own trigger and payload normalizers (plus the executors' required
+keys), to check that a task id names a task, and to ask the policy with the
+confirmation that is about to happen. A user is no longer asked to approve a
+write that would fail.

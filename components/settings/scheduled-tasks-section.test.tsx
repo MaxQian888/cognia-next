@@ -688,3 +688,33 @@ describe("ScheduledTasksSection — chat channel + global ops channel", () => {
     await waitFor(() => expect(mockedTestChannel).toHaveBeenCalledWith("im", undefined, "slack:C1"))
   })
 })
+
+describe("ScheduledTasksSection — agent access", () => {
+  it("reads a policy saved before the switch existed as on", () => {
+    render(<ScheduledTasksSection />)
+    expect(
+      screen.getByRole("switch", { name: "Allow agents to manage scheduled tasks" })
+    ).toBeChecked()
+    expect(screen.getByRole("switch", { name: "Allow agents to auto-create tasks" })).toBeEnabled()
+  })
+
+  it("turning it off is saved and leaves the unattended rule inert, with the reason", () => {
+    const updatePermissionPolicy = jest.fn()
+    useSchedulerStore.setState({ updatePermissionPolicy } as never)
+    const { rerender } = render(<ScheduledTasksSection />)
+    fireEvent.click(screen.getByRole("switch", { name: "Allow agents to manage scheduled tasks" }))
+    expect(updatePermissionPolicy).toHaveBeenCalledWith({ agentToolsEnabled: false })
+
+    useSchedulerStore.setState({
+      permissionPolicy: {
+        ...useSchedulerStore.getState().permissionPolicy,
+        agentToolsEnabled: false,
+      },
+    })
+    rerender(<ScheduledTasksSection />)
+    const autoCreate = screen.getByRole("switch", { name: "Allow agents to auto-create tasks" })
+    expect(autoCreate).toBeDisabled()
+    expect(autoCreate).toHaveAttribute("aria-describedby", "agent-auto-create-inert")
+    expect(screen.getByTestId("agent-auto-create-inert")).toHaveTextContent(/no effect/)
+  })
+})

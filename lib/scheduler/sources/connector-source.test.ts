@@ -277,6 +277,18 @@ describe("createConnectorSource — mutations", () => {
     expect(scheduler.updateTask).not.toHaveBeenCalled()
   })
 
+  it("rejects a mutation the scheduler refused instead of resolving as a success", async () => {
+    const { scheduler, source } = setup()
+    scheduler.pauseTask.mockResolvedValueOnce(false)
+    scheduler.deleteTask.mockResolvedValueOnce(false)
+    scheduler.runTaskNow.mockResolvedValueOnce(null)
+    scheduler.updateTask.mockResolvedValueOnce(null)
+    await expect(source.pause("d-1")).rejects.toThrow("could not be paused")
+    await expect(source.delete("gone")).rejects.toThrow("was not found")
+    await expect(source.runNow("gone")).rejects.toThrow("was not found")
+    await expect(source.update?.("gone", { name: "x" })).rejects.toThrow("was not found")
+  })
+
   it("rejects create() — connector jobs are not authored from the scheduler page", async () => {
     const { source } = setup()
     await expect(source.create?.({} as never)).rejects.toThrow(/not supported/i)

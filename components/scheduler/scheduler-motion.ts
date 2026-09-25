@@ -14,11 +14,21 @@ export const listContainerVariants: Variants = {
   show: { transition: { staggerChildren: 0.03 } },
 }
 
-/** A list row: fade + tiny upward slide. */
+/** A list row: fade + tiny upward slide in, a quicker fade out. */
 export const listItemVariants: Variants = {
   hidden: { opacity: 0, y: 4 },
   show: { opacity: 1, y: 0, transition: { duration: 0.18, ease: "easeOut" } },
+  exit: { opacity: 0, transition: { duration: 0.12, ease: "easeIn" } },
 }
+
+/**
+ * Above this many rows the list stops animating layout. Every re-order then
+ * measures every row, and a long schedule re-orders each minute.
+ */
+export const LAYOUT_ANIMATION_ROW_LIMIT = 80
+
+/** The "just added" ring: how long it takes to fade after a create lands. */
+export const JUST_CREATED_HIGHLIGHT_MS = 1_200
 
 /** Dashboard view crossfade (overview ↔ calendar ↔ timeline). */
 export const viewSwitchVariants: Variants = {

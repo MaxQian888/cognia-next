@@ -3,6 +3,7 @@ import {
   parseSchedulerQuery,
   resolveLegacySelection,
   schedulerHref,
+  schedulerItemHref,
   writeSchedulerQuery,
 } from "./page-query"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
@@ -95,5 +96,26 @@ describe("schedulerHref", () => {
   it("omits the question mark when the query is empty", () => {
     expect(schedulerHref("/scheduler", "")).toBe("/scheduler")
     expect(schedulerHref("/me/scheduler", "item=app%3Aa")).toBe("/me/scheduler?item=app%3Aa")
+  })
+})
+
+describe("schedulerItemHref", () => {
+  it("builds the address parseSchedulerQuery reads back", () => {
+    const href = schedulerItemHref({ kind: "app", sourceId: "t1" })
+    expect(href).toBe("/scheduler?item=app%3At1")
+    const query = parseSchedulerQuery(new URLSearchParams(href.split("?")[1]))
+    expect(query.item).toBe("app:t1")
+  })
+
+  it("names the run under the item's own kind", () => {
+    const href = schedulerItemHref({ kind: "plugin", sourceId: "t2" }, "run-7")
+    const query = parseSchedulerQuery(new URLSearchParams(href.split("?")[1]))
+    expect(query).toMatchObject({ item: "plugin:t2", run: "plugin:run-7" })
+  })
+
+  it("can target the phone route", () => {
+    expect(schedulerItemHref({ kind: "app", sourceId: "t1" }, undefined, "/me/scheduler")).toMatch(
+      /^\/me\/scheduler\?item=/
+    )
   })
 })

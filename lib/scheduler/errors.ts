@@ -20,6 +20,7 @@ export type SchedulerErrorCode =
   | "SCRIPT_VALIDATION_FAILED"
   | "PLUGIN_HANDLER_NOT_FOUND"
   | "DEPRECATED_TASK_TYPE"
+  | "NEEDS_APPROVAL"
   | "UNKNOWN"
 
 export class SchedulerError extends Error {
@@ -106,6 +107,25 @@ export class SchedulerError extends Error {
             : "Execution cancelled by a newer start (cancel-previous overlap policy)",
       { taskName, reason }
     )
+  }
+
+  /**
+   * A run that stopped because nobody was there to approve it (terminal
+   * reason `needs-approval`). Handed to `onScheduledTaskError` instead of a
+   * bare `Error`, so a plugin can tell "waiting on a person" from "broken" by
+   * `code` and read what was refused from `details`.
+   */
+  static needsApproval(
+    taskName: string,
+    summary: string,
+    output?: Record<string, unknown>
+  ): SchedulerError {
+    return new SchedulerError("NEEDS_APPROVAL", summary, {
+      taskName,
+      terminalReason: "needs-approval",
+      ...(Array.isArray(output?.needsApproval) ? { needsApproval: output.needsApproval } : {}),
+      ...(output?.workspaceTrust ? { workspaceTrust: output.workspaceTrust } : {}),
+    })
   }
 
   static initFailed(reason: string, cause?: Error): SchedulerError {

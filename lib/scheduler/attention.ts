@@ -15,7 +15,7 @@
 
 import type { ScheduledTask } from "@/types/scheduler"
 import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
-import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+import { runApprovalRequest, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 import { getTaskTypeHostSupport, type TaskTypeHostSupport } from "./host-support"
 import type { TaskWriteSource } from "./write-authority"
@@ -24,6 +24,7 @@ export type AttentionSeverity = "critical" | "attention" | "info"
 
 export type AttentionKind =
   | "auto-paused"
+  | "needs-approval"
   | "consecutive-failures"
   | "last-run-failed"
   | "source-failed"
@@ -41,8 +42,12 @@ export interface AttentionSignal {
   /** The item this is about, when it is about one. */
   itemUnifiedId?: string
   itemName?: string
-  /** The run, for `running` and `last-run-failed`. */
+  /** The run, for `running`, `needs-approval` and `last-run-failed`. */
   runUnifiedId?: string
+  /** For `needs-approval`: the tools the run was refused, joined. */
+  tools?: string
+  /** For `needs-approval`: the workspace roots it ran restricted for, joined. */
+  roots?: string
   /** Live processes behind a `running` signal. */
   processCount?: number
   /** Consecutive failures, or tasks owned by the source near its quota. */
@@ -109,8 +114,8 @@ function latestRunByItem(runs: readonly UnifiedExecutionRun[]): Map<string, Unif
 /**
  * The one signal an item row shows, or `null`. Ordered by what the user
  * would want to hear first about this item: that it stopped itself, that it
- * keeps failing, that it failed last time, that its host cannot run it, that
- * it is running now.
+ * is waiting for their approval, that it keeps failing, that it is running
+ * now, that it failed last time, that its host cannot run it.
  */
 export function itemAttention(
   item: UnifiedScheduledItem,
@@ -133,6 +138,23 @@ export function itemAttention(
       ...base,
       count: task.consecutiveFailures,
       detail: task.lastError,
+    }
+  }
+  // The latest run stopped for want of an approver. Said before the failure
+  // counts, because it is waiting on the user rather than broken, and it names
+  // what to allow. A run in flight supersedes it; with no run loaded, the
+  // task row's own terminal reason decides.
+  const approval = latestRun ? runApprovalRequest(latestRun) : null
+  if (approval || (!latestRun && task?.lastTerminalReason === "needs-approval")) {
+    return {
+      id: `needs-approval:${item.unifiedId}`,
+      kind: "needs-approval",
+      severity: "attention",
+      ...base,
+      ...(approval && latestRun ? { runUnifiedId: latestRun.unifiedId } : {}),
+      ...(approval?.tools.length ? { tools: approval.tools.join(", ") } : {}),
+      ...(approval?.untrustedRoots.length ? { roots: approval.untrustedRoots.join(", ") } : {}),
+      detail: task?.lastError ?? latestRun?.error?.message,
     }
   }
   if ((task?.consecutiveFailures ?? 0) >= CONSECUTIVE_FAILURE_THRESHOLD) {

@@ -11,15 +11,16 @@
 
 // Host gating goes through `lib/scheduler/host-support` → `lib/platform/detect`
 // (`detectPlatform()` + the capability baseline); flip the platform between
-// "tauri" and "web" to exercise the supported / unsupported branches.
+// "tauri" and "web" to exercise the supported / unsupported branches, or set
+// `platform` for a host `tauri` cannot describe (the headless brain).
 // State lives inside the factory: `detectPlatform()` runs during module
 // import (transport selection), before a top-level `let` would be initialised.
 jest.mock("@/lib/platform/detect", () => {
-  const hostState = { tauri: true }
+  const hostState: { tauri: boolean; platform?: string } = { tauri: true }
   return {
     ...jest.requireActual("@/lib/platform/detect"),
     __hostState: hostState,
-    detectPlatform: () => (hostState.tauri ? "tauri" : "web"),
+    detectPlatform: () => hostState.platform ?? (hostState.tauri ? "tauri" : "web"),
     isTauri: () => hostState.tauri,
   }
 })
@@ -33,7 +34,9 @@ import { BUILT_IN_EXECUTOR_TASK_TYPES } from "../executor-owners"
  * exercise — the threading itself is covered by the run-level tests.
  */
 const SCOPE = {}
-const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean } }).__hostState
+const hostState = (
+  platformDetect as unknown as { __hostState: { tauri: boolean; platform?: string } }
+).__hostState
 jest.mock("@/lib/tauri", () => ({
   // Delegate to the detect mock's state so both modules agree at import time.
   isTauri: () =>
@@ -91,6 +94,13 @@ jest.mock("@/lib/project-environment/executor", () => ({
   executeProjectEnvironment: (input: unknown) => executeProjectEnvironmentMock(input),
 }))
 
+// The owning workspace a scheduled chat run resolves against. Read from Dexie,
+// never from the UI store, so this is the only source a test needs to seed.
+const getAllProjectsMock = jest.fn(async () => [] as unknown[])
+jest.mock("@/lib/db/projects", () => ({
+  getAllProjects: () => getAllProjectsMock(),
+}))
+
 const getSettingsMock = jest.fn(async () => ({
   id: "singleton",
   alwaysAllowTools: [],
@@ -106,13 +116,13 @@ jest.mock("@/lib/db/settings", () => ({
   getSettings: () => getSettingsMock(),
 }))
 
-const listEnabledMcpServersMock = jest.fn(async () => [] as unknown[])
+const listEnabledMcpServersMock = jest.fn(async (_scope?: unknown) => [] as unknown[])
 const buildMcpServerMapMock = jest.fn(
   (rows: Array<{ id: string }>) =>
     Object.fromEntries(rows.map((r) => [r.id, { id: r.id }])) as Record<string, { id: string }>
 )
 jest.mock("@/lib/db/mcp-servers", () => ({
-  listEnabledMcpServers: () => listEnabledMcpServersMock(),
+  listEnabledMcpServers: (scope?: unknown) => listEnabledMcpServersMock(scope),
   buildMcpServerMap: (rows: Array<{ id: string }>) => buildMcpServerMapMock(rows),
   buildMcpServerMapResolved: (rows: Array<{ id: string }>) => buildMcpServerMapMock(rows),
 }))
@@ -129,6 +139,14 @@ jest.mock("@/lib/db/skills", () => ({
 const resolveSendOptionsMock = jest.fn(async (_ctx: unknown) => ({}) as Record<string, unknown>)
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (ctx: unknown) => resolveSendOptionsMock(ctx),
+}))
+
+// The Workspace Trust ledger. The gate over it (`lib/workspace/trust-gate`)
+// runs for real, so these cases exercise the verdict the executor acts on.
+// Every root is trusted unless a case says otherwise.
+const isWorkspaceTrustedMock = jest.fn(async (_path: string) => true)
+jest.mock("@/lib/db/trusted-workspaces", () => ({
+  isWorkspaceTrusted: (path: string) => isWorkspaceTrustedMock(path),
 }))
 
 const customModeStoreState = {
@@ -228,12 +246,16 @@ import {
   resolveAgentMode,
   applyPayloadOverrides,
   applyAdHocSkill,
+  alignConfinementRoots,
 } from "./index"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type { Project } from "@/types"
 import type { SendOptions } from "@cognia/agent-config-types"
 
 beforeEach(() => {
   hostState.tauri = true
+  hostState.platform = undefined
+  isWorkspaceTrustedMock.mockReset().mockResolvedValue(true)
   sendPromptMock.mockClear()
   onClaudeMessageMock.mockReset()
   interruptSessionMock.mockClear()
@@ -283,6 +305,7 @@ beforeEach(() => {
   settleTaskWorkspaceMock.mockClear()
   getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
   executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
+  getAllProjectsMock.mockReset().mockResolvedValue([])
   getSessionMock.mockReset()
   getSessionMock.mockResolvedValue(undefined)
   getSettingsMock.mockClear()
@@ -556,6 +579,29 @@ describe("applyAdHocSkill", () => {
   })
 })
 
+describe("alignConfinementRoots", () => {
+  it("leaves options without a confinement policy untouched", () => {
+    const base: SendOptions = { cwd: "/repo", additionalDirectories: ["/docs"] }
+    expect(alignConfinementRoots(base)).toBe(base)
+  })
+  it("leaves a disabled policy untouched", () => {
+    const base: SendOptions = { cwd: "/alias", confinement: { enabled: false, roots: ["/repo"] } }
+    expect(alignConfinementRoots(base)).toBe(base)
+  })
+  it("rebuilds the roots from the final cwd and additional directories", () => {
+    const out = alignConfinementRoots({
+      cwd: "/alias",
+      additionalDirectories: ["/alias-docs", "", "/alias"],
+      confinement: { enabled: true, roots: ["/repo", "/docs"] },
+    })
+    expect(out.confinement).toEqual({ enabled: true, roots: ["/alias", "/alias-docs"] })
+  })
+  it("drops the policy when nothing is left to confine to, as build-options does", () => {
+    const out = alignConfinementRoots({ confinement: { enabled: true, roots: ["/repo"] } })
+    expect(out).not.toHaveProperty("confinement")
+  })
+})
+
 describe("executeChatTask", () => {
   it("rejects missing prompt", async () => {
     const r = await executeChatTask(makeTask({ payload: {} }), makeExecution(), makeSignal())
@@ -624,6 +670,30 @@ describe("executeChatTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/Session not found/)
+  })
+  it("creates the run's session in the task's workspace and names the task and run", async () => {
+    emitTerminalResult()
+    await executeChatTask(
+      makeTask({ projectId: "proj-task", payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj-task",
+        origin: { kind: "scheduled-task", taskId: "task-1", taskName: "Test", runId: "exec-1" },
+      })
+    )
+  })
+  it("leaves a reused conversation's origin alone", async () => {
+    getSessionMock.mockResolvedValueOnce({ id: "reuse", title: "x" })
+    emitTerminalResult("reuse")
+    await executeChatTask(
+      makeTask({ projectId: "proj-task", payload: { prompt: "hi", sessionId: "reuse" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(createSessionMock).not.toHaveBeenCalled()
   })
   it("creates a team session when payload.teamId is set", async () => {
     emitTerminalResult()
@@ -880,6 +950,8 @@ describe("executeChatTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("needs approval: Edit")
+    // Terminal, so the scheduler does not replay the turn into the same denial.
+    expect(r.terminalReason).toBe("needs-approval")
     expect(r.output).toMatchObject({
       status: "needs_approval",
       needsApproval: [expect.objectContaining({ requestId: "req-1", toolName: "Edit" })],
@@ -1010,6 +1082,224 @@ describe("executeChatTask", () => {
   })
 })
 
+function makeProject(id: string, overrides: Partial<Project> = {}): Project {
+  return {
+    id,
+    name: id,
+    roots: [{ id: `${id}-root`, path: `/${id}`, isPrimary: true }],
+    knowledgeBase: [],
+    sessionIds: [],
+    sessionCount: 0,
+    messageCount: 0,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    lastAccessedAt: new Date(0),
+    ...overrides,
+  } as unknown as Project
+}
+
+function resolvedActiveProject(): Project | null | undefined {
+  return (resolveSendOptionsMock.mock.calls[0]?.[0] as { activeProject?: Project | null })
+    ?.activeProject
+}
+
+describe("executeChatTask — owning workspace (ADR-0144)", () => {
+  it("hands resolveSendOptions the task's own workspace, not the UI-active one", async () => {
+    const owning = makeProject("proj-task", { customInstructions: "Run the linter first." })
+    getSettingsMock.mockResolvedValueOnce({
+      id: "singleton",
+      alwaysAllowTools: [],
+      activeProjectId: "proj-ui",
+    } as unknown as Awaited<ReturnType<typeof getSettingsMock>>)
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-ui"), owning])
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({ projectId: "proj-task", payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    // The whole row, so workspace instructions, roots (CLAUDE.md discovery,
+    // additional directories) and project knowledge all resolve from it.
+    expect(resolvedActiveProject()).toBe(owning)
+  })
+
+  it("resolves a reused conversation against its own workspace", async () => {
+    const owning = makeProject("proj-session")
+    getSessionMock.mockResolvedValueOnce({ id: "reuse", title: "x", projectId: "proj-session" })
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-other"), owning])
+    emitTerminalResult("reuse")
+
+    await executeChatTask(
+      makeTask({ payload: { prompt: "hi", sessionId: "reuse" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(resolvedActiveProject()).toBe(owning)
+  })
+
+  it("attributes the capability scope and the send-time workspace to the same workspace", async () => {
+    const bound = makeProject("project-1")
+    getSessionMock.mockResolvedValueOnce({ id: "reuse", title: "x", projectId: "proj-session" })
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-session"), bound])
+    listEnabledMcpServersMock.mockResolvedValueOnce([{ id: "a", enabled: true }])
+    emitTerminalResult("reuse")
+
+    const r = await executeChatTask(
+      makeTask({
+        payload: {
+          prompt: "hi",
+          sessionId: "reuse",
+          mcpServerIds: ["a"],
+          executionContext: {
+            location: "local",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+          },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    expect(listEnabledMcpServersMock).toHaveBeenCalledWith({ projectId: "project-1" })
+    expect(resolvedActiveProject()).toBe(bound)
+  })
+
+  it("runs with no workspace when its own no longer exists, never borrowing another", async () => {
+    getSettingsMock.mockResolvedValueOnce({
+      id: "singleton",
+      alwaysAllowTools: [],
+      activeProjectId: "proj-ui",
+    } as unknown as Awaited<ReturnType<typeof getSettingsMock>>)
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-ui")])
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({ projectId: "proj-deleted", payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    expect(resolvedActiveProject()).toBeNull()
+  })
+
+  it("does not read workspaces for a run no workspace owns", async () => {
+    emitTerminalResult()
+
+    await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution(), makeSignal())
+
+    expect(getAllProjectsMock).not.toHaveBeenCalled()
+    expect(resolvedActiveProject()).toBeNull()
+  })
+
+  it("still runs, restricted and unverified, when the workspace read fails", async () => {
+    getAllProjectsMock.mockRejectedValueOnce(new Error("db closed"))
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({ projectId: "proj-task", payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    expect(resolvedActiveProject()).toBeNull()
+    expect(sendPromptMock).toHaveBeenCalled()
+    // A workspace nobody could look up is not "no workspace": fail closed.
+    expect(resolveSendOptionsMock.mock.calls[0]?.[0]).toMatchObject({
+      workspaceRestricted: true,
+      trustedWorkspaceRoots: [],
+    })
+    expect(r.output).toMatchObject({
+      workspaceTrust: { restricted: true, untrustedRoots: [], unverified: true },
+    })
+  })
+
+  it("does not adopt the UI workspace createSession stamped on an unbound task's session", async () => {
+    // `createSession` falls back to the active workspace when none is passed.
+    createSessionMock.mockImplementationOnce(async (input: unknown) => ({
+      id: "session-created",
+      ...((input as Record<string, unknown>) ?? {}),
+      projectId: "proj-ui",
+    }))
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("proj-ui")])
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    expect(getAllProjectsMock).not.toHaveBeenCalled()
+    expect(resolvedActiveProject()).toBeNull()
+    // resolveSendOptions scopes skills/MCP/memory by `session.projectId` first.
+    const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as { session?: { projectId?: string } }
+    expect(ctx.session?.projectId).toBeUndefined()
+  })
+
+  it("confines a leased run to its bundle aliases, not the source checkout", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([makeProject("project-1")])
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      cwd: "/repo",
+      confinement: { enabled: true, roots: ["/repo"] },
+    } as unknown as Record<string, unknown>)
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({
+        payload: {
+          prompt: "hi",
+          executionContext: {
+            location: "local",
+            projectId: "project-1",
+            projectRoot: "/repo",
+            taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+          },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.cwd).toBe("/bundle/primary")
+    expect(options.confinement).toEqual({
+      enabled: true,
+      roots: ["/bundle/primary", "/bundle/docs"],
+    })
+  })
+
+  it("extends confinement to the task's own additional directories", async () => {
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      cwd: "/proj-task",
+      confinement: { enabled: true, roots: ["/proj-task"] },
+    } as unknown as Record<string, unknown>)
+    emitTerminalResult()
+
+    await executeChatTask(
+      makeTask({ payload: { prompt: "hi", additionalDirectories: ["/shared/assets"] } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.confinement).toEqual({
+      enabled: true,
+      roots: ["/proj-task", "/shared/assets"],
+    })
+  })
+})
+
 describe("executeAgentTask", () => {
   it("rejects without prompt or characterId", async () => {
     expect(
@@ -1114,6 +1404,354 @@ describe("executeSkillTask", () => {
     expect(listEnabledSkillsByIdsMock).toHaveBeenCalledWith(["skill-1"])
     const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
     expect(options.allowedTools).toEqual(expect.arrayContaining(["TodoWrite"]))
+  })
+})
+
+describe("chat-style runs — Workspace Trust", () => {
+  /** The owning workspace, rooted where the tests' leases expect it. */
+  function trustProject(roots: Array<{ id: string; path: string }>): Project {
+    return {
+      id: "project-1",
+      name: "project-1",
+      roots: roots.map((root, index) => ({ ...root, isPrimary: index === 0 })),
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    } as unknown as Project
+  }
+
+  function sendCtx(): { workspaceRestricted?: boolean; trustedWorkspaceRoots?: string[] } {
+    return resolveSendOptionsMock.mock.calls[0]?.[0] as {
+      workspaceRestricted?: boolean
+      trustedWorkspaceRoots?: string[]
+    }
+  }
+
+  /** Stamp the trust proof the way `resolveSendOptions` does, from its ctx. */
+  function echoTrustProof(base: Record<string, unknown> = {}) {
+    resolveSendOptionsMock.mockImplementationOnce(async (ctx) => {
+      const roots = (ctx as { trustedWorkspaceRoots?: string[] }).trustedWorkspaceRoots
+      return { ...base, ...(roots?.length ? { trustedWorkspaceRoots: roots } : {}) }
+    })
+  }
+
+  const ownedTask = (payload: Record<string, unknown> = {}) =>
+    makeTask({ projectId: "project-1", payload: { prompt: "hi", ...payload } })
+
+  it("runs an untrusted workspace in Restricted Mode and completes, naming the roots", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(isWorkspaceTrustedMock).toHaveBeenCalledWith("/repo")
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: true, trustedWorkspaceRoots: [] })
+    // It still ran: read-only work in an untrusted checkout is allowed, and a
+    // turn that asked for nothing is not failed (nor counted toward auto-pause).
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(r.success).toBe(true)
+    expect(r.terminalReason).toBeUndefined()
+    expect(r.output).toMatchObject({
+      workspaceTrust: { restricted: true, untrustedRoots: ["/repo"] },
+    })
+    expect(r.output).not.toHaveProperty("status")
+    expect((r.output as { workspaceTrust: object }).workspaceTrust).not.toHaveProperty("unverified")
+  })
+
+  it("keeps Restricted Mode when the payload replaces disallowedTools or allows a mutator", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    // What `resolveSendOptions` returns for a restricted send.
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      allowedTools: ["Read"],
+      disallowedTools: ["Bash", "Edit", "Write"],
+    } as unknown as Record<string, unknown>)
+    emitTerminalResult()
+
+    await executeChatTask(
+      ownedTask({ disallowedTools: ["WebSearch"], allowedTools: ["Bash"] }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.disallowedTools).toEqual(
+      expect.arrayContaining(["WebSearch", "Bash", "Edit", "Write"])
+    )
+    expect(options.allowedTools).toEqual(["Read"])
+  })
+
+  it("leaves a trusted run's payload disallowedTools as the payload set them", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      disallowedTools: ["Old"],
+    } as unknown as Record<string, unknown>)
+    emitTerminalResult()
+
+    await executeChatTask(ownedTask({ disallowedTools: ["New"] }), makeExecution(), makeSignal())
+
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.disallowedTools).toEqual(["New"])
+  })
+
+  it("names only the roots that lack a grant", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([
+      trustProject([
+        { id: "r1", path: "/repo" },
+        { id: "r2", path: "/docs" },
+      ]),
+    ])
+    isWorkspaceTrustedMock.mockImplementation(async (path) => path === "/repo")
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: true, trustedWorkspaceRoots: [] })
+    expect(r.output).toMatchObject({ workspaceTrust: { untrustedRoots: ["/docs"] } })
+  })
+
+  it("sends the trust proof for a trusted workspace and completes normally", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([
+      trustProject([
+        { id: "r1", path: "/repo" },
+        { id: "r2", path: "/docs" },
+      ]),
+    ])
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(sendCtx()).toMatchObject({
+      workspaceRestricted: false,
+      trustedWorkspaceRoots: ["/repo", "/docs"],
+    })
+    expect(r.success).toBe(true)
+    expect(r.output).not.toHaveProperty("workspaceTrust")
+  })
+
+  it("reports denied tools and untrusted roots together", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    onClaudeMessageMock.mockImplementationOnce(async (cb) => {
+      const cast = cb as (e: unknown) => void
+      setTimeout(
+        () =>
+          cast({
+            sessionId: "session-created",
+            type: "permission_request",
+            requestId: "req-1",
+            toolName: "WebFetch",
+            input: {},
+          }),
+        0
+      )
+      setTimeout(() => cast({ sessionId: "session-created", type: "result" }), 5)
+      return () => undefined
+    })
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(r.error).toBe(
+      "needs approval: WebFetch; workspace not trusted (/repo), so the run had no disk or host-mutating tools"
+    )
+    expect(r.output).toMatchObject({
+      status: "needs_approval",
+      needsApproval: [expect.objectContaining({ toolName: "WebFetch" })],
+      workspaceTrust: { restricted: true, untrustedRoots: ["/repo"] },
+    })
+  })
+
+  it("gates agent and skill runs through the same runner", async () => {
+    getAllProjectsMock.mockResolvedValue([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+
+    emitTerminalResult()
+    const agent = await executeAgentTask(
+      makeTask({
+        type: "agent",
+        projectId: "project-1",
+        payload: { prompt: "hi", characterId: "c" },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+    emitTerminalResult()
+    const skill = await executeSkillTask(
+      makeTask({ type: "skill", projectId: "project-1", payload: { prompt: "hi", skillId: "s" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(agent.output).toMatchObject({ workspaceTrust: { restricted: true } })
+    expect(skill.output).toMatchObject({ workspaceTrust: { restricted: true } })
+    for (const [ctx] of resolveSendOptionsMock.mock.calls) {
+      expect(ctx).toMatchObject({ workspaceRestricted: true })
+    }
+  })
+
+  it("gates the headless brain the same as the desktop", async () => {
+    // Not Tauri, but it holds the checkout: `!isTauri()` would wave it through.
+    hostState.tauri = false
+    hostState.platform = "headless"
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: true })
+    expect(r.output).toMatchObject({ workspaceTrust: { restricted: true } })
+  })
+
+  it("never reaches the trust gate on a host without the sidecar", async () => {
+    hostState.tauri = false
+    hostState.platform = "mobile"
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(r).toMatchObject({ success: false, terminalReason: "unsupported-on-host" })
+    expect(isWorkspaceTrustedMock).not.toHaveBeenCalled()
+  })
+
+  it("does not gate when Workspace Trust is turned off in settings", async () => {
+    getSettingsMock.mockResolvedValueOnce({
+      id: "singleton",
+      alwaysAllowTools: [],
+      workspaceTrust: { enabled: false },
+    } as unknown as Awaited<ReturnType<typeof getSettingsMock>>)
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(isWorkspaceTrustedMock).not.toHaveBeenCalled()
+    // Off means unrestricted, and it mints no proof either.
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: false, trustedWorkspaceRoots: [] })
+    expect(r.success).toBe(true)
+  })
+
+  it("does not gate a run no workspace owns", async () => {
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(isWorkspaceTrustedMock).not.toHaveBeenCalled()
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: false })
+    expect(r.success).toBe(true)
+  })
+
+  it("fails closed when the trust ledger cannot be read", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    isWorkspaceTrustedMock.mockRejectedValue(new Error("db closed"))
+    emitTerminalResult()
+
+    const r = await executeChatTask(ownedTask(), makeExecution(), makeSignal())
+
+    expect(sendCtx()).toMatchObject({ workspaceRestricted: true, trustedWorkspaceRoots: [] })
+    expect(r.success).toBe(true)
+    expect(r.output).toMatchObject({
+      workspaceTrust: { restricted: true, untrustedRoots: ["/repo"], unverified: true },
+    })
+  })
+
+  it("carries the trust proof onto a leased run's alias", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    echoTrustProof({ cwd: "/repo" })
+    emitTerminalResult()
+
+    const r = await executeChatTask(
+      ownedTask({
+        executionContext: {
+          location: "local",
+          projectId: "project-1",
+          projectRoot: "/repo",
+          taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.cwd).toBe("/bundle/primary")
+    // The sidecar honours only a trusted root that is active for the send.
+    expect(options.trustedWorkspaceRoots).toEqual(["/bundle/primary"])
+  })
+
+  it("maps each root of a borrowed canonical bundle to its own alias", async () => {
+    getAllProjectsMock.mockResolvedValueOnce([
+      trustProject([
+        { id: "root-primary", path: "/live/repo" },
+        { id: "root-docs", path: "/live/docs" },
+      ]),
+    ])
+    getSessionMock.mockResolvedValueOnce({
+      id: "session-1",
+      projectId: "project-1",
+      executionContext: {
+        execution: {
+          mode: "managed",
+          bundleId: "bundle-1",
+          base: { kind: "remoteDefault" },
+          roots: [
+            { logicalRootId: "root-primary", role: "primary", aliasPath: "/live/repo" },
+            { logicalRootId: "root-docs", role: "additional", aliasPath: "/live/docs" },
+          ],
+        },
+        location: "managedWorktree",
+        projectId: "project-1",
+        projectRoot: "/live/repo",
+        taskWorkspace: { taskId: "task-workspace:session-1", workspaceKey: "session-1" },
+      },
+    })
+    echoTrustProof({ cwd: "/live/repo" })
+    emitTerminalResult("session-1")
+
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi", sessionId: "session-1" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.trustedWorkspaceRoots).toEqual(["/bundle/primary", "/bundle/docs"])
+  })
+
+  it("does not extend a grant to an alias whose source is not the trusted root", async () => {
+    // Trust is per exact root: the lease checks out a subdirectory nobody trusted.
+    getAllProjectsMock.mockResolvedValueOnce([trustProject([{ id: "r1", path: "/repo" }])])
+    echoTrustProof({ cwd: "/repo/packages/app" })
+    emitTerminalResult()
+
+    await executeChatTask(
+      ownedTask({
+        executionContext: {
+          location: "local",
+          projectId: "project-1",
+          projectRoot: "/repo/packages/app",
+          taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+        },
+      }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
+    expect(options.cwd).toBe("/bundle/primary")
+    expect(options.trustedWorkspaceRoots).toEqual(["/repo"])
   })
 })
 

@@ -12,7 +12,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, SquareIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,12 +26,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { formatDuration } from "@/lib/scheduler/format-utils"
-import { toRunStatusPill, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+import { runApprovalRequest, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 import { KindIcon } from "./kind-visuals"
 import { RunArtifactLinks } from "./run-artifact-links"
+import { RunOutcomePill } from "./run-row"
 
 /**
  * Payload / result dumps are arbitrarily large. Bounded height + in-place
@@ -72,6 +72,12 @@ export interface RunDetailSheetProps {
   onNavigate?: (run: UnifiedExecutionRun) => void
   onOpenItem?: (unifiedId: string) => void
   onOpenSession?: (sessionId: string) => void
+  /**
+   * Stop a running run. The list row had a Stop; the sheet opened on that same
+   * running run had none, so the place a user reads a run's progress was the
+   * one place it could not be stopped.
+   */
+  onCancelRun?: (run: UnifiedExecutionRun) => void
 }
 
 /**
@@ -100,14 +106,20 @@ export function RunDetailSheet({
   onNavigate,
   onOpenItem,
   onOpenSession,
+  onCancelRun,
 }: RunDetailSheetProps) {
   const t = useTranslations("scheduler")
   const tSheet = useTranslations("scheduler.runSheet")
+  const tApproval = useTranslations("scheduler.approval")
   const [showLogs, setShowLogs] = useState(false)
   const [showStack, setShowStack] = useState(false)
 
   if (!run) return null
 
+  // A run that stopped for want of an approver keeps its session link and
+  // result: the conversation is where the user sees what it was about to do.
+  const approval = runApprovalRequest(run)
+  const showResult = run.result !== undefined && (run.status !== "failed" || approval !== null)
   const index = runs.findIndex((candidate) => candidate.unifiedId === run.unifiedId)
   const previous = index > 0 ? runs[index - 1] : undefined
   const next = index >= 0 && index < runs.length - 1 ? runs[index + 1] : undefined
@@ -139,7 +151,7 @@ export function RunDetailSheet({
                 )}
               </SheetTitle>
               <SheetDescription className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <RunStatusPill status={toRunStatusPill(run.status)} />
+                <RunOutcomePill run={run} />
                 <span>{t(`kindFilter.${run.kind}`)}</span>
                 {run.triggerSource ? (
                   <Badge
@@ -181,12 +193,29 @@ export function RunDetailSheet({
               </div>
             ) : null}
           </div>
-          {run.result !== undefined && run.status !== "failed" ? (
+          {showResult ? (
             <RunArtifactLinks output={run.result} onOpenSession={onOpenSession} />
           ) : null}
         </SheetHeader>
 
         <div className="h-[calc(100%-6rem)] space-y-5 overflow-y-auto px-5 py-4 text-sm">
+          {run.status === "running" && onCancelRun ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
+              <p className="text-xs text-muted-foreground">{tSheet("runningNow")}</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => onCancelRun(run)}
+                data-testid="run-sheet-stop"
+              >
+                <SquareIcon className="size-3" aria-hidden="true" />
+                {tSheet("stop")}
+              </Button>
+            </div>
+          ) : null}
+
           {progress !== null ? (
             <section data-testid="run-sheet-progress">
               <Progress value={Math.round(progress * 100)} className="h-1.5" />
@@ -224,7 +253,50 @@ export function RunDetailSheet({
             </section>
           ) : null}
 
-          {run.result !== undefined && run.status !== "failed" ? (
+          {approval ? (
+            <section
+              className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs"
+              data-testid="run-sheet-approval"
+            >
+              <div>
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  {tApproval("sheetTitle")}
+                </h3>
+                <p className="mt-1 text-muted-foreground">{tApproval("sheetBody")}</p>
+                {approval.tools.length === 0 &&
+                approval.untrustedRoots.length === 0 &&
+                run.error?.message ? (
+                  <p className="mt-1 font-mono text-[11px]">{run.error.message}</p>
+                ) : null}
+              </div>
+              {approval.tools.length > 0 ? (
+                <div data-testid="run-sheet-approval-tools">
+                  <p className="font-medium">{tApproval("deniedTools")}</p>
+                  <p className="mt-0.5 font-mono text-[11px]">{approval.tools.join(", ")}</p>
+                  <p className="mt-0.5 text-muted-foreground">{tApproval("hintTools")}</p>
+                </div>
+              ) : null}
+              {approval.untrustedRoots.length > 0 ? (
+                <div data-testid="run-sheet-approval-roots">
+                  <p className="font-medium">
+                    {approval.unverified
+                      ? tApproval("unverifiedRoots")
+                      : tApproval("untrustedRoots")}
+                  </p>
+                  <ul className="mt-0.5 font-mono text-[11px]">
+                    {approval.untrustedRoots.map((root) => (
+                      <li key={root} className="break-all">
+                        {root}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-0.5 text-muted-foreground">{tApproval("hintTrust")}</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          {showResult ? (
             <section>
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {t("result")}
@@ -235,7 +307,7 @@ export function RunDetailSheet({
             </section>
           ) : null}
 
-          {run.error ? (
+          {run.error && !approval ? (
             <section data-testid="run-sheet-error">
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
                 {t("error")}

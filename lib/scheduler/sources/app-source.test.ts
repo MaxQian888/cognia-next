@@ -288,7 +288,7 @@ describe("app source · managed host target", () => {
       deleteTask: jest.fn(async () => true),
       pauseTask: jest.fn(async () => true),
       resumeTask: jest.fn(async () => true),
-      runTaskNow: jest.fn(async () => null),
+      runTaskNow: jest.fn(async (): Promise<{ id: string } | null> => ({ id: "remote-run" })),
     }
   }
 
@@ -321,6 +321,21 @@ describe("app source · managed host target", () => {
     expect((await source.get("remote-row"))?.sourceId).toBe("remote-row")
     expect(db.getAllTasks).not.toHaveBeenCalled()
     expect(db.getTask).not.toHaveBeenCalled()
+  })
+
+  it("rejects a write the host refused instead of resolving as if it succeeded", async () => {
+    const { db, scheduler } = makeLocalStubs()
+    const remote = makeRemote([makeTask({ id: "remote-row" })])
+    remote.pauseTask.mockResolvedValueOnce(false)
+    remote.runTaskNow.mockResolvedValueOnce(null)
+    remote.deleteTask.mockResolvedValueOnce(false)
+    remote.updateTask.mockResolvedValueOnce(null as never)
+    const source = createAppSource({ scheduler, db, dataSource: () => remote as never })
+
+    await expect(source.pause("remote-row")).rejects.toThrow("could not be paused")
+    await expect(source.runNow("gone")).rejects.toThrow("was not found")
+    await expect(source.delete("gone")).rejects.toThrow("was not found")
+    await expect(source.update("gone", { description: "x" })).rejects.toThrow("was not found")
   })
 
   it("routes every write to the paired host and leaves the local scheduler untouched", async () => {

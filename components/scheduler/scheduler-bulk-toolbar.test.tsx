@@ -18,7 +18,13 @@ jest.mock("next-intl", () => ({
 jest.mock("@/components/ui/alert-dialog")
 
 const toastErrorMock = jest.fn()
-jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastErrorMock(...a) } }))
+const toastSuccessMock = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...a: unknown[]) => toastErrorMock(...a),
+    success: (...a: unknown[]) => toastSuccessMock(...a),
+  },
+}))
 
 function makeItem(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledItem {
   return {
@@ -218,5 +224,62 @@ describe("SchedulerBulkToolbar · failures are reported", () => {
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled())
     expect(toastErrorMock.mock.calls[0][0]).toBe("bulkPartialFailure")
     expect(toastErrorMock.mock.calls[0][1]).toEqual(expect.objectContaining({ description: "Bad" }))
+  })
+})
+
+describe("SchedulerBulkToolbar · only what the action changes", () => {
+  beforeEach(() => {
+    toastSuccessMock.mockClear()
+    toastErrorMock.mockClear()
+  })
+
+  it("offers Resume only when something selected is paused, and Pause only when something is active", () => {
+    const { rerender } = render(
+      <SchedulerBulkToolbar
+        selectedItems={[makeItem({ unifiedId: "app:1", status: "active" })]}
+        onClearSelection={() => {}}
+      />
+    )
+    expect(screen.getByTestId("bulk-pause")).toBeEnabled()
+    expect(screen.getByTestId("bulk-resume")).toBeDisabled()
+    rerender(
+      <SchedulerBulkToolbar
+        selectedItems={[makeItem({ unifiedId: "app:1", status: "paused" })]}
+        onClearSelection={() => {}}
+      />
+    )
+    expect(screen.getByTestId("bulk-pause")).toBeDisabled()
+    expect(screen.getByTestId("bulk-resume")).toBeEnabled()
+  })
+
+  it("pauses only the active items and says how many it changed", async () => {
+    const calls: { action: string; kind: string; sourceId: string }[] = []
+    const onClear = jest.fn()
+    render(
+      <SchedulerBulkToolbar
+        selectedItems={[
+          makeItem({ unifiedId: "app:1", sourceId: "1", status: "active" }),
+          makeItem({ unifiedId: "app:2", sourceId: "2", status: "paused" }),
+        ]}
+        onClearSelection={onClear}
+        registry={fakeRegistry(calls)}
+      />
+    )
+    fireEvent.click(screen.getByTestId("bulk-pause"))
+    await waitFor(() => expect(onClear).toHaveBeenCalled())
+    expect(calls).toEqual([{ action: "pause", kind: "app", sourceId: "1" }])
+    expect(toastSuccessMock).toHaveBeenCalledWith("bulkDone.pause")
+    expect(translateCalls).toContainEqual({ key: "bulkDone.pause", values: { count: 1 } })
+  })
+
+  it("passes the count to the delete confirmation through the message, not a string replace", () => {
+    translateCalls.length = 0
+    render(
+      <SchedulerBulkToolbar
+        selectedItems={[makeItem({ unifiedId: "app:1" }), makeItem({ unifiedId: "app:2" })]}
+        onClearSelection={() => {}}
+      />
+    )
+    expect(translateCalls).toContainEqual({ key: "bulkDeleteDescription", values: { n: 2 } })
   })
 })

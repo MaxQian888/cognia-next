@@ -19,7 +19,7 @@
  */
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ChevronLeftIcon, SearchIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -81,10 +81,18 @@ import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import type { CreateScheduledTaskInput } from "@/types/scheduler"
-import { parseUnifiedId, type UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  makeUnifiedId,
+  parseUnifiedId,
+  unifiedKindForTaskType,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
+import {
+  isAppTableKind,
+  taskAnnouncesOutcome,
+  useSchedulerItemActions,
+} from "@/hooks/scheduler/use-scheduler-item-actions"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
-
-const APP_TABLE_KINDS = new Set(["app", "plugin", "connector"])
 
 export default function MobileSchedulerPage() {
   return (
@@ -101,6 +109,7 @@ function MobileSchedulerBody() {
 
   // Width, not runtime: a narrow browser tab is a phone-shaped scheduler.
   const compact = useCompactLayout()
+  const searchParams = useSearchParams()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -108,8 +117,10 @@ function MobileSchedulerBody() {
   }, [])
   useEffect(() => {
     if (!mounted || compact) return
-    router.replace("/scheduler")
-  }, [compact, mounted, router])
+    // The same address on the wider page: the open task stays open.
+    const query = searchParams.toString()
+    router.replace(query ? `/scheduler?${query}` : "/scheduler")
+  }, [compact, mounted, router, searchParams])
 
   const {
     tasks,
@@ -199,7 +210,7 @@ function MobileSchedulerBody() {
     () => items.find((item) => item.unifiedId === selection.itemId) ?? null,
     [items, selection.itemId]
   )
-  const selectedIsAppTable = Boolean(selectedItem && APP_TABLE_KINDS.has(selectedItem.kind))
+  const selectedIsAppTable = isAppTableKind(selectedItem?.kind)
   const selectedSourceId = selectedIsAppTable ? selectedItem!.sourceId : null
   useEffect(() => {
     selectTask(selectedSourceId)
@@ -280,7 +291,8 @@ function MobileSchedulerBody() {
         }
         setShowCreateSheet(false)
         setCreateDraft(null)
-        selection.selectItem(`app:${created.id}`)
+        selection.selectItem(makeUnifiedId(unifiedKindForTaskType(created.type), created.id))
+        toast.success(t("itemActions.created", { name: created.name }))
       } finally {
         setIsSubmitting(false)
       }
@@ -293,7 +305,7 @@ function MobileSchedulerBody() {
       if (!selectedAppTask) return
       setIsSubmitting(true)
       try {
-        await updateTask(selectedAppTask.id, {
+        const updated = await updateTask(selectedAppTask.id, {
           name: input.name,
           description: input.description,
           trigger: input.trigger,
@@ -305,31 +317,44 @@ function MobileSchedulerBody() {
           onSuccessTaskIds: input.onSuccessTaskIds ?? [],
           onFailureTaskIds: input.onFailureTaskIds ?? [],
         })
+        if (!updated) {
+          toast.error(t("updateTaskFailed"), {
+            description: useSchedulerStore.getState().error ?? undefined,
+          })
+          return
+        }
         setShowEditSheet(false)
+        toast.success(t("itemActions.saved", { name: updated.name }))
       } finally {
         setIsSubmitting(false)
       }
     },
-    [selectedAppTask, updateTask]
+    [selectedAppTask, updateTask, t]
   )
 
+  const itemActionsState = useSchedulerItemActions({
+    runTaskNow,
+    pauseTask,
+    resumeTask,
+    deleteTask,
+    runs: recentRuns,
+    onOpenRun: (runUnifiedId) => selection.openRun(runUnifiedId),
+    announcesOutcome: (item, outcome) =>
+      isAppTableKind(item.kind) && taskAnnouncesOutcome(tasksById.get(item.sourceId), outcome),
+  })
+  const removeItem = itemActionsState.remove
   const handleDeleteConfirm = useCallback(async () => {
     const item = pendingDelete
     if (!item) return
     setPendingDelete(null)
-    if (APP_TABLE_KINDS.has(item.kind)) {
-      await deleteTask(item.sourceId)
-    } else {
-      const source = getSchedulerSourceRegistry().getSource(item.kind)
-      await source?.delete(item.sourceId)
-    }
-    if (selection.itemId === item.unifiedId) selection.clear()
-  }, [pendingDelete, deleteTask, selection])
+    const removed = await removeItem(item)
+    if (removed && selection.itemId === item.unifiedId) selection.clear()
+  }, [pendingDelete, removeItem, selection])
 
   const handleCancelRun = useCallback(
     async (run: UnifiedExecutionRun) => {
       const parsed = parseUnifiedId(run.unifiedId)
-      if (!parsed || !APP_TABLE_KINDS.has(run.kind)) {
+      if (!parsed || !isAppTableKind(run.kind)) {
         toast.error(t("cancelRunUnreachable"))
         return
       }
@@ -351,34 +376,16 @@ function MobileSchedulerBody() {
     [recentRuns, handleCancelRun]
   )
 
+  const { runNow: runItemNow, pause: pauseItem, resume: resumeItem } = itemActionsState
   const itemActions = useMemo<ItemActions>(() => {
-    const report = (item: UnifiedScheduledItem) => (error: unknown) => {
-      toast.error(t("actionFailed", { name: item.name }), {
-        description: error instanceof Error ? error.message : String(error),
-      })
-    }
-    const dispatch =
-      (store: (taskId: string) => Promise<unknown>, action: "runNow" | "pause" | "resume") =>
-      (item: UnifiedScheduledItem) => {
-        if (APP_TABLE_KINDS.has(item.kind)) {
-          void store(item.sourceId).catch(report(item))
-          return
-        }
-        const source = getSchedulerSourceRegistry().getSource(item.kind)
-        if (!source) {
-          toast.error(t("actionFailed", { name: item.name }))
-          return
-        }
-        void source[action](item.sourceId).catch(report(item))
-      }
     return {
-      onRunNow: dispatch(runTaskNow, "runNow"),
-      onPause: dispatch(pauseTask, "pause"),
-      onResume: dispatch(resumeTask, "resume"),
+      onRunNow: runItemNow,
+      onPause: pauseItem,
+      onResume: resumeItem,
       onDelete: (item) => setPendingDelete(item),
       onEdit: selectedItem?.kind === "app" ? () => setShowEditSheet(true) : undefined,
     }
-  }, [t, runTaskNow, pauseTask, resumeTask, selectedItem?.kind])
+  }, [runItemNow, pauseItem, resumeItem, selectedItem?.kind])
 
   if (!mounted || !compact) return null
   if (!isInitialized) return <SchedulerSkeleton variant="sidebar" />
@@ -562,6 +569,7 @@ function MobileSchedulerBody() {
             outcomeCells={itemOutcomeCells}
             allTasks={tasks}
             actions={itemActions}
+            pendingAction={itemActionsState.pending[selectedItem.unifiedId]}
             onOpenRun={handleOpenRun}
             onCancelRun={handleCancelRun}
             onSelectItem={handleSelectUnifiedId}
@@ -647,6 +655,7 @@ function MobileSchedulerBody() {
         runs={itemRuns.length > 0 ? itemRuns : recentRuns}
         onNavigate={handleOpenRun}
         onOpenItem={handleSelectUnifiedId}
+        onCancelRun={handleCancelRun}
       />
 
       <DeleteItemDialog

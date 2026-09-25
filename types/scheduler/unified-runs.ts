@@ -62,9 +62,53 @@ export interface UnifiedExecutionRun {
   logs?: UnifiedRunLog[]
   /** What initiated the run (app-task executions only; e.g. "backfill"). */
   triggerSource?: string
+  /**
+   * The structured reason the run ended (app-task executions only), e.g.
+   * `needs-approval` for a `failed` run that stopped for want of an approver.
+   */
+  terminalReason?: string
   origin: {
     tableName: string
     nativeId: string
+  }
+}
+
+/**
+ * What a `needs-approval` run was waiting on, read back from its result
+ * (`status: "needs_approval"` output of a scheduled chat / agent / skill or
+ * goal run). Either list may be empty: a turn can be refused tools in a
+ * trusted workspace, or run restricted without asking for anything.
+ */
+export interface RunApprovalRequest {
+  /** Distinct tools the unattended responder refused, in first-refused order. */
+  tools: string[]
+  /** Workspace roots the run was restricted for. */
+  untrustedRoots: string[]
+  /** Trust could not be read, so the roots are unverified rather than untrusted. */
+  unverified: boolean
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** `null` unless the run failed with terminal reason `needs-approval`. */
+export function runApprovalRequest(run: UnifiedExecutionRun): RunApprovalRequest | null {
+  if (run.status !== "failed" || run.terminalReason !== "needs-approval") return null
+  const result = isRecord(run.result) ? run.result : {}
+  const denials = Array.isArray(result.needsApproval) ? result.needsApproval : []
+  const tools = new Set<string>()
+  for (const denial of denials) {
+    if (isRecord(denial) && typeof denial.toolName === "string" && denial.toolName) {
+      tools.add(denial.toolName)
+    }
+  }
+  const trust = isRecord(result.workspaceTrust) ? result.workspaceTrust : {}
+  const roots = Array.isArray(trust.untrustedRoots) ? trust.untrustedRoots : []
+  return {
+    tools: [...tools],
+    untrustedRoots: roots.filter((root): root is string => typeof root === "string" && !!root),
+    unverified: trust.unverified === true,
   }
 }
 

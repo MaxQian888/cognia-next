@@ -157,6 +157,85 @@ describe("itemAttention", () => {
     expect(signal).toMatchObject({ kind: "last-run-failed", detail: "took too long" })
   })
 
+  describe("a run that stopped for approval", () => {
+    const blocked = (): UnifiedExecutionRun => ({
+      ...run("app:a", "failed", 7),
+      terminalReason: "needs-approval",
+      error: { message: "needs approval: Bash; workspace not trusted (/repo)" },
+      result: {
+        status: "needs_approval",
+        needsApproval: [{ toolName: "Bash" }, { toolName: "Edit" }],
+        workspaceTrust: { restricted: true, untrustedRoots: ["/repo"] },
+      },
+    })
+
+    it("names what it is waiting on, as waiting rather than broken", () => {
+      const signal = itemAttention(item("app", "a"), {
+        task: task("a", {
+          lastTerminalReason: "needs-approval",
+          lastError: "needs approval: Bash",
+        }),
+        latestRun: blocked(),
+        hostSupport: supported,
+      })
+      expect(signal).toEqual({
+        id: "needs-approval:app:a",
+        kind: "needs-approval",
+        severity: "attention",
+        itemUnifiedId: "app:a",
+        itemName: "a",
+        runUnifiedId: "app:a:run:7",
+        tools: "Bash, Edit",
+        roots: "/repo",
+        detail: "needs approval: Bash",
+      })
+    })
+
+    it("outranks the failure count it also adds to, but not an auto-pause", () => {
+      expect(
+        itemAttention(item("app", "a"), {
+          task: task("a", { consecutiveFailures: 4 }),
+          latestRun: blocked(),
+          hostSupport: supported,
+        })
+      ).toMatchObject({ kind: "needs-approval" })
+      expect(
+        itemAttention(item("app", "a"), {
+          task: task("a", {
+            status: "paused",
+            lastTerminalReason: "auto-paused",
+            consecutiveFailures: 4,
+          }),
+          latestRun: blocked(),
+          hostSupport: supported,
+        })
+      ).toMatchObject({ kind: "auto-paused" })
+    })
+
+    it("gives way to a run that has started since", () => {
+      expect(
+        itemAttention(item("app", "a"), {
+          task: task("a", { lastTerminalReason: "needs-approval", lastError: "needs approval" }),
+          latestRun: run("app:a", "running", 9),
+          hostSupport: supported,
+        })
+      ).toMatchObject({ kind: "running" })
+    })
+
+    it("falls back to the task row when no run is loaded", () => {
+      const signal = itemAttention(item("app", "a"), {
+        task: task("a", {
+          lastTerminalReason: "needs-approval",
+          lastError: "needs approval: Bash",
+        }),
+        hostSupport: supported,
+      })
+      expect(signal).toMatchObject({ kind: "needs-approval", detail: "needs approval: Bash" })
+      expect(signal).not.toHaveProperty("tools")
+      expect(signal).not.toHaveProperty("runUnifiedId")
+    })
+  })
+
   it("reports a type the host cannot run", () => {
     const signal = itemAttention(item("app", "a"), {
       task: task("a", { type: "background-command" }),

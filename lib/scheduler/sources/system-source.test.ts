@@ -157,6 +157,21 @@ describe("createSystemSource", () => {
     expect(stubs.native.createSystemTask).toHaveBeenCalled()
   })
 
+  it("rejects when the OS scheduler refuses, so callers can say so", async () => {
+    const stubs = makeStubs()
+    stubs.native.disableSystemTask.mockResolvedValueOnce(false)
+    stubs.native.enableSystemTask.mockResolvedValueOnce(false)
+    stubs.native.deleteSystemTask.mockResolvedValueOnce(false)
+    const source = createSystemSource({
+      native: stubs.native,
+      isAvailable: () => true,
+      pollIntervalMs: 0,
+    })
+    await expect(source.pause("sys-1")).rejects.toThrow("could not be disabled")
+    await expect(source.resume("sys-1")).rejects.toThrow("could not be enabled")
+    await expect(source.delete("sys-1")).rejects.toThrow("was not found")
+  })
+
   it("pause invokes disableSystemTask", async () => {
     const stubs = makeStubs()
     const source = createSystemSource({

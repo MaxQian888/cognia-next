@@ -1,5 +1,7 @@
 import {
   graphNodeVariants,
+  JUST_CREATED_HIGHLIGHT_MS,
+  LAYOUT_ANIMATION_ROW_LIMIT,
   listContainerVariants,
   listItemVariants,
   staticIf,
@@ -30,5 +32,22 @@ describe("staticIf", () => {
   it("falls back to an empty settled state when no show variant exists", () => {
     const collapsed = staticIf(true, { hidden: { opacity: 0 } })
     expect(collapsed.show).toEqual({})
+  })
+})
+
+describe("list row motion", () => {
+  it("lets a removed row fade out instead of vanishing", () => {
+    expect(listItemVariants.exit).toMatchObject({ opacity: 0 })
+  })
+
+  it("collapses the exit too under reduced motion", () => {
+    expect(staticIf(true, listItemVariants).exit).toBe(listItemVariants.show)
+  })
+
+  it("keeps the layout and highlight budgets small enough to stay subtle", () => {
+    expect(LAYOUT_ANIMATION_ROW_LIMIT).toBeGreaterThan(0)
+    expect(LAYOUT_ANIMATION_ROW_LIMIT).toBeLessThanOrEqual(100)
+    expect(JUST_CREATED_HIGHLIGHT_MS).toBeGreaterThanOrEqual(500)
+    expect(JUST_CREATED_HIGHLIGHT_MS).toBeLessThanOrEqual(2_000)
   })
 })

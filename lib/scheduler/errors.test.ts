@@ -147,5 +147,29 @@ describe("SchedulerError", () => {
       expect(err.details).toEqual({ url: "https://example.com/hook", status: undefined })
       expect((err as Error & { cause?: unknown }).cause).toBeUndefined()
     })
+
+    it("needsApproval() carries the summary and what the run was refused", () => {
+      const denial = { requestId: "r1", toolName: "Bash", at: 1, reason: "x" }
+      const workspaceTrust = { restricted: true, untrustedRoots: ["/repo"] }
+      const err = SchedulerError.needsApproval("Nightly", "needs approval: Bash", {
+        sessionId: "s1",
+        status: "needs_approval",
+        needsApproval: [denial],
+        workspaceTrust,
+      })
+      expect(err.code).toBe("NEEDS_APPROVAL")
+      expect(err.message).toBe("needs approval: Bash")
+      expect(err.details).toEqual({
+        taskName: "Nightly",
+        terminalReason: "needs-approval",
+        needsApproval: [denial],
+        workspaceTrust,
+      })
+    })
+
+    it("needsApproval() leaves out what the output does not carry", () => {
+      const err = SchedulerError.needsApproval("Nightly", "needs approval")
+      expect(err.details).toEqual({ taskName: "Nightly", terminalReason: "needs-approval" })
+    })
   })
 })

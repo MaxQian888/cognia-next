@@ -10,12 +10,16 @@
  * had collapsed into the same missing button.
  */
 
+import { useId } from "react"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
+  ArrowLeftIcon,
   ArrowUpRightIcon,
   CopyIcon,
   GitBranchIcon,
   HistoryIcon,
+  Loader2Icon,
   MonitorUpIcon,
   MoreHorizontalIcon,
   PauseIcon,
@@ -35,6 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
+import type { PendingItemAction } from "@/hooks/scheduler/use-scheduler-item-actions"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
 import { AuthoredByBadge, ItemStatusBadge, KindPlate, useTriggerText } from "../kind-visuals"
@@ -63,14 +68,44 @@ export interface ItemHeroProps {
   actions: ItemActions
   /** Something is in flight for this item; Run now waits. */
   busy?: boolean
+  /** An action the user just pressed that has not answered yet. */
+  pendingAction?: PendingItemAction
+  /**
+   * Back to the overview. The desktop page passes it: with the list collapsed,
+   * `Esc` was the only way back, and nothing on screen said so. The phone
+   * shell has its own back control and leaves it out.
+   */
+  onBack?: () => void
   className?: string
 }
 
-export function ItemHero({ item, actions, busy = false, className }: ItemHeroProps) {
+/** A spinner in place of an action's icon while that action is in flight. */
+function ActionIcon({ pending, icon: Icon }: { pending: boolean; icon: typeof PlayIcon }) {
+  return pending ? (
+    <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
+  ) : (
+    <Icon className="size-3.5" aria-hidden="true" />
+  )
+}
+
+export function ItemHero({
+  item,
+  actions,
+  busy = false,
+  pendingAction,
+  onBack,
+  className,
+}: ItemHeroProps) {
   const t = useTranslations("scheduler")
   const tDetail = useTranslations("scheduler.detail")
   const triggerText = useTriggerText()
+  const reduceMotion = useReducedMotion()
+  const reasonId = useId()
   const isPaused = item.status === "paused"
+  const starting = pendingAction === "starting"
+  const toggling = pendingAction === "pausing" || pendingAction === "resuming"
+  const deleting = pendingAction === "deleting"
+  const anyPending = pendingAction !== undefined
   const nextRun = item.nextRunAt ? new Date(item.nextRunAt) : undefined
 
   const runReason = item.capabilities.runNow ? undefined : tDetail("cannot.runNow")
@@ -89,8 +124,32 @@ export function ItemHero({ item, actions, busy = false, className }: ItemHeroPro
     actions.onUnpromote ||
     editElsewhere
 
+  // `title` alone is invisible to a screen reader and to touch; each disabled
+  // control also points at a visually hidden reason.
+  const describedBy = (reason: string | undefined, suffix: string) =>
+    reason ? `${reasonId}-${suffix}` : undefined
+
   return (
     <div className={cn("shrink-0 border-b px-4 py-3.5", className)} data-testid="item-hero">
+      {onBack ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-2 mb-1.5 h-6 gap-1 px-2 text-xs text-muted-foreground"
+          onClick={onBack}
+          data-testid="item-hero-back"
+        >
+          <ArrowLeftIcon className="size-3.5" aria-hidden="true" />
+          {tDetail("backToOverview")}
+        </Button>
+      ) : null}
+      <span className="sr-only">
+        {runReason ? <span id={`${reasonId}-run`}>{runReason}</span> : null}
+        {pauseReason ? <span id={`${reasonId}-pause`}>{pauseReason}</span> : null}
+        {editReason ? <span id={`${reasonId}-edit`}>{editReason}</span> : null}
+        {deleteReason ? <span id={`${reasonId}-delete`}>{deleteReason}</span> : null}
+      </span>
       <div className="flex items-start gap-3">
         <KindPlate kind={item.kind} />
         <div className="min-w-0 flex-1">
@@ -130,12 +189,14 @@ export function ItemHero({ item, actions, busy = false, className }: ItemHeroPro
           size="sm"
           className="h-7 gap-1.5 text-xs"
           onClick={() => actions.onRunNow(item)}
-          disabled={busy || !item.capabilities.runNow}
+          disabled={busy || anyPending || !item.capabilities.runNow}
           title={runReason}
+          aria-describedby={describedBy(runReason, "run")}
+          aria-busy={starting || undefined}
           data-testid="item-action-run"
         >
-          <PlayIcon className="size-3.5" aria-hidden="true" />
-          {t("runNow")}
+          <ActionIcon pending={starting} icon={PlayIcon} />
+          {starting ? tDetail("starting") : t("runNow")}
         </Button>
         <Button
           type="button"
@@ -143,15 +204,28 @@ export function ItemHero({ item, actions, busy = false, className }: ItemHeroPro
           variant="outline"
           className="h-7 gap-1.5 text-xs"
           onClick={() => (isPaused ? actions.onResume(item) : actions.onPause(item))}
-          disabled={!item.capabilities.pause}
+          disabled={anyPending || !item.capabilities.pause}
           title={pauseReason}
+          aria-describedby={describedBy(pauseReason, "pause")}
+          aria-busy={toggling || undefined}
           data-testid={isPaused ? "item-action-resume" : "item-action-pause"}
         >
-          {isPaused ? (
-            <PlayIcon className="size-3.5" aria-hidden="true" />
-          ) : (
-            <PauseIcon className="size-3.5" aria-hidden="true" />
-          )}
+          {/* Pause and Resume trade places; the icon cross-fades so the swap
+              reads as the same control changing state, not a new button. */}
+          <span className="relative inline-flex size-3.5 items-center justify-center">
+            <AnimatePresence initial={false} mode="popLayout">
+              <motion.span
+                key={toggling ? "pending" : isPaused ? "resume" : "pause"}
+                className="inline-flex"
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? undefined : { opacity: 0, scale: 0.6 }}
+                transition={{ duration: 0.14, ease: "easeOut" }}
+              >
+                <ActionIcon pending={toggling} icon={isPaused ? PlayIcon : PauseIcon} />
+              </motion.span>
+            </AnimatePresence>
+          </span>
           {isPaused ? t("resume") : t("pause")}
         </Button>
         {editHere ? (
@@ -187,6 +261,7 @@ export function ItemHero({ item, actions, busy = false, className }: ItemHeroPro
             className="h-7 gap-1.5 text-xs"
             disabled
             title={editReason}
+            aria-describedby={describedBy(editReason, "edit")}
             data-testid="item-action-edit-disabled"
           >
             <PencilIcon className="size-3.5" aria-hidden="true" />
@@ -273,11 +348,13 @@ export function ItemHero({ item, actions, busy = false, className }: ItemHeroPro
             variant="ghost"
             className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
             onClick={() => actions.onDelete(item)}
-            disabled={!item.capabilities.delete}
+            disabled={anyPending || !item.capabilities.delete}
             title={deleteReason}
+            aria-describedby={describedBy(deleteReason, "delete")}
+            aria-busy={deleting || undefined}
             data-testid="item-action-delete"
           >
-            <Trash2Icon className="size-3.5" aria-hidden="true" />
+            <ActionIcon pending={deleting} icon={Trash2Icon} />
             {t("delete")}
           </Button>
         </span>

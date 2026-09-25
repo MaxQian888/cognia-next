@@ -188,6 +188,44 @@ export function computeUnifiedOccurrences(
   return out
 }
 
+/** How far ahead a single trigger preview looks before it gives up. */
+const TRIGGER_PREVIEW_HORIZON_DAYS = 366
+
+/**
+ * The next `count` fire times of ONE trigger, through the same expansion the
+ * calendar uses, so "what the form previews" and "what the agenda shows" can
+ * never disagree.
+ *
+ * For the surfaces that describe a trigger before (or without) a unified item:
+ * the task form while it is being written, the agent's confirmation, the
+ * agent's `inspect` answer. An `event` trigger has no schedule and returns
+ * nothing; a `once` trigger returns its instant if it is still ahead.
+ */
+export function projectTriggerFireTimes(
+  trigger: ScheduledTask["trigger"],
+  count: number,
+  options: { from?: Date; nextRunAt?: Date } = {}
+): Date[] {
+  if (count <= 0) return []
+  const from = options.from ?? new Date()
+  const windowEnd = new Date(from.getTime() + TRIGGER_PREVIEW_HORIZON_DAYS * DAY_MS)
+  const runAt =
+    trigger.type === "once" && trigger.runAt !== undefined ? new Date(trigger.runAt) : undefined
+  return expandSchedule(
+    {
+      type: trigger.type,
+      cron: trigger.type === "cron" ? trigger.cronExpression : undefined,
+      intervalMs: trigger.type === "interval" ? trigger.intervalMs : undefined,
+      runAtMs: runAt && !Number.isNaN(runAt.getTime()) ? runAt.getTime() : undefined,
+      timezone: trigger.timezone,
+      nextRunAtMs: options.nextRunAt?.getTime(),
+    },
+    from,
+    windowEnd,
+    count
+  ).slice(0, count)
+}
+
 /** A day bucket of occurrences (local calendar day). */
 export interface OccurrenceDay {
   /** Local `YYYY-MM-DD` key. */

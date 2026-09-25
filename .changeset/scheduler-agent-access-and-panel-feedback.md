@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+The assistant can now manage scheduled tasks from any desktop conversation: a new "Allow agents to manage scheduled tasks" setting (on by default) offers the scheduler tools without turning on every other built-in skill. Its schedule changes are checked before you are asked (bad cron, past time, missing fields, policy refusals), the approval dialog names the task, says the schedule in words and lists the next runs, and a change you approve is no longer refused by the "auto-create" setting, which now only governs unattended writes. Results render as live task cards that open the scheduler, and conversations a scheduled run opens land in the task's workspace with a chip linking back to it. On the scheduler page, Run now / Pause / Resume / Delete / Save always say whether they worked, New → Backup opens its dialog, old-run clean-up asks first and reports the count, the task form previews the next runs, a running run can be stopped from its detail sheet, the detail has a way back to the overview, and rows animate into place instead of jumping.

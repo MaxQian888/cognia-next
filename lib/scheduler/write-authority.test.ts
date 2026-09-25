@@ -163,6 +163,107 @@ describe("authorizeTaskWrite", () => {
   })
 })
 
+describe("authorizeTaskWrite · agent access and confirmation", () => {
+  it("refuses every agent write while agents may not manage the schedule", async () => {
+    const verdict = await authorizeTaskWrite(
+      { taskType: "chat", source: "agent", humanConfirmed: true },
+      deps({ policy: { agentToolsEnabled: false, agentAutoCreate: true } })
+    )
+    // Not even a confirmed write: the switch is the user's standing answer.
+    expect(verdict).toMatchObject({ allowed: false, reason: "agent-tools-disabled" })
+  })
+
+  it("does not apply the agent switch to plugins or the user", async () => {
+    const off = deps({ policy: { agentToolsEnabled: false, agentAutoCreate: true } })
+    await expect(authorizeTaskWrite({ taskType: "chat", source: "plugin" }, off)).resolves.toEqual({
+      allowed: true,
+    })
+    await expect(authorizeTaskWrite({ taskType: "chat", source: "user" }, off)).resolves.toEqual({
+      allowed: true,
+    })
+  })
+
+  it("treats an absent switch (a policy saved before it existed) as on", async () => {
+    const verdict = await authorizeTaskWrite(
+      { taskType: "chat", source: "agent", humanConfirmed: true },
+      {
+        loadPolicy: async () => ({ ...policy(), agentToolsEnabled: undefined }),
+        countTasksBySource: async () => 0,
+      }
+    )
+    expect(verdict).toEqual({ allowed: true })
+  })
+
+  it("lets a write the user confirmed through, with agentAutoCreate off", async () => {
+    // agentAutoCreate answers "may agents act unattended"; a confirmed write is attended.
+    const verdict = await authorizeTaskWrite(
+      { taskType: "chat", source: "agent", humanConfirmed: true },
+      deps({ policy: { agentAutoCreate: false } })
+    )
+    expect(verdict).toEqual({ allowed: true })
+  })
+
+  it("does not ask twice for a confirmation-required type the user already confirmed", async () => {
+    const verdict = await authorizeTaskWrite(
+      { taskType: "goal", source: "agent", humanConfirmed: true },
+      deps({ policy: { confirmationRequired: ["goal"] } })
+    )
+    expect(verdict).toEqual({ allowed: true })
+    expect(verdictNeedsConfirmation(verdict)).toBe(false)
+  })
+
+  it("still refuses an unattended agent write with agentAutoCreate off", async () => {
+    const verdict = await authorizeTaskWrite(
+      { taskType: "chat", source: "agent", humanConfirmed: false },
+      deps({ policy: { agentAutoCreate: false } })
+    )
+    expect(verdict).toMatchObject({ allowed: false, reason: "agent-auto-create-disabled" })
+  })
+
+  it("keeps the script switch and the quota for confirmed writes", async () => {
+    await expect(
+      authorizeTaskWrite(
+        { taskType: "script", source: "agent", humanConfirmed: true },
+        deps({ policy: { scriptTasksEnabled: false } })
+      )
+    ).resolves.toMatchObject({ allowed: false, reason: "script-tasks-disabled" })
+    await expect(
+      authorizeTaskWrite(
+        { taskType: "chat", source: "agent", humanConfirmed: true },
+        deps({ policy: { maxTasksPerSource: 2 }, owned: 2 })
+      )
+    ).resolves.toMatchObject({ allowed: false, reason: "quota-exceeded" })
+  })
+
+  it("scopes the quota to creation: an agent at its limit can still act on what it owns", async () => {
+    const atLimit = deps({ policy: { maxTasksPerSource: 2, agentAutoCreate: true }, owned: 2 })
+    await expect(
+      authorizeTaskWrite({ taskType: "chat", source: "agent", operation: "mutate" }, atLimit)
+    ).resolves.toEqual({ allowed: true })
+    await expect(
+      authorizeTaskWrite({ taskType: "chat", source: "agent", operation: "create" }, atLimit)
+    ).resolves.toMatchObject({ allowed: false, reason: "quota-exceeded" })
+    // Unspecified is a create, which is what every older caller meant.
+    await expect(
+      authorizeTaskWrite({ taskType: "chat", source: "agent" }, atLimit)
+    ).resolves.toMatchObject({ allowed: false, reason: "quota-exceeded" })
+  })
+
+  it("still refuses a host that cannot run the type, confirmed or not", async () => {
+    getTaskTypeHostSupport.mockReturnValue({
+      supported: false,
+      reason: "desktop-only",
+      missing: ["shell"],
+      requires: ["shell"],
+    })
+    const verdict = await authorizeTaskWrite(
+      { taskType: "background-command", source: "agent", humanConfirmed: true },
+      deps()
+    )
+    expect(verdict).toMatchObject({ allowed: false, reason: "unsupported-on-host" })
+  })
+})
+
 describe("assertTaskWriteAllowed", () => {
   it("resolves for an allowed write", async () => {
     await expect(

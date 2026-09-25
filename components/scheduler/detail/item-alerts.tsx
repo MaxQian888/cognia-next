@@ -61,7 +61,14 @@ export function ItemAlerts({ signals, task, systemTask, className }: ItemAlertsP
       body:
         signal.kind === "unsupported-type" && signal.reason
           ? t(`hostSupport.reason.${signal.reason}`, { missing: signal.missing ?? "" })
-          : undefined,
+          : signal.kind === "needs-approval"
+            ? [
+                signal.tools ? t("approval.hintTools") : null,
+                signal.roots ? t("approval.hintTrust") : null,
+              ]
+                .filter((line): line is string => line !== null)
+                .join("\n") || undefined
+            : undefined,
     })
   }
   if (systemTask?.degraded_reasons?.length) {
@@ -89,7 +96,9 @@ export function ItemAlerts({ signals, task, systemTask, className }: ItemAlertsP
             <Icon className="size-4" aria-hidden="true" />
             <AlertTitle className="text-xs">{alert.title}</AlertTitle>
             {alert.body ? (
-              <AlertDescription className="text-xs">{alert.body}</AlertDescription>
+              <AlertDescription className="whitespace-pre-line text-xs">
+                {alert.body}
+              </AlertDescription>
             ) : null}
           </Alert>
         )

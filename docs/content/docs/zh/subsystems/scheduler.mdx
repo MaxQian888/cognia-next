@@ -201,6 +201,19 @@ interface TaskExecutorResult {
 
 结果写入 `schedulerHistory`（每任务最多 200 行）。
 
+### 重试，以及因等待批准而停止的运行
+
+失败的运行会在 `retryAttempt < config.maxRetries` 时按指数退避重试。例外是执行器标记为“重试只会重演”的失败（见 `types/scheduler/index.ts` 中的 `isRetryableTerminalReason`），目前只有 `needs-approval`。
+
+`chat`、`agent`、`skill` 和 `goal` 运行无人值守。需要权限的工具会被 `lib/claude/unattended-permission-responder.ts` 立即拒绝；未受信任工作区中的运行只拿到受限模式（Restricted Mode）的工具。两种情况下，运行都以 `failed` 结束，`terminalReason` 为 `"needs-approval"`，`output` 中带有 `status: "needs_approval"`、被拒绝的工具（`needsApproval`）以及可能的 `workspaceTrust` 限制。调度器随后：
+
+- **不**安排重试，因为同一轮会停在同一处，并再次消耗 token；
+- 发出 `needs-approval` 通知（warning 级别，由 `notification.onError` 控制），取代 `error` 通知；
+- 通过 `onScheduledTaskError` 交给插件一个 `code: "NEEDS_APPROVAL"` 的 `SchedulerError`，让插件区分“在等人”和“出故障”；
+- 仍把这次运行计为一次失败，计入 `pauseAfterConsecutiveFailures`，因此一个每次都需要批准的计划会被暂停，而不是无限计费。
+
+工作台以琥珀色的 **需要批准** 显示这类运行，在运行详情里列出被拒绝的工具和未受信任的根目录，并产生 `needs-approval` 关注信号。Bot 的 `agent-turn` 运行遵循同样的规则：`lib/bot/runtime/run.ts` 把 `needs_approval` 结果记为 `failed`，并撤销投递，而不是退避重试。
+
 ## 任务在哪台主机上跑（ADR-0128）
 
 归属是**主机自有**的：桌面、无头大脑（`cognia-server`）与 web / 伴侣 webview 各自维护自己的 `CogniaSchedulerDB`，任务不在主机间交接。差别在于主机能*运行*哪些类型。`lib/scheduler/host-support.ts` 按类型声明需求；executor 以结构化的 `unsupported-on-host` 结果拒绝，任务表单把不支持的类型**禁用并给出原因**（从不隐藏）。

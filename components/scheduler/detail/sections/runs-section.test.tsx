@@ -40,7 +40,9 @@ describe("RunsSection", () => {
     const { rerender } = render(
       <RunsSection item={item()} runs={[]} onOpenRun={jest.fn()} loading />
     )
-    expect(screen.getByTestId("runs-section-empty")).toHaveTextContent("Loading")
+    // Loading shows placeholder rows, not text that reads like an answer.
+    expect(screen.getByTestId("runs-section-loading")).toHaveAttribute("aria-busy", "true")
+    expect(screen.queryByTestId("runs-section-empty")).not.toBeInTheDocument()
     rerender(<RunsSection item={item()} runs={[]} onOpenRun={jest.fn()} />)
     expect(screen.getByTestId("runs-section-empty")).toHaveTextContent("No executions yet")
   })

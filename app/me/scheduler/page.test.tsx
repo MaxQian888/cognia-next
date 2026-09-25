@@ -215,6 +215,13 @@ describe("MobileSchedulerPage", () => {
     expect(routerReplace).toHaveBeenCalledWith("/scheduler")
   })
 
+  it("keeps the open task and run when it bounces to the desktop route", () => {
+    compactValue = false
+    searchParams = new URLSearchParams("item=app%3At1&run=app%3Ar1")
+    render(<MobileSchedulerPage />)
+    expect(routerReplace).toHaveBeenCalledWith("/scheduler?item=app%3At1&run=app%3Ar1")
+  })
+
   it("renders the stat strip, the attention block and one row per item", () => {
     render(<MobileSchedulerPage />)
     // Pinned: the shell section is a flex column and the strip must not be

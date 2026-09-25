@@ -129,3 +129,18 @@ describe("ItemDetail", () => {
     expect(screen.queryByTestId("item-outcomes")).not.toBeInTheDocument()
   })
 })
+
+describe("ItemDetail · hands the page's action state to the masthead", () => {
+  it("shows the in-flight action and the way back", () => {
+    const onBack = jest.fn()
+    render(<ItemDetail {...props({ pendingAction: "starting", onBack })} />)
+    expect(screen.getByTestId("item-action-run")).toHaveAttribute("aria-busy", "true")
+    screen.getByTestId("item-hero-back").click()
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it("has no back control when the shell brings its own", () => {
+    render(<ItemDetail {...props()} />)
+    expect(screen.queryByTestId("item-hero-back")).not.toBeInTheDocument()
+  })
+})

@@ -14,8 +14,8 @@
  * components in a phone shell; the two routes are a mutually exclusive pair.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -24,6 +24,11 @@ import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useLocalisedItems } from "@/hooks/scheduler/use-localised-items"
 import { useSchedulerListFilter } from "@/hooks/scheduler/use-scheduler-list-filter"
 import { useSchedulerSelection } from "@/hooks/scheduler/use-scheduler-selection"
+import {
+  isAppTableKind,
+  taskAnnouncesOutcome,
+  useSchedulerItemActions,
+} from "@/hooks/scheduler/use-scheduler-item-actions"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import {
   toUnifiedFromTaskExecution,
@@ -43,7 +48,12 @@ import { deriveUnifiedStatistics, filterUnifiedItems } from "@/lib/scheduler/uni
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
-import { parseUnifiedId, type UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  makeUnifiedId,
+  parseUnifiedId,
+  unifiedKindForTaskType,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 import {
@@ -63,17 +73,56 @@ import type { ItemActions } from "@/components/scheduler/detail/item-hero"
 import { QuickWorkflowTriggerDialog } from "@/components/scheduler/dialogs/quick-workflow-trigger-dialog"
 import { SchedulerOverview } from "@/components/scheduler/overview/scheduler-overview"
 import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
+import { CleanupRunsDialog } from "@/components/scheduler/cleanup-runs-dialog"
+import {
+  JUST_CREATED_HIGHLIGHT_MS,
+  staticIf,
+  viewSwitchVariants,
+} from "@/components/scheduler/scheduler-motion"
 import { SchedulerBulkToolbar } from "@/components/scheduler/scheduler-bulk-toolbar"
 import { useSchedulerHostSummary } from "@/components/scheduler/scheduler-host-popover"
 import { SchedulerListPane, SchedulerListSidebar } from "@/components/scheduler/scheduler-list-pane"
 import { SchedulerPageHeader } from "@/components/scheduler/scheduler-page-header"
 import { TaskDependencyDialog } from "@/components/scheduler/task-dependency-dialog"
 
-/** The kinds whose rows are `ScheduledTask`s in the app scheduler's table. */
-const APP_TABLE_KINDS = new Set(["app", "plugin", "connector"])
+/**
+ * Delete / Backspace asks to delete the selected task only while nothing else
+ * has focus, or focus is on the list or the detail itself. A header button or
+ * the host popover keeps its own keys.
+ */
+function focusIsOnSchedule(target: EventTarget | null): boolean {
+  if (typeof document !== "undefined" && target === document.body) return true
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(
+    target.closest(
+      '[data-testid="scheduler-list"], [data-testid="scheduler-list-pane"], [data-testid="item-detail"]'
+    )
+  )
+}
 
-function isAppTableKind(item: UnifiedScheduledItem | null | undefined): boolean {
-  return Boolean(item && APP_TABLE_KINDS.has(item.kind))
+/** An agent-created task this recent is "just added" when it appears. */
+const AGENT_CREATE_RECENCY_MS = 2 * 60_000
+
+/** Old runs the header's clean-up removes: anything older than this. */
+const CLEANUP_MAX_AGE_DAYS = 30
+
+/**
+ * Whether a key press belongs to something else on screen: a field being
+ * typed in, or a dialog, sheet or menu that owns the keyboard while open.
+ */
+function keyboardIsBusy(target: EventTarget | null): boolean {
+  if (typeof document !== "undefined") {
+    const overlay = document.querySelector(
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"]'
+    )
+    if (overlay) return true
+  }
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true
+  const role = target.getAttribute("role")
+  return role === "textbox" || role === "combobox" || role === "searchbox"
 }
 
 /** A coarse clock for sorting and bucketing: the second ticker would reorder the list every second. */
@@ -97,6 +146,7 @@ function SchedulerPageBody() {
 
   // One scheduler with two entrances beats two that disagree about filters.
   const compact = useCompactLayout()
+  const searchParams = useSearchParams()
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -104,8 +154,11 @@ function SchedulerPageBody() {
   }, [])
   useEffect(() => {
     if (!mounted || !compact) return
-    router.replace("/me/scheduler")
-  }, [compact, mounted, router])
+    // Keep `?item=` / `?run=`: a link that meant "open this task" must still
+    // mean it on a phone-sized window.
+    const query = searchParams.toString()
+    router.replace(query ? `/me/scheduler?${query}` : "/me/scheduler")
+  }, [compact, mounted, router, searchParams])
 
   const {
     tasks,
@@ -236,7 +289,7 @@ function SchedulerPageBody() {
     () => items.find((item) => item.unifiedId === selection.itemId) ?? null,
     [items, selection.itemId]
   )
-  const selectedIsAppTable = isAppTableKind(selectedItem)
+  const selectedIsAppTable = isAppTableKind(selectedItem?.kind)
   // The app store's selection follows the address for app-table rows, which
   // is what loads their executions (and the load-more cursor) into the store.
   const selectedSourceId = selectedIsAppTable ? selectedItem!.sourceId : null
@@ -313,6 +366,46 @@ function SchedulerPageBody() {
     token: string
   } | null>(null)
   const [highlightedIndex, setHighlightedIndex] = useState(-1)
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false)
+
+  // The row a create just added: ringed and scrolled into view, then let go.
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!justCreatedId) return
+    const timer = window.setTimeout(() => setJustCreatedId(null), JUST_CREATED_HIGHLIGHT_MS)
+    return () => window.clearTimeout(timer)
+  }, [justCreatedId])
+  // An assistant can add a task from a conversation while this page is open;
+  // that row deserves the same "here it is" as one added from the header.
+  const seenTaskIds = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (!isInitialized) return
+    const seen = seenTaskIds.current
+    seenTaskIds.current = new Set(tasks.map((task) => task.id))
+    if (!seen) return
+    const fresh = tasks.find(
+      (task) =>
+        !seen.has(task.id) &&
+        task.createdBy?.kind === "agent" &&
+        Date.now() - new Date(task.createdAt).getTime() < AGENT_CREATE_RECENCY_MS
+    )
+    if (!fresh) return
+    // Deferred so the effect body itself sets no state.
+    queueMicrotask(() =>
+      setJustCreatedId(makeUnifiedId(unifiedKindForTaskType(fresh.type), fresh.id))
+    )
+  }, [tasks, isInitialized])
+
+  const itemActionsState = useSchedulerItemActions({
+    runTaskNow,
+    pauseTask,
+    resumeTask,
+    deleteTask,
+    runs: recentRuns,
+    onOpenRun: (runUnifiedId) => selection.openRun(runUnifiedId),
+    announcesOutcome: (item, outcome) =>
+      isAppTableKind(item.kind) && taskAnnouncesOutcome(tasksById.get(item.sourceId), outcome),
+  })
 
   // The keyboard cursor resets whenever the rows change.
   const listKey = orderedItems.map((item) => item.unifiedId).join("|")
@@ -349,7 +442,10 @@ function SchedulerPageBody() {
           return
         }
         setShowCreateSheet(false)
-        selection.selectItem(`app:${created.id}`)
+        const createdId = makeUnifiedId(unifiedKindForTaskType(created.type), created.id)
+        selection.selectItem(createdId)
+        setJustCreatedId(createdId)
+        toast.success(t("itemActions.created", { name: created.name }))
       } finally {
         setIsSubmitting(false)
       }
@@ -362,7 +458,7 @@ function SchedulerPageBody() {
       if (!selectedAppTask) return
       setIsSubmitting(true)
       try {
-        await updateTask(selectedAppTask.id, {
+        const updated = await updateTask(selectedAppTask.id, {
           name: input.name,
           description: input.description,
           trigger: input.trigger,
@@ -375,12 +471,21 @@ function SchedulerPageBody() {
           onSuccessTaskIds: input.onSuccessTaskIds ?? [],
           onFailureTaskIds: input.onFailureTaskIds ?? [],
         })
+        if (!updated) {
+          // The sheet stays open with the user's edits; closing it would read
+          // as saved.
+          toast.error(t("updateTaskFailed"), {
+            description: useSchedulerStore.getState().error ?? undefined,
+          })
+          return
+        }
         setShowEditSheet(false)
+        toast.success(t("itemActions.saved", { name: updated.name }))
       } finally {
         setIsSubmitting(false)
       }
     },
-    [selectedAppTask, updateTask]
+    [selectedAppTask, updateTask, t]
   )
 
   const submitSystemTask = useCallback(
@@ -430,24 +535,22 @@ function SchedulerPageBody() {
   )
 
   const handleSystemDeleteConfirm = useCallback(async () => {
-    if (systemDeleteTaskId) {
-      await deleteSystemTask(systemDeleteTaskId)
-      setSystemDeleteTaskId(null)
-    }
-  }, [systemDeleteTaskId, deleteSystemTask])
+    if (!systemDeleteTaskId) return
+    const name = systemTasks.find((task) => task.id === systemDeleteTaskId)?.name ?? ""
+    const ok = await deleteSystemTask(systemDeleteTaskId).catch(() => false)
+    setSystemDeleteTaskId(null)
+    if (ok) toast.success(t("itemActions.deleted", { name }))
+    else toast.error(t("actionFailed", { name }))
+  }, [systemDeleteTaskId, deleteSystemTask, systemTasks, t])
 
+  const removeItem = itemActionsState.remove
   const handleDeleteConfirm = useCallback(async () => {
     const item = pendingDelete
     if (!item) return
     setPendingDelete(null)
-    if (APP_TABLE_KINDS.has(item.kind)) {
-      await deleteTask(item.sourceId)
-    } else {
-      const source = getSchedulerSourceRegistry().getSource(item.kind)
-      await source?.delete(item.sourceId)
-    }
-    if (selection.itemId === item.unifiedId) selection.clear()
-  }, [pendingDelete, deleteTask, selection])
+    const removed = await removeItem(item)
+    if (removed && selection.itemId === item.unifiedId) selection.clear()
+  }, [pendingDelete, removeItem, selection])
 
   /**
    * Stop a running run, and say what actually happened. Only app-table runs
@@ -457,7 +560,7 @@ function SchedulerPageBody() {
   const handleCancelRun = useCallback(
     async (run: UnifiedExecutionRun) => {
       const parsed = parseUnifiedId(run.unifiedId)
-      if (!parsed || !APP_TABLE_KINDS.has(run.kind)) {
+      if (!parsed || !isAppTableKind(run.kind)) {
         toast.error(t("cancelRunUnreachable"))
         return
       }
@@ -497,7 +600,9 @@ function SchedulerPageBody() {
       toast.error(t("cloneFailed"))
       return
     }
-    selection.selectItem(`app:${clone.id}`)
+    const cloneId = makeUnifiedId(unifiedKindForTaskType(clone.type), clone.id)
+    selection.selectItem(cloneId)
+    setJustCreatedId(cloneId)
     toast.success(t("cloneSuccess", { name: clone.name }))
   }, [selectedAppTask, cloneTask, selection, t])
 
@@ -567,7 +672,12 @@ function SchedulerPageBody() {
       try {
         const created = await createTask(input)
         if (!created) toast.error(useSchedulerStore.getState().error ?? t("createTaskFailed"))
-        else selection.selectItem(`app:${created.id}`)
+        else {
+          const createdId = makeUnifiedId(unifiedKindForTaskType(created.type), created.id)
+          selection.selectItem(createdId)
+          setJustCreatedId(createdId)
+          toast.success(t("itemActions.created", { name: created.name }))
+        }
       } finally {
         setIsSubmitting(false)
       }
@@ -589,41 +699,15 @@ function SchedulerPageBody() {
   }, [refresh, refreshSystem])
 
   /**
-   * Run / pause / resume for any kind. App-table rows go through the store so
-   * the cached slices reconcile; the other kinds go to their source. Every
-   * failure is said out loud.
+   * Run / pause / resume / delete for any kind, through the shared hook: the
+   * store for app-table rows, the source otherwise, and an answer either way.
    */
+  const { runNow: runItemNow, pause: pauseItem, resume: resumeItem } = itemActionsState
   const itemActions = useMemo<ItemActions>(() => {
-    const viaSource = (action: "runNow" | "pause" | "resume") => (item: UnifiedScheduledItem) => {
-      const source = getSchedulerSourceRegistry().getSource(item.kind)
-      if (!source) {
-        toast.error(t("actionFailed", { name: item.name }))
-        return
-      }
-      void source[action](item.sourceId).catch((error: unknown) => {
-        toast.error(t("actionFailed", { name: item.name }), {
-          description: error instanceof Error ? error.message : String(error),
-        })
-      })
-    }
-    const viaStore =
-      (
-        store: (taskId: string) => Promise<unknown>,
-        fallback: (item: UnifiedScheduledItem) => void
-      ) =>
-      (item: UnifiedScheduledItem) => {
-        if (APP_TABLE_KINDS.has(item.kind)) {
-          void store(item.sourceId).catch((error: unknown) => {
-            toast.error(t("actionFailed", { name: item.name }), {
-              description: error instanceof Error ? error.message : String(error),
-            })
-          })
-        } else fallback(item)
-      }
     return {
-      onRunNow: viaStore(runTaskNow, viaSource("runNow")),
-      onPause: viaStore(pauseTask, viaSource("pause")),
-      onResume: viaStore(resumeTask, viaSource("resume")),
+      onRunNow: runItemNow,
+      onPause: pauseItem,
+      onResume: resumeItem,
       onDelete: (item) => setPendingDelete(item),
       onEdit:
         selectedItem?.kind === "app"
@@ -647,10 +731,9 @@ function SchedulerPageBody() {
       promotionUnavailableReason,
     }
   }, [
-    t,
-    runTaskNow,
-    pauseTask,
-    resumeTask,
+    runItemNow,
+    pauseItem,
+    resumeItem,
     selectedItem?.kind,
     selectedAppTask,
     handleCloneTask,
@@ -672,8 +755,8 @@ function SchedulerPageBody() {
   // Keyboard: arrows walk the rendered list, Enter opens, Delete asks, n / r.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement)?.tagName
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+      // Escape is left to an open dialog or sheet, which closes itself.
+      if (keyboardIsBusy(event.target)) return
       if (event.key === "ArrowDown") {
         event.preventDefault()
         setHighlightedIndex((prev) => Math.min(prev + 1, orderedItems.length - 1))
@@ -689,7 +772,8 @@ function SchedulerPageBody() {
         handleSelectItem(orderedItems[highlightedIndex])
       } else if (
         (event.key === "Delete" || event.key === "Backspace") &&
-        selectedItem?.capabilities.delete
+        selectedItem?.capabilities.delete &&
+        focusIsOnSchedule(event.target)
       ) {
         event.preventDefault()
         setPendingDelete(selectedItem)
@@ -746,6 +830,7 @@ function SchedulerPageBody() {
         onClearChecks={clearMultiSelection}
         onCreate={() => setShowCreateSheet(true)}
         bulkToolbar={bulkToolbar}
+        justCreatedId={justCreatedId}
       />
     )
   }
@@ -767,7 +852,7 @@ function SchedulerPageBody() {
             onExport={() => setShowExportDialog(true)}
             onImport={() => setShowImportDialog(true)}
             onOpenTemplates={() => setShowTemplateGallery(true)}
-            onCleanup={() => void cleanupOldExecutions(30)}
+            onCleanup={() => setShowCleanupDialog(true)}
           />
         }
         detail={
@@ -775,14 +860,12 @@ function SchedulerPageBody() {
             <motion.div
               key={selectedItem ? `item:${selectedItem.unifiedId}` : "overview"}
               className="h-full"
-              {...(prefersReducedMotion
-                ? {}
-                : {
-                    initial: { opacity: 0 },
-                    animate: { opacity: 1 },
-                    exit: { opacity: 0 },
-                    transition: { duration: 0.15 },
-                  })}
+              // Overview ↔ item and item ↔ item: a short rise-and-fade, the
+              // same step the dashboard views use.
+              variants={staticIf(prefersReducedMotion, viewSwitchVariants)}
+              initial="hidden"
+              animate="show"
+              exit="exit"
             >
               {selectedItem ? (
                 <SchedulerErrorBoundary panelName="detail">
@@ -799,6 +882,8 @@ function SchedulerPageBody() {
                     outcomeCells={itemOutcomeCells}
                     allTasks={tasks}
                     actions={itemActions}
+                    pendingAction={itemActionsState.pending[selectedItem.unifiedId]}
+                    onBack={selection.clear}
                     onOpenRun={handleOpenRun}
                     onCancelRun={handleCancelRun}
                     onSelectItem={handleSelectUnifiedId}
@@ -891,14 +976,24 @@ function SchedulerPageBody() {
         open={showQuickWorkflowDialog}
         onOpenChange={setShowQuickWorkflowDialog}
       />
-      {showBackupDialog ? (
-        <BackupScheduleDialog
-          onScheduled={() => {
-            setShowBackupDialog(false)
-            refresh()
-          }}
-        />
-      ) : null}
+      <BackupScheduleDialog
+        open={showBackupDialog}
+        onOpenChange={setShowBackupDialog}
+        onScheduled={(taskId) => {
+          setShowBackupDialog(false)
+          refresh()
+          const createdId = makeUnifiedId("app", taskId)
+          selection.selectItem(createdId)
+          setJustCreatedId(createdId)
+        }}
+      />
+
+      <CleanupRunsDialog
+        open={showCleanupDialog}
+        onOpenChange={setShowCleanupDialog}
+        maxAgeDays={CLEANUP_MAX_AGE_DAYS}
+        onConfirm={() => cleanupOldExecutions(CLEANUP_MAX_AGE_DAYS)}
+      />
 
       <RunDetailSheet
         open={selectedRun !== null}
@@ -909,6 +1004,7 @@ function SchedulerPageBody() {
         runs={sheetRuns}
         onNavigate={handleOpenRun}
         onOpenItem={handleSelectUnifiedId}
+        onCancelRun={handleCancelRun}
       />
 
       <TaskDependencyDialog

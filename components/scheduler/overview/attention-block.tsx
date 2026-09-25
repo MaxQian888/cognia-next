@@ -42,6 +42,13 @@ export function useAttentionSentence(): (signal: AttentionSignal) => string {
     switch (signal.kind) {
       case "auto-paused":
         return t("autoPaused", { name, count: signal.count ?? 0 })
+      case "needs-approval":
+        if (signal.tools && signal.roots) {
+          return t("needsApprovalToolsAndTrust", { name, tools: signal.tools, roots: signal.roots })
+        }
+        if (signal.tools) return t("needsApprovalTools", { name, tools: signal.tools })
+        if (signal.roots) return t("needsApprovalTrust", { name, roots: signal.roots })
+        return t("needsApproval", { name })
       case "consecutive-failures":
         return t("consecutiveFailures", { name, count: signal.count ?? 0 })
       case "last-run-failed":

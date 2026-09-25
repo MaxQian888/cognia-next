@@ -27,4 +27,16 @@ describe("scheduler run mappers", () => {
     expect(filterRunsByKind([run], "plugin")).toEqual([run])
     expect(filterRunsByKind([run], "app")).toEqual([])
   })
+
+  it("carries the terminal reason so a run list can tell why it ended", () => {
+    const run = toUnifiedFromTaskExecution({
+      ...execution,
+      taskType: "chat",
+      status: "failed",
+      terminalReason: "needs-approval",
+      error: "needs approval: Bash",
+    })
+    expect(run).toMatchObject({ status: "failed", terminalReason: "needs-approval" })
+    expect(toUnifiedFromTaskExecution(execution)).not.toHaveProperty("terminalReason")
+  })
 })

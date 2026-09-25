@@ -76,3 +76,15 @@ Schema v219 在 `CURRENT_SCHEMA` 中声明 `scheduledTasks` 和 `scheduledTaskRu
 任何对话里的助手都可以把工作放上日程、并读回已有的内容，受两道独立的闸门约束。有一条需要明说，因为它是「已交付」和「够得到」之间的差别：内置技能只有在当前角色打开了 `enableBuiltInSkills` 时才会到达非 IM 会话。那是一个按角色的开关，不是按技能族的开关，所以对于关掉它的角色，这个技能族存在但用不上。
 
 刻意没做：`monitor`、`backup`、`plugin`、`custom` 仍然使用原始 JSON 载荷编辑器。`monitor` 需要为一个条件联合类型做构建器，另外三个在别处有自己的编写界面；对其中任何一个做近似实现，都会比诚实的文本框更糟。
+
+## 修订 2026-09-25：默认可达，确认即算数
+
+上面那条附注其实就是问题本身：没有任何界面会设置 `enableBuiltInSkills`，所以在桌面端 `schedule.*` 技能族已交付却够不到。而在够得到的地方，默认策略（`agentAutoCreate: false`）会在用户已经在确认对话框里点了「确认」之后拒绝一个 `chat` 任务，因为闸门分不清有人值守和无人值守的写入。
+
+**1. 定时任务技能族有自己的开关。** `SchedulerPermissionPolicy` 新增 `agentToolsEnabled`（默认开；在它出现之前保存的策略按「开」读取）。`resolveSendOptions` 只对上下文设置了 `interactiveChat` 的回合单独提供 `schedule.*` 技能族，并且只经由 `pluginTools`：也就是有人在本应用聊天面板里输入的回合，由实时聊天控制器通过 `buildSendOptions(…, { interactive: true })` 标记。定时运行、CLI、小队、评测、数字分身，以及从配对手机转发过来的回合都不设置：那里没人能回应桌面审批对话框，定时运行也不能给自己继续加日程。这些条目绝不会扩大一个空的允许列表（那会把「所有工具」变成「只有这九个」）；已被其他因素收窄的回合，则像其他技能一样把它们加进去。开关关闭时，这个技能族在任何模式下都会被剔除，旧的 IM 定时工具不再提供，`authorizeTaskWrite` 会以 `agent-tools-disabled` 拒绝任何 agent 写入，`list` / `inspect` 也拒绝读取。策略模块无法加载时按「关」处理。
+
+**2. 人的确认满足「是否有人在」这类规则。** 技能分发器自己设置 `ctx.humanConfirmed`（调用方无法冒充）：点击了本次请求的桌面对话框，或 IM 确认卡回调之后为 true；记住的「本会话内允许」授权为 false。定时任务写入根本不提供这种授权（`suppressAlwaysAllowRule`），因为每一次写入之后都会在无人值守时运行。带 `humanConfirmed` 的 `authorizeTaskWrite` 会跳过 `agent-auto-create-disabled`，对 `confirmationRequired` 类型也不再二次询问；主机闸门、agent 开关、脚本开关和额度仍然生效。没有它时，仍需要人的判定就是拒绝，这也堵上了反方向的漏洞：关闭了写入确认的 IM 渠道，此前可以创建用户明确说过始终需要自己确认的 `goal` 和 `agent-team` 任务。`agentAutoCreate` 现在的含义就是它字面上说的：agent 能否无人值守地写入。
+
+**3. 额度只计算来源拥有的任务。** `TaskWriteRequest.operation` 为 `"create"` 或 `"mutate"`；按来源的额度只约束创建，所以达到上限的 agent 仍然可以暂停、修改、运行或删除它放上去的任务。
+
+**4. 拒绝发生在对话框之前。** `BuiltInSkill.preflight` 在 schema 和 PII 闸门之后、HITL 之前运行。定时任务技能用它运行调度器自己的触发器和载荷规范化（外加各执行器要求的字段），检查任务 id 是否指向真实任务，并按即将发生的确认去询问策略。用户不会再被要求批准一个注定失败的写入。

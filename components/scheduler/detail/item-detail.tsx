@@ -42,6 +42,7 @@ import type { ScheduledTask } from "@/types/scheduler"
 import type { SystemTask } from "@/types/scheduler/system-scheduler"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+import type { PendingItemAction } from "@/hooks/scheduler/use-scheduler-item-actions"
 
 import { OutcomeStrip } from "../outcome-strip"
 import { TaskDependencyGraph } from "../task-dependency-graph"
@@ -73,6 +74,10 @@ export interface ItemDetailProps {
   /** Every app task, unfiltered, for the dependency graph. */
   allTasks: readonly ScheduledTask[]
   actions: ItemActions
+  /** An action on this item that has not answered yet (spinner in the hero). */
+  pendingAction?: PendingItemAction
+  /** Back to the overview; the hero shows the control only when given. */
+  onBack?: () => void
   onOpenRun: (run: UnifiedExecutionRun) => void
   onCancelRun?: (run: UnifiedExecutionRun) => void
   /** Selects another item by its unified id (the dependency graph's nodes). */
@@ -97,6 +102,8 @@ export function ItemDetail({
   outcomeCells,
   allTasks,
   actions,
+  pendingAction,
+  onBack,
   onOpenRun,
   onCancelRun,
   onSelectItem,
@@ -143,7 +150,15 @@ export function ItemDetail({
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)} data-testid="item-detail">
-      {hideHero ? null : <ItemHero item={item} actions={actions} busy={busy} />}
+      {hideHero ? null : (
+        <ItemHero
+          item={item}
+          actions={actions}
+          busy={busy}
+          pendingAction={pendingAction}
+          onBack={onBack}
+        />
+      )}
       <div ref={scroller} className={cn("min-h-0 flex-1 overflow-y-auto", containerClass)}>
         <div className="flex flex-col gap-3 p-4">
           <ItemAlerts signals={signals} task={task} systemTask={systemTask} />

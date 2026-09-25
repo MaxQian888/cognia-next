@@ -222,6 +222,19 @@ interface TaskExecutorResult {
 
 Results are written to `schedulerHistory` (capped at 200 newest per task).
 
+### Retries, and runs that stop for approval
+
+A failed run is retried while `retryAttempt < config.maxRetries`, with exponential backoff. The exception is a failure the executor marks as one a retry would only replay (`isRetryableTerminalReason` in `types/scheduler/index.ts`). Today that is `needs-approval`.
+
+`chat`, `agent`, `skill` and `goal` runs are unattended. A tool that asks for permission is denied at once by `lib/claude/unattended-permission-responder.ts`, and a run in an untrusted workspace gets Restricted Mode's tools only. Either way the run settles `failed` with `terminalReason: "needs-approval"`, and its `output` carries `status: "needs_approval"`, the denials (`needsApproval`) and any `workspaceTrust` restriction. The scheduler then:
+
+- schedules **no** retry, since the same turn would stop at the same point and bill the tokens again,
+- raises a `needs-approval` notification (warning level, gated by `notification.onError`) in place of the `error` one,
+- hands plugins a `SchedulerError` with `code: "NEEDS_APPROVAL"` through `onScheduledTaskError`, so they can tell "waiting on a person" from "broken",
+- still counts the run as one failure toward `pauseAfterConsecutiveFailures`, so a schedule that always needs approval is paused rather than billed indefinitely.
+
+The workbench shows these runs as **Needs approval** in amber, lists the refused tools and untrusted roots in the run sheet, and raises a `needs-approval` attention signal. Bot `agent-turn` runs follow the same rule: `lib/bot/runtime/run.ts` settles a `needs_approval` result `failed` and dismisses the delivery instead of backing it off.
+
 ## Which host runs a task (ADR-0128)
 
 Placement is **host-owned**: the desktop, the headless brain (`cognia-server`), and a web / companion webview each keep their own `CogniaSchedulerDB`, and nothing hands tasks between hosts. What differs is which types a host can *run*. `lib/scheduler/host-support.ts` declares the requirement per type; the executor refuses with a structured `unsupported-on-host` result, and the task form shows unsupported types **disabled with the reason** (never hidden).

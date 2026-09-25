@@ -152,3 +152,25 @@ it("disambiguates same-name tasks without renaming persisted names", () => {
   expect(screen.getByTitle("app:first")).toHaveTextContent("first")
   expect(screen.getByTitle("app:second")).toHaveTextContent("second")
 })
+
+describe("SchedulerListPane · a row that was just added", () => {
+  it("rings the new row and brings it into view", () => {
+    const scrollIntoView = jest.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      const rows = [item("Alpha"), item("Beta")]
+      render(<SchedulerListPane {...props({ items: rows, justCreatedId: rows[1].unifiedId })} />)
+      const ringed = document.querySelector('[data-just-created="true"]')
+      expect(ringed).toHaveAttribute("data-item-id", rows[1].unifiedId)
+      expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: "nearest" }))
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
+  it("rings nothing when nothing was just added", () => {
+    render(<SchedulerListPane {...props({ items: [item("Alpha")] })} />)
+    expect(document.querySelector("[data-just-created]")).toBeNull()
+  })
+})

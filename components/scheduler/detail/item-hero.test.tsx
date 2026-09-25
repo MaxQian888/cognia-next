@@ -122,3 +122,47 @@ describe("ItemHero", () => {
     expect(screen.queryByTestId("item-action-promote")).not.toBeInTheDocument()
   })
 })
+
+describe("ItemHero · feedback while an action is in flight", () => {
+  it("shows Run now as starting and holds every other action", () => {
+    render(
+      <ItemHero item={item()} actions={actions({ onEdit: jest.fn() })} pendingAction="starting" />
+    )
+    const run = screen.getByTestId("item-action-run")
+    expect(run).toBeDisabled()
+    expect(run).toHaveAttribute("aria-busy", "true")
+    expect(run).toHaveTextContent("Starting…")
+    expect(screen.getByTestId("item-action-pause")).toBeDisabled()
+    expect(screen.getByTestId("item-action-delete")).toBeDisabled()
+  })
+
+  it("marks the pause toggle busy while it is being answered", () => {
+    render(<ItemHero item={item()} actions={actions()} pendingAction="pausing" />)
+    expect(screen.getByTestId("item-action-pause")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByTestId("item-action-run")).toBeDisabled()
+  })
+
+  it("offers a way back to the overview only when the page gives one", () => {
+    const onBack = jest.fn()
+    const { rerender } = render(<ItemHero item={item()} actions={actions()} onBack={onBack} />)
+    fireEvent.click(screen.getByTestId("item-hero-back"))
+    expect(onBack).toHaveBeenCalled()
+    rerender(<ItemHero item={item()} actions={actions()} />)
+    expect(screen.queryByTestId("item-hero-back")).not.toBeInTheDocument()
+  })
+
+  it("points a disabled control at its reason, not only a hover title", () => {
+    render(
+      <ItemHero
+        item={item({ capabilities: { runNow: false, pause: true, edit: true, delete: false } })}
+        actions={actions()}
+      />
+    )
+    const run = screen.getByTestId("item-action-run")
+    const describedBy = run.getAttribute("aria-describedby")
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy!)).toHaveTextContent(run.getAttribute("title")!)
+    expect(screen.getByTestId("item-action-delete")).toHaveAttribute("aria-describedby")
+    expect(screen.getByTestId("item-action-pause")).not.toHaveAttribute("aria-describedby")
+  })
+})

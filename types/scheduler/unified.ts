@@ -139,6 +139,21 @@ export function makeUnifiedId(kind: ScheduledItemKind, sourceId: string): string
 }
 
 /**
+ * Which unified kind an app-table `ScheduledTask` row is listed under. The one
+ * ownership rule the app, plugin and connector sources partition the
+ * `scheduledTasks` table by, so a link built from a raw task (a chat tool
+ * result, a run session's origin) lands on the row the list actually shows.
+ */
+export function unifiedKindForTaskType(
+  taskType: string | null | undefined
+): "app" | "plugin" | "connector" {
+  if (taskType === "plugin") return "plugin"
+  if (taskType?.startsWith("connection:")) return "connector"
+  // Unknown or missing (a row read before its type was known) lists as app.
+  return "app"
+}
+
+/**
  * Helper — split a `unifiedId` back into its parts. Returns undefined for any
  * malformed input (no colon, empty kind, or unknown kind).
  */

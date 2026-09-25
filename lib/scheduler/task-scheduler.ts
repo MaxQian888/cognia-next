@@ -19,6 +19,7 @@ import {
   type TaskExecutorResult,
   DEFAULT_EXECUTION_CONFIG,
   DEFAULT_NOTIFICATION_CONFIG,
+  isRetryableTerminalReason,
 } from "@/types/scheduler"
 import {
   assertTaskTypeSupportedOnHost,
@@ -2090,12 +2091,66 @@ class TaskSchedulerImpl {
       execution.duration = execution.completedAt.getTime() - startTime.getTime()
       execution.terminalReason =
         result.terminalReason ?? (result.success ? "completed" : "executor-failure")
+      // An unattended turn that stopped at a permission wall. Not a crash: it
+      // is waiting on a person, and a retry would replay the same turn into
+      // the same wall. It still settles `failed` (the work was not done), but
+      // it is announced, handed to plugins and retried differently below.
+      const needsApproval = !result.success && execution.terminalReason === "needs-approval"
       execution.logs.push(
         this.createLog(
-          result.success ? "info" : "error",
-          result.success ? "Task completed successfully" : `Task failed: ${execution.error}`
+          result.success ? "info" : needsApproval ? "warn" : "error",
+          result.success
+            ? "Task completed successfully"
+            : needsApproval
+              ? `Task needs approval: ${execution.error}`
+              : `Task failed: ${execution.error}`
         )
       )
+
+      const retriesLeft = retryAttempt < task.config.maxRetries
+      const retryable = isRetryableTerminalReason(result.terminalReason)
+      if (!result.success && retriesLeft && !retryable) {
+        execution.logs.push(
+          this.createLog(
+            "info",
+            `Not retrying: a "${execution.terminalReason}" run would end the same way again`
+          )
+        )
+      }
+
+      // Decide the retry BEFORE the stats write, as the thrown-error path does:
+      // `updateTaskStats` counts a failure toward `consecutiveFailures` (and
+      // auto-pause) only when it does not see `retry-scheduled`, so a retried
+      // attempt must carry that reason by the time the stats are written.
+      if (
+        !result.success &&
+        retryable &&
+        retriesLeft &&
+        taskLifecycleVersion === this.getTaskLifecycleVersion(task.id)
+      ) {
+        const delay = this.calculateRetryDelay(task.config, retryAttempt)
+        shouldRetry = true
+        nextRetryAt = new Date(Date.now() + delay)
+        execution.retryScheduledAt = nextRetryAt
+        execution.terminalReason = "retry-scheduled"
+        execution.logs.push(
+          this.createLog(
+            "info",
+            `Scheduling retry ${retryAttempt + 1}/${task.config.maxRetries} in ${Math.round(delay / 1000)}s`
+          )
+        )
+        this.retryChains.add(task.id)
+        this.scheduleRetry(
+          task,
+          retryAttempt + 1,
+          nextRetryAt,
+          context.deferNextRunUpdate,
+          context.scheduledSlotClaimed,
+          delay,
+          executionLifecycleVersion,
+          taskLifecycleVersion
+        )
+      }
 
       // Update task statistics
       await this.updateTaskStats(task, execution, context.scheduledSlotClaimed === true)
@@ -2104,7 +2159,7 @@ class TaskSchedulerImpl {
       if (result.success && task.notification.onComplete) {
         await notifyTaskEvent(task, execution, "complete")
       } else if (!result.success && task.notification.onError) {
-        await notifyTaskEvent(task, execution, "error")
+        await notifyTaskEvent(task, execution, needsApproval ? "needs-approval" : "error")
       }
 
       // Emit scheduler events for event-triggered task chaining
@@ -2141,7 +2196,9 @@ class TaskSchedulerImpl {
           getPluginLifecycleHooks().dispatchOnScheduledTaskError(
             task.id,
             executionId,
-            new Error(execution.error || "Unknown error")
+            needsApproval
+              ? SchedulerError.needsApproval(task.name, execution.error ?? "", result.output)
+              : new Error(execution.error || "Unknown error")
           )
         }
       } catch {
@@ -2149,7 +2206,7 @@ class TaskSchedulerImpl {
       }
 
       log.info(
-        `Task ${task.name} ${result.success ? "completed" : "failed"} in ${execution.duration}ms`
+        `Task ${task.name} ${result.success ? "completed" : needsApproval ? "needs approval" : "failed"} in ${execution.duration}ms`
       )
 
       // Trigger dependent tasks on success
@@ -2157,32 +2214,6 @@ class TaskSchedulerImpl {
         this.triggerDependentTasks(task, "success").catch((err) => {
           log.error("Failed to trigger dependent tasks:", err)
         })
-      } else if (
-        retryAttempt < task.config.maxRetries &&
-        taskLifecycleVersion === this.getTaskLifecycleVersion(task.id)
-      ) {
-        const delay = this.calculateRetryDelay(task.config, retryAttempt)
-        shouldRetry = true
-        nextRetryAt = new Date(Date.now() + delay)
-        execution.retryScheduledAt = nextRetryAt
-        execution.terminalReason = "retry-scheduled"
-        execution.logs.push(
-          this.createLog(
-            "info",
-            `Scheduling retry ${retryAttempt + 1}/${task.config.maxRetries} in ${Math.round(delay / 1000)}s`
-          )
-        )
-        this.retryChains.add(task.id)
-        this.scheduleRetry(
-          task,
-          retryAttempt + 1,
-          nextRetryAt,
-          context.deferNextRunUpdate,
-          context.scheduledSlotClaimed,
-          delay,
-          executionLifecycleVersion,
-          taskLifecycleVersion
-        )
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)

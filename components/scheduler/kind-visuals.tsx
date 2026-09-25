@@ -113,7 +113,10 @@ export function ItemStatusBadge({ status }: { status: UnifiedItemStatus }) {
   return (
     <Badge
       variant="outline"
-      className={cn("h-5 px-1.5 text-[10px] font-medium", STATUS_BADGE[status])}
+      className={cn(
+        "h-5 px-1.5 text-[10px] font-medium transition-colors duration-200",
+        STATUS_BADGE[status]
+      )}
       data-testid={`item-status-badge-${status}`}
     >
       {t(status)}

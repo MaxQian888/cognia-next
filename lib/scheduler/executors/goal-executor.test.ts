@@ -90,6 +90,17 @@ describe("executeGoalTask", () => {
       new AbortController().signal
     )
     expect(createSessionMock).toHaveBeenCalled()
+    // The session names the task and run that opened it.
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: {
+          kind: "scheduled-task",
+          taskId: "task_1",
+          taskName: "goal task",
+          runId: "exec_1",
+        },
+      })
+    )
     expect(createGoalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "new_session",
@@ -135,6 +146,8 @@ describe("executeGoalTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/over budget/)
+    // An ordinary non-completion stays retryable.
+    expect(r.terminalReason).toBeUndefined()
   })
 
   it("fails a goal paused for approval, naming the denied tools", async () => {
@@ -153,6 +166,8 @@ describe("executeGoalTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("needs approval: Edit")
+    // A retry would create a fresh goal and drive it into the same denial.
+    expect(r.terminalReason).toBe("needs-approval")
     expect(r.output).toMatchObject({
       status: "paused",
       exit: "needs_approval",
@@ -169,5 +184,36 @@ describe("executeGoalTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("im blocked")
+  })
+})
+
+describe("executeGoalTask · workspace attribution", () => {
+  it("creates the session in the task's workspace, not the one on screen", async () => {
+    const task = { ...makeTask({ objective: "ship it" }), projectId: "proj-task" } as ScheduledTask
+    await executeGoalTask(task, execution, new AbortController().signal)
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-task" })
+    )
+    // Bound: the loop resolves the session's (the task's) workspace.
+    expect(runGoalLoopMock.mock.calls[0][0]).not.toHaveProperty("workspace")
+  })
+
+  it("resolves an unbound task's new session with no workspace, not the UI-active one", async () => {
+    await executeGoalTask(
+      makeTask({ objective: "ship it" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(runGoalLoopMock).toHaveBeenCalledWith(expect.objectContaining({ workspace: "none" }))
+  })
+
+  it("resolves a reused session against its own workspace even for an unbound task", async () => {
+    getSessionMock.mockResolvedValue({ id: "existing" })
+    await executeGoalTask(
+      makeTask({ objective: "x", sessionId: "existing" }),
+      execution,
+      new AbortController().signal
+    )
+    expect(runGoalLoopMock.mock.calls[0][0]).not.toHaveProperty("workspace")
   })
 })

@@ -142,6 +142,32 @@ export type TaskExecutionTerminalReason =
   // No executor was registered for the task type when the run was due — even
   // after the boot registration grace period.
   | "executor-not-found"
+  // A turn nobody was watching stopped at a permission wall: the unattended
+  // responder denied a tool, or the owning workspace is untrusted and the run
+  // had Restricted Mode's tools only. The execution `status` stays `failed`;
+  // `output` carries `status: "needs_approval"`, the denials
+  // (`needsApproval`) and any `workspaceTrust` restriction. Never retried: a
+  // retry replays the same turn into the same wall (`isRetryableTerminalReason`).
+  | "needs-approval"
+
+/**
+ * Terminal reasons an executor returns for a run whose retry would only
+ * replay the same outcome, paying for it again.
+ */
+const NON_RETRYABLE_TERMINAL_REASONS: ReadonlySet<string> = new Set<TaskExecutionTerminalReason>([
+  "needs-approval",
+])
+
+/**
+ * Whether a failed run with this executor-supplied reason may spend the task's
+ * `maxRetries` budget. A reason the executor did not supply (`undefined`, the
+ * generic `executor-failure` path) stays retryable.
+ */
+export function isRetryableTerminalReason(
+  reason: TaskExecutionTerminalReason | string | undefined
+): boolean {
+  return reason === undefined || !NON_RETRYABLE_TERMINAL_REASONS.has(reason)
+}
 
 /**
  * How a due fire interacts with an already-running execution of the same task.
@@ -287,7 +313,8 @@ export interface TestTaskPayload extends Record<string, unknown> {
  * Result contract every task executor returns. `terminalReason` is optional
  * and lets an executor override the scheduler's default mapping
  * (`completed` / `executor-failure`) with a structured reason — used by the
- * host gate (`unsupported-on-host`).
+ * host gate (`unsupported-on-host`) and by unattended turns that stopped for
+ * want of an approver (`needs-approval`, which the scheduler never retries).
  */
 export interface TaskExecutorResult {
   success: boolean
@@ -1046,7 +1073,17 @@ export interface TaskDefaults {
  * Controls what agents and plugins can do with scheduled tasks.
  */
 export interface SchedulerPermissionPolicy {
-  /** Whether agents can create tasks without user confirmation dialog */
+  /**
+   * Whether the assistant may manage the schedule at all: the `schedule.*`
+   * tools are offered to interactive desktop chat while this is on, and every
+   * agent write is refused while it is off (`write-authority.ts`). Optional so
+   * a policy persisted before it existed reads as the default, `true`.
+   */
+  agentToolsEnabled?: boolean
+  /**
+   * Whether agents may write to the schedule UNATTENDED. A write a person
+   * approved in the confirm dialog is attended and is not subject to this.
+   */
   agentAutoCreate: boolean
   /** Task types that always require explicit user confirmation before creation */
   confirmationRequired: ScheduledTaskType[]
@@ -1061,6 +1098,7 @@ export interface SchedulerPermissionPolicy {
 }
 
 export const DEFAULT_PERMISSION_POLICY: SchedulerPermissionPolicy = {
+  agentToolsEnabled: true,
   agentAutoCreate: false,
   confirmationRequired: ["script", "agent", "goal", "agent-team"],
   scriptTasksEnabled: true,

@@ -8,10 +8,13 @@
  * left to right: how it ended, what ran (optional, when the list mixes
  * items), when it started, how long it took, and a Stop while it is still
  * going. A failed row carries its error message on a second line so the
- * reason is on screen without opening the sheet.
+ * reason is on screen without opening the sheet. A run that stopped for want
+ * of an approver (`needs-approval`) reads as that, in amber, with what it
+ * was waiting on, rather than as a crash.
  */
 
 import { useTranslations } from "next-intl"
+import { HandIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -19,9 +22,55 @@ import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { useNowTicker } from "@/hooks/fleet/use-now-ticker"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/scheduler/format-utils"
-import { toRunStatusPill, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+import {
+  runApprovalRequest,
+  toRunStatusPill,
+  type RunApprovalRequest,
+  type UnifiedExecutionRun,
+} from "@/types/scheduler/unified-runs"
 
 import { KindIcon } from "./kind-visuals"
+
+/** A run's status pill: `Needs approval` for a run that stopped for one. */
+export function RunOutcomePill({
+  run,
+  className,
+}: {
+  run: UnifiedExecutionRun
+  className?: string
+}) {
+  const t = useTranslations("scheduler.approval")
+  if (!runApprovalRequest(run)) {
+    return <RunStatusPill status={toRunStatusPill(run.status)} className={className} />
+  }
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1.5 border-amber-500/40 bg-amber-500/15 font-normal text-amber-700 dark:text-amber-400",
+        className
+      )}
+      data-testid="run-status-needs-approval"
+    >
+      <HandIcon className="size-3" aria-hidden="true" />
+      {t("pill")}
+    </Badge>
+  )
+}
+
+/** One line naming what a `needs-approval` run was waiting on. */
+export function useRunApprovalLine(): (request: RunApprovalRequest) => string {
+  const t = useTranslations("scheduler.approval")
+  return (request) => {
+    const parts: string[] = []
+    if (request.tools.length > 0) parts.push(t("tools", { tools: request.tools.join(", ") }))
+    if (request.untrustedRoots.length > 0) {
+      const roots = request.untrustedRoots.join(", ")
+      parts.push(request.unverified ? t("trustUnverified", { roots }) : t("trust", { roots }))
+    }
+    return parts.length > 0 ? parts.join(" · ") : t("fallback")
+  }
+}
 
 export interface RunRowProps {
   run: UnifiedExecutionRun
@@ -59,7 +108,9 @@ export function RunRow({
 }: RunRowProps) {
   const t = useTranslations("scheduler")
   const relative = useRunRelativeTime()
+  const approvalLine = useRunApprovalLine()
   const isRunning = run.status === "running"
+  const approval = runApprovalRequest(run)
 
   return (
     <div
@@ -70,6 +121,7 @@ export function RunRow({
       )}
       data-testid={`run-row-${run.unifiedId}`}
       data-status={run.status}
+      data-terminal-reason={run.terminalReason}
     >
       <button
         type="button"
@@ -77,7 +129,7 @@ export function RunRow({
         className="flex min-w-0 flex-1 items-start gap-2.5 text-left hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
         aria-current={selected ? "true" : undefined}
       >
-        <RunStatusPill status={toRunStatusPill(run.status)} className="mt-px shrink-0" />
+        <RunOutcomePill run={run} className="mt-px shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-xs">
             {showItem ? (
@@ -104,7 +156,14 @@ export function RunRow({
               </Badge>
             ) : null}
           </span>
-          {run.status === "failed" && run.error?.message ? (
+          {approval ? (
+            <span
+              className="mt-0.5 block truncate text-[11px] text-amber-600 dark:text-amber-400"
+              data-testid="run-row-approval"
+            >
+              {approvalLine(approval)}
+            </span>
+          ) : run.status === "failed" && run.error?.message ? (
             <span
               className="mt-0.5 block truncate text-[11px] text-red-600 dark:text-red-400"
               data-testid="run-row-error"

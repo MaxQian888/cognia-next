@@ -62,6 +62,14 @@ describe("SchedulerListRow", () => {
       ["unsupported-type", {}, "Cannot run on this host"],
       ["running", {}, "Running now"],
       ["running", { processCount: 2 }, "Running now, 2 live processes"],
+      ["needs-approval", {}, "Waiting for your approval"],
+      ["needs-approval", { tools: "Bash, Edit" }, "Waiting for approval to use Bash, Edit"],
+      ["needs-approval", { roots: "/repo" }, "Waiting for you to trust /repo"],
+      [
+        "needs-approval",
+        { tools: "Bash", roots: "/repo" },
+        "Waiting for approval to use Bash and trust /repo",
+      ],
     ]
     for (const [kind, extra, text] of cases) {
       const { unmount } = render(

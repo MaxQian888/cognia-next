@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   CalendarIcon,
   ChevronDownIcon,
@@ -40,6 +41,7 @@ import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useScheduler } from "@/hooks/scheduler"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import {
   describeBackupDestinationReadiness,
   type BackupDestinationReadiness,
@@ -62,21 +64,53 @@ const SCHEDULE_PRESETS: Array<{ id: string; expression: string; labelKey: string
 ]
 
 interface BackupScheduleDialogProps {
+  /** Custom trigger for the uncontrolled mode. Ignored when `open` is given. */
   trigger?: React.ReactNode
   onScheduled?: (taskId: string) => void
+  /**
+   * Controlled open state. A caller that opens the dialog from its own menu
+   * (the scheduler header's "New → Backup") passes it; the dialog then renders
+   * no trigger button of its own. Before this the header mounted the
+   * uncontrolled dialog, which never opened and left a stray button behind.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDialogProps) {
+/** This device's IANA zone; a backup at "02:00" means the user's 02:00. */
+function localTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+  } catch {
+    return "UTC"
+  }
+}
+
+export function BackupScheduleDialog({
+  trigger,
+  onScheduled,
+  open: openProp,
+  onOpenChange,
+}: BackupScheduleDialogProps) {
   const t = useTranslations("scheduler")
   const tCommon = useTranslations("common")
   const { createTask } = useScheduler()
 
-  const [open, setOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const open = controlled ? openProp : uncontrolledOpen
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!controlled) setUncontrolledOpen(next)
+      onOpenChange?.(next)
+    },
+    [controlled, onOpenChange]
+  )
   const [submitting, setSubmitting] = useState(false)
 
-  const [taskName, setTaskName] = useState("Scheduled Backup")
+  const [taskName, setTaskName] = useState(() => t("backup.defaultTaskName"))
   const [cronExpression, setCronExpression] = useState("0 2 * * *")
-  const [timezone, setTimezone] = useState("UTC")
+  const [timezone, setTimezone] = useState(localTimezone)
   const [backupType, setBackupType] = useState<BackupType>("full")
   const [destination, setDestination] = useState<BackupDestination>("local")
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -152,6 +186,12 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
       if (task) {
         onScheduled?.(task.id)
         setOpen(false)
+      } else {
+        // The store refused it (host cannot run backups, a policy); say so
+        // instead of leaving the dialog open with nothing happening.
+        toast.error(t("backup.scheduleFailed"), {
+          description: useSchedulerStore.getState().error ?? undefined,
+        })
       }
     } finally {
       setSubmitting(false)
@@ -175,18 +215,22 @@ export function BackupScheduleDialog({ trigger, onScheduled }: BackupScheduleDia
     allowConcurrent,
     createTask,
     onScheduled,
+    setOpen,
+    t,
   ])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button variant="outline" size="sm">
-            <CalendarIcon className="mr-2 size-4" />
-            {t("backup.schedule")}
-          </Button>
-        )}
-      </DialogTrigger>
+      {controlled ? null : (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button variant="outline" size="sm">
+              <CalendarIcon className="mr-2 size-4" />
+              {t("backup.schedule")}
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

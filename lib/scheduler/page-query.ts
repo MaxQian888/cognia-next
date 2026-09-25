@@ -21,7 +21,12 @@
  * items and is a separate step from parsing.
  */
 
-import { parseUnifiedId, type UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  makeUnifiedId,
+  parseUnifiedId,
+  type ScheduledItemKind,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
 
 export const SCHEDULER_ITEM_PARAM = "item"
 export const SCHEDULER_RUN_PARAM = "run"
@@ -121,4 +126,23 @@ export function writeSchedulerQuery(params: URLSearchParams, patch: SchedulerQue
 /** `pathname` plus the query, with no dangling `?`. */
 export function schedulerHref(pathname: string, query: string): string {
   return query ? `${pathname}?${query}` : pathname
+}
+
+/**
+ * The address that opens one item (and optionally one of its runs) on the
+ * scheduler page. `runNativeId` is the run's own id; runs share their item's
+ * kind (`lib/scheduler/sources/run-mappers.ts`). For every emitter outside
+ * the page (a chat tool card, a run session's header, a notification) so they
+ * cannot drift from what `parseSchedulerQuery` reads.
+ */
+export function schedulerItemHref(
+  item: { kind: ScheduledItemKind; sourceId: string },
+  runNativeId?: string,
+  pathname = "/scheduler"
+): string {
+  const query = writeSchedulerQuery(new URLSearchParams(), {
+    item: makeUnifiedId(item.kind, item.sourceId),
+    ...(runNativeId ? { run: makeUnifiedId(item.kind, runNativeId) } : {}),
+  })
+  return schedulerHref(pathname, query)
 }

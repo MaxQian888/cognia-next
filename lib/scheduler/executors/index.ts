@@ -61,6 +61,9 @@ import {
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
+import { withRestrictedModeDenials } from "@/lib/workspace/restricted-tools"
+import { remapExactRoots } from "@/lib/task-workspace/root-aliases"
+import type { Project } from "@/types"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
 import { registerTaskExecutor, type TaskExecutor } from "../task-scheduler"
@@ -74,6 +77,12 @@ import { executeGithubIssueSyncTask } from "./github-issue-sync-executor"
 import { executeRadarReportTask } from "./radar-report-executor"
 import { executeAgentTeamTask } from "./team-executor"
 import { executeGoalTask } from "./goal-executor"
+import { scheduledSessionAttribution } from "./session-attribution"
+import {
+  loadOwningWorkspace,
+  resolveScheduledWorkspaceTrust,
+  type ScheduledWorkspaceTrust,
+} from "./owning-workspace"
 import { executePlanTask } from "./plan-executor"
 import { executeBotTask } from "./bot-executor"
 import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
@@ -82,6 +91,7 @@ import { sendPrompt, onClaudeMessage, interruptSession, approveTool } from "@/li
 import {
   createUnattendedPermissionResponder,
   needsApprovalSummary,
+  type UnattendedPermissionResponder,
 } from "@/lib/claude/unattended-permission-responder"
 import type {
   AppSettings,
@@ -371,7 +381,7 @@ interface PreparedSession {
 async function resolveOrCreateSession(
   task: ScheduledTask,
   payload: ChatLikeTaskPayload,
-  options: { characterId?: string }
+  options: { characterId?: string; runId?: string }
 ): Promise<PreparedSession | { error: string }> {
   if (payload.sessionId) {
     const existing = await getSession(payload.sessionId)
@@ -389,6 +399,7 @@ async function resolveOrCreateSession(
     teamId: payload.teamId,
     model: payload.model,
     executionContext: payload.executionContext,
+    ...scheduledSessionAttribution(task, options.runId),
   })
   return { session, created: true }
 }
@@ -431,6 +442,124 @@ async function applyAdHocSkill(
 }
 
 // =============================================================================
+// Workspace roots — confinement and the trust proof follow the lease
+// =============================================================================
+
+/**
+ * Point workspace confinement at the directories the run actually works in.
+ *
+ * `resolveSendOptions` derives `confinement.roots` from the cwd and additional
+ * directories it resolved (the source checkout). A scheduled run then moves
+ * both: payload `additionalDirectories` are unioned on top, and a task lease
+ * swaps cwd and additionalDirectories for bundle aliases. Without this, the
+ * roots still name the source checkout. Every write in the alias then counts
+ * as escaping the workspace and, with nobody there to approve it, ends the run
+ * `needs_approval`, while writes into the source checkout the lease exists to
+ * protect pass. Same derivation as build-options: cwd plus every additional
+ * directory.
+ */
+function alignConfinementRoots(options: SendOptions): SendOptions {
+  if (!options.confinement?.enabled) return options
+  const roots = new Set<string>()
+  if (options.cwd) roots.add(options.cwd)
+  for (const dir of options.additionalDirectories ?? []) {
+    if (dir) roots.add(dir)
+  }
+  if (roots.size === 0) {
+    const { confinement: _dropped, ...rest } = options
+    return rest
+  }
+  return { ...options, confinement: { ...options.confinement, roots: [...roots] } }
+}
+
+/**
+ * Which source root each alias of a scheduled lease checks out, limited to the
+ * aliases the lease actually made active.
+ *
+ * A borrowed canonical bundle was acquired over the owning workspace's roots,
+ * one lease per root keyed by the root's id (`ensureSessionExecutionBundle`).
+ * A scheduled writable bundle is acquired over the one bound root and answers
+ * with it as the primary alias. A root this cannot place gets no alias, so its
+ * grant does not travel.
+ */
+function leaseAliasesBySource(
+  lease: { primaryAlias: string; additionalAliases: readonly string[] },
+  source: {
+    canonicalBundle: { leases: readonly { logicalRootId: string; aliasPath: string }[] } | null
+    project: Project | null
+    boundWorkspaceRoot: string
+  }
+): Map<string, string> {
+  const aliases = new Map<string, string>()
+  if (!source.canonicalBundle) {
+    aliases.set(source.boundWorkspaceRoot.trim(), lease.primaryAlias)
+    return aliases
+  }
+  const active = new Set([lease.primaryAlias, ...lease.additionalAliases])
+  const aliasByRootId = new Map(
+    source.canonicalBundle.leases.map((root) => [root.logicalRootId, root.aliasPath] as const)
+  )
+  for (const root of source.project?.roots ?? []) {
+    const alias = aliasByRootId.get(root.id)
+    if (alias && active.has(alias)) aliases.set(root.path.trim(), alias)
+  }
+  return aliases
+}
+
+/**
+ * Carry the Workspace Trust proof onto the aliases a task lease runs in.
+ *
+ * `resolveSendOptions` stamps `trustedWorkspaceRoots` with the owning
+ * workspace's source roots. The sidecar honours only a trusted root that is
+ * also active for the send, so once a lease re-points cwd and
+ * additionalDirectories at bundle aliases, the source paths prove nothing and
+ * native SDK skills/plugins are refused. Each alias inherits the grant of the
+ * exact source root it checks out, the rule the connector loop applies. An
+ * alias whose source is not a trusted root stays unproven.
+ */
+function alignTrustedWorkspaceRoots(
+  options: SendOptions,
+  aliasesBySource: ReadonlyMap<string, string>
+): SendOptions {
+  if (!options.trustedWorkspaceRoots?.length) return options
+  return {
+    ...options,
+    trustedWorkspaceRoots: remapExactRoots(options.trustedWorkspaceRoots, aliasesBySource),
+  }
+}
+
+/**
+ * The reason a scheduled run ended `needs_approval`: the tools the unattended
+ * responder turned away, and the roots an untrusted workspace ran restricted
+ * for. Restricted Mode removes its tools before the turn starts, so the model
+ * never asks for them and no denial is recorded. The untrusted roots are the
+ * only evidence the run did less than a trusted one would have.
+ */
+function scheduledNeedsApprovalSummary(
+  permissions: UnattendedPermissionResponder,
+  trust: ScheduledWorkspaceTrust
+): string {
+  if (!trust.restricted) return needsApprovalSummary(permissions)
+  const roots = trust.untrustedRoots.length > 0 ? trust.untrustedRoots.join(", ") : null
+  const restriction = trust.unverified
+    ? `Workspace Trust could not be verified for ${roots ?? "the owning workspace"}, so the run had no disk or host-mutating tools`
+    : `workspace not trusted (${roots ?? "the owning workspace"}), so the run had no disk or host-mutating tools`
+  return `${needsApprovalSummary(permissions)}; ${restriction}`
+}
+
+/** The restriction a run carried, for its output: present only when it ran restricted. */
+function workspaceTrustOutput(trust: ScheduledWorkspaceTrust): Record<string, unknown> {
+  if (!trust.restricted) return {}
+  return {
+    workspaceTrust: {
+      restricted: true,
+      untrustedRoots: [...trust.untrustedRoots],
+      ...(trust.unverified ? { unverified: true } : {}),
+    },
+  }
+}
+
+// =============================================================================
 // Core chat-style runner — used by chat, agent, and skill executors
 // =============================================================================
 
@@ -458,6 +587,7 @@ async function runChatPrompt(
   // 1. Resolve / create the session.
   const sessionResult = await resolveOrCreateSession(task, payload, {
     characterId: options.characterId,
+    runId: execution.id,
   })
   if ("error" in sessionResult) {
     return { success: false, error: sessionResult.error }
@@ -488,12 +618,38 @@ async function runChatPrompt(
       }
     : session
 
+  // A schedule fires for the workspace that owns its conversation, which is
+  // almost never the one the user happens to be looking at when it fires — and
+  // often nothing is on screen at all. Resolving against the UI pointer here
+  // would hand a cron job someone else's skills, servers and instructions. One
+  // id answers both the capability scope and the send-time workspace, so the
+  // two cannot attribute the run to different workspaces.
+  // A conversation this run just created was stamped by `createSession`, which
+  // falls back to the UI-active workspace when the task names none. The task is
+  // the authority for that session: an unbound task has no owning workspace.
+  const sessionProjectId = sessionResult.created ? task.projectId : session.projectId
+  const owningProjectId = payload.executionContext?.projectId ?? sessionProjectId ?? null
+  const capabilityScope: WorkspaceCapabilityScope = { projectId: owningProjectId }
+  const owning = await loadOwningWorkspace(owningProjectId, { taskId: task.id })
+  const activeProject = owning.project
+  // Same gate, same workspace as an interactive turn: a schedule must not be
+  // the way around Restricted Mode for a checkout the user never trusted.
+  const workspaceTrust = await resolveScheduledWorkspaceTrust(owning, appSettings, {
+    taskId: task.id,
+  })
+
   let resolved: SendOptions
   try {
     resolved = await resolveSendOptions({
-      session: sessionForResolution,
+      // `resolveSendOptions` scopes skills, MCP servers, memory and RAG by
+      // `session.projectId` first, so the session it reads must carry the
+      // owning workspace, not the UI-active one `createSession` stamped.
+      session: { ...sessionForResolution, projectId: owningProjectId ?? undefined },
       appSettings,
       agentMode,
+      activeProject,
+      workspaceRestricted: workspaceTrust.restricted,
+      trustedWorkspaceRoots: workspaceTrust.trustedRoots,
     })
   } catch (err) {
     return {
@@ -502,19 +658,16 @@ async function runChatPrompt(
     }
   }
 
-  // A schedule fires for the workspace that owns its conversation, which is
-  // almost never the one the user happens to be looking at when it fires — and
-  // often nothing is on screen at all. Resolving capabilities against the UI
-  // pointer here would hand a cron job someone else's skills and servers.
-  const capabilityScope: WorkspaceCapabilityScope = {
-    projectId: payload.executionContext?.projectId ?? session.projectId ?? null,
-  }
-
   // 3. Layer payload-level overrides on top.
   let finalOptions = await applyPayloadOverrides(resolved, payload, appSettings, capabilityScope)
 
   // 4. Skill-task ad-hoc skill: splice into system prompt + allowedTools.
   finalOptions = await applyAdHocSkill(finalOptions, options.skillId, capabilityScope)
+
+  // The payload replaces `disallowedTools` and unions `allowedTools`, and the
+  // ad-hoc skill unions its tools too. Either could hand back a tool Restricted
+  // Mode removed, so the restriction is re-applied after every override.
+  if (workspaceTrust.restricted) finalOptions = withRestrictedModeDenials(finalOptions)
 
   // Scheduled managed-worktree runs fail closed: unlike an interactive run,
   // there is nobody present to approve bypassing failed isolation/setup. The
@@ -612,6 +765,19 @@ async function runChatPrompt(
       },
     }
   }
+  // Last rewrite of cwd / additionalDirectories above: confinement follows it.
+  finalOptions = alignConfinementRoots(finalOptions)
+  // So does the trust proof, alias by alias.
+  if (taskLease) {
+    finalOptions = alignTrustedWorkspaceRoots(
+      finalOptions,
+      leaseAliasesBySource(taskLease, {
+        canonicalBundle: canonicalManaged ? canonicalBundle : null,
+        project: activeProject,
+        boundWorkspaceRoot: boundWorkspaceRoot!,
+      })
+    )
+  }
 
   if (executionContext?.environmentId) {
     const environment = await getProjectEnvironment(executionContext.environmentId)
@@ -681,23 +847,36 @@ async function runChatPrompt(
       return
     }
     if (evtType === "result") {
+      // Only a turn that was actually refused something waits on a person. A
+      // restricted run that asked for nothing did its (read-only) work and
+      // completes, so a read-only schedule in a workspace nobody has trusted
+      // yet is not failed and auto-paused on every fire. Its output still says
+      // it ran restricted, and for which roots.
       if (permissions.needsApproval()) {
         resolveOnce({
           success: false,
-          error: needsApprovalSummary(permissions),
+          error: scheduledNeedsApprovalSummary(permissions, workspaceTrust),
+          // Terminal: a retry re-runs the whole turn into the same wall.
+          terminalReason: "needs-approval",
           output: {
             sessionId,
             events: collected.length,
             last: evt,
             status: "needs_approval",
             needsApproval: [...permissions.denials],
+            ...workspaceTrustOutput(workspaceTrust),
           },
         })
         return
       }
       resolveOnce({
         success: true,
-        output: { sessionId, events: collected.length, last: evt },
+        output: {
+          sessionId,
+          events: collected.length,
+          last: evt,
+          ...workspaceTrustOutput(workspaceTrust),
+        },
       })
     } else if (evtType === "error") {
       resolveOnce({
@@ -1091,4 +1270,5 @@ export {
   resolveAgentMode,
   applyPayloadOverrides,
   applyAdHocSkill,
+  alignConfinementRoots,
 }

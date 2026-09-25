@@ -199,10 +199,12 @@ describe("createWorkflowSource", () => {
     )
   })
 
-  it("runNow is a no-op when the trigger or workflow row is missing", async () => {
+  it("runNow rejects when the trigger row is missing, so the caller can say so", async () => {
     const stubs = makeStubs([])
     const source = createWorkflowSource({ db: stubs.db, sync: stubs.sync, run: stubs.run })
-    await source.runNow("missing")
+    await expect(source.runNow("missing")).rejects.toThrow(
+      "Workflow trigger missing was not found."
+    )
     expect(stubs.run).not.toHaveBeenCalled()
   })
 })

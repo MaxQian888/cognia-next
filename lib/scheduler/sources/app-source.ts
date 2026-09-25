@@ -49,15 +49,16 @@ import type {
 } from "@/types/scheduler"
 import {
   makeUnifiedId,
+  unifiedKindForTaskType,
   type UnifiedScheduledItem,
   type UnifiedItemStatus,
 } from "@/types/scheduler/unified"
+import { requireSourceOutcome } from "./outcome"
 import type {
   ScheduledItemSource,
   ScheduledItemSourceObserver,
   ScheduledItemSubscription,
 } from "./types"
-import { CONNECTOR_TASK_TYPE_PREFIX } from "./connector-source"
 import { filterRunsByKind, taskExecutionKind, toUnifiedFromTaskExecution } from "./run-mappers"
 
 /**
@@ -66,11 +67,11 @@ import { filterRunsByKind, taskExecutionKind, toUnifiedFromTaskExecution } from 
  * them so they don't appear twice.
  */
 function isAppOwnedTask(task: ScheduledTask): boolean {
-  return task.type !== "plugin" && !task.type.startsWith(CONNECTOR_TASK_TYPE_PREFIX)
+  return unifiedKindForTaskType(task.type) === "app"
 }
 
 function isPluginOwnedTask(task: ScheduledTask): boolean {
-  return task.type === "plugin"
+  return unifiedKindForTaskType(task.type) === "plugin"
 }
 
 /**
@@ -330,28 +331,33 @@ function createTaskSource(
     },
 
     async update(sourceId: string, input: UpdateScheduledTaskInput): Promise<void> {
-      await backend().updateTask(sourceId, input)
+      const result = await backend().updateTask(sourceId, input)
       afterWrite()
+      requireSourceOutcome(result, `Scheduled task ${sourceId} was not found.`)
     },
 
     async delete(sourceId: string): Promise<void> {
-      await backend().deleteTask(sourceId)
+      const result = await backend().deleteTask(sourceId)
       afterWrite()
+      requireSourceOutcome(result, `Scheduled task ${sourceId} was not found.`)
     },
 
     async pause(sourceId: string): Promise<void> {
-      await backend().pauseTask(sourceId)
+      const result = await backend().pauseTask(sourceId)
       afterWrite()
+      requireSourceOutcome(result, `Scheduled task ${sourceId} could not be paused.`)
     },
 
     async resume(sourceId: string): Promise<void> {
-      await backend().resumeTask(sourceId)
+      const result = await backend().resumeTask(sourceId)
       afterWrite()
+      requireSourceOutcome(result, `Scheduled task ${sourceId} could not be resumed.`)
     },
 
     async runNow(sourceId: string): Promise<void> {
-      await backend().runTaskNow(sourceId)
+      const result = await backend().runTaskNow(sourceId)
       afterWrite()
+      requireSourceOutcome(result, `Scheduled task ${sourceId} was not found.`)
     },
   }
 }

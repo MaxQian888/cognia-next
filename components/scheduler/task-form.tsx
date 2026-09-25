@@ -4,7 +4,7 @@
  * TaskForm - Create or edit a scheduled task
  */
 
-import { useReducer, useCallback } from "react"
+import { useReducer, useCallback, useMemo } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import { Clock, Calendar, Zap, Bell, Settings, ChevronDown, ChevronUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,7 @@ import {
   type ScheduledTask,
   type ScheduledTaskType,
   type TaskOverlapPolicy,
+  type TaskTrigger,
   type TaskTriggerType,
   type NotificationChannel,
   CRON_PRESETS,
@@ -90,6 +91,7 @@ import {
   formatCronExpression,
   parseCronExpression,
 } from "@/lib/scheduler/cron-parser"
+import { TriggerPreview } from "@/components/scheduler/trigger-preview"
 import { testNotificationChannel } from "@/lib/scheduler/notification-integration"
 import {
   TASK_TEMPLATES,
@@ -571,6 +573,39 @@ export function TaskForm({
   const [f, updateForm] = useReducer(formReducer, { initialValues, defaultTimezone }, (init) =>
     createInitialState(init.initialValues, init.defaultTimezone)
   )
+  // The trigger as the form currently describes it, for the next-runs preview.
+  // Same shapes the submit handler builds; `null` while a field is unusable so
+  // the preview stays quiet instead of repeating the field's own error.
+  const previewTrigger = useMemo<TaskTrigger | null>(() => {
+    switch (f.triggerType) {
+      case "cron":
+        return f.cronError
+          ? null
+          : { type: "cron", cronExpression: f.cronExpression, timezone: f.timezone }
+      case "interval":
+        return f.intervalMinutes > 0
+          ? { type: "interval", intervalMs: f.intervalMinutes * 60 * 1000 }
+          : null
+      case "once": {
+        if (!f.runAtDate || !f.runAtTime) return null
+        const runAt = new Date(`${f.runAtDate}T${f.runAtTime}`)
+        return Number.isNaN(runAt.getTime()) ? null : { type: "once", runAt }
+      }
+      case "event":
+        return { type: "event", eventType: f.eventType }
+      default:
+        return null
+    }
+  }, [
+    f.triggerType,
+    f.cronError,
+    f.cronExpression,
+    f.timezone,
+    f.intervalMinutes,
+    f.runAtDate,
+    f.runAtTime,
+    f.eventType,
+  ])
   // The host whose schedule is being edited (this device or the paired host):
   // task types the host cannot run are shown disabled with the reason —
   // never hidden (Working Rule 7).
@@ -1381,6 +1416,8 @@ export function TaskForm({
               </p>
             </div>
           )}
+
+          <TriggerPreview trigger={previewTrigger} />
 
           {/* Trigger validation error */}
           {f.triggerError && <p className="text-xs text-destructive">{f.triggerError}</p>}

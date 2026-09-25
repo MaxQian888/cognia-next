@@ -120,6 +120,7 @@ import { getNextCronTime, validateCronExpression } from "./cron-parser"
 import { CATCHUP_GRACE_WINDOW_MS, CATCHUP_MAX_REPLAYED_RUNS } from "./catchup-policy"
 import { loggers } from "@cognia/logging"
 import { loadSchedulerPolicy } from "./write-authority"
+import { SchedulerError } from "./errors"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
 
@@ -3109,6 +3110,77 @@ describe("TaskScheduler", () => {
         )
       })
 
+      it("counts an executor-returned failure chain as ONE failure, pausing only at its end", async () => {
+        // Each attempt records the row it was started from, i.e. what the
+        // previous attempt's stats write left behind.
+        const seenByAttempt: Array<Partial<ScheduledTask>> = []
+        const executor = jest.fn().mockImplementation(async (running: ScheduledTask) => {
+          seenByAttempt.push({
+            status: running.status,
+            consecutiveFailures: running.consecutiveFailures,
+            lastTerminalReason: running.lastTerminalReason,
+          })
+          return { success: false, error: "boom" }
+        })
+        registerTaskExecutor("test", executor)
+        const { notifyTaskEvent } = jest.requireMock("./notification-integration") as {
+          notifyTaskEvent: jest.Mock
+        }
+
+        // One failure already on the books: one more logical failure reaches
+        // the threshold, so counting a retried attempt would pause mid-chain.
+        const task = makePolicyTask({
+          id: "returned-failure-chain",
+          consecutiveFailures: 1,
+          config: {
+            ...makePolicyTask().config,
+            maxRetries: 2,
+            retryDelay: 1000,
+            pauseAfterConsecutiveFailures: 2,
+          },
+        })
+        // Stateful row: each attempt reads back what the previous one wrote.
+        mockSchedulerDb.getTask.mockImplementation(
+          async () =>
+            (mockSchedulerDb.updateTask.mock.calls.at(-1)?.[0] as ScheduledTask | undefined) ?? task
+        )
+        const latestRow = () => mockSchedulerDb.updateTask.mock.calls.at(-1)?.[0] as ScheduledTask
+
+        const first = await scheduler.runTaskNow(task.id)
+
+        expect(first?.terminalReason).toBe("retry-scheduled")
+        expect(latestRow()).toMatchObject({
+          status: "active",
+          consecutiveFailures: 1,
+          lastTerminalReason: "retry-scheduled",
+        })
+        expect(notifyTaskEvent).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          "auto-paused"
+        )
+
+        await jest.advanceTimersByTimeAsync(120_000)
+
+        // The whole chain ran (1 + maxRetries attempts), every retried attempt
+        // left the counter alone, and only the terminal one moved it: 1 → 2,
+        // which then trips the threshold.
+        expect(executor).toHaveBeenCalledTimes(3)
+        expect(seenByAttempt).toEqual([
+          { status: "active", consecutiveFailures: 1, lastTerminalReason: undefined },
+          { status: "active", consecutiveFailures: 1, lastTerminalReason: "retry-scheduled" },
+          { status: "active", consecutiveFailures: 1, lastTerminalReason: "retry-scheduled" },
+        ])
+        expect(latestRow()).toMatchObject({
+          status: "paused",
+          consecutiveFailures: 2,
+          lastTerminalReason: "auto-paused",
+        })
+        expect(
+          notifyTaskEvent.mock.calls.filter(([, , eventType]) => eventType === "auto-paused")
+        ).toHaveLength(1)
+      })
+
       it("resets the consecutive counter on success", async () => {
         const executor = jest.fn().mockResolvedValue({ success: true })
         registerTaskExecutor("test", executor)
@@ -3124,6 +3196,118 @@ describe("TaskScheduler", () => {
 
         expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
           expect.objectContaining({ consecutiveFailures: 0 })
+        )
+      })
+    })
+
+    describe("needs-approval", () => {
+      const denial = { requestId: "req-1", toolName: "Bash", at: 1, reason: "needs approval" }
+      const needsApprovalResult = {
+        success: false,
+        error: "needs approval: Bash",
+        terminalReason: "needs-approval" as const,
+        output: { sessionId: "s1", status: "needs_approval", needsApproval: [denial] },
+      }
+      const withRetries = (overrides: Partial<ScheduledTask> = {}) =>
+        makePolicyTask({
+          id: "approval-task",
+          config: { ...makePolicyTask().config, maxRetries: 3, retryDelay: 1000 },
+          ...overrides,
+        })
+
+      it("never retries it, whatever maxRetries allows", async () => {
+        const executor = jest.fn().mockResolvedValue(needsApprovalResult)
+        registerTaskExecutor("test", executor)
+        const task = withRetries()
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const execution = await scheduler.runTaskNow(task.id)
+        await jest.advanceTimersByTimeAsync(120_000)
+
+        expect(executor).toHaveBeenCalledTimes(1)
+        expect(execution).toMatchObject({
+          status: "failed",
+          terminalReason: "needs-approval",
+          error: "needs approval: Bash",
+        })
+        expect(execution?.retryScheduledAt).toBeUndefined()
+        expect(execution?.logs.some((l) => /Not retrying/.test(l.message))).toBe(true)
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ lastTerminalReason: "needs-approval", consecutiveFailures: 1 })
+        )
+      })
+
+      it("still retries an ordinary failure under the same policy", async () => {
+        const executor = jest
+          .fn()
+          .mockResolvedValueOnce({ success: false, error: "boom" })
+          .mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const task = withRetries()
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const execution = await scheduler.runTaskNow(task.id)
+        await jest.advanceTimersByTimeAsync(120_000)
+
+        expect(execution?.terminalReason).toBe("retry-scheduled")
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+
+      it("announces it as waiting on the user, not as a failure", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue(needsApprovalResult))
+        const { notifyTaskEvent } = jest.requireMock("./notification-integration") as {
+          notifyTaskEvent: jest.Mock
+        }
+        const task = withRetries({
+          notification: { onStart: false, onComplete: false, onError: true },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+
+        expect(notifyTaskEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ id: "approval-task" }),
+          expect.objectContaining({ terminalReason: "needs-approval" }),
+          "needs-approval"
+        )
+        expect(notifyTaskEvent).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          "error"
+        )
+      })
+
+      it("hands plugins a coded error they can tell apart from a crash", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue(needsApprovalResult))
+        const task = withRetries()
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const execution = await scheduler.runTaskNow(task.id)
+
+        expect(mockDispatchOnScheduledTaskComplete).not.toHaveBeenCalled()
+        expect(mockDispatchOnScheduledTaskError).toHaveBeenCalledTimes(1)
+        const [taskId, executionId, error] = mockDispatchOnScheduledTaskError.mock.calls[0]
+        expect([taskId, executionId]).toEqual([task.id, execution?.id])
+        expect(error).toBeInstanceOf(SchedulerError)
+        expect(error).toMatchObject({
+          code: "NEEDS_APPROVAL",
+          message: "needs approval: Bash",
+          details: { terminalReason: "needs-approval", needsApproval: [denial] },
+        })
+      })
+
+      it("counts toward auto-pause, so an always-blocked schedule stops billing", async () => {
+        registerTaskExecutor("test", jest.fn().mockResolvedValue(needsApprovalResult))
+        const task = withRetries({
+          consecutiveFailures: 1,
+          config: { ...withRetries().config, pauseAfterConsecutiveFailures: 2 },
+        })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+
+        expect(mockSchedulerDb.updateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "paused", consecutiveFailures: 2 })
         )
       })
     })

@@ -2,6 +2,7 @@ import {
   compareUnifiedItems,
   makeUnifiedId,
   parseUnifiedId,
+  unifiedKindForTaskType,
   type UnifiedScheduledItem,
 } from "./unified"
 
@@ -92,5 +93,18 @@ describe("compareUnifiedItems", () => {
     ]
     items.sort(compareUnifiedItems)
     expect(items.map((i) => i.unifiedId)).toEqual(["a:a", "a:b"])
+  })
+})
+
+describe("unifiedKindForTaskType", () => {
+  it("partitions the app table the way the sources list it", () => {
+    expect(unifiedKindForTaskType("plugin")).toBe("plugin")
+    expect(unifiedKindForTaskType("connection:scheduled:digest")).toBe("connector")
+    expect(unifiedKindForTaskType("connection:housekeeping:prune")).toBe("connector")
+    expect(unifiedKindForTaskType("chat")).toBe("app")
+    expect(unifiedKindForTaskType("goal")).toBe("app")
+    // An unknown type (a task read before its row loaded) is an app row.
+    expect(unifiedKindForTaskType("")).toBe("app")
+    expect(unifiedKindForTaskType(undefined)).toBe("app")
   })
 })

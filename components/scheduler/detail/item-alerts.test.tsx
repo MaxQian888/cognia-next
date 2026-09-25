@@ -39,6 +39,40 @@ describe("ItemAlerts", () => {
     expect(screen.getByTestId("item-alert-b")).toHaveTextContent("Needs the shell capability")
   })
 
+  it("says what a run is waiting on and how to clear it", () => {
+    const base = {
+      kind: "needs-approval",
+      severity: "attention",
+      itemUnifiedId: "app:a",
+      itemName: "Digest",
+    } as const
+    render(
+      <ItemAlerts
+        signals={[
+          { ...base, id: "both", tools: "Bash", roots: "/repo" },
+          { ...base, id: "trust", roots: "/repo" },
+          { ...base, id: "bare" },
+        ]}
+      />
+    )
+    const both = screen.getByTestId("item-alert-both")
+    expect(both).toHaveTextContent(
+      "Digest is waiting for your approval to use Bash, and for you to trust /repo"
+    )
+    expect(both).toHaveTextContent("allowed tools, or raise its permission mode")
+    expect(both).toHaveTextContent("Trust the workspace")
+    expect(both.dataset.severity).toBe("attention")
+
+    const trust = screen.getByTestId("item-alert-trust")
+    expect(trust).toHaveTextContent("Digest is waiting for you to trust /repo")
+    expect(trust).not.toHaveTextContent("allowed tools")
+
+    // Nothing known to name: the sentence alone, no empty hint.
+    const bare = screen.getByTestId("item-alert-bare")
+    expect(bare).toHaveTextContent("Digest is waiting for your approval")
+    expect(bare.querySelector("[data-slot='alert-description']")).toBeNull()
+  })
+
   it("shows the deprecated banner once, not twice, and the OS degradation", () => {
     const signals: AttentionSignal[] = [
       {

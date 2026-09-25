@@ -16,6 +16,7 @@ import type {
   TaskExecutorResult,
 } from "@/types/scheduler"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
+import { scheduledSessionAttribution } from "./session-attribution"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
@@ -72,6 +73,7 @@ export async function executeGoalTask(
       title: payload.sessionTitle ?? `${task.name} (scheduled goal)`,
       kind: "direct",
       characterId: payload.characterId,
+      ...scheduledSessionAttribution(task, execution.id),
     })
     sessionId = session.id
   }
@@ -103,11 +105,25 @@ export async function executeGoalTask(
   // 3. Drive the loop to terminal. Its turns run unattended: a tool that needs
   // approval is denied, and the goal pauses `needs_approval` with the tools
   // named in the error and listed below.
-  const result = await runGoalLoopHeadless({ sessionId, goalId, appSettings, signal })
+  // A session created here for a task that names no workspace was stamped with
+  // whichever one was active in the UI (`createSession`). That is not the
+  // task's workspace, so the loop resolves with none rather than with it.
+  const unboundRun = !payload.sessionId && !task.projectId
+  const result = await runGoalLoopHeadless({
+    sessionId,
+    goalId,
+    appSettings,
+    signal,
+    ...(unboundRun ? { workspace: "none" as const } : {}),
+  })
 
   const success = result.status === "completed"
+  // A goal paused for approval is waiting on a person. Retrying would create a
+  // fresh goal and drive its loop into the same denial.
+  const needsApproval = !success && result.exit === "needs_approval"
   return {
     success,
+    ...(needsApproval ? { terminalReason: "needs-approval" as const } : {}),
     output: {
       goalId,
       sessionId,

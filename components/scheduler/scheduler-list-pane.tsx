@@ -14,8 +14,9 @@
  * what needs the user.
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { AlertTriangleIcon, SearchIcon, XIcon } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
@@ -36,6 +37,7 @@ import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/
 import { TaskListEmptyState } from "./empty-states"
 import { SchedulerFilterBar } from "./scheduler-filter-bar"
 import { SchedulerListRow } from "./scheduler-list-row"
+import { LAYOUT_ANIMATION_ROW_LIMIT, listItemVariants, staticIf } from "./scheduler-motion"
 
 export interface SchedulerListPaneProps {
   /** Filtered and ordered; what the rows render. */
@@ -56,6 +58,11 @@ export interface SchedulerListPaneProps {
   onCreate: () => void
   /** The bulk toolbar, mounted by the page so it can own the confirm dialog. */
   bulkToolbar?: React.ReactNode
+  /**
+   * An item that was just added (by the user, a template, a clone or an
+   * agent). Its row is scrolled into view and ringed until the page clears it.
+   */
+  justCreatedId?: string | null
 }
 
 export function SchedulerListSidebar(props: SchedulerListPaneProps) {
@@ -81,9 +88,28 @@ export function SchedulerListPane({
   onClearChecks,
   onCreate,
   bulkToolbar,
+  justCreatedId = null,
 }: SchedulerListPaneProps) {
   const t = useTranslations("scheduler")
   const tList = useTranslations("scheduler.list")
+  const reduceMotion = useReducedMotion()
+  const rowVariants = staticIf(reduceMotion, listItemVariants)
+  // Rows glide to their new place when attention re-orders the list, instead
+  // of jumping. Off for long lists (every re-order measures every row) and for
+  // reduced motion.
+  const animateLayout = !reduceMotion && items.length <= LAYOUT_ANIMATION_ROW_LIMIT
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // A new row can land far down a long list; bring it into view once.
+  useEffect(() => {
+    if (!justCreatedId || !listRef.current) return
+    const row = Array.from(listRef.current.querySelectorAll<HTMLElement>("[data-item-id]")).find(
+      (element) => element.dataset.itemId === justCreatedId
+    )
+    if (row && typeof row.scrollIntoView === "function") {
+      row.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" })
+    }
+  }, [justCreatedId, reduceMotion])
   const checked = useMemo(() => new Set(checkedIds), [checkedIds])
   // Shared with the ⌘K palette (`lib/global-search/providers/system.ts`).
   const sharedNames = useMemo(() => duplicateNames(items), [items])
@@ -198,22 +224,44 @@ export function SchedulerListPane({
         ) : null}
 
         {items.length > 0 ? (
-          <div className="flex flex-col px-1.5 py-1" role="list" data-testid="scheduler-list">
-            {items.map((item) => (
-              <div key={item.unifiedId} role="listitem">
-                <SchedulerListRow
-                  item={item}
-                  showIdentity={sharedNames.has(item.name)}
-                  signal={signalByItem.get(item.unifiedId) ?? null}
-                  selected={selectedId === item.unifiedId}
-                  highlighted={highlightedId === item.unifiedId}
-                  checked={checked.has(item.unifiedId)}
-                  checkMode={checkMode}
-                  onSelect={onSelect}
-                  onToggleCheck={onToggleCheck}
-                />
-              </div>
-            ))}
+          <div
+            ref={listRef}
+            className="relative flex flex-col px-1.5 py-1"
+            role="list"
+            data-testid="scheduler-list"
+          >
+            <AnimatePresence initial={false} mode="popLayout">
+              {items.map((item) => (
+                <motion.div
+                  key={item.unifiedId}
+                  role="listitem"
+                  layout={animateLayout ? "position" : false}
+                  variants={rowVariants}
+                  initial="hidden"
+                  animate="show"
+                  exit="exit"
+                  transition={{ layout: { duration: 0.22, ease: "easeOut" } }}
+                  data-item-id={item.unifiedId}
+                  data-just-created={justCreatedId === item.unifiedId || undefined}
+                  className={cn(
+                    "rounded-md ring-inset transition-[box-shadow] duration-700",
+                    justCreatedId === item.unifiedId && "ring-2 ring-primary/50"
+                  )}
+                >
+                  <SchedulerListRow
+                    item={item}
+                    showIdentity={sharedNames.has(item.name)}
+                    signal={signalByItem.get(item.unifiedId) ?? null}
+                    selected={selectedId === item.unifiedId}
+                    highlighted={highlightedId === item.unifiedId}
+                    checked={checked.has(item.unifiedId)}
+                    checkMode={checkMode}
+                    onSelect={onSelect}
+                    onToggleCheck={onToggleCheck}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         ) : null}
       </SidebarContent>

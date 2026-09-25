@@ -184,7 +184,8 @@ export function createWorkflowSource(
 
     async runNow(sourceId: string): Promise<void> {
       const row = await db.workflowTriggers.get(sourceId)
-      if (!row) return
+      // Returning quietly here read as "it ran" to every caller.
+      if (!row) throw new Error(`Workflow trigger ${sourceId} was not found.`)
       await run({ workflowId: row.workflowId, triggerId: sourceId })
     },
   }

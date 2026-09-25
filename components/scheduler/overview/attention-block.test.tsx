@@ -98,6 +98,40 @@ describe("AttentionBlock", () => {
     expect(onOpenPolicy).toHaveBeenCalled()
   })
 
+  it("phrases a run waiting on approval by what it is waiting for, and opens its item", () => {
+    const onSelectItem = jest.fn()
+    const cases: [Partial<AttentionSignal>, string][] = [
+      [{}, "Nightly is waiting for your approval"],
+      [{ tools: "Bash, Edit" }, "Nightly is waiting for your approval to use Bash, Edit"],
+      [{ roots: "/repo" }, "Nightly is waiting for you to trust /repo"],
+      [
+        { tools: "Bash", roots: "/repo" },
+        "Nightly is waiting for your approval to use Bash, and for you to trust /repo",
+      ],
+    ]
+    for (const [extra, text] of cases) {
+      const { unmount } = render(
+        <AttentionBlock
+          signals={[
+            signal({
+              kind: "needs-approval",
+              itemUnifiedId: "app:n",
+              itemName: "Nightly",
+              ...extra,
+            }),
+          ]}
+          onSelectItem={onSelectItem}
+        />
+      )
+      const row = screen.getByTestId("attention-needs-approval")
+      expect(row).toHaveTextContent(text)
+      expect(row.dataset.severity).toBe("attention")
+      fireEvent.click(screen.getByTestId("attention-open-item"))
+      unmount()
+    }
+    expect(onSelectItem).toHaveBeenCalledWith("app:n")
+  })
+
   it("renders no action when the caller cannot answer the signal", () => {
     render(
       <AttentionBlock signals={[signal({ kind: "host-suspended" })]} onSelectItem={jest.fn()} />

@@ -12,6 +12,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { ActivityIcon, BellIcon, CalendarDaysIcon, HistoryIcon, LayersIcon } from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
@@ -27,6 +28,7 @@ import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 import { OutcomeStrip } from "../outcome-strip"
 import { RunRow } from "../run-row"
+import { listContainerVariants, listItemVariants, staticIf } from "../scheduler-motion"
 import { AttentionBlock, type AttentionBlockProps } from "./attention-block"
 import { Agenda } from "./agenda"
 import { KindSummary } from "./kind-summary"
@@ -73,6 +75,7 @@ export function SchedulerOverview({
   className,
 }: SchedulerOverviewProps) {
   const t = useTranslations("scheduler.overviewPage")
+  const reduceMotion = useReducedMotion()
   const outcome = summarizeOutcomeCells(outcomeCells)
 
   const stats: StatStripItem[] = [
@@ -111,26 +114,36 @@ export function SchedulerOverview({
   ]
 
   return (
-    <div
+    // Two beats: what needs you, then everything else. The grid moves as one
+    // block so each section keeps its own `wide` span.
+    <motion.div
       className={cn("@container/console-pane flex min-w-0 flex-col gap-3 p-4", className)}
       data-testid="scheduler-overview"
+      variants={staticIf(reduceMotion, listContainerVariants)}
+      initial="hidden"
+      animate="show"
     >
-      <ConsoleSection
-        id="attention"
-        title={t("attentionTitle")}
-        icon={BellIcon}
-        wide
-        meta={signals.length > 0 ? String(signals.length) : undefined}
-      >
-        <AttentionBlock
-          signals={signals}
-          next={agenda.next}
-          onSelectItem={onSelectItem}
-          {...attentionActions}
-        />
-      </ConsoleSection>
+      <motion.div variants={staticIf(reduceMotion, listItemVariants)} className="min-w-0">
+        <ConsoleSection
+          id="attention"
+          title={t("attentionTitle")}
+          icon={BellIcon}
+          wide
+          meta={signals.length > 0 ? String(signals.length) : undefined}
+        >
+          <AttentionBlock
+            signals={signals}
+            next={agenda.next}
+            onSelectItem={onSelectItem}
+            {...attentionActions}
+          />
+        </ConsoleSection>
+      </motion.div>
 
-      <div className="grid gap-3 @3xl/console-pane:grid-cols-2">
+      <motion.div
+        className="grid gap-3 @3xl/console-pane:grid-cols-2"
+        variants={staticIf(reduceMotion, listItemVariants)}
+      >
         <ConsoleSection id="outcomes" title={t("outcomesTitle")} icon={ActivityIcon} wide>
           <StatStrip
             stats={stats}
@@ -190,7 +203,7 @@ export function SchedulerOverview({
             </div>
           )}
         </ConsoleSection>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

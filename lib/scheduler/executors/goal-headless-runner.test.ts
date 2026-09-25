@@ -8,6 +8,8 @@ const runCaptureMock = jest.fn()
 const buildJudgeMock = jest.fn()
 const handleTurnCompleteMock = jest.fn()
 const getAllProjectsMock = jest.fn()
+const isWorkspaceTrustedMock = jest.fn(async (_path: string) => true)
+const hostEnforcesTrustMock = jest.fn(() => false)
 
 jest.mock("@/lib/db/goals", () => ({ getGoal: (...a: unknown[]) => getGoalMock(...a) }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: (...a: unknown[]) => getSessionMock(...a) }))
@@ -39,6 +41,14 @@ jest.mock("@/lib/goal/turn-driver", () => ({
 jest.mock("@/lib/db/projects", () => ({
   getAllProjects: () => getAllProjectsMock(),
 }))
+// Workspace Trust: the gate over the ledger runs for real. Off (a host with no
+// filesystem to protect) unless a case turns it on.
+jest.mock("@/lib/db/trusted-workspaces", () => ({
+  isWorkspaceTrusted: (path: string) => isWorkspaceTrustedMock(path),
+}))
+jest.mock("@/lib/scheduler/host-support", () => ({
+  hostEnforcesWorkspaceTrust: () => hostEnforcesTrustMock(),
+}))
 
 import { runGoalLoopHeadless } from "./goal-headless-runner"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
@@ -69,6 +79,8 @@ beforeEach(() => {
   buildJudgeMock.mockReset()
   handleTurnCompleteMock.mockReset()
   getAllProjectsMock.mockReset().mockResolvedValue([])
+  isWorkspaceTrustedMock.mockReset().mockResolvedValue(true)
+  hostEnforcesTrustMock.mockReset().mockReturnValue(false)
   getSessionMock.mockResolvedValue({ id: "s1" })
   buildJudgeMock.mockReturnValue({ id: "judge" })
   resolveSendOptionsMock.mockResolvedValue({ model: "m" })
@@ -322,6 +334,58 @@ describe("runGoalLoopHeadless — owning workspace (ADR-0144)", () => {
     expect(r.status).toBe("completed")
     expect(resolvedWorkspaces()).toEqual([null])
     expect(runCaptureMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs every turn in Restricted Mode when the owning workspace is untrusted", async () => {
+    hostEnforcesTrustMock.mockReturnValue(true)
+    isWorkspaceTrustedMock.mockResolvedValue(false)
+    const owning = {
+      id: "proj-owning",
+      name: "proj-owning",
+      roots: [{ id: "r1", path: "/repos/owning", isPrimary: true }],
+    } as unknown as Project
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockResolvedValue([owning])
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(isWorkspaceTrustedMock).toHaveBeenCalledWith("/repos/owning")
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      activeProject: owning,
+      workspaceRestricted: true,
+      trustedWorkspaceRoots: [],
+    })
+  })
+
+  it("sends the trust proof for a trusted owning workspace", async () => {
+    hostEnforcesTrustMock.mockReturnValue(true)
+    const owning = {
+      id: "proj-owning",
+      name: "proj-owning",
+      roots: [{ id: "r1", path: "/repos/owning", isPrimary: true }],
+    } as unknown as Project
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockResolvedValue([owning])
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      workspaceRestricted: false,
+      trustedWorkspaceRoots: ["/repos/owning"],
+    })
+  })
+
+  it("fails closed when the owning workspace cannot be read", async () => {
+    hostEnforcesTrustMock.mockReturnValue(true)
+    getSessionMock.mockResolvedValue({ id: "s1", projectId: "proj-owning" })
+    getAllProjectsMock.mockRejectedValue(new Error("db closed"))
+    oneTurn()
+
+    await runGoalLoopHeadless(input())
+    expect(resolveSendOptionsMock.mock.calls[0][0]).toMatchObject({
+      activeProject: null,
+      workspaceRestricted: true,
+    })
   })
 
   it('resolves with no workspace when the caller passes workspace: "none"', async () => {

@@ -4,6 +4,7 @@ import {
   dayKey,
   groupOccurrencesByDay,
   groupOccurrencesByTask,
+  projectTriggerFireTimes,
   type Occurrence,
 } from "./upcoming-occurrences"
 
@@ -235,5 +236,54 @@ describe("computeUnifiedOccurrences", () => {
       { from, days: 1 }
     )
     expect(occ.map((o) => o.taskId)).toEqual(["app:early", "app:late"])
+  })
+})
+
+describe("projectTriggerFireTimes", () => {
+  const from = new Date("2026-09-25T00:00:00Z")
+
+  it("lists the next cron fires in the trigger's own zone", () => {
+    const dates = projectTriggerFireTimes(
+      { type: "cron", cronExpression: "0 9 * * *", timezone: "UTC" },
+      3,
+      { from }
+    )
+    expect(dates.map((date) => date.toISOString())).toEqual([
+      "2026-09-25T09:00:00.000Z",
+      "2026-09-26T09:00:00.000Z",
+      "2026-09-27T09:00:00.000Z",
+    ])
+  })
+
+  it("steps an interval from the task's known next run", () => {
+    const nextRunAt = new Date("2026-09-25T00:30:00Z")
+    const dates = projectTriggerFireTimes({ type: "interval", intervalMs: 3_600_000 }, 2, {
+      from,
+      nextRunAt,
+    })
+    expect(dates.map((date) => date.toISOString())).toEqual([
+      "2026-09-25T00:30:00.000Z",
+      "2026-09-25T01:30:00.000Z",
+    ])
+  })
+
+  it("returns a one-off only while it is still ahead", () => {
+    const runAt = new Date("2026-09-26T08:00:00Z")
+    expect(projectTriggerFireTimes({ type: "once", runAt }, 3, { from })).toEqual([runAt])
+    expect(
+      projectTriggerFireTimes({ type: "once", runAt: new Date("2026-09-24T00:00:00Z") }, 3, {
+        from,
+      })
+    ).toEqual([])
+  })
+
+  it("has nothing for an event trigger, an invalid cron, or a zero count", () => {
+    expect(
+      projectTriggerFireTimes({ type: "event", eventType: "chat:completed" }, 3, { from })
+    ).toEqual([])
+    expect(projectTriggerFireTimes({ type: "cron", cronExpression: "nope" }, 3, { from })).toEqual(
+      []
+    )
+    expect(projectTriggerFireTimes({ type: "interval", intervalMs: 1000 }, 0, { from })).toEqual([])
   })
 })

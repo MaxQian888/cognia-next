@@ -4,6 +4,8 @@ import { BackupScheduleDialog } from "./backup-schedule-dialog"
 
 const createTask = jest.fn()
 const onScheduled = jest.fn()
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }))
 
 const readinessMock = jest.fn(async () => [
   { destination: "local", state: "ready" },
@@ -140,5 +142,58 @@ describe("BackupScheduleDialog", () => {
     expect(within(dialog).queryByText(/^max retries$/i)).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole("button", { name: /advanced settings/i }))
     expect(within(dialog).getByText(/^max retries$/i)).toBeInTheDocument()
+  })
+})
+
+describe("BackupScheduleDialog · opened by its caller", () => {
+  it("opens from the caller's own menu, with no trigger button of its own", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <BackupScheduleDialog open onOpenChange={onOpenChange} onScheduled={onScheduled} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    // The header used to mount this and get a stray "Schedule backup" button instead.
+    expect(screen.queryByRole("button", { name: /schedule backup/i })).not.toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^cancel$/i }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("stays closed while the caller says closed", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <BackupScheduleDialog open={false} onOpenChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /schedule backup/i })).not.toBeInTheDocument()
+  })
+
+  it("says so when the schedule refused the backup, instead of doing nothing", async () => {
+    createTask.mockResolvedValueOnce(null)
+    const onOpenChange = jest.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <BackupScheduleDialog open onOpenChange={onOpenChange} onScheduled={onScheduled} />
+      </NextIntlClientProvider>
+    )
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^schedule$/i }))
+    await screen.findByRole("dialog")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(toastError).toHaveBeenCalled()
+    expect(onScheduled).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("defaults the time zone to this device's, not UTC", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <BackupScheduleDialog open onOpenChange={jest.fn()} />
+      </NextIntlClientProvider>
+    )
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^schedule$/i }))
+    const local = Intl.DateTimeFormat().resolvedOptions().timeZone
+    expect(createTask.mock.calls[0][0].trigger.timezone).toBe(local)
   })
 })

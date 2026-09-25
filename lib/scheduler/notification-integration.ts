@@ -28,7 +28,14 @@ export const WEBHOOK_DELIVERY_LIMITS = {
   timeoutMs: 10_000,
 } as const
 
-export type TaskEventType = "start" | "progress" | "complete" | "error" | "auto-paused"
+/**
+ * `needs-approval` is raised in place of `error` when a run stopped for want of
+ * an approver (terminal reason `needs-approval`). It is gated by the same
+ * `notification.onError` flag, but reads as "waiting on you" rather than
+ * "broken" and coalesces into its own row.
+ */
+export type TaskEventType =
+  "start" | "progress" | "complete" | "error" | "needs-approval" | "auto-paused"
 
 /** Events that report a run going as planned — not news for maintenance tasks. */
 export const ROUTINE_TASK_EVENTS: ReadonlySet<TaskEventType> = new Set([
@@ -58,7 +65,7 @@ export function taskEventDedupeKey(
 
 function centerLevelFor(eventType: TaskEventType): NotificationLevel {
   if (eventType === "error") return "error"
-  if (eventType === "auto-paused") return "warning"
+  if (eventType === "auto-paused" || eventType === "needs-approval") return "warning"
   if (eventType === "complete") return "success"
   return "info"
 }
@@ -241,6 +248,13 @@ function getNotificationContent(
         icon: "❌",
       }
 
+    case "needs-approval":
+      return {
+        title: `Task Needs Approval: ${task.name}`,
+        body: `The scheduled task "${task.name}" stopped at a step nobody was there to approve (${execution.error || "needs approval"}). It was not retried: allow it, then run the task again.`,
+        icon: "✋",
+      }
+
     case "auto-paused":
       return {
         title: `Task Auto-Paused: ${task.name}`,
@@ -282,6 +296,7 @@ function sendToastNotification(title: string, body: string, eventType: TaskEvent
       toast.error(title, { description: body })
       break
     case "auto-paused":
+    case "needs-approval":
       toast.warning(title, { description: body })
       break
     case "start":

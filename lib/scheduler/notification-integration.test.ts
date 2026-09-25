@@ -146,7 +146,7 @@ describe("notification-integration", () => {
       }
     )
 
-    it.each(["error", "auto-paused"] as const)(
+    it.each(["error", "needs-approval", "auto-paused"] as const)(
       "still surfaces a maintenance task's %s",
       async (eventType) => {
         const housekeeping = {
@@ -278,6 +278,28 @@ describe("notification-integration", () => {
           level: "warning",
           title: "Task Auto-Paused: Test Task",
           body: expect.stringContaining("3 consecutive failures"),
+        })
+      )
+    })
+
+    // A run that stopped for want of an approver is waiting on the user, not
+    // broken: its own row, a warning, and a body that says it was not retried.
+    it("warns that a run needs approval, in a row apart from failures", async () => {
+      const blocked = {
+        ...mockExecution,
+        status: "failed" as const,
+        terminalReason: "needs-approval" as const,
+        error: "needs approval: Bash",
+      }
+
+      await notifyTaskEvent(mockTask, blocked, "needs-approval")
+
+      expect(mockCenterNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: "warning",
+          title: "Task Needs Approval: Test Task",
+          body: expect.stringMatching(/needs approval: Bash.*not retried/),
+          dedupeKey: "task:task-1:needs-approval",
         })
       )
     })

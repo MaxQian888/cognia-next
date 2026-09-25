@@ -9,13 +9,16 @@
  */
 
 import { useTranslations } from "next-intl"
-import { ArrowUpRightIcon } from "lucide-react"
+import { ArrowUpRightIcon, MessagesSquareIcon } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { FactList, FactRow } from "@/components/surface/fact-list"
 import type { ScheduledTask } from "@/types/scheduler"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
+
+import { focusSessionInItsWorkspace } from "../../run-artifact-links"
 
 export interface OriginSectionProps {
   item: UnifiedScheduledItem
@@ -25,7 +28,12 @@ export interface OriginSectionProps {
 export function OriginSection({ item, task }: OriginSectionProps) {
   const t = useTranslations("scheduler")
   const tDetail = useTranslations("scheduler.detail")
+  const router = useRouter()
   const createdBy = item.createdBySource ?? task?.createdBy?.kind
+  // An agent that scheduled this recorded the conversation it was in; that is
+  // where the user can ask why, or ask for it to be changed.
+  const authoringSessionId =
+    task?.createdBy?.kind === "agent" ? task.createdBy.sessionId : undefined
   // A link back to the page itself is not an "open elsewhere".
   const externalLink = !item.origin.deepLinkHref.startsWith("/scheduler")
 
@@ -55,6 +63,21 @@ export function OriginSection({ item, task }: OriginSectionProps) {
           {item.sourceId}
         </FactRow>
       </FactList>
+      {authoringSessionId ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={() =>
+            void focusSessionInItsWorkspace(authoringSessionId).then(() => router.push("/"))
+          }
+          data-testid="origin-open-conversation"
+        >
+          <MessagesSquareIcon className="mr-1.5 size-3.5" aria-hidden="true" />
+          {tDetail("openAuthoringConversation")}
+        </Button>
+      ) : null}
       {externalLink ? (
         <Button
           asChild

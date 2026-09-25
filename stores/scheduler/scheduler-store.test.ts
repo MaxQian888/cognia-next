@@ -692,6 +692,17 @@ describe("useSchedulerStore", () => {
       expect(mockScheduler.updateTask).toHaveBeenCalledWith("task-id", { name: "Renamed" })
     })
 
+    it("records a not-found error when the scheduler has no such task", async () => {
+      mockScheduler.updateTask.mockResolvedValueOnce(null)
+      const { result } = renderHook(() => useSchedulerStore())
+      let updated: ScheduledTask | null = sampleTask()
+      await act(async () => {
+        updated = await result.current.updateTask("gone", { name: "x" })
+      })
+      expect(updated).toBeNull()
+      expect(result.current.error).toBe("Scheduled task gone was not found.")
+    })
+
     it("records errors and returns null when scheduler.updateTask throws", async () => {
       mockScheduler.updateTask.mockRejectedValueOnce(new Error("nope"))
       const { result } = renderHook(() => useSchedulerStore())
@@ -778,6 +789,8 @@ describe("useSchedulerStore", () => {
         await result.current.deleteTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+      // The refusal is recorded, so the caller can say why.
+      expect(result.current.error).toBe("Scheduled task task-1 was not found.")
     })
   })
 
@@ -849,6 +862,7 @@ describe("useSchedulerStore", () => {
         ok = await result.current.pauseTask("task-1")
       })
       expect(ok).toBe(false)
+      expect(result.current.error).toBe("pause-fail")
     })
 
     it("does not refreshAll when pauseTask returns false", async () => {
@@ -858,6 +872,7 @@ describe("useSchedulerStore", () => {
         await result.current.pauseTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+      expect(result.current.error).toBe("Scheduled task task-1 could not be paused.")
     })
 
     it("resumes successfully", async () => {
@@ -877,6 +892,7 @@ describe("useSchedulerStore", () => {
         ok = await result.current.resumeTask("task-1")
       })
       expect(ok).toBe(false)
+      expect(result.current.error).toBe("resume-fail")
     })
 
     it("does not refreshAll when resumeTask returns false", async () => {
@@ -886,6 +902,7 @@ describe("useSchedulerStore", () => {
         await result.current.resumeTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+      expect(result.current.error).toBe("Scheduled task task-1 could not be resumed.")
     })
   })
 
@@ -955,6 +972,7 @@ describe("useSchedulerStore", () => {
         await result.current.runTaskNow("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+      expect(result.current.error).toBe("Scheduled task task-1 was not found.")
     })
   })
 
@@ -1392,14 +1410,18 @@ describe("useSchedulerStore", () => {
       expect(mockedDb.cleanupOldExecutions).toHaveBeenCalledWith(60)
     })
 
-    it("returns 0 when the underlying call throws", async () => {
+    it("rethrows and records the error when the underlying call throws", async () => {
       mockedDb.cleanupOldExecutions.mockRejectedValueOnce(new Error("db"))
       const { result } = renderHook(() => useSchedulerStore())
-      let count = -1
+      let caught: unknown
       await act(async () => {
-        count = await result.current.cleanupOldExecutions()
+        await result.current.cleanupOldExecutions().catch((error: unknown) => {
+          caught = error
+        })
       })
-      expect(count).toBe(0)
+      // A failure must not read as "nothing was old enough".
+      expect(caught).toEqual(new Error("db"))
+      expect(result.current.error).toBe("db")
     })
   })
 

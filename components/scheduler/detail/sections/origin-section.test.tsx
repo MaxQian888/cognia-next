@@ -1,5 +1,14 @@
 import { render, screen } from "@testing-library/react"
 
+import userEvent from "@testing-library/user-event"
+
+const push = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
+const focusSession = jest.fn(async (_sessionId: string) => undefined)
+jest.mock("../../run-artifact-links", () => ({
+  focusSessionInItsWorkspace: (id: string) => focusSession(id),
+}))
+
 import { OriginSection } from "./origin-section"
 import type { ScheduledTask } from "@/types/scheduler"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
@@ -54,5 +63,25 @@ describe("OriginSection", () => {
       />
     )
     expect(screen.getByText("You")).toBeInTheDocument()
+  })
+})
+
+describe("OriginSection · the conversation that created it", () => {
+  it("opens the agent's conversation, in its own workspace", async () => {
+    const user = userEvent.setup()
+    const task = {
+      createdBy: { kind: "agent", sessionId: "sess-7" },
+      createdAt: new Date(2026, 0, 1),
+    } as unknown as ScheduledTask
+    render(<OriginSection item={item({ createdBySource: "agent" })} task={task} />)
+    await user.click(screen.getByTestId("origin-open-conversation"))
+    expect(focusSession).toHaveBeenCalledWith("sess-7")
+    expect(push).toHaveBeenCalledWith("/")
+  })
+
+  it("has no such link for a task a person or a plugin set up", () => {
+    const task = { createdBy: { kind: "user" } } as unknown as ScheduledTask
+    render(<OriginSection item={item()} task={task} />)
+    expect(screen.queryByTestId("origin-open-conversation")).not.toBeInTheDocument()
   })
 })

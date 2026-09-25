@@ -1,7 +1,11 @@
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
 import type { ConnectorAuditRow } from "@/lib/db/connector-types"
 import type { TaskExecution, TaskExecutionLog } from "@/types/scheduler"
-import { makeUnifiedId, type ScheduledItemKind } from "@/types/scheduler/unified"
+import {
+  makeUnifiedId,
+  unifiedKindForTaskType,
+  type ScheduledItemKind,
+} from "@/types/scheduler/unified"
 import type {
   UnifiedExecutionRun,
   UnifiedRunLog,
@@ -9,10 +13,9 @@ import type {
 } from "@/types/scheduler/unified-runs"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 
+/** A run is listed under its task's kind: the one ownership rule, not a copy of it. */
 export function taskExecutionKind(taskType: string): "app" | "plugin" | "connector" {
-  if (taskType === "plugin") return "plugin"
-  if (taskType.startsWith("connection:")) return "connector"
-  return "app"
+  return unifiedKindForTaskType(taskType)
 }
 
 export function toUnifiedFromTaskExecution(exec: TaskExecution): UnifiedExecutionRun {
@@ -31,6 +34,7 @@ export function toUnifiedFromTaskExecution(exec: TaskExecution): UnifiedExecutio
     error: exec.error ? { message: exec.error } : undefined,
     logs: exec.logs.map(mapTaskExecLog),
     triggerSource: exec.triggerSource,
+    ...(exec.terminalReason ? { terminalReason: exec.terminalReason } : {}),
     origin: { tableName: "scheduledTaskRuns", nativeId: exec.id },
   }
 }
@@ -101,7 +105,7 @@ export function toUnifiedFromAudit(row: ConnectorAuditRow): UnifiedExecutionRun 
   }
 }
 
-function mapTaskExecStatus(status: TaskExecution["status"]): UnifiedRunStatus {
+export function mapTaskExecStatus(status: TaskExecution["status"]): UnifiedRunStatus {
   switch (status) {
     case "pending":
     case "running":

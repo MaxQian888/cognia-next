@@ -15,6 +15,7 @@
 
 import * as native from "@/lib/native/system-scheduler"
 import { describeLocalSchedulerHost, hostSatisfies } from "../host-support"
+import { requireSourceOutcome } from "./outcome"
 import type {
   CreateSystemTaskInput,
   SystemTask,
@@ -130,15 +131,24 @@ export function createSystemSource(
     },
 
     async delete(sourceId: string): Promise<void> {
-      await nativeAdapter.deleteSystemTask(sourceId)
+      requireSourceOutcome(
+        await nativeAdapter.deleteSystemTask(sourceId),
+        `System task ${sourceId} was not found.`
+      )
     },
 
     async pause(sourceId: string): Promise<void> {
-      await nativeAdapter.disableSystemTask(sourceId)
+      requireSourceOutcome(
+        await nativeAdapter.disableSystemTask(sourceId),
+        `System task ${sourceId} could not be disabled.`
+      )
     },
 
     async resume(sourceId: string): Promise<void> {
-      await nativeAdapter.enableSystemTask(sourceId)
+      requireSourceOutcome(
+        await nativeAdapter.enableSystemTask(sourceId),
+        `System task ${sourceId} could not be enabled.`
+      )
     },
 
     async runNow(sourceId: string): Promise<void> {

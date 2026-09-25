@@ -142,12 +142,9 @@ export function SchedulerDialogs({
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
                 <Plus className="h-5 w-5 text-primary" />
               </div>
-              {t("createTask") || "Create Task"}
+              {t("createTask")}
             </SheetTitle>
-            <SheetDescription className="text-sm">
-              {t("createTaskDescription") ||
-                "Set up a new scheduled task with triggers, notifications and more"}
-            </SheetDescription>
+            <SheetDescription className="text-sm">{t("createTaskDescription")}</SheetDescription>
           </SheetHeader>
           <div className="mt-6">
             {createDraftSummary && (
@@ -184,11 +181,9 @@ export function SchedulerDialogs({
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10">
                 <Settings className="h-5 w-5 text-blue-500" />
               </div>
-              {t("editTask") || "Edit Task"}
+              {t("editTask")}
             </SheetTitle>
-            <SheetDescription className="text-sm">
-              {t("editTaskDescription") || "Modify task settings and configurations"}
-            </SheetDescription>
+            <SheetDescription className="text-sm">{t("editTaskDescription")}</SheetDescription>
           </SheetHeader>
           <div className="mt-6">
             {selectedTask && (
@@ -223,10 +218,10 @@ export function SchedulerDialogs({
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
                 <Plus className="h-5 w-5 text-primary" />
               </div>
-              {t("createSystemTask") || "Create System Task"}
+              {t("createSystemTask")}
             </SheetTitle>
             <SheetDescription className="text-sm">
-              {t("systemSchedulerDescription") || "Manage OS-level scheduled tasks"}
+              {t("systemSchedulerDescription")}
             </SheetDescription>
           </SheetHeader>
           <div className="mt-6">
@@ -248,10 +243,10 @@ export function SchedulerDialogs({
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10">
                 <Settings className="h-5 w-5 text-blue-500" />
               </div>
-              {t("editSystemTask") || "Edit System Task"}
+              {t("editSystemTask")}
             </SheetTitle>
             <SheetDescription className="text-sm">
-              {t("systemSchedulerDescription") || "Manage OS-level scheduled tasks"}
+              {t("systemSchedulerDescription")}
             </SheetDescription>
           </SheetHeader>
           <div className="mt-6">
@@ -282,19 +277,16 @@ export function SchedulerDialogs({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteTask") || "Delete Task"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("deleteTaskConfirm") ||
-                "Are you sure you want to delete this task? This action cannot be undone."}
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("deleteTask")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("deleteTaskConfirm")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel") || "Cancel"}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={onSystemDeleteConfirm}
               className="bg-destructive text-destructive-foreground"
             >
-              {t("delete") || "Delete"}
+              {t("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

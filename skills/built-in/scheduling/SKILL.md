@@ -92,6 +92,7 @@ Read the answer before reporting success. `status: "requested"` means the stop w
 - `overlap-skipped`: the previous run of this task was still going.
 - `concurrency-blocked`: the machine was already running as many tasks at once as the user allows. Not a fault in the task.
 - `user-cancelled`: somebody stopped that run, from the panel or with `scheduler_cancel_task_run`.
+- `needs-approval`: the run was unattended and stopped where it needed a person: a tool it was refused, or a workspace that is not trusted. It is never retried, because a retry stops in the same place. The run's output names the tools and roots. The fix is the user's: add the tools to the task's allowed tools or raise its permission mode, or trust the workspace, then run it again.
 - `missed-run-skipped` / `catchup-window-expired`: the machine was asleep past the catch-up window.
 - `auto-paused`: it failed enough consecutive times that the scheduler stopped it.
 

@@ -34,6 +34,8 @@ export type TaskWriteSource = "user" | "agent" | "plugin" | "system"
 
 /** Machine-readable refusal, so every surface can render the same reasons. */
 export type TaskWriteRefusalReason =
+  /** `agentToolsEnabled` is off and the writer is an agent. */
+  | "agent-tools-disabled"
   /** `scriptTasksEnabled` is off and the type is `script`. */
   | "script-tasks-disabled"
   /** `maxTasksPerSource` reached for this source. */
@@ -60,6 +62,22 @@ export interface TaskWriteRequest {
   sessionId?: string
   /** Owning plugin, for a plugin write. */
   pluginId?: string
+  /**
+   * Whether this write adds a task or acts on one that already exists.
+   * Defaults to `"create"`. The per-source quota bounds how many tasks a
+   * source may OWN, so it gates creation only: an agent at its limit must
+   * still be able to pause, amend or delete what it already put there.
+   */
+  operation?: "create" | "mutate"
+  /**
+   * A person approved THIS write before it ran: the built-in skills' confirm
+   * dialog, or the IM confirm card's callback. Set by the skill dispatcher,
+   * never by the agent. `agentAutoCreate` answers "may agents act
+   * unattended", and a confirmed write is attended, so it no longer applies;
+   * `confirmationRequired` is satisfied for the same reason. The host gate,
+   * `agentToolsEnabled`, the script switch and the quota still apply.
+   */
+  humanConfirmed?: boolean
 }
 
 export interface TaskWriteAuthorityDeps {
@@ -133,6 +151,19 @@ export async function authorizeTaskWrite(
 
   const policy = await (deps.loadPolicy ?? loadSchedulerPolicy)()
 
+  // The user's standing answer to "may agents touch the schedule at all".
+  // `build-options.ts` also withholds the tools while it is off; this is the
+  // same rule for every write path that does not go through that manifest,
+  // the three legacy IM tools included.
+  if (request.source === "agent" && policy.agentToolsEnabled === false) {
+    return {
+      allowed: false,
+      reason: "agent-tools-disabled",
+      message:
+        'Agents are not allowed to manage your schedule. Turn on "Allow agents to manage scheduled tasks" in the scheduler settings.',
+    }
+  }
+
   if (request.taskType === "script" && !policy.scriptTasksEnabled) {
     return {
       allowed: false,
@@ -141,14 +172,19 @@ export async function authorizeTaskWrite(
     }
   }
 
-  const owned = await (deps.countTasksBySource ?? countTasksBySourceFromDb)(request.source)
-  if (owned >= policy.maxTasksPerSource) {
-    return {
-      allowed: false,
-      reason: "quota-exceeded",
-      message: `This ${request.source} already owns ${owned} scheduled tasks, which is the configured limit of ${policy.maxTasksPerSource}.`,
+  if ((request.operation ?? "create") === "create") {
+    const owned = await (deps.countTasksBySource ?? countTasksBySourceFromDb)(request.source)
+    if (owned >= policy.maxTasksPerSource) {
+      return {
+        allowed: false,
+        reason: "quota-exceeded",
+        message: `This ${request.source} already owns ${owned} scheduled tasks, which is the configured limit of ${policy.maxTasksPerSource}.`,
+      }
     }
   }
+  // Both remaining rules ask "was a person in the loop". A confirmed write
+  // already answered yes, so neither may refuse it or ask a second time.
+  if (request.humanConfirmed === true) return { allowed: true }
 
   // `confirmationRequired` is the narrower rule and is checked first, so a type
   // on that list asks for a human rather than being refused outright even when

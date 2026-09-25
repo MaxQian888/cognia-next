@@ -54,11 +54,14 @@ export function SchedulerBulkToolbar({
     try {
       const reg = resolveRegistry()
       const failed: string[] = []
+      let done = 0
       // Iterate sequentially; per-source operations may hit IndexedDB or
       // sidecars and parallelizing them risks lock contention.
       for (const item of selectedItems) {
-        if (action === "pause" && !item.capabilities.pause) continue
-        if (action === "resume" && !item.capabilities.pause) continue
+        // Only items the action changes: pausing a paused task is not a
+        // success to count, and resuming an active one is not either.
+        if (action === "pause" && !(item.capabilities.pause && item.status === "active")) continue
+        if (action === "resume" && !(item.capabilities.pause && item.status === "paused")) continue
         if (action === "delete" && !item.capabilities.delete) continue
         const source = reg.getSource(item.kind)
         if (!source) {
@@ -67,6 +70,7 @@ export function SchedulerBulkToolbar({
         }
         try {
           await source[action](item.sourceId)
+          done += 1
         } catch {
           // A bulk run keeps going past one bad item, but it must not pretend
           // the item succeeded: the loop used to swallow this entirely and
@@ -94,13 +98,19 @@ export function SchedulerBulkToolbar({
           description: hidden > 0 ? `${joined} ${t("bulkPartialFailureMore", { hidden })}` : joined,
         })
       }
+      if (done > 0) toast.success(t(`bulkDone.${action}`, { count: done }))
       onClearSelection()
     } finally {
       setWorking(false)
     }
   }
 
-  const pausableCount = selectedItems.filter((i) => i.capabilities.pause).length
+  const pausableCount = selectedItems.filter(
+    (i) => i.capabilities.pause && i.status === "active"
+  ).length
+  const resumableCount = selectedItems.filter(
+    (i) => i.capabilities.pause && i.status === "paused"
+  ).length
   const deletableCount = selectedItems.filter((i) => i.capabilities.delete).length
 
   return (
@@ -115,13 +125,12 @@ export function SchedulerBulkToolbar({
             variant="ghost"
             data-testid="bulk-clear"
             onClick={onClearSelection}
-            aria-label={t("clearSelection") || "Clear selection"}
+            aria-label={t("clearSelection")}
           >
             <X className="h-3.5 w-3.5" />
           </Button>
           <span className="text-xs font-medium" data-testid="bulk-count">
-            <span data-testid="bulk-count-value">{selectedItems.length}</span>{" "}
-            {t("selected") || "selected"}
+            <span data-testid="bulk-count-value">{selectedItems.length}</span> {t("selected")}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -133,17 +142,17 @@ export function SchedulerBulkToolbar({
             onClick={() => void dispatchAll("pause")}
           >
             <Pause className="mr-1.5 h-3.5 w-3.5" />
-            {t("pause") || "Pause"}
+            {t("pause")}
           </Button>
           <Button
             size="sm"
             variant="outline"
             data-testid="bulk-resume"
-            disabled={working || pausableCount === 0}
+            disabled={working || resumableCount === 0}
             onClick={() => void dispatchAll("resume")}
           >
             <Play className="mr-1.5 h-3.5 w-3.5" />
-            {t("resume") || "Resume"}
+            {t("resume")}
           </Button>
           <Button
             size="sm"
@@ -153,7 +162,7 @@ export function SchedulerBulkToolbar({
             onClick={() => setDeleteConfirmOpen(true)}
           >
             <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-            {t("delete") || "Delete"}
+            {t("delete")}
           </Button>
         </div>
       </div>
@@ -161,16 +170,13 @@ export function SchedulerBulkToolbar({
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("bulkDeleteTitle") || "Delete selected tasks?"}</AlertDialogTitle>
+            <AlertDialogTitle>{t("bulkDeleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {(
-                t("bulkDeleteDescription", { n: deletableCount }) ||
-                "This will delete {n} selected tasks across all kinds. This action cannot be undone."
-              ).replace("{n}", String(deletableCount))}
+              {t("bulkDeleteDescription", { n: deletableCount })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel") || "Cancel"}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               data-testid="bulk-delete-confirm"
               onClick={() => {
@@ -178,7 +184,7 @@ export function SchedulerBulkToolbar({
                 void dispatchAll("delete")
               }}
             >
-              {t("delete") || "Delete"}
+              {t("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

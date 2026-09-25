@@ -7,9 +7,9 @@
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { validateCronExpression } from "@/lib/scheduler/cron-parser"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
-import type { RadarScheduleSettings } from "@/types/radar"
+import { RADAR_REPORT_TASK_ID, type RadarScheduleSettings } from "@/types/radar"
 
-export const RADAR_REPORT_TASK_ID = "radar-report::singleton"
+export { RADAR_REPORT_TASK_ID }
 
 const DAILY_CRON = "0 9 * * *" // 09:00 daily — a "morning briefing" feel
 const WEEKLY_CRON = "0 9 * * 1" // 09:00 every Monday
