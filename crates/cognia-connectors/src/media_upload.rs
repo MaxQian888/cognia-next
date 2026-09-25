@@ -23,11 +23,7 @@ const MAX_FORM_FIELDS_BYTES: usize = 64 * 1024;
 
 fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
-    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))
+    proxy_config::managed_client(builder, target_url).map_err(|error| error.to_string())
 }
 
 /// Decode inline composer attachments without handing a data URL to HTTP or

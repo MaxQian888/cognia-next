@@ -303,11 +303,8 @@ async fn fetch_endpoint(
     fatal_error: &mut bool,
 ) -> Result<(String, ClientConfig), String> {
     let builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
-    let (builder, _) = proxy_config::apply_reqwest_policy(builder, ENDPOINT_URL)
-        .map_err(|error| error.to_string())?;
-    let client = builder
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let client =
+        proxy_config::managed_client(builder, ENDPOINT_URL).map_err(|error| error.to_string())?;
 
     let resp = client
         .post(ENDPOINT_URL)

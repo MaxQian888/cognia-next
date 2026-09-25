@@ -125,11 +125,8 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
     let builder = Client::builder()
         .timeout(timeout)
         .danger_accept_invalid_certs(req.accept_invalid_certificates());
-    let (builder, _) =
-        proxy_config::apply_reqwest_policy(builder, &req.url).map_err(|error| error.to_string())?;
-    let client = builder
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let client =
+        proxy_config::managed_client(builder, &req.url).map_err(|error| error.to_string())?;
 
     let method = req.validated_method()?;
 

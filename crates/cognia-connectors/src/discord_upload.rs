@@ -60,11 +60,7 @@ pub struct ConnectorDiscordUploadRequest {
 /// rest of the connector HTTP layer.
 fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder().timeout(Duration::from_secs(60));
-    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))
+    proxy_config::managed_client(builder, target_url).map_err(|error| error.to_string())
 }
 
 /// Fetch the source URL into memory (shared proxy / TLS config). Times out after

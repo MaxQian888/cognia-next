@@ -1007,11 +1007,7 @@ fn decrypt_legacy_file(path: &Path) -> Result<Vec<u8>, String> {
 /// `media_upload::build_client`.
 fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
     let builder = reqwest::Client::builder().timeout(FETCH_TIMEOUT);
-    let (builder, _) = proxy_config::apply_reqwest_policy(builder, target_url)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))
+    proxy_config::managed_client(builder, target_url).map_err(|error| error.to_string())
 }
 
 // ---------------------------------------------------------------------------
