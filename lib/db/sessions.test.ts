@@ -17,7 +17,7 @@ import {
   listAgentThreadSessions,
   listScopedSessions,
   listWorkspaceSessions,
-  countWorkspaceMessages,
+  countWorkspaceConversations,
   deleteSession,
   listSessionBranches,
   countBranchesAtMessage,
@@ -1316,7 +1316,7 @@ describe("workspace (project) scoping", () => {
   })
 })
 
-describe("countWorkspaceMessages", () => {
+describe("countWorkspaceConversations", () => {
   async function putMessages(sessionId: string, count: number) {
     await getDb().messages.bulkPut(
       Array.from({ length: count }, (_, index) => ({
@@ -1329,7 +1329,7 @@ describe("countWorkspaceMessages", () => {
     )
   }
 
-  it("counts the messages of the conversations the workspace's chat list shows", async () => {
+  it("counts the conversations the workspace's chat list shows, and their messages", async () => {
     await saveSettings({ activeProjectId: "proj-A" })
     const own = await createSession({ title: "own" })
     const legacy = await createSession({ title: "legacy" })
@@ -1338,31 +1338,44 @@ describe("countWorkspaceMessages", () => {
     const subagent = await createSession({ title: "subagent" })
     await getDb().sessions.update(subagent.id, { kind: "subagent" })
     const empty = await createSession({ title: "empty" })
+    expect(empty.projectId).toBe("proj-A")
     await putMessages(own.id, 3)
     await putMessages(legacy.id, 2)
     await putMessages(other.id, 5)
     await putMessages(subagent.id, 7)
 
-    // Own + workspace-less; not another workspace's, not an embedded
-    // transcript, and a conversation with no messages adds nothing.
-    expect(await countWorkspaceMessages("proj-A")).toBe(5)
-    expect(await countWorkspaceMessages("proj-B")).toBe(7)
-    expect(empty.projectId).toBe("proj-A")
+    // Own (with or without messages) + workspace-less; not another
+    // workspace's, not an embedded transcript.
+    expect(await countWorkspaceConversations("proj-A")).toEqual({
+      conversations: 3,
+      messages: 5,
+    })
+    // The workspace-less conversation is shown in every workspace.
+    expect(await countWorkspaceConversations("proj-B")).toEqual({
+      conversations: 2,
+      messages: 7,
+    })
   })
 
   it("is zero for a workspace with no conversations", async () => {
-    expect(await countWorkspaceMessages("proj-empty")).toBe(0)
+    expect(await countWorkspaceConversations("proj-empty")).toEqual({
+      conversations: 0,
+      messages: 0,
+    })
   })
 
   it("re-emits in a liveQuery when a message lands or a conversation joins", async () => {
-    await saveSettings({ activeProjectId: "proj-A" })
-    const own = await createSession({ title: "own" })
+    // Its own workspace id: Dexie's liveQuery cache keeps a reversed
+    // `[projectId+updatedAt]` range an earlier test subscribed to, and the
+    // fixture's restore does not evict it, so a reused id replays that test's rows.
+    const own = await createSession({ title: "own", projectId: "proj-live" })
     await putMessages(own.id, 1)
-    const emissions: number[] = []
-    const sub = Dexie.liveQuery(() => countWorkspaceMessages("proj-A")).subscribe({
-      next: (count) => emissions.push(count),
+    const emissions: Array<{ conversations: number; messages: number }> = []
+    const sub = Dexie.liveQuery(() => countWorkspaceConversations("proj-live")).subscribe({
+      next: (counts) => emissions.push(counts),
     })
-    await waitUntil(() => emissions.at(-1) === 1)
+    await waitUntil(() => emissions.at(-1)?.messages === 1)
+    expect(emissions.at(-1)).toEqual({ conversations: 1, messages: 1 })
 
     await getDb().messages.put({
       id: "late",
@@ -1371,16 +1384,16 @@ describe("countWorkspaceMessages", () => {
       parts: [],
       createdAt: 9,
     } as never)
-    await waitUntil(() => emissions.at(-1) === 2)
+    await waitUntil(() => emissions.at(-1)?.messages === 2)
 
     // A conversation moved in from another workspace brings its messages.
-    const moved = await createSession({ title: "moved", projectId: "proj-B" })
+    const moved = await createSession({ title: "moved", projectId: "proj-elsewhere" })
     await putMessages(moved.id, 4)
-    await getDb().sessions.update(moved.id, { projectId: "proj-A" })
-    await waitUntil(() => emissions.at(-1) === 6)
+    await getDb().sessions.update(moved.id, { projectId: "proj-live" })
+    await waitUntil(() => emissions.at(-1)?.messages === 6)
 
     sub.unsubscribe()
-    expect(emissions.at(-1)).toBe(6)
+    expect(emissions.at(-1)).toEqual({ conversations: 2, messages: 6 })
   })
 })
 

@@ -129,25 +129,39 @@ export async function listWorkspaceSessions(projectId: string): Promise<ChatSess
   return [...scoped, ...unscoped].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+export interface WorkspaceConversationCounts {
+  conversations: number
+  messages: number
+}
+
 /**
- * How many messages a workspace's conversations hold, counted over the same
- * conversations its chat list shows: {@link listWorkspaceSessions} less the
- * embedded ones no list shows (subagent transcripts, resource workbenches,
- * workflow editors — `lib/chat/session-exposure.ts`).
+ * How many conversations a workspace has, and how many messages they hold,
+ * over one set: the conversations its chat list shows, i.e.
+ * {@link listWorkspaceSessions} less the embedded ones no list shows (subagent
+ * transcripts, resource workbenches, workflow editors —
+ * `lib/chat/session-exposure.ts`). One read for both, so the two numbers always
+ * describe the same conversations.
  *
- * Counted from `messages` because `Project.messageCount` is written as 0 at
- * creation and never again. One `sessionId` index count per conversation: each
- * is a native IndexedDB `count(range)` that reads no rows, where a single
- * `anyOf` count walks every matching key with a cursor, and a live query
- * re-runs this on every message write, a streaming reply's included.
+ * Counted from the tables because `Project.messageCount` is written as 0 at
+ * creation and never again, and `Project.sessionIds` misses every conversation
+ * of no workspace that the chat list shows. Messages take one `sessionId` index
+ * count per conversation: each is a native IndexedDB `count(range)` that reads
+ * no rows, where a single `anyOf` count walks every matching key with a
+ * cursor, and a live query re-runs this on every message write, a streaming
+ * reply's included.
  */
-export async function countWorkspaceMessages(projectId: string): Promise<number> {
+export async function countWorkspaceConversations(
+  projectId: string
+): Promise<WorkspaceConversationCounts> {
   const db = getDb()
   const sessions = filterExposedSessions(await listWorkspaceSessions(projectId), "main-list")
   const counts = await Promise.all(
     sessions.map((session) => db.messages.where("sessionId").equals(session.id).count())
   )
-  return counts.reduce((sum, count) => sum + count, 0)
+  return {
+    conversations: sessions.length,
+    messages: counts.reduce((sum, count) => sum + count, 0),
+  }
 }
 
 /**

@@ -228,7 +228,7 @@ export interface Project {
   sessionCount: number
   /**
    * Written as 0 at creation and never maintained; kept only for the persisted
-   * row and plugin API shape. Count live via `countWorkspaceMessages(project.id)`
+   * row and plugin API shape. Count live via `countWorkspaceConversations(project.id)`
    * (`lib/db/sessions.ts`), as the workspace overview panel does.
    */
   messageCount: number

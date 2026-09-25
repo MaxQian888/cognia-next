@@ -24,7 +24,7 @@ import { RootSwitcher } from "@/components/source-control/root-switcher"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
-import { countWorkspaceMessages } from "@/lib/db/sessions"
+import { countWorkspaceConversations, type WorkspaceConversationCounts } from "@/lib/db/sessions"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { cn } from "@/lib/utils"
 import { useGitStore } from "@/stores/git/git-store"
@@ -34,6 +34,8 @@ interface ProjectOverviewPanelProps {
   projectId: string
   onOpenWorkspace: () => void
 }
+
+const EMPTY_COUNTS: WorkspaceConversationCounts = { conversations: 0, messages: 0 }
 
 function basename(path: string): string {
   const segments = path.split(/[\\/]/).filter(Boolean)
@@ -57,9 +59,15 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
   const committing = useGitStore((state) => state.ops.commit)
   const syncing = useGitStore((state) => state.ops.sync)
   const setRootDir = useGitStore((state) => state.setRootDir)
-  // Counted live from the workspace's conversations: `Project.messageCount` is
-  // written as 0 at creation and never again. `undefined` until the first read.
-  const messageCount = useClientLiveQuery(() => countWorkspaceMessages(projectId), [projectId], 0)
+  // Counted live over the conversations the workspace's chat list shows:
+  // `Project.messageCount` is written as 0 at creation and never again, and
+  // `Project.sessionIds` misses the conversations of no workspace that list
+  // shows. `undefined` until the first read.
+  const counts = useClientLiveQuery(
+    () => countWorkspaceConversations(projectId),
+    [projectId],
+    EMPTY_COUNTS
+  )
 
   const roots = project?.roots ?? []
   const rootPaths = roots.map((root) => root.path)
@@ -86,7 +94,6 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
     Number(Boolean(project.description?.trim())) +
     Number(Boolean(project.customInstructions?.trim())) +
     Number(project.knowledgeBase.length > 0)
-  const sessionCount = Math.max(project.sessionCount, project.sessionIds.length)
 
   let scmAnalysis = t("analysis.scmLoading")
   if (!available) scmAnalysis = t("analysis.scmUnavailable")
@@ -151,7 +158,8 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
             <Metric
               icon={<MessageSquareTextIcon className="size-3.5" />}
               label={t("summary.conversations")}
-              value={sessionCount}
+              value={counts?.conversations}
+              testId="project-overview-conversation-count"
             />
             <Metric
               icon={<BookOpenTextIcon className="size-3.5" />}
@@ -161,7 +169,7 @@ export function ProjectOverviewPanel({ projectId, onOpenWorkspace }: ProjectOver
             <Metric
               icon={<SparklesIcon className="size-3.5" />}
               label={t("summary.messages")}
-              value={messageCount}
+              value={counts?.messages}
               testId="project-overview-message-count"
             />
           </div>

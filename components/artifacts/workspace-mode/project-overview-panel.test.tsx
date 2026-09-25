@@ -17,9 +17,12 @@ const onOpenWorkspace = jest.fn()
 let projects: Project[] = []
 let available = true
 let gitState: Record<string, unknown>
-let liveMessageCount: number | undefined
+let liveCounts: { conversations: number; messages: number } | undefined
 const liveQueries: Array<{ query: () => unknown; deps: unknown[] }> = []
-const countWorkspaceMessages = jest.fn(async (_projectId: string) => 0)
+const countWorkspaceConversations = jest.fn(async (_projectId: string) => ({
+  conversations: 0,
+  messages: 0,
+}))
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
@@ -28,12 +31,12 @@ jest.mock("next/navigation", () => ({
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: (query: () => unknown, deps: unknown[]) => {
     liveQueries.push({ query, deps })
-    return liveMessageCount
+    return liveCounts
   },
 }))
 
 jest.mock("@/lib/db/sessions", () => ({
-  countWorkspaceMessages: (projectId: string) => countWorkspaceMessages(projectId),
+  countWorkspaceConversations: (projectId: string) => countWorkspaceConversations(projectId),
 }))
 
 jest.mock("next-intl", () => ({
@@ -151,7 +154,7 @@ function status(): GitStatus {
 beforeEach(() => {
   jest.clearAllMocks()
   available = true
-  liveMessageCount = 23
+  liveCounts = { conversations: 5, messages: 23 }
   liveQueries.length = 0
   projects = [
     project("project-a", "Alpha", "/repo/a"),
@@ -185,30 +188,39 @@ describe("ProjectOverviewPanel", () => {
     expect(screen.getByText("projectOverview.analysis.title")).toBeInTheDocument()
   })
 
-  it("shows the workspace's live message count, not the never-written project field", () => {
+  it("shows the workspace's live conversation and message counts, not the project fields", () => {
     render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
 
-    // The fixture's stale `messageCount: 14` must not leak through.
-    const metric = screen.getByTestId("project-overview-message-count")
-    expect(metric).toHaveTextContent("projectOverview.summary.messages")
-    expect(metric).toHaveTextContent("23")
-    expect(metric).not.toHaveTextContent("14")
+    // The fixture's `sessionIds` (2) and stale `messageCount: 14` must not leak.
+    const conversations = screen.getByTestId("project-overview-conversation-count")
+    expect(conversations).toHaveTextContent("projectOverview.summary.conversations")
+    expect(conversations).toHaveTextContent("5")
+    expect(conversations).not.toHaveTextContent("2")
+    const messages = screen.getByTestId("project-overview-message-count")
+    expect(messages).toHaveTextContent("projectOverview.summary.messages")
+    expect(messages).toHaveTextContent("23")
+    expect(messages).not.toHaveTextContent("14")
 
-    // The live query is keyed to this panel's workspace and counts its messages.
+    // One live query, keyed to this panel's workspace, feeds both tiles.
     expect(liveQueries.at(-1)?.deps).toEqual(["project-b"])
     void liveQueries.at(-1)?.query()
-    expect(countWorkspaceMessages).toHaveBeenCalledWith("project-b")
+    expect(countWorkspaceConversations).toHaveBeenCalledTimes(1)
+    expect(countWorkspaceConversations).toHaveBeenCalledWith("project-b")
   })
 
-  it("holds a placeholder for the message count until the first read lands", () => {
-    liveMessageCount = undefined
+  it("holds placeholders for both counts until the first read lands", () => {
+    liveCounts = undefined
 
     render(<ProjectOverviewPanel projectId="project-b" onOpenWorkspace={onOpenWorkspace} />)
 
-    const metric = screen.getByTestId("project-overview-message-count")
-    expect(metric).toHaveTextContent("projectOverview.summary.messages")
-    expect(metric.querySelector('[data-slot="skeleton"]')).not.toBeNull()
-    expect(metric).not.toHaveTextContent(/\d/)
+    for (const testId of [
+      "project-overview-conversation-count",
+      "project-overview-message-count",
+    ]) {
+      const metric = screen.getByTestId(testId)
+      expect(metric.querySelector('[data-slot="skeleton"]')).not.toBeNull()
+      expect(metric).not.toHaveTextContent(/\d/)
+    }
   })
 
   it("offers workspace, refresh, sync, and full Source Control shortcuts", () => {
