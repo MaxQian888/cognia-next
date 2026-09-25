@@ -1,4 +1,4 @@
-import { shareViewerRunsInApp } from "./viewer-context"
+import { isShareViewerRoute, SHARE_VIEWER_ROUTE, shareViewerRunsInApp } from "./viewer-context"
 
 describe("shareViewerRunsInApp", () => {
   it("is true inside a native shell whatever the origin", () => {
@@ -59,5 +59,29 @@ describe("shareViewerRunsInApp", () => {
         nativeShell: false,
       })
     ).toBe(true)
+  })
+})
+
+describe("isShareViewerRoute", () => {
+  it.each([SHARE_VIEWER_ROUTE, "/share/view/", "/share/view.html"])(
+    "matches the viewer route as a static host serves it: %s",
+    (pathname) => {
+      expect(isShareViewerRoute(pathname)).toBe(true)
+    }
+  )
+
+  // The gates open for this one page, not for everything under `/share` or
+  // anything that merely starts with the same letters.
+  it.each(["/", "/share", "/share/views", "/share/view-admin", "/share/view/x", "/settings"])(
+    "does not match %s",
+    (pathname) => {
+      expect(isShareViewerRoute(pathname)).toBe(false)
+    }
+  )
+
+  it("is false before the router knows the path", () => {
+    expect(isShareViewerRoute(null)).toBe(false)
+    expect(isShareViewerRoute(undefined)).toBe(false)
+    expect(isShareViewerRoute("")).toBe(false)
   })
 })

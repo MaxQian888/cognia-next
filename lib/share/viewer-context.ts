@@ -25,6 +25,27 @@
 // (`pnpm dev`, a self-hosted deployment), and gating on the native marker would
 // tell every web user their own library does not exist.
 
+/** The viewer route. Every minted link is `${base}/share/view?c=…#k=…`. */
+export const SHARE_VIEWER_ROUTE = "/share/view"
+
+/**
+ * Whether `pathname` is the viewer route, in every spelling a static host can
+ * serve it under (`/share/view`, `/share/view/`, `/share/view.html`).
+ *
+ * The account, cloud sign-in and onboarding gates ask this before closing the
+ * app: reading a share needs no local account (ADR-0037, "The anonymous
+ * visitor"), and every one of those gates would otherwise stand in front of
+ * the link or navigate away from it, which drops the `#k=` key.
+ */
+export function isShareViewerRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false
+  return (
+    pathname === SHARE_VIEWER_ROUTE ||
+    pathname === `${SHARE_VIEWER_ROUTE}/` ||
+    pathname === `${SHARE_VIEWER_ROUTE}.html`
+  )
+}
+
 /** Everything the decision needs, so it can be made without touching globals. */
 export interface ShareViewerHost {
   /** The origin this page is served from, for example `https://share.cognia.cn`. */

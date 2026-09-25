@@ -80,7 +80,9 @@
     "autoUnlockFailedOther": "The profile could not be opened automatically. Enter your password to try again.",
     "deviceWorkspaceHint": "This workspace is protected by this device’s credential store. No password is needed.",
     "rememberOnDeviceLabel": "Unlock automatically on this device",
-    "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working."
+    "rememberOnDeviceHelp": "Keeps the password in this device’s credential store so you are not asked again here. Your password keeps working.",
+    "shareGuestHint": "This is a shared link. Anyone who has it can read it without an account; unlock to add it to your library.",
+    "shareGuestAction": "Read without unlocking"
   },
   "manage": {
     "activeAccountLabel": "Current account",

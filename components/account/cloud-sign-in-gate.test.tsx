@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {
@@ -149,6 +149,31 @@ describe("CloudSignInGate", () => {
       window.history.replaceState(null, "", "/")
     }
   )
+
+  // ADR-0037, "The anonymous visitor": a share link is readable without any
+  // account, and a web sign-in round-trips through the identity provider,
+  // which returns without the link's `#k=` key.
+  it.each(["/share/view", "/share/view/", "/share/view.html"])(
+    "lets a share link be read without team sign-in at %s",
+    async (pathname) => {
+      window.history.replaceState(null, "", `${pathname}?c=code#k=key`)
+      const d = deps({ pathname })
+      renderGate(d)
+      expect(screen.getByTestId("app")).toBeInTheDocument()
+      // The ungated path settles its phase on a microtask; flush it inside act.
+      await act(async () => {})
+      expect(screen.getByTestId("app")).toBeInTheDocument()
+      expect(d.discover).not.toHaveBeenCalled()
+      expect(window.location.hash).toBe("#k=key")
+      window.history.replaceState(null, "", "/")
+    }
+  )
+
+  it("still requires cloud identity next to the share viewer", async () => {
+    renderGate(deps({ pathname: "/share/views" }))
+    expect(await screen.findByTestId("cloud-sign-in-social-github")).toBeInTheDocument()
+    expect(screen.queryByTestId("app")).not.toBeInTheDocument()
+  })
 
   it("still requires cloud identity on the normal app and workbench-like paths", async () => {
     const { rerender } = renderGate(deps({ pathname: "/lark/workbench" }))

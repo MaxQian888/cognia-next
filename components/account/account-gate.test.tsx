@@ -13,6 +13,14 @@ jest.mock("next-intl", () => ({
   useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 
+// The share viewer route is the one place the gate hands a reader with no
+// open account a guest view instead of a gate screen. Default to the app root
+// so the ordinary gate tests are unaffected.
+let mockPathname: string | null = "/"
+jest.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+}))
+
 jest.mock("@/hooks/use-network-status", () => ({
   useNetworkStatus: () => ({
     loading: false,
@@ -116,6 +124,7 @@ beforeEach(() => {
   mockIsTauri = true
   mockIsCapacitor = false
   mockPetRole = "main"
+  mockPathname = "/"
   mockCreateAccount.mockResolvedValue(account("acct_first", "First"))
   mockUnlockAccount.mockResolvedValue()
   mockUnlockSecretStore.mockResolvedValue(null)
@@ -690,5 +699,162 @@ describe("lock screen wiring for automatic unlock", () => {
       </AccountGate>
     )
     expect(screen.queryByTestId("account-lock-screen-remember")).not.toBeInTheDocument()
+  })
+})
+
+// ADR-0037, "The anonymous visitor". `/share/view` renders for anyone holding
+// the link, and on the public deployment that is a fresh browser with no
+// account at all. The gate must neither stand in front of the link nor send
+// the visitor through account creation, whose hand-off to onboarding leaves the
+// page and drops the `#k=` key.
+describe("share viewer route", () => {
+  const alpha = account("acct_alpha", "Alpha")
+
+  function renderShareRoute(options: { guestView?: boolean } = {}) {
+    const { guestView = true } = options
+    return render(
+      <AccountGate guestView={guestView ? <div>guest viewer</div> : undefined}>
+        <div>app viewer</div>
+      </AccountGate>
+    )
+  }
+
+  beforeEach(() => {
+    mockIsTauri = false
+    mockPathname = "/share/view"
+  })
+
+  it.each(["/share/view", "/share/view/", "/share/view.html"])(
+    "shows a fresh browser the guest viewer, not the first-run form, at %s",
+    (route) => {
+      mockPathname = route
+      setGateState({ accounts: [] })
+      renderShareRoute()
+      expect(screen.getByText("guest viewer")).toBeInTheDocument()
+      expect(screen.queryByText("app viewer")).not.toBeInTheDocument()
+      expect(screen.queryByText("firstRunTitle")).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "createAccount" })).not.toBeInTheDocument()
+    }
+  )
+
+  // The decision waits for every automatic unlock boot runs (desktop
+  // workspace, remembered profile, tab session), so an owner is never shown the
+  // guest view first and then switched, which would fetch the share twice.
+  it("decides nothing until the registry has settled", () => {
+    setGateState({ accounts: [], loaded: false, loading: true })
+    renderShareRoute()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+    expect(screen.queryByText("app viewer")).not.toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "progressLabel" })).toBeInTheDocument()
+  })
+
+  it("keeps the owner's open account in the app, where the import actions are", () => {
+    setGateState({
+      accounts: [alpha],
+      activeAccountId: alpha.id,
+      unlockedAccountId: alpha.id,
+      locked: false,
+    })
+    renderShareRoute()
+    expect(screen.getByText("app viewer")).toBeInTheDocument()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+  })
+
+  it("puts unlocking first when this browser has an account, with reading as a guest beside it", () => {
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    renderShareRoute()
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+    expect(screen.getByText("shareGuestHint")).toBeInTheDocument()
+    expect(screen.getByTestId("account-gate-read-share-as-guest")).toHaveTextContent(
+      "shareGuestAction"
+    )
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+    expect(screen.queryByText("app viewer")).not.toBeInTheDocument()
+  })
+
+  it("switches to the guest viewer when the reader chooses not to unlock", () => {
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    renderShareRoute()
+    fireEvent.click(screen.getByTestId("account-gate-read-share-as-guest"))
+    expect(screen.getByText("guest viewer")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "unlockAccount" })).not.toBeInTheDocument()
+    expect(mockUnlockAccount).not.toHaveBeenCalled()
+  })
+
+  it("offers the same choice on the device-managed workspace screen", () => {
+    const device = {
+      ...account("acct_desktop_local_workspace", "Local"),
+      protection: "device" as const,
+    }
+    setGateState({ accounts: [device], activeAccountId: device.id, locked: true })
+    renderShareRoute()
+    expect(screen.getByTestId("account-device-workspace-open")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("account-gate-read-share-as-guest"))
+    expect(screen.getByText("guest viewer")).toBeInTheDocument()
+  })
+
+  // The choice answers the unlock screen. Once an account is open (unlocked
+  // from another route, say), the app is the right thing to show again.
+  it("hands back to the app once an account is open, even after reading as a guest", () => {
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    const { rerender } = renderShareRoute()
+    fireEvent.click(screen.getByTestId("account-gate-read-share-as-guest"))
+    expect(screen.getByText("guest viewer")).toBeInTheDocument()
+
+    setGateState({
+      accounts: [alpha],
+      activeAccountId: alpha.id,
+      unlockedAccountId: alpha.id,
+      locked: false,
+    })
+    rerender(
+      <AccountGate guestView={<div>guest viewer</div>}>
+        <div>app viewer</div>
+      </AccountGate>
+    )
+    expect(screen.getByText("app viewer")).toBeInTheDocument()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+  })
+
+  // The one-time recovery key is shown once and cannot be recovered later, so
+  // nothing may paint over it, the guest view included. An empty registry is
+  // the state in which the guest branch would otherwise win, so this fails if
+  // the share route is ever checked before the hand-over.
+  it("never skips the one-time recovery key hand-over", () => {
+    setGateState({ accounts: [], pendingRecoveryKey: "ABCD-EFGH" })
+    renderShareRoute()
+    expect(screen.getByTestId("account-vault-recovery")).toBeInTheDocument()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+  })
+
+  it("leaves native mobile to its own pairing gate", () => {
+    mockIsCapacitor = true
+    setGateState({ accounts: [] })
+    renderShareRoute()
+    expect(screen.getByText("app viewer")).toBeInTheDocument()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+  })
+
+  it("is the ordinary gate on any other route", () => {
+    mockPathname = "/settings"
+    setGateState({ accounts: [] })
+    renderShareRoute()
+    expect(screen.getByText("firstRunTitle")).toBeInTheDocument()
+    expect(screen.queryByText("guest viewer")).not.toBeInTheDocument()
+  })
+
+  it("is the ordinary gate when the layout supplies no guest view", () => {
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    renderShareRoute({ guestView: false })
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-gate-read-share-as-guest")).not.toBeInTheDocument()
+  })
+
+  it("does not offer reading as a guest on the unlock screen of any other route", () => {
+    mockPathname = "/"
+    setGateState({ accounts: [alpha], activeAccountId: alpha.id, locked: true })
+    renderShareRoute()
+    expect(screen.getByRole("button", { name: "unlockAccount" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-gate-read-share-as-guest")).not.toBeInTheDocument()
   })
 })

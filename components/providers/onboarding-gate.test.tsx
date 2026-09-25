@@ -80,6 +80,47 @@ describe("OnboardingGate", () => {
     }
   )
 
+  // ADR-0037, "The anonymous visitor": reading a share needs no setup, and
+  // the redirect would leave the page and drop the `#k=` key with it.
+  it.each(["/share/view", "/share/view/", "/share/view.html"])(
+    "lets a first-run account read a share link at %s",
+    (route) => {
+      pathname = route
+      window.history.replaceState(null, "", `${route}?c=code#k=key`)
+      gate.mockReturnValue({ status: "enter", shell: "web" })
+      const { rerender } = render(
+        <OnboardingGate>
+          <p>share</p>
+        </OnboardingGate>
+      )
+      expect(screen.getByText("share")).toBeInTheDocument()
+      expect(replace).not.toHaveBeenCalled()
+      expect(window.location.hash).toBe("#k=key")
+      // Entering the app from the viewer still goes through the flow.
+      pathname = "/"
+      rerender(
+        <OnboardingGate>
+          <p>app</p>
+        </OnboardingGate>
+      )
+      expect(replace).toHaveBeenCalledWith("/onboarding")
+      expect(screen.queryByText("app")).not.toBeInTheDocument()
+      window.history.replaceState(null, "", "/")
+    }
+  )
+
+  it("renders the share viewer while the verdict is still resolving", () => {
+    pathname = "/share/view"
+    gate.mockReturnValue({ status: "resolving", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>share</p>
+      </OnboardingGate>
+    )
+    expect(screen.getByText("share")).toBeInTheDocument()
+    expect(screen.queryByTestId("page-loading")).not.toBeInTheDocument()
+  })
+
   it("does not exempt similarly prefixed routes", () => {
     pathname = "/lark/workbench-admin"
     gate.mockReturnValue({ status: "enter", shell: "web" })

@@ -2,6 +2,7 @@
 
 import type { FormEvent, ReactNode } from "react"
 import { useId, useMemo, useState } from "react"
+import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { CheckIcon, CopyIcon, DownloadIcon, UserRoundPlusIcon } from "lucide-react"
 
@@ -21,6 +22,7 @@ import {
 } from "@/lib/accounts/desktop-local-account"
 import { classifySecretStoreError } from "@/lib/credentials/secret-store-readiness"
 import { unlockSecretStore } from "@/lib/tauri/recovery"
+import { isShareViewerRoute } from "@/lib/share/viewer-context"
 import {
   selectActiveAccount,
   useAccountStore,
@@ -32,10 +34,23 @@ import { PasswordStrengthMeter } from "./password-strength-meter"
 
 export interface AccountGateProps {
   children: ReactNode
+  /**
+   * What the share viewer route renders for a reader with no open account
+   * (ADR-0037, "The anonymous visitor"): the page inside `ShareGuestShell`.
+   *
+   * Used on `/share/view` only, and only where this gate would otherwise
+   * stand in front of the link: in place of the first-run form when there is
+   * no account on this origin, and behind an explicit "read without
+   * unlocking" choice on the unlock screen when there is one. An open account
+   * still gets `children`, the full runtime, so the owner keeps the app chrome
+   * and the import actions. Absent, the gate behaves as it always has.
+   */
+  guestView?: ReactNode
 }
 
-export function AccountGate({ children }: AccountGateProps) {
+export function AccountGate({ children, guestView }: AccountGateProps) {
   const t = useTranslations("account.gate")
+  const pathname = usePathname()
   const accounts = useAccountStore((state) => state.accounts)
   const loaded = useAccountStore((state) => state.loaded)
   const loading = useAccountStore((state) => state.loading)
@@ -67,6 +82,10 @@ export function AccountGate({ children }: AccountGateProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [recoverySaved, setRecoverySaved] = useState(false)
+  // Set by the unlock screen's "read without unlocking" action on the share
+  // route. Local to this gate on purpose: it is an answer to one screen, not a
+  // preference, and it only ever applies while no account is open.
+  const [readShareAsGuest, setReadShareAsGuest] = useState(false)
   const { copied, isCopying, copy } = useCopy({ scope: "account recovery key" })
 
   const targetAccount = useMemo(
@@ -74,6 +93,7 @@ export function AccountGate({ children }: AccountGateProps) {
     [accounts, activeAccount]
   )
   const visibleError = actionError ?? storeError
+  const onShareViewer = guestView !== undefined && isShareViewerRoute(pathname)
 
   if (!loaded || loading) {
     // The boot screen's `accounts` step names this wait; the heading stays the
@@ -164,6 +184,44 @@ export function AccountGate({ children }: AccountGateProps) {
     return <>{children}</>
   }
 
+  // Everything below decides between the app and a gate screen, and on the
+  // share route the second is the guest viewer instead. Only after `loaded`:
+  // by then every automatic unlock (the desktop workspace, a remembered
+  // profile, the tab session) has already run, so an owner lands in the app
+  // rather than as a guest. That also makes the choice once, before the page
+  // mounts, and never switches it on its own afterwards. Each read of a share
+  // counts a view, and a gate that swapped shells under a mounted page would
+  // remount it and fetch the envelope again, spending a burn-after-read link
+  // on a re-render. (A lock still unmounts the page, as it always has; reading
+  // it again after that, by unlocking or as a guest, is the reader's choice.)
+  if (onShareViewer) {
+    // No account on this origin is the public deployment's normal case: a
+    // fresh browser holding a link. The first-run form is the wrong screen,
+    // and creating an account from it hands off to onboarding, which leaves
+    // the page and drops the `#k=` key.
+    if (accounts.length === 0) return <>{guestView}</>
+    // With accounts present there is always a target account, so `locked` is
+    // the whole question: the unlock screen is up and the reader declined it.
+    if (readShareAsGuest && locked) return <>{guestView}</>
+  }
+
+  // Offered under both unlock screens on the share route. Unlocking stays the
+  // primary action there: it is how the owner reaches the import actions with
+  // the link still in the address bar.
+  const readShareAsGuestAction = onShareViewer ? (
+    <div className="flex w-full max-w-sm flex-col items-center gap-2 text-center">
+      <p className="text-xs text-muted-foreground">{t("shareGuestHint")}</p>
+      <Button
+        type="button"
+        variant="outline"
+        data-testid="account-gate-read-share-as-guest"
+        onClick={() => setReadShareAsGuest(true)}
+      >
+        {t("shareGuestAction")}
+      </Button>
+    </div>
+  ) : null
+
   if (accounts.length === 0) {
     const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
@@ -239,7 +297,7 @@ export function AccountGate({ children }: AccountGateProps) {
     const credentialStoreBlocked =
       visibleError !== null && classifySecretStoreError(visibleError) !== null
     return (
-      <GateShell>
+      <GateShell footer={readShareAsGuestAction}>
         <section
           className="flex w-full max-w-sm flex-col gap-4"
           data-testid="account-device-workspace"
@@ -275,7 +333,7 @@ export function AccountGate({ children }: AccountGateProps) {
     // than this component's shared `submitting` / `actionError` state — which
     // belong to the first-run and recovery-key-handover forms above.
     return (
-      <GateShell>
+      <GateShell footer={readShareAsGuestAction}>
         <AccountLockScreen
           accounts={accounts}
           activeAccountId={targetAccount?.id ?? activeAccountId}
@@ -312,10 +370,17 @@ async function resetRefusedLocalDatabase(): Promise<void> {
   window.location.reload()
 }
 
-function GateShell({ children }: { children: ReactNode }) {
+function GateShell({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground">
-      {children}
+      {footer ? (
+        <div className="flex w-full flex-col items-center gap-6 py-6">
+          {children}
+          {footer}
+        </div>
+      ) : (
+        children
+      )}
     </main>
   )
 }

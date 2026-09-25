@@ -13,6 +13,11 @@ description: Turn chat exports, workflow images, A2UI apps, and backup packages 
 > `/share/view` route is now the single viewer for every kind, A2UI apps render
 > for real (read-only), and the worker became a pure `/v1` API. See the
 > [Phase 4 addendum](#phase-4--unified-viewer--a2ui-true-rendering-2026-05-29).
+>
+> **The anonymous visitor (2026-09-25)**: reading a share needs no local
+> account. With none open, the gates render `/share/view` in a guest shell
+> instead of the first-run form. See the
+> [addendum](#the-anonymous-visitor-2026-09-25).
 
 ## Context
 
@@ -193,3 +198,103 @@ Config is env-driven (`SHARE_DB_PATH`, `SHARE_UPLOAD_SECRET`,
 `SHARE_MAX_BODY_BYTES`, `SHARE_ALLOWED_ORIGINS`, `SHARE_RATE_PER_SEC` /
 `SHARE_RATE_BURST`, `SHARE_REAPER_INTERVAL_SECS`, `PORT` / `BIND_ADDR`). See
 `services/share-server/README.md` for the build/run/deploy guide.
+
+## The anonymous visitor (2026-09-25)
+
+**Problem.** Phase 4 put the viewer into the app's static export so that one
+`/share/view` route serves both the owner in the app and an anonymous visitor on
+the share host. The second case never worked in a shipped build. The route sat
+under the whole authenticated runtime in `app/layout.tsx`, so `AccountGate`
+showed a fresh browser the "Create local account" form instead of the share.
+Creating an account then handed off to `OnboardingGate`, which replaced the
+route with `/onboarding` and dropped `?c=…#k=…`. Reproduced against a production
+export (`NODE_ENV=production`, no `NEXT_PUBLIC_E2E`) in a fresh browser context.
+The link made no envelope read and showed the first-run form. After an account
+was created, the page was on `/onboarding` with the link gone, and nine IndexedDB
+databases existed in the visitor's browser. Two things hid it. The E2E spec's
+`prepareViewer` seeds an account first, and the dev server provisions a
+throwaway account in every fresh profile.
+
+**Options weighed.**
+
+1. _Add `/share/view` to `LIGHTWEIGHT_ROUTE_PREFIXES`._ Rejected. That list is
+   keyed on the route so that the static HTML and hydration agree, but it is all
+   or nothing. The owner's in-app copy would lose the account it needs for the
+   import actions (`template-definition`, `chat-template`), and the app chrome
+   with it.
+2. _Key a lightweight branch on the origin_ (served from the share host means
+   lightweight). Rejected, for three reasons. The static HTML cannot know the
+   origin, so it would switch after hydration anyway. The share origin is itself
+   account-scoped config (`AppSettings.shareUrl`), which cannot be read before an
+   account is open. And the branch could not be exercised on `localhost`.
+3. _Pass through at the gates, keyed on the settled account state._ Chosen.
+
+**Decision.** Reading a share needs no local account.
+
+- `isShareViewerRoute(pathname)` (`lib/share/viewer-context.ts`) names the route
+  in every spelling a static host serves it under (`/share/view`,
+  `/share/view/`, `/share/view.html`). It matches that route only, nothing under
+  or beside it.
+- `AccountGate` takes a `guestView`. The root layout fills it with the page
+  inside `ShareGuestShell`. On the share route, once the registry has settled
+  (`loaded && !loading`), the gate renders:
+
+  | Account state                                            | Renders                                                                                   |
+  | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+  | An account is open                                       | The full runtime, unchanged: chrome, library, import                                      |
+  | No account on this origin                                | The guest view directly, never the first-run form                                         |
+  | Accounts exist, none open                                | The unlock screen as before, plus "Read without unlocking", which switches to the guest view |
+  | Native mobile, the one-time recovery key, pet overlays   | Unchanged, and checked first                                                              |
+
+  The static HTML and the first client render are both the boot screen, because
+  the store has loaded on neither, so they agree. The gate chooses between the
+  app and the guest view after that.
+
+- **Why wait for `loaded`, and why unlock first when accounts exist.** Every
+  read of a share counts a view (`maxViews`, burn-after-read). The choice has to
+  be final before the page mounts. A gate that switched shells afterwards would
+  remount the page and fetch the envelope again. By the time `loaded` is set,
+  every automatic unlock has run (the desktop workspace, a remembered profile,
+  tab-session resume), so an owner is never shown the guest view first. For the
+  same reason, a locked owner is asked to unlock _before_ the page mounts. The
+  other order, a guest view with an unlock button inside it, would already have
+  spent a read.
+- `CloudSignInGate` and `OnboardingGate` let the route through, as they already
+  do for `/lark/workbench`. A web sign-in round-trips through the identity
+  provider, and a first-run redirect leaves the page. Both lose the `#k=` key.
+  Entering the app from the viewer still meets both gates.
+- `ShareGuestShell` holds only the providers the viewer reads. next-intl and the
+  theme come from above the gate. The shell adds `TooltipProvider` and
+  `Toaster`, and nothing else: no `SettingsHydrator`, no plugin runtime, no
+  Dexie. Under it the viewer reads from `defaultShareBaseUrl()`, the build-time
+  `NEXT_PUBLIC_SHARE_URL`, instead of `resolveShareEndpoint()`. It offers no
+  import and does not call `resolveShareViewerRunsInApp()`. This matters because
+  `getDb()` falls back to the legacy database when no account is selected, so
+  reading the settings row or the keyring would create an app database in a
+  stranger's browser.
+
+**Consequences.**
+
+- The public deployment must be built with `NEXT_PUBLIC_SHARE_URL` naming its
+  own host, as the Pages README already says. A guest has no `shareUrl` setting
+  to override it.
+- A guest sees the default locale, because settings never load and
+  `LocaleGate` falls back to it. Picking up the browser's language on the public
+  host is open follow-up work.
+- On `/share/view`, the guest view takes the place of every screen the gate
+  would show with no account, including the desktop's "workspace could not
+  start" error, which leaves the registry empty. That error still shows on
+  every other route, and reading a share does not need the workspace.
+- A lock (idle auto-lock) unmounts the page, as it always has. Reading the link
+  again afterwards, by unlocking or as a guest, fetches the envelope again, so
+  it spends another view. That is the reader's choice, not a shell swap the
+  gate makes by itself.
+- The header and footer links to `/` still boot the full app. That is where a
+  visitor creates an account ("Make your own with Cognia").
+- Tests: `tests/e2e/share/public-share-view.spec.ts` gains an "anonymous
+  visitor" block. It seeds nothing and opens the link as the browser's first
+  navigation. It asserts the payload, the untouched URL, one envelope read, no
+  account or legacy database, and no import offer for a `chat-template`. The
+  guest-only assertions run against the static export, which is what CI runs,
+  because the dev server provisions an account in every fresh profile. Unit
+  tests pin each gate's pass-through and the page's guest mode.

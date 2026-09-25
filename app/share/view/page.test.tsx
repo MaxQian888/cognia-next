@@ -1,11 +1,14 @@
 import React from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import ShareViewPage from "./page"
+import { ShareGuestShell } from "@/components/share/share-guest-shell"
+import { resolveShareEndpoint } from "@/lib/share/config"
 import { loadShare, decryptEnvelope } from "@/lib/share/load"
 import type { SharePayload } from "@/lib/share/types"
 
 jest.mock("@/lib/share/config", () => ({
-  resolveShareEndpoint: jest.fn().mockResolvedValue({ baseUrl: "https://x", uploadSecret: "" }),
+  resolveShareEndpoint: jest.fn(),
+  defaultShareBaseUrl: () => "https://share.default",
 }))
 
 jest.mock("@/lib/share/load", () => ({
@@ -30,6 +33,7 @@ import { resolveShareViewerRunsInApp } from "@/lib/share/viewer-context"
 const mockRunsInApp = resolveShareViewerRunsInApp as jest.MockedFunction<
   typeof resolveShareViewerRunsInApp
 >
+const mockResolveEndpoint = resolveShareEndpoint as jest.MockedFunction<typeof resolveShareEndpoint>
 const mockLoadShare = loadShare as jest.MockedFunction<typeof loadShare>
 const mockDecrypt = decryptEnvelope as jest.MockedFunction<typeof decryptEnvelope>
 
@@ -43,6 +47,7 @@ const PAYLOAD: SharePayload = {
 beforeEach(() => {
   jest.clearAllMocks()
   mockRunsInApp.mockResolvedValue(false)
+  mockResolveEndpoint.mockResolvedValue({ baseUrl: "https://x", uploadSecret: "" })
 })
 
 describe("ShareViewPage", () => {
@@ -50,6 +55,8 @@ describe("ShareViewPage", () => {
     mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
     render(<ShareViewPage />)
     await waitFor(() => expect(screen.getByTestId("payload")).toHaveTextContent("chat-md"))
+    // The in-app copy reads the endpoint from the open account's settings.
+    expect(mockLoadShare).toHaveBeenCalledWith("https://x", expect.any(String), expect.any(String))
   })
 
   it("shows the unavailable state", async () => {
@@ -104,5 +111,59 @@ describe("ShareViewPage", () => {
     render(<ShareViewPage />)
     await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
     expect(screen.getByTestId("payload")).toHaveAttribute("data-can-import", "false")
+  })
+
+  // ADR-0037, "The anonymous visitor": with no account open, AccountGate
+  // renders this page in ShareGuestShell. There is no settings row, keyring or
+  // library then, and reading the first two would open a database in the
+  // visitor's browser.
+  describe("for a guest", () => {
+    it("reads from the build-time endpoint without touching settings", async () => {
+      mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+      render(
+        <ShareGuestShell>
+          <ShareViewPage />
+        </ShareGuestShell>
+      )
+      await waitFor(() => expect(screen.getByTestId("payload")).toHaveTextContent("chat-md"))
+      expect(mockLoadShare).toHaveBeenCalledTimes(1)
+      expect(mockLoadShare).toHaveBeenCalledWith(
+        "https://share.default",
+        expect.any(String),
+        expect.any(String)
+      )
+      expect(mockResolveEndpoint).not.toHaveBeenCalled()
+    })
+
+    it("offers no import and never asks whether it runs in the app", async () => {
+      mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+      // Would say yes if asked: a guest on a self-hosted origin is not the
+      // public host, but it still has no library to import into.
+      mockRunsInApp.mockResolvedValue(true)
+      render(
+        <ShareGuestShell>
+          <ShareViewPage />
+        </ShareGuestShell>
+      )
+      await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
+      expect(screen.getByTestId("payload")).toHaveAttribute("data-can-import", "false")
+      expect(mockRunsInApp).not.toHaveBeenCalled()
+    })
+
+    it("keeps the passphrase round-trip", async () => {
+      const envelope = { v: 1 } as never
+      mockLoadShare.mockResolvedValue({ status: "passphrase", envelope, key: "k" })
+      mockDecrypt.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+      render(
+        <ShareGuestShell>
+          <ShareViewPage />
+        </ShareGuestShell>
+      )
+      await waitFor(() => expect(screen.getByText("Passphrase required")).toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "hunter2" } })
+      fireEvent.click(screen.getByText("Unlock"))
+      await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
+      expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2")
+    })
   })
 })

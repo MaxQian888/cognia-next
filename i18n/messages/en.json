@@ -1674,6 +1674,8 @@
       "revealPassword": "Show password",
       "runtimeBadgeBrowser": "Browser Vault on this device",
       "runtimeBadgeDesktop": "Desktop keychain on this device",
+      "shareGuestAction": "Read without unlocking",
+      "shareGuestHint": "This is a shared link. Anyone who has it can read it without an account; unlock to add it to your library.",
       "slowBody": "Reopening your account database after a lock takes a moment. Nothing is lost — this keeps going.",
       "slowTitle": "Still working ({seconds}s)",
       "stageActivating": "Entering your workspace",

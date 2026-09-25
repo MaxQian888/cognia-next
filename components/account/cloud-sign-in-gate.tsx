@@ -63,6 +63,7 @@ import {
   signInWithDeployment,
   type CloudSignInMethod,
 } from "@/lib/identity/cloud-sign-in-flow"
+import { isShareViewerRoute } from "@/lib/share/viewer-context"
 import { useAccountStore } from "@/stores/account/account-store"
 
 import { NATIVE_CALLBACK_URI, type LogtoDrivers, type LogtoSession } from "@/lib/logto/client"
@@ -178,6 +179,10 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     // This entry handles Feishu SSO itself, then requests the existing host
     // pairing or team sign-in according to the mode the user opens.
     /^\/lark\/workbench(?:\/|\.html)?$/.test(pathname ?? "") ||
+    // A share link is readable without any account (ADR-0037, "The anonymous
+    // visitor"), and a web sign-in round-trips through the identity provider,
+    // which comes back without the link's `#k=` key.
+    isShareViewerRoute(pathname) ||
     (pathname ? UNGATED_PATHS.some((prefix) => pathname.startsWith(prefix)) : false) ||
     isSecondaryOverlayRole(getPetWindowRole())
 

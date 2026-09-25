@@ -24,6 +24,21 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "")
 }
 
+/**
+ * The endpoint for a reader with no open account: the build-time default.
+ *
+ * The share viewer's guest mode (ADR-0037, "The anonymous visitor") reads from
+ * here instead of {@link resolveShareEndpoint}. A visitor has no settings row
+ * and no keyring, and asking for either reaches `getDb()`, which with no
+ * account selected opens (and so creates) the legacy app database in a
+ * stranger's browser. The public deployment is built with
+ * `NEXT_PUBLIC_SHARE_URL` naming its own host, so this is the right answer
+ * there without a lookup.
+ */
+export function defaultShareBaseUrl(): string {
+  return normalizeBaseUrl(DEFAULT_SHARE_URL)
+}
+
 /** Resolve the live endpoint from settings + keyring. */
 export async function resolveShareEndpoint(): Promise<ShareEndpoint> {
   const settings = await getSettings()

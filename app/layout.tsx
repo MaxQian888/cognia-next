@@ -26,6 +26,7 @@ import { RecoveryBootGate } from "@/components/providers/recovery-boot-gate"
 import { OnboardingGate } from "@/components/providers/onboarding-gate"
 import { AccountAutoLock } from "@/components/account/account-auto-lock"
 import { AccountGate } from "@/components/account/account-gate"
+import { ShareGuestShell } from "@/components/share/share-guest-shell"
 import { CloudSignInGate } from "@/components/account/cloud-sign-in-gate"
 import { AccountStoreInitializer } from "@/components/providers/initializers/account-store-initializer"
 import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
@@ -225,7 +226,14 @@ export default async function RootLayout({
                   waiting on a first-open schema upgrade. The component is a
                   production no-op unless NEXT_PUBLIC_E2E=1. */}
               <ExposeTestGlobals />
-              <AccountGate>
+              {/* `guestView` is what `/share/view` renders when no account is
+                  open: the page alone in ShareGuestShell, no runtime, no
+                  Dexie. It is how a fresh browser on the public share
+                  deployment reads a link instead of meeting the first-run
+                  form. Keyed on the settled account store, not the route
+                  alone, so the owner's in-app copy keeps this whole tree
+                  (ADR-0037, "The anonymous visitor"). */}
+              <AccountGate guestView={<ShareGuestShell>{children}</ShareGuestShell>}>
                 <SettingsHydrator />
                 <AccountAutoLock />
                 <SettingsSyncProvider>

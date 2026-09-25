@@ -14,6 +14,7 @@ jest.mock("@/lib/keyring", () => ({
 }))
 
 import {
+  defaultShareBaseUrl,
   resolveShareEndpoint,
   setShareUploadSecret,
   hasShareUploadSecret,
@@ -62,5 +63,19 @@ describe("hasShareUploadSecret", () => {
     expect(await hasShareUploadSecret()).toBe(true)
     getSecret.mockResolvedValueOnce(null)
     expect(await hasShareUploadSecret()).toBe(false)
+  })
+})
+
+describe("defaultShareBaseUrl", () => {
+  it("is the build-time endpoint without its trailing slash", () => {
+    expect(defaultShareBaseUrl()).toBe(DEFAULT_SHARE_URL.replace(/\/+$/, ""))
+  })
+
+  // The guest viewer calls this with no account open, where a settings or
+  // keyring read would open (and create) the legacy app database.
+  it("reads neither the settings row nor the keyring", () => {
+    defaultShareBaseUrl()
+    expect(getSettings).not.toHaveBeenCalled()
+    expect(getSecret).not.toHaveBeenCalled()
   })
 })

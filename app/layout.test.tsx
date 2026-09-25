@@ -23,8 +23,20 @@ jest.mock("@/components/desktop/desktop-app-shell", () => ({
 jest.mock("@/components/account/cloud-sign-in-gate", () => ({
   CloudSignInGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
+// Records the `guestView` the layout hands the gate, so the share viewer's
+// no-account branch can be asserted without booting the account store.
+let mockAccountGateGuestView: React.ReactNode = undefined
 jest.mock("@/components/account/account-gate", () => ({
-  AccountGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  AccountGate: ({
+    children,
+    guestView,
+  }: {
+    children: React.ReactNode
+    guestView?: React.ReactNode
+  }) => {
+    mockAccountGateGuestView = guestView
+    return <>{children}</>
+  },
 }))
 
 // matchMedia isn't implemented by jsdom — next-themes reads it during SSR.
@@ -64,6 +76,19 @@ describe("RootLayout", () => {
     expect(markup).toContain("--font-geist-mono")
     expect(markup).toContain("antialiased")
     expect(markup).toContain("<main>content</main>")
+  })
+
+  // ADR-0037, "The anonymous visitor": the gate needs the page on its own,
+  // wrapped in the guest shell, for `/share/view` with no account open.
+  it("hands the account gate the page inside the share guest shell", async () => {
+    mockAccountGateGuestView = undefined
+    const tree = await RootLayout({ children: <main>shared page</main> })
+    renderToStaticMarkup(tree)
+
+    expect(mockAccountGateGuestView).toBeDefined()
+    const guestMarkup = renderToStaticMarkup(<>{mockAccountGateGuestView}</>)
+    expect(guestMarkup).toContain('data-testid="share-guest-shell"')
+    expect(guestMarkup).toContain("<main>shared page</main>")
   })
 
   it("uses the locale resolved by next-intl getLocale", async () => {

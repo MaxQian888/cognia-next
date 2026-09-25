@@ -11,13 +11,18 @@
  * after hydration and decrypts via the app's own share crypto. For a local,
  * no-network preview-before-publish, callers render `<PayloadView>` directly
  * (see `share-link-dialog`); this route always does the fetch+decrypt flow.
+ *
+ * Reading needs no account. With none open, `AccountGate` renders this page in
+ * `ShareGuestShell` instead of its first-run / unlock screens, and the page then
+ * reads from the build-time share endpoint and offers no import (ADR-0037,
+ * "The anonymous visitor").
  */
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import { resolveShareEndpoint } from "@/lib/share/config"
+import { defaultShareBaseUrl, resolveShareEndpoint } from "@/lib/share/config"
 import {
   loadShare,
   decryptEnvelope,
@@ -25,6 +30,7 @@ import {
   type ShareLoadErrorReason,
 } from "@/lib/share/load"
 import { PayloadView } from "@/components/share/payload-view"
+import { useShareViewerIsGuest } from "@/components/share/share-guest-shell"
 import { resolveShareViewerRunsInApp } from "@/lib/share/viewer-context"
 
 const ERROR_KEY: Record<ShareLoadErrorReason, string> = {
@@ -40,6 +46,12 @@ export default function ShareViewPage() {
 
 export function ShareView() {
   const t = useTranslations("share.view")
+  /**
+   * True when no account is open and `AccountGate` rendered this page in the
+   * guest shell (ADR-0037, "The anonymous visitor"). There is then no settings
+   * row to take the endpoint from and no library to import into.
+   */
+  const guest = useShareViewerIsGuest()
   const [state, setState] = useState<ShareLoadState>({ status: "loading" })
   /**
    * Whether this page is the app's own copy of the viewer rather than the
@@ -52,16 +64,19 @@ export function ShareView() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const { baseUrl } = await resolveShareEndpoint()
+      const baseUrl = guest ? defaultShareBaseUrl() : (await resolveShareEndpoint()).baseUrl
       const next = await loadShare(baseUrl, window.location.search, window.location.hash)
       if (active) setState(next)
     })()
     return () => {
       active = false
     }
-  }, [])
+  }, [guest])
 
   useEffect(() => {
+    // A guest has no library, so the answer is already "no". Asking would
+    // also read the settings row through `resolveShareEndpoint`.
+    if (guest) return
     let active = true
     void resolveShareViewerRunsInApp()
       .then((inApp) => {
@@ -73,7 +88,7 @@ export function ShareView() {
     return () => {
       active = false
     }
-  }, [])
+  }, [guest])
 
   useEffect(() => {
     if (state.status === "ready" && state.payload.title) {

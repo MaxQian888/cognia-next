@@ -80,7 +80,9 @@
     "autoUnlockFailedOther": "未能自动打开此档案。请输入密码重试。",
     "deviceWorkspaceHint": "此工作空间由本设备的凭据存储保护，无需输入密码。",
     "rememberOnDeviceLabel": "在这台设备上自动解锁",
-    "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。"
+    "rememberOnDeviceHelp": "将密码保存在本设备的凭据存储中，以后在这台设备上不再询问。原密码仍然有效。",
+    "shareGuestHint": "这是一条分享链接，持有链接的人无需账户即可阅读；解锁后可将其加入你的库。",
+    "shareGuestAction": "不解锁，直接阅读"
   },
   "manage": {
     "activeAccountLabel": "当前账户",

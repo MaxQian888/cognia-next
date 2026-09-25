@@ -1674,6 +1674,8 @@
       "revealPassword": "显示密码",
       "runtimeBadgeBrowser": "本设备的浏览器保险库",
       "runtimeBadgeDesktop": "本设备的桌面密钥链",
+      "shareGuestAction": "不解锁，直接阅读",
+      "shareGuestHint": "这是一条分享链接，持有链接的人无需账户即可阅读；解锁后可将其加入你的库。",
       "slowBody": "锁定之后重新打开账户数据库需要一点时间。数据不会丢失，解锁仍在继续。",
       "slowTitle": "仍在处理（{seconds} 秒）",
       "stageActivating": "进入工作区",
