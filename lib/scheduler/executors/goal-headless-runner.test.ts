@@ -1,4 +1,4 @@
-import type { RunGoalLoopInput } from "./goal-headless-runner"
+import type { GoalPermissionResponder, RunGoalLoopInput } from "./goal-headless-runner"
 import type { Project } from "@/types"
 
 const getGoalMock = jest.fn()
@@ -489,5 +489,139 @@ describe("runGoalLoopHeadless — unattended permissions", () => {
     const r = await runGoalLoopHeadless(input())
     expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual([])
     expect(r).toEqual({ status: "completed", turns: 1, lastResponse: "r1", exit: "judge_done" })
+  })
+})
+
+describe("runGoalLoopHeadless — caller-supplied permission responder", () => {
+  /** A capture that asks for each tool in turn, recording each decision. */
+  function captureAsking(tools: string[], text: string) {
+    return async (
+      _sessionId: string,
+      _prompt: unknown,
+      _options: unknown,
+      cap: { onPermissionRequest?: (req: unknown) => unknown }
+    ) => {
+      for (const [i, toolName] of tools.entries()) {
+        decisions.push(
+          await cap.onPermissionRequest?.({
+            type: "permission_request",
+            sessionId: "s1",
+            requestId: `req-${toolName}-${i}`,
+            toolUseID: `tu-${i}`,
+            toolName,
+            input: {},
+          })
+        )
+      }
+      return { text }
+    }
+  }
+  let decisions: unknown[] = []
+
+  beforeEach(() => {
+    decisions = []
+    getGoalMock.mockResolvedValue(activeGoal)
+  })
+
+  it("answers every request with the caller's responder, not the unattended one", async () => {
+    runCaptureMock.mockImplementation(captureAsking(["Edit"], "edited"))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "done",
+    })
+    const onPermissionRequest = jest.fn(async () => ({ decision: "allow" as const }))
+
+    const r = await runGoalLoopHeadless(input({ onPermissionRequest }))
+    expect(onPermissionRequest).toHaveBeenCalledTimes(1)
+    expect(onPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "req-Edit-0", toolName: "Edit" }),
+      expect.any(Function)
+    )
+    expect(decisions).toEqual([{ decision: "allow" }])
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual([])
+    expect(r).toEqual({ status: "completed", turns: 1, lastResponse: "edited", exit: "judge_done" })
+  })
+
+  it("treats a human's Deny as a decision: the goal carries on, nothing is recorded", async () => {
+    runCaptureMock
+      .mockImplementationOnce(captureAsking(["Bash"], "Bash was denied, used Read instead"))
+      .mockImplementationOnce(captureAsking([], "finished"))
+    handleTurnCompleteMock
+      .mockResolvedValueOnce({ kind: "continue", userMessage: "keep going" })
+      .mockResolvedValueOnce({
+        kind: "exit",
+        exit: "judge_done",
+        resultingStatus: "completed",
+        reason: "done",
+      })
+    const onPermissionRequest = jest.fn(async () => ({
+      decision: "deny" as const,
+      message: "denied by the user",
+    }))
+
+    const r = await runGoalLoopHeadless(input({ onPermissionRequest }))
+    // The model got the human's answer, not the unattended "no approver" text.
+    expect(decisions).toEqual([{ decision: "deny", message: "denied by the user" }])
+    // No turn was handed a missing approver, so the driver never pauses.
+    expect(handleTurnCompleteMock).toHaveBeenCalledTimes(2)
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual([])
+    expect(handleTurnCompleteMock.mock.calls[1][0].needsApproval).toEqual([])
+    expect(r).toEqual({
+      status: "completed",
+      turns: 2,
+      lastResponse: "finished",
+      exit: "judge_done",
+    })
+    expect(r.needsApproval).toBeUndefined()
+  })
+
+  it("records a request the caller hands to `unattended` and pauses on it", async () => {
+    runCaptureMock.mockImplementation(captureAsking(["Edit", "Write"], "blocked"))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "needs_approval",
+      resultingStatus: "paused",
+      reason: "no approver attached for: Write",
+    })
+    // Edit is decided by a human; the Write card is never answered.
+    const onPermissionRequest = jest.fn<
+      ReturnType<GoalPermissionResponder>,
+      Parameters<GoalPermissionResponder>
+    >(async (request, unattended) =>
+      request.toolName === "Edit" ? { decision: "deny", message: "no" } : unattended(request)
+    )
+
+    const r = await runGoalLoopHeadless(input({ onPermissionRequest }))
+    expect(decisions).toEqual([
+      { decision: "deny", message: "no" },
+      { decision: "deny", message: expect.stringContaining('Tool "Write" needs a human approval') },
+    ])
+    expect(handleTurnCompleteMock.mock.calls[0][0].needsApproval).toEqual(["Write"])
+    expect(r).toMatchObject({
+      status: "paused",
+      exit: "needs_approval",
+      error: "needs approval: Write",
+    })
+    expect(r.needsApproval).toEqual([
+      expect.objectContaining({ requestId: "req-Write-1", toolName: "Write" }),
+    ])
+  })
+
+  it("hands the caller's responder to an injected sender too (the connector path)", async () => {
+    const sendTurn = jest.fn(captureAsking(["Bash"], "r1"))
+    handleTurnCompleteMock.mockResolvedValue({
+      kind: "exit",
+      exit: "judge_done",
+      resultingStatus: "completed",
+      reason: "done",
+    })
+    const onPermissionRequest = jest.fn(async () => ({ decision: "allow" as const }))
+
+    await runGoalLoopHeadless(input({ sendTurn: sendTurn as never, onPermissionRequest }))
+    expect(runCaptureMock).not.toHaveBeenCalled()
+    expect(onPermissionRequest).toHaveBeenCalledTimes(1)
+    expect(decisions).toEqual([{ decision: "allow" }])
   })
 })

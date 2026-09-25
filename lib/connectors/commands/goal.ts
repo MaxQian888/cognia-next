@@ -14,22 +14,36 @@
  * session that hasn't opted in — mapped here to a bilingual "enable it in the
  * app" reply.
  *
+ * Tool approvals: the driver's turns ask the conversation, like its other
+ * turns (`runtime.ts`): an Allow / Deny / Allow-for-session card for whoever
+ * sent `/goal`. A Deny is a decision the model sees; a card nobody answers
+ * pauses the goal `needs_approval`.
+ *
  * Availability: this runs wherever the connector runtime runs — desktop (all
  * channels) and `cli serve` (webhook-transport channels only). The Capacitor
  * mobile shell has no connector runtime, so IM goals are desktop/CLI-only.
  */
 
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
 import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { Goal } from "@/types/goal"
 import type { SlashContext } from "@/lib/slash-commands/builtin"
 import { isTerminalGoalStatus } from "@/types/goal"
+import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import { getGoalRuntime, GoalImBlocked } from "@/lib/goal/runtime"
 import { dispatchGoalSubcommand, type GoalCommandResult } from "@/lib/slash-commands/actions/goal"
-import { runGoalLoopHeadless } from "@/lib/scheduler/executors/goal-headless-runner"
+import {
+  runGoalLoopHeadless,
+  type GoalPermissionResponder,
+} from "@/lib/scheduler/executors/goal-headless-runner"
 import { safeSendPrompt } from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { appendAudit } from "@/lib/connectors/audit"
+import {
+  CONNECTOR_TURN_TIMEOUT_MS,
+  makeImPermissionResponder,
+} from "@/lib/connectors/hitl/tool-approval"
+import { readForResolution } from "@/lib/db/conversation-overrides"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
 import { useSettingsStore } from "@/stores/settings"
@@ -101,6 +115,8 @@ export async function handleGoalCommand(input: HandleGoalCommandInput): Promise<
       sessionId: session.id,
       goalId: goal.id,
       appSettings,
+      initiatorUserId: event.sender.remoteUserId,
+      deliveryTarget: deliveryTargetFromEvent(event),
     })
   }
 }
@@ -116,12 +132,23 @@ export interface ConnectorGoalDriverArgs {
   sessionId: string
   goalId: string
   appSettings: AppSettings | null
+  /**
+   * remoteUserId of whoever sent the `/goal` command that started this
+   * driver. Scopes the approval card's buttons to them (or a configured
+   * operator), as `runtime.ts` does for the sender of an ordinary turn.
+   * Absent → operators-only scope.
+   */
+  initiatorUserId?: string
+  /** Where that `/goal` message arrived. The approval card is delivered there. */
+  deliveryTarget?: ConversationDeliveryTarget
 }
 
 export interface ConnectorGoalDriverDeps {
   run?: typeof runGoalLoopHeadless
   enqueue?: typeof enqueueOutbound
   signal?: AbortSignal
+  makeResponder?: typeof makeImPermissionResponder
+  readOverride?: typeof readForResolution
 }
 
 /** Goal ids with a live driver — guards against double-driving one goal. */
@@ -131,9 +158,18 @@ const runningDrivers = new Set<string>()
  * Start (idempotently) a headless driver for `goalId`. Each completed turn's
  * assistant text is posted back to the conversation; the loop honors the
  * pacing gate (quiet-hours / interval / manual-hold) and exits on any terminal
- * or externally-paused status. Turns run unattended: a tool that needs
- * approval is denied, the goal pauses `needs_approval`, and the conversation
- * is told which tools.
+ * or externally-paused status.
+ *
+ * A tool that needs approval is asked for in the conversation, the same way
+ * an ordinary IM turn asks (`makeImPermissionResponder`): `yolo` mode or an
+ * earlier "allow for session" approves it outright, otherwise an Allow / Deny
+ * / Allow-for-session card goes to the conversation, answerable by the
+ * `/goal` sender or an operator, and the turn waits for the tap. Turns get
+ * the connector turn timeout so that wait can resolve. An Allow or Deny is a
+ * decision and the loop carries on. A card that could not be shown, or that
+ * expired untapped, is handed to the runner's unattended responder: the tool
+ * is denied, the goal pauses `needs_approval`, and the conversation is told
+ * which tools.
  */
 export function startConnectorGoalDriver(
   args: ConnectorGoalDriverArgs,
@@ -144,8 +180,30 @@ export function startConnectorGoalDriver(
 
   const run = deps.run ?? runGoalLoopHeadless
   const enqueue = deps.enqueue ?? enqueueOutbound
+  const makeResponder = deps.makeResponder ?? makeImPermissionResponder
+  const readOverride = deps.readOverride ?? readForResolution
   const controller = new AbortController()
   const signal = deps.signal ?? controller.signal
+
+  // Built per request so the conversation's approval mode is read fresh, as
+  // `runtime.ts` reads it per turn: a `/mode yolo|prompt` sent mid-goal
+  // applies to the next tool. An unreadable override falls back to asking.
+  // No `runId`: goal turns have no durable execution run to carry an
+  // interrupt. TTL is the registry default, as for an ordinary turn.
+  const onPermissionRequest: GoalPermissionResponder = async (request, unattended) => {
+    const override = await readOverride(args.conversationKey).catch(() => undefined)
+    return makeResponder({
+      sessionId: args.sessionId,
+      adapterId: args.adapterId,
+      conversationKey: args.conversationKey,
+      conversationRef: args.conversationRef,
+      ...(args.deliveryTarget ? { deliveryTarget: args.deliveryTarget } : {}),
+      ...(args.initiatorUserId ? { initiatorUserId: args.initiatorUserId } : {}),
+      approvalMode: override?.approvalMode,
+      signal,
+      onUnanswered: unattended,
+    })(request)
+  }
 
   const post = async (text: string): Promise<unknown> => {
     if (!hasNoLeakingPii(text)) {
@@ -178,6 +236,9 @@ export function startConnectorGoalDriver(
         goalId: args.goalId,
         appSettings: args.appSettings,
         signal,
+        // Room for a human approval (registry TTL 10 min) inside one turn.
+        perTurnTimeoutMs: CONNECTOR_TURN_TIMEOUT_MS,
+        onPermissionRequest,
         sendTurn: (sessionId, prompt, options, captureOptions) =>
           safeSendPrompt(sessionId, prompt, options, {
             ...captureOptions,
@@ -197,11 +258,13 @@ export function startConnectorGoalDriver(
           `🎯 目标已${result.status} / Goal ${result.status} — ${result.turns} 回合 / turn(s).`
         ).catch(() => undefined)
       } else if (result.exit === "needs_approval") {
-        // The driver runs unattended, so a tool that needs approval was denied
-        // and the goal paused. Say so: the pause is otherwise silent here.
+        // An approval card went unanswered (or could not be shown), so the
+        // tool was denied and the goal paused. Say so: the pause is otherwise
+        // silent here. `/goal resume` asks again.
         const tools = [...new Set((result.needsApproval ?? []).map((d) => d.toolName))].join(", ")
         await post(
-          `⏸️ 目标已暂停:工具需要授权 (${tools}) / Goal paused — tools need approval: ${tools}.`
+          `⏸️ 目标已暂停:工具需要授权 (${tools}),发送 /goal resume 重新请求 / ` +
+            `Goal paused — tools need approval: ${tools}. Send /goal resume to ask again.`
         ).catch(() => undefined)
       }
     } catch (err) {

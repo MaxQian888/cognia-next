@@ -12,8 +12,10 @@ import {
   TOOL_APPROVE_PREFIX,
   TOOL_DENY_PREFIX,
   TOOL_ALLOW_SESSION_PREFIX,
+  CONNECTOR_TURN_TIMEOUT_MS,
 } from "./tool-approval"
 import {
+  DEFAULT_APPROVAL_TTL_MS,
   resolveApproval,
   hasSessionBypass,
   grantSessionBypass,
@@ -187,6 +189,70 @@ describe("makeImPermissionResponder", () => {
       decision: "deny",
       message: "failed to surface approval card",
     })
+  })
+
+  it("gives connector turns more time than an approval may wait", () => {
+    expect(CONNECTOR_TURN_TIMEOUT_MS).toBeGreaterThan(DEFAULT_APPROVAL_TTL_MS)
+  })
+})
+
+describe("makeImPermissionResponder — onUnanswered", () => {
+  const unattendedDecision = { decision: "deny" as const, message: "nobody answered" }
+
+  it("hands a card that expired untapped to onUnanswered", async () => {
+    const h = harness("prompt")
+    const onUnanswered = jest.fn(() => unattendedDecision)
+    const responder = makeImPermissionResponder({ ...h.ctx, ttlMs: 5, onUnanswered })
+
+    await expect(responder(req())).resolves.toEqual(unattendedDecision)
+    expect(onUnanswered).toHaveBeenCalledWith(req())
+    expect(settleApprovalCard).toHaveBeenCalledWith(expect.objectContaining({ state: "expired" }))
+  })
+
+  it("hands a card it could not surface to onUnanswered", async () => {
+    const h = harness("prompt")
+    const onUnanswered = jest.fn(async () => unattendedDecision)
+    h.ctx.enqueue = (async () => {
+      throw new Error("outbox down")
+    }) as unknown as Harness["ctx"]["enqueue"]
+
+    await expect(makeImPermissionResponder({ ...h.ctx, onUnanswered })(req())).resolves.toEqual(
+      unattendedDecision
+    )
+    expect(onUnanswered).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns a human's Deny as it is, without onUnanswered", async () => {
+    const h = harness("prompt")
+    const onUnanswered = jest.fn(() => unattendedDecision)
+    const pending = makeImPermissionResponder({ ...h.ctx, onUnanswered })(req())
+    await new Promise((r) => setTimeout(r, 0))
+
+    resolveApproval("s1", "req_1", { decision: "deny" })
+    await expect(pending).resolves.toEqual({ decision: "deny" })
+    expect(onUnanswered).not.toHaveBeenCalled()
+  })
+
+  it("does not treat the owner ending the wait as unanswered", async () => {
+    const h = harness("prompt")
+    const onUnanswered = jest.fn(() => unattendedDecision)
+    const owner = new AbortController()
+    const pending = makeImPermissionResponder({ ...h.ctx, signal: owner.signal, onUnanswered })(
+      req()
+    )
+    await new Promise((r) => setTimeout(r, 0))
+
+    owner.abort()
+    await expect(pending).resolves.toEqual({ decision: "deny", message: "approval owner ended" })
+    expect(onUnanswered).not.toHaveBeenCalled()
+  })
+
+  it("never consults onUnanswered for an auto-allowed tool", async () => {
+    const onUnanswered = jest.fn(() => unattendedDecision)
+    await expect(
+      makeImPermissionResponder({ ...harness("yolo").ctx, onUnanswered })(req())
+    ).resolves.toEqual({ decision: "allow" })
+    expect(onUnanswered).not.toHaveBeenCalled()
   })
 })
 

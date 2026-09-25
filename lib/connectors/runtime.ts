@@ -88,7 +88,7 @@ import { buildImPermissionCeiling } from "@/lib/connectors/im-permission-ceiling
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"
 import { evaluateImRate } from "@/lib/connectors/im-rate/registry"
 import { getRunningAdapter } from "./lifecycle"
-import { makeImPermissionResponder } from "./hitl/tool-approval"
+import { CONNECTOR_TURN_TIMEOUT_MS, makeImPermissionResponder } from "./hitl/tool-approval"
 import { registerImElicitationContext } from "./hitl/im-elicitation-context"
 import { holdWorkflowDispatchForApproval } from "./hitl/workflow-run-approval"
 import {
@@ -127,13 +127,6 @@ import {
   speakerPromptHeader,
   speakerTranscriptName,
 } from "@/lib/chat/speaker"
-
-/**
- * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
- * default so an in-flight tool-permission approval (registry TTL 10 min)
- * resolves before the turn times out, while still bounding a stuck sidecar.
- */
-const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
 
 /**
  * Read watchdog for connector turns. Until this was wired, connector captures

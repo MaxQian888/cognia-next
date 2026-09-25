@@ -32,6 +32,15 @@ import {
   type AwaitApprovalOptions,
 } from "./approval-registry"
 
+/**
+ * Turn-capture timeout for a connector turn whose tool requests go through
+ * this responder. Raised above the 5-min capture default so an in-flight human
+ * approval (registry TTL `DEFAULT_APPROVAL_TTL_MS`, 10 min) resolves
+ * before the turn times out, while still bounding a stuck sidecar. Shared by
+ * inbound IM turns (`runtime.ts`) and the IM `/goal` driver (`commands/goal.ts`).
+ */
+export const CONNECTOR_TURN_TIMEOUT_MS = 15 * 60 * 1000
+
 /** Action-id namespaces so the bus can route + the numeric mirror can map. */
 export const TOOL_APPROVE_PREFIX = "tapa:"
 export const TOOL_DENY_PREFIX = "tapd:"
@@ -108,6 +117,17 @@ export interface ImPermissionResponderContext {
    * (plan 2026-07-24 Phase 2). Absent → operators-only scope.
    */
   initiatorUserId?: string
+  /**
+   * Answers a request no human could decide: the card could not be surfaced,
+   * or its TTL expired with no tap. Its decision replaces the default deny.
+   * Not called for an explicit Deny (a decision) nor when `signal` ended the
+   * wait (the run is over). The IM `/goal` driver passes the goal runner's
+   * unattended responder here, so an unanswered card pauses the goal
+   * `needs_approval` instead of letting the loop re-ask every turn.
+   */
+  onUnanswered?: (
+    req: PermissionRequestEvent
+  ) => CapturePermissionDecision | Promise<CapturePermissionDecision>
 }
 
 /**
@@ -215,6 +235,7 @@ export function makeImPermissionResponder(
         const { resolveRunInterruptFromSource } = await import("@/lib/execution/run-control")
         await resolveRunInterruptFromSource(ctx.runId, interruptId, "deny")
       }
+      if (ctx.onUnanswered) return ctx.onUnanswered(req)
       return { decision: "deny", message: "failed to surface approval card" }
     }
 
@@ -255,6 +276,9 @@ export function makeImPermissionResponder(
         decision.decision === "allow" ? "approve" : "deny"
       )
     }
+    // `onExpire` also fires when the owner's signal ends the wait; only a TTL
+    // expiry means nobody answered.
+    if (expired && !ctx.signal?.aborted && ctx.onUnanswered) return ctx.onUnanswered(req)
     return decision
   }
 }

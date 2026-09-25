@@ -27,13 +27,22 @@
  * no raw PII leaves the device in the headless (un-reviewed) path. Subsequent
  * turns use the turn-driver's generated continuation messages.
  *
- * Nobody is watching these turns. A tool's permission request is answered at
- * once by the unattended responder: denied, with the model told why. The turn
- * driver then pauses the goal with exit `needs_approval` rather than continue
- * into the same wall, and the result names the denied tools.
+ * By default nobody is watching these turns (the scheduler). A tool's
+ * permission request is answered at once by the unattended responder: denied,
+ * with the model told why. The turn driver then pauses the goal with exit
+ * `needs_approval` rather than continue into the same wall, and the result
+ * names the denied tools. A caller with a human in the loop supplies its own
+ * responder (`onPermissionRequest`; the IM driver asks in the conversation).
+ * Its answers are decisions, so only the requests it hands back to the
+ * unattended responder, the ones nobody could answer, pause the goal.
  */
 
-import type { AppSettings, SendContent, SendOptions } from "@cognia/agent-config-types"
+import type {
+  AppSettings,
+  PermissionRequestEvent,
+  SendContent,
+  SendOptions,
+} from "@cognia/agent-config-types"
 import { isTerminalGoalStatus, type ExitReason, type Goal, type GoalStatus } from "@/types/goal"
 import { getGoal } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"
@@ -41,6 +50,7 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import {
   runAndCaptureAssistantReply,
   RunAndCaptureError,
+  type CapturePermissionDecision,
   type RunAndCaptureOptions,
   type RunAndCaptureResult,
 } from "@/lib/claude/run-and-capture"
@@ -57,6 +67,16 @@ import { loadOwningWorkspace } from "./owning-workspace"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
+
+/**
+ * A caller's answer to a goal turn's tool permission request. `unattended` is
+ * the run's default responder: hand it a request nobody could decide and it
+ * denies it the unattended way and records it for `needsApproval`.
+ */
+export type GoalPermissionResponder = (
+  request: PermissionRequestEvent,
+  unattended: UnattendedPermissionResponder["onPermissionRequest"]
+) => CapturePermissionDecision | Promise<CapturePermissionDecision>
 
 export interface RunGoalLoopInput {
   sessionId: string
@@ -108,6 +128,20 @@ export interface RunGoalLoopInput {
    * conversation.
    */
   workspace?: "owning" | "none"
+  /**
+   * Who answers each turn's tool permission requests. Unset (the scheduler),
+   * the unattended responder denies every request at once, and a turn with a
+   * denial pauses the goal `needs_approval`. A caller with a human in the loop
+   * supplies its own: the connector driver projects an IM approval card. What
+   * it returns is a decision, so a human's Deny reaches the model like any
+   * other tool result and the goal carries on.
+   *
+   * A request no human could decide (the card was never shown, or expired
+   * untapped) goes to the `unattended` argument instead. Those denials, and
+   * only those, feed `needsApproval` and the `needs_approval` pause, since
+   * the next turn would find nobody there either.
+   */
+  onPermissionRequest?: GoalPermissionResponder
 }
 
 export interface RunGoalLoopResult {
@@ -119,20 +153,27 @@ export interface RunGoalLoopResult {
   exit?: ExitReason
   /**
    * Every tool request the run denied for want of an approver, in arrival
-   * order. Present only when there was one. The goal is then `paused` with
-   * exit `needs_approval`, unless the turn ended it another way (the judge
-   * found it done, a limit fired).
+   * order: with the default responder every request that asked, with a
+   * caller's `onPermissionRequest` only those it handed to `unattended`. A
+   * human's Deny is never listed. Present only when there was one. The goal is
+   * then `paused` with exit `needs_approval`, unless the turn ended it another
+   * way (the judge found it done, a limit fired).
    */
   needsApproval?: UnattendedPermissionDenial[]
 }
 
 export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunGoalLoopResult> {
-  // Nobody is watching a headless goal. Answer each permission request now with
-  // a recorded denial, rather than leave it to whichever listener the shell
-  // has: the desktop's silent "session not open" deny, or the headless brain's
-  // hang until the capture timeout.
+  // Answer each permission request now, rather than leave it to whichever
+  // listener the shell has: the desktop's silent "session not open" deny, or
+  // the headless brain's hang until the capture timeout. With no caller
+  // responder nobody is watching, so every request gets a recorded denial.
+  // With one, only the requests it hands back are recorded.
   const permissions = createUnattendedPermissionResponder("goal")
-  const result = await driveGoalLoop(input, permissions)
+  const callerResponder = input.onPermissionRequest
+  const onPermissionRequest: RunAndCaptureOptions["onPermissionRequest"] = callerResponder
+    ? (request) => callerResponder(request, permissions.onPermissionRequest)
+    : permissions.onPermissionRequest
+  const result = await driveGoalLoop(input, permissions, onPermissionRequest)
   return permissions.needsApproval()
     ? { ...result, needsApproval: [...permissions.denials] }
     : result
@@ -140,7 +181,8 @@ export async function runGoalLoopHeadless(input: RunGoalLoopInput): Promise<RunG
 
 async function driveGoalLoop(
   input: RunGoalLoopInput,
-  permissions: UnattendedPermissionResponder
+  permissions: UnattendedPermissionResponder,
+  onPermissionRequest: RunAndCaptureOptions["onPermissionRequest"]
 ): Promise<RunGoalLoopResult> {
   const { sessionId, goalId, appSettings, signal } = input
   const sendTurn = input.sendTurn ?? runAndCaptureAssistantReply
@@ -257,7 +299,7 @@ async function driveGoalLoop(
           ? { timeoutMs: input.perTurnTimeoutMs }
           : {}),
         execution: { kind: "goal", label: `Goal ${goalId.slice(0, 8)}`, taskId: goalId },
-        onPermissionRequest: permissions.onPermissionRequest,
+        onPermissionRequest,
       })
       captureText = capture.text
       lastResponse = capture.text

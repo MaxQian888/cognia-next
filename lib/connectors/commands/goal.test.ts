@@ -1,4 +1,6 @@
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { PermissionRequestEvent } from "@cognia/agent-config-types"
+import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
+import type { RunGoalLoopInput } from "@/lib/scheduler/executors/goal-headless-runner"
 import type { ConnectorGoalDriverArgs } from "./goal"
 
 // Keep the heavy transitive graph (scheduler runner, slash actions, settings
@@ -54,14 +56,20 @@ import { runGoalLoopHeadless } from "@/lib/scheduler/executors/goal-headless-run
 import { safeSendPrompt } from "@/lib/connectors/ai-loop/safe-send-prompt"
 import { appendAudit } from "@/lib/connectors/audit"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { CONNECTOR_TURN_TIMEOUT_MS } from "@/lib/connectors/hitl/tool-approval"
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
 function fakeEvent(): NormalizedInboundEvent {
   return {
     adapterId: "tg",
+    platform: "telegram",
     conversationKey: "ck",
     conversationRef: { channelId: "c1" },
+    channel: { kind: "group", id: "c1" },
+    sender: { id: "p-1", remoteUserId: "u-1" },
+    messageId: "m-1",
+    timestamp: 7,
   } as unknown as NormalizedInboundEvent
 }
 
@@ -110,6 +118,41 @@ describe("handleGoalCommand", () => {
     expect(reply).toHaveBeenCalledWith("🎯 Goal active", "applied")
     expect(startDriver).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "s1", goalId: "g1", adapterId: "tg" })
+    )
+  })
+
+  it("names the /goal sender and the message's delivery target for approval cards", async () => {
+    const startDriver = jest.fn()
+
+    await handleGoalCommand({
+      event: fakeEvent(),
+      arg: "ship it",
+      ensureSession: async () => ({ id: "s1" }) as never,
+      reply: jest.fn().mockResolvedValue(undefined),
+      deps: {
+        dispatch: jest.fn().mockResolvedValue({ system: "ok" }),
+        getOpenGoal: jest.fn().mockResolvedValue({ id: "g1", status: "active" }),
+        startDriver,
+        appSettings: null,
+      },
+    })
+
+    expect(startDriver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiatorUserId: "u-1",
+        deliveryTarget: {
+          address: {
+            conversationKey: "ck",
+            platform: "telegram",
+            adapterId: "tg",
+            scopeKind: "group",
+            containerId: "c1",
+          },
+          conversationRef: { channelId: "c1" },
+          sourceMessageId: "m-1",
+          refreshedAt: 7,
+        },
+      })
     )
   })
 
@@ -332,7 +375,8 @@ describe("startConnectorGoalDriver", () => {
 
     const texts = enqueue.mock.calls.map((c) => c[0].request.segments[0].text)
     expect(texts).toEqual([
-      "⏸️ 目标已暂停:工具需要授权 (Edit, Bash) / Goal paused — tools need approval: Edit, Bash.",
+      "⏸️ 目标已暂停:工具需要授权 (Edit, Bash),发送 /goal resume 重新请求 / " +
+        "Goal paused — tools need approval: Edit, Bash. Send /goal resume to ask again.",
     ])
   })
 
@@ -355,5 +399,123 @@ describe("startConnectorGoalDriver", () => {
     await tick()
     await tick()
     expect(__isConnectorGoalDriverRunningForTesting("g1")).toBe(false)
+  })
+})
+
+describe("startConnectorGoalDriver — IM tool approvals", () => {
+  const request = {
+    type: "permission_request",
+    sessionId: "s1",
+    requestId: "req-1",
+    toolUseID: "tu-1",
+    toolName: "Bash",
+    input: {},
+  } as unknown as PermissionRequestEvent
+  const deliveryTarget = {
+    address: {
+      conversationKey: "ck",
+      platform: "telegram",
+      adapterId: "tg",
+      scopeKind: "group",
+      containerId: "c1",
+    },
+    conversationRef: { channelId: "c1" },
+    sourceMessageId: "m-1",
+    refreshedAt: 7,
+  } as unknown as ConversationDeliveryTarget
+
+  /** Start a driver whose run never ends, and hand back what it gave the runner. */
+  function startCapturing(deps: Parameters<typeof startConnectorGoalDriver>[1] = {}) {
+    const run = jest.fn((_input: RunGoalLoopInput) => new Promise<never>(() => {}))
+    startConnectorGoalDriver(driverArgs({ initiatorUserId: "u-1", deliveryTarget }), {
+      run: run as never,
+      enqueue: jest.fn(),
+      ...deps,
+    })
+    return run.mock.calls[0][0]
+  }
+
+  it("gives each turn room for a human approval, like an ordinary IM turn", () => {
+    const input = startCapturing()
+    expect(input.perTurnTimeoutMs).toBe(CONNECTOR_TURN_TIMEOUT_MS)
+    expect(input.onPermissionRequest).toEqual(expect.any(Function))
+  })
+
+  it("asks the conversation through the IM approval card", async () => {
+    const imResponder = jest.fn(async () => ({ decision: "allow" as const }))
+    const makeResponder = jest.fn(() => imResponder)
+    const readOverride = jest.fn(async () => ({ approvalMode: "prompt" }) as never)
+    const signal = new AbortController().signal
+    const unattended = jest.fn()
+
+    const input = startCapturing({ makeResponder, readOverride, signal })
+    const decision = await input.onPermissionRequest!(request, unattended)
+
+    expect(readOverride).toHaveBeenCalledWith("ck")
+    expect(makeResponder).toHaveBeenCalledWith({
+      sessionId: "s1",
+      adapterId: "tg",
+      conversationKey: "ck",
+      conversationRef: { channelId: "c1" },
+      deliveryTarget,
+      initiatorUserId: "u-1",
+      approvalMode: "prompt",
+      signal,
+      // A card nobody answers falls back to the runner's unattended denial.
+      onUnanswered: unattended,
+    })
+    expect(imResponder).toHaveBeenCalledWith(request)
+    expect(decision).toEqual({ decision: "allow" })
+    // The human decided; the unattended fallback was not consulted.
+    expect(unattended).not.toHaveBeenCalled()
+  })
+
+  it("reads the approval mode fresh for each request, so /mode applies mid-goal", async () => {
+    const makeResponder = jest.fn(() => async () => ({ decision: "allow" as const }))
+    const readOverride = jest
+      .fn()
+      .mockResolvedValueOnce({ approvalMode: "yolo" })
+      .mockResolvedValueOnce({ approvalMode: "prompt" })
+
+    const input = startCapturing({ makeResponder, readOverride })
+    await input.onPermissionRequest!(request, jest.fn())
+    await input.onPermissionRequest!(request, jest.fn())
+
+    expect(makeResponder.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      expect.objectContaining({ approvalMode: "yolo" }),
+      expect.objectContaining({ approvalMode: "prompt" }),
+    ])
+  })
+
+  it("asks when the conversation has no override or it cannot be read", async () => {
+    const makeResponder = jest.fn(() => async () => ({ decision: "deny" as const }))
+    const readOverride = jest
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("dexie down"))
+
+    const input = startCapturing({ makeResponder, readOverride })
+    await input.onPermissionRequest!(request, jest.fn())
+    await input.onPermissionRequest!(request, jest.fn())
+
+    for (const call of makeResponder.mock.calls) {
+      expect((call as unknown[])[0]).toEqual(expect.objectContaining({ approvalMode: undefined }))
+    }
+  })
+
+  it("scopes the card to operators when the /goal sender is unknown", async () => {
+    const makeResponder = jest.fn(() => async () => ({ decision: "allow" as const }))
+    const run = jest.fn((_input: RunGoalLoopInput) => new Promise<never>(() => {}))
+    startConnectorGoalDriver(driverArgs(), {
+      run: run as never,
+      enqueue: jest.fn(),
+      makeResponder,
+      readOverride: jest.fn(async () => undefined),
+    })
+
+    await run.mock.calls[0][0].onPermissionRequest!(request, jest.fn())
+    const ctx = (makeResponder.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(ctx).not.toHaveProperty("initiatorUserId")
+    expect(ctx).not.toHaveProperty("deliveryTarget")
   })
 })

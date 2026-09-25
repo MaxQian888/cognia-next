@@ -130,10 +130,10 @@ Phase 1 之后已落地(此处保留作交付记录):
 - **子目标自动拆解** —— DONE。`lib/goal/subgoals.ts` + Subgoals tab(LLM 拆成可勾选清单;judge 可经 `completedSubgoals` 判定自动勾选)。
 - **Judge model override** —— DONE。`GoalConfig.judgeModel` / `judgeProvider`,在 `Settings → Goals → Defaults` 用 provider-model 选择器编辑(按 provider 目录校验 —— 打错字不再静默降级 judge)。
 - **Workflow trigger 集成** —— DONE。`lib/goal/completion-linkage.ts` 在终态发 `trigger.goal.completed`。
-- **Cron 驱动续 turn** —— DONE。调度器 `goal` executor 驱动 `lib/scheduler/executors/goal-headless-runner.ts:runGoalLoopHeadless`。它的每一轮都无人值守:`createUnattendedPermissionResponder` 立即拒绝权限请求,`handleTurnComplete`(以 `needsApproval` 收到本轮被拒的工具)在本该 continue 的地方改为以 `needs_approval` 退出、把目标暂停。唯一例外是布置完成承诺(completion promise)校验的那一轮。
+- **Cron 驱动续 turn** —— DONE。调度器 `goal` executor 驱动 `lib/scheduler/executors/goal-headless-runner.ts:runGoalLoopHeadless`。它的每一轮都无人值守:未传 `RunGoalLoopInput.onPermissionRequest` 时,`createUnattendedPermissionResponder` 立即拒绝权限请求,`handleTurnComplete`(以 `needsApproval` 收到本轮被拒的工具)在本该 continue 的地方改为以 `needs_approval` 退出、把目标暂停。唯一例外是布置完成承诺(completion promise)校验的那一轮。有审批人的调用方传入 `onPermissionRequest`,它的答复是决定,人工「拒绝」不会进入 `needsApproval`,只有它交给 `unattended` 兜底的请求才会。
 - **Goal 模板库** —— DONE。`lib/goal/seed-templates.ts`(4 个内置)+ Templates tab CRUD。
 - **chat hook 静默 send 接线** —— DONE。`hooks/use-claude-chat.ts:scheduleGoalContinuation` 以 `sendRef.current(msg, …, { skipUserAppend: true })` 下发续 turn。
-- **Connector inbound goals** —— DONE。`/goal` 是连接器控制命令(`lib/connectors/commands/goal.ts`):复用 `dispatchGoalSubcommand` 的子命令文法,并因 IM 会话无 chat hook 而驱动一个无头 driver(`runGoalLoopHeadless` + 逐回合投递 + pacing 门)。由 v49 的 `ConversationOverrideRow.allowGoalDriving` opt-in 守卫。在连接器运行时所在处运行 —— 桌面(全部渠道)+ `cli serve`(webhook 渠道);Capacitor 移动壳无连接器运行时。
+- **Connector inbound goals** —— DONE。`/goal` 是连接器控制命令(`lib/connectors/commands/goal.ts`):复用 `dispatchGoalSubcommand` 的子命令文法,并因 IM 会话无 chat hook 而驱动一个无头 driver(`runGoalLoopHeadless` + 逐回合投递 + pacing 门)。由 v49 的 `ConversationOverrideRow.allowGoalDriving` opt-in 守卫。工具授权走会话的人工审批流:driver 以 `makeImPermissionResponder`(`lib/connectors/hitl/tool-approval.ts`)作为 `onPermissionRequest`,与 `runtime.ts` 处理入站回合一致,每次请求都从会话 override 读取审批模式,以发送 `/goal` 的人作为 actor scope,沿用 registry TTL,并以 `CONNECTOR_TURN_TIMEOUT_MS` 作为单回合超时。它不创建 run interrupt,因为 goal 回合没有持久化的 execution run。卡片超时或无法送达时交给无人值守兜底(`onUnanswered`),目标以 `needs_approval` 暂停。在连接器运行时所在处运行 —— 桌面(全部渠道)+ `cli serve`(webhook 渠道);Capacitor 移动壳无连接器运行时。
 
 仍开放 / 有意延后:
 
