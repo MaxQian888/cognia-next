@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { createPortal } from "react-dom"
 import { Plus, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -21,6 +22,7 @@ import {
 import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import { discoverSubscriptionModels } from "@/lib/subscription/core/model-discovery"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
+import { PROVIDER_SETTINGS_PARAM as PROVIDER_PARAM } from "@/lib/settings/deep-link"
 import { useProviderManager } from "@/hooks/ai/use-provider-manager"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
@@ -258,6 +260,26 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProviderId])
+
+  // `?provider=` (`providerSettingsHref` in `lib/settings/deep-link`): land on the provider a failure
+  // named — "Provider "anthropic" is not configured" → Open settings — rather
+  // than the persisted selection, which would leave the user hunting through
+  // 70-odd rows for the one the error was about. Consumed once and stripped,
+  // so a reload or a later visit is back on the user's own selection.
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedProviderId = searchParams.get(PROVIDER_PARAM)
+  useEffect(() => {
+    if (!requestedProviderId || !settingsLoaded) return
+    const known =
+      s.filteredProviders.some(([id]) => id === requestedProviderId) ||
+      Boolean(s.customProviders[requestedProviderId])
+    if (known) void s.setSelectedProviderId(requestedProviderId)
+    const next = new URLSearchParams(searchParams.toString())
+    next.delete(PROVIDER_PARAM)
+    router.replace(`?${next.toString()}`, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedProviderId, settingsLoaded])
 
   const selectedId = s.selectedProviderId
   const selectedBuiltIn = selectedId

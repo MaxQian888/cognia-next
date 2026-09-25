@@ -198,6 +198,39 @@ describe("runStandaloneTurn", () => {
     })
   })
 
+  it("carries the resolver's code on session_ended so the card can offer settings", async () => {
+    mockResolve.mockReturnValue({
+      kind: "unresolved",
+      reason: 'Provider "anthropic" is not configured.',
+      nextAction: "open_provider_settings",
+      code: "no_candidates",
+      providerId: "anthropic",
+      attemptedProviderIds: ["anthropic"],
+    })
+    const { events, promise } = run()
+    await promise
+    expect(events[0]).toEqual({
+      type: "session_ended",
+      sessionId: "s1",
+      error: 'Provider "anthropic" is not configured.',
+      providerUnresolved: {
+        code: "no_candidates",
+        nextAction: "open_provider_settings",
+        providerId: "anthropic",
+      },
+    })
+  })
+
+  it("leaves providerUnresolved off a failure that reached the provider", async () => {
+    const { events, promise } = run({
+      streamTextImpl: (() => {
+        throw new Error("401 unauthorized")
+      }) as never,
+    })
+    await promise
+    expect(events.at(-1)).not.toHaveProperty("providerUnresolved")
+  })
+
   it("surfaces a provider/stream error as session_ended.error", async () => {
     const { events, promise } = run({
       streamTextImpl: (() => {

@@ -1,4 +1,10 @@
-import { connectionsHref, mcpHref, SETTINGS_ROUTE, settingsHref } from "./deep-link"
+import {
+  connectionsHref,
+  mcpHref,
+  providerSettingsHref,
+  SETTINGS_ROUTE,
+  settingsHref,
+} from "./deep-link"
 import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 
 describe("settingsHref", () => {
@@ -111,5 +117,17 @@ describe("mcpHref", () => {
   it("opens one configured server's detail pane", () => {
     // How a managed external service points at the MCP row it provisioned.
     expect(mcpHref({ server: "srv-1" })).toBe("/settings?section=mcp&server=srv-1")
+  })
+})
+
+describe("providerSettingsHref", () => {
+  it("points at AI connections itself", () => {
+    expect(providerSettingsHref()).toBe("/settings?section=ai-connections")
+  })
+
+  it("selects the provider a failure named", () => {
+    expect(providerSettingsHref({ provider: "anthropic" })).toBe(
+      "/settings?section=ai-connections&provider=anthropic"
+    )
   })
 })

@@ -7,6 +7,8 @@ import {
   FrozenModelBindingError,
 } from "@/lib/ai/agent/execution/agent-execution-handle"
 
+import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
+
 import { diagnoseDegradedReason, diagnoseExecutionError } from "./from-execution-error"
 
 describe("diagnoseExecutionError", () => {
@@ -36,6 +38,21 @@ describe("diagnoseExecutionError", () => {
     expect(diagnoseExecutionError(new FrozenModelBindingError("gpt-9"))?.code).toBe(
       "frozenModelBinding"
     )
+  })
+
+  it("routes an unresolvable provider to the settings that fix it", () => {
+    const out = diagnoseExecutionError(
+      new ProviderResolutionError({
+        reason: 'Provider "anthropic" is not configured.',
+        code: "no_candidates",
+        providerId: "anthropic",
+      })
+    )
+    expect(out).toEqual({
+      code: "providerMisconfigured",
+      message: 'Provider "anthropic" is not configured.',
+      meta: { providerId: "anthropic", extra: { resolutionCode: "no_candidates" } },
+    })
   })
 
   it("returns null for anything else so the funnel keeps looking", () => {

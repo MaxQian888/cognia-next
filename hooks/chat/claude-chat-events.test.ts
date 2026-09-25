@@ -810,6 +810,24 @@ describe("Router + Fusion turn wiring (ADR-0188)", () => {
     expect(useChatStore.getState().sessions.rf?.errorDiagnostic?.code).toBe("routerFusionRefused")
   })
 
+  it("ends a turn with no resolvable provider on the settings card, not the breaker", async () => {
+    seed({ provider: "anthropic", model: "sonnet" })
+    await dispatch({
+      type: "session_ended",
+      sessionId: "rf",
+      error: 'Provider "anthropic" is not configured.',
+      providerUnresolved: { code: "no_candidates", providerId: "anthropic" },
+    })
+    // Nothing reached the provider: tripping its breaker would block the
+    // first send after the user adds the key.
+    expect(mockRecordProviderOutcome).not.toHaveBeenCalled()
+    expect(mockAttemptRoutingFallback).not.toHaveBeenCalled()
+    const diagnostic = useChatStore.getState().sessions.rf?.errorDiagnostic
+    expect(diagnostic?.code).toBe("providerMisconfigured")
+    expect(diagnostic?.meta?.providerId).toBe("anthropic")
+    expect(diagnostic?.actions).toContainEqual({ kind: "open-settings", section: "ai-connections" })
+  })
+
   it("keeps the sidecar's own words and the turn's span on the refusal diagnostic", async () => {
     seed({ provider: "openai", model: "gpt-5", routerFusion: route, spanId: "span-7" })
     mockRouterFusionGate.routerFusionTurnActive.mockReturnValue(true)

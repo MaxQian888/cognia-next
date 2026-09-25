@@ -36,6 +36,7 @@ import {
   routerFusionTurnActive,
 } from "@/lib/router-fusion/gate/chat-events"
 import { routerFusionRefusalDiagnostic } from "@/lib/router-fusion/gate/refusal-diagnostic"
+import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
   isSessionOpen,
@@ -476,6 +477,9 @@ export async function handleEvent(
       // A refusal ended the turn: the provider did not fail, so neither its
       // breaker nor a routing fallback may react.
       const routerFusionRefusal = evt.routerFusionRefusal
+      // Nothing was sent at all — no provider resolved. Same rule: the
+      // provider did not fail, so its breaker and the fallback stay out of it.
+      const providerUnresolved = evt.providerUnresolved
       const terminalMessages =
         messagesMirrorRef.current.get(evt.sessionId) ??
         useChatStore.getState().sessions[evt.sessionId]?.messages
@@ -498,7 +502,7 @@ export async function handleEvent(
           // (which overwrites the cached send). Trips its breaker after repeats.
           const failedSend = useChatStore.getState().lastSendBySession[evt.sessionId]
           const failedProvider = failedSend?.options.provider
-          if (failedProvider && !routerFusionRefusal) {
+          if (failedProvider && !routerFusionRefusal && !providerUnresolved) {
             recordProviderOutcome({
               providerId: failedProvider,
               ok: false,
@@ -522,7 +526,7 @@ export async function handleEvent(
           // `true` when a retry was scheduled — in that case suppress
           // the error toast so the UI stays in `streaming`.
           const retried =
-            isStandaloneChatMode() || routerFusionRefusal
+            isStandaloneChatMode() || routerFusionRefusal || providerUnresolved
               ? false
               : await attemptRoutingFallback(evt.sessionId, evt.error, {
                   httpStatus: evt.httpStatus,
@@ -541,17 +545,24 @@ export async function handleEvent(
                     sessionId: evt.sessionId,
                     ...(failedSend?.options.spanId ? { spanId: failedSend.options.spanId } : {}),
                   })
-                : toDiagnostic(evt.error, {
-                    source: "provider",
-                    meta: {
-                      sessionId: evt.sessionId,
-                      ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
-                      ...(typeof evt.retryAfterMs === "number"
-                        ? { retryAfterMs: evt.retryAfterMs }
-                        : {}),
-                      ...(failedProvider ? { providerId: failedProvider } : {}),
-                    },
-                  })
+                : toDiagnostic(
+                    providerUnresolved
+                      ? new ProviderResolutionError({ reason: evt.error, ...providerUnresolved })
+                      : evt.error,
+                    {
+                      source: "provider",
+                      meta: {
+                        sessionId: evt.sessionId,
+                        ...(typeof evt.httpStatus === "number"
+                          ? { httpStatus: evt.httpStatus }
+                          : {}),
+                        ...(typeof evt.retryAfterMs === "number"
+                          ? { retryAfterMs: evt.retryAfterMs }
+                          : {}),
+                        ...(failedProvider ? { providerId: failedProvider } : {}),
+                      },
+                    }
+                  )
             )
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
@@ -573,9 +584,11 @@ export async function handleEvent(
                 durationMs,
                 errorType: routerFusionRefusal
                   ? "router_fusion_refused"
-                  : typeof evt.httpStatus === "number"
-                    ? `http_${evt.httpStatus}`
-                    : "provider_error",
+                  : providerUnresolved
+                    ? "provider_unresolved"
+                    : typeof evt.httpStatus === "number"
+                      ? `http_${evt.httpStatus}`
+                      : "provider_error",
                 ...(failedProvider ? { provider: failedProvider } : {}),
               })
             }

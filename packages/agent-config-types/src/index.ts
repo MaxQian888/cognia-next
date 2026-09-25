@@ -1266,6 +1266,14 @@ export interface SessionEndedEvent {
    * not fail at the provider, so routing fallback and breakers must not react.
    */
   routerFusionRefusal?: { code: string; message?: string }
+  /**
+   * No provider could be resolved for the turn (`resolveFeatureProvider`
+   * answered `unresolved`), so nothing was sent. Carries the resolver's
+   * machine-readable code so the chat card can offer the settings that fix it
+   * — and, like a refusal, it is not a provider failure: the breaker and the
+   * routing fallback must not react to it.
+   */
+  providerUnresolved?: { code?: string; nextAction?: string; providerId?: string }
 }
 
 /**

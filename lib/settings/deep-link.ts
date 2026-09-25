@@ -113,3 +113,16 @@ export interface McpDeepLink {
 export function mcpHref(link: McpDeepLink = {}): string {
   return settingsHref("mcp", { params: { preset: link.preset, server: link.server } })
 }
+
+/** The provider-selection param `provider-settings.tsx` consumes. */
+export const PROVIDER_SETTINGS_PARAM = "provider"
+
+/**
+ * Deep-link into AI connections, optionally selecting one provider
+ * (`?provider=`). Used by failures that name the provider at fault, so "Open
+ * settings" lands on that provider's credentials rather than whichever row was
+ * selected last.
+ */
+export function providerSettingsHref(link: { provider?: string } = {}): string {
+  return settingsHref("ai-connections", { params: { [PROVIDER_SETTINGS_PARAM]: link.provider } })
+}

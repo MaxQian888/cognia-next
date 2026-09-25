@@ -554,6 +554,17 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("mobile-actions-trigger")).toBeInTheDocument()
   })
 
+  it("leaves a chat failure to the pane's inline card instead of toasting it too", () => {
+    toastError.mockClear()
+    errorMessageRef.current = 'Provider "anthropic" is not configured.'
+    try {
+      render(<AppShellMobile />)
+      expect(toastError).not.toHaveBeenCalled()
+    } finally {
+      errorMessageRef.current = null
+    }
+  })
+
   it("wraps the chat pane in the artifact workspace dock (gap11)", () => {
     render(<AppShellMobile />)
     const dock = screen.getByTestId("artifact-workspace-dock")

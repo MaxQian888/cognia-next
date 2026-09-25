@@ -14,6 +14,13 @@ import React from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ProviderSettings } from "./provider-settings"
 
+const mockRouterReplace = jest.fn()
+let mockSearchParams = new URLSearchParams("section=ai-connections")
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: mockRouterReplace, push: jest.fn() }),
+  useSearchParams: () => mockSearchParams,
+}))
+
 const mockSubscriptionDefinition = jest.fn()
 const mockDiscoverSubscriptionModels = jest.fn()
 jest.mock("@/lib/subscription/core/provider-registry", () => ({
@@ -846,6 +853,41 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     render(<ProviderSettings />)
     expect(mockSetSelectedProviderId).toHaveBeenCalledWith("openai")
+  })
+
+  it("lands on the provider a deep link names, then strips the param", () => {
+    // "Open settings" from a chat failure about anthropic, while the default
+    // provider (the store mock's "openai") would otherwise win.
+    mockSearchParams = new URLSearchParams("section=ai-connections&provider=anthropic")
+    mockHookState = makeHookState({
+      selectedProviderId: "openai",
+      filteredProviders: [
+        ["anthropic", { name: "Anthropic", defaultModel: "claude-sonnet-5" }],
+        ["openai", { name: "OpenAI", defaultModel: "gpt-4o" }],
+      ],
+    })
+    try {
+      render(<ProviderSettings />)
+      expect(mockSetSelectedProviderId).toHaveBeenCalledWith("anthropic")
+      expect(mockRouterReplace).toHaveBeenCalledWith("?section=ai-connections", { scroll: false })
+    } finally {
+      mockSearchParams = new URLSearchParams("section=ai-connections")
+    }
+  })
+
+  it("ignores a deep-linked provider that does not exist, but still strips it", () => {
+    mockSearchParams = new URLSearchParams("section=ai-connections&provider=nope")
+    mockHookState = makeHookState({
+      selectedProviderId: "openai",
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+    })
+    try {
+      render(<ProviderSettings />)
+      expect(mockSetSelectedProviderId).not.toHaveBeenCalledWith("nope")
+      expect(mockRouterReplace).toHaveBeenCalledWith("?section=ai-connections", { scroll: false })
+    } finally {
+      mockSearchParams = new URLSearchParams("section=ai-connections")
+    }
   })
 
   it("auto-selects the first connected row when the default provider is not listed", () => {

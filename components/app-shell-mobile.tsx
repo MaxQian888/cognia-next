@@ -116,6 +116,8 @@ import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { impact, notify } from "@/lib/capacitor/haptics"
+import { SETTINGS_ROUTE, settingsHref } from "@/lib/settings/deep-link"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-shell-status"
 
 const log = loggers.shell
@@ -180,7 +182,6 @@ export function AppShellMobile() {
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
-  const errorMessage = useChatStore((s) => s.errorMessage)
   const chatStatus = useChatStore((s) => s.status)
   const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
   const clearActiveSession = useChatStore((s) => s.clearActiveSession)
@@ -205,7 +206,6 @@ export function AppShellMobile() {
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
-  const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [homeLayoutOpen, setHomeLayoutOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
 
@@ -300,16 +300,9 @@ export function AppShellMobile() {
     setSelectedGuild,
   ])
 
-  // Surface non-fatal errors as toasts.
-  useEffect(() => {
-    if (errorMessage && errorMessage !== lastErrorShown) {
-      toast.error(errorMessage)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLastErrorShown(errorMessage)
-    } else if (!errorMessage) {
-      setLastErrorShown(null)
-    }
-  }, [errorMessage, lastErrorShown])
+  // No error toast here: the chat pane is always mounted on this shell and
+  // renders the active session's failure as an inline card with its actions,
+  // so a toast only announced the same failure twice (surface-router rule 1).
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const [exportOpen, setExportOpen] = useState(false)
@@ -461,9 +454,9 @@ export function AppShellMobile() {
     [create, select, setSelectedGuild, directChat, handleSend, newChatExecution]
   )
 
-  const openSettings = (tab?: string) => {
+  const openSettings = (tab?: string, params?: Readonly<Record<string, string>>) => {
     log.info("open settings (mobile)", { tab: tab ?? "general" })
-    router.push(tab ? `/settings?section=${tab}` : "/settings")
+    router.push(tab ? settingsHref(tab as SettingsSectionId, { params }) : SETTINGS_ROUTE)
   }
 
   useEffect(() => {

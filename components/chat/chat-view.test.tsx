@@ -820,6 +820,32 @@ describe("ChatPane", () => {
     }
   })
 
+  it("opens AI connections on the provider the failure named", () => {
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
+    MockDiagnosticCard.mockClear()
+    const diagnostic = createDiagnostic("providerMisconfigured", {
+      source: "provider",
+      meta: { providerId: "anthropic" },
+      now: () => 0,
+      id: "pm",
+    })
+    storeState.errorDiagnostic = diagnostic
+    const props = makeProps()
+    try {
+      render(<ChatPane {...props} />)
+      const handlers = MockDiagnosticCard.mock.calls[0]?.[0]?.handlers ?? {}
+      handlers["open-settings"]({ kind: "open-settings", section: "ai-connections" })
+      expect(props.onOpenSettings).toHaveBeenCalledWith("ai-connections", {
+        provider: "anthropic",
+      })
+      // Another section keeps its plain link: `provider` means nothing there.
+      handlers["open-settings"]({ kind: "open-settings", section: "network" })
+      expect(props.onOpenSettings).toHaveBeenLastCalledWith("network", undefined)
+    } finally {
+      storeState.errorDiagnostic = null
+    }
+  })
+
   it("serves the workspace codes the send path now emits", () => {
     const MockDiagnosticCard = DiagnosticCard as jest.Mock
     for (const code of [

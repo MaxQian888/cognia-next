@@ -1089,6 +1089,36 @@ test("opens settings via deep-link when pendingSettingsRequest is set", async ()
   )
 })
 
+test("carries a section's own params when the pane asks for settings", async () => {
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  const props = paneGroupPropsLog[paneGroupPropsLog.length - 1] as {
+    onOpenSettings: (tab?: string, params?: Record<string, string>) => void
+  }
+  act(() => props.onOpenSettings("ai-connections", { provider: "anthropic" }))
+  expect(routerPush).toHaveBeenCalledWith("/settings?section=ai-connections&provider=anthropic")
+})
+
+test("leaves a chat failure to the pane's inline card instead of toasting it too", async () => {
+  jest.mocked(toast.error).mockClear()
+  errorMessageRef.current = 'Provider "anthropic" is not configured.'
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  expect(toast.error).not.toHaveBeenCalled()
+})
+
+test("toasts a chat failure while the Canvas guild hides the chat pane", async () => {
+  jest.mocked(toast.error).mockClear()
+  selectedGuild = { kind: "canvas" }
+  errorMessageRef.current = "overloaded"
+  await act(async () => {
+    render(<DesktopChatWorkspace />)
+  })
+  expect(toast.error).toHaveBeenCalledWith("overloaded")
+})
+
 test("marks the chat <main> region as a scope-target for chat backgrounds", () => {
   const { container } = render(<DesktopChatWorkspace />)
   const main = container.querySelector("main[data-bg-target='chat']")

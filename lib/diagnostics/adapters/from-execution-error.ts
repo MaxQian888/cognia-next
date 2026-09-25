@@ -18,6 +18,7 @@ import {
   AgentCapabilityError,
   FrozenModelBindingError,
 } from "@/lib/ai/agent/execution/agent-execution-handle"
+import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
 
 export interface ExecutionDiagnosis {
   code: DiagnosticCode
@@ -58,6 +59,20 @@ export function diagnoseExecutionError(err: unknown): ExecutionDiagnosis | null 
   }
   if (err instanceof FrozenModelBindingError) {
     return { code: "frozenModelBinding", message: err.message, meta: {} }
+  }
+  // Not the execution layer's own, but thrown at the same point — before any
+  // spend — and just as structured. Missing key, disabled provider and "none
+  // set up" all have one remedy, the provider settings, which is exactly what
+  // `providerMisconfigured` offers.
+  if (err instanceof ProviderResolutionError) {
+    return {
+      code: "providerMisconfigured",
+      message: err.message,
+      meta: {
+        ...(err.providerId ? { providerId: err.providerId } : {}),
+        ...(err.code ? { extra: { resolutionCode: err.code } } : {}),
+      },
+    }
   }
   return null
 }

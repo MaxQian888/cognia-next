@@ -59,6 +59,8 @@ import {
 } from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import { isChatHomeActive, planGuildReconcile } from "@/lib/shell/guild-session-sync"
+import { SETTINGS_ROUTE, settingsHref } from "@/lib/settings/deep-link"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { loggers } from "@cognia/logging"
 import {
   runtimeAvailabilityMessageKey,
@@ -251,16 +253,21 @@ export function DesktopChatWorkspace() {
     setSelectedGuild,
   ])
 
+  // The chat pane renders the active session's failure as an inline card with
+  // its actions, so a toast on top only announced it twice (surface-router
+  // rule 1). The Canvas guild unmounts that pane — only there is a toast the
+  // one place the failure can show up.
+  const chatPaneHidden = selectedGuild.kind === "canvas"
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {
       log.warn("chat error surfaced", { message: errorMessage })
-      toast.error(errorMessage)
+      if (chatPaneHidden) toast.error(errorMessage)
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastErrorShown(errorMessage)
     } else if (!errorMessage) {
       setLastErrorShown(null)
     }
-  }, [errorMessage, lastErrorShown])
+  }, [errorMessage, lastErrorShown, chatPaneHidden])
 
   // Recent sessions for the welcome-page "Continue" group (newest first,
   // excluding the one already open).
@@ -275,9 +282,9 @@ export function DesktopChatWorkspace() {
   )
 
   const openSettings = useCallback(
-    (tab?: string) => {
+    (tab?: string, params?: Readonly<Record<string, string>>) => {
       log.info("open settings", { tab: tab ?? "general" })
-      router.push(tab ? `/settings?section=${tab}` : "/settings")
+      router.push(tab ? settingsHref(tab as SettingsSectionId, { params }) : SETTINGS_ROUTE)
     },
     [router]
   )

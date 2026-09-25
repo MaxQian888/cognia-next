@@ -40,6 +40,7 @@ import {
 import { WelcomeStats } from "./welcome/welcome-stats"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
+import { PROVIDER_SETTINGS_PARAM } from "@/lib/settings/deep-link"
 import { MessageList } from "./message-list"
 import { CompanionTranscriptMessages } from "./companion-transcript-messages"
 import { RunStatusBar } from "./run-status-bar"
@@ -250,7 +251,12 @@ interface ChatPaneProps {
    */
   onPickCharacter?: () => void
   onUseSample: (text: string) => void
-  onOpenSettings: (tab?: string) => void
+  /**
+   * Open settings on `tab`. `params` are that section's own URL params
+   * (`settingsHref`), e.g. `{ provider }` to land on the provider a failure
+   * named.
+   */
+  onOpenSettings: (tab?: string, params?: Readonly<Record<string, string>>) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
   /**
@@ -815,12 +821,21 @@ export function ChatPane({
             // `view-logs` alone is prescribed by 18 of the codes.
             handlers={{
               ...(hasHistory ? { retry: () => void handleRetry() } : {}),
-              "open-settings": (action) =>
-                onOpenSettings(
+              "open-settings": (action) => {
+                const section =
                   action.kind === "open-settings"
                     ? (action.section as SettingsSectionId)
                     : "providers"
-                ),
+                // A failure that names its provider (bad key, not set up)
+                // opens on that provider, not on whichever row was last open.
+                const providerId = errorDiagnostic.meta?.providerId
+                onOpenSettings(
+                  section,
+                  section === "ai-connections" && providerId
+                    ? { [PROVIDER_SETTINGS_PARAM]: providerId }
+                    : undefined
+                )
+              },
               "view-logs": () => router.push("/logs"),
               // The same stop the composer offers. Reached from here because a
               // `turnSilent` warning is precisely the case where the composer's

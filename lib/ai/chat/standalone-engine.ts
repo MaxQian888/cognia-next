@@ -20,6 +20,7 @@ import { convertToModelMessages, isStepCount, streamText, type UIMessage } from 
 import { composeSystem } from "@/lib/ai/agent/agent-executor"
 import { partitionPrompt } from "@/lib/ai/prompt-partition"
 import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
+import { ProviderResolutionError } from "@/lib/ai/provider-resolution-error"
 import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import type { ClaudeEvent, SendOptions } from "@cognia/agent-config-types"
 import { loggers } from "@cognia/logging"
@@ -108,7 +109,9 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
       const providerId = candidate?.providerId ?? sendOptions.provider
       const resolution = resolveStandaloneProvider(settings, providerId)
       if (resolution.kind !== "resolved") {
-        lastError = new Error(resolution.reason || "No model provider is configured.")
+        // Typed, not `new Error(reason)`: the resolver's code is what lets the
+        // chat card offer "Open settings" instead of "Unexpected error".
+        lastError = new ProviderResolutionError(resolution)
         candidate = controller?.failAndAdvance() ?? null
         fallbackAttempt = Boolean(candidate)
         continue
@@ -239,6 +242,19 @@ export async function runStandaloneTurn(params: StandaloneTurnParams): Promise<v
       return
     }
     const message = err instanceof Error ? err.message : String(err)
-    await emit({ type: "session_ended", sessionId, error: message })
+    await emit({
+      type: "session_ended",
+      sessionId,
+      error: message,
+      ...(err instanceof ProviderResolutionError
+        ? {
+            providerUnresolved: {
+              ...(err.code ? { code: err.code } : {}),
+              ...(err.nextAction ? { nextAction: err.nextAction } : {}),
+              ...(err.providerId ? { providerId: err.providerId } : {}),
+            },
+          }
+        : {}),
+    })
   }
 }

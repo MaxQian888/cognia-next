@@ -62,7 +62,7 @@ export interface ChatPaneGroupProps {
   ) => void | Promise<void>
   /** Whether that hero composer may address a runtime — see `ChatPane.heroRouting`. */
   heroRouting?: boolean
-  onOpenSettings: (tab?: string) => void
+  onOpenSettings: (tab?: string, params?: Readonly<Record<string, string>>) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
   /** Context bar fused onto the welcome hero composer's top edge (`composer/context-bar.tsx`). */
