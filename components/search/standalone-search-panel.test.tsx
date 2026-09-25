@@ -78,6 +78,8 @@ describe("StandaloneSearchPanel", () => {
     const input = screen.getByTestId("standalone-search-input")
     fireEvent.change(input, { target: { value: "你好" } })
     fireEvent.keyDown(input, { key: "Enter", isComposing: true })
+    // WebKit (Tauri on macOS): the confirming Enter reports keyCode 229.
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })
     expect(runImpl).not.toHaveBeenCalled()
   })
 

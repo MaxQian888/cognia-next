@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ui/ime"
 import {
   useStandaloneSearch,
   type UseStandaloneSearchOptions,
@@ -61,7 +62,7 @@ export function StandaloneSearchPanel({ searchOptions }: StandaloneSearchPanelPr
           onKeyDown={(e) => {
             // Not while an IME is composing: that Enter picks the candidate
             // (typing Chinese), and used to fire the search mid-word.
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
               e.preventDefault()
               if (canRun) void run()
             }
