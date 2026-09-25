@@ -23,6 +23,19 @@ export type CogniaDeeplinkRoute =
     }
   | { kind: "pair_qr"; payload: string; raw: string }
   | { kind: "open_session"; sessionId: string; raw: string }
+  /**
+   * One issue on the board (`cognia://issues/<id>`). The Browser Companion
+   * mints these for a page filed as an issue; `/issues?id=` is the page.
+   */
+  | { kind: "open_issue"; issueId: string; raw: string }
+  /**
+   * One agent task (`cognia://agent-tasks/<id>`). Minted by the Browser
+   * Companion for a page handed to an agent. There is no page of its own —
+   * the task board lives with the agent in Settings → Characters — so the
+   * desktop resolves it at click time: the task's conversation when it has
+   * one, the board otherwise.
+   */
+  | { kind: "open_agent_task"; taskId: string; raw: string }
   | { kind: "share_target"; text?: string; url?: string; raw: string }
   | { kind: "open_workflow_run"; workflowId: string; runId: string; raw: string }
   | { kind: "open_im"; conversationKey?: string; raw: string }
@@ -78,6 +91,16 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
   if (host === "session" || host === "chat") {
     return { kind: "open_session", sessionId: path || params.get("id") || "", raw }
   }
+  if (host === "issues" || host === "issue") {
+    return { kind: "open_issue", issueId: firstSegment(path) || params.get("id") || "", raw }
+  }
+  if (host === "agent-tasks" || host === "agent-task") {
+    return {
+      kind: "open_agent_task",
+      taskId: firstSegment(path) || params.get("id") || "",
+      raw,
+    }
+  }
   if (host === "share") {
     return {
       kind: "share_target",
@@ -115,4 +138,21 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
     return { kind: "open_workspace", workspacePath: params.get("path") ?? undefined, raw }
   }
   return { kind: "unknown", raw }
+}
+
+/**
+ * The first path segment, percent-decoded.
+ *
+ * The Browser Companion builds these links with `encodeURIComponent`, so an id
+ * with a reserved character arrives escaped. A malformed escape is kept as
+ * written rather than thrown: the lookup it feeds then finds nothing, which is
+ * the right answer for an id nobody minted.
+ */
+function firstSegment(path: string): string {
+  const segment = path.split("/").filter(Boolean)[0] ?? ""
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
 }

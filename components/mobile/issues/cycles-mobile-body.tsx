@@ -15,6 +15,7 @@ import Link from "next/link"
 import { useTranslations } from "next-intl"
 
 import { TrackerTabs } from "@/components/issues/tracker-tabs"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -35,7 +36,7 @@ export function CyclesMobileBody() {
     initial: [] as IssueCycle[],
     table: "issueCycles",
   })
-  const cycles = cyclesQuery.data ?? []
+  const cycles = useMemo(() => cyclesQuery.data ?? [], [cyclesQuery.data])
   const issues = useDexieFirstQuery({
     query: () => (workspaceId ? listIssues({ projectId: workspaceId }) : Promise.resolve([])),
     deps: [workspaceId],
@@ -53,10 +54,13 @@ export function CyclesMobileBody() {
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="cycles-mobile-body">
       <header className="safe-area-pt flex flex-col gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
+          <MobileBackButton />
           <h1 className="text-base font-semibold">{t("cycles.title")}</h1>
-          <Badge variant="secondary" className="font-normal">
-            {t("cycles.summary", { count: cycles.length })}
-          </Badge>
+          {cycles.length > 0 ? (
+            <Badge variant="secondary" className="font-normal">
+              {t("cycles.summary", { count: cycles.length })}
+            </Badge>
+          ) : null}
         </div>
         <TrackerTabs active="cycles" compact />
       </header>
@@ -64,12 +68,12 @@ export function CyclesMobileBody() {
       {cycles.length === 0 && cyclesQuery.isSyncing ? (
         <ListSkeleton rows={3} testId="cycles-mobile-skeleton" className="p-4" />
       ) : cycles.length === 0 ? (
-        <p
-          className="py-16 text-center text-sm text-muted-foreground"
-          data-testid="cycles-mobile-empty"
-        >
-          {t("cycles.empty")}
-        </p>
+        <div className="px-6 py-16 text-center" data-testid="cycles-mobile-empty">
+          {/* `cycles.empty` tells the desktop reader to "create one", and this
+              body has nothing to create one with. */}
+          <p className="text-sm font-medium">{t("mobile.cyclesEmpty")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("mobile.cyclesEmptyHint")}</p>
+        </div>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {cycles.map((cycle) => {

@@ -38,6 +38,13 @@ describe("WorkflowListToolbar", () => {
     expect(screen.getByTestId("mobile-workflow-density")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-workflow-new-folder")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-workflow-new")).toBeInTheDocument()
+    // Icon-only controls must still carry a name.
+    expect(screen.getByRole("button", { name: "newFolder" })).toBe(
+      screen.getByTestId("mobile-workflow-new-folder")
+    )
+    expect(screen.getByRole("button", { name: "new" })).toBe(
+      screen.getByTestId("mobile-workflow-new")
+    )
   })
 
   it("debounces the search into the store query", async () => {

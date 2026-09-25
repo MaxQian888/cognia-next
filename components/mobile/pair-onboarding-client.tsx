@@ -560,6 +560,17 @@ export function PairOnboardingClient() {
       </div>
     ) : null
 
+  // Every guided step opens with its own page heading, the way the first-run
+  // flow's steps do (ADR-0193); the panel beside it narrates the scene.
+  const stepHeading =
+    step === "discover"
+      ? { title: t("discover.title"), description: t("discover.subtitle") }
+      : step === "pair"
+        ? isWebHost
+          ? { title: t("web.formCardTitle"), description: t("web.formCardDescription") }
+          : { title: t("formCardTitle"), description: t("formCardDescription") }
+        : { title: t("heading.paired.title"), description: t("heading.paired.description") }
+
   return (
     // `display: contents` — the shell is the viewport owner, so this element
     // must not become a box between it and the flex column that sizes it.
@@ -575,6 +586,7 @@ export function PairOnboardingClient() {
         step={step}
         steps={isWebHost ? WEB_STEPS : undefined}
         bodyKey={step}
+        heading={stepHeading}
         notice={recoveryNotice}
         status={
           isWebHost ? (

@@ -13,7 +13,7 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer"
 import {
-  useWorkspacePickerDialogs,
+  useWorkspacePickerRequests,
   WorkspacePickerList,
 } from "@/components/workspace/workspace-picker-list"
 import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
@@ -32,8 +32,8 @@ import { cn } from "@/lib/utils"
  * The name in the header IS the switcher now, which is where every product
  * with more than one workspace puts it. The list is the same
  * `WorkspacePickerList` the desktop popover renders, at touch density, and the
- * dialogs it opens are mounted outside the Drawer because a Drawer unmounts
- * its children when it closes.
+ * dialogs it opens belong to the shell's `WorkspaceDialogHost`, outside the
+ * Drawer, because a Drawer unmounts its children when it closes.
  *
  * The sheet carries the branch under the list, which is the same pair the
  * desktop title bar shows. The header row itself stays ONE chip on purpose: it
@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils"
 export function MobileWorkspaceChip({ className }: { className?: string }) {
   const t = useTranslations("mobile.workspace")
   const [open, setOpen] = useState(false)
-  const { actions, element: dialogs } = useWorkspacePickerDialogs()
+  const actions = useWorkspacePickerRequests()
   const name = useProjectStore((s) => {
     const id = s.activeProjectId
     return id ? (s.projects.find((p) => p.id === id)?.name ?? null) : null
@@ -92,8 +92,6 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
           </div>
         </DrawerContent>
       </Drawer>
-
-      {dialogs}
     </>
   )
 }

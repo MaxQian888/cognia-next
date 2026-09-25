@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -206,6 +206,10 @@ jest.mock("next-intl", () => ({
       fingerprintHint: "Pinned to this signing key.",
       formCardTitle: "Pair this phone",
       formCardDescription: "One-tap scan or manual paste.",
+      "web.formCardTitle": "Pair this browser",
+      "web.formCardDescription": "Paste the one-time invitation.",
+      "heading.paired.title": "You're connected",
+      "heading.paired.description": "This client reconnects on its own.",
       submit: "Pair",
       submitInProgress: "Pairing…",
       errorTitle: "Pairing failed",
@@ -301,6 +305,31 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(await screen.findByTestId("pair-discover-step")).toBeInTheDocument()
     expect(screen.getByTestId("pair-stepper")).toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "discover")
+  })
+
+  it("opens every step with its own page heading, as the first-run flow does", async () => {
+    // ADR-0193: the panel narrates, the step body carries the page title.
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-discover-step")
+    const body = () => screen.getByTestId("pair-step-body")
+    expect(
+      within(body()).getByRole("heading", { level: 1, name: "Find your desktop" })
+    ).toBeInTheDocument()
+    expect(within(body()).getByText("Pick a server or use a QR/manual code.")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("pair-discover-skip"))
+    expect(
+      within(body()).getByRole("heading", { level: 1, name: "Pair this phone" })
+    ).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("pair-payload"), { target: { value: PAIR_PAYLOAD } })
+    await user.click(screen.getByTestId("pair-submit"))
+    await waitFor(() => expect(screen.getByTestId("pair-paired-step")).toBeInTheDocument())
+    expect(
+      within(body()).getByRole("heading", { level: 1, name: "You're connected" })
+    ).toBeInTheDocument()
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
   })
 
   it("hydrates and lands on the paired step when storage already has a config", async () => {
@@ -598,6 +627,11 @@ describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
   it("skips discover and lands straight on the pair step", async () => {
     render(<PairOnboardingClient />)
     expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    // The browser form says what it is in the browser's own words.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Pair this browser" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Paste the one-time invitation.")).toBeInTheDocument()
     expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
   })

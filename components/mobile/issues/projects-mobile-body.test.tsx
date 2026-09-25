@@ -113,8 +113,24 @@ describe("ProjectsMobileBody", () => {
   it("offers no write controls at all — mobile is read-only by design", () => {
     projectsForTest = [project()]
     const { container } = render(<ProjectsMobileBody />)
-    expect(container.querySelectorAll("button")).toHaveLength(0)
+    // The back arrow navigates; it is the only button this body may carry.
+    const buttons = Array.from(container.querySelectorAll("button"))
+    expect(buttons.map((b) => b.getAttribute("data-testid"))).toEqual(["mobile-back-button"])
     expect(container.querySelectorAll("input")).toHaveLength(0)
+  })
+
+  it("gives the screen a way back to the hub that opened it", () => {
+    render(<ProjectsMobileBody />)
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+  })
+
+  it("says where projects come from instead of a bare empty line", () => {
+    render(<ProjectsMobileBody />)
+    const empty = screen.getByTestId("projects-mobile-empty")
+    expect(empty).toHaveTextContent("projects.empty")
+    expect(empty).toHaveTextContent("mobile.projectsEmptyHint")
+    // The count badge would only repeat the empty state.
+    expect(screen.queryByText(/projects\.summary/)).not.toBeInTheDocument()
   })
 
   it("renders nothing to query without a workspace", () => {

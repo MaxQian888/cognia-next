@@ -8,16 +8,17 @@
  * columns, which is why this route had no compact branch and rendered the
  * split anyway.
  *
- * Nothing about git is re-modelled. `BranchHeader`, `ChangesView`, `CommitBox`
- * and `DiffPane` are the same components the desktop renders, reading the same
- * `useGitStore` and driven by the same `useGitActions`, so a file can never be
- * staged here and unstaged there. What changes is only which of them is on
- * screen: the change list IS the page, and the diff arrives as a drawer when a
- * file is tapped.
+ * Nothing about git is re-modelled. `BranchHeader`, `ChangesView`, `CommitBox`,
+ * `DiffPane`, `ConflictResolver`, `TimelineView`, `CommitDetail`, `StashPanel`
+ * and the status banners are the same components the desktop renders, reading
+ * the same `useGitStore` and driven by the same `useGitActions`, so a file can
+ * never be staged here and unstaged there. What changes is only which of them
+ * is on screen: the change list IS the page, and a file, a conflict or a
+ * commit arrives as a drawer.
  *
- * `density="touch"` on both list and diff, which those components already
- * support for the chat dock's narrow pane. The stage / unstage / discard
- * targets grow, and the diff drops to a single-column hunk view.
+ * `density="touch"` on list, diff, conflict resolver and banners: the stage /
+ * unstage / discard targets grow, the diff drops to a single-column hunk view,
+ * and the conflict diff renders inline.
  *
  * `variant="review"` rather than `"panel"`, because `"panel"` is what makes
  * `ChangesView` render a `CommitBox` of its own at the TOP of the list. This
@@ -25,42 +26,66 @@
  * boxes on the page: same draft, separate sign-off, identity-dialog and
  * history state, either one able to commit.
  *
- * Deliberately absent: the stash, timeline, remotes, tags, compare, worktree
- * and stack dialogs the desktop `SyncToolbar` opens. Each is its own
- * multi-pane surface, and offering a trigger that opens an unusable dialog is
- * worse than not offering it. Pull, push and refresh are here, carrying their
- * ahead and behind counts, because they are one-tap actions and "is there
- * anything to pull" is the reason to open git on a phone at all.
+ * What the phone has, beyond the list:
+ *  - the merge / rebase "in progress" strip with Continue and Abort, because a
+ *    rebase stopped on a conflict otherwise has no way out on this screen;
+ *  - the conflict resolver for a conflicted file, not a plain diff of it;
+ *  - pull (honouring the pull-rebase preference), push, or publish when the
+ *    branch has no upstream yet, each carrying its count and its busy state;
+ *  - Sync, the Timeline and Stashes behind a "more" menu. The timeline and
+ *    stash sheets are `w-full` below 640px, i.e. full-screen here, and the
+ *    timeline hides its graph view, which has no width to draw in. A picked
+ *    commit closes the timeline and opens in a drawer, never behind it.
  *
- * Worktrees and stacks are no longer among the omissions. They were a link out
- * to `/workspace?tab=environments` while the only way to show them here was the
- * desktop worktree sheet, whose table has nowhere to go at 375px. The
- * repository navigator does not have that problem: its inventory degrades to
- * cards below 640px on its own measured width, and a stack renders as a
- * vertical chain. So the phone gets the same two views the desktop panel
- * offers, and the change list stays the one it opens on.
+ * Deliberately absent: remotes, tags, compare and interactive rebase. Each is
+ * a multi-field or multi-pane editing surface, and offering a trigger that
+ * opens an unusable dialog is worse than not offering it. Worktrees and stacks
+ * are here through the repository navigator, whose inventory degrades to cards
+ * below 640px on its own measured width.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import { useTranslations } from "next-intl"
+import { LayoutGroup, motion } from "motion/react"
 import {
+  AlertTriangleIcon,
+  ArchiveIcon,
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  HistoryIcon,
+  MoreHorizontalIcon,
   RefreshCwIcon,
+  SparklesIcon,
+  UploadCloudIcon,
 } from "lucide-react"
 
 import { BranchHeader } from "@/components/source-control/branch-header"
 import { RepositoryNavigator } from "@/components/source-control/repository-navigator"
 import { ChangesView } from "@/components/source-control/changes-view"
 import { CommitBox } from "@/components/source-control/commit-box"
+import { CommitDetail } from "@/components/source-control/commit-detail"
+import { ConflictResolver } from "@/components/source-control/conflict-resolver"
 import { DiffPane } from "@/components/source-control/diff-pane"
+import { StashPanel } from "@/components/source-control/stash-panel"
+import { SequencerBanner, StaleStatusBanner } from "@/components/source-control/status-banners"
+import { TimelineView } from "@/components/source-control/timeline-view"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { cn } from "@/lib/utils"
+import { commitShell } from "@/lib/git/commit-shell"
+import { MOBILE_SPRING, mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Empty,
   EmptyContent,
@@ -71,33 +96,69 @@ import {
 } from "@/components/ui/empty"
 import { useGitActions } from "@/hooks/git/use-git-actions"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
+import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { useGitStore } from "@/stores/git/git-store"
 
-export function SourceControlMobileBody() {
+const VIEWS = ["changes", "browse"] as const
+
+interface SourceControlMobileBodyProps {
+  /**
+   * Open the diff drawer on mount for the stored selection. Set by the route
+   * when it arrived with `?path=`, i.e. someone linked to one file; a plain
+   * return to this screen leaves it closed (see `diffOpen` below).
+   */
+  initialDiffOpen?: boolean
+}
+
+export function SourceControlMobileBody({ initialDiffOpen = false }: SourceControlMobileBodyProps) {
   const t = useTranslations("sourceControl")
   const { available, rootDir, refresh, openFolder, remote } = useGitRepo()
   const actions = useGitActions(refresh)
   const can = actions.can ?? (() => true)
+  const { prefs } = useSourceControlPrefs()
 
   const repoState = useGitStore((s) => s.repoState)
   const status = useGitStore((s) => s.status)
+  const loadError = useGitStore((s) => s.loadError)
+  const loadingStatus = useGitStore((s) => s.loadingStatus)
   const branches = useGitStore((s) => s.branches)
+  const stashes = useGitStore((s) => s.stashes)
+  const conflicts = useGitStore((s) => s.conflicts)
   const selectedPath = useGitStore((s) => s.selectedPath)
   const selectedStaged = useGitStore((s) => s.selectedStaged)
+  const selectedCommit = useGitStore((s) => s.selectedCommit)
+  const timelineRepo = useGitStore((s) => s.timelineRepo)
+  const timelineFile = useGitStore((s) => s.timelineFile)
   const selectFile = useGitStore((s) => s.selectFile)
-  const committing = useGitStore((s) => s.ops.commit)
+  const selectCommit = useGitStore((s) => s.selectCommit)
+  const ops = useGitStore((s) => s.ops)
+  const committing = ops.commit
 
   /**
    * The diff opens on a tap, not on the store's selection.
    *
    * Selection survives navigation, and the desktop reopens on it, so deriving
    * "open" from it would pop the drawer every time the user returns to this
-   * page. Same reasoning as `devices-mobile-body`.
+   * page. Same reasoning as `devices-mobile-body`. The one exception is a link
+   * that named the file (`initialDiffOpen`).
    */
-  const [diffOpen, setDiffOpen] = useState(false)
+  const [diffOpen, setDiffOpen] = useState(initialDiffOpen)
   // Which body: the change list, or the repository navigator. Same two views
   // the desktop panel offers, so a phone is not a different product.
-  const [view, setView] = useState<"changes" | "browse">("changes")
+  const [view, setView] = useState<(typeof VIEWS)[number]>("changes")
+  const [timelineOpen, setTimelineOpen] = useState(false)
+  // The file whose history the timeline opened on, or null for the repository.
+  const [historyPath, setHistoryPath] = useState<string | null>(null)
+  const [stashOpen, setStashOpen] = useState(false)
+  const [commitOpen, setCommitOpen] = useState(false)
+
+  // Hooks before the early returns below.
+  const skeletonVisible = useDeferredLoading(!status && !loadError, { key: rootDir })
+  const tabGroup = useId()
+  const underline = useReducedMotionTransition(MOBILE_SPRING)
+  const fade = useReducedMotionTransition(mobileTransition("fast"))
+
   const onSelectFile = useCallback(
     (path: string, staged: boolean) => {
       selectFile(path, staged)
@@ -105,6 +166,13 @@ export function SourceControlMobileBody() {
     },
     [selectFile]
   )
+  const openTimeline = useCallback((path: string | null) => {
+    setHistoryPath(path)
+    setTimelineOpen(true)
+  }, [])
+  // A failed refresh is already on screen (the stale strip, or the error
+  // state); the rejection itself has nowhere further to go.
+  const refreshSafely = useCallback(() => refresh().catch(() => undefined), [refresh])
 
   if (!available) {
     return (
@@ -156,6 +224,19 @@ export function SourceControlMobileBody() {
           </EmptyMedia>
           <EmptyDescription>{t("emptyState.notARepo")}</EmptyDescription>
         </EmptyHeader>
+        {/* The folder is bound, so turning it into a repository is one tap
+            and needs nothing a phone lacks. Same action as the desktop. */}
+        <EmptyContent>
+          <Button
+            className="min-h-11"
+            onClick={() => void actions.init()}
+            disabled={ops.init || !can("git_init")}
+            data-testid="sc-mobile-init"
+          >
+            {ops.init ? <Spinner className="size-4" /> : <SparklesIcon className="size-4" />}
+            {t("emptyState.initRepo")}
+          </Button>
+        </EmptyContent>
       </Empty>
     )
   }
@@ -163,6 +244,13 @@ export function SourceControlMobileBody() {
   const stagedCount = status?.staged.length ?? 0
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
+  // A checked-out branch with no upstream pushes nowhere; publish it instead.
+  // The same rule as the desktop toolbar.
+  const needsPublish = status !== null && status.branch !== null && status.upstream === null
+  const conflict = selectedPath ? conflicts.find((c) => c.path === selectedPath) : undefined
+  const pickedCommit = selectedCommit
+    ? commitShell(selectedCommit, [timelineRepo, timelineFile])
+    : null
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="source-control-mobile-body">
@@ -180,123 +268,246 @@ export function SourceControlMobileBody() {
         <Button
           size="sm"
           variant="ghost"
-          className="h-8 gap-1 px-2 text-xs"
-          disabled={!can("git_pull")}
+          className="h-9 gap-1 px-2 text-xs"
+          disabled={ops.pull || !can("git_pull")}
           aria-label={t("actions.pull")}
-          onClick={() => void actions.pull()}
+          onClick={() => void actions.pull({ rebase: prefs.pullRebase })}
           data-testid="sc-mobile-pull"
         >
-          <ArrowDownToLineIcon className="size-4" />
+          {ops.pull ? <Spinner className="size-4" /> : <ArrowDownToLineIcon className="size-4" />}
           {behind > 0 ? behind : null}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 gap-1 px-2 text-xs"
-          disabled={!can("git_push")}
-          aria-label={t("actions.push")}
-          onClick={() => void actions.push()}
-          data-testid="sc-mobile-push"
-        >
-          <ArrowUpFromLineIcon className="size-4" />
-          {ahead > 0 ? ahead : null}
-        </Button>
+        {needsPublish ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-9 gap-1 px-2 text-xs"
+            disabled={ops.push || !can("git_push")}
+            aria-label={t("actions.publish")}
+            onClick={() => void actions.push({ setUpstream: true })}
+            data-testid="sc-mobile-publish"
+          >
+            {ops.push ? <Spinner className="size-4" /> : <UploadCloudIcon className="size-4" />}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-9 gap-1 px-2 text-xs"
+            disabled={ops.push || !can("git_push")}
+            aria-label={t("actions.push")}
+            onClick={() => void actions.push()}
+            data-testid="sc-mobile-push"
+          >
+            {ops.push ? <Spinner className="size-4" /> : <ArrowUpFromLineIcon className="size-4" />}
+            {ahead > 0 ? ahead : null}
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"
-          className="size-8"
+          className="size-9"
           aria-label={t("actions.refresh")}
-          onClick={() => void refresh()}
+          onClick={() => void refreshSafely()}
           data-testid="sc-mobile-refresh"
         >
-          <RefreshCwIcon className="size-4" />
+          <RefreshCwIcon className={cn("size-4", loadingStatus && "animate-spin")} />
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-9"
+              aria-label={t("actions.more")}
+              data-testid="sc-mobile-more"
+            >
+              <MoreHorizontalIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem
+              className="min-h-11"
+              disabled={ops.sync || !can("git_sync")}
+              onSelect={() => void actions.sync()}
+              data-testid="sc-mobile-sync"
+            >
+              <RefreshCwIcon className="size-4" />
+              {t("actions.sync")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {/* preventDefault on overlay-opening items: opening a Sheet from a
+                closing menu races Radix focus restore (sticky pointer-events),
+                exactly as in the desktop toolbar. */}
+            <DropdownMenuItem
+              className="min-h-11"
+              disabled={!can("git_log")}
+              onSelect={(e) => {
+                e.preventDefault()
+                openTimeline(null)
+              }}
+              data-testid="sc-mobile-timeline"
+            >
+              <HistoryIcon className="size-4" />
+              {t("timeline.title")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="min-h-11"
+              disabled={!can("git_stash_list")}
+              onSelect={(e) => {
+                e.preventDefault()
+                setStashOpen(true)
+              }}
+              data-testid="sc-mobile-stash"
+            >
+              <ArchiveIcon className="size-4" />
+              {t("stash.title")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
-      {/*
-        Worktrees and stacks stopped being a link out. They are the navigator,
-        and it is usable here: the worktree inventory degrades to cards below
-        640px on its own measured width, and a stack renders as a vertical
-        chain, which is the one shape a phone has room for.
+      <SequencerBanner
+        operation={repoState?.operationInProgress ?? null}
+        actions={actions}
+        density="touch"
+      />
+      <StaleStatusBanner
+        message={loadError && status ? loadError : null}
+        onRetry={() => void refreshSafely()}
+        density="touch"
+      />
 
-        The rest of the desktop's dialogs stay deliberately absent, for the
-        reason at the top of this file. A trigger that opens an unusable dialog
-        is worse than not offering it.
-      */}
-      <div
-        role="tablist"
-        aria-label={t("views.label")}
-        className="flex shrink-0 border-b"
-        data-testid="sc-mobile-views"
-      >
-        {(["changes", "browse"] as const).map((candidate) => (
-          <button
-            key={candidate}
-            type="button"
-            role="tab"
-            aria-selected={view === candidate}
-            onClick={() => setView(candidate)}
-            className={cn(
-              "min-h-11 flex-1 px-3 text-xs text-muted-foreground active:bg-accent",
-              view === candidate && "border-b-2 border-primary font-medium text-foreground"
-            )}
-            data-testid={`sc-mobile-view-${candidate}`}
-          >
-            {t(`views.${candidate}`)}
-          </button>
-        ))}
-      </div>
-
-      {view === "browse" ? (
-        <div className="min-h-0 flex-1">
-          <RepositoryNavigator
-            rootDir={rootDir}
-            branches={branches}
-            actions={actions}
-            canMutate={actions.can}
-          />
+      <LayoutGroup id={tabGroup}>
+        <div
+          role="tablist"
+          aria-label={t("views.label")}
+          className="flex shrink-0 border-b"
+          data-testid="sc-mobile-views"
+        >
+          {VIEWS.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              role="tab"
+              aria-selected={view === candidate}
+              onClick={() => setView(candidate)}
+              className={cn(
+                "relative min-h-11 flex-1 px-3 text-xs text-muted-foreground transition-colors active:bg-accent",
+                view === candidate && "font-medium text-foreground"
+              )}
+              data-testid={`sc-mobile-view-${candidate}`}
+            >
+              {t(`views.${candidate}`)}
+              {/* One underline that slides to the tapped tab. */}
+              {view === candidate && (
+                <motion.span
+                  layoutId="sc-mobile-view-underline"
+                  transition={underline}
+                  aria-hidden
+                  className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary"
+                  data-testid="sc-mobile-view-underline"
+                />
+              )}
+            </button>
+          ))}
         </div>
-      ) : (
-        <>
-          {/* `status` is null until the first load resolves, and `ChangesView`
-              requires it. The desktop panel guards the same way rather than
-              rendering an empty list that reads as "no changes". */}
-          {status ? (
-            <PullToRefresh onRefresh={refresh} className="min-h-0 flex-1">
-              <ChangesView
-                variant="review"
-                density="touch"
-                rootDir={rootDir}
-                status={status}
-                actions={actions}
-                committing={committing}
-                selectedPath={selectedPath}
-                onSelectFile={onSelectFile}
-              />
-            </PullToRefresh>
-          ) : (
-            <div className="min-h-0 flex-1 px-3 py-6" data-testid="sc-mobile-loading">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="mt-3 h-4 w-full" />
-              <Skeleton className="mt-2 h-4 w-2/3" />
-            </div>
-          )}
+      </LayoutGroup>
 
-          {/* The commit box is pinned rather than scrolled to. It is the one
-              action the screen exists for, and a message field that walks off
-              the bottom of a list is a field nobody finds. */}
-          {status ? (
-            <div className="shrink-0 border-t px-2 py-2">
-              <CommitBox
-                rootDir={rootDir}
-                stagedCount={stagedCount}
-                committing={committing}
-                actions={actions}
-              />
-            </div>
-          ) : null}
-        </>
-      )}
+      <motion.div
+        key={view}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={fade}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        {view === "browse" ? (
+          <div className="min-h-0 flex-1">
+            <RepositoryNavigator
+              rootDir={rootDir}
+              branches={branches}
+              actions={actions}
+              canMutate={actions.can}
+            />
+          </div>
+        ) : !status && loadError ? (
+          // Nothing loaded and the read failed. The skeleton used to stay up
+          // here for good, which says "still loading" about a read that is
+          // over.
+          <Empty className="min-h-0 flex-1 border-0" data-testid="sc-mobile-load-error">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <AlertTriangleIcon />
+              </EmptyMedia>
+              <EmptyTitle>{t("repository.errorTitle")}</EmptyTitle>
+              <EmptyDescription className="break-words">{loadError}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button
+                className="min-h-11"
+                onClick={() => void refreshSafely()}
+                data-testid="sc-mobile-load-retry"
+              >
+                <RefreshCwIcon className="size-4" />
+                {t("repository.retry")}
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : (
+          <>
+            {/* `status` is null until the first load resolves, and
+                `ChangesView` requires it. An empty list here would read as
+                "no changes", which is the one thing it must not say while it
+                does not know. */}
+            {status ? (
+              <PullToRefresh onRefresh={refreshSafely} className="min-h-0 flex-1">
+                <ChangesView
+                  variant="review"
+                  density="touch"
+                  rootDir={rootDir}
+                  status={status}
+                  actions={actions}
+                  committing={committing}
+                  selectedPath={selectedPath}
+                  onSelectFile={onSelectFile}
+                  // A row's context menu (a long press on touch) reaches the
+                  // file's own history, as on the desktop.
+                  onViewHistory={can("git_log") ? (path) => openTimeline(path) : undefined}
+                />
+              </PullToRefresh>
+            ) : (
+              <div
+                role="status"
+                aria-label={t("repository.loading")}
+                className="min-h-0 flex-1 px-3 py-6"
+                data-testid="sc-mobile-loading"
+              >
+                {skeletonVisible ? (
+                  <div aria-hidden>
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="mt-3 h-4 w-full" />
+                    <Skeleton className="mt-2 h-4 w-2/3" />
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {/* The commit box is pinned rather than scrolled to. It is the one
+                action the screen exists for, and a message field that walks
+                off the bottom of a list is a field nobody finds. */}
+            {status ? (
+              <div className="shrink-0 border-t px-2 py-2">
+                <CommitBox
+                  rootDir={rootDir}
+                  stagedCount={stagedCount}
+                  committing={committing}
+                  actions={actions}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
+      </motion.div>
 
       <ResponsiveDetailSheet
         open={diffOpen && Boolean(selectedPath)}
@@ -305,9 +516,26 @@ export function SourceControlMobileBody() {
       >
         {/* The drawer caps itself at 85vh and `DiffPane` is `h-full` with its
             own scroller, so a bounded box between the two gives that scroller
-            something definite to resolve against. */}
-        <div className="h-[68vh] min-h-0">
-          {selectedPath ? (
+            something definite to resolve against. `dvh`, so the box follows
+            the browser chrome collapsing instead of running under it. */}
+        <div className="h-[68dvh] min-h-0">
+          {selectedPath && conflict ? (
+            <ConflictResolver
+              conflict={conflict}
+              density="touch"
+              onResolve={
+                can("git_resolve_conflict")
+                  ? (resolution) => {
+                      void actions.resolveConflict(conflict.path, resolution).then((failure) => {
+                        if (failure) return
+                        setDiffOpen(false)
+                        selectFile(null, false)
+                      })
+                    }
+                  : undefined
+              }
+            />
+          ) : selectedPath ? (
             <DiffPane
               rootDir={rootDir}
               path={selectedPath}
@@ -318,6 +546,41 @@ export function SourceControlMobileBody() {
           ) : null}
         </div>
       </ResponsiveDetailSheet>
+
+      {/* A pick closes the full-screen timeline and opens the commit in a
+          drawer, so the detail is never rendered behind a modal overlay. */}
+      <TimelineView
+        open={timelineOpen}
+        onOpenChange={setTimelineOpen}
+        rootDir={rootDir}
+        filePath={historyPath}
+        allowGraph={false}
+        onPickCommit={() => {
+          setTimelineOpen(false)
+          setCommitOpen(true)
+        }}
+      />
+      <ResponsiveDetailSheet
+        open={commitOpen && pickedCommit !== null}
+        onOpenChange={(open) => {
+          setCommitOpen(open)
+          if (!open) selectCommit(null)
+        }}
+        title={pickedCommit?.summary || pickedCommit?.shortHash || t("timeline.title")}
+        description={pickedCommit?.shortHash}
+      >
+        <div className="h-[68dvh] min-h-0" data-testid="sc-mobile-commit">
+          {pickedCommit ? (
+            <CommitDetail rootDir={rootDir} commit={pickedCommit} actions={actions} />
+          ) : null}
+        </div>
+      </ResponsiveDetailSheet>
+      <StashPanel
+        open={stashOpen}
+        onOpenChange={setStashOpen}
+        stashes={stashes}
+        actions={actions}
+      />
     </div>
   )
 }

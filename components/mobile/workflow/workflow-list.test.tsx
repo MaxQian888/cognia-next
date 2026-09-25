@@ -115,9 +115,22 @@ jest.mock("@/components/interactions/long-press", () => ({
   ),
 }))
 jest.mock("@/components/mobile/empty-state", () => ({
-  EmptyState: ({ title, spotIcon }: { title: string; spotIcon?: string }) => (
+  EmptyState: ({
+    title,
+    spotIcon,
+    cta,
+  }: {
+    title: string
+    spotIcon?: string
+    cta?: { label: string; onSelect: () => void; testId?: string }
+  }) => (
     <div data-testid="empty-state" data-spot-icon={spotIcon}>
       {title}
+      {cta ? (
+        <button type="button" data-testid={cta.testId} onClick={cta.onSelect}>
+          {cta.label}
+        </button>
+      ) : null}
     </div>
   ),
 }))
@@ -253,6 +266,15 @@ describe("<WorkflowList />", () => {
     expect(screen.queryByTestId("recent-runs-stub")).not.toBeInTheDocument()
     expect(screen.queryByTestId("pending-human-input-stub")).not.toBeInTheDocument()
     expect(screen.queryByTestId("pending-approvals-stub")).not.toBeInTheDocument()
+  })
+
+  // The old copy sent the reader to the desktop while "+" opened the same
+  // dialog right here; the empty state now offers it in place.
+  it("offers the create dialog from the empty state", () => {
+    pushQueries({})
+    render(<WorkflowList />)
+    fireEvent.click(screen.getByTestId("mobile-workflow-empty-create"))
+    expect(screen.getByTestId("create-dialog-open")).toBeInTheDocument()
   })
 
   it("opens the create dialog from the toolbar", () => {

@@ -83,6 +83,11 @@ it("renders the fleet list directly rather than behind a trigger", () => {
   expect(screen.queryByTestId("mobile-detail")).toBeNull()
 })
 
+it("gives the screen a way back to the hub that opened it", () => {
+  render(<DevicesMobileBody />)
+  expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+})
+
 it("opens the detail drawer on tap and shows the tapped device", async () => {
   render(<DevicesMobileBody />)
   await userEvent.click(screen.getByTestId("device-row-device:a"))

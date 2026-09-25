@@ -41,7 +41,7 @@ import {
   pluginSectionHasControls,
   useVisiblePluginSection,
 } from "@/components/plugins/plugin-section-pane"
-import { visiblePluginSections } from "@/components/plugins/plugin-nav-config"
+import { pluginNavItem, visiblePluginSections } from "@/components/plugins/plugin-nav-config"
 import { ScrollShadowRow } from "@/components/plugins/scroll-shadow-row"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { Button } from "@/components/ui/button"
@@ -51,8 +51,8 @@ import {
   useDevtoolsGate,
   usePluginMarketplace,
   usePluginRegistrySync,
-  usePluginRow,
 } from "@/hooks/plugins"
+import { usePluginsUrlSync } from "@/hooks/plugins/use-plugins-url-sync"
 import { isMirroredPluginClient } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { isTauri } from "@/lib/platform/detect"
 import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
@@ -65,6 +65,15 @@ export interface PluginsMobileBodyProps {
    * reusing a page body under a shell that is also a page.
    */
   showHeader?: boolean
+}
+
+/**
+ * The same rule `visiblePluginSections` disables the toggle chips by: a
+ * `desktop` section is not selectable off the Tauri shell. Module-level so the
+ * predicate handed to the URL sync is stable.
+ */
+function isMobileSectionAllowed(section: PluginNavSection): boolean {
+  return isTauri() || pluginNavItem(section).featureFlag !== "desktop"
 }
 
 export function PluginsMobileBody({ showHeader = true }: PluginsMobileBodyProps = {}) {
@@ -85,6 +94,11 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
   const visibleSection = useVisiblePluginSection(activeSection)
   const devtoolsEnabled = useDevtoolsGate()
   const sections = visiblePluginSections({ devtoolsEnabled, isDesktop: isTauri() })
+
+  // Same deep-link handling as the desktop panel (`?plugin=`, `?section=`, …),
+  // minus the sections this shell disables: a link must not select a section
+  // the toggle row refuses to.
+  usePluginsUrlSync({ isSectionAllowed: isMobileSectionAllowed })
 
   const detailPluginId = usePluginsStore((s) => s.detailPluginId)
   const closeDetail = usePluginsStore((s) => s.closeDetail)
@@ -138,18 +152,24 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
           band and covers the bottom navigation. */}
       <PluginBatchActionsBar className={COMPACT_ABOVE_TAB_BAR_BOTTOM} />
 
+      {/* One refresh, not two. On the Library the toolbar below carries the
+          registry sync (it used to be permanently disabled here because this
+          body never passed it a handler, while this header button did the same
+          job); every other section gets it from the header. */}
       {showHeader ? (
         <header className="safe-area-pt flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t("title")}</h1>
-          <RefreshCatalogButton syncing={syncing} onSync={sync} label={tMobile("refresh")} />
+          {visibleSection !== "library" ? (
+            <RefreshCatalogButton syncing={syncing} onSync={sync} label={tMobile("refresh")} />
+          ) : null}
         </header>
-      ) : (
+      ) : visibleSection !== "library" ? (
         // Under `SubPageShell` the title and back arrow already exist, but the
         // refresh still has to be reachable.
         <div className="flex shrink-0 justify-end border-b px-2 py-1.5">
           <RefreshCatalogButton syncing={syncing} onSync={sync} label={tMobile("refresh")} />
         </div>
-      )}
+      ) : null}
 
       {/* Says what a queued toggle actually promises. On this host the plugin
           runtime lives on the paired desktop, so "enabled" here means "the
@@ -183,7 +203,7 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
                 value={section}
                 disabled={disabled}
                 title={disabled ? tSections("desktopOnlyHint") : undefined}
-                className="h-8 gap-1.5 px-2.5 text-xs"
+                className="h-8 gap-1.5 px-2.5 text-xs pointer-coarse:h-9"
                 data-testid={`plugins-mobile-section-${section}`}
                 data-disabled-reason={disabled ? "desktop" : undefined}
               >
@@ -203,7 +223,11 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
 
       {visibleSection === "library" ? (
         <div className="shrink-0 border-b px-2 py-1.5">
-          <PluginPanelToolbar onCheckUpdates={() => setUpdateOpen(true)} />
+          <PluginPanelToolbar
+            onCheckUpdates={() => setUpdateOpen(true)}
+            onSyncRegistry={sync}
+            syncing={syncing}
+          />
         </div>
       ) : null}
 
@@ -244,7 +268,7 @@ function RefreshCatalogButton({
     <Button
       size="icon"
       variant="ghost"
-      className="size-8"
+      className="size-9"
       aria-label={label}
       disabled={syncing}
       onClick={() => void onSync()}
@@ -268,21 +292,27 @@ function MobilePluginDetail({
   onOpenChange,
   fallbackTitle,
 }: MobilePluginDetailProps) {
-  const rowState = usePluginRow(pluginId ?? "")
-  const title = rowState.state === "ready" ? rowState.row.name : fallbackTitle
-
   return (
     <ResponsiveDetailSheet
       open={open && pluginId !== null}
       onOpenChange={onOpenChange}
-      title={title}
+      // The section label, not the plugin's name: `PluginDetailHeader` opens
+      // the pane with the name, version and avatar, so titling the drawer with
+      // the name as well printed it twice, one line apart.
+      title={fallbackTitle}
     >
       {/*
         The drawer caps itself at 85vh and `PluginDetailPane` is `h-full` with
         its own scroller, so a bounded box between the two gives that scroller
-        something definite to resolve against.
+        something definite to resolve against. `dvh`, not `vh`: on a phone the
+        `vh` box is measured with the browser chrome collapsed and runs under
+        the toolbar. The bottom inset keeps the last section clear of the home
+        indicator.
       */}
-      <div className="h-[70vh] min-h-0">
+      <div
+        className="h-[70dvh] min-h-0 pb-[env(safe-area-inset-bottom)]"
+        data-testid="plugins-mobile-detail-body"
+      >
         <PluginDetailPane />
       </div>
     </ResponsiveDetailSheet>

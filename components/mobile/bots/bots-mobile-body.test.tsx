@@ -14,7 +14,9 @@ jest.mock("@/hooks/bots/use-bot-installations", () => ({
   enabledPluginKey: () => "",
 }))
 jest.mock("@/components/bots/bot-runtime-notice", () => ({
-  BotRuntimeNotice: () => <div data-testid="bot-runtime-notice-stub" />,
+  BotRuntimeNotice: ({ hasBots }: { hasBots?: boolean }) => (
+    <div data-testid="bot-runtime-notice-stub" data-has-bots={String(hasBots)} />
+  ),
 }))
 jest.mock("@/components/bots/install-bot-sheet", () => ({
   InstallBotSheet: ({ open }: { open: boolean }) =>
@@ -135,6 +137,23 @@ describe("BotsMobileBody", () => {
     failed = true
     render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
     expect(screen.getByRole("alert")).toBeInTheDocument()
+  })
+
+  it("does not alarm about a runner before anything is installed", () => {
+    rows = []
+    const { unmount } = render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
+    expect(screen.getByTestId("bot-runtime-notice-stub")).toHaveAttribute("data-has-bots", "false")
+    unmount()
+    rows = [row()]
+    render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
+    expect(screen.getByTestId("bot-runtime-notice-stub")).toHaveAttribute("data-has-bots", "true")
+  })
+
+  it("opens the install sheet from the empty list", () => {
+    rows = []
+    render(<BotsMobileBody onSelect={noop} onDeselect={noop} />)
+    fireEvent.click(screen.getByTestId("bot-list-install"))
+    expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
   })
 
   it("opens the install sheet from the header button", () => {

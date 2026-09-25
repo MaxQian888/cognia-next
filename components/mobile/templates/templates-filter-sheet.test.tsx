@@ -77,7 +77,9 @@ describe("TemplatesFilterSheet", () => {
     const state = route({ activeFilterCount: 1 })
     open(state)
     fireEvent.click(screen.getByTestId("templates-filter-clear"))
-    expect(state.clearFilters).toHaveBeenCalled()
+    // Called with no argument: handing the click event through would land it
+    // in `options`.
+    expect(state.clearFilters).toHaveBeenCalledWith()
   })
 
   it("hides the clear control when nothing is filtered", () => {

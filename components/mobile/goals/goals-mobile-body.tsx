@@ -20,6 +20,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Surface } from "@/components/surface/surface"
 import { EmptyState } from "@/components/mobile/empty-state"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { GoalDetailSheet } from "@/components/goal/goal-detail-sheet"
 import { GoalAnalyticsPanel } from "@/components/goal/analytics/goal-analytics-panel"
@@ -75,7 +76,8 @@ export function GoalsMobileBody() {
       )}
       data-testid="mobile-goals-body"
     >
-      <header className="px-4">
+      <header className="flex items-center gap-1 px-4">
+        <MobileBackButton />
         <h1 className="text-2xl font-semibold tracking-tight">{t("console.title")}</h1>
       </header>
 

@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+let mockActiveProjectId: string | null = "w1"
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
 let issuesResult: unknown[] = []
@@ -54,7 +55,7 @@ jest.mock("@/lib/db/issue-projects", () => ({ listIssueProjects: jest.fn() }))
 jest.mock("@/lib/db/labels", () => ({ listLabels: jest.fn() }))
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (s: { activeProjectId: string | null }) => unknown) =>
-    selector({ activeProjectId: "w1" }),
+    selector({ activeProjectId: mockActiveProjectId }),
 }))
 
 import { fireEvent, render, screen } from "@testing-library/react"
@@ -93,12 +94,39 @@ beforeEach(() => {
   eventsResult = []
   runsResult = []
   isSyncing = false
+  mockActiveProjectId = "w1"
 })
 
 describe("IssuesMobileBody", () => {
   it("shows an empty state when there is nothing", () => {
     render(<IssuesMobileBody />)
     expect(screen.getByTestId("issues-mobile-empty")).toBeInTheDocument()
+    // The count badge would only repeat the empty state.
+    expect(screen.queryByText(/^summary/)).not.toBeInTheDocument()
+  })
+
+  it("shows the issue count once there are issues", () => {
+    issuesResult = [issue()]
+    render(<IssuesMobileBody />)
+    expect(screen.getByText(/^summary/)).toBeInTheDocument()
+  })
+
+  it("offers no create button on the empty board without a workspace to file into", () => {
+    mockActiveProjectId = null
+    render(<IssuesMobileBody />)
+    expect(screen.getByTestId("issues-mobile-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("issues-mobile-empty-create")).not.toBeInTheDocument()
+  })
+
+  it("offers to start the first issue from the empty board", () => {
+    render(<IssuesMobileBody />)
+    fireEvent.click(screen.getByTestId("issues-mobile-empty-create"))
+    expect(screen.getByTestId("create-sheet-stub")).toBeInTheDocument()
+  })
+
+  it("gives the screen a way back to the hub that opened it", () => {
+    render(<IssuesMobileBody />)
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
   })
 
   it("skeletonises the board rather than claiming it is empty mid-sync", () => {

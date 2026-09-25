@@ -58,6 +58,11 @@ export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigato
     case "open_scheduler_task":
     case "open_settings":
     case "open_workspace":
+    // The Browser Companion's issue and agent-task links. The extension runs
+    // beside the desktop that hosts the work and hands them to that desktop's
+    // `cognia://` handler; a phone is never the one asked to open them.
+    case "open_issue":
+    case "open_agent_task":
       // Desktop-owned routes; the mobile shell intentionally has no action.
       return
     case "unknown":

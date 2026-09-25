@@ -22,6 +22,7 @@ import { toast } from "sonner"
 
 import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/mobile/empty-state"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { MemoryRow } from "@/components/memory/memory-row"
 import { listMemories } from "@/lib/db/memories"
@@ -130,7 +131,10 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
       data-testid="mobile-memory-body"
     >
       <header className="flex flex-col gap-3 px-4">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <div className="flex items-center gap-1">
+          <MobileBackButton />
+          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        </div>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}

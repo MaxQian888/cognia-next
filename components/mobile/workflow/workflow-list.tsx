@@ -64,6 +64,7 @@ const EMPTY_RUN_COUNTS: ReadonlyMap<string, number> = new Map<string, number>()
  */
 export function WorkflowList({ className }: WorkflowListProps) {
   const t = useTranslations("mobile.workflow")
+  const tLib = useTranslations("workflows.library")
 
   const currentFolderId = useWorkflowLibraryStore((s) => s.currentFolderId)
   const sort = useWorkflowLibraryStore((s) => s.sort)
@@ -226,7 +227,17 @@ export function WorkflowList({ className }: WorkflowListProps) {
           ) : null}
 
           {isEmpty ? (
-            <EmptyState spotIcon="workflows" title={t("empty")} />
+            // The old copy sent the reader to the desktop while the "+" above
+            // opened the same create dialog right here. Offer it in place.
+            <EmptyState
+              spotIcon="workflows"
+              title={t("empty")}
+              cta={{
+                label: tLib("new"),
+                onSelect: () => setCreateOpen(true),
+                testId: "mobile-workflow-empty-create",
+              }}
+            />
           ) : (
             // One surface with hairline rows, not a frame per workflow. Three
             // workflows meant three boxes floating on the page, which is the

@@ -5,7 +5,9 @@
  * not: the same store, the same actions, and the same components as the
  * desktop panel, so a file cannot be staged here and unstaged there.
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { SourceControlMobileBody } from "./source-control-mobile-body"
 
@@ -21,11 +23,17 @@ jest.mock("@/hooks/git/use-git-repo", () => ({ useGitRepo: () => repo }))
 const actions = {
   pull: jest.fn(async () => undefined),
   push: jest.fn(async () => undefined),
-  can: () => true,
+  sync: jest.fn(async () => undefined),
+  init: jest.fn(async () => null),
+  sequencerContinue: jest.fn(async () => null),
+  sequencerAbort: jest.fn(async () => null),
+  resolveConflict: jest.fn(async (): Promise<unknown> => null),
+  can: (_command: string) => true,
 }
 jest.mock("@/hooks/git/use-git-actions", () => ({ useGitActions: () => actions }))
 
 const selectFile = jest.fn()
+const selectCommit = jest.fn()
 let storeState: Record<string, unknown> = {}
 jest.mock("@/stores/git/git-store", () => ({
   useGitStore: (selector: (s: Record<string, unknown>) => unknown) => selector(storeState),
@@ -46,18 +54,27 @@ jest.mock("@/components/source-control/changes-view", () => ({
     density,
     variant,
     onSelectFile,
+    onViewHistory,
   }: {
     density: string
     variant: string
     onSelectFile: (path: string, staged: boolean) => void
+    onViewHistory?: (path: string) => void
   }) => (
-    <button
-      data-testid={`changes-view-${density}`}
-      data-variant={variant}
-      onClick={() => onSelectFile("a.ts", false)}
-    >
-      changes
-    </button>
+    <>
+      <button
+        data-testid={`changes-view-${density}`}
+        data-variant={variant}
+        onClick={() => onSelectFile("a.ts", false)}
+      >
+        changes
+      </button>
+      {onViewHistory ? (
+        <button data-testid="changes-history" onClick={() => onViewHistory("src/a.ts")}>
+          history
+        </button>
+      ) : null}
+    </>
   ),
 }))
 jest.mock("@/components/source-control/repository-navigator", () => ({
@@ -77,8 +94,81 @@ jest.mock("@/components/interactions/pull-to-refresh", () => ({
   PullToRefresh: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 jest.mock("@/components/shared/responsive-detail-sheet", () => ({
-  ResponsiveDetailSheet: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div data-testid="detail-sheet">{children}</div> : null,
+  ResponsiveDetailSheet: ({
+    open,
+    title,
+    onOpenChange,
+    children,
+  }: {
+    open: boolean
+    title: string
+    onOpenChange: (open: boolean) => void
+    children: React.ReactNode
+  }) =>
+    open ? (
+      <div data-testid="detail-sheet" data-title={title}>
+        <button type="button" data-testid="detail-sheet-close" onClick={() => onOpenChange(false)}>
+          close
+        </button>
+        {children}
+      </div>
+    ) : null,
+}))
+jest.mock("@/components/source-control/conflict-resolver", () => ({
+  ConflictResolver: ({
+    conflict,
+    density,
+    onResolve,
+  }: {
+    conflict: { path: string }
+    density: string
+    onResolve?: (r: { side: string }) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="conflict-resolver"
+      data-density={density}
+      onClick={() => onResolve?.({ side: "ours" })}
+    >
+      {conflict.path}
+    </button>
+  ),
+}))
+jest.mock("@/components/source-control/timeline-view", () => ({
+  TimelineView: ({
+    open,
+    filePath,
+    allowGraph,
+    onPickCommit,
+  }: {
+    open: boolean
+    filePath: string | null
+    allowGraph?: boolean
+    onPickCommit?: (sha: string) => void
+  }) =>
+    open ? (
+      <button
+        type="button"
+        data-testid="timeline-view"
+        data-file={filePath ?? ""}
+        data-allow-graph={String(allowGraph)}
+        onClick={() => {
+          // What the real sheet does on a row: select in the store, then hand over.
+          storeState.selectedCommit = "abc1234def"
+          onPickCommit?.("abc1234def")
+        }}
+      >
+        timeline
+      </button>
+    ) : null,
+}))
+jest.mock("@/components/source-control/commit-detail", () => ({
+  CommitDetail: ({ commit }: { commit: { hash: string } }) => (
+    <div data-testid="commit-detail">{commit.hash}</div>
+  ),
+}))
+jest.mock("@/components/source-control/stash-panel", () => ({
+  StashPanel: ({ open }: { open: boolean }) => (open ? <div data-testid="stash-panel" /> : null),
 }))
 
 function status(overrides: Record<string, unknown> = {}) {
@@ -96,9 +186,18 @@ beforeEach(() => {
     branches: [],
     selectedPath: null,
     selectedStaged: false,
+    selectedCommit: null,
     selectFile,
-    ops: { commit: false },
+    selectCommit,
+    stashes: [],
+    conflicts: [],
+    timelineRepo: [],
+    timelineFile: [],
+    loadError: null,
+    loadingStatus: false,
+    ops: { commit: false, pull: false, push: false, sync: false, init: false, sequence: false },
   }
+  act(() => useSettingsStore.setState({ settings: null as never }))
 })
 
 it("renders the list as the page and the commit box pinned below it", () => {
@@ -218,5 +317,199 @@ describe("browse", () => {
     render(<SourceControlMobileBody />)
     fireEvent.click(await screen.findByTestId("sc-mobile-view-browse"))
     expect(screen.queryByTestId("commit-box")).not.toBeInTheDocument()
+  })
+})
+
+describe("load states", () => {
+  it("says the read failed, with a retry, instead of a skeleton that never ends", () => {
+    storeState.status = null
+    storeState.loadError = "fatal: not a git repository"
+    render(<SourceControlMobileBody />)
+    expect(screen.queryByTestId("sc-mobile-loading")).toBeNull()
+    expect(screen.getByTestId("sc-mobile-load-error")).toHaveTextContent("fatal: not a git repository")
+    fireEvent.click(screen.getByTestId("sc-mobile-load-retry"))
+    expect(repo.refresh).toHaveBeenCalled()
+  })
+
+  it("keeps the last list and says it is stale when a refresh fails", () => {
+    storeState.loadError = "index.lock exists"
+    render(<SourceControlMobileBody />)
+    expect(screen.getByTestId("changes-view-touch")).toBeInTheDocument()
+    expect(screen.getByTestId("sc-load-error-banner")).toHaveTextContent("index.lock exists")
+  })
+})
+
+describe("a stopped merge or rebase", () => {
+  it("offers continue and abort at touch size", () => {
+    storeState.repoState = { isRepo: true, operationInProgress: "rebase" }
+    render(<SourceControlMobileBody />)
+    expect(screen.getByTestId("sequencer-banner")).toBeInTheDocument()
+    expect(screen.getByTestId("sequencer-continue").className).toMatch(/\bh-9\b/)
+    fireEvent.click(screen.getByTestId("sequencer-continue"))
+    fireEvent.click(screen.getByTestId("sequencer-abort"))
+    expect(actions.sequencerContinue).toHaveBeenCalled()
+    expect(actions.sequencerAbort).toHaveBeenCalled()
+  })
+
+  it("opens a conflicted file in the resolver, and closes the drawer once resolved", async () => {
+    storeState.conflicts = [{ path: "a.ts", ours: "o", theirs: "t" }]
+    storeState.selectedPath = "a.ts"
+    render(<SourceControlMobileBody />)
+    fireEvent.click(screen.getByTestId("changes-view-touch"))
+    const resolver = screen.getByTestId("conflict-resolver")
+    expect(resolver).toHaveAttribute("data-density", "touch")
+    expect(screen.queryByTestId("diff-pane")).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(resolver)
+    })
+    expect(actions.resolveConflict).toHaveBeenCalledWith("a.ts", { side: "ours" })
+    expect(selectFile).toHaveBeenLastCalledWith(null, false)
+    expect(screen.queryByTestId("detail-sheet")).toBeNull()
+  })
+
+  it("keeps the drawer open when resolving fails", async () => {
+    actions.resolveConflict.mockResolvedValueOnce({ kind: "commandFailed", detail: "x" })
+    storeState.conflicts = [{ path: "a.ts", ours: "o", theirs: "t" }]
+    storeState.selectedPath = "a.ts"
+    render(<SourceControlMobileBody />)
+    fireEvent.click(screen.getByTestId("changes-view-touch"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("conflict-resolver"))
+    })
+    expect(screen.getByTestId("detail-sheet")).toBeInTheDocument()
+  })
+})
+
+describe("network actions", () => {
+  it("publishes a branch that has no upstream instead of pushing nowhere", () => {
+    storeState.status = status({ upstream: null })
+    render(<SourceControlMobileBody />)
+    expect(screen.queryByTestId("sc-mobile-push")).toBeNull()
+    fireEvent.click(screen.getByTestId("sc-mobile-publish"))
+    expect(actions.push).toHaveBeenCalledWith({ setUpstream: true })
+  })
+
+  it("pulls with the rebase preference the desktop honours", () => {
+    act(() =>
+      useSettingsStore.setState({
+        settings: { gitSettings: { panel: { pullRebase: true } } } as never,
+      })
+    )
+    render(<SourceControlMobileBody />)
+    fireEvent.click(screen.getByTestId("sc-mobile-pull"))
+    expect(actions.pull).toHaveBeenCalledWith({ rebase: true })
+  })
+
+  it("disables a button while its operation runs", () => {
+    storeState.ops = { ...(storeState.ops as object), pull: true, push: true }
+    render(<SourceControlMobileBody />)
+    expect(screen.getByTestId("sc-mobile-pull")).toBeDisabled()
+    expect(screen.getByTestId("sc-mobile-push")).toBeDisabled()
+  })
+
+  it("syncs from the more menu", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlMobileBody />)
+    await user.click(screen.getByTestId("sc-mobile-more"))
+    await user.click(await screen.findByTestId("sc-mobile-sync"))
+    expect(actions.sync).toHaveBeenCalled()
+  })
+})
+
+describe("timeline and stashes", () => {
+  it("opens the timeline full-screen without its graph, and a pick in a drawer", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlMobileBody />)
+    await user.click(screen.getByTestId("sc-mobile-more"))
+    await user.click(await screen.findByTestId("sc-mobile-timeline"))
+    const timeline = await screen.findByTestId("timeline-view")
+    expect(timeline).toHaveAttribute("data-allow-graph", "false")
+    expect(timeline).toHaveAttribute("data-file", "")
+
+    fireEvent.click(timeline)
+    // The sheet is gone and the commit is in a drawer, never behind it.
+    expect(screen.queryByTestId("timeline-view")).toBeNull()
+    expect(screen.getByTestId("commit-detail")).toHaveTextContent("abc1234def")
+    expect(screen.getByTestId("detail-sheet")).toHaveAttribute("data-title", "abc1234")
+
+    fireEvent.click(screen.getByTestId("detail-sheet-close"))
+    expect(selectCommit).toHaveBeenCalledWith(null)
+  })
+
+  it("opens the stash sheet", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlMobileBody />)
+    await user.click(screen.getByTestId("sc-mobile-more"))
+    await user.click(await screen.findByTestId("sc-mobile-stash"))
+    expect(await screen.findByTestId("stash-panel")).toBeInTheDocument()
+  })
+})
+
+it("initializes a folder that is not a repository yet", () => {
+  storeState.repoState = { isRepo: false }
+  render(<SourceControlMobileBody />)
+  fireEvent.click(screen.getByTestId("sc-mobile-init"))
+  expect(actions.init).toHaveBeenCalled()
+})
+
+it("opens the stored selection's drawer when the route asked for it", () => {
+  storeState.selectedPath = "a.ts"
+  render(<SourceControlMobileBody initialDiffOpen />)
+  expect(screen.getByTestId("diff-pane").textContent).toBe("a.ts:touch")
+})
+
+it("slides one underline under the active tab", () => {
+  render(<SourceControlMobileBody />)
+  expect(screen.getAllByTestId("sc-mobile-view-underline")).toHaveLength(1)
+  fireEvent.click(screen.getByTestId("sc-mobile-view-browse"))
+  expect(screen.getByTestId("sc-mobile-view-browse")).toContainElement(
+    screen.getByTestId("sc-mobile-view-underline")
+  )
+})
+
+it("opens a file's own history from its row", () => {
+  render(<SourceControlMobileBody />)
+  fireEvent.click(screen.getByTestId("changes-history"))
+  expect(screen.getByTestId("timeline-view")).toHaveAttribute("data-file", "src/a.ts")
+})
+
+describe("permissions and busy states", () => {
+  const allow = actions.can
+  afterEach(() => {
+    actions.can = allow
+  })
+
+  it("disables Timeline and Stashes, and drops per-file history, without their commands", async () => {
+    actions.can = (command: string) => command !== "git_log" && command !== "git_stash_list"
+    const user = userEvent.setup()
+    render(<SourceControlMobileBody />)
+    expect(screen.queryByTestId("changes-history")).toBeNull()
+    await user.click(screen.getByTestId("sc-mobile-more"))
+    expect(await screen.findByTestId("sc-mobile-timeline")).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("sc-mobile-stash")).toHaveAttribute("data-disabled")
+  })
+
+  it("disables init while it runs, and publish while a push runs", () => {
+    storeState.repoState = { isRepo: false }
+    storeState.ops = { ...(storeState.ops as object), init: true }
+    const { unmount } = render(<SourceControlMobileBody />)
+    expect(screen.getByTestId("sc-mobile-init")).toBeDisabled()
+    unmount()
+
+    storeState.repoState = { isRepo: true }
+    storeState.status = status({ upstream: null })
+    storeState.ops = { ...(storeState.ops as object), init: false, push: true }
+    render(<SourceControlMobileBody />)
+    expect(screen.getByTestId("sc-mobile-publish")).toBeDisabled()
+  })
+
+  it("swallows a failed refresh, which is already on screen as the stale strip", async () => {
+    repo.refresh.mockRejectedValueOnce(new Error("offline"))
+    render(<SourceControlMobileBody />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("sc-mobile-refresh"))
+    })
+    expect(repo.refresh).toHaveBeenCalled()
   })
 })

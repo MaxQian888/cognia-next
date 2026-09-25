@@ -20,17 +20,15 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 // The list and its dialogs are covered by their own suite. Stubbed here so this
 // one stays about the chip becoming a real trigger.
 const pickerRender = jest.fn()
+const pickerDialogsHook = jest.fn()
 jest.mock("@/components/workspace/workspace-picker-list", () => ({
-  useWorkspacePickerDialogs: () => ({
-    actions: {
-      openFolder: jest.fn(),
-      newWorkspace: jest.fn(),
-      adopt: jest.fn(),
-      manage: jest.fn(),
-      canOpenFolder: true,
-      adoptableCount: 0,
-    },
-    element: <div data-testid="picker-dialogs" />,
+  useWorkspacePickerDialogs: () => pickerDialogsHook(),
+  useWorkspacePickerRequests: () => ({
+    openFolder: jest.fn(),
+    newWorkspace: jest.fn(),
+    adopt: jest.fn(),
+    manage: jest.fn(),
+    canOpenFolder: true,
   }),
   WorkspacePickerList: (props: { density?: string; onSwitched?: () => void }) => {
     pickerRender(props)
@@ -102,12 +100,13 @@ it("closes the drawer once a workspace is chosen", () => {
   expect(screen.queryByTestId("picker-list")).not.toBeInTheDocument()
 })
 
-it("mounts the dialogs outside the drawer, which unmounts its children", () => {
+it("leaves the dialogs to the shell's host rather than mounting its own", () => {
   // A dialog owned by the drawer content would be torn down by the same close
-  // that asked to open it, so nothing would appear.
+  // that asked to open it, so the chip's actions are requests to
+  // `WorkspaceDialogHost`, which the mobile shell mounts outside every drawer.
   activateWorkspace()
   render(<MobileWorkspaceChip />)
 
-  expect(screen.getByTestId("picker-dialogs")).toBeInTheDocument()
+  expect(pickerDialogsHook).not.toHaveBeenCalled()
   expect(screen.queryByTestId("picker-list")).not.toBeInTheDocument()
 })

@@ -119,6 +119,12 @@ describe("<MemoryMobileBody />", () => {
     expect(screen.queryByTestId("memory-row-m2")).not.toBeInTheDocument()
   })
 
+  it("gives the screen a way back to the hub that opened it", () => {
+    liveQuery.mockReturnValue([])
+    render(<MemoryMobileBody />)
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+  })
+
   it("shows the empty state when there are no memories", () => {
     liveQuery.mockReturnValue([])
     render(<MemoryMobileBody />)

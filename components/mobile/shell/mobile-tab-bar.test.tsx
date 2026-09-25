@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { MobileTabBar, pickActiveTabId } from "./mobile-tab-bar"
+import { ME_ENTRIES } from "@/components/mobile/me/me-entries"
 
 const pathnameMock = jest.fn(() => "/")
 jest.mock("next/navigation", () => ({
@@ -60,6 +61,19 @@ describe("pickActiveTabId", () => {
   })
   it("falls back to chat for unknown routes", () => {
     expect(pickActiveTabId("/something-else")).toBe("chat")
+  })
+  // Every screen the `/me` hub opens must light a tab that leads back to it.
+  // Falling through to Chat is what made Memory and Projects read as "lost".
+  it("never lights Chat for a screen the Me hub opens", () => {
+    for (const entry of ME_ENTRIES) {
+      const tab = pickActiveTabId(entry.href)
+      expect({ href: entry.href, tab }).not.toEqual({ href: entry.href, tab: "chat" })
+    }
+  })
+  it("matches me for the hub's out-of-/me destinations", () => {
+    expect(pickActiveTabId("/memory")).toBe("me")
+    expect(pickActiveTabId("/projects")).toBe("me")
+    expect(pickActiveTabId("/search")).toBe("me")
   })
 })
 

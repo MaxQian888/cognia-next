@@ -97,6 +97,16 @@ describe("dispatchRoute", () => {
     }
   )
 
+  it("leaves the Browser Companion's issue and agent-task links to the desktop", () => {
+    const navs = makeNavigators()
+    dispatchRoute({ kind: "open_issue", issueId: "i-1", raw: "cognia://issues/i-1" }, navs)
+    dispatchRoute({ kind: "open_agent_task", taskId: "t-1", raw: "cognia://agent-tasks/t-1" }, navs)
+    expect(navs.pushSession).not.toHaveBeenCalled()
+    expect(navs.openShareTarget).not.toHaveBeenCalled()
+    expect(navs.redeemPair).not.toHaveBeenCalled()
+    expect(navs.openWorkflowRun).not.toHaveBeenCalled()
+  })
+
   it("does nothing for unknown routes (just logs)", () => {
     const navs = makeNavigators()
     dispatchRoute({ kind: "unknown", raw: "cognia://nope" }, navs)

@@ -6,7 +6,15 @@
 
 import type { RoomDescriptor } from "@/lib/signaling/crypto"
 
-export type DevicePlatform = "ios" | "android" | "web" | "unknown"
+/**
+ * What a paired device is.
+ *
+ * `browser` is the Cognia browser extension (ADR-0154): paired through its own
+ * enrollment, holding only `browser.submit` and `browser.read-own`, with no
+ * signaling room and no grant a phone could be given. It is listed here so the
+ * device console can show it and revoke it like any other pairing.
+ */
+export type DevicePlatform = "ios" | "android" | "web" | "browser" | "unknown"
 
 /** Public, signed locator for the durable terminal host. Never contains secrets. */
 export interface TerminalHostDescriptor {

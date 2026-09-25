@@ -11,13 +11,13 @@
  * stay in lock-step.
  */
 
-import { Suspense, useCallback, type ReactNode } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense, type ReactNode } from "react"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { useMobileBack } from "@/components/mobile/shell/mobile-back-button"
 
 export interface SubPageShellProps {
   title: string
@@ -83,18 +83,8 @@ export function SubPageShell({
   testid,
 }: SubPageShellProps) {
   const widthClass = width === "wide" ? "max-w-2xl lg:max-w-4xl" : "max-w-2xl"
-  const router = useRouter()
-  // Pop history instead of pushing another entry: `/me → subpage → back-arrow`
-  // used to grow history to `/me, subpage, /me`, so the hardware back button
-  // then returned the user to the subpage they had just left. Fall back to a
-  // replace() when there's nothing to pop (cold start straight on a subpage).
-  const onBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back()
-    } else {
-      router.replace(backHref)
-    }
-  }, [router, backHref])
+  // Pops history rather than pushing `/me` again (see `useMobileBack`).
+  const onBack = useMobileBack(backHref)
   return (
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"

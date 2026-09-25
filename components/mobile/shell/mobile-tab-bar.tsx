@@ -60,7 +60,23 @@ export const MOBILE_TABS: TabSpec[] = [
     id: "me",
     href: "/me",
     icon: UserIcon,
-    matchPrefixes: ["/me", "/settings", "/pair"],
+    // The `/me` hub is the only phone entry into these screens (see
+    // `ME_ENTRIES`). Without them the fallback lit Chat while Memory or
+    // Projects was open, and the reader had no tab that led back.
+    matchPrefixes: [
+      "/me",
+      "/settings",
+      "/pair",
+      "/memory",
+      "/projects",
+      "/issues",
+      "/goals",
+      "/source-control",
+      "/workspace",
+      "/remote-sessions",
+      "/search",
+      "/devices",
+    ],
   },
 ]
 

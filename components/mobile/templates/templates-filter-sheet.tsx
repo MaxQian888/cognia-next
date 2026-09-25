@@ -101,7 +101,7 @@ export function TemplatesFilterSheet({ route, domains }: TemplatesFilterSheetPro
             <Button
               variant="ghost"
               size="sm"
-              onClick={route.clearFilters}
+              onClick={() => route.clearFilters()}
               data-testid="templates-filter-clear"
             >
               {t("filters.clear")}

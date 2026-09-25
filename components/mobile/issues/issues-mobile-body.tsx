@@ -26,6 +26,7 @@ import { listIssueCycles } from "@/lib/db/issue-cycles"
 import { buildPlanningHints } from "@/lib/issues/planning-hints"
 import { PlanningBadges } from "@/components/issues/planning/planning-badges"
 import { TrackerTabs } from "@/components/issues/tracker-tabs"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { Button } from "@/components/ui/button"
 import { listLabels } from "@/lib/db/labels"
 import { buildIssueGroups } from "@/lib/issues/board-model"
@@ -115,10 +116,14 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="issues-mobile-body">
       <header className="safe-area-pt flex flex-col gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
+          <MobileBackButton />
           <h1 className="text-base font-semibold">{t("title")}</h1>
-          <Badge variant="secondary" className="font-normal">
-            {t("summary", { count: total })}
-          </Badge>
+          {/* "No issues" beside the empty board said the same thing twice. */}
+          {total > 0 ? (
+            <Badge variant="secondary" className="font-normal">
+              {t("summary", { count: total })}
+            </Badge>
+          ) : null}
           <span className="flex-1" />
           <Button
             size="icon-sm"
@@ -140,12 +145,25 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
         // always rendered as the first.
         <ListSkeleton rows={3} testId="issues-mobile-skeleton" className="p-4" />
       ) : total === 0 ? (
-        <p
-          className="py-16 text-center text-sm text-muted-foreground"
+        <div
+          className="flex flex-col items-center gap-3 px-6 py-16 text-center"
           data-testid="issues-mobile-empty"
         >
-          {t("board.empty")}
-        </p>
+          <p className="text-sm text-muted-foreground">{t("board.empty")}</p>
+          {/* The header's plus is a 32px glyph in a corner; an empty board is
+              the moment the reader is looking for the way to start one. */}
+          {projectId ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCreateOpen(true)}
+              data-testid="issues-mobile-empty-create"
+            >
+              <PlusIcon className="size-4" aria-hidden />
+              {t("create.trigger")}
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {groups.map((group) => (

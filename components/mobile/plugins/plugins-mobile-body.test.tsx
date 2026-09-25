@@ -3,6 +3,7 @@
  */
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
@@ -40,7 +41,33 @@ jest.mock("@/components/plugins/plugin-batch-actions-bar", () => ({
   ),
 }))
 jest.mock("@/components/plugins/plugin-panel-toolbar", () => ({
-  PluginPanelToolbar: () => <div data-testid="stub-toolbar" />,
+  PluginPanelToolbar: ({
+    onSyncRegistry,
+    syncing,
+  }: {
+    onSyncRegistry?: () => void
+    syncing?: boolean
+  }) => (
+    <div data-testid="stub-toolbar">
+      <button
+        type="button"
+        data-testid="stub-toolbar-sync"
+        disabled={!onSyncRegistry || syncing}
+        onClick={() => onSyncRegistry?.()}
+      >
+        sync
+      </button>
+    </div>
+  ),
+}))
+
+// Controllable URL, so the shared deep-link handling can be driven here.
+let mockSearch = new URLSearchParams()
+const mockReplace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => mockSearch,
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace }),
+  usePathname: () => "/plugins",
 }))
 jest.mock("@/components/plugins/plugin-section-pane", () => ({
   PluginSectionPane: ({ section }: { section: string }) => (
@@ -89,6 +116,9 @@ import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 import { PluginsMobileBody } from "./plugins-mobile-body"
 
 beforeEach(() => {
+  mockSearch = new URLSearchParams()
+  mockReplace.mockClear()
+  mockSync.mockClear()
   mockIsMirrored.mockReturnValue(false)
   mockDevtoolsGate.mockReturnValue(false)
   usePluginsStore.setState({ activeSection: "library", detailPluginId: null })
@@ -169,19 +199,67 @@ describe("PluginsMobileBody", () => {
     expect(screen.getByTestId("plugins-mobile-mirrored-hint")).toBeInTheDocument()
   })
 
-  it("refreshes the catalog from the header button", () => {
+  // The Library toolbar's Sync button was permanently disabled here (no
+  // handler was passed), while a second header button did the same job. One
+  // refresh per section now: the toolbar's on the Library, the header's on
+  // every other section.
+  it("syncs the registry from the Library toolbar, with no duplicate header button", () => {
     render(<PluginsMobileBody />)
-    fireEvent.click(screen.getByTestId("plugins-mobile-refresh"))
+    expect(screen.queryByTestId("plugins-mobile-refresh")).toBeNull()
+    const sync = screen.getByTestId("stub-toolbar-sync")
+    expect(sync).not.toBeDisabled()
+    fireEvent.click(sync)
+    expect(mockSync).toHaveBeenCalled()
+  })
+
+  it("refreshes the catalog from the header button off the Library", () => {
+    usePluginsStore.setState({ activeSection: "governance" })
+    render(<PluginsMobileBody />)
+    const refresh = screen.getByTestId("plugins-mobile-refresh")
+    expect(refresh).toHaveClass("size-9")
+    fireEvent.click(refresh)
     expect(mockSync).toHaveBeenCalled()
   })
 
   // `/me/plugins` mounts this under `SubPageShell`, which owns the title and
   // back arrow. Dropping our header must not drop the refresh with it.
   it("keeps refresh reachable when the host supplies the header", () => {
+    usePluginsStore.setState({ activeSection: "discover" })
     render(<PluginsMobileBody showHeader={false} />)
     expect(screen.queryByRole("heading", { name: "title" })).toBeNull()
     fireEvent.click(screen.getByTestId("plugins-mobile-refresh"))
     expect(mockSync).toHaveBeenCalled()
+  })
+
+  // ⌘K results and "View details" toasts link `/plugins?plugin=<id>`. The phone
+  // body ignored every URL param, so the link landed on a bare list.
+  it("opens the detail drawer for a ?plugin= deep link and strips the param", () => {
+    usePluginsStore.setState({ activeSection: "discover" })
+    mockSearch = new URLSearchParams("plugin=web-tools")
+    render(<PluginsMobileBody />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
+    expect(usePluginsStore.getState().detailPluginId).toBe("web-tools")
+    expect(screen.getByTestId("stub-detail-pane")).toBeInTheDocument()
+    expect(mockReplace).toHaveBeenCalledWith("/plugins", { scroll: false })
+  })
+
+  it("applies ?section= but not to a section this shell disables", () => {
+    mockSearch = new URLSearchParams("section=agent-packages")
+    render(<PluginsMobileBody />)
+    expect(usePluginsStore.getState().activeSection).toBe("library")
+  })
+
+  // The detail header already opens with the name; titling the drawer with it
+  // too printed the name twice, one line apart.
+  it("titles the drawer with the section label, not the plugin name", () => {
+    render(<PluginsMobileBody />)
+    act(() => usePluginsStore.getState().openDetail("web-tools"))
+    expect(screen.queryByText("Plugin web-tools")).toBeNull()
+    expect(screen.getByText("detailSheetLabel")).toBeInTheDocument()
+    expect(screen.getByTestId("plugins-mobile-detail-body")).toHaveClass(
+      "h-[70dvh]",
+      "pb-[env(safe-area-inset-bottom)]"
+    )
   })
 
   /**

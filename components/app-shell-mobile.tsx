@@ -591,7 +591,6 @@ export function AppShellMobile() {
                   {tShell("closeNav")}
                 </Button>
               </SheetClose>
-              <SharedSessionJoin />
               <div className="flex flex-1 overflow-hidden">
                 {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
                   phone viewport never reaches `md`, so the default rail variant
@@ -635,6 +634,11 @@ export function AppShellMobile() {
                   />
                 </div>
               </div>
+              {/* Joining someone else's conversation is a once-in-a-while
+                  action, so it sits at the foot of the drawer rather than
+                  above the rail and the list (renders nothing unless shared
+                  chat is enabled). */}
+              <SharedSessionJoin className="shrink-0 rounded-none border-t px-4" />
             </SheetContent>
           </Sheet>
         </MobileChannelListSourceProvider>

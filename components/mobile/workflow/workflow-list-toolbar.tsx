@@ -67,16 +67,26 @@ export function WorkflowListToolbar({ onNewWorkflow }: WorkflowListToolbarProps)
             <Rows2Icon className="size-4" />
           )}
         </Button>
+        {/* Icon-only, so the name has to come from the label: without it a
+            screen reader announced both as a bare "button". */}
         <Button
           variant="outline"
           size="sm"
           onClick={() => openCreateFolder(currentFolderId)}
+          aria-label={tLib("newFolder")}
+          title={tLib("newFolder")}
           data-testid="mobile-workflow-new-folder"
         >
-          <FolderPlusIcon className="size-4" />
+          <FolderPlusIcon className="size-4" aria-hidden="true" />
         </Button>
-        <Button size="sm" onClick={onNewWorkflow} data-testid="mobile-workflow-new">
-          <PlusIcon className="size-4" />
+        <Button
+          size="sm"
+          onClick={onNewWorkflow}
+          aria-label={tLib("new")}
+          title={tLib("new")}
+          data-testid="mobile-workflow-new"
+        >
+          <PlusIcon className="size-4" aria-hidden="true" />
         </Button>
       </div>
     </div>

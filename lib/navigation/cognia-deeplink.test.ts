@@ -18,6 +18,41 @@ describe("parseCogniaDeeplink", () => {
     })
   })
 
+  it("parses the Browser Companion's issue and agent-task links", () => {
+    // `lib/browser-companion/service.ts:workDeepLink` mints both, and until
+    // they were parsed here every "Open in Cognia" on a filed issue or an agent
+    // task landed on the unknown-link toast.
+    expect(parseCogniaDeeplink("cognia://issues/issue-1")).toMatchObject({
+      kind: "open_issue",
+      issueId: "issue-1",
+    })
+    expect(parseCogniaDeeplink("cognia://agent-tasks/task-1")).toMatchObject({
+      kind: "open_agent_task",
+      taskId: "task-1",
+    })
+    // Built with `encodeURIComponent`, so decoded here.
+    expect(parseCogniaDeeplink("cognia://issues/a%2Fb%20c")).toMatchObject({
+      kind: "open_issue",
+      issueId: "a/b c",
+    })
+    // Singular hosts and the `?id=` fallback, like every other route here.
+    expect(parseCogniaDeeplink("cognia://issue?id=issue-2")).toMatchObject({
+      kind: "open_issue",
+      issueId: "issue-2",
+    })
+    expect(parseCogniaDeeplink("cognia://agent-task?id=task-2")).toMatchObject({
+      kind: "open_agent_task",
+      taskId: "task-2",
+    })
+  })
+
+  it("keeps a malformed escape as written rather than throwing", () => {
+    expect(parseCogniaDeeplink("cognia://issues/%E0%A4%A")).toMatchObject({
+      kind: "open_issue",
+      issueId: "%E0%A4%A",
+    })
+  })
+
   it("carries the OS-promotion wake token on scheduler task links", () => {
     expect(parseCogniaDeeplink("cognia://scheduler/task/task-1?run=abc_DEF-9")).toMatchObject({
       kind: "open_scheduler_task",

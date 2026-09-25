@@ -17,7 +17,7 @@
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
-import { PlusIcon, RefreshCwIcon } from "lucide-react"
+import { PlusIcon, QrCodeIcon, RefreshCwIcon } from "lucide-react"
 
 import { AddHostSheet } from "@/components/devices/add-host-sheet"
 import { DeviceDetail } from "@/components/devices/device-detail"
@@ -26,6 +26,7 @@ import { ExecutionHostChip } from "@/components/devices/execution-host-switcher"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { Button } from "@/components/ui/button"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
 import { remoteHostRef } from "@/lib/devices/build-device-rows"
@@ -85,6 +86,7 @@ export function DevicesMobileBody() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="devices-mobile-body">
       <header className="safe-area-pt flex shrink-0 items-center gap-2 border-b px-3 py-2">
+        <MobileBackButton />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{t("title")}</h1>
           <p className="truncate text-xs text-muted-foreground">
@@ -128,6 +130,8 @@ export function DevicesMobileBody() {
             onClick={() => router.push(isTauri() ? "/settings?section=companion" : "/pair")}
             data-testid="mobile-devices-pair"
           >
+            {/* Bare ghost text in a bordered strip read as a label, not a control. */}
+            <QrCodeIcon className="size-3.5" aria-hidden="true" />
             {t("actions.pair")}
           </Button>
         </div>

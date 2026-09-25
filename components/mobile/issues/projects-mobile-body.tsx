@@ -17,6 +17,7 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 
 import { TrackerTabs } from "@/components/issues/tracker-tabs"
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
@@ -64,12 +65,16 @@ export function ProjectsMobileBody({ initialSelectedId }: ProjectsMobileBodyProp
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="projects-mobile-body">
-      <header className="flex flex-col gap-2 border-b px-4 py-3">
+      <header className="safe-area-pt flex flex-col gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
+          <MobileBackButton />
           <h1 className="text-base font-semibold">{t("projects.title")}</h1>
-          <Badge variant="secondary" className="font-normal">
-            {t("projects.summary", { count: rows.length })}
-          </Badge>
+          {/* "No projects" beside "No projects yet" said the same thing twice. */}
+          {rows.length > 0 ? (
+            <Badge variant="secondary" className="font-normal">
+              {t("projects.summary", { count: rows.length })}
+            </Badge>
+          ) : null}
         </div>
         <TrackerTabs active="projects" compact />
       </header>
@@ -77,12 +82,12 @@ export function ProjectsMobileBody({ initialSelectedId }: ProjectsMobileBodyProp
       {rows.length === 0 && projectsQuery.isSyncing ? (
         <ListSkeleton rows={3} testId="projects-mobile-skeleton" className="p-4" />
       ) : rows.length === 0 ? (
-        <p
-          className="py-16 text-center text-sm text-muted-foreground"
-          data-testid="projects-mobile-empty"
-        >
-          {t("projects.empty")}
-        </p>
+        <div className="px-6 py-16 text-center" data-testid="projects-mobile-empty">
+          <p className="text-sm font-medium">{t("projects.empty")}</p>
+          {/* This body is read-only (no companion command creates a project),
+              so say where one comes from instead of leaving a dead end. */}
+          <p className="mt-1 text-xs text-muted-foreground">{t("mobile.projectsEmptyHint")}</p>
+        </div>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {rows.map((project) => {

@@ -33,6 +33,8 @@ import {
   SearchIcon,
 } from "lucide-react"
 
+import { MobileBackButton } from "@/components/mobile/shell/mobile-back-button"
+import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { TemplateBindingField } from "@/components/templates/template-binding-field"
@@ -65,7 +67,7 @@ export function TemplatesMobileBody() {
   const runtime = useMemo(() => getTemplateRuntime(), [])
   const route = useTemplateRouteState()
 
-  const { definitions, tierOf, hiddenCount } = useScopedTemplateCatalog(
+  const { definitions, tierOf, hiddenCount, revision } = useScopedTemplateCatalog(
     {
       text: route.query,
       platform: templatePlatform,
@@ -201,7 +203,13 @@ export function TemplatesMobileBody() {
       data-bg-target="chat"
       data-testid="templates-mobile-body"
     >
-      <div className="safe-area-pt flex shrink-0 items-center gap-2 p-3">
+      {/* The body opened straight into a search box: no title said which
+          screen this was, and nothing but the tab bar led back to Discover. */}
+      <header className="safe-area-pt flex shrink-0 items-center gap-1 px-3 pt-2">
+        <MobileBackButton fallbackHref="/discover" />
+        <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{t("title")}</h1>
+      </header>
+      <div className="flex shrink-0 items-center gap-2 p-3 pt-1">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -219,7 +227,24 @@ export function TemplatesMobileBody() {
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-6">
         {definitions.length === 0 ? (
-          <EmptyState icon={FileArchiveIcon} title={t("empty.noResults")} />
+          // Three different answers, and "no templates match these filters"
+          // was given for all of them: while the catalog was still loading,
+          // and on an unfiltered list, where there is no filter to blame.
+          revision === 0 ? (
+            <ListSkeleton rows={4} testId="templates-mobile-loading" />
+          ) : route.query.trim() || route.activeFilterCount > 0 ? (
+            <EmptyState
+              icon={FileArchiveIcon}
+              title={t("empty.noResults")}
+              cta={{
+                label: t("filters.clear"),
+                onSelect: () => route.clearFilters({ includeQuery: true }),
+                testId: "templates-mobile-clear-filters",
+              }}
+            />
+          ) : (
+            <EmptyState icon={FileArchiveIcon} title={t("empty.noTemplates")} />
+          )
         ) : (
           definitions.map((definition) => (
             <TemplateCard

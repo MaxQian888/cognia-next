@@ -20,6 +20,8 @@ jest.mock("@/hooks/use-template-catalog", () => ({
  * would leave the sheet permanently shut, so this one round-trips it.
  */
 let searchParams = new URLSearchParams()
+// 0 means the catalog has not been populated yet.
+let catalogRevision = 1
 jest.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: (href: string) => {
@@ -35,7 +37,7 @@ jest.mock("@/hooks/templates/use-scoped-template-catalog", () => ({
     owners: {},
     tierOf: () => "mine",
     hiddenCount: 0,
-    revision: 0,
+    revision: catalogRevision,
   }),
 }))
 jest.mock("@/lib/templates/runtime", () => ({
@@ -108,6 +110,44 @@ describe("TemplatesMobileBody", () => {
   it("opts the phone catalog into the wallpaper layer", () => {
     render(<TemplatesMobileBody />)
     expect(screen.getByTestId("templates-mobile-body")).toHaveAttribute("data-bg-target", "chat")
+  })
+
+  describe("empty list", () => {
+    beforeEach(() => {
+      catalogDefinitions = []
+    })
+    afterEach(() => {
+      catalogRevision = 1
+    })
+
+    it("shows a skeleton while the catalog has not loaded, not a filter miss", () => {
+      catalogRevision = 0
+      render(<TemplatesMobileBody />)
+      expect(screen.getByTestId("templates-mobile-loading")).toBeInTheDocument()
+      expect(screen.queryByText("empty.noResults")).not.toBeInTheDocument()
+    })
+
+    it("does not blame filters on an unfiltered, empty catalog", () => {
+      searchParams = new URLSearchParams()
+      render(<TemplatesMobileBody />)
+      expect(screen.getByText("empty.noTemplates")).toBeInTheDocument()
+      expect(screen.queryByText("empty.noResults")).not.toBeInTheDocument()
+    })
+
+    it("offers to clear the filters and the search when they empty the list", () => {
+      searchParams = new URLSearchParams("q=zzz&domain=skill")
+      render(<TemplatesMobileBody />)
+      expect(screen.getByText("empty.noResults")).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "filters.clear" }))
+      expect(searchParams.has("q")).toBe(false)
+      expect(searchParams.has("domain")).toBe(false)
+    })
+  })
+
+  it("names the screen and gives it a way back to Discover", () => {
+    render(<TemplatesMobileBody />)
+    expect(screen.getByRole("heading", { level: 1, name: "title" })).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
   })
 
   it("preflights and instantiates the template a tap opened", async () => {

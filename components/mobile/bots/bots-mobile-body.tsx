@@ -89,7 +89,7 @@ export function BotsMobileBody({
       {/* Whether anything will actually run these Bots matters MORE here than
           on the desktop shell — a phone almost never is the runner. */}
       <div className="shrink-0">
-        <BotRuntimeNotice />
+        <BotRuntimeNotice hasBots={rows.length > 0} />
         {failed ? (
           // Same persistent-state alert as the desktop console — a toast would
           // vanish while the rows below stay stale.
@@ -114,6 +114,7 @@ export function BotsMobileBody({
           onSearchChange={setSearch}
           onStatusFilterChange={setStatusFilter}
           onSelect={onSelect}
+          onInstall={() => setInstallOpen(true)}
         />
       </div>
 

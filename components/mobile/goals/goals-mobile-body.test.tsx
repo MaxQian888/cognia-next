@@ -83,6 +83,11 @@ describe("<GoalsMobileBody />", () => {
     )
   })
 
+  it("gives the screen a way back to the hub that opened it", () => {
+    render(<GoalsMobileBody />)
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+  })
+
   it("shows the empty state when there are no goals", () => {
     liveQuery.mockReturnValue([])
     render(<GoalsMobileBody />)

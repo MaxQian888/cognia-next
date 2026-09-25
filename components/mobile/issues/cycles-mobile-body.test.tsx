@@ -56,6 +56,15 @@ describe("CyclesMobileBody", () => {
     expect(screen.getByTestId("cycles-mobile-empty")).toBeInTheDocument()
   })
 
+  it("does not tell the reader to create a cycle this body cannot create", () => {
+    render(<CyclesMobileBody />)
+    const empty = screen.getByTestId("cycles-mobile-empty")
+    expect(empty).toHaveTextContent("mobile.cyclesEmpty")
+    expect(empty).toHaveTextContent("mobile.cyclesEmptyHint")
+    expect(empty).not.toHaveTextContent("cycles.empty")
+    expect(screen.getByTestId("mobile-back-button")).toBeInTheDocument()
+  })
+
   it("separates 'not synced yet' from 'no cycles'", () => {
     isSyncing = true
     render(<CyclesMobileBody />)
@@ -76,5 +85,17 @@ describe("CyclesMobileBody", () => {
     expect(screen.getByTestId("cycles-mobile-progress-c1")).toHaveTextContent("cycles.progress:1,2,0,0")
     expect(screen.getByTestId("cycles-mobile-dates-c1")).toBeInTheDocument()
     expect(screen.getByText("cycles.kindLabel.milestone")).toBeInTheDocument()
+  })
+
+  // The count only repeats the empty state when there is nothing to count.
+  it("shows the cycle count only when there are cycles", () => {
+    const { unmount } = render(<CyclesMobileBody />)
+    expect(screen.queryByText(/^cycles\.summary/)).not.toBeInTheDocument()
+    unmount()
+    cyclesForTest = [
+      { id: "c1", projectId: "w1", kind: "milestone", name: "v1", status: "planned", startsAt: 0 },
+    ]
+    render(<CyclesMobileBody />)
+    expect(screen.getByText("cycles.summary:1")).toBeInTheDocument()
   })
 })
