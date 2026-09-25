@@ -325,6 +325,11 @@ const REGISTRY = [
   // only the two standalone services under services/ ran clippy at all.
   { script: "rust:fmt:check", group: "rust", runtime: "rust" },
   { script: "rust:clippy", group: "rust", runtime: "rust", resource: "cargo" },
+  // ADR-0195: the workspace layer map. Reads `cargo metadata --no-deps`, so it
+  // needs no build; `:deep` cross-checks the tauri-free verdicts with
+  // `cargo tree -i tauri` per crate.
+  { script: "audit:rust-architecture", group: "rust", runtime: "rust" },
+  { script: "audit:rust-architecture:deep", group: "rust", runtime: "rust", resource: "cargo" },
 
   // Supply-chain checks are blocking. Missing scanners must fail locally too;
   // otherwise check:all can report success without performing the audit.

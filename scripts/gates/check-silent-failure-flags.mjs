@@ -10,7 +10,7 @@
  *      argument.
  *
  * Handler discovery is a two-pass scan:
- *   - Pass A walks every `*.rs` file under `src-tauri/src/plugin_api/` and
+ *   - Pass A walks every `*.rs` file under `crates/cognia-plugin-runtime/src/` and
  *     `src-tauri/src/plugins/`, plus every plugin-owned Rust source brought
  *     in via `#[path = "../../../../plugins/.../commands.rs"]` (the
  *     `src-tauri/src/plugins/<name>/mod.rs` files declare these). For each
@@ -45,10 +45,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, "../..")
 const LIB_RS = resolve(REPO_ROOT, "src-tauri/src/lib.rs")
 const SEARCH_DIRS = ["lib/plugin", "hooks/plugins", "stores/plugin", "stores/plugins"]
-const RUST_SOURCE_ROOTS = [
-  resolve(REPO_ROOT, "src-tauri/src/plugin_api"),
-  resolve(REPO_ROOT, "src-tauri/src/plugins"),
-]
+// The plugin runtime moved out of `src-tauri/src/plugin_api` into its own crate
+// (ADR-0067); scanning the old path found no handlers at all and let every
+// orphaned `plugin_*` command through.
+const RUST_SOURCE_ROOTS = [resolve(REPO_ROOT, "crates/cognia-plugin-runtime/src")]
 
 function listTsFiles() {
   const cmd = `git -C "${REPO_ROOT}" ls-files ${SEARCH_DIRS.map((d) => `"${d}"`).join(" ")}`

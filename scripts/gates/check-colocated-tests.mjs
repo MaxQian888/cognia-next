@@ -4,7 +4,10 @@
  * with a co-located test.
  *
  *   components/**  hooks/**  lib/**       →  foo.ts  needs  foo.test.ts
- *   src-tauri/src/**                      →  foo.rs  needs  #[cfg(test)]
+ *   src-tauri/src/**  crates/<crate>/src/** →  foo.rs  needs  #[cfg(test)]
+ *
+ * A Rust file that only declares modules and re-exports (`mod x;`,
+ * `pub use y::*;`) has no behavior to test and is not gated.
  *
  * Excluded by the rule itself: `components/ui/` (shadcn) and
  * `components/ai-elements/` (vendored).
@@ -77,6 +80,14 @@ export const TS_ROOTS = [
  */
 export const TS_EXCLUDED = ["components/ui/", "components/ai-elements/", "web/components/ui/"]
 export const RUST_ROOT = "src-tauri/src/"
+/**
+ * Workspace crates carry the same rule (ADR-0196): code that moves out of
+ * `src-tauri/src` into `crates/` must not leave the rule behind at the border.
+ * The plugin templates under `crates/` are scaffolding the CLI copies into a
+ * new plugin, not workspace crates, so they are not gated here.
+ */
+const CRATE_SOURCE = /^crates\/[^/]+\/src\/.+\.rs$/
+export const RUST_EXCLUDED = ["crates/cognia-plugin-template"]
 
 const TS_EXT = /\.(ts|tsx)$/
 /** Tests, stories and ambient declarations are not themselves gated sources. */
@@ -96,7 +107,33 @@ export function isGatedTsSource(file) {
 
 /** @param {string} file @returns {boolean} */
 export function isGatedRustSource(file) {
-  return file.startsWith(RUST_ROOT) && file.endsWith(".rs")
+  if (!file.endsWith(".rs")) return false
+  if (file.startsWith(RUST_ROOT)) return true
+  if (RUST_EXCLUDED.some((prefix) => file.startsWith(prefix))) return false
+  return CRATE_SOURCE.test(file)
+}
+
+/**
+ * Does this Rust source only declare modules and re-export items? Such a file
+ * (`mod foo; pub use cognia_x::*;`) has no behavior a test could pin. Pure.
+ *
+ * @param {string} source
+ * @returns {boolean}
+ */
+export function rustIsDeclarationOnly(source) {
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/#!?\[[^\]]*\]/g, "")
+  const statement =
+    /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:mod\s+\w+|use\s+[^;]+|extern\s+crate\s+[^;]+)\s*;/
+  let rest = code
+  while (rest.trim() !== "") {
+    const match = rest.match(statement)
+    if (!match) return false
+    rest = rest.slice(match[0].length)
+  }
+  return true
 }
 
 /**
@@ -128,7 +165,8 @@ export function findViolations(files, io) {
     if (isGatedTsSource(file)) {
       if (!expectedTestPaths(file).some((p) => io.has(p))) violations.push(file)
     } else if (isGatedRustSource(file)) {
-      if (!rustHasInlineTests(io.readRust(file))) violations.push(file)
+      const source = io.readRust(file)
+      if (!rustHasInlineTests(source) && !rustIsDeclarationOnly(source)) violations.push(file)
     }
   }
   return violations.sort()

@@ -1,0 +1,33 @@
+{
+  "$comment": "Written by `pnpm audit:rust-architecture:baseline`. Rows are violations that existed when the gate landed; the list may only shrink (ADR-0196).",
+  "findings": [
+    "direct-only: cognia-subscription depends on keyring",
+    "direct-only: cognia-terminal depends on keyring",
+    "forbidden: cognia-net reaches rquickjs",
+    "layer: cognia-files -> cognia-agents",
+    "layer: cognia-net -> cognia-secrets",
+    "layer: cognia-observability -> cognia-automation",
+    "layer: cognia-plugin-runtime -> cognia-automation",
+    "layer: cognia-plugin-runtime -> cognia-connectors",
+    "layer: cognia-terminal -> cognia-automation",
+    "tauri-default: cognia-agent-state",
+    "tauri-default: cognia-agents",
+    "tauri-default: cognia-automation",
+    "tauri-default: cognia-ccswitch",
+    "tauri-default: cognia-connectors",
+    "tauri-default: cognia-external-agent",
+    "tauri-default: cognia-files",
+    "tauri-default: cognia-gateway",
+    "tauri-default: cognia-git",
+    "tauri-default: cognia-mcp-server",
+    "tauri-default: cognia-media",
+    "tauri-default: cognia-ocr",
+    "tauri-default: cognia-plugin-runtime",
+    "tauri-default: cognia-scheduling",
+    "tauri-default: cognia-skills",
+    "tauri-default: cognia-subscription",
+    "tauri-default: cognia-terminal",
+    "tauri-default: cognia-tts",
+    "tauri-default: cognia-vector"
+  ]
+}

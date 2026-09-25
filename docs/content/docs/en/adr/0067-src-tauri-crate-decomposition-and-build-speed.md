@@ -5,7 +5,7 @@ description: "The Tauri backend is 170k LOC of Rust in a single crate (`app_lib`
 
 # ADR-0067 — src-tauri crate decomposition & build-speed program
 
-**Status**: Accepted (2026-07-13) — **W1 landed** (2026-07-30); **Tier A landed** (7 crates); **Tier B + follow-up landed** (13 more crates, 2026-07-13); app shell (Tier C) remains
+**Status**: Accepted (2026-07-13) — **W1 landed** (2026-07-30); **Tier A landed** (7 crates); **Tier B + follow-up landed** (13 more crates, 2026-07-13); Tier C and the layering rules that keep the split from regrowing continue in [ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked)
 **Authors**: Max Qian + Claude Opus 4.8
 **Builds on**: the existing workspace split pattern (`crates/cognia-cli`, `crates/cognia-sandbox-runner` — the latter explicitly extracted "so `cargo check -p cognia-sandbox-runner` compiles only a few crates instead of the whole Tauri tree"), the release/test profile overrides in the root `Cargo.toml`, and the per-module `commands.rs` "thin Tauri adapter" convention already present across the backend.
 

@@ -23,7 +23,7 @@ const SHARED_LIB = resolve(__dirname, "lib", "generate-handler.mjs")
 
 function makeFixture({ libRs, tsFiles = [], rustSources = [], pluginsRust = [] }) {
   const root = mkdtempSync(join(tmpdir(), "silent-flag-audit-"))
-  mkdirSync(join(root, "src-tauri", "src", "plugin_api"), { recursive: true })
+  mkdirSync(join(root, "crates", "cognia-plugin-runtime", "src"), { recursive: true })
   mkdirSync(join(root, "src-tauri", "src", "plugins"), { recursive: true })
   writeFileSync(join(root, "src-tauri", "src", "lib.rs"), libRs, "utf8")
   for (const { path, contents } of rustSources) {
@@ -97,7 +97,7 @@ ${entries}
 test("matched handler + correct flag exits 0", () => {
   const root = makeFixture({
     libRs: libRs("plugin_api::widget::plugin_widget_open"),
-    rustSources: [{ path: "src-tauri/src/plugin_api/widget.rs", contents: HANDLER_RS }],
+    rustSources: [{ path: "crates/cognia-plugin-runtime/src/widget.rs", contents: HANDLER_RS }],
     tsFiles: [
       {
         path: "lib/plugin/widget.ts",
@@ -124,7 +124,7 @@ test("matched handler + correct flag exits 0", () => {
 test("matched handler + stale !isTauri() flag exits 1 with flip hint", () => {
   const root = makeFixture({
     libRs: libRs("plugin_api::widget::plugin_widget_open"),
-    rustSources: [{ path: "src-tauri/src/plugin_api/widget.rs", contents: HANDLER_RS }],
+    rustSources: [{ path: "crates/cognia-plugin-runtime/src/widget.rs", contents: HANDLER_RS }],
     tsFiles: [
       {
         path: "lib/plugin/widget.ts",
@@ -205,7 +205,7 @@ test("nested module handler (plugin_api::wasm::commands) is discovered", () => {
   const root = makeFixture({
     libRs: libRs("plugin_api::wasm::commands::plugin_widget_nested"),
     rustSources: [
-      { path: "src-tauri/src/plugin_api/wasm/commands.rs", contents: NESTED_HANDLER_RS },
+      { path: "crates/cognia-plugin-runtime/src/wasm/commands.rs", contents: NESTED_HANDLER_RS },
     ],
     tsFiles: [
       {
@@ -232,7 +232,7 @@ test("nested module handler (plugin_api::wasm::commands) is discovered", () => {
 test("orphaned declaration (source defines but lib.rs forgets) exits 1", () => {
   const root = makeFixture({
     libRs: libRs(), // empty generate_handler!
-    rustSources: [{ path: "src-tauri/src/plugin_api/widget.rs", contents: HANDLER_RS }],
+    rustSources: [{ path: "crates/cognia-plugin-runtime/src/widget.rs", contents: HANDLER_RS }],
     tsFiles: [],
   })
   const result = runScript(root)
@@ -276,7 +276,7 @@ fn main() {
 `
   const root = makeFixture({
     libRs: libWithComment,
-    rustSources: [{ path: "src-tauri/src/plugin_api/widget.rs", contents: HANDLER_RS }],
+    rustSources: [{ path: "crates/cognia-plugin-runtime/src/widget.rs", contents: HANDLER_RS }],
     tsFiles: [],
   })
   const result = runScript(root)

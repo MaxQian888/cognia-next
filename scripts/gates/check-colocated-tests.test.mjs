@@ -23,6 +23,7 @@ import {
   main,
   readBaseline,
   rustHasInlineTests,
+  rustIsDeclarationOnly,
 } from "./check-colocated-tests.mjs"
 
 test("isGatedTsSource covers the documented roots", () => {
@@ -66,12 +67,34 @@ test("isGatedTsSource honours the rule's carve-outs and non-source shapes", () =
   }
 })
 
-test("isGatedRustSource only matches src-tauri sources", () => {
+test("isGatedRustSource matches src-tauri and workspace crate sources", () => {
   assert.ok(isGatedRustSource("src-tauri/src/lib.rs"))
   assert.ok(isGatedRustSource("src-tauri/src/ocr/engine.rs"))
-  assert.ok(!isGatedRustSource("crates/cognia-cli/src/main.rs"))
+  assert.ok(isGatedRustSource("crates/cognia-cli/src/main.rs"))
+  assert.ok(isGatedRustSource("crates/cognia-git/src/commands/log.rs"))
+  assert.ok(!isGatedRustSource("crates/cognia-git/build.rs"))
+  assert.ok(!isGatedRustSource("crates/cognia-git/tests/integration.rs"))
+  assert.ok(!isGatedRustSource("crates/cognia-plugin-template/src/lib.rs"))
   assert.ok(!isGatedRustSource("src-tauri/build.rs"))
   assert.ok(!isGatedRustSource("src-tauri/src/notes.md"))
+})
+
+test("rustIsDeclarationOnly accepts module and re-export shims only", () => {
+  assert.ok(rustIsDeclarationOnly("//! Facade.\n\npub use cognia_net::proxy_config::*;\n"))
+  assert.ok(rustIsDeclarationOnly('#[cfg(feature = "x")]\npub mod commands;\nmod inner;\n'))
+  assert.ok(rustIsDeclarationOnly("pub use crate::a::{\n    b,\n    c,\n};\n/* note */\n"))
+  assert.ok(rustIsDeclarationOnly("//! Comments only.\n"))
+  assert.ok(!rustIsDeclarationOnly("pub use x::y;\npub fn run() {}\n"))
+  assert.ok(!rustIsDeclarationOnly("const LIMIT: usize = 3;\n"))
+})
+
+test("a declaration-only Rust file is not a violation", () => {
+  const sources = {
+    "crates/cognia-x/src/lib.rs": "pub mod a;\npub use a::*;\n",
+    "crates/cognia-x/src/a.rs": "pub fn a() {}\n",
+  }
+  const io = { has: () => false, readRust: (p) => sources[p] }
+  assert.deepEqual(findViolations(Object.keys(sources), io), ["crates/cognia-x/src/a.rs"])
 })
 
 test("expectedTestPaths offers every accepted co-located name", () => {

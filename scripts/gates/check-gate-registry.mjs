@@ -80,6 +80,7 @@ export const EXEMPTIONS = {
   "audit:host-parity:report":
     "reporter — prints the full headless↔desktop inventory including the ungated class-D subsystem census; the gated half is `audit:host-parity`",
   "rust:clippy:baseline": "writer — regenerates the clippy baseline",
+  "audit:rust-architecture:baseline": "writer — regenerates the Rust layer-map baseline",
   "check:sdk-surface:write": "writer — re-triages the Agent SDK surface manifest after a bump",
   "i18n:sort": "writer — the check half is i18n:sort:check",
 

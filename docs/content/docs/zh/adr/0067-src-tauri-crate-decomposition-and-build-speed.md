@@ -5,7 +5,8 @@ description: "Tauri后端是单crate（`app_lib`）中有17万LOC Rust，所以�
 
 # ADR-0067 — src-tauri crate 拆分与构建提速计划
 
-**状态**：已接受（2026-07-13）——**W1已获批**（2026-07-30）;**A级登陆**（7 crate）;**B级+后续订单已落地**（2026-07-13，crate又13个）;应用壳（C层）保持**作者**：Max Qian + Claude Opus 4.8 **基于**构建**：现有的工作区拆分模式（`crates/cognia-cli`、`crates/cognia-sandbox-runner`——后者明确提取“只编译少数`cargo check -p cognia-sandbox-runner` crate而非整个Tauri树”），根`Cargo.toml`覆盖release/test配置文件，以及后端已有的每个模块`commands.rs`“薄薄Tauri适配器”惯例。
+**状态**：已接受（2026-07-13）——**W1已获批**（2026-07-30）;**A级登陆**（7 crate）;**B级+后续订单已落地**（2026-07-13，crate又13个）;C 层与防止拆分回涨的分层规则由 [ADR-0196](./0196-a-library-crate-links-tauri-only-when-asked) 延续
+**作者**：Max Qian + Claude Opus 4.8 **基于**构建**：现有的工作区拆分模式（`crates/cognia-cli`、`crates/cognia-sandbox-runner`——后者明确提取“只编译少数`cargo check -p cognia-sandbox-runner` crate而非整个Tauri树”），根`Cargo.toml`覆盖release/test配置文件，以及后端已有的每个模块`commands.rs`“薄薄Tauri适配器”惯例。
 
 ## 背景
 
