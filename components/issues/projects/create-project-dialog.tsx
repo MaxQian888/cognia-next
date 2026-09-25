@@ -101,43 +101,64 @@ export function CreateProjectDialog({
           <DialogDescription>{t("projects.createHint")}</DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
-          <ProjectIdentityFields
-            value={identity}
-            onChange={setIdentity}
-            takenKeys={takenKeys}
-            idPrefix="create-project"
-            disabled={busy}
-          />
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-project-description">{t("projects.description")}</Label>
-            <Textarea
-              id="create-project-description"
-              value={description}
+        {/* A real form, so Enter in the name or key field creates the project
+            once the identity is valid. */}
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (verdict.valid && !busy) void submit()
+          }}
+        >
+          <div className="flex flex-col gap-4">
+            <ProjectIdentityFields
+              value={identity}
+              onChange={setIdentity}
+              takenKeys={takenKeys}
+              idPrefix="create-project"
               disabled={busy}
-              onChange={(event) => setDescription(event.target.value)}
-              // The description is shared with agents as context, so it is worth
-              // saying so rather than leaving it looking decorative.
-              placeholder={t("projects.descriptionHint")}
-              rows={3}
-              data-testid="create-project-description"
             />
-          </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            {t("create.cancel")}
-          </Button>
-          <Button
-            disabled={!verdict.valid || busy}
-            onClick={() => void submit()}
-            data-testid="create-project-submit"
-          >
-            {t("projects.create")}
-          </Button>
-        </DialogFooter>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="create-project-description">{t("projects.description")}</Label>
+              <Textarea
+                id="create-project-description"
+                value={description}
+                disabled={busy}
+                onChange={(event) => setDescription(event.target.value)}
+                // The description is shared with agents as context, so it is worth
+                // saying so rather than leaving it looking decorative.
+                placeholder={t("projects.descriptionHint")}
+                rows={3}
+                data-testid="create-project-description"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            {/* Resets like the close button and Escape do: calling the prop
+              directly skipped `reset()`, so Cancel then reopen showed the
+              abandoned name and key. */}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                reset()
+                onOpenChange(false)
+              }}
+              disabled={busy}
+            >
+              {t("create.cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={!verdict.valid || busy}
+              data-testid="create-project-submit"
+            >
+              {t("projects.create")}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

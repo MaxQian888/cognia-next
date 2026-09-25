@@ -58,6 +58,37 @@ describe("CreateProjectDialog", () => {
     expect((mockCreate.mock.calls[0][0] as { key: string }).key.length).toBeGreaterThan(0)
   })
 
+  it("creates on Enter in the name field", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await waitFor(() => expect(mockListTakenKeys).toHaveBeenCalled())
+    await user.type(screen.getByTestId("create-project-name"), "Mercury{Enter}")
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ name: "Mercury" }))
+    )
+  })
+
+  it("does not create on Enter while the identity is invalid", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await waitFor(() => expect(mockListTakenKeys).toHaveBeenCalled())
+    await user.type(screen.getByTestId("create-project-name"), "{Enter}")
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("forgets an abandoned draft when cancelled and reopened", async () => {
+    const user = userEvent.setup()
+    const onOpenChange = jest.fn()
+    const { rerender, props } = renderDialog({ onOpenChange })
+    await waitFor(() => expect(mockListTakenKeys).toHaveBeenCalled())
+    await user.type(screen.getByTestId("create-project-name"), "Abandoned")
+    await user.click(screen.getByRole("button", { name: "create.cancel" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    rerender(<CreateProjectDialog {...props} open={false} />)
+    rerender(<CreateProjectDialog {...props} open />)
+    expect(screen.getByTestId("create-project-name")).toHaveValue("")
+  })
+
   it("carries the description, which is what agents read as context", async () => {
     const user = userEvent.setup()
     renderDialog()

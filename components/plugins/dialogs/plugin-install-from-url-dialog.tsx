@@ -137,7 +137,16 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
         </div>
 
         <DialogFooter className="shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button
+            variant="outline"
+            // Reset like Escape and the close button do; calling the prop
+            // directly skipped it, so reopening showed the abandoned input.
+            onClick={() => {
+              reset()
+              onOpenChange(false)
+            }}
+            disabled={busy}
+          >
             {t("cancel")}
           </Button>
           <Button onClick={() => void handleSubmit()} disabled={busy}>

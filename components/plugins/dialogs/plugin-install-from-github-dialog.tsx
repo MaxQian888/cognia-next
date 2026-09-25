@@ -223,7 +223,16 @@ export function PluginInstallFromGithubDialog({ open, onOpenChange, initialRef }
         )}
 
         <DialogFooter className="shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={preInstall.busy}>
+          <Button
+            variant="outline"
+            // Reset like Escape and the close button do; calling the prop
+            // directly skipped it, so reopening showed the abandoned input.
+            onClick={() => {
+              reset()
+              onOpenChange(false)
+            }}
+            disabled={preInstall.busy}
+          >
             {t("cancel")}
           </Button>
           <Button onClick={handleInstall} disabled={!preview || preInstall.busy}>

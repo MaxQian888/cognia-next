@@ -54,6 +54,19 @@ describe("PluginInstallFromUrlDialog", () => {
     expect(screen.getByText("submit")).toBeInTheDocument()
   })
 
+  it("forgets the typed URL when cancelled and reopened", () => {
+    const onOpenChange = jest.fn()
+    const { rerender } = render(<PluginInstallFromUrlDialog open onOpenChange={onOpenChange} />)
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "https://example.com/abandoned.json" },
+    })
+    fireEvent.click(screen.getByText("cancel"))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    rerender(<PluginInstallFromUrlDialog open={false} onOpenChange={onOpenChange} />)
+    rerender(<PluginInstallFromUrlDialog open onOpenChange={onOpenChange} />)
+    expect(screen.getByLabelText("label")).toHaveValue("")
+  })
+
   it("shows empty error when submitted without URL", () => {
     render(<PluginInstallFromUrlDialog open={true} onOpenChange={() => {}} />)
     fireEvent.click(screen.getByText("submit"))

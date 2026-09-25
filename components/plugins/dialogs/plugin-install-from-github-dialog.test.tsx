@@ -106,6 +106,24 @@ function renderDialog(onOpenChange = jest.fn()) {
 }
 
 describe("PluginInstallFromGithubDialog", () => {
+  it("forgets the typed repository when cancelled and reopened", () => {
+    const onOpenChange = jest.fn()
+    const ui = (open: boolean) => (
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <PluginInstallFromGithubDialog open={open} onOpenChange={onOpenChange} />
+      </NextIntlClientProvider>
+    )
+    const { rerender } = render(ui(true))
+    fireEvent.change(screen.getByLabelText("GitHub repository"), {
+      target: { value: "acme/abandoned" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    rerender(ui(false))
+    rerender(ui(true))
+    expect(screen.getByLabelText("GitHub repository")).toHaveValue("")
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
     makeClientMock.mockReturnValue({ getPlugin: jest.fn(), installPlugin: jest.fn() })
