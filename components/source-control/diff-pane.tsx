@@ -3,22 +3,38 @@
 /**
  * Loads + renders the diff for the selected working/staged file, wiring the
  * per-hunk gutter actions (Stage / Unstage / Discard Hunk) to the backend.
+ *
+ * Freshness: the store drops every working-tree and staged diff on each
+ * status write (`setStatus`), which the fs watcher triggers on any relevant
+ * edit. The cache miss re-enables the read below, so an agent's write or an
+ * editor save shows up in the open diff instead of the diff from before it.
+ *
+ * One Monaco instance for the pane's lifetime. While a newly selected file
+ * loads, the viewer keeps the last diff it had but is faded out and inert, and
+ * the loading line (or the failure) sits on top. That way the previous file's
+ * diff is never shown under the new file's name, and a click from file to
+ * file does not tear down and rebuild the editor.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion } from "motion/react"
 import { MessageSquarePlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { gitDiffFile } from "@/lib/git/commands"
+import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { fileDiffKey, type GitDiff, type GitFileChange, type GitHunk } from "@/types/git"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import type { GitActionResult, UseGitActionsResult } from "@/hooks/git/use-git-actions"
-import { DiffViewer, type HunkAction } from "./diff-viewer"
+import { DiffLoading, DiffViewer, type HunkAction } from "./diff-viewer"
 import { HunkReviewList } from "./hunk-review-list"
 import { AiExplainPopover } from "./ai-explain-popover"
+import { ReadError } from "./read-error"
 
 interface DiffPaneProps {
   rootDir: string
@@ -50,14 +66,12 @@ export function DiffPane({
   onSendToChat,
 }: DiffPaneProps) {
   const t = useTranslations("sourceControl")
-  const [fetched, setFetched] = useState<GitDiff | null>(null)
   const cacheDiff = useGitStore((s) => s.cacheDiff)
-  const getCachedDiff = useGitStore((s) => s.getCachedDiff)
   const invalidateDiff = useGitStore((s) => s.invalidateDiff)
-  // Re-fetch the diff whenever the status changes (e.g. after a hunk op).
   const statusStamp = useGitStore((s) => s.status)
   const [reviewCollapsed, setReviewCollapsed] = useState(false)
   const reviewLayout = useResizableLayout("cognia-git-diff-review")
+  const fade = useReducedMotionTransition(mobileTransition("fast"))
   const can = actions.can ?? (() => true)
 
   // The working-tree change row backs the rename-aware review key. Fall back to
@@ -67,23 +81,24 @@ export function DiffPane({
     statusStamp?.merge.find((c) => c.path === path) ??
     ({ path, origPath: null, status: "modified", staged: false, group: "changes" } as GitFileChange)
 
-  // The cached diff is read during render; the effect only performs the async
-  // fetch on a cache miss (avoids setState directly inside an effect body).
+  // Subscribed, not read once: a status write that drops this entry must
+  // re-render the pane so the read below re-enables.
   const key = fileDiffKey(path, staged)
-  const cachedDiff = getCachedDiff(key)
-
-  useEffect(() => {
-    if (cachedDiff) return
-    let alive = true
-    void gitDiffFile(rootDir, path, staged).then((d) => {
-      if (!alive) return
-      cacheDiff(key, d)
-      setFetched(d)
-    })
-    return () => {
-      alive = false
-    }
-  }, [rootDir, path, staged, key, cachedDiff, cacheDiff, statusStamp])
+  const cachedDiff = useGitStore((s) => s.diffCache[key])
+  const readKey = `${rootDir}\u0000${key}`
+  const read = useGitRead(readKey, () => gitDiffFile(rootDir, path, staged), {
+    enabled: !cachedDiff,
+    // A status write while this read is out means the file may have moved
+    // again since the read started; restart it so the older answer is never
+    // the one cached.
+    revision: statusStamp,
+    onData: (fresh) => {
+      // Only into the repository it was read from: a read that lands after a
+      // repo switch must not seed the next repository's cache.
+      if (useGitStore.getState().rootDir === rootDir) cacheDiff(key, fresh)
+    },
+  })
+  const loadingVisible = useDeferredLoading(read.loading, { key: readKey })
 
   const runHunk = useCallback(
     async (fn: (patch: string) => Promise<GitActionResult | void>, hunk: GitHunk) => {
@@ -126,7 +141,12 @@ export function DiffPane({
           : []),
       ]
 
-  const diff = cachedDiff ?? fetched
+  const diff: GitDiff | null = cachedDiff ?? read.data ?? null
+  // The last diff that loaded, so the viewer (and its Monaco instance) stays
+  // mounted across a file switch. Adjusted during render, not in an effect.
+  const [heldDiff, setHeldDiff] = useState<GitDiff | null>(diff)
+  if (diff && diff !== heldDiff) setHeldDiff(diff)
+  const viewerDiff = diff ?? heldDiff
 
   const explainEnabled = useSettingsStore(
     (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
@@ -159,8 +179,39 @@ export function DiffPane({
           {canExplain && <AiExplainPopover subject={path} diffText={diffText} />}
         </div>
       )}
-      <div className="min-h-0 flex-1">
-        <DiffViewer diff={diff} staged={staged} hunkActions={hunkActions} density={density} />
+      <div className="relative min-h-0 flex-1">
+        {viewerDiff && (
+          <motion.div
+            className="h-full"
+            initial={false}
+            animate={{ opacity: diff ? 1 : 0 }}
+            transition={fade}
+            aria-hidden={diff ? undefined : true}
+            inert={!diff}
+            data-testid="diff-pane-viewer"
+          >
+            <DiffViewer
+              diff={viewerDiff}
+              staged={staged}
+              hunkActions={hunkActions}
+              density={density}
+            />
+          </motion.div>
+        )}
+        {!diff && (
+          <div className="absolute inset-0" data-testid="diff-pane-pending">
+            {read.error ? (
+              <ReadError
+                variant="block"
+                message={read.error}
+                onRetry={read.retry}
+                testId="diff-load-error"
+              />
+            ) : loadingVisible ? (
+              <DiffLoading />
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   )

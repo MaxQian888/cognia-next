@@ -451,6 +451,15 @@ export function commitDiffKey(sha: string, path: string): string {
   return `c:${sha}:${path}`
 }
 
+/**
+ * Whether a diff cache key names a working-tree or staged diff, i.e. one that
+ * goes stale when the working tree or index moves. Commit diffs (`c:`) are
+ * immutable per sha and never do.
+ */
+export function isWorkingDiffKey(key: string): boolean {
+  return key.startsWith("w:") || key.startsWith("s:")
+}
+
 /** Narrow an unknown thrown value to a structured `GitErrorPayload` when possible. */
 export function asGitError(err: unknown): GitErrorPayload | null {
   if (

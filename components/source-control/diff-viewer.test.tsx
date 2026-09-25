@@ -136,6 +136,20 @@ describe("DiffViewer", () => {
     expect(onClick).toHaveBeenCalledWith(hunk)
   })
 
+  it("keeps the hunk bar to one scrolling row so it cannot squeeze the editor", () => {
+    render(
+      <DiffViewer
+        diff={diff}
+        staged={false}
+        hunkActions={[{ icon: "stage", label: "Stage Hunk", onClick: jest.fn() }]}
+      />
+    )
+    const bar = screen.getByTestId("hunk-bar")
+    expect(bar).toHaveClass("flex-nowrap", "overflow-x-auto", "shrink-0")
+    expect(bar).not.toHaveClass("flex-wrap")
+    expect(screen.getByTestId("hunk-row-0")).toHaveClass("shrink-0")
+  })
+
   it("uses touch-sized hunk controls in touch density", () => {
     render(
       <DiffViewer

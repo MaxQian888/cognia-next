@@ -7,7 +7,7 @@
  * an older revision of one file back into the working tree.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Dialog,
@@ -21,8 +21,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { gitRefs } from "@/lib/git/commands"
-import type { GitRef } from "@/types/git"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { ReadError } from "./read-error"
 
 interface RestoreDialogProps {
   rootDir: string
@@ -35,7 +36,6 @@ interface RestoreDialogProps {
 export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreDialogProps) {
   const t = useTranslations("sourceControl")
   const [source, setSource] = useState("HEAD")
-  const [refs, setRefs] = useState<GitRef[]>([])
   const can = actions.can ?? (() => true)
 
   // Reset the source to HEAD when a new file opens — done in render via a
@@ -46,14 +46,12 @@ export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreD
     setSource("HEAD")
   }
 
-  useEffect(() => {
-    if (path === null) return
-    let alive = true
-    void gitRefs(rootDir).then((r) => alive && setRefs(r))
-    return () => {
-      alive = false
-    }
-  }, [path, rootDir])
+  // Suggestions for the source field. The field takes any commit-ish, so a
+  // failed read costs the suggestions, not the restore, and says so.
+  const refsRead = useGitRead(`${rootDir}\u0000refs`, () => gitRefs(rootDir), {
+    enabled: path !== null,
+  })
+  const refs = refsRead.data ?? []
 
   const doRestore = useCallback(async () => {
     if (!path) return
@@ -87,6 +85,14 @@ export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreD
               <option key={`${r.kind}:${r.name}`} value={r.name} />
             ))}
           </datalist>
+          {refsRead.error ? (
+            <ReadError
+              message={refsRead.error}
+              onRetry={refsRead.retry}
+              className="px-0"
+              testId="restore-refs-error"
+            />
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

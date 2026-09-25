@@ -6,7 +6,9 @@ jest.mock("@/components/source-control/source-control-panel", () => ({
   SourceControlPanel: () => <div data-testid="sc-desktop-stub" />,
 }))
 jest.mock("@/components/mobile/source-control/source-control-mobile-body", () => ({
-  SourceControlMobileBody: () => <div data-testid="sc-mobile-stub" />,
+  SourceControlMobileBody: ({ initialDiffOpen }: { initialDiffOpen?: boolean }) => (
+    <div data-testid="sc-mobile-stub" data-initial-diff-open={String(Boolean(initialDiffOpen))} />
+  ),
 }))
 
 const compactMock = jest.fn().mockReturnValue(false)
@@ -71,5 +73,48 @@ describe("SourceControlPage", () => {
     act(() => useGitStore.getState().setRootDir("/repo"))
     rerender(<SourceControlPage />)
     expect(useGitStore.getState().rootDir).toBe("/repo")
+  })
+
+  /**
+   * A surface that lists changes links to one of them. Selecting before
+   * navigating was lost whenever the link also changed repository, because
+   * binding a new root clears the selection; the root goes first, then the file.
+   */
+  it("binds ?root= first, then selects ?path= on the side ?staged= names", () => {
+    act(() => useGitStore.getState().setRootDir("/elsewhere"))
+    params = new URLSearchParams({ root: "/repo", path: "src/a.ts", staged: "1" })
+    render(<SourceControlPage />)
+    const state = useGitStore.getState()
+    expect(state.rootDir).toBe("/repo")
+    expect(state.selectedPath).toBe("src/a.ts")
+    expect(state.selectedStaged).toBe(true)
+  })
+
+  it("opens the named file's drawer on a phone, and only when a file is named", () => {
+    compactMock.mockReturnValue(true)
+    params = new URLSearchParams({ root: "/repo", path: "a.ts" })
+    const { unmount } = render(<SourceControlPage />)
+    expect(screen.getByTestId("sc-mobile-stub")).toHaveAttribute("data-initial-diff-open", "true")
+    unmount()
+
+    params = new URLSearchParams({ root: "/repo" })
+    render(<SourceControlPage />)
+    expect(screen.getByTestId("sc-mobile-stub")).toHaveAttribute("data-initial-diff-open", "false")
+  })
+
+  it("re-selects when only the file changes, and accepts a file without a root", () => {
+    params = new URLSearchParams({ root: "/repo", path: "a.ts" })
+    const { rerender } = render(<SourceControlPage />)
+    expect(useGitStore.getState().selectedPath).toBe("a.ts")
+
+    params = new URLSearchParams({ root: "/repo", path: "b.ts", staged: "1" })
+    rerender(<SourceControlPage />)
+    expect(useGitStore.getState().selectedPath).toBe("b.ts")
+    expect(useGitStore.getState().selectedStaged).toBe(true)
+
+    params = new URLSearchParams({ path: "c.ts" })
+    rerender(<SourceControlPage />)
+    expect(useGitStore.getState().rootDir).toBe("/repo")
+    expect(useGitStore.getState().selectedPath).toBe("c.ts")
   })
 })

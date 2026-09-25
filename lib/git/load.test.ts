@@ -18,7 +18,7 @@ jest.mock("@/lib/git/commands", () => ({
   getGitOperationAvailability: (...a: unknown[]) => getGitOperationAvailabilityMock(...a),
 }))
 
-import { loadGitRepo, refreshGitStatus } from "./load"
+import { gitErrorDetail, loadGitRepo, refreshGitStatus } from "./load"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitStatus } from "@/types/git"
 
@@ -314,5 +314,18 @@ describe("refreshGitStatus", () => {
   it("no-ops on null path", async () => {
     await refreshGitStatus(null)
     expect(gitRepoStateMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("gitErrorDetail", () => {
+  it("prefers the typed payload's detail", () => {
+    expect(gitErrorDetail({ kind: "networkFailed", detail: "could not resolve host" })).toBe(
+      "could not resolve host"
+    )
+  })
+
+  it("falls back to the thrown message, then to the string form", () => {
+    expect(gitErrorDetail(new Error("boom"))).toBe("boom")
+    expect(gitErrorDetail("plain")).toBe("plain")
   })
 })

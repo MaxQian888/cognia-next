@@ -38,6 +38,7 @@ jest.mock("./diff-viewer", () => ({
       ))}
     </div>
   ),
+  DiffLoading: () => <div data-testid="diff-loading-stub" />,
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -76,7 +77,12 @@ beforeEach(() => {
     isBinary: false,
   })
   mockSettings = { gitSettings: {} }
-  act(() => useGitStore.getState().reset())
+  act(() => {
+    useGitStore.getState().reset()
+    // Every real mount reviews the store's own repository (the dock gates on
+    // `gitRootDir === rootPath`), and the pane only caches into that one.
+    useGitStore.getState().setRootDir("/r")
+  })
 })
 
 describe("DiffPane", () => {
@@ -108,7 +114,7 @@ describe("DiffPane", () => {
       fireEvent.click(screen.getByTestId("stub-hunk-stage"))
     })
 
-    expect(useGitStore.getState().getCachedDiff("w:a.ts")).not.toBeNull()
+    expect(useGitStore.getState().getCachedDiff("w:a.ts")).toBeDefined()
   })
 
   it("shows an unstage action for staged diffs", async () => {
@@ -245,6 +251,145 @@ describe("DiffPane", () => {
     render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
     await screen.findByTestId("diff-viewer-stub")
     expect(gitDiffFileMock).not.toHaveBeenCalled()
+  })
+
+  describe("loading, failure and freshness", () => {
+    function pending<T>() {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>((res) => {
+        resolve = res
+      })
+      return { promise, resolve }
+    }
+    const diffFor = (path: string) => ({
+      path,
+      oldContent: "",
+      newContent: path,
+      hunks: [hunk],
+      isBinary: false,
+    })
+
+    it("does not mount the viewer, or say 'select a file', while the first diff loads", () => {
+      gitDiffFileMock.mockReturnValue(new Promise(() => {}))
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      expect(screen.getByTestId("diff-pane-pending")).toBeInTheDocument()
+      expect(screen.queryByTestId("diff-viewer-stub")).not.toBeInTheDocument()
+      expect(screen.queryByText(/select a file/i)).not.toBeInTheDocument()
+    })
+
+    it("shows the loading line only once the read outlasts the flicker delay", () => {
+      jest.useFakeTimers()
+      try {
+        gitDiffFileMock.mockReturnValue(new Promise(() => {}))
+        render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+        expect(screen.queryByTestId("diff-loading-stub")).not.toBeInTheDocument()
+        act(() => {
+          jest.advanceTimersByTime(250)
+        })
+        expect(screen.getByTestId("diff-loading-stub")).toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("shows the failure with a retry that reads again", async () => {
+      gitDiffFileMock
+        .mockRejectedValueOnce({ kind: "commandFailed", detail: "bad object" })
+        .mockResolvedValueOnce(diffFor("a.ts"))
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      expect(await screen.findByTestId("diff-load-error")).toHaveTextContent("bad object")
+
+      fireEvent.click(screen.getByTestId("diff-load-error-retry"))
+      await waitFor(() =>
+        expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+      )
+      expect(gitDiffFileMock).toHaveBeenCalledTimes(2)
+    })
+
+    it("hides the previous file's diff while the next one loads", async () => {
+      const second = pending<ReturnType<typeof diffFor>>()
+      gitDiffFileMock.mockImplementation((_root: string, path: string) =>
+        path === "a.ts" ? Promise.resolve(diffFor("a.ts")) : second.promise
+      )
+      const actions = makeActions()
+      const { rerender } = render(
+        <DiffPane rootDir="/r" path="a.ts" staged={false} actions={actions} />
+      )
+      await waitFor(() =>
+        expect(screen.getByTestId("diff-pane-viewer")).not.toHaveAttribute("aria-hidden")
+      )
+
+      rerender(<DiffPane rootDir="/r" path="b.ts" staged={false} actions={actions} />)
+      // Still mounted (one Monaco instance), but hidden and inert under b.ts.
+      expect(screen.getByTestId("diff-pane-viewer")).toHaveAttribute("aria-hidden", "true")
+      expect(screen.getByTestId("diff-pane-pending")).toBeInTheDocument()
+
+      await act(async () => second.resolve(diffFor("b.ts")))
+      expect(screen.getByTestId("diff-pane-viewer")).not.toHaveAttribute("aria-hidden")
+      expect(screen.queryByTestId("diff-pane-pending")).not.toBeInTheDocument()
+    })
+
+    it("re-reads the open file when a status refresh lands (an external edit)", async () => {
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      await waitFor(() => expect(gitDiffFileMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(useGitStore.getState().getCachedDiff("w:a.ts")).toBeDefined())
+
+      act(() =>
+        useGitStore.getState().setStatus({
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          staged: [],
+          changes: [],
+          merge: [],
+          isRebasing: false,
+          isMerging: false,
+        })
+      )
+      await waitFor(() => expect(gitDiffFileMock).toHaveBeenCalledTimes(2))
+      // The held diff stays visible while the fresh one is read.
+      expect(screen.getByTestId("diff-pane-viewer")).not.toHaveAttribute("aria-hidden")
+    })
+
+    it("restarts a read overtaken by a status write, so the older answer is never cached", async () => {
+      const stale = pending<ReturnType<typeof diffFor>>()
+      const fresh = pending<ReturnType<typeof diffFor>>()
+      gitDiffFileMock
+        .mockReset()
+        .mockReturnValueOnce(stale.promise)
+        .mockReturnValueOnce(fresh.promise)
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      act(() =>
+        useGitStore.getState().setStatus({
+          branch: "main",
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          staged: [],
+          changes: [],
+          merge: [],
+          isRebasing: false,
+          isMerging: false,
+        })
+      )
+      expect(gitDiffFileMock).toHaveBeenCalledTimes(2)
+
+      await act(async () => stale.resolve({ ...diffFor("a.ts"), newContent: "before" }))
+      expect(useGitStore.getState().getCachedDiff("w:a.ts")).toBeUndefined()
+
+      await act(async () => fresh.resolve({ ...diffFor("a.ts"), newContent: "after" }))
+      expect(useGitStore.getState().getCachedDiff("w:a.ts")?.newContent).toBe("after")
+    })
+
+    it("does not seed the cache of a repository the user switched to", async () => {
+      const slow = pending<ReturnType<typeof diffFor>>()
+      gitDiffFileMock.mockReturnValue(slow.promise)
+      render(<DiffPane rootDir="/r" path="a.ts" staged={false} actions={makeActions()} />)
+      act(() => useGitStore.getState().setRootDir("/other"))
+      await act(async () => slow.resolve(diffFor("a.ts")))
+      expect(useGitStore.getState().getCachedDiff("w:a.ts")).toBeUndefined()
+    })
   })
 
   it("omits every unavailable hunk mutation", async () => {

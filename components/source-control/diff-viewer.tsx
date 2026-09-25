@@ -29,7 +29,12 @@ const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.Di
   loading: () => <DiffLoading />,
 })
 
-function DiffLoading() {
+/**
+ * The "loading diff" placeholder. Exported so `DiffPane` can show the same
+ * line while it fetches, instead of mounting the viewer with no diff (which
+ * this component reads as "nothing selected").
+ */
+export function DiffLoading() {
   const t = useTranslations("sourceControl")
   return (
     // The region announces, not the glyph: the label beside it is already the
@@ -146,15 +151,21 @@ export function DiffViewer({ diff, hunkActions = [], density = "compact" }: Diff
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="diff-viewer">
       {hunkActions.length > 0 && diff.hunks.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 text-xs">
-          <span className="text-muted-foreground">
+        // One row that scrolls sideways, not a wrapping block: a file with
+        // thirty hunks used to wrap into a bar taller than the editor it sat
+        // on, and the diff itself was left a sliver.
+        <div
+          className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b px-3 py-1.5 text-xs [scrollbar-width:thin]"
+          data-testid="hunk-bar"
+        >
+          <span className="shrink-0 text-muted-foreground">
             {t("diff.hunkCount", { count: diff.hunks.length })}
           </span>
           {diff.hunks.map((hunk, i) => (
             <div
               key={`${hunk.header}-${i}`}
               className={cn(
-                "flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5",
+                "flex shrink-0 items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5",
                 density === "touch" && "min-h-11"
               )}
               data-testid={`hunk-row-${i}`}

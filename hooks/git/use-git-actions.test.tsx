@@ -33,6 +33,7 @@ jest.mock("@/lib/git/commands", () => ({
   gitSequencerContinue: jest.fn(),
   gitSequencerAbort: jest.fn(),
   gitInteractiveRebase: jest.fn(),
+  gitInit: jest.fn(),
   runGitUserAction: jest.fn((_command: string, operation: () => Promise<unknown>) => operation()),
   resolveGitOperationAvailability: jest.fn(() => ({ state: "available" })),
 }))
@@ -234,6 +235,28 @@ describe("useGitActions", () => {
     expect(commands.gitMerge).toHaveBeenCalledWith("/repo", "feature")
     expect(refresh).toHaveBeenCalled()
     expect(useGitStore.getState().ops.sequence).toBe(false)
+  })
+
+  it("init runs under its own op, refreshes onto the new repository, and toasts a failure", async () => {
+    commands.gitInit.mockImplementation(async () => {
+      expect(useGitStore.getState().ops.init).toBe(true)
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.init()
+    })
+    expect(commands.runGitUserAction).toHaveBeenCalledWith("git_init", expect.any(Function))
+    expect(commands.gitInit).toHaveBeenCalledWith("/repo")
+    expect(refresh).toHaveBeenCalled()
+    expect(useGitStore.getState().ops.init).toBe(false)
+
+    commands.gitInit.mockRejectedValueOnce({ kind: "commandFailed", detail: "permission denied" })
+    let failure: unknown
+    await act(async () => {
+      failure = await result.current.init()
+    })
+    expect(failure).toEqual({ kind: "commandFailed", detail: "permission denied" })
+    expect(toastErrorMock).toHaveBeenCalledWith(expect.stringContaining("permission denied"))
   })
 
   it("ignoreAdd runs under the ignore op and forwards the pattern", async () => {

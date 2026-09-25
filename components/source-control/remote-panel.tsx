@@ -6,7 +6,7 @@
  * `git_remote_add` / `git_remote_remove` (mutations via `useGitActions`).
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { CopyIcon, PlusIcon, Trash2Icon } from "lucide-react"
@@ -20,9 +20,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import { gitRemotes } from "@/lib/git/commands"
-import type { GitRemote } from "@/types/git"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { ReadError } from "./read-error"
 
 interface RemotePanelProps {
   open: boolean
@@ -34,27 +36,15 @@ interface RemotePanelProps {
 
 export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePanelProps) {
   const t = useTranslations("sourceControl")
-  const [remotes, setRemotes] = useState<GitRemote[]>([])
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
   const can = actions.can ?? (() => true)
 
-  const reload = useCallback(async () => {
-    setRemotes(await gitRemotes(rootDir))
-  }, [rootDir])
-
-  // Load on open via an async continuation (setState lands in `.then`, never
-  // synchronously in the effect body). `reload` is reused by the handlers.
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    void gitRemotes(rootDir).then((r) => {
-      if (alive) setRemotes(r)
-    })
-    return () => {
-      alive = false
-    }
-  }, [open, rootDir])
+  // Read on open. A mutation re-reads through `retry`, which keeps the list
+  // on screen while the new one lands.
+  const list = useGitRead(`${rootDir}\u0000remotes`, () => gitRemotes(rootDir), { enabled: open })
+  const remotes = list.data ?? []
+  const reload = list.retry
 
   const doAdd = async () => {
     const n = name.trim()
@@ -64,13 +54,13 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
     if (failure) return
     setName("")
     setUrl("")
-    await reload()
+    reload()
   }
 
   const doRemove = async (remoteName: string) => {
     const failure = await actions.remoteRemove(remoteName)
     if (failure) return
-    await reload()
+    reload()
   }
 
   const copyUrl = async (value: string) => {
@@ -151,9 +141,22 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
                 </Button>
               </li>
             ))}
-            {remotes.length === 0 && (
+            {list.error ? (
+              <li>
+                <ReadError message={list.error} onRetry={list.retry} testId="remotes-load-error" />
+              </li>
+            ) : list.loading ? (
+              <li
+                role="status"
+                className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"
+                data-testid="remotes-loading"
+              >
+                <Spinner className="size-3.5" />
+                {t("read.loading")}
+              </li>
+            ) : remotes.length === 0 ? (
               <li className="px-2 py-3 text-sm text-muted-foreground">{t("remotes.empty")}</li>
-            )}
+            ) : null}
           </ul>
         </ScrollArea>
       </SheetContent>

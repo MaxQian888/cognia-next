@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
-import { ChangesView } from "./changes-view"
+import { ChangesView, ROW_MOTION_LIMIT } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GitStatus } from "@/types/git"
@@ -54,6 +54,7 @@ function makeActions(): UseGitActionsResult {
   return {
     // The capability probe every action row consults before enabling itself.
     can: jest.fn(() => true),
+    init: jest.fn().mockResolvedValue(undefined),
     stage: jest.fn().mockResolvedValue(undefined),
     unstage: jest.fn().mockResolvedValue(undefined),
     discard: jest.fn().mockResolvedValue(undefined),
@@ -337,5 +338,50 @@ describe("ChangesView", () => {
     expect(screen.queryByTestId("unstage-staged.ts")).not.toBeInTheDocument()
     expect(screen.queryByTestId("stage-work.ts")).not.toBeInTheDocument()
     expect(screen.queryByTestId("discard-work.ts")).not.toBeInTheDocument()
+  })
+
+  describe("row motion", () => {
+    it("wraps each row in an enter/exit animation for an ordinary change set", () => {
+      renderView(makeActions())
+      // merge + staged + changes: one animated row each.
+      expect(screen.getAllByTestId("change-row-motion")).toHaveLength(3)
+    })
+
+    it("renders plain rows past the limit, and they still act", () => {
+      const many: GitStatus = {
+        ...status,
+        merge: [],
+        staged: [],
+        changes: Array.from({ length: ROW_MOTION_LIMIT + 1 }, (_, i) => ({
+          path: `f${i}.ts`,
+          origPath: null,
+          status: "modified" as const,
+          staged: false,
+          group: "changes" as const,
+        })),
+      }
+      const actions = makeActions()
+      renderView(actions, many)
+      expect(screen.queryByTestId("change-row-motion")).not.toBeInTheDocument()
+      expect(screen.getByText("f0.ts")).toBeInTheDocument()
+      expect(screen.getByText(`f${ROW_MOTION_LIMIT}.ts`)).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId(`stage-f${ROW_MOTION_LIMIT}.ts`))
+      expect(actions.stage).toHaveBeenCalledWith([`f${ROW_MOTION_LIMIT}.ts`])
+    })
+
+    it("renders plain rows under reduced motion, and they still act", () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const motionModule = require("motion/react") as { useReducedMotion: () => boolean }
+      const spy = jest.spyOn(motionModule, "useReducedMotion").mockReturnValue(true)
+      try {
+        const actions = makeActions()
+        renderView(actions)
+        expect(screen.queryByTestId("change-row-motion")).not.toBeInTheDocument()
+        fireEvent.click(screen.getByTestId("stage-work.ts"))
+        expect(actions.stage).toHaveBeenCalledWith(["work.ts"])
+      } finally {
+        spy.mockRestore()
+      }
+    })
   })
 })

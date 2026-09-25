@@ -3,9 +3,14 @@
 /**
  * Timeline Sheet: repo-wide or per-file commit history. Selecting a commit sets
  * the store's `selectedCommit`, which the panel renders as a CommitDetail.
+ *
+ * The sheet is modal. A commit picked here is rendered by the host OUTSIDE the
+ * sheet (the desktop's right pane, the phone's drawer), behind this overlay,
+ * so the host passes `onPickCommit` and closes the sheet on a pick; otherwise
+ * the detail it opened is dimmed, inert, and gone again on close.
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ListIcon, NetworkIcon } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -17,9 +22,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { gitFileHistory, gitLog, gitRefs } from "@/lib/git/commands"
 import { useGitStore, type TimelineScope } from "@/stores/git/git-store"
 import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
+import { gitErrorDetail } from "@/lib/git/load"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import { cn } from "@/lib/utils"
-import type { GitRef } from "@/types/git"
 import { CommitGraphView } from "./commit-graph-view"
+import { ReadError } from "./read-error"
 
 const PAGE = 50
 
@@ -31,9 +38,26 @@ interface TimelineViewProps {
   rootDir: string
   /** When set, the "This File" tab is available and pre-selected. */
   filePath: string | null
+  /**
+   * A commit was picked (list row or graph node). The host renders the detail
+   * outside this modal sheet, so it closes the sheet here.
+   */
+  onPickCommit?: (sha: string) => void
+  /**
+   * Offer the graph view. Off on a phone, where a lane graph has no width to
+   * draw in and the list is the readable shape.
+   */
+  allowGraph?: boolean
 }
 
-export function TimelineView({ open, onOpenChange, rootDir, filePath }: TimelineViewProps) {
+export function TimelineView({
+  open,
+  onOpenChange,
+  rootDir,
+  filePath,
+  onPickCommit,
+  allowGraph = true,
+}: TimelineViewProps) {
   const t = useTranslations("sourceControl")
   const scope = useGitStore((s) => s.timelineScope)
   const setScope = useGitStore((s) => s.setTimelineScope)
@@ -45,8 +69,8 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
   const { prefs } = useSourceControlPrefs()
 
   const [viewMode, setViewMode] = useState<TimelineViewMode>(prefs.defaultTimelineView)
-  const [refs, setRefs] = useState<GitRef[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
+  const [moreError, setMoreError] = useState<string | null>(null)
   const [filter, setFilter] = useState("")
 
   // Reset to the preferred view each time the Sheet opens (render-phase guard,
@@ -60,32 +84,37 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
   const effectiveScope: TimelineScope = filePath ? scope : "repo"
   // The graph only makes sense for the full repo history; a single file's
   // history is degenerate as a graph, so force the list there.
-  const showGraph = viewMode === "graph" && effectiveScope === "repo"
+  const showGraph = allowGraph && viewMode === "graph" && effectiveScope === "repo"
 
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    if (effectiveScope === "file" && filePath) {
-      void gitFileHistory(rootDir, filePath, PAGE).then((c) => alive && setTimeline("file", c))
-    } else {
-      void gitLog(rootDir, PAGE, 0).then((c) => alive && setTimeline("repo", c))
-    }
-    return () => {
-      alive = false
-    }
-  }, [open, effectiveScope, rootDir, filePath, setTimeline])
+  // First page of the history in scope. Written through to the store, which
+  // the panel reads to give `CommitDetail` a header before its own read lands.
+  const history = useGitRead(
+    `${rootDir}\u0000${effectiveScope}\u0000${effectiveScope === "file" ? filePath : ""}`,
+    async () => {
+      if (effectiveScope === "file" && filePath) {
+        const commits = await gitFileHistory(rootDir, filePath, PAGE)
+        setTimeline("file", commits)
+        return commits.length
+      }
+      const commits = await gitLog(rootDir, PAGE, 0)
+      setTimeline("repo", commits)
+      return commits.length
+    },
+    { enabled: open }
+  )
 
   // Ref decorations for the graph (branch/tag/HEAD badges) — only when shown.
-  useEffect(() => {
-    if (!open || !showGraph) return
-    let alive = true
-    void gitRefs(rootDir).then((r) => alive && setRefs(r))
-    return () => {
-      alive = false
-    }
-  }, [open, showGraph, rootDir])
+  const refsRead = useGitRead(`${rootDir}\u0000refs`, () => gitRefs(rootDir), {
+    enabled: open && showGraph,
+  })
+  const refs = refsRead.data ?? []
 
-  const commits = effectiveScope === "file" ? fileCommits : repoCommits
+  // The store keeps whichever history was read last, which may belong to
+  // another file. Until this scope's read has answered, show nothing from it:
+  // a pending read says "loading", not someone else's commits.
+  const ready = history.data !== undefined
+  const storeCommits = effectiveScope === "file" ? fileCommits : repoCommits
+  const commits = ready ? storeCommits : []
 
   // Client-side filter over the loaded pages: summary/body, author, or hash
   // prefix, case-insensitive. Load-more keeps fetching unfiltered pages.
@@ -106,12 +135,20 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
 
   const loadMore = async () => {
     setLoadingMore(true)
+    setMoreError(null)
     try {
       const more = await gitLog(rootDir, PAGE, commits.length)
       if (more.length > 0) setTimeline("repo", [...commits, ...more])
+    } catch (error) {
+      setMoreError(gitErrorDetail(error))
     } finally {
       setLoadingMore(false)
     }
+  }
+
+  const pick = (sha: string) => {
+    selectCommit(sha)
+    onPickCommit?.(sha)
   }
 
   return (
@@ -124,7 +161,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
         <SheetHeader>
           <div className="flex items-center justify-between gap-2">
             <SheetTitle>{t("timeline.title")}</SheetTitle>
-            {effectiveScope === "repo" && (
+            {allowGraph && effectiveScope === "repo" && (
               <div className="flex items-center gap-0.5" data-testid="timeline-view-toggle">
                 <Button
                   variant={viewMode === "list" ? "secondary" : "ghost"}
@@ -183,13 +220,38 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
         )}
 
         <ScrollArea className="mt-2 min-h-0 flex-1">
-          {showGraph ? (
-            <CommitGraphView
-              commits={commits}
-              refs={refs}
-              selectedCommit={selectedCommit}
-              onSelect={selectCommit}
+          {history.error ? (
+            <ReadError
+              message={history.error}
+              onRetry={history.retry}
+              className="px-4"
+              testId="timeline-load-error"
             />
+          ) : !ready ? (
+            <div
+              role="status"
+              className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground"
+              data-testid="timeline-loading"
+            >
+              <Spinner className="size-3.5" />
+              {t("timeline.loading")}
+            </div>
+          ) : showGraph ? (
+            <>
+              {refsRead.error ? (
+                <ReadError
+                  message={refsRead.error}
+                  onRetry={refsRead.retry}
+                  testId="timeline-refs-error"
+                />
+              ) : null}
+              <CommitGraphView
+                commits={commits}
+                refs={refs}
+                selectedCommit={selectedCommit}
+                onSelect={pick}
+              />
+            </>
           ) : (
             <ul className="flex flex-col p-2">
               {visibleCommits.map((c) => (
@@ -197,7 +259,7 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => selectCommit(c.hash)}
+                    onClick={() => pick(c.hash)}
                     className={cn(
                       "h-auto w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left font-normal",
                       selectedCommit === c.hash && "bg-accent"
@@ -217,7 +279,14 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
               )}
             </ul>
           )}
-          {canLoadMore && (
+          {moreError ? (
+            <ReadError
+              message={moreError}
+              onRetry={() => void loadMore()}
+              testId="timeline-more-error"
+            />
+          ) : null}
+          {ready && canLoadMore && (
             <div className="p-2">
               <Button
                 variant="ghost"

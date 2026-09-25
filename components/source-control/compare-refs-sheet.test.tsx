@@ -7,6 +7,7 @@ jest.mock("./diff-viewer", () => ({
   DiffViewer: ({ diff }: { diff: unknown }) => (
     <div data-testid="diff-viewer-stub" data-has-diff={diff ? "yes" : "no"} />
   ),
+  DiffLoading: () => <div data-testid="diff-loading-stub" />,
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -85,5 +86,70 @@ describe("CompareRefsSheet", () => {
     render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
     expect(await screen.findByTestId("compare-empty")).toBeInTheDocument()
     expect(filesMock).not.toHaveBeenCalled()
+  })
+
+  it("says why the ref list is missing and retries it", async () => {
+    refsMock
+      .mockReset()
+      .mockRejectedValueOnce(new Error("not a git repository"))
+      .mockResolvedValue(refs)
+    render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
+    expect(await screen.findByTestId("compare-refs-error")).toHaveTextContent(
+      "not a git repository"
+    )
+    fireEvent.click(screen.getByTestId("compare-refs-error-retry"))
+    await waitFor(() => expect(screen.queryByTestId("compare-refs-error")).not.toBeInTheDocument())
+    expect(refsMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports a failed file listing instead of claiming there are no changes", async () => {
+    filesMock.mockReset().mockRejectedValue({ kind: "commandFailed", detail: "unknown revision" })
+    render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
+    await waitFor(() => expect(refsMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByTestId("compare-base"))
+    fireEvent.click(await screen.findByTestId("compare-base-main"))
+    fireEvent.click(screen.getByTestId("compare-target"))
+    fireEvent.click(await screen.findByTestId("compare-target-feature"))
+    expect(await screen.findByTestId("compare-files-error")).toHaveTextContent("unknown revision")
+    expect(screen.queryByTestId("compare-empty")).not.toBeInTheDocument()
+  })
+
+  it("reports a failed file diff in the diff area", async () => {
+    fileDiffMock.mockReset().mockRejectedValue(new Error("blob missing"))
+    render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
+    await waitFor(() => expect(refsMock).toHaveBeenCalled())
+    await pickBoth()
+    fireEvent.click(screen.getByTestId("compare-file-src/a.ts"))
+    expect(await screen.findByTestId("compare-diff-error")).toHaveTextContent("blob missing")
+  })
+
+  it("clears the file selection when the pair changes", async () => {
+    refsMock.mockResolvedValue([...refs, { name: "other", kind: "branch", targetHash: "ccc" }])
+    render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
+    await waitFor(() => expect(refsMock).toHaveBeenCalled())
+    await pickBoth()
+    fireEvent.click(screen.getByTestId("compare-file-src/a.ts"))
+    await waitFor(() =>
+      expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+    )
+
+    fireEvent.click(screen.getByTestId("compare-target"))
+    fireEvent.click(await screen.findByTestId("compare-target-other"))
+    await screen.findByTestId("compare-file-src/a.ts")
+    // A new pair starts with nothing selected, not the old pair's diff.
+    expect(screen.queryByTestId("diff-viewer-stub")).not.toBeInTheDocument()
+    expect(screen.getByText("Select a file to view its diff")).toBeInTheDocument()
+  })
+
+  it("says it is listing files while the pair's read is out", async () => {
+    filesMock.mockReset().mockReturnValue(new Promise(() => {}))
+    render(<CompareRefsSheet open onOpenChange={() => {}} rootDir="/r" />)
+    await waitFor(() => expect(refsMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByTestId("compare-base"))
+    fireEvent.click(await screen.findByTestId("compare-base-main"))
+    fireEvent.click(screen.getByTestId("compare-target"))
+    fireEvent.click(await screen.findByTestId("compare-target-feature"))
+    expect(await screen.findByTestId("compare-files-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("compare-empty")).not.toBeInTheDocument()
   })
 })

@@ -17,6 +17,12 @@
  * every render: after the first bind the panel owns its own root, and a user
  * who then switches roots by hand must not be dragged back by a stale URL.
  *
+ * `?path=` (with `?staged=1` for the index side) names a file to select, and
+ * is applied AFTER the root: binding a different repository clears the
+ * selection, so a surface that selected the file itself and then navigated
+ * lost it whenever the roots differed. On a phone the file's drawer opens,
+ * since there the selection alone shows nothing.
+ *
  * Static export note: `useSearchParams()` opts out of static rendering, so the
  * reader sits inside `<Suspense>`. Same idiom as `app/workspace/page.tsx`.
  */
@@ -26,7 +32,11 @@ import { useSearchParams } from "next/navigation"
 
 import { SourceControlMobileBody } from "@/components/mobile/source-control/source-control-mobile-body"
 import { SourceControlPanel } from "@/components/source-control/source-control-panel"
-import { SOURCE_CONTROL_ROOT_PARAM } from "@/lib/global-search/providers/git"
+import {
+  SOURCE_CONTROL_PATH_PARAM,
+  SOURCE_CONTROL_ROOT_PARAM,
+  SOURCE_CONTROL_STAGED_PARAM,
+} from "@/lib/global-search/providers/git"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useGitStore } from "@/stores/git/git-store"
 
@@ -34,15 +44,32 @@ function SourceControlPageInner() {
   const compact = useCompactLayout()
   const searchParams = useSearchParams()
   const requestedRoot = searchParams?.get(SOURCE_CONTROL_ROOT_PARAM) ?? null
+  const requestedPath = searchParams?.get(SOURCE_CONTROL_PATH_PARAM) ?? null
+  const requestedStaged = searchParams?.get(SOURCE_CONTROL_STAGED_PARAM) === "1"
   const applied = useRef<string | null>(null)
+  const appliedSelection = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!requestedRoot || applied.current === requestedRoot) return
-    applied.current = requestedRoot
-    useGitStore.getState().setRootDir(requestedRoot)
-  }, [requestedRoot])
+    const store = useGitStore.getState()
+    if (requestedRoot && applied.current !== requestedRoot) {
+      applied.current = requestedRoot
+      store.setRootDir(requestedRoot)
+    }
+    // After the root, which clears the selection when it changes repository.
+    const selection = requestedPath
+      ? `${requestedRoot ?? ""}\u0000${requestedPath}\u0000${requestedStaged}`
+      : null
+    if (selection && appliedSelection.current !== selection) {
+      appliedSelection.current = selection
+      store.selectFile(requestedPath, requestedStaged)
+    }
+  }, [requestedRoot, requestedPath, requestedStaged])
 
-  return compact ? <SourceControlMobileBody /> : <SourceControlPanel />
+  return compact ? (
+    <SourceControlMobileBody initialDiffOpen={requestedPath !== null} />
+  ) : (
+    <SourceControlPanel />
+  )
 }
 
 export default function SourceControlPage() {

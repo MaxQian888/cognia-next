@@ -1,4 +1,11 @@
-import { asGitError, commitDiffKey, EMPTY_REPO_STATE, EMPTY_STATUS, fileDiffKey } from "./index"
+import {
+  asGitError,
+  commitDiffKey,
+  EMPTY_REPO_STATE,
+  EMPTY_STATUS,
+  fileDiffKey,
+  isWorkingDiffKey,
+} from "./index"
 
 describe("diff cache keys", () => {
   it("distinguishes staged vs working", () => {
@@ -8,6 +15,12 @@ describe("diff cache keys", () => {
 
   it("namespaces commit diffs by sha + path", () => {
     expect(commitDiffKey("abc", "a.ts")).toBe("c:abc:a.ts")
+  })
+
+  it("tells working and staged keys apart from immutable commit keys", () => {
+    expect(isWorkingDiffKey(fileDiffKey("a.ts", false))).toBe(true)
+    expect(isWorkingDiffKey(fileDiffKey("a.ts", true))).toBe(true)
+    expect(isWorkingDiffKey(commitDiffKey("abc", "a.ts"))).toBe(false)
   })
 })
 

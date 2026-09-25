@@ -7,22 +7,25 @@
  * return and reuses the shared resizable split.
  */
 
-import { useRef, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { LayoutGroup, motion } from "motion/react"
 import {
   AlertTriangleIcon,
+  ArrowLeftIcon,
   DownloadIcon,
   FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
   RefreshCwIcon,
+  ScanSearchIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
 } from "lucide-react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -35,10 +38,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { useDeferredLoading } from "@/hooks/ui/use-deferred-loading"
 import { useElementWidth } from "@/hooks/use-element-width"
+import { MOBILE_SPRING, mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
-import { Spinner } from "@/components/ui/spinner"
-import { gitInit, runGitUserAction } from "@/lib/git/commands"
+import { commitShell } from "@/lib/git/commit-shell"
 import { parseGitTarget } from "@/lib/git/target"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { useGitRepo } from "@/hooks/git/use-git-repo"
@@ -61,6 +65,7 @@ import { RootSwitcher } from "./root-switcher"
 import { RepositoryNavigator } from "./repository-navigator"
 import { StackPanel } from "./stack-panel"
 import { StashPanel } from "./stash-panel"
+import { SequencerBanner, StaleStatusBanner } from "./status-banners"
 import { SyncToolbar } from "./sync-toolbar"
 import { TagPanel } from "./tag-panel"
 import { TimelineView } from "./timeline-view"
@@ -120,9 +125,13 @@ export function SourceControlPanel() {
   const selectedPath = useGitStore((s) => s.selectedPath)
   const selectedStaged = useGitStore((s) => s.selectedStaged)
   const selectedCommit = useGitStore((s) => s.selectedCommit)
+  // The loaded histories, which give a picked commit its header.
+  const repoHistory = useGitStore((s) => s.timelineRepo)
+  const fileHistory = useGitStore((s) => s.timelineFile)
   const selectFile = useGitStore((s) => s.selectFile)
   const selectCommit = useGitStore((s) => s.selectCommit)
   const committing = useGitStore((s) => s.ops.commit)
+  const initializing = useGitStore((s) => s.ops.init)
   const activeProject = useProjectStore((state) =>
     state.activeProjectId
       ? state.projects.find((project) => project.id === state.activeProjectId)
@@ -163,6 +172,13 @@ export function SourceControlPanel() {
   const layout = useResizableLayout(
     isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
   )
+  // The first status read, skeleton-first. Deferred so a warm read (the usual
+  // case: the status-bar controller already loaded this repository) never
+  // flashes one. Called before the early returns below, like every hook.
+  const skeletonVisible = useDeferredLoading(!status && loadingStatus, { key: rootDir })
+  const tabPillGroup = useId()
+  const tabPill = useReducedMotionTransition(MOBILE_SPRING)
+  const fade = useReducedMotionTransition(mobileTransition("fast"))
   const refreshSafely = () => void refresh().catch(() => undefined)
   const selectedRemoteTarget = rootDir ? parseGitTarget(rootDir) : null
   const cloneDialog = (
@@ -246,12 +262,11 @@ export function SourceControlPanel() {
           </EmptyHeader>
           <EmptyContent className="flex-row gap-2">
             <Button
-              onClick={() => {
-                // Direct call (not via actions.run): rootDir is bound but not a
-                // repo yet; refresh flips the panel once init lands.
-                void runGitUserAction("git_init", () => gitInit(rootDir)).then(() => refresh())
-              }}
-              disabled={!can("git_init")}
+              // Through the action runner: a failed init toasts instead of
+              // vanishing, and a successful one refreshes the panel onto the
+              // repository it just created.
+              onClick={() => void actions.init()}
+              disabled={initializing || !can("git_init")}
               data-testid="init-repo-button"
             >
               <SparklesIcon className="size-3.5" />
@@ -283,6 +298,13 @@ export function SourceControlPanel() {
   }
 
   const conflict = selectedPath ? conflicts.find((c) => c.path === selectedPath) : undefined
+  const rightPaneKind = selectedCommit
+    ? "commit"
+    : conflict
+      ? "conflict"
+      : selectedPath
+        ? "diff"
+        : "empty"
 
   const openTimelineFor = (path: string | null) => {
     setTimelineFile(path)
@@ -322,39 +344,61 @@ export function SourceControlPanel() {
         navigation={
           // The inline slot, which is `min-w-0 shrink overflow-x-auto`, so a
           // two-tab set can never push the actions past the header's edge.
-          <div
-            role="tablist"
-            aria-label={t("views.label")}
-            className="flex items-center gap-0.5"
-            data-testid="sc-view-switcher"
-          >
-            {SOURCE_CONTROL_VIEWS.map((candidate) => (
-              <Button
-                key={candidate}
-                type="button"
-                role="tab"
-                aria-selected={view === candidate}
-                variant="ghost"
-                size="sm"
-                onClick={() => setView(candidate)}
-                aria-label={t(`views.${candidate}`)}
-                className={cn("h-7 gap-1.5 px-2 text-xs", view === candidate && "bg-accent")}
-                data-testid={`sc-view-${candidate}`}
-              >
-                {candidate === "changes" ? (
-                  <FileSearchIcon aria-hidden className="size-3.5" />
-                ) : (
-                  <GitBranchIcon aria-hidden className="size-3.5" />
-                )}
-                {/* `@3xl` (768px of HEADER width), not `@xl`. At `@xl` the
-                    labels still showed on an 820px window where the row had no
-                    room for them, and the slot's own `overflow-x-auto` cut
-                    "Browse" off mid-word. Icon-only is the honest fallback, and
-                    `aria-label` carries the name either way. */}
-                <span className="hidden @3xl/feature-header:inline">{t(`views.${candidate}`)}</span>
-              </Button>
-            ))}
-          </div>
+          <LayoutGroup id={tabPillGroup}>
+            <div
+              role="tablist"
+              aria-label={t("views.label")}
+              className="flex items-center gap-0.5"
+              data-testid="sc-view-switcher"
+            >
+              {SOURCE_CONTROL_VIEWS.map((candidate) => (
+                <Button
+                  key={candidate}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === candidate}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setView(candidate)}
+                  aria-label={t(`views.${candidate}`)}
+                  className={cn(
+                    // `isolate`: the pill's `-z-10` stays inside the button
+                    // instead of sinking behind the header's background.
+                    "relative isolate h-7 gap-1.5 px-2 text-xs",
+                    view === candidate && "text-foreground"
+                  )}
+                  data-testid={`sc-view-${candidate}`}
+                >
+                  {/* One pill that slides between the tabs (shared layout)
+                      instead of a background that blinks from one to the
+                      other. Behind the content, so the icon and label sit on
+                      it; the group id keeps two mounted panels apart. */}
+                  {view === candidate && (
+                    <motion.span
+                      layoutId="sc-view-pill"
+                      transition={tabPill}
+                      aria-hidden
+                      className="absolute inset-0 -z-10 rounded-md bg-accent"
+                      data-testid="sc-view-pill"
+                    />
+                  )}
+                  {candidate === "changes" ? (
+                    <FileSearchIcon aria-hidden className="size-3.5" />
+                  ) : (
+                    <GitBranchIcon aria-hidden className="size-3.5" />
+                  )}
+                  {/* `@3xl` (768px of HEADER width), not `@xl`. At `@xl` the
+                      labels still showed on an 820px window where the row had
+                      no room for them, and the slot's own `overflow-x-auto` cut
+                      "Browse" off mid-word. Icon-only is the honest fallback,
+                      and `aria-label` carries the name either way. */}
+                  <span className="hidden @3xl/feature-header:inline">
+                    {t(`views.${candidate}`)}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </LayoutGroup>
         }
         actions={
           <div className="flex min-w-0 items-center gap-0.5">
@@ -377,14 +421,18 @@ export function SourceControlPanel() {
               onOpenStacks={() => setStacksOpen(true)}
               onRefresh={refreshSafely}
             />
+            {/* Not `FileSearchIcon`: that is the Changes tab's glyph two
+                controls to the left, and one icon for two destinations made
+                the review sheet look like a second way into the change list. */}
             <Button
               variant="ghost"
               size="icon"
               className="size-7 text-muted-foreground hover:text-foreground"
               aria-label={tReview("open")}
               onClick={() => setReviewOpen(true)}
+              data-testid="sc-open-review"
             >
-              <FileSearchIcon className="size-3.5" />
+              <ScanSearchIcon className="size-3.5" />
             </Button>
             <Popover>
               <PopoverTrigger asChild>
@@ -412,67 +460,18 @@ export function SourceControlPanel() {
         }
       />
 
-      {repoState?.operationInProgress && (
-        <Alert
-          className="rounded-none border-x-0 border-t-0 px-3 py-1.5"
-          data-testid="sequencer-banner"
-        >
-          <AlertDescription className="flex min-w-0 items-center gap-2 text-xs">
-            <span className="min-w-0 flex-1 truncate">
-              {t(`sequencer.inProgress.${repoState.operationInProgress}` as never)}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 text-xs"
-              onClick={() => void actions.sequencerContinue()}
-              disabled={!can("git_sequencer_continue")}
-              data-testid="sequencer-continue"
-            >
-              {t("sequencer.continue")}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-xs text-destructive"
-              onClick={() => void actions.sequencerAbort()}
-              disabled={!can("git_sequencer_abort")}
-              data-testid="sequencer-abort"
-            >
-              {t("sequencer.abort")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {loadError && status && (
-        <Alert
-          variant="destructive"
-          className="rounded-none border-x-0 border-t-0 px-3 py-1.5"
-          data-testid="sc-load-error-banner"
-        >
-          <AlertTriangleIcon className="size-3.5 shrink-0 text-destructive" />
-          <AlertDescription className="flex min-w-0 items-center gap-2 text-xs">
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {t("repository.stale", { message: loadError })}
-            </span>
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={refreshSafely}>
-              <RefreshCwIcon className="size-3" />
-              {t("repository.retry")}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
+      <SequencerBanner operation={repoState?.operationInProgress ?? null} actions={actions} />
+      <StaleStatusBanner message={loadError && status ? loadError : null} onRetry={refreshSafely} />
 
       {!status && loadingStatus ? (
-        <Empty className="min-h-0 flex-1 border-0" data-testid="sc-loading">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Spinner />
-            </EmptyMedia>
-            <EmptyTitle>{t("repository.loading")}</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
+        <div
+          role="status"
+          aria-label={t("repository.loading")}
+          className="min-h-0 flex-1"
+          data-testid="sc-loading"
+        >
+          {skeletonVisible ? <PanelSkeleton narrow={isNarrow} /> : null}
+        </div>
       ) : !status && loadError ? (
         <Empty className="min-h-0 flex-1 border-0" data-testid="sc-load-error">
           <EmptyHeader>
@@ -489,78 +488,126 @@ export function SourceControlPanel() {
             </Button>
           </EmptyContent>
         </Empty>
-      ) : view === "browse" ? (
-        <RepositoryNavigator
-          rootDir={rootDir}
-          branches={branches}
-          actions={actions}
-          canMutate={actions.can}
-        />
       ) : (
-        <ResizablePanelGroup
-          orientation={isNarrow ? "vertical" : "horizontal"}
-          defaultLayout={layout.defaultLayout}
-          onLayoutChanged={layout.onLayoutChanged}
-          className="min-h-0 flex-1"
+        // Keyed by view, so switching tabs fades the new body in instead of
+        // swapping it in one frame. Also the height bound the navigator
+        // needed: it is an `h-full` scroller, and as a bare flex child it took
+        // the WHOLE panel's height and ran its last rows past the bottom edge.
+        <motion.div
+          key={view}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={fade}
+          className="flex min-h-0 flex-1 flex-col"
+          data-testid={`sc-view-body-${view}`}
         >
-          <ResizablePanel
-            id="sc-changes"
-            defaultSize={isNarrow ? "42%" : "32%"}
-            minSize={isNarrow ? "28%" : "20%"}
-          >
-            {status && (
-              <ChangesView
-                rootDir={rootDir}
-                status={status}
-                actions={actions}
-                committing={committing}
-                selectedPath={selectedPath}
-                onSelectFile={(path, staged) => selectFile(path, staged)}
-                onViewHistory={(path) => openTimelineFor(path)}
-                onViewBlame={(path) => setBlameTarget({ path })}
-                onRestore={(path) => setRestorePath(path)}
-              />
-            )}
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel
-            id="sc-diff"
-            defaultSize={isNarrow ? "58%" : "68%"}
-            minSize={isNarrow ? "32%" : "30%"}
-          >
-            {selectedCommit ? (
-              <CommitDetail
-                rootDir={rootDir}
-                commit={syntheticCommit(selectedCommit)}
-                actions={actions}
-                onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
-                onInteractiveRebase={(base) => setRebaseBase(base)}
-              />
-            ) : conflict ? (
-              <ConflictResolver
-                conflict={conflict}
-                onResolve={
-                  can("git_resolve_conflict")
-                    ? (resolution) => {
-                        void actions.resolveConflict(conflict.path, resolution).then((failure) => {
-                          if (!failure) selectFile(null, false)
-                        })
+          {view === "browse" ? (
+            <RepositoryNavigator
+              rootDir={rootDir}
+              branches={branches}
+              actions={actions}
+              canMutate={actions.can}
+            />
+          ) : (
+            <ResizablePanelGroup
+              orientation={isNarrow ? "vertical" : "horizontal"}
+              defaultLayout={layout.defaultLayout}
+              onLayoutChanged={layout.onLayoutChanged}
+              className="min-h-0 flex-1"
+            >
+              <ResizablePanel
+                id="sc-changes"
+                defaultSize={isNarrow ? "42%" : "32%"}
+                minSize={isNarrow ? "28%" : "20%"}
+              >
+                {status && (
+                  <ChangesView
+                    rootDir={rootDir}
+                    status={status}
+                    actions={actions}
+                    committing={committing}
+                    selectedPath={selectedPath}
+                    onSelectFile={(path, staged) => selectFile(path, staged)}
+                    onViewHistory={(path) => openTimelineFor(path)}
+                    onViewBlame={(path) => setBlameTarget({ path })}
+                    onRestore={(path) => setRestorePath(path)}
+                  />
+                )}
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="sc-diff"
+                defaultSize={isNarrow ? "58%" : "68%"}
+                minSize={isNarrow ? "32%" : "30%"}
+              >
+                {/* Faded in per KIND of content (diff, commit, conflict, empty),
+                not per file: re-keying on the path would rebuild the Monaco
+                editor on every click in the change list. */}
+                <motion.div
+                  key={rightPaneKind}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={fade}
+                  className="h-full"
+                  data-testid={`sc-right-pane-${rightPaneKind}`}
+                >
+                  {selectedCommit ? (
+                    <div className="flex h-full min-h-0 flex-col">
+                      {/* The way back. Picking a file in the list also leaves, but
+                      with a clean tree, or in the stacked layout where the
+                      list is out of sight, there was no way out at all. */}
+                      <div className="flex shrink-0 items-center border-b px-2 py-1">
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="gap-1 text-muted-foreground"
+                          onClick={() => selectCommit(null)}
+                          data-testid="sc-commit-back"
+                        >
+                          <ArrowLeftIcon className="size-3" />
+                          {t("commitDetail.backToChanges")}
+                        </Button>
+                      </div>
+                      <div className="min-h-0 flex-1">
+                        <CommitDetail
+                          rootDir={rootDir}
+                          commit={commitShell(selectedCommit, [repoHistory, fileHistory])}
+                          actions={actions}
+                          onViewBlame={(path, rev) => setBlameTarget({ path, rev })}
+                          onInteractiveRebase={(base) => setRebaseBase(base)}
+                        />
+                      </div>
+                    </div>
+                  ) : conflict ? (
+                    <ConflictResolver
+                      conflict={conflict}
+                      onResolve={
+                        can("git_resolve_conflict")
+                          ? (resolution) => {
+                              void actions
+                                .resolveConflict(conflict.path, resolution)
+                                .then((failure) => {
+                                  if (!failure) selectFile(null, false)
+                                })
+                            }
+                          : undefined
                       }
-                    : undefined
-                }
-              />
-            ) : selectedPath ? (
-              <DiffPane
-                rootDir={rootDir}
-                path={selectedPath}
-                staged={selectedStaged}
-                actions={actions}
-              />
-            ) : (
-              <DiffPaneEmpty />
-            )}
-          </ResizablePanel>
-        </ResizablePanelGroup>
+                    />
+                  ) : selectedPath ? (
+                    <DiffPane
+                      rootDir={rootDir}
+                      path={selectedPath}
+                      staged={selectedStaged}
+                      actions={actions}
+                    />
+                  ) : (
+                    <DiffPaneEmpty />
+                  )}
+                </motion.div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
+        </motion.div>
       )}
 
       <StashPanel
@@ -595,8 +642,11 @@ export function SourceControlPanel() {
         onOpenChange={(open) => !open && setRestorePath(null)}
         actions={actions}
       />
+      {/* Keyed by repository AND base: the dialog holds the user's edited
+          todo list, which must not survive into another repository that
+          happens to share the base name ("main"). */}
       <InteractiveRebaseDialog
-        key={rebaseBase ?? "none"}
+        key={`${rootDir}\u0000${rebaseBase ?? "none"}`}
         rootDir={rootDir}
         base={rebaseBase}
         onOpenChange={(open) => !open && setRebaseBase(null)}
@@ -625,14 +675,15 @@ export function SourceControlPanel() {
           </div>
         </SheetContent>
       </Sheet>
+      {/* A pick closes the sheet: the detail renders in the right pane,
+          which this modal sheet otherwise covers with its overlay. Closing
+          without a pick leaves whatever the pane was showing alone. */}
       <TimelineView
         open={timelineOpen}
-        onOpenChange={(open) => {
-          setTimelineOpen(open)
-          if (!open) selectCommit(null)
-        }}
+        onOpenChange={setTimelineOpen}
         rootDir={rootDir}
         filePath={timelineFile}
+        onPickCommit={() => setTimelineOpen(false)}
       />
       <UnifiedReviewSheet
         open={reviewOpen}
@@ -654,6 +705,38 @@ export function SourceControlPanel() {
   )
 }
 
+/**
+ * The first-load placeholder, shaped like what replaces it: a change list
+ * beside (or, narrow, above) a diff. Decorative; the wrapper carries the
+ * `role="status"` and its label.
+ */
+function PanelSkeleton({ narrow }: { narrow: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={cn("flex h-full min-h-0 gap-px bg-border/40", narrow ? "flex-col" : "flex-row")}
+      data-testid="sc-loading-skeleton"
+    >
+      <div
+        className={cn(
+          "flex shrink-0 flex-col gap-2 bg-background p-3",
+          narrow ? "h-2/5" : "w-[32%]"
+        )}
+      >
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="mt-2 h-3 w-24" />
+        {[82, 64, 90, 58, 74].map((width) => (
+          <Skeleton key={width} className="h-4" style={{ width: `${width}%` }} />
+        ))}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 bg-background p-3">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="min-h-0 w-full flex-1" />
+      </div>
+    </div>
+  )
+}
+
 function DiffPaneEmpty() {
   const t = useTranslations("sourceControl")
   return (
@@ -662,28 +745,5 @@ function DiffPaneEmpty() {
         <EmptyDescription>{t("diff.selectFile")}</EmptyDescription>
       </EmptyHeader>
     </Empty>
-  )
-}
-
-/**
- * The Timeline list stores only the selected sha in the store. The
- * CommitDetail component re-fetches the commit's metadata via its file list,
- * but needs a `GitCommit` shell to render the header before data arrives — we
- * look it up from the loaded timeline, falling back to a minimal stub.
- */
-function syntheticCommit(hash: string) {
-  const { timelineRepo, timelineFile } = useGitStore.getState()
-  const found = [...timelineRepo, ...timelineFile].find((c) => c.hash === hash)
-  return (
-    found ?? {
-      hash,
-      shortHash: hash.slice(0, 7),
-      summary: "",
-      body: "",
-      authorName: "",
-      authorEmail: "",
-      authoredAtMs: 0,
-      parents: [],
-    }
   )
 }

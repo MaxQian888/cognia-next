@@ -5,7 +5,7 @@
  * file shows its diff (vs first parent) in the Monaco DiffViewer.
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { GitBranchPlusIcon, HistoryIcon, ScanLineIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -55,7 +55,9 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { HOVER_REVEAL_CONTROL_CLASS } from "@/lib/ui/hover-reveal"
 import { cn } from "@/lib/utils"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
-import { DiffViewer } from "./diff-viewer"
+import { useGitRead } from "@/hooks/git/use-git-read"
+import { DiffLoading, DiffViewer } from "./diff-viewer"
+import { ReadError } from "./read-error"
 import { AiExplainPopover } from "./ai-explain-popover"
 import { splitPath, statusDecoration } from "./status-decoration"
 
@@ -84,11 +86,8 @@ export function CommitDetail({
   const [branchDialogOpen, setBranchDialogOpen] = useState(false)
   const [branchName, setBranchName] = useState("")
   const [confirmCheckout, setConfirmCheckout] = useState(false)
-  const [files, setFiles] = useState<GitFileChange[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [diff, setDiff] = useState<GitDiff | null>(null)
   const cacheDiff = useGitStore((s) => s.cacheDiff)
-  const getCachedDiff = useGitStore((s) => s.getCachedDiff)
   const explainEnabled = useSettingsStore(
     (s) => s.settings?.gitSettings?.explainAI?.enabled ?? false
   )
@@ -103,37 +102,29 @@ export function CommitDetail({
     setSelected(null)
   }
 
-  // When the selected file changes, show its cached diff immediately or clear
-  // the pane while the diff loads. Also a render-phase reset.
+  // The commit's files, keyed by repository + sha, so a newly picked commit
+  // reads as loading rather than showing the previous commit's list.
+  const filesRead = useGitRead(commitKey, () => gitCommitFiles(rootDir, commit.hash))
+  const files: GitFileChange[] = filesRead.data ?? []
+
+  // The selected file's diff: served from the cache (commit diffs never go
+  // stale), else read, keyed so a new selection never shows the old diff.
   const selectedKey = selected ? commitDiffKey(commit.hash, selected) : null
-  const [prevSelected, setPrevSelected] = useState<string | null>(selected)
-  if (prevSelected !== selected) {
-    setPrevSelected(selected)
-    setDiff(selectedKey ? (getCachedDiff(selectedKey) ?? null) : null)
-  }
-
-  useEffect(() => {
-    let alive = true
-    void gitCommitFiles(rootDir, commit.hash).then((f) => {
-      if (alive) setFiles(f)
-    })
-    return () => {
-      alive = false
+  const cachedDiff = useGitStore((s) => (selectedKey ? s.diffCache[selectedKey] : undefined))
+  const diffRead = useGitRead(
+    selectedKey ? `${rootDir}\u0000${selectedKey}` : null,
+    () => gitDiffCommit(rootDir, commit.hash, selected ?? ""),
+    {
+      enabled: !cachedDiff,
+      onData: (fresh) => {
+        // Only into the cache of the repository it was read from.
+        if (selectedKey && useGitStore.getState().rootDir === rootDir) {
+          cacheDiff(selectedKey, fresh)
+        }
+      },
     }
-  }, [rootDir, commit.hash])
-
-  useEffect(() => {
-    if (!selected || !selectedKey || getCachedDiff(selectedKey)) return
-    let alive = true
-    void gitDiffCommit(rootDir, commit.hash, selected).then((d) => {
-      if (!alive) return
-      cacheDiff(selectedKey, d)
-      setDiff(d)
-    })
-    return () => {
-      alive = false
-    }
-  }, [rootDir, commit.hash, selected, selectedKey, cacheDiff, getCachedDiff])
+  )
+  const diff: GitDiff | null = cachedDiff ?? diffRead.data ?? null
 
   const createBranchFromCommit = async () => {
     const name = branchName.trim()
@@ -357,66 +348,102 @@ export function CommitDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <div className="flex min-h-0 flex-1">
-        <ScrollArea className="w-56 shrink-0 border-r">
-          <ul className="flex flex-col p-1">
-            {files.map((f) => {
-              const deco = statusDecoration(f.status)
-              const { name, dir } = splitPath(f.path)
-              return (
-                <li
-                  key={f.path}
-                  className={cn(
-                    "group flex items-center gap-1 rounded pr-1 hover:bg-accent",
-                    selected === f.path && "bg-accent"
-                  )}
-                >
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setSelected(f.path)}
-                    className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded px-2 py-1 text-left text-xs font-normal"
-                    data-testid={`commit-file-${f.path}`}
+      {/* Measured on this pane, not the window: in the desktop's stacked
+          layout or the phone's drawer the pane is a few hundred pixels wide,
+          and a 224px file column beside the diff left the diff a sliver. */}
+      <div className="@container/commit-files flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col @lg/commit-files:flex-row">
+          <ScrollArea className="max-h-40 shrink-0 border-b @lg/commit-files:max-h-none @lg/commit-files:w-56 @lg/commit-files:border-r @lg/commit-files:border-b-0">
+            <ul className="flex flex-col p-1">
+              {files.map((f) => {
+                const deco = statusDecoration(f.status)
+                const { name, dir } = splitPath(f.path)
+                return (
+                  <li
+                    key={f.path}
+                    className={cn(
+                      "group flex items-center gap-1 rounded pr-1 hover:bg-accent",
+                      selected === f.path && "bg-accent"
+                    )}
                   >
-                    <span className="min-w-0 flex-1 truncate">
-                      {name}
-                      {dir && <span className="ml-1 text-[10px] text-muted-foreground">{dir}</span>}
-                    </span>
-                    <span className={cn("font-mono", deco.colorClass)}>{deco.letter}</span>
-                  </Button>
-                  {onViewBlame && (
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-xs"
-                      onClick={() => onViewBlame(f.path, commit.hash)}
-                      className={cn("shrink-0 text-muted-foreground", HOVER_REVEAL_CONTROL_CLASS)}
-                      aria-label={t("actions.viewBlame")}
-                      title={t("actions.viewBlame")}
-                      data-testid={`commit-blame-${f.path}`}
+                      onClick={() => setSelected(f.path)}
+                      className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded px-2 py-1 text-left text-xs font-normal"
+                      data-testid={`commit-file-${f.path}`}
                     >
-                      <ScanLineIcon className="size-3" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {name}
+                        {dir && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">{dir}</span>
+                        )}
+                      </span>
+                      <span className={cn("font-mono", deco.colorClass)}>{deco.letter}</span>
                     </Button>
-                  )}
+                    {onViewBlame && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => onViewBlame(f.path, commit.hash)}
+                        className={cn("shrink-0 text-muted-foreground", HOVER_REVEAL_CONTROL_CLASS)}
+                        aria-label={t("actions.viewBlame")}
+                        title={t("actions.viewBlame")}
+                        data-testid={`commit-blame-${f.path}`}
+                      >
+                        <ScanLineIcon className="size-3" />
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
+              {filesRead.error ? (
+                <li>
+                  <ReadError
+                    message={filesRead.error}
+                    onRetry={filesRead.retry}
+                    testId="commit-files-error"
+                  />
                 </li>
-              )
-            })}
-            {files.length === 0 && (
-              <li className="px-2 py-2 text-xs text-muted-foreground">{t("timeline.empty")}</li>
+              ) : filesRead.loading ? (
+                <li
+                  role="status"
+                  className="px-2 py-2 text-xs text-muted-foreground"
+                  data-testid="commit-files-loading"
+                >
+                  {t("read.loading")}
+                </li>
+              ) : files.length === 0 ? (
+                <li className="px-2 py-2 text-xs text-muted-foreground">
+                  {t("commitDetail.noFiles")}
+                </li>
+              ) : null}
+            </ul>
+          </ScrollArea>
+          <div className="flex min-h-0 flex-1 flex-col">
+            {explainEnabled && diff && !diff.isBinary && diff.hunks.length > 0 && selected && (
+              <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
+                <AiExplainPopover
+                  subject={`commit ${commit.shortHash} · ${selected}`}
+                  diffText={diff.hunks.map((h) => h.patch).join("\n")}
+                />
+              </div>
             )}
-          </ul>
-        </ScrollArea>
-        <div className="flex min-h-0 flex-1 flex-col">
-          {explainEnabled && diff && !diff.isBinary && diff.hunks.length > 0 && selected && (
-            <div className="flex shrink-0 items-center justify-end border-b px-2 py-1">
-              <AiExplainPopover
-                subject={`commit ${commit.shortHash} · ${selected}`}
-                diffText={diff.hunks.map((h) => h.patch).join("\n")}
-              />
+            <div className="min-h-0 flex-1">
+              {selected && !diff && diffRead.error ? (
+                <ReadError
+                  variant="block"
+                  message={diffRead.error}
+                  onRetry={diffRead.retry}
+                  testId="commit-diff-error"
+                />
+              ) : selected && !diff ? (
+                <DiffLoading />
+              ) : (
+                <DiffViewer diff={diff} staged={false} />
+              )}
             </div>
-          )}
-          <div className="min-h-0 flex-1">
-            <DiffViewer diff={diff} staged={false} />
           </div>
         </div>
       </div>

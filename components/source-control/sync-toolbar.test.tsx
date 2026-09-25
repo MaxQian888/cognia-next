@@ -277,8 +277,11 @@ describe("SyncToolbar", () => {
     await user.click(screen.getByTestId("sync-more"))
     await user.click(await screen.findByTestId("more-discard-all"))
     expect(actions.discardAll).not.toHaveBeenCalled()
+    // The confirmation names what else goes: untracked files.
+    expect(screen.getByTestId("discard-confirm")).toHaveTextContent(/untracked files/i)
     await user.click(await screen.findByTestId("discard-confirm-action"))
-    expect(actions.discardAll).toHaveBeenCalledWith(false)
+    // Same meaning as the Changes group's "Discard All": untracked included.
+    expect(actions.discardAll).toHaveBeenCalledWith(true)
   })
 
   it("gates toolbar and overflow controls by their exact commands", async () => {

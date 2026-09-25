@@ -22,7 +22,8 @@ import { languageFromPath } from "@/lib/git/language-map"
 import { getShikiLanguage } from "@/lib/artifacts/constants"
 import { highlightCode } from "@/components/ai-elements/code-block"
 import { gitBlame } from "@/lib/git/commands"
-import type { GitBlameLine } from "@/types/git"
+import { useGitRead } from "@/hooks/git/use-git-read"
+import { ReadError } from "./read-error"
 
 interface BlameViewProps {
   rootDir: string
@@ -56,22 +57,14 @@ function HighlightedLine({ tokens }: { tokens: ThemedToken[] }) {
 export function BlameView({ rootDir, path, rev }: BlameViewProps) {
   const t = useTranslations("sourceControl")
   const colors = useThemeColors()
-  const [lines, setLines] = useState<GitBlameLine[] | null>(null)
   // Per-line syntax tokens (shiki). Null until/unless highlighting resolves —
   // the view always renders plain content as a fallback.
   const [tokenLines, setTokenLines] = useState<ThemedToken[][] | null>(null)
 
-  // The panel re-keys this component by path+rev, so it mounts fresh per file —
-  // no in-effect state reset is needed (which would trip set-state-in-effect).
-  useEffect(() => {
-    let alive = true
-    void gitBlame(rootDir, path, rev).then((l) => {
-      if (alive) setLines(l)
-    })
-    return () => {
-      alive = false
-    }
-  }, [rootDir, path, rev])
+  const blame = useGitRead(`${rootDir}\u0000${path}\u0000${rev ?? ""}`, () =>
+    gitBlame(rootDir, path, rev)
+  )
+  const lines = blame.data ?? null
 
   const shikiLang = useMemo(() => getShikiLanguage(languageFromPath(path) ?? undefined), [path])
 
@@ -89,6 +82,17 @@ export function BlameView({ rootDir, path, rev }: BlameViewProps) {
       alive = false
     }
   }, [lines, shikiLang])
+
+  if (blame.error) {
+    return (
+      <ReadError
+        variant="block"
+        message={blame.error}
+        onRetry={blame.retry}
+        testId="blame-load-error"
+      />
+    )
+  }
 
   if (lines === null) {
     return (

@@ -4,7 +4,7 @@ jest.mock("next/dynamic", () => () => {
   // `automaticLayout: true` (the fix for the tiny-editor sizing bug), and fire
   // `onMount` with a fake diff editor so the mount wiring is exercised.
   const Mock = (props: {
-    options?: { automaticLayout?: boolean }
+    options?: { automaticLayout?: boolean; renderSideBySide?: boolean }
     onMount?: (editor: unknown, monaco: unknown) => void
   }) => {
     const onMount = props?.onMount
@@ -18,6 +18,7 @@ jest.mock("next/dynamic", () => () => {
       <div
         data-testid="monaco-diff-mock"
         data-automatic-layout={String(props?.options?.automaticLayout)}
+        data-side-by-side={String(props?.options?.renderSideBySide)}
       />
     )
   }
@@ -98,5 +99,18 @@ describe("mergeBoth", () => {
   it("joins ours then theirs, ensuring a separating newline", () => {
     expect(mergeBoth({ path: "x", ours: "a", theirs: "b", base: null })).toBe("a\nb")
     expect(mergeBoth({ path: "x", ours: "a\n", theirs: "b", base: null })).toBe("a\nb")
+  })
+
+  it("grows its accept buttons to touch size and renders inline on a phone", () => {
+    render(<ConflictResolver conflict={conflict} onResolve={() => {}} density="touch" />)
+    for (const id of ["accept-ours", "accept-theirs", "accept-both"]) {
+      expect(screen.getByTestId(id).className).toMatch(/\bmin-h-11\b/)
+    }
+    expect(screen.getByTestId("monaco-diff-mock")).toHaveAttribute("data-side-by-side", "false")
+  })
+
+  it("keeps two columns on the desktop", () => {
+    render(<ConflictResolver conflict={conflict} onResolve={() => {}} />)
+    expect(screen.getByTestId("monaco-diff-mock")).toHaveAttribute("data-side-by-side", "true")
   })
 })

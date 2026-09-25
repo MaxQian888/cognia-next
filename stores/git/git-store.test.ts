@@ -146,6 +146,25 @@ describe("git-store", () => {
     expect(useGitStore.getState().getCachedDiff("a")).toBeUndefined()
   })
 
+  it("setStatus drops working and staged diffs but keeps commit diffs", () => {
+    act(() => {
+      useGitStore.getState().cacheDiff("w:a.ts", mkDiff("a.ts"))
+      useGitStore.getState().cacheDiff("s:a.ts", mkDiff("a.ts"))
+      useGitStore.getState().cacheDiff("c:abc:a.ts", mkDiff("a.ts"))
+      useGitStore.getState().setStatus(sampleStatus)
+    })
+    const { diffCache, diffCacheOrder } = useGitStore.getState()
+    expect(Object.keys(diffCache)).toEqual(["c:abc:a.ts"])
+    expect(diffCacheOrder).toEqual(["c:abc:a.ts"])
+  })
+
+  it("setStatus keeps the cache identity when there is nothing to drop", () => {
+    act(() => useGitStore.getState().cacheDiff("c:abc:a.ts", mkDiff("a.ts")))
+    const before = useGitStore.getState().diffCache
+    act(() => useGitStore.getState().setStatus(sampleStatus))
+    expect(useGitStore.getState().diffCache).toBe(before)
+  })
+
   it("invalidateDiff on a missing key is a no-op", () => {
     act(() => useGitStore.getState().cacheDiff("a", mkDiff("a")))
     act(() => useGitStore.getState().invalidateDiff("missing"))

@@ -10,6 +10,7 @@ jest.mock("./diff-viewer", () => ({
   DiffViewer: ({ diff }: { diff: unknown }) => (
     <div data-testid="diff-viewer-stub" data-has-diff={diff ? "yes" : "no"} />
   ),
+  DiffLoading: () => <div data-testid="diff-loading-stub" />,
 }))
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -52,6 +53,77 @@ beforeEach(() => {
   })
   mockSettings = { gitSettings: {} }
   act(() => useGitStore.getState().reset())
+})
+
+describe("CommitDetail reads", () => {
+  it("reports a failed file listing with a retry", async () => {
+    filesMock.mockReset().mockRejectedValueOnce(new Error("bad object")).mockResolvedValue([])
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    expect(await screen.findByTestId("commit-files-error")).toHaveTextContent("bad object")
+    fireEvent.click(screen.getByTestId("commit-files-error-retry"))
+    expect(await screen.findByText("No file changes in this commit")).toBeInTheDocument()
+  })
+
+  it("says it is loading the files, not that there are none", () => {
+    filesMock.mockReset().mockReturnValue(new Promise(() => {}))
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    expect(screen.getByTestId("commit-files-loading")).toBeInTheDocument()
+    expect(screen.queryByText("No file changes in this commit")).not.toBeInTheDocument()
+  })
+
+  it("shows loading, then a failed diff with a retry, for a selected file", async () => {
+    diffMock
+      .mockReset()
+      .mockRejectedValueOnce({ kind: "commandFailed", detail: "blob gone" })
+      .mockResolvedValue({
+        path: "a.ts",
+        oldContent: "",
+        newContent: "",
+        hunks: [],
+        isBinary: false,
+      })
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    fireEvent.click(await screen.findByTestId("commit-file-a.ts"))
+    expect(await screen.findByTestId("commit-diff-error")).toHaveTextContent("blob gone")
+    fireEvent.click(screen.getByTestId("commit-diff-error-retry"))
+    await waitFor(() =>
+      expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+    )
+  })
+})
+
+describe("CommitDetail diff cache", () => {
+  it("serves a cached commit diff without reading it again", async () => {
+    act(() =>
+      useGitStore.getState().cacheDiff("c:abcdef1234567890:a.ts", {
+        path: "a.ts",
+        oldContent: "",
+        newContent: "",
+        hunks: [],
+        isBinary: false,
+      })
+    )
+    render(<CommitDetail rootDir="/r" commit={commit} />)
+    fireEvent.click(await screen.findByTestId("commit-file-a.ts"))
+    expect(screen.getByTestId("diff-viewer-stub")).toHaveAttribute("data-has-diff", "yes")
+    expect(diffMock).not.toHaveBeenCalled()
+  })
+
+  it("caches a read into the bound repository, and only that one", async () => {
+    act(() => useGitStore.getState().setRootDir("/r"))
+    const first = render(<CommitDetail rootDir="/r" commit={commit} />)
+    fireEvent.click(await screen.findByTestId("commit-file-a.ts"))
+    await waitFor(() =>
+      expect(useGitStore.getState().getCachedDiff("c:abcdef1234567890:a.ts")).toBeDefined()
+    )
+    first.unmount()
+
+    act(() => useGitStore.getState().setRootDir("/other"))
+    render(<CommitDetail rootDir="/r" commit={{ ...commit, hash: "1111111111" }} />)
+    fireEvent.click(await screen.findByTestId("commit-file-a.ts"))
+    await waitFor(() => expect(diffMock).toHaveBeenCalledWith("/r", "1111111111", "a.ts"))
+    expect(useGitStore.getState().getCachedDiff("c:1111111111:a.ts")).toBeUndefined()
+  })
 })
 
 describe("CommitDetail", () => {

@@ -12,7 +12,7 @@
  * state reset (which would trip set-state-in-effect).
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 import {
@@ -33,9 +33,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
 import { gitRebaseCommits } from "@/lib/git/commands"
-import type { RebaseAction, RebaseTodoEntry } from "@/types/git"
+import type { GitCommit, RebaseAction, RebaseTodoEntry } from "@/types/git"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { ReadError } from "./read-error"
 
 interface Row {
   sha: string
@@ -56,6 +59,17 @@ interface InteractiveRebaseDialogProps {
     Partial<Pick<UseGitActionsResult, "can">>
 }
 
+/** The todo list git proposes: every commit picked, message unchanged. */
+function toRows(commits: GitCommit[]): Row[] {
+  return commits.map((c) => ({
+    sha: c.hash,
+    shortHash: c.shortHash,
+    summary: c.summary,
+    action: "pick" as RebaseAction,
+    message: c.summary,
+  }))
+}
+
 export function InteractiveRebaseDialog({
   rootDir,
   base,
@@ -63,41 +77,27 @@ export function InteractiveRebaseDialog({
   actions,
 }: InteractiveRebaseDialogProps) {
   const t = useTranslations("sourceControl")
-  const [rows, setRows] = useState<Row[] | null>(null)
   const can = actions.can ?? (() => true)
 
-  useEffect(() => {
-    if (base === null) return
-    let alive = true
-    void gitRebaseCommits(rootDir, base).then((commits) => {
-      if (!alive) return
-      setRows(
-        commits.map((c) => ({
-          sha: c.hash,
-          shortHash: c.shortHash,
-          summary: c.summary,
-          action: "pick" as RebaseAction,
-          message: c.summary,
-        }))
-      )
-    })
-    return () => {
-      alive = false
-    }
-  }, [base, rootDir])
+  // The todo list as read, then as the user edits it. The panel re-keys this
+  // dialog per base, so an edit never outlives the base it was made against.
+  const todo = useGitRead(base === null ? null : `${rootDir}\u0000${base}`, () =>
+    gitRebaseCommits(rootDir, base ?? "")
+  )
+  const [edited, setEdited] = useState<Row[] | null>(null)
+  const rows = edited ?? (todo.data ? toRows(todo.data) : null)
 
   const update = (i: number, patch: Partial<Row>) =>
-    setRows((prev) => prev?.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) ?? prev)
+    setEdited(rows?.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) ?? null)
 
-  const move = (i: number, dir: -1 | 1) =>
-    setRows((prev) => {
-      if (!prev) return prev
-      const j = i + dir
-      if (j < 0 || j >= prev.length) return prev
-      const next = [...prev]
-      ;[next[i], next[j]] = [next[j], next[i]]
-      return next
-    })
+  const move = (i: number, dir: -1 | 1) => {
+    if (!rows) return
+    const j = i + dir
+    if (j < 0 || j >= rows.length) return
+    const next = [...rows]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setEdited(next)
+  }
 
   const apply = async () => {
     if (!rows || base === null) return
@@ -188,9 +188,22 @@ export function InteractiveRebaseDialog({
                 )}
               </li>
             ))}
-            {rows?.length === 0 && (
+            {todo.error ? (
+              <li>
+                <ReadError message={todo.error} onRetry={todo.retry} testId="irebase-load-error" />
+              </li>
+            ) : todo.loading ? (
+              <li
+                role="status"
+                className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"
+                data-testid="irebase-loading"
+              >
+                <Spinner className="size-3.5" />
+                {t("read.loading")}
+              </li>
+            ) : rows?.length === 0 ? (
               <li className="px-2 py-3 text-sm text-muted-foreground">{t("irebase.empty")}</li>
-            )}
+            ) : null}
           </ul>
         </ScrollArea>
 

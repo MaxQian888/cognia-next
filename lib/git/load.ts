@@ -27,7 +27,12 @@ const log = createLogger("git.load")
 // kind from overwriting a newer one.
 let loadRequestId = 0
 
-function errorDetail(error: unknown): string {
+/**
+ * The human-readable part of a failed git call: the typed payload's `detail`
+ * when the backend sent one, the thrown message otherwise. Shared by the
+ * snapshot loader and every per-surface read (`useGitRead`).
+ */
+export function gitErrorDetail(error: unknown): string {
   return asGitError(error)?.detail ?? (error instanceof Error ? error.message : String(error))
 }
 
@@ -76,13 +81,13 @@ async function readRepoLists(rootDir: string): Promise<RepoLists> {
   const [worktrees, stackParents] = await Promise.all([
     getGitOperationAvailability("git_worktree_list").state === "available"
       ? gitWorktreeList(rootDir).catch((error: unknown) => {
-          log.warn("worktree_list_failed", { detail: errorDetail(error) })
+          log.warn("worktree_list_failed", { detail: gitErrorDetail(error) })
           return [] as GitWorktree[]
         })
       : Promise.resolve([] as GitWorktree[]),
     getGitOperationAvailability("git_stack_parents").state === "available"
       ? gitStackParents(rootDir).catch((error: unknown) => {
-          log.warn("stack_parents_failed", { detail: errorDetail(error) })
+          log.warn("stack_parents_failed", { detail: gitErrorDetail(error) })
           return [] as Array<[string, string]>
         })
       : Promise.resolve([] as Array<[string, string]>),
@@ -148,7 +153,7 @@ export async function loadGitRepo(rootDir: string | null): Promise<void> {
     writeRepoLists(lists)
   } catch (error) {
     if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
-      useGitStore.getState().setLoadError(errorDetail(error))
+      useGitStore.getState().setLoadError(gitErrorDetail(error))
     }
     throw error
   } finally {
@@ -183,7 +188,7 @@ export async function refreshGitStatus(rootDir: string | null): Promise<void> {
     writeRepoLists(lists)
   } catch (error) {
     if (requestId === loadRequestId && isCurrentRoot(rootDir)) {
-      useGitStore.getState().setLoadError(errorDetail(error))
+      useGitStore.getState().setLoadError(gitErrorDetail(error))
     }
     throw error
   } finally {

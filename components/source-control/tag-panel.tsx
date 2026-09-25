@@ -6,7 +6,7 @@
  * `git_tags` (read) + `git_create_tag` / `git_delete_tag` (mutations).
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowUpFromLineIcon, PlusIcon, TagIcon, Trash2Icon } from "lucide-react"
 import {
@@ -19,9 +19,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import { gitTags } from "@/lib/git/commands"
-import type { GitTag } from "@/types/git"
+import { useGitRead } from "@/hooks/git/use-git-read"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { ReadError } from "./read-error"
 
 interface TagPanelProps {
   open: boolean
@@ -33,27 +35,15 @@ interface TagPanelProps {
 
 export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps) {
   const t = useTranslations("sourceControl")
-  const [tags, setTags] = useState<GitTag[]>([])
   const [name, setName] = useState("")
   const [message, setMessage] = useState("")
   const can = actions.can ?? (() => true)
 
-  const reload = useCallback(async () => {
-    setTags(await gitTags(rootDir))
-  }, [rootDir])
-
-  // Load on open via an async continuation (setState lands in `.then`, never
-  // synchronously in the effect body). `reload` is reused by the handlers.
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    void gitTags(rootDir).then((tg) => {
-      if (alive) setTags(tg)
-    })
-    return () => {
-      alive = false
-    }
-  }, [open, rootDir])
+  // Read on open. A mutation re-reads through `retry`, which keeps the list
+  // on screen while the new one lands.
+  const list = useGitRead(`${rootDir}\u0000tags`, () => gitTags(rootDir), { enabled: open })
+  const tags = list.data ?? []
+  const reload = list.retry
 
   const doCreate = async () => {
     const n = name.trim()
@@ -62,13 +52,13 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
     if (failure) return
     setName("")
     setMessage("")
-    await reload()
+    reload()
   }
 
   const doDelete = async (tagName: string) => {
     const failure = await actions.deleteTag(tagName)
     if (failure) return
-    await reload()
+    reload()
   }
 
   return (
@@ -148,9 +138,22 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
                 </Button>
               </li>
             ))}
-            {tags.length === 0 && (
+            {list.error ? (
+              <li>
+                <ReadError message={list.error} onRetry={list.retry} testId="tags-load-error" />
+              </li>
+            ) : list.loading ? (
+              <li
+                role="status"
+                className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground"
+                data-testid="tags-loading"
+              >
+                <Spinner className="size-3.5" />
+                {t("read.loading")}
+              </li>
+            ) : tags.length === 0 ? (
               <li className="px-2 py-3 text-sm text-muted-foreground">{t("tags.empty")}</li>
-            )}
+            ) : null}
           </ul>
         </ScrollArea>
       </SheetContent>

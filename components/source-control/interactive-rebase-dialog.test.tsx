@@ -173,4 +173,33 @@ describe("InteractiveRebaseDialog", () => {
     await screen.findByTestId("irebase-row-aaaaaaa1")
     expect(screen.getByTestId("irebase-apply")).toBeDisabled()
   })
+
+  it("reports a failed todo read and keeps apply disabled", async () => {
+    gitRebaseCommits.mockRejectedValueOnce(new Error("bad base"))
+    render(
+      <InteractiveRebaseDialog
+        rootDir="/r"
+        base="abc"
+        onOpenChange={() => {}}
+        actions={makeActions()}
+      />
+    )
+    expect(await screen.findByTestId("irebase-load-error")).toHaveTextContent("bad base")
+    expect(screen.getByTestId("irebase-apply")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("irebase-load-error-retry"))
+    expect(await screen.findByTestId("irebase-row-aaaaaaa1")).toBeInTheDocument()
+  })
+
+  it("says it is loading before the todo list arrives", () => {
+    gitRebaseCommits.mockReturnValueOnce(new Promise(() => {}))
+    render(
+      <InteractiveRebaseDialog
+        rootDir="/r"
+        base="abc"
+        onOpenChange={() => {}}
+        actions={makeActions()}
+      />
+    )
+    expect(screen.getByTestId("irebase-loading")).toBeInTheDocument()
+  })
 })

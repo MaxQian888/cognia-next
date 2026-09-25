@@ -94,4 +94,15 @@ describe("RestoreDialog", () => {
     )
     expect(await screen.findByTestId("restore-confirm")).toBeDisabled()
   })
+
+  it("keeps restore usable when the ref suggestions fail, and says so", async () => {
+    gitRefs.mockRejectedValueOnce(new Error("refs unavailable"))
+    const actions = makeActions()
+    render(<RestoreDialog rootDir="/r" path="a.ts" onOpenChange={() => {}} actions={actions} />)
+    expect(await screen.findByTestId("restore-refs-error")).toHaveTextContent("refs unavailable")
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("restore-confirm"))
+    })
+    expect(actions.restore).toHaveBeenCalledWith(["a.ts"], false, "HEAD")
+  })
 })

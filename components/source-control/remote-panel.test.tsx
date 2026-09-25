@@ -113,4 +113,19 @@ describe("RemotePanel", () => {
     expect(screen.getByTestId("remote-add")).toBeDisabled()
     expect(screen.getByTestId("remote-remove-origin")).toBeDisabled()
   })
+
+  it("reports a failed read instead of claiming there are no remotes", async () => {
+    gitRemotes.mockRejectedValueOnce(new Error("transport closed"))
+    render(<RemotePanel open rootDir="/repo" onOpenChange={() => {}} actions={makeActions()} />)
+    expect(await screen.findByTestId("remotes-load-error")).toHaveTextContent("transport closed")
+    expect(screen.queryByText("No remotes configured")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("remotes-load-error-retry"))
+    expect(await screen.findByTestId("remote-entry-origin")).toBeInTheDocument()
+  })
+
+  it("says it is loading before the first answer", () => {
+    gitRemotes.mockReturnValueOnce(new Promise(() => {}))
+    render(<RemotePanel open rootDir="/repo" onOpenChange={() => {}} actions={makeActions()} />)
+    expect(screen.getByTestId("remotes-loading")).toBeInTheDocument()
+  })
 })

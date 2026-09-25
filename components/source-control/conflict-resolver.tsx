@@ -23,6 +23,7 @@ import {
 import { resolveActiveThemeColors } from "@/lib/themes"
 import { useSettingsStore } from "@/stores"
 import { languageFromPath } from "@/lib/git/language-map"
+import { cn } from "@/lib/utils"
 import type { ConflictSide, GitConflict } from "@/types/git"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
@@ -33,9 +34,20 @@ const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.Di
 interface ConflictResolverProps {
   conflict: GitConflict
   onResolve?: (resolution: { mergedContent?: string; side?: ConflictSide }) => void
+  /**
+   * `touch` for the phone's drawer: the path gets its own line, the three
+   * accept buttons share the row at a 44px tap height, and the diff renders
+   * inline, since two columns of code do not fit in 375px.
+   */
+  density?: "compact" | "touch"
 }
 
-export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps) {
+export function ConflictResolver({
+  conflict,
+  onResolve,
+  density = "compact",
+}: ConflictResolverProps) {
+  const touch = density === "touch"
   const t = useTranslations("sourceControl")
   const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -99,25 +111,28 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
   const options = useMemo<MonacoEditor.IStandaloneDiffEditorConstructionOptions>(
     () => ({
       readOnly: true,
-      renderSideBySide: true,
+      renderSideBySide: !touch,
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       fontSize: 13,
     }),
-    []
+    [touch]
   )
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="conflict-resolver">
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5">
-        <span className="mr-2 truncate text-xs font-medium" title={conflict.path}>
+        <span
+          className={cn("mr-2 truncate text-xs font-medium", touch && "basis-full")}
+          title={conflict.path}
+        >
           {conflict.path}
         </span>
         <Button
           size="sm"
           variant="outline"
-          className="h-6 text-xs"
+          className={cn("text-xs", touch ? "min-h-11 flex-1" : "h-6")}
           onClick={() => onResolve?.({ side: "ours" })}
           disabled={!onResolve}
           data-testid="accept-ours"
@@ -127,7 +142,7 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
         <Button
           size="sm"
           variant="outline"
-          className="h-6 text-xs"
+          className={cn("text-xs", touch ? "min-h-11 flex-1" : "h-6")}
           onClick={() => onResolve?.({ side: "theirs" })}
           disabled={!onResolve}
           data-testid="accept-theirs"
@@ -137,7 +152,7 @@ export function ConflictResolver({ conflict, onResolve }: ConflictResolverProps)
         <Button
           size="sm"
           variant="outline"
-          className="h-6 text-xs"
+          className={cn("text-xs", touch ? "min-h-11 flex-1" : "h-6")}
           onClick={() => onResolve?.({ mergedContent: mergeBoth(conflict) })}
           disabled={!onResolve}
           data-testid="accept-both"

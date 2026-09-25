@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BlameView } from "./blame-view"
 import type { GitBlameLine } from "@/types/git"
 
@@ -74,5 +74,16 @@ describe("BlameView", () => {
     gitBlame.mockResolvedValue([])
     render(<BlameView rootDir="/repo" path="a.ts" />)
     await waitFor(() => expect(screen.getByTestId("blame-empty")).toBeInTheDocument())
+  })
+
+  it("shows a failed blame with a retry instead of loading forever", async () => {
+    gitBlame
+      .mockRejectedValueOnce({ kind: "commandFailed", detail: "no such path" })
+      .mockResolvedValueOnce([])
+    render(<BlameView rootDir="/r" path="gone.ts" />)
+    const error = await screen.findByTestId("blame-load-error")
+    expect(error).toHaveTextContent("no such path")
+    fireEvent.click(screen.getByTestId("blame-load-error-retry"))
+    expect(await screen.findByTestId("blame-empty")).toBeInTheDocument()
   })
 })

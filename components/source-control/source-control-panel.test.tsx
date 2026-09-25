@@ -16,6 +16,7 @@ const repoCfg: {
   selectRemoteWorkspace: jest.fn(),
 }
 const actionCfg = {
+  init: jest.fn(),
   resolveConflict: jest.fn(),
   sequencerContinue: jest.fn(),
   sequencerAbort: jest.fn(),
@@ -141,13 +142,19 @@ jest.mock("./conflict-resolver", () => ({
 }))
 jest.mock("./commit-detail", () => ({
   CommitDetail: ({
+    commit,
     onViewBlame,
     onInteractiveRebase,
   }: {
+    commit: { hash: string; shortHash: string; summary: string }
     onViewBlame: (path: string, rev: string) => void
     onInteractiveRebase: (base: string) => void
   }) => (
-    <div data-testid="commit-detail-stub">
+    <div
+      data-testid="commit-detail-stub"
+      data-summary={commit.summary}
+      data-short-hash={commit.shortHash}
+    >
       <button
         type="button"
         data-testid="commit-detail-blame"
@@ -177,14 +184,30 @@ jest.mock("./timeline-view", () => ({
   TimelineView: ({
     open,
     onOpenChange,
+    onPickCommit,
   }: {
     open: boolean
     onOpenChange: (open: boolean) => void
+    onPickCommit?: (sha: string) => void
   }) =>
     open ? (
-      <button type="button" data-testid="timeline-view-stub" onClick={() => onOpenChange(false)}>
-        close timeline
-      </button>
+      <>
+        <button type="button" data-testid="timeline-view-stub" onClick={() => onOpenChange(false)}>
+          close timeline
+        </button>
+        <button
+          type="button"
+          data-testid="timeline-pick-stub"
+          onClick={() => {
+            // What the real sheet does on a row click: select, then hand over.
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require("@/stores/git/git-store").useGitStore.getState().selectCommit("abc123")
+            onPickCommit?.("abc123")
+          }}
+        >
+          pick commit
+        </button>
+      </>
     ) : null,
 }))
 jest.mock("./remote-panel", () => ({
@@ -325,12 +348,9 @@ jest.mock("./clone-repository-dialog", () => ({
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { gitInit } from "@/lib/git/commands"
 import { SOURCE_CONTROL_DENSE_WIDTH, SourceControlPanel } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitStatus } from "@/types/git"
-
-const gitInitMock = gitInit as jest.Mock
 
 const status: GitStatus = {
   branch: "main",
@@ -414,8 +434,8 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("sc-not-a-repo")).toBeInTheDocument()
   })
 
-  it("initializes a repository from the not-a-repo state", async () => {
-    gitInitMock.mockClear()
+  it("initializes a repository through the action runner (which toasts a failure)", async () => {
+    actionCfg.init.mockClear().mockResolvedValue(null)
     act(() =>
       useGitStore.getState().setRepoState({
         isRepo: false,
@@ -428,7 +448,7 @@ describe("SourceControlPanel", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("init-repo-button"))
     })
-    expect(gitInitMock).toHaveBeenCalledWith("/repo")
+    expect(actionCfg.init).toHaveBeenCalledTimes(1)
   })
 
   it("offers clone alongside init when the bound folder is not a repository", () => {
@@ -694,6 +714,125 @@ describe("SourceControlPanel", () => {
     fireEvent.click(screen.getByTestId("commit-detail-rebase"))
     expect(screen.getByTestId("rebase-dialog-stub")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("rebase-dialog-stub"))
+  })
+
+  describe("timeline to commit detail", () => {
+    it("closes the sheet on a pick and shows the commit in the right pane", () => {
+      render(<SourceControlPanel />)
+      fireEvent.click(screen.getByTestId("open-timeline-stub"))
+      fireEvent.click(screen.getByTestId("timeline-pick-stub"))
+      // The modal sheet is gone, so the detail behind it is reachable.
+      expect(screen.queryByTestId("timeline-view-stub")).not.toBeInTheDocument()
+      expect(screen.getByTestId("commit-detail-stub")).toBeInTheDocument()
+      expect(useGitStore.getState().selectedCommit).toBe("abc123")
+    })
+
+    it("leaves the right pane alone when the sheet closes without a pick", () => {
+      act(() => useGitStore.getState().selectCommit("abc123"))
+      render(<SourceControlPanel />)
+      fireEvent.click(screen.getByTestId("open-timeline-stub"))
+      fireEvent.click(screen.getByTestId("timeline-view-stub"))
+      expect(useGitStore.getState().selectedCommit).toBe("abc123")
+      expect(screen.getByTestId("commit-detail-stub")).toBeInTheDocument()
+    })
+
+    it("offers a way back from a commit to the change list", () => {
+      act(() => useGitStore.getState().selectCommit("abc123"))
+      render(<SourceControlPanel />)
+      fireEvent.click(screen.getByTestId("sc-commit-back"))
+      expect(useGitStore.getState().selectedCommit).toBeNull()
+      expect(screen.getByTestId("diff-pane-empty")).toBeInTheDocument()
+    })
+  })
+
+  it("fades the right pane per kind of content, not per file", () => {
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sc-right-pane-empty")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("changes-select"))
+    expect(screen.getByTestId("sc-right-pane-diff")).toBeInTheDocument()
+  })
+
+  it("gives the browse view a bounded body and marks the active tab with one pill", () => {
+    render(<SourceControlPanel />)
+    expect(screen.getAllByTestId("sc-view-pill")).toHaveLength(1)
+    fireEvent.click(screen.getByTestId("sc-view-browse"))
+    const body = screen.getByTestId("sc-view-body-browse")
+    expect(body.className).toMatch(/\bmin-h-0\b/)
+    expect(body.className).toMatch(/\bflex-1\b/)
+    expect(screen.getByTestId("sc-view-browse")).toContainElement(
+      screen.getByTestId("sc-view-pill")
+    )
+  })
+
+  it("opens the unified review sheet from its header control", async () => {
+    const user = userEvent.setup()
+    render(<SourceControlPanel />)
+    const trigger = screen.getByTestId("sc-open-review")
+    expect(trigger).toHaveAccessibleName()
+    await user.click(trigger)
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("heads a picked commit with its loaded timeline entry, else a short-hash stub", () => {
+    act(() => {
+      useGitStore.getState().setTimeline("repo", [
+        {
+          hash: "abc123",
+          shortHash: "abc123",
+          summary: "feat: from the timeline",
+          body: "",
+          authorName: "A",
+          authorEmail: "a@x",
+          authoredAtMs: 1,
+          parents: [],
+        },
+      ])
+      useGitStore.getState().selectCommit("abc123")
+    })
+    const { unmount } = render(<SourceControlPanel />)
+    expect(screen.getByTestId("commit-detail-stub")).toHaveAttribute(
+      "data-summary",
+      "feat: from the timeline"
+    )
+    unmount()
+
+    act(() => useGitStore.getState().selectCommit("ffffffffff"))
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("commit-detail-stub")).toHaveAttribute("data-short-hash", "fffffff")
+  })
+
+  it("disables the init button while an init is running", () => {
+    act(() => {
+      useGitStore.getState().setRepoState({
+        isRepo: false,
+        rootDir: "/repo",
+        detachedHead: false,
+        operationInProgress: null,
+      })
+      useGitStore.getState().setOp("init", true)
+    })
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("init-repo-button")).toBeDisabled()
+    act(() => useGitStore.getState().setOp("init", false))
+  })
+
+  it("draws the two-pane skeleton once a first load outlasts the delay", () => {
+    jest.useFakeTimers()
+    try {
+      act(() => {
+        useGitStore.getState().setStatus(null)
+        useGitStore.getState().setLoadingStatus(true)
+      })
+      render(<SourceControlPanel />)
+      // A warm read settles long before this; nothing flashes for it.
+      expect(screen.queryByTestId("sc-loading-skeleton")).not.toBeInTheDocument()
+      act(() => {
+        jest.advanceTimersByTime(250)
+      })
+      expect(screen.getByTestId("sc-loading-skeleton")).toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("wires sequencer controls to their actions", () => {

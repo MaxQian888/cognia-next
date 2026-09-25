@@ -23,10 +23,12 @@ import type {
   GitStatus,
   GitStatusGroup,
 } from "@/types/git"
+import { isWorkingDiffKey } from "@/types/git"
 
 /** In-flight operation keys (drive spinners + disable buttons). */
 export type GitOp =
   | "status"
+  | "init"
   | "commit"
   | "push"
   | "pull"
@@ -66,6 +68,7 @@ const DEFAULT_EXPANDED: Record<GitStatusGroup, boolean> = {
 function emptyOps(): Record<GitOp, boolean> {
   return {
     status: false,
+    init: false,
     commit: false,
     push: false,
     pull: false,
@@ -108,6 +111,24 @@ function sameWorktrees(a: readonly GitWorktree[], b: readonly GitWorktree[]): bo
       left.isMain === right.isMain
     )
   })
+}
+
+/**
+ * The diff cache minus every working-tree and staged entry, or `null` when
+ * there is none to drop (so the caller can keep the cache's identity).
+ */
+function withoutWorkingDiffs(
+  cache: Record<string, GitDiff>,
+  order: string[]
+): { diffCache: Record<string, GitDiff>; diffCacheOrder: string[] } | null {
+  const kept = order.filter((key) => !isWorkingDiffKey(key))
+  if (kept.length === order.length) return null
+  const diffCache: Record<string, GitDiff> = {}
+  for (const key of kept) {
+    const diff = cache[key]
+    if (diff) diffCache[key] = diff
+  }
+  return { diffCache, diffCacheOrder: kept }
 }
 
 export interface GitState {
@@ -267,7 +288,15 @@ export const useGitStore = create<GitState>()(
       },
 
       setRepoState: (repoState) => set({ repoState }),
-      setStatus: (status) => set({ status }),
+      // A status write means the working tree or index may have moved: the fs
+      // watcher republishes on every relevant write (an agent's edit, an
+      // editor save), a mutation refreshes on success, a paired client polls.
+      // Working-tree and staged diffs are derived from exactly that state, so
+      // they leave with it; an open `DiffPane` then re-reads its file instead
+      // of showing the diff from before the edit. Commit diffs are immutable
+      // per sha and stay.
+      setStatus: (status) =>
+        set((s) => ({ status, ...withoutWorkingDiffs(s.diffCache, s.diffCacheOrder) })),
       setLoadingStatus: (loadingStatus) => set({ loadingStatus }),
       setLoadError: (loadError) => set({ loadError }),
 

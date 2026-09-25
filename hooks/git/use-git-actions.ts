@@ -25,6 +25,7 @@ import {
   gitDiscardAll,
   gitFetch,
   gitIgnoreAdd,
+  gitInit,
   gitMerge,
   gitMergeAbort,
   gitPull,
@@ -70,6 +71,12 @@ const OP_ERROR_KEY: Partial<Record<GitOp, string>> = {
 
 export interface UseGitActionsResult {
   can: (command: string) => boolean
+  /**
+   * `git init` in the bound folder, which is not a repository yet. Through the
+   * same runner as every other action, so a failure toasts instead of being
+   * dropped and a success refreshes the panel onto the new repository.
+   */
+  init: () => Promise<GitActionResult>
   stage: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
   unstage: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
   discard: (paths: string[], hunkPatch?: string) => Promise<GitActionResult>
@@ -203,6 +210,7 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
   return useMemo<UseGitActionsResult>(
     () => ({
       can,
+      init: () => run("init", "git_init", (rp) => gitInit(rp)),
       stage: (paths, hunkPatch) =>
         run("stage", "git_stage", (rp) => gitStage(rp, paths, hunkPatch)),
       unstage: (paths, hunkPatch) =>

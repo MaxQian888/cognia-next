@@ -121,4 +121,19 @@ describe("TagPanel", () => {
     expect(screen.getByTestId("tag-push-v1.0")).toBeDisabled()
     expect(screen.getByTestId("tag-delete-v1.0")).toBeDisabled()
   })
+
+  it("reports a failed read instead of claiming there are no tags", async () => {
+    gitTags.mockRejectedValueOnce(new Error("transport closed"))
+    render(<TagPanel open rootDir="/repo" onOpenChange={() => {}} actions={makeActions()} />)
+    expect(await screen.findByTestId("tags-load-error")).toHaveTextContent("transport closed")
+    expect(screen.queryByText("No tags")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("tags-load-error-retry"))
+    await waitFor(() => expect(gitTags).toHaveBeenCalledTimes(2))
+  })
+
+  it("says it is loading before the first answer", () => {
+    gitTags.mockReturnValueOnce(new Promise(() => {}))
+    render(<TagPanel open rootDir="/repo" onOpenChange={() => {}} actions={makeActions()} />)
+    expect(screen.getByTestId("tags-loading")).toBeInTheDocument()
+  })
 })

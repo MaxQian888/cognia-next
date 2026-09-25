@@ -141,7 +141,10 @@ export function SyncToolbar({
     if (prefs.confirmForcePush) setConfirmForcePush(true)
     else runForcePush()
   }
-  const runDiscardAll = () => void actions.discardAll(false)
+  // Untracked files included, the same as the Changes group's "Discard All".
+  // One label with two meanings is how a user who reached for one of them got
+  // the other; the confirmation says untracked files go too.
+  const runDiscardAll = () => void actions.discardAll(true)
   const requestDiscardAll = () => {
     if (prefs.confirmDiscard) setConfirmDiscardAll(true)
     else runDiscardAll()

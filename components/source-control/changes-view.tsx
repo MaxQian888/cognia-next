@@ -3,11 +3,18 @@
 /**
  * The left pane: commit box on top, then the Merge / Staged / Changes groups
  * with per-file and group-level actions.
+ *
+ * Rows enter and leave with a short height-and-fade, so staging a file reads
+ * as the row moving from Changes to Staged rather than two lists redrawing.
+ * Only below `ROW_MOTION_LIMIT` files and never under reduced motion: a
+ * 2,000-file checkout after a branch switch must not animate 2,000 heights.
  */
 
-import { useState } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion, type Variants } from "motion/react"
 import { CheckIcon, MinusIcon, Trash2Icon } from "lucide-react"
+import { MOBILE_EASE, MOBILE_DURATION } from "@/lib/ui/motion"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty"
 import type { GitStatus, GitStatusGroup } from "@/types/git"
@@ -18,6 +25,63 @@ import { ChangeGroup } from "./change-group"
 import { ChangeItem } from "./change-item"
 import { CommitBox } from "./commit-box"
 import { DiscardConfirmDialog } from "./discard-confirm-dialog"
+
+/** Above this many changed files, rows render without enter/exit motion. */
+export const ROW_MOTION_LIMIT = 150
+
+/**
+ * Height + fade. `overflow` is hidden only while the height moves and released
+ * at rest, so a settled row's focus ring is never clipped.
+ */
+const ROW_VARIANTS: Variants = {
+  hidden: {
+    opacity: 0,
+    height: 0,
+    overflow: "hidden",
+    transition: { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE },
+  },
+  shown: {
+    opacity: 1,
+    height: "auto",
+    transition: { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE },
+    transitionEnd: { overflow: "visible" },
+  },
+}
+
+/** One group's rows, animated when `animate`, plain otherwise. */
+function ChangeRows({
+  animate,
+  rows,
+}: {
+  animate: boolean
+  rows: { key: string; node: ReactNode }[]
+}) {
+  if (!animate) {
+    return (
+      <>
+        {rows.map((row) => (
+          <Fragment key={row.key}>{row.node}</Fragment>
+        ))}
+      </>
+    )
+  }
+  return (
+    <AnimatePresence initial={false}>
+      {rows.map((row) => (
+        <motion.div
+          key={row.key}
+          variants={ROW_VARIANTS}
+          initial="hidden"
+          animate="shown"
+          exit="hidden"
+          data-testid="change-row-motion"
+        >
+          {row.node}
+        </motion.div>
+      ))}
+    </AnimatePresence>
+  )
+}
 
 /** A discard the user requested that may be behind a confirmation. */
 type PendingDiscard = { kind: "file"; path: string } | { kind: "all"; includeUntracked: boolean }
@@ -72,7 +136,10 @@ export function ChangesView({
   }
 
   const isExpanded = (g: GitStatusGroup) => expandedGroups[g]
-  const hasChanges = status.merge.length + status.staged.length + status.changes.length > 0
+  const total = status.merge.length + status.staged.length + status.changes.length
+  const hasChanges = total > 0
+  const reduceMotion = useReducedMotion()
+  const animateRows = !reduceMotion && total <= ROW_MOTION_LIMIT
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="changes-view">
@@ -94,18 +161,23 @@ export function ChangesView({
               onToggle={() => toggleGroup("merge")}
               density={density}
             >
-              {status.merge.map((c) => (
-                <ChangeItem
-                  key={`merge:${c.path}`}
-                  change={c}
-                  selected={selectedPath === c.path}
-                  onSelect={() => onSelectFile(c.path, false)}
-                  onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                  density={density}
-                />
-              ))}
+              <ChangeRows
+                animate={animateRows}
+                rows={status.merge.map((c) => ({
+                  key: `merge:${c.path}`,
+                  node: (
+                    <ChangeItem
+                      change={c}
+                      selected={selectedPath === c.path}
+                      onSelect={() => onSelectFile(c.path, false)}
+                      onCopyPath={() => copyPath(c.path)}
+                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                      density={density}
+                    />
+                  ),
+                }))}
+              />
             </ChangeGroup>
           )}
 
@@ -126,20 +198,27 @@ export function ChangesView({
                 },
               ]}
             >
-              {status.staged.map((c) => (
-                <ChangeItem
-                  key={`staged:${c.path}`}
-                  change={c}
-                  selected={selectedPath === c.path}
-                  onSelect={() => onSelectFile(c.path, true)}
-                  onUnstage={can("git_unstage") ? () => void actions.unstage([c.path]) : undefined}
-                  onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                  onRestore={onRestore ? () => onRestore(c.path) : undefined}
-                  density={density}
-                />
-              ))}
+              <ChangeRows
+                animate={animateRows}
+                rows={status.staged.map((c) => ({
+                  key: `staged:${c.path}`,
+                  node: (
+                    <ChangeItem
+                      change={c}
+                      selected={selectedPath === c.path}
+                      onSelect={() => onSelectFile(c.path, true)}
+                      onUnstage={
+                        can("git_unstage") ? () => void actions.unstage([c.path]) : undefined
+                      }
+                      onCopyPath={() => copyPath(c.path)}
+                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                      onRestore={onRestore ? () => onRestore(c.path) : undefined}
+                      density={density}
+                    />
+                  ),
+                }))}
+              />
             </ChangeGroup>
           )}
 
@@ -168,28 +247,33 @@ export function ChangesView({
                 },
               ]}
             >
-              {status.changes.map((c) => (
-                <ChangeItem
-                  key={`changes:${c.path}`}
-                  change={c}
-                  selected={selectedPath === c.path}
-                  onSelect={() => onSelectFile(c.path, false)}
-                  onStage={can("git_stage") ? () => void actions.stage([c.path]) : undefined}
-                  onDiscard={
-                    can("git_discard")
-                      ? () => requestDiscard({ kind: "file", path: c.path })
-                      : undefined
-                  }
-                  onCopyPath={() => copyPath(c.path)}
-                  onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
-                  onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
-                  onRestore={onRestore ? () => onRestore(c.path) : undefined}
-                  onAddToGitignore={
-                    can("git_ignore_add") ? () => void actions.ignoreAdd(c.path) : undefined
-                  }
-                  density={density}
-                />
-              ))}
+              <ChangeRows
+                animate={animateRows}
+                rows={status.changes.map((c) => ({
+                  key: `changes:${c.path}`,
+                  node: (
+                    <ChangeItem
+                      change={c}
+                      selected={selectedPath === c.path}
+                      onSelect={() => onSelectFile(c.path, false)}
+                      onStage={can("git_stage") ? () => void actions.stage([c.path]) : undefined}
+                      onDiscard={
+                        can("git_discard")
+                          ? () => requestDiscard({ kind: "file", path: c.path })
+                          : undefined
+                      }
+                      onCopyPath={() => copyPath(c.path)}
+                      onViewHistory={onViewHistory ? () => onViewHistory(c.path) : undefined}
+                      onViewBlame={onViewBlame ? () => onViewBlame(c.path) : undefined}
+                      onRestore={onRestore ? () => onRestore(c.path) : undefined}
+                      onAddToGitignore={
+                        can("git_ignore_add") ? () => void actions.ignoreAdd(c.path) : undefined
+                      }
+                      density={density}
+                    />
+                  ),
+                }))}
+              />
             </ChangeGroup>
           )}
 
