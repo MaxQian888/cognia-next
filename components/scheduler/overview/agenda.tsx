@@ -29,11 +29,19 @@ export interface AgendaProps {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-function densityClass(count: number): string {
-  if (count === 0) return "bg-muted"
-  if (count < 3) return "bg-primary/30"
-  if (count < 8) return "bg-primary/60"
-  return "bg-primary"
+/**
+ * Shade relative to the window's busiest day. Absolute thresholds (3 / 8)
+ * could not tell a five-minute task's 288 runs a day from a daily one — every
+ * cell went solid `bg-primary`, a near-black bar in the neutral theme that
+ * read as a redaction strip. The top step stops short of full strength.
+ */
+export function densityClass(count: number, max: number): string {
+  if (count === 0 || max <= 0) return "bg-muted"
+  const share = count / max
+  if (share <= 0.25) return "bg-primary/15"
+  if (share <= 0.5) return "bg-primary/30"
+  if (share <= 0.75) return "bg-primary/45"
+  return "bg-primary/60"
 }
 
 export function Agenda({ agenda, windowDays, now, onSelectItem, className }: AgendaProps) {
@@ -47,6 +55,8 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
     const key = localDayKey(date)
     return { key, date, count: agenda.countsByDay.get(key) ?? 0 }
   })
+
+  const busiest = Math.max(0, ...densityDays.map((day) => day.count))
 
   const days: OccurrenceDay[] = pinnedDay
     ? agenda.days.filter((day) => day.key === pinnedDay)
@@ -71,7 +81,7 @@ export function Agenda({ agenda, windowDays, now, onSelectItem, className }: Age
                 title={label}
                 className={cn(
                   "block h-5 w-full rounded-sm transition-shadow",
-                  densityClass(day.count),
+                  densityClass(day.count, busiest),
                   pinned && "ring-2 ring-ring ring-offset-1 ring-offset-background"
                 )}
                 data-testid="agenda-density-cell"

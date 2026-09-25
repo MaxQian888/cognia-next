@@ -27,6 +27,37 @@ const baseProps = {
   onToggleCheck: jest.fn(),
 }
 
+describe("SchedulerListRow — without a next run", () => {
+  it("says Paused for a paused task instead of contradicting its interval", () => {
+    render(
+      <SchedulerListRow
+        {...baseProps}
+        item={item({
+          status: "paused",
+          triggerSummary: { type: "interval", intervalMs: 7 * 86_400_000 },
+          nextRunAt: undefined,
+        })}
+      />
+    )
+    expect(screen.getByTestId("scheduler-list-row-next")).toHaveTextContent("Paused")
+  })
+
+  it("says On Event for an event task, which never has a time", () => {
+    render(
+      <SchedulerListRow
+        {...baseProps}
+        item={item({
+          triggerSummary: { type: "event", eventType: "backup:completed" },
+          nextRunAt: undefined,
+        })}
+      />
+    )
+    expect(screen.getByTestId("scheduler-list-row-next")).toHaveTextContent("On Event")
+    // A built-in event reads as its label, not its wire id.
+    expect(screen.getByText("Backup completed")).toBeInTheDocument()
+  })
+})
+
 describe("SchedulerListRow", () => {
   it("is one button that selects the item, with the trigger and next run", () => {
     const onSelect = jest.fn()

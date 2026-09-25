@@ -177,8 +177,16 @@ export function useTriggerText(): (trigger: UnifiedTriggerSummary) => string {
         return t("every", { interval: formatInterval(trigger.intervalMs) })
       case "once":
         return trigger.runAtMs ? new Date(trigger.runAtMs).toLocaleString() : t("triggerTypes.once")
-      case "event":
+      case "event": {
+        // A built-in event reads as its preset label ("Backup completed"),
+        // not its wire id. Only colon ids are presets; a dotted id cannot be
+        // a message key.
+        const preset = `eventTypePresets.${trigger.eventType ?? ""}`
+        if (trigger.eventType && !trigger.eventType.includes(".") && t.has(preset)) {
+          return t(preset)
+        }
         return trigger.eventType ?? t("triggerTypes.event")
+      }
       default:
         return trigger.type
     }

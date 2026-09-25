@@ -57,9 +57,11 @@ describe("kind visuals", () => {
     const { result } = renderHook(() => useTriggerText())
     expect(result.current({ type: "cron", cron: "0 9 * * *" })).toBe("0 9 * * *")
     expect(result.current({ type: "interval", intervalMs: 3_600_000 })).toBe("Every 1h")
+    // A built-in event reads as its preset label; an unknown one keeps its id.
     expect(result.current({ type: "event", eventType: "backup:completed" })).toBe(
-      "backup:completed"
+      "Backup completed"
     )
+    expect(result.current({ type: "event", eventType: "outbound.queue" })).toBe("outbound.queue")
     expect(result.current({ type: "once" })).toBe("One Time")
     expect(result.current({ type: "once", runAtMs: Date.UTC(2026, 0, 1) })).toMatch(/2026|1\//)
   })

@@ -194,7 +194,14 @@ function SchedulerListRowImpl({
                     overdue: t("overdue"),
                     lessThanMinute: t("lessThanMinute"),
                   })
-                : t("noSchedule")}
+                : // No next run says different things: a paused task has a
+                  // schedule it is not keeping ("Every 7d · No schedule" read
+                  // as a contradiction), and an event task never has a time.
+                  item.status === "paused"
+                  ? t("statuses.paused")
+                  : item.triggerSummary.type === "event"
+                    ? t("triggerOnEvent")
+                    : t("noSchedule")}
             </span>
           </span>
         </span>

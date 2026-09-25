@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
-import { Agenda } from "./agenda"
+import { Agenda, densityClass } from "./agenda"
 import { buildAgenda } from "@/lib/scheduler/agenda"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 
@@ -70,5 +70,18 @@ describe("Agenda", () => {
     expect(Number(rows[0].dataset.count)).toBeGreaterThan(100)
     expect(rows[0]).toHaveTextContent(`×${rows[0].dataset.count}`)
     expect(rows[0]).toHaveTextContent(/until/)
+  })
+})
+
+describe("densityClass", () => {
+  it("shades against the busiest day, not fixed counts", () => {
+    // A five-minute task fires 288 times a day: every cell used to be solid
+    // `bg-primary`, a black bar in the neutral theme.
+    expect(densityClass(288, 288)).toBe("bg-primary/60")
+    expect(densityClass(1, 4)).toBe("bg-primary/15")
+    expect(densityClass(2, 4)).toBe("bg-primary/30")
+    expect(densityClass(3, 4)).toBe("bg-primary/45")
+    expect(densityClass(0, 4)).toBe("bg-muted")
+    expect(densityClass(0, 0)).toBe("bg-muted")
   })
 })
