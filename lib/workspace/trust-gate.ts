@@ -19,16 +19,29 @@ export interface WorkspaceTrustForSend {
   restricted: boolean
   /** Present only when every active root has an explicit persisted grant. */
   trustedRoots: string[]
+  /**
+   * The roots with no grant, primary first. Non-empty exactly when
+   * `restricted`. Lets a caller with nobody watching (a scheduled run) name
+   * what the user has to trust instead of only saying that something is
+   * untrusted.
+   */
+  untrustedRoots: string[]
+}
+
+/** Trust does not apply: nothing restricted, and no proof minted. */
+function ungated(): WorkspaceTrustForSend {
+  return { restricted: false, trustedRoots: [], untrustedRoots: [] }
 }
 
 export async function resolveWorkspaceTrustForSend(
   project: Pick<Project, "roots"> | null | undefined,
   opts: { enabled: boolean; onWeb: boolean }
 ): Promise<WorkspaceTrustForSend> {
-  if (opts.onWeb || !opts.enabled || !project) return { restricted: false, trustedRoots: [] }
+  if (opts.onWeb || !opts.enabled || !project) return ungated()
   const paths = allRootPaths(project)
-  if (paths.length === 0) return { restricted: false, trustedRoots: [] }
+  if (paths.length === 0) return ungated()
   const verdicts = await Promise.all(paths.map((p) => isWorkspaceTrusted(p)))
-  const restricted = verdicts.some((trusted) => !trusted)
-  return { restricted, trustedRoots: restricted ? [] : paths }
+  const untrustedRoots = paths.filter((_, index) => !verdicts[index])
+  const restricted = untrustedRoots.length > 0
+  return { restricted, trustedRoots: restricted ? [] : paths, untrustedRoots }
 }

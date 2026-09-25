@@ -38,6 +38,7 @@ import {
   openWorkspaceBundleTurnLease,
   type WorkspaceBundleTurnLease,
 } from "@/lib/task-workspace/run-lease"
+import { remapExactRoots } from "@/lib/task-workspace/root-aliases"
 import type { AcquireWorkspaceBundle, BeginTaskWorkspaceTurn } from "@/lib/task-workspace/types"
 
 export interface SafeSendPromptOptions extends RunAndCaptureOptions {
@@ -154,10 +155,6 @@ function connectorWritableRoots(options: SendOptions | undefined): ConnectorWrit
 
 function connectorBoundaryId(prefix: string, value: string): string {
   return `${prefix}${value.replace(/[^a-zA-Z0-9_.:-]/g, "_")}`.slice(0, 128)
-}
-
-function remapExactRoots(values: string[], aliasesBySource: ReadonlyMap<string, string>): string[] {
-  return values.map((value) => aliasesBySource.get(value.trim()) ?? value)
 }
 
 async function openConnectorWorkspaceTurn(

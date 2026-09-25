@@ -157,6 +157,25 @@ export function hostSatisfies(
   return hasCapability(requirement, host.capabilities)
 }
 
+/**
+ * Whether Workspace Trust governs agent runs on this host: the capability-based
+ * answer to the `onWeb` bypass `lib/workspace/trust-gate.ts` takes.
+ *
+ * Trust guards a real directory from the checkout it holds, so it applies
+ * wherever the run's tools reach the host's own filesystem: the desktop and
+ * the headless brain. The interactive composer derives the same input from
+ * `!isTauri()`, which is right for a webview but classifies the headless brain,
+ * the process that actually holds the checkout, as having no filesystem at
+ * all. A browser or the mobile webview has no host filesystem to protect, so
+ * the gate is bypassed there. Those hosts also refuse chat-style tasks at the
+ * `sidecar` requirement before trust is ever asked.
+ */
+export function hostEnforcesWorkspaceTrust(
+  host: SchedulerHostDescriptor = describeLocalSchedulerHost()
+): boolean {
+  return hostSatisfies("host-filesystem", host)
+}
+
 /** True when the type is deprecated (no executor, auto-paused, not creatable). */
 export function isDeprecatedTaskType(type: string): type is ScheduledTaskType {
   return (DEPRECATED_TASK_TYPES as readonly string[]).includes(type)

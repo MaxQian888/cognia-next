@@ -57,20 +57,36 @@ it("returns roots only when every root has an explicit grant", async () => {
   trusted.isWorkspaceTrusted.mockResolvedValue(true)
   await expect(
     resolveWorkspaceTrustForSend(project(["/a", "/b"]), { enabled: true, onWeb: false })
-  ).resolves.toEqual({ restricted: false, trustedRoots: ["/a", "/b"] })
+  ).resolves.toEqual({ restricted: false, trustedRoots: ["/a", "/b"], untrustedRoots: [] })
 
   trusted.isWorkspaceTrusted.mockImplementation(async (p) => p === "/a")
   await expect(
     resolveWorkspaceTrustForSend(project(["/a", "/b"]), { enabled: true, onWeb: false })
-  ).resolves.toEqual({ restricted: true, trustedRoots: [] })
+  ).resolves.toEqual({ restricted: true, trustedRoots: [], untrustedRoots: ["/b"] })
+})
+
+it("names every untrusted root, primary first", async () => {
+  trusted.isWorkspaceTrusted.mockImplementation(async (p) => p === "/b")
+  await expect(
+    resolveWorkspaceTrustForSend(project(["/a", "/b", "/c"]), { enabled: true, onWeb: false })
+  ).resolves.toEqual({ restricted: true, trustedRoots: [], untrustedRoots: ["/a", "/c"] })
+})
+
+it("reports no untrusted roots when the gate does not apply", async () => {
+  await expect(
+    resolveWorkspaceTrustForSend(null, { enabled: true, onWeb: false })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [], untrustedRoots: [] })
+  await expect(
+    resolveWorkspaceTrustForSend(project([]), { enabled: true, onWeb: false })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [], untrustedRoots: [] })
 })
 
 it("does not mint local-content trust when trust is bypassed", async () => {
   trusted.isWorkspaceTrusted.mockResolvedValue(true)
   await expect(
     resolveWorkspaceTrustForSend(project(["/a"]), { enabled: false, onWeb: false })
-  ).resolves.toEqual({ restricted: false, trustedRoots: [] })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [], untrustedRoots: [] })
   await expect(
     resolveWorkspaceTrustForSend(project(["/a"]), { enabled: true, onWeb: true })
-  ).resolves.toEqual({ restricted: false, trustedRoots: [] })
+  ).resolves.toEqual({ restricted: false, trustedRoots: [], untrustedRoots: [] })
 })

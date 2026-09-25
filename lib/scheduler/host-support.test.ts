@@ -7,6 +7,7 @@ import {
   describeLocalSchedulerHost,
   describeUnsupportedTaskType,
   getTaskTypeHostSupport,
+  hostEnforcesWorkspaceTrust,
   hostSatisfies,
   isCardAuthoredTaskType,
   isDeprecatedTaskType,
@@ -94,6 +95,16 @@ describe("host-support matrix", () => {
     expect(hostSatisfies("desktop-shell", headless)).toBe(false)
     expect(hostSatisfies("shell", headless)).toBe(true)
     expect(hostSatisfies("shell", mobile)).toBe(false)
+  })
+
+  it("enforces Workspace Trust wherever runs reach the host filesystem", () => {
+    // The desktop and the headless brain hold real checkouts; the brain is the
+    // host `!isTauri()` got wrong.
+    expect(hostEnforcesWorkspaceTrust(desktop)).toBe(true)
+    expect(hostEnforcesWorkspaceTrust(headless)).toBe(true)
+    // No host filesystem to protect: the gate's `onWeb` bypass.
+    expect(hostEnforcesWorkspaceTrust(web)).toBe(false)
+    expect(hostEnforcesWorkspaceTrust(mobile)).toBe(false)
   })
 
   it("desktop-only requirement produces the desktop-only reason", () => {
