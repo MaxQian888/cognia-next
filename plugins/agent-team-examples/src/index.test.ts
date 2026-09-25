@@ -10,7 +10,7 @@
  * between the two manifests.
  */
 
-import definition, { manifest } from "./index"
+import definition, { EXAMPLE_NAME_SUFFIX, manifest } from "./index"
 import {
   getSubagent,
   registerSubagent,
@@ -53,6 +53,30 @@ describe("agent-team-examples plugin", () => {
     expect(manifest.sharedMemoryAdapters).toHaveLength(1)
     expect(manifest.balanceAdapters).toHaveLength(1)
     expect(definition.manifest.id).toBe(PLUGIN_ID)
+  })
+
+  // An example must never switch itself on for every user: no `startup`
+  // activation event, so it only runs once someone enables it.
+  it("is opt-in — no startup activation on either manifest", () => {
+    expect(jsonManifest).not.toHaveProperty("activationEvents")
+    expect(manifest.activationEvents ?? []).not.toContain("startup")
+    expect(manifest.activateOnStartup).not.toBe(true)
+  })
+
+  it("labels every contributed display name as an example", () => {
+    const names = [
+      ...(manifest.subagents ?? []).map((sa) => sa.name),
+      ...(manifest.agentTeamTemplates ?? []).map((tpl) => tpl.name),
+      ...(manifest.sharedMemoryAdapters ?? []).map((ad) => ad.name),
+      ...(manifest.balanceAdapters ?? []).map((ad) => ad.name),
+    ]
+    expect(names).toHaveLength(7)
+    for (const name of names) expect(name?.endsWith(EXAMPLE_NAME_SUFFIX)).toBe(true)
+  })
+
+  it("spreads plugin.json instead of restating a subset", () => {
+    expect(manifest.description).toBe(jsonManifest.description)
+    expect(manifest.runtimeCompatibility).toEqual(jsonManifest.runtimeCompatibility)
   })
 
   // The overlay wins the merge, so a capability present only on the TS side

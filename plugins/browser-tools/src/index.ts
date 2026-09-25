@@ -11,9 +11,9 @@
 import {
   defineContextProvider,
   definePlugin,
+  definePluginManifest,
   definePluginTool,
   type PluginContext,
-  type PluginManifest,
   type PluginToolRegistration,
 } from "@cognia/plugin-sdk"
 import type {
@@ -79,15 +79,52 @@ interface SelectionForRefResult {
 }
 
 /**
- * The session a tool call belongs to. `ctx.session` is captured at activation
- * because a tool executor is invoked through the plugin-tool IPC round trip
- * and never receives the context as an argument.
+ * `ctx.session`, captured at activation. Only the FALLBACK for a call that
+ * carries no `sessionId` of its own (a direct `ctx.agent.invokeTool` from
+ * host code): the chat that issued the tool call is `callCtx.sessionId`, and
+ * the focused session can be a different chat entirely when the user switched
+ * away while the agent was still running.
  */
 let session: PluginContext["session"] | undefined
 
-function activeSessionId(): string | undefined {
-  const sessionId = session?.getCurrentSessionId()
-  return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined
+/** The per-call context the host hands a tool executor. */
+type ToolCallContext = Parameters<PluginToolRegistration["execute"]>[1]
+
+function callSessionId(callCtx: ToolCallContext | undefined): string | undefined {
+  const fromCall = callCtx?.sessionId
+  if (typeof fromCall === "string" && fromCall.length > 0) return fromCall
+  const focused = session?.getCurrentSessionId()
+  return typeof focused === "string" && focused.length > 0 ? focused : undefined
+}
+
+/** Upper bound for `browser_wait_for.timeoutMs` — keeps a call inside its tool budget. */
+export const WAIT_FOR_MAX_TIMEOUT_MS = 60_000
+
+/** Clamp a model-supplied wait budget; `undefined` keeps the engine default. */
+function clampWaitTimeout(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  return Math.min(Math.max(Math.round(value), 0), WAIT_FOR_MAX_TIMEOUT_MS)
+}
+
+/**
+ * Turn a thrown engine / router error into the structured tool envelope.
+ *
+ * `routeEngine` throws `BrowserSessionError` (`browser_feature_unsupported`,
+ * `browser_page_not_found`, …) when the selected engine cannot serve the call —
+ * e.g. a browser or mobile host with no healthy remote Chromium. Thrown, the
+ * model saw an opaque tool failure; returned, it sees the code and the reason
+ * and can pick another route (the Playwright MCP tools, a human handoff).
+ */
+export function toolFailure(err: unknown): { ok: false; error: string; code?: string } {
+  const code =
+    err && typeof err === "object" && "code" in err && typeof err.code === "string"
+      ? err.code
+      : undefined
+  return {
+    ok: false,
+    ...(code ? { code } : {}),
+    error: err instanceof Error ? err.message : String(err),
+  }
 }
 
 function parseSelectionForRef(value: unknown): SelectionForRefResult {
@@ -160,12 +197,12 @@ function pendingDialogResponse(result: BrowserDialogState) {
   return { result, dialogPending: true, dialog: result.dialog }
 }
 
-const manifest = manifestJson as unknown as PluginManifest
+export const manifest = definePluginManifest(manifestJson)
 
 const definition = definePlugin({
   manifest,
   activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("browser-tools activated")
+    ctx.logger.info("browser-tools activated")
     session = ctx.session
     browser = ctx.browser
 
@@ -174,7 +211,7 @@ const definition = definePlugin({
     // keeps every public origin on the embedded engine — the safe direction.
     void browser.primeDomainGrants().catch(() => undefined)
 
-    ctx.agent?.context?.registerProvider?.(
+    ctx.agent.context.registerProvider(
       defineContextProvider({
         id: "browser-tools:availability",
         name: "Browser tools availability",
@@ -183,13 +220,25 @@ const definition = definePlugin({
       })
     )
 
-    const register = ctx.agent?.registerTool
-    if (!register) return
-    const reg = (tool: PluginToolRegistration) => register(definePluginTool(tool))
+    // Every executor is wrapped: an engine/router throw becomes the structured
+    // `{ ok: false, code?, error }` envelope (see `toolFailure`) instead of an
+    // opaque tool failure.
+    const reg = (tool: PluginToolRegistration) =>
+      ctx.agent.registerTool(
+        definePluginTool({
+          ...tool,
+          execute: async (args, callCtx) => {
+            try {
+              return await tool.execute(args, callCtx)
+            } catch (err) {
+              return toolFailure(err)
+            }
+          },
+        })
+      )
 
     reg({
       name: "browser_navigate",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_navigate",
         description:
@@ -226,7 +275,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_snapshot",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_snapshot",
         description:
@@ -244,7 +292,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_annotate",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_annotate",
         description:
@@ -261,7 +308,7 @@ const definition = definePlugin({
           additionalProperties: false,
         },
       },
-      execute: async (args) => {
+      execute: async (args, callCtx) => {
         const a = (args ?? {}) as Record<string, unknown>
         const ref = typeof a.ref === "string" ? a.ref.trim() : ""
         const comment = typeof a.comment === "string" ? a.comment.trim() : ""
@@ -274,7 +321,9 @@ const definition = definePlugin({
           return { ok: false, error: "severity must be blocking, important, or suggestion" }
         }
 
-        const sessionId = activeSessionId()
+        // The annotation belongs to the chat that asked for it, not whichever
+        // chat has focus when the call lands.
+        const sessionId = callSessionId(callCtx)
         if (!sessionId) return { ok: false, error: "No active chat session" }
 
         const { engine, untrusted } = await currentRoute()
@@ -317,7 +366,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_press_key",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_press_key",
         description:
@@ -337,7 +385,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_scroll",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_scroll",
         description:
@@ -371,11 +418,13 @@ const definition = definePlugin({
 
     reg({
       name: "browser_evaluate",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_evaluate",
         description:
           'Evaluate a JavaScript EXPRESSION in the page and return its JSON value (e.g. "document.title" or "[...document.querySelectorAll(\'a\')].map(a=>a.href)"). Single expression only — no statements. Enabled only on the trusted localhost preview; blocked on public origins.',
+        // Runs model-authored code inside the user's page (cookies, storage,
+        // authenticated fetches) — the user approves each expression.
+        requiresApproval: true,
         parametersSchema: {
           type: "object",
           properties: { expression: { type: "string" } },
@@ -407,7 +456,6 @@ const definition = definePlugin({
     ) =>
       reg({
         name,
-        pluginId: ctx.pluginId,
         definition: {
           name,
           description: desc,
@@ -452,7 +500,6 @@ const definition = definePlugin({
     )
     reg({
       name: "browser_fill_form",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_fill_form",
         description:
@@ -553,7 +600,6 @@ const definition = definePlugin({
     ) =>
       reg({
         name,
-        pluginId: ctx.pluginId,
         definition: {
           name,
           description: desc,
@@ -588,11 +634,13 @@ const definition = definePlugin({
 
     reg({
       name: "browser_wait_for",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_wait_for",
         description:
-          "Wait for a condition, up to `timeoutMs`: visible `text` appears/disappears (default), an element matching a CSS `selector` appears/disappears, or the network goes idle (`networkIdle: true` — no in-flight or new requests). Provide exactly one of text/selector/networkIdle. Returns the wait result plus a fresh snapshot.",
+          "Wait for a condition, up to `timeoutMs` (max 60000): visible `text` appears/disappears (default), an element matching a CSS `selector` appears/disappears, or the network goes idle (`networkIdle: true` — no in-flight or new requests). Provide exactly one of text/selector/networkIdle. Returns the wait result plus a fresh snapshot.",
+        // The wait itself is capped at WAIT_FOR_MAX_TIMEOUT_MS; the budget adds
+        // room for the post-wait load settle + snapshot.
+        timeoutMs: WAIT_FOR_MAX_TIMEOUT_MS + 15_000,
         parametersSchema: {
           type: "object",
           properties: {
@@ -600,7 +648,7 @@ const definition = definePlugin({
             selector: { type: "string" },
             networkIdle: { type: "boolean" },
             mode: { type: "string", enum: ["appear", "disappear"] },
-            timeoutMs: { type: "number" },
+            timeoutMs: { type: "number", minimum: 0, maximum: WAIT_FOR_MAX_TIMEOUT_MS },
           },
         },
       },
@@ -613,18 +661,19 @@ const definition = definePlugin({
           timeoutMs?: number
         }
         const engine = engineFor().engine
+        const timeoutMs = clampWaitTimeout(a.timeoutMs)
         let result
         if (a.networkIdle) {
-          result = await engine.waitForNetworkIdle({ timeoutMs: a.timeoutMs })
+          result = await engine.waitForNetworkIdle({ timeoutMs })
         } else if (a.selector) {
           result = await engine.waitForSelector(a.selector, {
             mode: a.mode,
-            timeoutMs: a.timeoutMs,
+            timeoutMs,
           })
         } else {
           result = await engine.waitForText(String(a.text ?? ""), {
             mode: a.mode,
-            timeoutMs: a.timeoutMs,
+            timeoutMs,
           })
         }
         return withSnapshot({ result })
@@ -633,11 +682,10 @@ const definition = definePlugin({
 
     reg({
       name: "browser_screenshot",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_screenshot",
         description:
-          "Capture a PNG of the current preview (vision fallback — prefer browser_snapshot for structure). Returns base64 PNG bytes.",
+          "Capture the current preview as an image the model can see (vision fallback — prefer browser_snapshot for structure). Scoped (fullPage / element) captures need the RemoteChromiumEngine.",
         parametersSchema: {
           type: "object",
           properties: {
@@ -647,33 +695,32 @@ const definition = definePlugin({
         },
       },
       execute: async (args) => {
-        try {
-          const input = (args ?? {}) as {
-            scope?: "viewport" | "fullPage" | "element"
-            ref?: string
-          }
-          const shot = await engineFor().engine.screenshot({
-            scope: input.scope ?? (input.ref ? "element" : "viewport"),
-            ref: input.ref,
-          })
-          return { ok: true, base64: shot.bytes, width: shot.width, height: shot.height }
-        } catch (err) {
-          const code =
-            err && typeof err === "object" && "code" in err && typeof err.code === "string"
-              ? err.code
-              : undefined
-          return {
-            ok: false,
-            ...(code ? { code } : {}),
-            error: err instanceof Error ? err.message : String(err),
-          }
+        const input = (args ?? {}) as {
+          scope?: "viewport" | "fullPage" | "element"
+          ref?: string
+        }
+        const scope = input.scope ?? (input.ref ? "element" : "viewport")
+        const shot = await engineFor().engine.screenshot({ scope, ref: input.ref })
+        // A real MCP image block: returned as `{ base64 }` the sidecar
+        // JSON-stringified it into a text wall a vision model cannot decode.
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ ok: true, scope, width: shot.width, height: shot.height }),
+            },
+            {
+              type: "image",
+              data: shot.bytes,
+              mimeType: shot.format === "jpeg" ? "image/jpeg" : "image/png",
+            },
+          ],
         }
       },
     })
 
     reg({
       name: "browser_read_console",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_read_console",
         description: "Drain buffered console messages from the preview.",
@@ -684,7 +731,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_read_network",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_read_network",
         description:
@@ -696,7 +742,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_get_page",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_get_page",
         description: "Return the preview's current url + title.",
@@ -707,7 +752,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_pages",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_pages",
         description: "List browser pages and identify the globally active page.",
@@ -718,7 +762,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_new_page",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_new_page",
         description: "Create and activate a new remote browser page.",
@@ -737,7 +780,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_drag",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_drag",
         description: "Drag one ref'd element onto another using native Playwright input.",
@@ -759,7 +801,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_handle_dialog",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_handle_dialog",
         description: "Accept or dismiss the pending native browser dialog.",
@@ -781,7 +822,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_set_zoom",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_set_zoom",
         description: "Set page zoom between 0.25 and 5.",
@@ -799,7 +839,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_find",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_find",
         description: "Find text in the active page.",
@@ -824,7 +863,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_find_clear",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_find_clear",
         description: "Clear active find-in-page highlights.",
@@ -838,7 +876,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_switch_page",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_switch_page",
         description: "Make a page active. This is a mutating operation and requires control.",
@@ -857,7 +894,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_close_page",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_close_page",
         description: "Close a browser page.",
@@ -876,11 +912,16 @@ const definition = definePlugin({
 
     reg({
       name: "browser_set_files",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_set_files",
         description:
           "Set files on a file input by snapshot ref. Paths must be relative to the active workspace allowed root.",
+        // Hands local files to a web page (an upload), so the user approves it;
+        // `access: "read"` puts every entry of `paths` through the sidecar's
+        // workspace confinement before the call reaches the engine.
+        requiresApproval: true,
+        access: "read",
+        pathParams: ["paths"],
         parametersSchema: {
           type: "object",
           properties: {
@@ -901,7 +942,6 @@ const definition = definePlugin({
 
     reg({
       name: "browser_downloads",
-      pluginId: ctx.pluginId,
       definition: {
         name: "browser_downloads",
         description: "List quarantined and explicitly saved browser downloads for this session.",

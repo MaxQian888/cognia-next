@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
+import { registerPluginI18n, unregisterPluginI18n } from "@cognia/plugin-sdk/api/i18n"
 
-import { PresentationResultCard, setPresentationResultBridge } from "./card"
-import { translate } from "./i18n"
+import { createPresentationResultCard, PRESENTATIONS_PLUGIN_ID } from "./card"
+import { I18N_MESSAGES } from "./i18n"
 
 function part(output: unknown): ToolUIPart {
   return {
@@ -14,16 +15,31 @@ function part(output: unknown): ToolUIPart {
   } as unknown as ToolUIPart
 }
 
-afterEach(() => setPresentationResultBridge(null))
+beforeAll(() => {
+  // What the plugin manager does with plugin.json's `i18n.locales` on enable.
+  registerPluginI18n({
+    pluginId: PRESENTATIONS_PLUGIN_ID,
+    messages: Object.fromEntries(
+      Object.entries(I18N_MESSAGES).map(([locale, messages]) => [
+        locale,
+        Object.fromEntries(
+          Object.entries(messages).map(([key, value]) => [
+            `plugin.${PRESENTATIONS_PLUGIN_ID}.${key}`,
+            value,
+          ])
+        ),
+      ])
+    ),
+  })
+})
+
+afterAll(() => unregisterPluginI18n(PRESENTATIONS_PLUGIN_ID))
 
 describe("PresentationResultCard", () => {
-  it("renders deck title, slide count, version, and findings badges", () => {
-    setPresentationResultBridge({
-      t: (key, vars) => translate("en", key, vars),
-      openArtifact: jest.fn(),
-    })
+  it("renders deck title, slide count, version, and one set of findings badges", () => {
+    const Card = createPresentationResultCard({ openArtifact: jest.fn() })
     render(
-      <PresentationResultCard
+      <Card
         part={part({
           ok: true,
           artifactId: "a1",
@@ -37,45 +53,48 @@ describe("PresentationResultCard", () => {
     expect(screen.getByTestId("presentation-result-title")).toHaveTextContent("Launch")
     expect(screen.getByTestId("presentation-result-slides")).toHaveTextContent("Slides: 2")
     expect(screen.getByText("v3")).toBeInTheDocument()
-    // "Errors: 1" appears in the header badge and the body badge.
-    expect(screen.getAllByText("Errors: 1")).toHaveLength(2)
-    expect(screen.getByText("Warnings: 2")).toBeInTheDocument()
-    expect(screen.getByTestId("presentation-result-card-badge")).toHaveTextContent("Errors: 1")
+    // Each count appears once — the header no longer repeats the body badge.
+    expect(screen.getAllByText("Errors: 1")).toHaveLength(1)
+    expect(screen.getAllByText("Warnings: 2")).toHaveLength(1)
+    expect(screen.queryByTestId("presentation-result-card-badge")).toBeNull()
   })
 
-  it("invokes the bridge open action for artifact results", () => {
+  it("invokes the bound open action with a touch-sized button", () => {
     const openArtifact = jest.fn()
-    setPresentationResultBridge({ t: (key, vars) => translate("en", key, vars), openArtifact })
-    render(<PresentationResultCard part={part({ ok: true, artifactId: "a7" })} />)
-    fireEvent.click(screen.getByTestId("presentation-result-open"))
+    const Card = createPresentationResultCard({ openArtifact })
+    render(<Card part={part({ ok: true, artifactId: "a7" })} />)
+    const open = screen.getByTestId("presentation-result-open")
+    expect(open.className).toContain("h-9")
+    expect(open.className).toContain("sm:h-7")
+    fireEvent.click(open)
     expect(openArtifact).toHaveBeenCalledWith("a7")
   })
 
-  it("renders the exported byte size for export results", () => {
-    render(<PresentationResultCard part={part({ ok: true, artifactId: "a1", byteLength: 2048 })} />)
+  it("shows the exported size only for a successful export", () => {
+    const Card = createPresentationResultCard()
+    const { rerender } = render(
+      <Card part={part({ ok: true, saved: true, artifactId: "a1", byteLength: 2048 })} />
+    )
     expect(screen.getByTestId("presentation-result-exported")).toHaveTextContent("Exported 2.0 KB")
+
+    rerender(
+      <Card
+        part={part({
+          ok: false,
+          artifactId: "a1",
+          byteLength: 2048,
+          requiresConfirmation: true,
+        })}
+      />
+    )
+    expect(screen.queryByTestId("presentation-result-exported")).toBeNull()
   })
 
-  it("falls back to the English bundle when no bridge is injected", () => {
-    render(
-      <PresentationResultCard part={part({ ok: true, artifactId: "a1", deck: { slides: [{}] } })} />
-    )
+  it("has no open action when no opener is bound", () => {
+    const Card = createPresentationResultCard()
+    render(<Card part={part({ ok: true, artifactId: "a1", deck: { slides: [{}] } })} />)
     expect(screen.getByText("Presentation")).toBeInTheDocument()
-    expect(screen.getByTestId("presentation-result-slides")).toHaveTextContent("Slides: 1")
-    // Without a bridge there is no open action.
     expect(screen.queryByTestId("presentation-result-open")).toBeNull()
-  })
-
-  it("uses the injected translator when provided", () => {
-    setPresentationResultBridge({
-      t: (key, vars) => translate("zh-CN", key, vars),
-      openArtifact: jest.fn(),
-    })
-    render(
-      <PresentationResultCard part={part({ ok: true, artifactId: "a1", deck: { slides: [{}] } })} />
-    )
-    expect(screen.getByText("演示文稿")).toBeInTheDocument()
-    expect(screen.getByText("幻灯片：1")).toBeInTheDocument()
   })
 
   it.each([
@@ -83,7 +102,8 @@ describe("PresentationResultCard", () => {
     ["an unparseable payload", "not json"],
     ["an empty object", {}],
   ])("renders nothing for %s", (_label, output) => {
-    const { container } = render(<PresentationResultCard part={part(output)} />)
+    const Card = createPresentationResultCard()
+    const { container } = render(<Card part={part(output)} />)
     expect(container).toBeEmptyDOMElement()
   })
 })

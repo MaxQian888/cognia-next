@@ -109,9 +109,13 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // only feeds the managed Pro IDE proxy, so moving the theme there would
   // silently stop it rendering in the file tree / tabs / Quick Open.
   "cognia-material-icon-theme": ["legacy_deprecated:IDE_LEGACY_MANIFEST_DEPRECATED"],
-  "cognia-character-seeds": ["field_missing:character-pack"],
+  // Unbundled template: an installed copy only ever reads plugin.json, so the
+  // packs are declared there (not only on the TS module manifest).
+  "cognia-character-seeds": [],
   "cognia-goal-insights": [],
-  "cognia-python-demo": ["field_missing:tools"],
+  // Python tools are `@tool` functions the host discovers at load, so the
+  // plugin tags itself `python` rather than `tools` (which gates `tools[]`).
+  "cognia-python-demo": [],
   // The connector is python-backed and `connectors` is
   // `pythonExecution: "experimental"`, so the validator warns by design —
   // execution stays gated behind `lib/plugin/python/experimental-flag.ts`.
@@ -147,7 +151,8 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // own index.test.ts.
   "context-inspector": ["field_missing:context-panel", "field_missing:webview"],
   // `tools` is declared in the manifest now (so `deep_research` is discoverable
-  // before activation); the skill is still registered imperatively in `activate`.
+  // before activation); the playbook skill rides the `definePluginManifest`
+  // overlay in src/index.ts.
   "deep-research": ["field_missing:skills"],
   // `mcpServerPresets[]` is materialized in plugin.json (pure data — the
   // preset is also visible to static tooling before activation). The panel
@@ -164,15 +169,20 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "external-agent-adapter-example": [],
   "external-agent-preset-example": [],
   ocr: ["field_missing:tools"],
-  "playwright-mcp": ["field_missing:mcp-server-preset"],
+  // The integration, the responder Bot and its character pack carry handlers
+  // and typed prompts, so they ride the `definePluginManifest` overlay in
+  // src/index.ts; src/index.test.ts pins that the merged manifest has all three.
+  pagerduty: ["field_missing:bot", "field_missing:character-pack", "field_missing:integrations"],
+  // `mcpServerPresets[]` is declared in plugin.json (pure data), like stagehand.
+  "playwright-mcp": [],
   // Class 1: the panel is registered imperatively in `activate()`. It cannot
   // use `manifest.contextPanels` — that field resolves a renderer from a
   // separate `entry` module, and a `builtin://` plugin has no fetchable
   // install path to import one from.
   "prompt-templates": ["field_missing:context-panel"],
   // Tools are registered by decorator in main.py, not declared in the
-  // manifest, so the field is legitimately empty for a python plugin.
-  repowiki: ["field_missing:tools"],
+  // manifest, so the plugin tags itself `python` rather than `tools`.
+  repowiki: [],
   "ripgrep-tools": [],
   // `commands` is DECLARED now (manifest.commands[] + hooks.onCommand), so the
   // `field_missing:commands` entry is gone. `tools` stays imperative —
@@ -197,7 +207,8 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "wasm-example-formatter": [],
   "web-clone": [],
   "web-tools": ["field_missing:tools"],
-  "workflow-ai": ["field_missing:tools", "field_missing:commands"],
+  // No `commands` capability any more: the plugin declares no slash command.
+  "workflow-ai": ["field_missing:tools"],
   "workspace-tools": ["field_missing:tools", "field_missing:workflow"],
   // `tools[]` is declared in plugin.json now (discoverable before activation);
   // the rest stay on the module-manifest overlay (pack/skills/presets/

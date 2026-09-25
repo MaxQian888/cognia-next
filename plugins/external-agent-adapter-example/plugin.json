@@ -1,30 +1,31 @@
 {
   "id": "cognia-external-agent-adapter-example",
   "name": "External Agent Adapter Example",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Reference plugin demonstrating the external-agent-adapter capability: a plugin contributing a brand-new external-agent protocol adapter plus a matching preset.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["external-agent-adapter", "external-agent-preset"],
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "tauri": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "mobile": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     }
   },
   "externalAgentAdapters": [
@@ -32,7 +33,7 @@
       "id": "demo-echo",
       "label": "Demo Echo Protocol",
       "description": "A reference external-agent protocol adapter (echo, no subprocess).",
-      "entry": "src/demo-adapter.ts",
+      "entry": "dist/demo-adapter.js",
       "export": "createDemoEchoAdapter"
     }
   ],
@@ -47,5 +48,17 @@
       "supportTier": "executable",
       "tags": ["example", "reference"]
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "External Agent Adapter Example",
+        "manifest.description": "Reference plugin demonstrating the external-agent-adapter capability: a plugin contributing a brand-new external-agent protocol adapter plus a matching preset."
+      },
+      "zh-CN": {
+        "manifest.name": "外部 Agent 适配器示例",
+        "manifest.description": "演示 external-agent-adapter 能力的参考插件：插件贡献一个全新的外部 Agent 协议适配器及配套预设。"
+      }
+    }
+  }
 }

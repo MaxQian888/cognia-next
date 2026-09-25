@@ -124,6 +124,25 @@ describe("createPipelineDb", () => {
     expect(tables[TABLES.topics].update).toHaveBeenCalledWith("1", { status: "selected" })
   })
 
+  it("setTopicStatus records the Writer session when one is given", async () => {
+    const { dexie, tables } = fakeDexie()
+    await createPipelineDb(dexie).setTopicStatus("1", "selected", "sess_9")
+    expect(tables[TABLES.topics].update).toHaveBeenCalledWith("1", {
+      status: "selected",
+      sessionId: "sess_9",
+    })
+  })
+
+  it("listResearch sorts newest first", async () => {
+    const { dexie, tables } = fakeDexie()
+    tables[TABLES.research].toArray = jest.fn(async () => [
+      { id: "r1", kind: "fact", content: "a", createdAt: 1 },
+      { id: "r2", kind: "case", content: "b", createdAt: 2 },
+    ])
+    const notes = await createPipelineDb(dexie).listResearch()
+    expect(notes.map((note) => note.id)).toEqual(["r2", "r1"])
+  })
+
   it("saveResearch persists a stamped row", async () => {
     const { dexie, tables } = fakeDexie()
     const row = await createPipelineDb(dexie).saveResearch({ kind: "fact", content: "c" })

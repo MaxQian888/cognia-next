@@ -1,8 +1,10 @@
 {
   "id": "cognia-web-tools",
   "name": "Web Tools",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Agent tools on top of the promoted web built-ins: web_download saves a URL to disk, web_research distills and summarizes URLs into a cited answer. (web_search / web_fetch themselves are host built-ins.)",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "configuration"],
   "main": "src/index.ts",
@@ -44,6 +46,18 @@
       "availability": "degraded",
       "entrypoint": "src/index.ts",
       "reason": "web_download cannot persist files from the mobile WebView (no download manager); web_research still works."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Web Tools",
+        "manifest.description": "Agent tools on top of the promoted web built-ins: web_download saves a URL to disk, web_research distills and summarizes URLs into a cited answer. (web_search / web_fetch themselves are host built-ins.)"
+      },
+      "zh-CN": {
+        "manifest.name": "网页工具",
+        "manifest.description": "基于内置网页能力的 Agent 工具：web_download 把网址保存到磁盘，web_research 提炼并总结多个网址，给出附引用的答案。（web_search / web_fetch 本身是宿主内置工具。）"
+      }
     }
   }
 }

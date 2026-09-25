@@ -1,18 +1,23 @@
 /**
- * Runtime-free offline eval harness for cognia-web-tools.
+ * Offline eval harness for cognia-web-tools.
  *
- * `pnpm plugin:eval` cannot load the real plugin entry (`src/index.ts` imports
- * the Next app — `@/lib/...`, Zustand stores), so this harness provides a
- * deterministic, network-free stand-in for each tool. Its job is to verify the
- * tool CONTRACT (input → output shape) in CI; model tool-SELECTION is verified
- * separately by the `--online` cases run inside the app.
+ * Drives the REAL plugin entry (`src/index.ts`): `pnpm plugin:eval` runs under
+ * tsx, which loads the TypeScript module and its `@cognia/plugin-sdk` imports
+ * directly. Only the host is faked — `ctx.network.download`,
+ * `ctx.agent.invokeTool("web_fetch")` and `ctx.agent.runStreamed` answer from
+ * the fixtures below, deterministically and without network — so the offline
+ * cases check the plugin's own argument handling (filename / directory
+ * sanitising, URL limits, result envelopes) rather than a copy of it.
  *
- * Keep the output shape in lockstep with `src/index.ts`:
- *   - `web_download` → `{ ok, path, bytes, contentType?, savedTo }` with the
- *     same filename-basename / directory-validation rules as the source.
- *   - `web_research` → `{ ok, channel, object: { summary, sources }, text,
- *     parseError, fetched }` or `{ ok: false, error }`.
+ * Model tool-SELECTION is not covered offline; that needs the in-app dispatch
+ * path (`--online`).
  */
+
+import * as entry from "./src/index.ts"
+
+// tsx may hand the TypeScript module back through CommonJS interop, where the
+// default export sits one level deeper.
+const plugin = typeof entry.default?.activate === "function" ? entry.default : entry.default.default
 
 const DOWNLOAD_FIXTURES = {
   "https://example.com/report.pdf": 2048,
@@ -21,89 +26,86 @@ const DOWNLOAD_FIXTURES = {
   "https://example.com/f.bin": 16,
 }
 
-const RESEARCH_FIXTURES = {
+const PAGE_FIXTURES = {
   "https://example.com":
     "Example Domain\n\nThis domain is for use in illustrative examples in documents.",
 }
 
-/** Mirror of `sanitizeFilename` in src/index.ts — basename + control strip. */
-function sanitizeFilename(name) {
-  const base = String(name).split(/[/\\]/).filter(Boolean).pop() ?? ""
-  const clean = base.replace(/[\x00-\x1f\x7f]/g, "").trim()
-  return clean === "" || clean === "." || clean === ".." ? "download.bin" : clean
+/** A deterministic stand-in for a streamed, structured summarization run. */
+function fixtureRun(prompt) {
+  const sources = Object.keys(PAGE_FIXTURES).filter((url) => prompt.includes(url))
+  const object = {
+    summary: `Deterministic fixture summary over ${sources.length} source(s).`,
+    sources: sources.map((url) => ({ url, title: url })),
+  }
+  const result = {
+    channel: "text",
+    toolsAvailable: false,
+    text: JSON.stringify(object),
+    object,
+    parseError: null,
+  }
+  return {
+    agentId: "fixture-run",
+    result: Promise.resolve(result),
+    cancel() {},
+    async *[Symbol.asyncIterator]() {
+      yield { type: "text-delta", delta: result.text }
+    },
+  }
 }
 
-/** Mirror of `sanitizeSubdir` — clean relative subfolders only. */
-function sanitizeSubdir(raw) {
-  const trimmed = String(raw).trim()
-  if (!trimmed) return { ok: false, error: "directory is empty" }
-  if (trimmed.startsWith("/") || trimmed.startsWith("\\") || /^[A-Za-z]:/.test(trimmed)) {
-    return { ok: false, error: "directory must be relative" }
+const noop = () => {}
+
+function fixtureContext(tools) {
+  return {
+    pluginId: plugin.manifest.id,
+    config: {},
+    logger: { debug: noop, info: noop, warn: noop, error: noop },
+    capabilities: { tauri: true, mobile: false, web: false, browser: true, platform: "desktop" },
+    network: {
+      async download(url, destPath) {
+        const size = DOWNLOAD_FIXTURES[url]
+        if (size === undefined) throw new Error("network:download: HTTP 404")
+        return { path: destPath, size }
+      },
+    },
+    agent: {
+      context: { registerProvider: () => noop },
+      registerTool(tool) {
+        tools.set(tool.name, tool)
+        return noop
+      },
+      async invokeTool(name, args) {
+        if (name !== "web_fetch") throw new Error(`fixture host has no tool ${name}`)
+        const text = PAGE_FIXTURES[args.url]
+        return text === undefined
+          ? { ok: false, error: "HTTP 404" }
+          : { ok: true, status: 200, text }
+      },
+      runStreamed: fixtureRun,
+    },
   }
-  const parts = trimmed.split("/").map((p) => p.trim())
-  if (parts.some((p) => p === "" || p === "." || p === ".." || p.includes("\\"))) {
-    return { ok: false, error: `directory "${raw}" is not a clean relative path` }
-  }
-  return { ok: true, dir: parts.join("/") }
 }
 
-function basenameFromUrl(url) {
-  try {
-    const u = new URL(url)
-    return u.pathname.split("/").filter(Boolean).pop() ?? "download.bin"
-  } catch {
-    return "download.bin"
-  }
+let toolsPromise
+
+async function activatedTools() {
+  toolsPromise ??= (async () => {
+    const tools = new Map()
+    await plugin.activate(fixtureContext(tools))
+    return tools
+  })()
+  return toolsPromise
 }
 
 /**
- * @param {string} name tool name as declared in the manifest
+ * @param {string} name tool name as registered by the plugin
  * @param {Record<string, unknown>} args
  * @returns {Promise<unknown>}
  */
 export async function invokeTool(name, args) {
-  if (name === "web_download") {
-    const url = String(args.url ?? "")
-    if (!url) return { ok: false, error: "url is required" }
-    const filename = sanitizeFilename(args.filename ?? basenameFromUrl(url))
-    let dir = ""
-    if (args.directory) {
-      const scoped = sanitizeSubdir(args.directory)
-      if (!scoped.ok) return { ok: false, error: scoped.error }
-      dir = scoped.dir
-    }
-    const bytes = DOWNLOAD_FIXTURES[url]
-    if (bytes === undefined) return { ok: false, error: `HTTP 404` }
-    return {
-      ok: true,
-      path: dir ? `${dir}/${filename}` : filename,
-      bytes,
-      savedTo: "plugin-data-dir",
-    }
-  }
-
-  if (name === "web_research") {
-    const query = typeof args.query === "string" ? args.query.trim() : ""
-    if (!query) return { ok: false, error: "query is required" }
-    const urls = Array.isArray(args.urls) ? args.urls.filter((u) => typeof u === "string") : []
-    const fetched = urls.filter((u) => RESEARCH_FIXTURES[u] !== undefined)
-    const failed = urls
-      .filter((u) => RESEARCH_FIXTURES[u] === undefined)
-      .map((u) => ({ url: u, error: "HTTP 404" }))
-    return {
-      ok: true,
-      channel: "text",
-      toolsAvailable: false,
-      object: {
-        summary: `Deterministic fixture summary for "${query}".`,
-        sources: fetched.map((u) => ({ url: u, title: u })),
-      },
-      text: `Deterministic fixture summary for "${query}".`,
-      parseError: null,
-      fetched,
-      ...(failed.length > 0 ? { failed } : {}),
-    }
-  }
-
-  throw new Error(`unknown tool: ${name}`)
+  const tool = (await activatedTools()).get(name)
+  if (!tool) throw new Error(`unknown tool: ${name}`)
+  return tool.execute(args, { config: {} })
 }

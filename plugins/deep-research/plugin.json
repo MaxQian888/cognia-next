@@ -1,8 +1,10 @@
 {
   "id": "cognia-deep-research",
   "name": "Deep Research",
+  "nameKey": "manifest.name",
   "version": "0.2.0",
   "description": "Autonomous web deep-research: search → read → reason → cited answer. Adds the /research command and a deep_research agent tool.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "commands", "skills", "configuration"],
   "main": "src/index.ts",
@@ -13,9 +15,18 @@
     "cognia": ">=0.1.0"
   },
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
   },
   "permissions": ["agent:control", "ai:chat", "ai:embed", "artifact:write", "settings:read"],
   "networkAccess": {
@@ -37,7 +48,10 @@
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string", "description": "The research question or report topic." },
+          "query": {
+            "type": "string",
+            "description": "The research question or report topic."
+          },
           "mode": {
             "type": "string",
             "enum": ["search", "report"],
@@ -50,14 +64,16 @@
           }
         },
         "required": ["query"]
-      }
+      },
+      "timeoutMs": 300000
     }
   ],
   "commands": [
     {
       "id": "research",
       "name": "/research",
-      "description": "Autonomous web deep-research → a cited answer."
+      "description": "Autonomous web deep-research → a cited answer.",
+      "descriptionKey": "commands.research.description"
     }
   ],
   "configSchema": {
@@ -106,5 +122,79 @@
     "maxBadAttempts": 2,
     "readTopK": 3,
     "searchResultsPerQuery": 6
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Deep Research",
+        "manifest.description": "Autonomous web deep-research: search → read → reason → cited answer. Adds the /research command and a deep_research agent tool.",
+        "slash.usage": "Usage:\n- `/research <question>` — a cited answer.\n- `/research report <topic>` — a multi-section cited report.\n- Prefix with `quick` or `deep` to shrink or raise the research budget (e.g. `/research deep report <topic>`).",
+        "card.title": "Deep Research",
+        "card.sources": "Sources",
+        "card.footer": "{steps} steps · {tokens} tokens · {note}",
+        "card.noteCancelled": "⚠️ cancelled — partial findings",
+        "card.noteBudget": "⚠️ answered under budget limits — may be incomplete",
+        "card.noteChecked": "✓ evidence-checked",
+        "report.footer": "{sections} sections · {tokens} tokens · deep research report",
+        "report.footerPartial": "{sections} sections · {tokens} tokens · deep research report · ⚠️ partial",
+        "error.noProvider": "**Deep Research** needs an AI model provider.\n\nNo model is configured for this plugin to use. Configure a provider in settings, then try again.",
+        "error.noAiPermission": "**Deep Research** needs permission to use the AI model.\n\nThe research loop calls the model to rewrite queries, judge sources, and draft the answer. Grant the model access when prompted, then try again.",
+        "error.webDisabled": "**Deep Research** is disabled because web tools are turned off.\n\nEnable web tools in Settings, then try again.",
+        "error.noSearchProvider": "**Deep Research** needs a web search provider.\n\nEnable one and add its API key in Settings → Search, then try again.",
+        "error.rateLimited": "**Deep Research** hit the outbound rate limit.\n\nToo many web requests in a short window. Wait a moment, then try again.",
+        "error.blocked": "**Deep Research** was blocked by a safety guard.\n\nThe request contained sensitive data, or targeted an address the app refuses to fetch.",
+        "error.toolUnavailable": "**Deep Research** cannot reach the app's web tools on this host.",
+        "error.failed": "**Deep Research** failed.",
+        "progress.planning": "Planning research…",
+        "progress.searching": "🔍 Searching: {queries}",
+        "progress.reading": "📖 Reading {count} source(s)",
+        "progress.refining": "🤔 Refining: {gaps}",
+        "progress.drafting": "✍️ Drafting answer",
+        "progress.done": "Done",
+        "progress.cancelled": "Cancelled",
+        "progress.scoping": "🛰️ Scoping the landscape…",
+        "progress.section": "📝 Section {done}/{total}: {heading}",
+        "progress.weaving": "🧵 Weaving the report together…",
+        "answer.cancelledWithFindings": "Research was cancelled. Findings gathered so far:\n\n{findings}",
+        "answer.cancelledEmpty": "Research was cancelled before an answer could be drafted.",
+        "report.cancelledEmpty": "Research was cancelled before any section completed.",
+        "commands.research.description": "Autonomous web deep-research → a cited answer."
+      },
+      "zh-CN": {
+        "manifest.name": "深度调研",
+        "manifest.description": "自主网页深度调研：搜索 → 阅读 → 推理 → 附引用的答案。提供 /research 命令和 deep_research Agent 工具。",
+        "slash.usage": "用法：\n- `/research <问题>` —— 给出带引用的答案。\n- `/research report <主题>` —— 生成多章节、带引用的研究报告。\n- 在前面加 `quick` 或 `deep` 可缩小或扩大研究预算（例如 `/research deep report <主题>`）。",
+        "card.title": "深度研究",
+        "card.sources": "来源",
+        "card.footer": "{steps} 步 · {tokens} tokens · {note}",
+        "card.noteCancelled": "⚠️ 已取消 —— 仅为部分结果",
+        "card.noteBudget": "⚠️ 在预算限制下作答 —— 可能不完整",
+        "card.noteChecked": "✓ 已核对证据",
+        "report.footer": "{sections} 个章节 · {tokens} tokens · 深度研究报告",
+        "report.footerPartial": "{sections} 个章节 · {tokens} tokens · 深度研究报告 · ⚠️ 部分完成",
+        "error.noProvider": "**深度研究**需要一个 AI 模型提供方。\n\n当前没有可供本插件使用的模型。请在设置中配置提供方后重试。",
+        "error.noAiPermission": "**深度研究**需要「使用 AI 模型」的权限。\n\n研究循环会调用模型改写查询、评估来源并起草答案。请在弹出的授权提示中允许后重试。",
+        "error.webDisabled": "联网工具已关闭，**深度研究**无法运行。\n\n请在设置中启用联网工具后重试。",
+        "error.noSearchProvider": "**深度研究**需要一个网络搜索服务。\n\n请在「设置 → 搜索」中启用一个搜索服务并填写 API Key 后重试。",
+        "error.rateLimited": "**深度研究**触发了联网请求频率限制。\n\n短时间内联网请求过多，请稍候再试。",
+        "error.blocked": "**深度研究**被安全策略拦截。\n\n请求包含敏感数据，或目标地址不被允许访问。",
+        "error.toolUnavailable": "当前运行环境未提供联网搜索/抓取工具，**深度研究**无法运行。",
+        "error.failed": "**深度研究**失败。",
+        "progress.planning": "正在规划研究…",
+        "progress.searching": "🔍 正在搜索：{queries}",
+        "progress.reading": "📖 正在阅读 {count} 个来源",
+        "progress.refining": "🤔 正在补充：{gaps}",
+        "progress.drafting": "✍️ 正在起草答案",
+        "progress.done": "完成",
+        "progress.cancelled": "已取消",
+        "progress.scoping": "🛰️ 正在梳理研究范围…",
+        "progress.section": "📝 第 {done}/{total} 节：{heading}",
+        "progress.weaving": "🧵 正在整合报告…",
+        "answer.cancelledWithFindings": "研究已取消。目前收集到的发现：\n\n{findings}",
+        "answer.cancelledEmpty": "研究在起草答案前已被取消。",
+        "report.cancelledEmpty": "研究在任何章节完成前已被取消。",
+        "commands.research.description": "自主进行网络深度研究，给出带引用的答案。"
+      }
+    }
   }
 }

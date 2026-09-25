@@ -5,8 +5,13 @@ jest.mock("./docx", () => ({
 }))
 
 import type { Artifact, ExportResult } from "@cognia/plugin-sdk"
-import { DOCUMENT_ARTIFACT_KIND } from "./model"
+import manifestJson from "../plugin.json"
+import { importDocx } from "./docx"
+import { createDocument, DOCUMENT_ARTIFACT_KIND } from "./model"
 import { createDocumentsRuntime, normalizeDocxName } from "./runtime"
+
+const EN = manifestJson.i18n.locales.en as Record<string, string>
+const translate = (key: string) => EN[key] ?? key
 
 interface VersionRow {
   id: string
@@ -20,7 +25,16 @@ interface VersionRow {
 function makeCtx() {
   const artifacts = new Map<string, Artifact>()
   const versions = new Map<string, VersionRow[]>()
-  const save = jest.fn(async () => ({ saved: true }))
+  const save = jest.fn(
+    async (): Promise<{
+      saved: boolean
+      platform?: "desktop" | "mobile" | "web"
+      location?: string
+    }> => ({
+      saved: true,
+      platform: "desktop",
+    })
+  )
   const exportSession = jest.fn(async (): Promise<ExportResult> => ({
     success: true,
     blob: new Blob([Uint8Array.from([9, 8, 7])]),
@@ -84,8 +98,18 @@ function makeCtx() {
         return next
       },
     },
-    files: { save },
+    files: {
+      save,
+      readAttachment: jest.fn(async () => ({
+        id: "h1",
+        name: "in.docx",
+        mimeType: "application/octet-stream",
+        size: 3,
+        bytes: Uint8Array.from([1, 2, 3]),
+      })),
+    },
     export: { exportSession },
+    i18n: { t: translate },
   } as never
   return { ctx, artifacts, versions, save, exportSession }
 }
@@ -104,13 +128,93 @@ it("creates, edits, validates, and exports a document artifact", async () => {
     })
   ).resolves.toMatchObject({ version: 2 })
   await expect(runtime.validate("d1")).resolves.toMatchObject({ ok: true })
-  await expect(runtime.exportDocx("d1")).resolves.toMatchObject({ ok: true })
+  await expect(runtime.exportDocx("d1")).resolves.toMatchObject({
+    ok: true,
+    saved: true,
+    platform: "desktop",
+    filename: "Brief.docx",
+    message: expect.stringContaining("save dialog"),
+  })
   const imported = JSON.parse(artifacts.get("d1")!.content)
-  imported.importedFeatures = ["tracked changes"]
+  imported.importedFeatures = ["tracked-changes"]
   artifacts.get("d1")!.content = JSON.stringify(imported)
-  await expect(runtime.exportDocx("d1")).rejects.toThrow("allowUnsupportedFeatureLoss")
+  save.mockClear()
+  await expect(runtime.exportDocx("d1")).resolves.toMatchObject({
+    ok: false,
+    requiresConfirmation: true,
+    unsupportedFeatures: ["tracked-changes"],
+    error: expect.stringContaining("allowUnsupportedFeatureLoss"),
+  })
+  expect(save).not.toHaveBeenCalled()
   await expect(runtime.exportDocx("d1", undefined, true)).resolves.toMatchObject({ ok: true })
   expect(save).toHaveBeenCalled()
+})
+
+it("marks tool-created artifacts as not user-initiated", async () => {
+  const { ctx } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Brief" })
+  const createArtifact = (ctx as unknown as { artifact: { createArtifact: jest.Mock } }).artifact
+    .createArtifact
+  expect(createArtifact.mock.calls[0][0].metadata).toMatchObject({
+    sourceOrigin: "tool",
+    userInitiated: false,
+  })
+})
+
+it("imports DOCX with localized progress and importer labels", async () => {
+  const { ctx } = makeCtx()
+  jest.mocked(importDocx).mockResolvedValueOnce(createDocument("Imported"))
+  const runtime = createDocumentsRuntime(ctx)
+  const reportProgress = jest.fn()
+  await expect(runtime.importDocx({ handle: "h1" }, { reportProgress })).resolves.toMatchObject({
+    ok: true,
+    artifactId: "d1",
+  })
+  expect(reportProgress).toHaveBeenCalledWith(10, "Reading DOCX file")
+  expect(reportProgress).toHaveBeenCalledWith(40, "Parsing DOCX structure")
+  expect(importDocx).toHaveBeenCalledWith(
+    expect.any(Uint8Array),
+    "in.docx",
+    { emptyComment: "(empty comment)", unknownAuthor: "Unknown", untitled: "Document" },
+    undefined
+  )
+})
+
+it("hands a caller-chosen title to the importer, which keeps the file's own Title as content", async () => {
+  const { ctx } = makeCtx()
+  jest.mocked(importDocx).mockResolvedValueOnce(createDocument("Q3 review"))
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.importDocx({ handle: "h1", title: "Q3 review" })
+  expect(importDocx).toHaveBeenLastCalledWith(
+    expect.any(Uint8Array),
+    "in.docx",
+    expect.any(Object),
+    "Q3 review"
+  )
+})
+
+it("tells the model where a mobile export landed and when the user cancelled", async () => {
+  const { ctx, save } = makeCtx()
+  const runtime = createDocumentsRuntime(ctx)
+  await runtime.create({ title: "Plan", text: "x" })
+  save.mockResolvedValueOnce({
+    saved: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/plan.docx",
+  })
+  await expect(runtime.exportDocx("d1", "plan")).resolves.toMatchObject({
+    ok: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/plan.docx",
+    message: expect.stringContaining("Documents/cognia/exports"),
+  })
+  save.mockResolvedValueOnce({ saved: false })
+  await expect(runtime.exportDocx("d1", "plan")).resolves.toMatchObject({
+    ok: false,
+    cancelled: true,
+    saved: false,
+  })
 })
 
 it("propagates setTitle to the artifact title", async () => {
@@ -153,7 +257,7 @@ it("exports a session transcript through the export API and save dialog", async 
   const result = await runtime.exportTranscript({ sessionId: "s1" })
   expect(exportSession).toHaveBeenCalledWith("s1", { format: "docx" })
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: "chat.docx" }))
-  expect(result).toMatchObject({ ok: true, byteLength: 3 })
+  expect(result).toMatchObject({ ok: true, filename: "chat.docx", byteLength: 3 })
 })
 
 it("surfaces transcript export failures", async () => {

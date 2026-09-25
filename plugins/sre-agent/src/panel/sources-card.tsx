@@ -4,11 +4,12 @@ import { useEffect, useState } from "react"
 import { cn } from "@cognia/plugin-ui"
 import type { SreIngestSource, SreIngestStatus } from "../providers/types"
 import type { SreRuntime } from "../runtime"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 const STATUS_TONE: Record<SreIngestStatus, string> = {
-  healthy: "text-green-700 dark:text-green-500",
-  lagging: "text-amber-700 dark:text-amber-500",
+  healthy: "text-success",
+  lagging: "text-warning",
   stalled: "text-destructive",
   static: "text-muted-foreground",
 }
@@ -22,8 +23,9 @@ const STATUS_TONE: Record<SreIngestStatus, string> = {
  * pipeline at all reports `static` with null lag — see the fixture provider.
  */
 export function SourcesCard({ runtime }: { runtime: SreRuntime }) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const [sources, setSources] = useState<SreIngestSource[] | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -32,14 +34,23 @@ export function SourcesCard({ runtime }: { runtime: SreRuntime }) {
       .then((next) => {
         if (!cancelled) setSources(next)
       })
-      .catch(() => {
-        if (!cancelled) setSources([])
+      .catch((error: unknown) => {
+        // Never an empty list: "no sources" and "could not ask" are different
+        // answers, and only one of them means the evidence is trustworthy.
+        if (!cancelled) setFailure(error instanceof Error ? error.message : String(error))
       })
     return () => {
       cancelled = true
     }
   }, [runtime])
 
+  if (failure) {
+    return (
+      <p role="alert" className="text-xs text-destructive" data-testid="sre-sources-error">
+        {t("sources.failed", { message: failure })}
+      </p>
+    )
+  }
   if (!sources) return null
 
   return (
@@ -48,7 +59,7 @@ export function SourcesCard({ runtime }: { runtime: SreRuntime }) {
       <ul className="divide-y">
         {sources.map((source) => (
           <li key={source.id} className="flex items-center gap-2 py-1.5" data-testid="sre-source">
-            <span className="min-w-0 flex-1 truncate text-xs">
+            <span className="min-w-0 flex-1 text-xs break-words">
               {source.label}
               <span className="ml-1.5 text-muted-foreground">{source.pipeline}</span>
             </span>

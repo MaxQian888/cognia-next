@@ -9,7 +9,8 @@ import { Input } from "@cognia/plugin-ui"
 import { Label } from "@cognia/plugin-ui"
 import { cn } from "@cognia/plugin-ui"
 import type { ScanOptions } from "../types"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 interface Props {
   scanning: boolean
@@ -29,7 +30,7 @@ export function ScanForm({
   onStart,
   onCancel,
 }: Props) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const [target, setTarget] = useState(defaultTarget ?? "")
   const [model, setModel] = useState(defaultModel ?? "")
   const [apiKey, setApiKey] = useState("")
@@ -110,8 +111,8 @@ export function ScanForm({
         </CollapsibleContent>
       </Collapsible>
 
-      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2">
-        <p className="text-xs text-amber-700 dark:text-amber-400">{t("form.authWarning")}</p>
+      <div className="rounded-md border border-warning/40 bg-warning/10 p-2">
+        <p className="text-xs text-warning-foreground dark:text-warning">{t("form.authWarning")}</p>
         <label className="mt-2 flex items-start gap-2 text-sm">
           <Checkbox
             checked={authorized}

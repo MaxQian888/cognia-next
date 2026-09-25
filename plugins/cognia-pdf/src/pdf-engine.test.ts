@@ -10,7 +10,14 @@ jest.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
 const globalScope = globalThis as { __COGNIA_PDF_WORKER_URL__?: string }
 const workerUrl = "/_cognia/builtin-plugins/_shared/pdf.worker.test.mjs"
 
-import { extractPdfPages, fillPdfFields, inspectPdf, isSignedPdf } from "./pdf-engine"
+import {
+  extractPdfPages,
+  fillPdfFields,
+  inspectPdf,
+  isRenderCancelled,
+  isSignedPdf,
+  openPdfForRender,
+} from "./pdf-engine"
 
 interface MockWidget {
   id: string
@@ -420,5 +427,66 @@ describe("PDF engine public file seam", () => {
     // Partial names plus a lone trailing '/' exercise the index-window boundary.
     const miss = new TextEncoder().encode("/Typo /Signature %PDF body /")
     expect(isSignedPdf(miss)).toBe(false)
+  })
+})
+
+describe("PDF canvas render session", () => {
+  function installRenderable() {
+    const render = jest.fn((_options: { canvas: unknown; viewport: { width: number } }) => ({
+      promise: Promise.resolve(),
+      cancel: jest.fn(),
+    }))
+    const destroy = jest.fn(async () => undefined)
+    getDocument.mockImplementation(() => ({
+      promise: Promise.resolve({
+        numPages: 3,
+        getPage: jest.fn(async () => ({
+          getViewport: ({ scale }: { scale: number }) => ({
+            width: 600 * scale,
+            height: 800 * scale,
+          }),
+          render,
+        })),
+        destroy,
+      }),
+    }))
+    return { render, destroy }
+  }
+
+  it("paints a page at the requested CSS width and device pixel ratio", async () => {
+    const { render, destroy } = installRenderable()
+    const session = await openPdfForRender(Uint8Array.from([1]))
+    expect(session.pageCount).toBe(3)
+    const canvas = {
+      width: 0,
+      height: 0,
+      style: { width: "", height: "" },
+    } as unknown as HTMLCanvasElement
+    await expect(session.renderPage(2, canvas, { cssWidth: 300, pixelRatio: 2 })).resolves.toEqual({
+      cssWidth: 300,
+      cssHeight: 400,
+    })
+    expect(canvas.width).toBe(600)
+    expect(canvas.height).toBe(800)
+    expect(canvas.style.width).toBe("300px")
+    expect(canvas.style.height).toBe("400px")
+    expect(render.mock.calls[0][0].viewport.width).toBe(600)
+    expect(workerOptions.workerSrc).toBe(workerUrl)
+    await session.destroy()
+    expect(destroy).toHaveBeenCalled()
+  })
+
+  it("rejects out-of-range pages and recognises cancelled renders", async () => {
+    installRenderable()
+    const session = await openPdfForRender(Uint8Array.from([1]))
+    const canvas = { style: {} } as unknown as HTMLCanvasElement
+    await expect(session.renderPage(0, canvas, { cssWidth: 100, pixelRatio: 1 })).rejects.toThrow(
+      "out of range"
+    )
+    await expect(session.renderPage(4, canvas, { cssWidth: 100, pixelRatio: 1 })).rejects.toThrow(
+      "out of range"
+    )
+    expect(isRenderCancelled({ name: "RenderingCancelledException" })).toBe(true)
+    expect(isRenderCancelled(new Error("boom"))).toBe(false)
   })
 })

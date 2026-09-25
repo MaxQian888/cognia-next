@@ -51,6 +51,9 @@ export function buildEngineDeps(ctx: PluginContext, options: BuildDepsOptions = 
       warn: (message, ...args) => ctx.logger.warn(message, ...args),
     },
     ...(options.reportProgress ? { reportProgress: options.reportProgress } : {}),
+    // The engine's progress cards and cancellation text, in the user's
+    // language, from the plugin's own i18n bundle.
+    text: (key, params) => ctx.i18n.t(key, params),
     ...(options.signal ? { signal: options.signal } : {}),
   }
 }

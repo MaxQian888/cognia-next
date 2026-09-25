@@ -30,6 +30,11 @@ export interface TopicRow {
   score?: number
   status: TopicStatus
   createdAt: number
+  /**
+   * The Writer session opened for this topic, recorded once it has actually
+   * started — how a saved draft finds its way back to the conversation.
+   */
+  sessionId?: string
 }
 
 export interface ResearchRow {
@@ -157,8 +162,10 @@ export function buildTopicRow(c: CandidateInput, source: string): TopicRow {
 export interface PipelineDb {
   saveTopics(candidates: CandidateInput[], source: string): Promise<TopicRow[]>
   listTopics(status?: TopicStatus): Promise<TopicRow[]>
-  setTopicStatus(id: string, status: TopicStatus): Promise<void>
+  /** Set a topic's status; `sessionId` records the Writer session it went to. */
+  setTopicStatus(id: string, status: TopicStatus, sessionId?: string): Promise<void>
   saveResearch(row: Omit<ResearchRow, "id" | "createdAt">): Promise<ResearchRow>
+  listResearch(): Promise<ResearchRow[]>
   saveDraft(
     row: Omit<DraftRow, "id" | "createdAt" | "status"> & { status?: DraftStatus }
   ): Promise<DraftRow>
@@ -182,8 +189,8 @@ export function createPipelineDb(dexie: PluginDexieAPI): PipelineDb {
       const filtered = status ? all.filter((t) => t.status === status) : all
       return filtered.sort((a, b) => b.createdAt - a.createdAt)
     },
-    async setTopicStatus(id, status) {
-      await topics().update(id, { status })
+    async setTopicStatus(id, status, sessionId) {
+      await topics().update(id, sessionId ? { status, sessionId } : { status })
     },
     async saveResearch(row) {
       const full: ResearchRow = { ...row, id: genId("research"), createdAt: Date.now() }
@@ -200,6 +207,10 @@ export function createPipelineDb(dexie: PluginDexieAPI): PipelineDb {
       }
       await drafts().put(full)
       return full
+    },
+    async listResearch() {
+      const all = await research().toArray()
+      return all.sort((a, b) => b.createdAt - a.createdAt)
     },
     async listDrafts() {
       const all = await drafts().toArray()

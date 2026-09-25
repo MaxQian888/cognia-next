@@ -1,5 +1,5 @@
 import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
-import type { VisualizationSpec } from "./model"
+import { VISUALIZATION_PROFILES, type VisualizationSpec } from "./model"
 import { createVisualizeRuntime, type VisualizePluginContext } from "./runtime"
 
 export const VISUALIZE_TOOL_NAMES = [
@@ -11,7 +11,11 @@ export const VISUALIZE_TOOL_NAMES = [
   "visualize_validate",
   "visualize_preview",
   "visualize_export",
+  "visualize_export_report",
 ] as const
+
+/** A save dialog stays open while the user decides — outlast the 30 s default. */
+const FILE_DIALOG_TIMEOUT_MS = 120_000
 const artifactId = { type: "string", minLength: 1 } as const
 const artifactOnly = {
   type: "object",
@@ -24,7 +28,14 @@ const specSchema = {
   properties: {
     title: { type: "string", minLength: 1 },
     description: { type: "string" },
-    profile: { type: "string" },
+    profile: {
+      type: "string",
+      enum: [...VISUALIZATION_PROFILES],
+      description:
+        "sankey/network/process need source+target per data point; timeline/gantt need start " +
+        "(end optional); scatter plots x/y (else index/value); heatmap is group × label; " +
+        "for a histogram, bin the values first and use bar.",
+    },
     data: {
       type: "array",
       minItems: 1,
@@ -65,7 +76,7 @@ export function createVisualizeTools(ctx: VisualizePluginContext): PluginToolReg
       name: VISUALIZE_TOOL_NAMES[0],
       definition: {
         name: VISUALIZE_TOOL_NAMES[0],
-        description: "Recommend one of 22 visualization profiles for an analytical intent.",
+        description: `Recommend one of the ${VISUALIZATION_PROFILES.length} visualization profiles for an analytical intent.`,
         parametersSchema: {
           type: "object",
           properties: { intent: { type: "string", minLength: 1 } },
@@ -102,14 +113,31 @@ export function createVisualizeTools(ctx: VisualizePluginContext): PluginToolReg
       name: VISUALIZE_TOOL_NAMES[3],
       definition: {
         name: VISUALIZE_TOOL_NAMES[3],
-        description: "List this plugin's visualization artifacts, optionally scoped to a session.",
+        description:
+          "List this plugin's visualization artifacts in the current session (or another " +
+          "session by id; allSessions lists every session).",
         parametersSchema: {
           type: "object",
-          properties: { sessionId: { type: "string" } },
+          properties: {
+            sessionId: {
+              type: "string",
+              minLength: 1,
+              description: "Defaults to the calling session.",
+            },
+            allSessions: {
+              type: "boolean",
+              description: "List visualizations from every session instead of one.",
+            },
+          },
           additionalProperties: false,
         },
       },
-      execute: async (args) => runtime.list(args as { sessionId?: string }),
+      execute: async (args, tc) => {
+        const input = args as { sessionId?: string; allSessions?: boolean }
+        return runtime.list({
+          sessionId: input.allSessions ? undefined : (input.sessionId ?? tc.sessionId),
+        })
+      },
     }),
     definePluginTool({
       name: VISUALIZE_TOOL_NAMES[4],
@@ -130,7 +158,12 @@ export function createVisualizeTools(ctx: VisualizePluginContext): PluginToolReg
       },
       execute: async (args) =>
         runtime.update(
-          args as { artifactId: string; expectedVersion: number; spec: VisualizationSpec }
+          args as {
+            artifactId: string
+            expectedVersion: number
+            spec: VisualizationSpec
+            changeDescription?: string
+          }
         ),
     }),
     definePluginTool({
@@ -155,22 +188,64 @@ export function createVisualizeTools(ctx: VisualizePluginContext): PluginToolReg
       name: VISUALIZE_TOOL_NAMES[7],
       definition: {
         name: VISUALIZE_TOOL_NAMES[7],
-        description: "Export the validated visualization as SVG, HTML, or JSON.",
+        description:
+          "Export the validated visualization as SVG, HTML, or JSON. Desktop shows a save " +
+          "dialog, mobile saves to Documents/cognia/exports, web downloads it; relay the " +
+          "returned message to the user.",
         parametersSchema: {
           type: "object",
           properties: {
             artifactId,
             format: { enum: ["svg", "html", "json"] },
-            suggestedName: { type: "string" },
+            suggestedName: {
+              type: "string",
+              description: "File name without a path; the format's extension is enforced.",
+            },
           },
           required: ["artifactId", "format"],
           additionalProperties: false,
         },
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
       },
       execute: async (args) =>
         runtime.export(
           args as { artifactId: string; format: "svg" | "html" | "json"; suggestedName?: string }
         ),
+    }),
+    definePluginTool({
+      name: VISUALIZE_TOOL_NAMES[8],
+      definition: {
+        name: VISUALIZE_TOOL_NAMES[8],
+        description:
+          "Export every visualization in a chat session as one standalone HTML report and save " +
+          "it (same save behavior as visualize_export).",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            sessionId: {
+              type: "string",
+              minLength: 1,
+              description: "Defaults to the calling session.",
+            },
+            suggestedName: {
+              type: "string",
+              description: "File name without a path; .html is enforced.",
+            },
+          },
+          additionalProperties: false,
+        },
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
+      },
+      execute: async (args, tc) => {
+        const input = args as { sessionId?: string; suggestedName?: string }
+        const sessionId = input.sessionId ?? tc.sessionId
+        if (!sessionId)
+          return {
+            ok: false as const,
+            error: "No chat session to report on: pass sessionId when calling outside a session.",
+          }
+        return runtime.exportReport({ sessionId, suggestedName: input.suggestedName })
+      },
     }),
   ]
 }

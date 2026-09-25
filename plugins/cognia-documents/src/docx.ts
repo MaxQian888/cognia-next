@@ -6,6 +6,50 @@ interface ImportedCommentInfo {
   paraId?: string
 }
 
+/**
+ * Localized strings the importer writes into the model. They become document
+ * content the user reads (comment bodies, authors, the fallback title), so the
+ * caller resolves them through `ctx.i18n.t` instead of baking in English.
+ */
+export interface DocxImportLabels {
+  /** Body of a Word comment that carried no text. */
+  emptyComment: string
+  /** Author of a Word comment that carried no author. */
+  unknownAuthor: string
+  /** Title when neither the package, the body, nor the filename supplies one. */
+  untitled: string
+}
+
+export const DEFAULT_DOCX_IMPORT_LABELS: DocxImportLabels = {
+  emptyComment: "(empty comment)",
+  unknownAuthor: "Unknown",
+  untitled: "Document",
+}
+
+/**
+ * Stable ids for the native features the model cannot round-trip. The ids are
+ * what `importedFeatures` stores; the preview localizes them through
+ * `feature.<id>` keys, and the export guard lists them to the model.
+ */
+export const DOCX_FEATURE_IDS = [
+  "tracked-changes",
+  "document-protection",
+  "images",
+  "hyperlinks",
+  "drawings",
+  "embedded-objects",
+  "footnotes",
+  "endnotes",
+  "headers-footers",
+  "fields",
+  "content-controls",
+  "section-page-setup",
+  "embedded-external-content",
+  "merged-table-cells",
+  "page-breaks",
+] as const
+export type DocxFeatureId = (typeof DOCX_FEATURE_IDS)[number]
+
 type DocxFileChild = import("docx").FileChild
 type DocxParagraphChild = import("docx").ParagraphChild
 
@@ -17,7 +61,10 @@ interface ZipLike {
 
 export async function importDocx(
   bytes: Uint8Array,
-  filename = "document.docx"
+  filename = "document.docx",
+  labels: DocxImportLabels = DEFAULT_DOCX_IMPORT_LABELS,
+  /** A caller-chosen title; wins over the file's own. */
+  titleOverride?: string
 ): Promise<DocumentModel> {
   const JSZip = (await import("jszip")).default
   const zip = await JSZip.loadAsync(bytes)
@@ -31,13 +78,39 @@ export async function importDocx(
   const commentDone = await readResolvedCommentParaIds(zip)
   const coreTitle = await readCoreTitle(zip)
 
-  const title = coreTitle || filename.replace(/\.docx$/i, "") || "Document"
+  const commentIdsByBlock = new Map<number, number[]>()
+  const scanned = scanBody(xml, numbering, commentIdsByBlock)
+
+  // `exportDocx` writes the model title as the body's first paragraph (Word's
+  // "Title" style) AND into core.xml. Reading that paragraph back as a heading
+  // block duplicated the title on every round trip, so a leading Title
+  // paragraph is the document title, not content. Its comments stay: they
+  // fall through to the first surviving block below.
+  const leadingTitle = scanned.titleParagraph
+  const leadingText = leadingTitle?.text.trim() ?? ""
+  const override = titleOverride?.trim() ?? ""
+  const title =
+    override || leadingText || coreTitle || filename.replace(/\.docx$/i, "") || labels.untitled
   const model = createDocument(title)
   model.sourceFilename = filename
   model.importedFeatures = features
-
-  const commentIdsByBlock = new Map<number, number[]>()
-  model.blocks = scanBody(xml, numbering, commentIdsByBlock)
+  model.blocks = scanned.blocks
+  // The Title paragraph is dropped only because it becomes the model title.
+  // Kept as content when it would otherwise vanish: a caller-chosen title
+  // replaces it, or it is the only block the file's comments could sit on.
+  // `b0`: parsed block ids start at `b1`.
+  const titleBlock: DocumentBlock | null = leadingText
+    ? { id: "b0", type: "heading", level: 1, text: leadingText }
+    : null
+  const hasUnanchoredComment = [...comments.keys()].some(
+    (commentId) => ![...commentIdsByBlock.values()].some((ids) => ids.includes(commentId))
+  )
+  if (
+    titleBlock &&
+    ((override && override !== leadingText) || (!model.blocks.length && hasUnanchoredComment))
+  ) {
+    model.blocks = [titleBlock, ...model.blocks]
+  }
   let commentSequence = 1
   for (const [blockIndex, commentIds] of commentIdsByBlock) {
     const block = model.blocks[blockIndex]
@@ -48,8 +121,8 @@ export async function importDocx(
       model.comments.push({
         id: `m${commentSequence++}`,
         blockId: block.id,
-        text: info.text || "(empty comment)",
-        author: info.author || "Unknown",
+        text: info.text || labels.emptyComment,
+        author: info.author || labels.unknownAuthor,
         resolved: info.paraId ? commentDone.has(info.paraId) : false,
       })
     }
@@ -64,8 +137,8 @@ export async function importDocx(
     model.comments.push({
       id: `m${commentSequence++}`,
       blockId,
-      text: info.text || "(empty comment)",
-      author: info.author || "Unknown",
+      text: info.text || labels.emptyComment,
+      author: info.author || labels.unknownAuthor,
       resolved: info.paraId ? commentDone.has(info.paraId) : false,
     })
   }
@@ -281,32 +354,54 @@ function revisionRuns(
 // Import — feature detection
 // ---------------------------------------------------------------------------
 
-async function detectFeatures(zip: ZipLike, documentXml: string): Promise<string[]> {
-  const features: string[] = []
+async function detectFeatures(zip: ZipLike, documentXml: string): Promise<DocxFeatureId[]> {
+  const features: DocxFeatureId[] = []
   const names = Object.keys(zip.files)
   const has = (prefix: string) => names.some((name) => name.startsWith(prefix))
-  if (/<w:(ins|del|moveFrom|moveTo)\b/.test(documentXml)) features.push("tracked changes")
+  if (/<w:(ins|del|moveFrom|moveTo)\b/.test(documentXml)) features.push("tracked-changes")
   const settings = zip.file("word/settings.xml")
   if (settings && /<w:documentProtection\b/.test(await settings.async("string")))
-    features.push("document protection")
+    features.push("document-protection")
   if (has("word/media/")) features.push("images")
   if (/<w:hyperlink\b/.test(documentXml)) features.push("hyperlinks")
   if (/<w:(drawing|pict)\b/.test(documentXml)) features.push("drawings")
-  if (has("word/embeddings/") || has("word/diagrams/")) features.push("embedded objects")
-  if (zip.file("word/footnotes.xml")) features.push("footnotes")
-  if (zip.file("word/endnotes.xml")) features.push("endnotes")
+  if (has("word/embeddings/") || has("word/diagrams/")) features.push("embedded-objects")
+  // Word (and the `docx` writer this plugin exports with) always ships
+  // footnotes.xml / endnotes.xml holding only the separator notes, so the part
+  // existing says nothing. Only a real note reference in the body, or a note
+  // that is not a separator, is content the model would drop.
+  if (await hasRealNotes(zip, documentXml, "footnote")) features.push("footnotes")
+  if (await hasRealNotes(zip, documentXml, "endnote")) features.push("endnotes")
   if (names.some((name) => /^word\/(header|footer)\d*\.xml$/.test(name)))
-    features.push("headers/footers")
-  if (/<w:(instrText|fldSimple)\b|<w:fldChar\b/.test(documentXml))
-    features.push("fields (TOC, cross-references)")
-  if (/<w:sdt\b/.test(documentXml)) features.push("content controls")
+    features.push("headers-footers")
+  if (/<w:(instrText|fldSimple)\b|<w:fldChar\b/.test(documentXml)) features.push("fields")
+  if (/<w:sdt\b/.test(documentXml)) features.push("content-controls")
   // Every body ends with one sectPr (page setup) — only flag real section
   // breaks, where layout actually varies across the document.
-  if ((documentXml.match(/<w:sectPr\b/g) ?? []).length > 1) features.push("section page setup")
-  if (/<w:altChunk\b/.test(documentXml)) features.push("embedded external content")
-  if (/<w:(gridSpan|vMerge)\b/.test(documentXml)) features.push("merged table cells")
-  if (/<w:br[^>]*w:type="page"/.test(documentXml)) features.push("page breaks")
+  if ((documentXml.match(/<w:sectPr\b/g) ?? []).length > 1) features.push("section-page-setup")
+  if (/<w:altChunk\b/.test(documentXml)) features.push("embedded-external-content")
+  if (/<w:(gridSpan|vMerge)\b/.test(documentXml)) features.push("merged-table-cells")
+  if (/<w:br[^>]*w:type="page"/.test(documentXml)) features.push("page-breaks")
   return features
+}
+
+/** Note types Word uses for the separator lines, never for user content. */
+const SEPARATOR_NOTE_TYPES = new Set(["separator", "continuationSeparator", "continuationNotice"])
+
+async function hasRealNotes(
+  zip: ZipLike,
+  documentXml: string,
+  kind: "footnote" | "endnote"
+): Promise<boolean> {
+  if (new RegExp(`<w:${kind}Reference\\b`).test(documentXml)) return true
+  const part = zip.file(`word/${kind}s.xml`)
+  if (!part) return false
+  const xml = await part.async("string")
+  for (const match of xml.matchAll(new RegExp(`<w:${kind}\\b([^>]*?)(/?)>`, "g"))) {
+    const type = attr(match[1], "w:type")
+    if (!type || !SEPARATOR_NOTE_TYPES.has(type)) return true
+  }
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +444,7 @@ async function readComments(zip: ZipLike): Promise<Map<number, ImportedCommentIn
     const id = Number.parseInt(attr(match[1], "w:id") ?? "", 10)
     if (!Number.isFinite(id)) continue
     comments.set(id, {
-      author: attr(match[1], "w:author") ?? "Unknown",
+      author: attr(match[1], "w:author") ?? "",
       text: extractParagraphText(match[2]).join("\n"),
       paraId: attr(match[1], "w14:paraId"),
     })
@@ -394,9 +489,11 @@ function scanBody(
   documentXml: string,
   numbering: NumberingInfo,
   commentIdsByBlock: Map<number, number[]>
-): DocumentBlock[] {
+): { blocks: DocumentBlock[]; titleParagraph?: { text: string } } {
   const body = /<w:body\b[^>]*>([\s\S]*)<\/w:body>/.exec(documentXml)?.[1] ?? documentXml
   const blocks: DocumentBlock[] = []
+  let titleParagraph: { text: string } | undefined
+  let sawContent = false
   const scanRegion = (region: string): void => {
     TOP_LEVEL_ELEMENT.lastIndex = 0
     let match: RegExpExecArray | null
@@ -408,13 +505,22 @@ function scanBody(
       if (tag === "p") {
         const block = parseParagraph(slice, numbering, blocks.length)
         if (block) {
-          const anchors = commentAnchors(slice)
-          if (anchors.length) commentIdsByBlock.set(blocks.length, anchors)
-          blocks.push(block)
+          const leading = !sawContent
+          sawContent = true
+          if (leading && block.type !== "table" && isTitleParagraph(slice)) {
+            titleParagraph = { text: block.text }
+          } else {
+            const anchors = commentAnchors(slice)
+            if (anchors.length) commentIdsByBlock.set(blocks.length, anchors)
+            blocks.push(block)
+          }
         }
       } else if (tag === "tbl") {
         const block = parseTable(slice, blocks.length)
-        if (block) blocks.push(block)
+        if (block) {
+          sawContent = true
+          blocks.push(block)
+        }
       } else if (tag === "sdt") {
         const content = /<w:sdtContent\b[^>]*>([\s\S]*?)<\/w:sdtContent>/.exec(slice)?.[1]
         if (content) scanRegion(content)
@@ -423,7 +529,15 @@ function scanBody(
     }
   }
   scanRegion(body)
-  return blocks
+  // Block ids follow document order; the consumed title paragraph shifted
+  // nothing because ids are assigned from `blocks.length` at parse time.
+  return { blocks, titleParagraph }
+}
+
+/** A paragraph styled with Word's built-in "Title" style (not "Subtitle"). */
+function isTitleParagraph(paragraphXml: string): boolean {
+  const pPr = /<w:pPr\b[^>]*>([\s\S]*?)<\/w:pPr>/.exec(paragraphXml)?.[1] ?? ""
+  return /^title$/i.test(/<w:pStyle\b[^>]*?w:val="([^"]+)"/.exec(pPr)?.[1] ?? "")
 }
 
 /** End offset (exclusive) of the element whose open tag starts at `from`. */

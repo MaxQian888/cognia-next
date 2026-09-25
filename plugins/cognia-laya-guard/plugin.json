@@ -1,12 +1,14 @@
 {
   "id": "cognia-laya-guard",
   "name": "Laya (local System-1)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Local System-1 decisions via the laya checkpoint: moderates inbound connector (IM) messages for spam/threat/harassment/toxic in one ~60 ms forward pass — no LLM call, en+zh via the laya Router.",
+  "descriptionKey": "manifest.description",
   "type": "python",
   "capabilities": ["python", "tools", "hooks", "decision-provider"],
   "pythonMain": "main.py",
-  "bundle_include": ["layaguard/__init__.py", "layaguard/engine.py", "README.md"],
+  "bundle_include": ["layaguard/__init__.py", "layaguard/engine.py", "pyproject.toml", "README.md"],
   "pythonVenv": "isolated",
   "pythonDependencies": ["laya==0.3.5"],
   "activationEvents": ["startup"],
@@ -77,11 +79,12 @@
       "description": "Answers typed questions with the local laya checkpoint (en + zh via the laya Router). Runs on this computer."
     }
   ],
-  "permissions": ["python:execute", "network:fetch", "decisions:provide"],
+  "permissions": ["python:execute", "network:fetch", "decisions:provide", "connectors:read"],
   "permissionJustifications": {
     "python:execute": "The plugin's hooks and tools run in the desktop Python host.",
     "network:fetch": "First use downloads the laya checkpoint weights (~1.3 GB) from HuggingFace; they are cached locally afterwards.",
-    "decisions:provide": "Offers the local laya checkpoint as a System-1 decision provider you can select in Settings → Conversation; nothing is sent to it until you pick it."
+    "decisions:provide": "Offers the local laya checkpoint as a System-1 decision provider you can select in Settings → Conversation; nothing is sent to it until you pick it.",
+    "connectors:read": "The onConnectorInbound hook reads the text of every inbound IM message (Lark/Slack/Discord/Telegram) to score it locally for spam/threat/harassment/toxic. The text never leaves this computer."
   },
   "networkAccess": {
     "allowedDomains": ["huggingface.co", "*.huggingface.co", "*.hf.co", "hf-mirror.com"]
@@ -149,10 +152,24 @@
   "i18n": {
     "locales": {
       "en": {
-        "decisionProvider.label": "Laya (local)"
+        "manifest.name": "Laya (local System-1)",
+        "manifest.description": "Local System-1 decisions via the laya checkpoint: moderates inbound connector (IM) messages for spam/threat/harassment/toxic in one ~60 ms forward pass — no LLM call, en+zh via the laya Router.",
+        "decisionProvider.label": "Laya (local)",
+        "inbound.observeNote": "laya observe mode · threshold {threshold}",
+        "inbound.truncatedNote": "message truncated to the head window",
+        "status.loading": "laya checkpoint is loading",
+        "status.notLoaded": "laya checkpoint is not loaded",
+        "status.retrying": "{message} (retrying in {seconds} s)"
       },
       "zh-CN": {
-        "decisionProvider.label": "Laya（本地）"
+        "manifest.name": "Laya（本地 System-1）",
+        "manifest.description": "借助 laya 检查点在本地做 System-1 决策：一次约 60 毫秒的前向推理即可审核入站 IM 消息中的垃圾、威胁、骚扰与恶意内容——无需调用大模型，经 laya Router 支持中英文。",
+        "decisionProvider.label": "Laya（本地）",
+        "inbound.observeNote": "laya 观察模式 · 阈值 {threshold}",
+        "inbound.truncatedNote": "消息过长，仅检测了开头部分",
+        "status.loading": "laya 模型正在加载",
+        "status.notLoaded": "laya 模型尚未加载",
+        "status.retrying": "{message}（{seconds} 秒后重试）"
       }
     }
   }

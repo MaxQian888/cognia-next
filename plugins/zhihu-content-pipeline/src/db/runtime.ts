@@ -1,19 +1,29 @@
 /**
- * Runtime singleton for the plugin's Dexie-backed pipeline DB.
+ * Runtime handles for the review modal.
  *
- * `ctx.dexie` is only available inside `activate()`, but the review modal (a
- * plugin React component with no `ctx`) needs to read the same namespaced
- * tables. activate() publishes the handle here; the modal reads it via
- * `getPipelineDb()` (and `useLiveQuery` over its queries for reactivity). The
- * plugin is bundled into the app, so this module singleton is shared across
- * the plugin's code at runtime.
+ * `ctx` exists only inside `activate()`, but the review modal (a plugin React
+ * component that receives `PluginModalProps` alone) needs the pipeline tables
+ * and a few host calls. `activate()` publishes them here and `deactivate()`
+ * clears them, so a disabled plugin's modal cannot keep writing.
  */
 
-import type { PluginDexieAPI, PluginSessionAPI } from "@cognia/plugin-sdk"
+import type {
+  PluginClipboardAPI,
+  PluginDexieAPI,
+  PluginSessionAPI,
+  PluginUIAPI,
+} from "@cognia/plugin-sdk"
 import { createPipelineDb, type PipelineDb } from "./tables"
 
+/** The host calls the review modal makes — nothing more. */
+export interface ReviewHost {
+  session: Pick<PluginSessionAPI, "startSeededSession" | "switchSession">
+  clipboard: Pick<PluginClipboardAPI, "writeText">
+  ui: Pick<PluginUIAPI, "navigate" | "showToast">
+}
+
 let pipelineDb: PipelineDb | null = null
-let pluginSession: PluginSessionAPI | null = null
+let reviewHost: ReviewHost | null = null
 
 /** Publish (or clear) the pipeline DB from a live `ctx.dexie` handle. */
 export function setPipelineDbFromDexie(dexie: PluginDexieAPI | undefined | null): void {
@@ -25,15 +35,10 @@ export function getPipelineDb(): PipelineDb | null {
   return pipelineDb
 }
 
-export function setPluginSession(session: PluginSessionAPI | null): void {
-  pluginSession = session
+export function setReviewHost(host: ReviewHost | null): void {
+  reviewHost = host
 }
 
-export function getPluginSession(): PluginSessionAPI | null {
-  return pluginSession
-}
-
-/** Test-only: inject a fake DB. */
-export function __setPipelineDbForTesting(next: PipelineDb | null): void {
-  pipelineDb = next
+export function getReviewHost(): ReviewHost | null {
+  return reviewHost
 }

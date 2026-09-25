@@ -1,88 +1,68 @@
 /**
- * Backend Refactor Suite — entry point.
+ * Go Backend Refactor Suite — entry point.
  *
- * A first-party plugin that packages a reusable backend-refactoring
- * development system out of cognia-next's own features:
+ * A first-party plugin that packages a reusable refactoring system for Go
+ * backends out of cognia-next's own features:
  *  - **role characters** (character-pack) — analyst / architect / refactorer /
  *    tester / reviewer / doc-writer.
  *  - **agent.turn** (custom workflow node) — a synchronous, tool-enabled,
- *    cwd-scoped Claude turn (the only path that actually edits code; reuses
- *    `runAndCaptureAssistantReply`). Registered via `ctx.workflow.registerNode`.
+ *    cwd-scoped Claude turn (the only path that actually edits code).
+ *  - **pipeline.stop** (custom workflow node) — ends a give-up path as a
+ *    FAILED run with its reason.
  *  - **skills**, **subagents**, a **review-board team template**, and the
- *    **backend-refactor-pipeline** workflow template (added across M3/M4).
+ *    **Go backend refactor pipeline** workflow template.
  *
- * Lifecycle: declarative manifest entries (characterPacks / skills / subagents
- * / agentTeamTemplates / workflowTemplates) are picked up by the plugin
- * manager's OVERLAY_REGISTRY dispatch loop on enable. We additionally register
- * the character pack imperatively here for dev hot-reload coherence (mirrors
- * `cognia-character-seeds`), and the custom workflow node imperatively because
- * node executors carry a runtime `execute` fn that the manifest can't hold.
+ * Lifecycle: the declarative contributions (characterPacks / skills /
+ * subagents / agentTeamTemplates / workflowTemplates) ride the manifest and
+ * are registered by the plugin manager's overlay dispatch on enable — the
+ * plugin never registers them a second time. Only the two workflow nodes are
+ * registered imperatively, because a node executor carries a runtime
+ * `execute` fn that the manifest can't hold.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { PLUGIN_ID } from "./ids"
-import { I18N_MESSAGES } from "./i18n"
+import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 import { REFACTOR_ROLE_PACK } from "./characters/pack"
 import { createAgentTurnNode } from "./nodes/agent-turn"
+import { createPipelineStopNode } from "./nodes/stop"
 import { REFACTOR_SKILLS } from "./skills/definitions"
 import { REFACTOR_SUBAGENTS } from "./subagents/definitions"
 import { REVIEW_BOARD_TEMPLATE } from "./team/template"
 import { REFACTOR_PIPELINE_TEMPLATE } from "./workflow/template"
-/**
- * Disposer for the custom workflow node. The plugin manager also tears down
- * a plugin's node registrations on disable (`teardownPluginWorkflowRegistrations`),
- * so calling this in deactivate is belt-and-suspenders — it stays correct
- * under dev hot-reload where the manager teardown may not run.
- */
-let disposeAgentTurn: (() => void) | null = null
 
-const definition: PluginDefinition = {
-  manifest: {
-    id: PLUGIN_ID,
-    name: "Backend Refactor Suite",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: [
-      "character-pack",
-      "workflow",
-      "skills",
-      "subagent",
-      "agent-team-template",
-      "workflow-template",
-    ],
-    main: "src/index.ts",
-    permissions: ["agent:control"],
-    characterPacks: [REFACTOR_ROLE_PACK],
-    skills: REFACTOR_SKILLS,
-    subagents: REFACTOR_SUBAGENTS,
-    agentTeamTemplates: [REVIEW_BOARD_TEMPLATE],
-    workflowTemplates: [REFACTOR_PIPELINE_TEMPLATE],
-    i18n: { locales: I18N_MESSAGES },
-  } as never,
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  characterPacks: [REFACTOR_ROLE_PACK],
+  skills: REFACTOR_SKILLS,
+  subagents: REFACTOR_SUBAGENTS,
+  agentTeamTemplates: [REVIEW_BOARD_TEMPLATE],
+  workflowTemplates: [REFACTOR_PIPELINE_TEMPLATE],
+})
+
+export default definePlugin({
+  manifest,
   activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("backend-refactor plugin activated")
-    // Imperative registration mirrors the declarative manifest so the pack
-    // is present under dev hot-reload before the manifest walker runs.
-    ctx.characterPacks.register(REFACTOR_ROLE_PACK)
-    // The agent.turn node carries a runtime `execute`, so it can't ride the
-    // declarative manifest path — register it through the first-class plugin
-    // node API (auto-prefixes the kind, adds the editor palette entry).
-    disposeAgentTurn = ctx.workflow.registerNode(
-      createAgentTurnNode({
-        tauri: ctx.capabilities.tauri,
-        runCharacterTurn: ctx.agent.runCharacterTurn,
-      })
+    // Registered through the first-class plugin node API (auto-prefixes the
+    // kind, adds the editor palette entry). The disposers go on the
+    // activation's lifecycle ledger; the manager also tears a plugin's nodes
+    // down on disable.
+    ctx.lifecycle.onDispose(
+      ctx.workflow.registerNode(
+        createAgentTurnNode({
+          tauri: ctx.capabilities.tauri,
+          runCharacterTurn: ctx.agent.runCharacterTurn,
+        })
+      ),
+      "cognia-backend-refactor:agent-turn-node"
     )
-    // The agent.turn catalog entry only exists after the line above, so the
+    ctx.lifecycle.onDispose(
+      ctx.workflow.registerNode(createPipelineStopNode()),
+      "cognia-backend-refactor:pipeline-stop-node"
+    )
+    // The node catalog entries only exist after the lines above, so the
     // workflow-template `requires.pluginNodeKinds` check can lag depending on
     // enable-order. Refresh now so the pipeline template's warning reflects
-    // the just-registered node regardless of dispatch order.
+    // the just-registered nodes regardless of dispatch order.
     ctx.workflow.refreshTemplateWarnings()
   },
-  deactivate: async () => {
-    disposeAgentTurn?.()
-    disposeAgentTurn = null
-  },
-}
-
-export default definition
+})

@@ -5,7 +5,24 @@ import {
   buildScheduleDigest,
   createScheduleDigestBot,
   describeScheduleDigest,
+  type DigestTranslate,
 } from "./bot"
+import manifestJson from "../plugin.json"
+
+type Locale = keyof typeof manifestJson.i18n.locales
+
+/** `ctx.i18n.t` over the plugin's own bundle, failing loudly on a missing key. */
+function translator(locale: Locale = "en"): DigestTranslate {
+  const bundle = manifestJson.i18n.locales[locale] as Record<string, string>
+  return (key, params) => {
+    const value = bundle[key]
+    if (value === undefined) throw new Error(`missing ${locale} key ${key}`)
+    return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : match
+    )
+  }
+}
+const t = translator()
 
 const NOW = 1_700_000_000_000
 const DAY = 24 * 60 * 60_000
@@ -88,15 +105,30 @@ describe("buildScheduleDigest", () => {
 
 describe("describeScheduleDigest", () => {
   it("always states the active count", () => {
-    expect(describeScheduleDigest({ total: 3, active: 1, paused: 0, stale: [], failing: [] })).toBe(
-      "1 active of 3"
-    )
+    expect(
+      describeScheduleDigest({ total: 3, active: 1, paused: 0, stale: [], failing: [] }, t)
+    ).toBe("1 active of 3")
   })
 
   it("mentions only the problems that exist", () => {
     expect(
-      describeScheduleDigest({ total: 3, active: 2, paused: 1, stale: ["a"], failing: ["b"] })
+      describeScheduleDigest({ total: 3, active: 2, paused: 1, stale: ["a"], failing: ["b"] }, t)
     ).toBe("2 active of 3, 1 paused, 1 failing, 1 stale")
+  })
+
+  it("speaks the user's language", () => {
+    expect(
+      describeScheduleDigest(
+        { total: 3, active: 2, paused: 1, stale: [], failing: [] },
+        translator("zh-CN")
+      )
+    ).toBe("共 3 个任务，2 个运行中，1 个已暂停")
+  })
+
+  it("ships every en key in zh-CN", () => {
+    expect(Object.keys(manifestJson.i18n.locales["zh-CN"]).sort()).toEqual(
+      Object.keys(manifestJson.i18n.locales.en).sort()
+    )
   })
 })
 
@@ -125,13 +157,14 @@ describe("createScheduleDigestBot", () => {
     // when the run started, not a fresh snapshot of a schedule that moved.
     const run = jest.fn(async (_name: string, fn: () => unknown) => fn())
     const listTasks = jest.fn(async () => [task()])
-    const handler = createScheduleDigestBot({ listTasks, now: () => NOW })
+    const handler = createScheduleDigestBot({ t, listTasks, now: () => NOW })
     await handler(context({ step: { run } as unknown as BotRunContextV1["step"] }))
     expect(run).toHaveBeenCalledWith("read-schedule", expect.any(Function))
   })
 
   it("returns a summary and the structured digest", async () => {
     const handler = createScheduleDigestBot({
+      t,
       listTasks: async () => [task(), task({ id: "b", status: "paused" })],
       now: () => NOW,
     })
@@ -144,6 +177,7 @@ describe("createScheduleDigestBot", () => {
 
   it("takes the stale window from the installation's config", async () => {
     const handler = createScheduleDigestBot({
+      t,
       listTasks: async () => [task({ lastRunAt: new Date(NOW - 5 * DAY) })],
       now: () => NOW,
     })
@@ -156,6 +190,7 @@ describe("createScheduleDigestBot", () => {
     // hand-edited config, must not turn the window into NaN and mark
     // everything stale.
     const handler = createScheduleDigestBot({
+      t,
       listTasks: async () => [task({ lastRunAt: new Date(NOW - DAY) })],
       now: () => NOW,
     })
@@ -166,6 +201,7 @@ describe("createScheduleDigestBot", () => {
   it("logs a warning when something is failing, and stays quiet when nothing is", async () => {
     const log = jest.fn()
     const failing = createScheduleDigestBot({
+      t,
       listTasks: async () => [task({ consecutiveFailures: 2 })],
       now: () => NOW,
     })
@@ -175,7 +211,7 @@ describe("createScheduleDigestBot", () => {
     })
 
     const quiet = jest.fn()
-    const healthy = createScheduleDigestBot({ listTasks: async () => [task()], now: () => NOW })
+    const healthy = createScheduleDigestBot({ t, listTasks: async () => [task()], now: () => NOW })
     await healthy(context({ log: quiet }))
     expect(quiet).not.toHaveBeenCalled()
   })
@@ -185,6 +221,7 @@ describe("createScheduleDigestBot", () => {
     // "nothing is scheduled" is a materially different answer from "I could
     // not look".
     const handler = createScheduleDigestBot({
+      t,
       listTasks: async () => {
         throw new Error("scheduler-tools is not active")
       },

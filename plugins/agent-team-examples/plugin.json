@@ -1,19 +1,43 @@
 {
   "id": "cognia-agent-team-examples",
   "name": "Agent Team Examples",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Reference subagents and team templates demonstrating Agent Team plugin extensibility (ADR-0032).",
+  "description": "Example plugin (opt-in): reference subagents, team templates, and demo shared-memory / balance adapters showing Agent Team plugin extensibility (ADR-0032). Enable it from the Plugins page to try them; nothing here is on by default.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["subagent", "agent-team-template", "shared-memory-adapter", "balance-adapter"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
-  "activationEvents": ["startup"],
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Agent Team Examples",
+        "manifest.description": "Example plugin (opt-in): reference subagents, team templates, and demo shared-memory / balance adapters showing Agent Team plugin extensibility (ADR-0032). Enable it from the Plugins page to try them; nothing here is on by default."
+      },
+      "zh-CN": {
+        "manifest.name": "Agent 团队示例",
+        "manifest.description": "示例插件（需手动开启）：提供参考子代理、团队模板，以及演示用的共享记忆与余额适配器，展示 Agent 团队的插件扩展能力（ADR-0032）。在插件页启用后即可试用，默认不会开启任何内容。"
+      }
+    }
   }
 }

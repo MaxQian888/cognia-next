@@ -1,4 +1,3 @@
-import type { FullPluginContext } from "@cognia/plugin-sdk/context"
 import {
   evidenceText,
   isSensitiveFieldName,
@@ -26,11 +25,6 @@ import type {
   SreTraceFilter,
 } from "./providers/types"
 
-export interface SrePluginContext {
-  pluginId: string
-  logger?: FullPluginContext["logger"]
-}
-
 /**
  * Public aliases for the tool-facing input names.
  *
@@ -42,12 +36,27 @@ export type SreQueryLogsInput = SreLogFilter
 export type SreQueryTraceInput = SreTraceFilter
 export type SreQueryMetricsInput = SreMetricFilter
 
+/**
+ * Where a result's records came from. `"demo-corpus"` is the bundled recording
+ * (`SreProviderKind` `"fixture"`) — never the user's systems — and is stamped
+ * on every result so neither the agent nor a reader of the tool output can
+ * mistake it for live evidence.
+ */
+export type SreDataSource = "demo-corpus" | "live"
+
+/** What the agent reads next to demo records. English: it is model-facing. */
+export const DEMO_CORPUS_NOTICE =
+  "DEMO CORPUS: these records come from a bundled recording of one 2026-08 Qwen timeout incident, not from the user's systems. Say so in your answer."
+
 export interface SreQueryResult<T extends SreEvidence> {
   ok: true
   records: T[]
   evidenceIds: string[]
   /** Id of the backend that answered, whatever kind it is. */
   provider: string
+  dataSource: SreDataSource
+  /** Present exactly when `dataSource` is `"demo-corpus"`. */
+  notice?: string
   /**
    * The fixture corpus behind the answer — present only when a fixture actually
    * answered. A remote provider leaves it off rather than naming a corpus that
@@ -59,6 +68,8 @@ export interface SreQueryResult<T extends SreEvidence> {
 export interface SreProviderInfo {
   id: string
   kind: SreProviderKind
+  /** True for the bundled demo corpus — the panel labels itself from this. */
+  demo: boolean
   coverage: SreTimeRange | null
 }
 
@@ -122,7 +133,7 @@ function assertWindow(input: { environment: string; startTime: string; endTime: 
  * empty investigation and look broken. An unbounded backend gets the last hour.
  */
 export function defaultIncidentWindow(
-  provider: SreLogProvider = createFixtureProvider()
+  provider: Pick<SreLogProvider, "coverage"> = createFixtureProvider()
 ): SreTimeRange {
   const coverage = provider.coverage()
   if (coverage) return coverage
@@ -142,11 +153,9 @@ export function defaultIncidentWindow(
  * sensitive-field gate on aggregates. The provider owns only "where records
  * come from".
  */
-export function createSreRuntime(
-  _ctx: SrePluginContext,
-  provider: SreLogProvider = createFixtureProvider()
-): SreRuntime {
+export function createSreRuntime(provider: SreLogProvider = createFixtureProvider()): SreRuntime {
   const evidencePool = new Map<string, SreEvidence>()
+  const demo = provider.kind === "fixture"
   const remember = <T extends SreEvidence>(records: T[]): SreQueryResult<T> => {
     const redacted = records.map((record) => redactSensitiveValue(record) as T)
     for (const record of redacted) evidencePool.set(record.id, record)
@@ -155,7 +164,8 @@ export function createSreRuntime(
       records: redacted,
       evidenceIds: redacted.map((record) => record.id),
       provider: provider.id,
-      ...(provider.kind === "fixture" ? { fixture: provider.id } : {}),
+      dataSource: demo ? "demo-corpus" : "live",
+      ...(demo ? { fixture: provider.id, notice: DEMO_CORPUS_NOTICE } : {}),
     }
   }
 
@@ -166,7 +176,12 @@ export function createSreRuntime(
   }
 
   return {
-    provider: () => ({ id: provider.id, kind: provider.kind, coverage: provider.coverage() }),
+    provider: () => ({
+      id: provider.id,
+      kind: provider.kind,
+      demo,
+      coverage: provider.coverage(),
+    }),
 
     queryLogs: async (input) => {
       assertWindow(input)

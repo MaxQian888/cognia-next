@@ -21,7 +21,7 @@ import type { PdfPluginContext } from "./runtime"
 
 function stubContext(overrides: Partial<PdfPluginContext> = {}): PdfPluginContext {
   return {
-    pluginId: "cognia-pdf",
+    i18n: { t: (key: string) => key },
     artifact: {
       createArtifact: jest.fn(async () => "pdf-1"),
       openArtifact: jest.fn(),
@@ -62,6 +62,34 @@ it("exposes the complete PDF tool contract with closed schemas", () => {
       type: "object",
       additionalProperties: false,
     })
+})
+
+it("gives dialog, processing, and OCR tools budgets beyond the 30s default", () => {
+  const tools = createPdfTools(stubContext())
+  const timeouts = Object.fromEntries(tools.map((tool) => [tool.name, tool.definition.timeoutMs]))
+  expect(timeouts).toMatchObject({
+    pdf_import: 120_000,
+    pdf_fill_form: 120_000,
+    pdf_extract_pages: 120_000,
+    pdf_extract_text: 300_000,
+    pdf_validate: 120_000,
+    pdf_export: 120_000,
+  })
+  expect(tools.every((tool) => !("pluginId" in tool))).toBe(true)
+})
+
+it("describes form values with anyOf instead of a type array carrying items", () => {
+  const fill = createPdfTools(stubContext()).find((tool) => tool.name === "pdf_fill_form")!
+  const values = (
+    fill.definition.parametersSchema as {
+      properties: { values: { additionalProperties: Record<string, unknown> } }
+    }
+  ).properties.values.additionalProperties
+  expect(values).not.toHaveProperty("type")
+  expect(values).not.toHaveProperty("items")
+  expect(values).toEqual({
+    anyOf: [{ type: "string" }, { type: "boolean" }, { type: "array", items: { type: "string" } }],
+  })
 })
 
 it("routes pdf_extract_text through the OCR surface with page range and format", async () => {

@@ -1,67 +1,69 @@
 /**
- * Goal Insights — built-in reference plugin for the goal lifecycle hooks.
+ * Goal Insights — opt-in EXAMPLE plugin for the goal lifecycle hooks.
  *
- * Ships a `hooks` block on its `PluginDefinition` (registered by the manager
- * on enable, dispatched by `lib/plugin/messaging/hooks-system.ts`). Reacts to
- * `onGoalCreate` / `onGoalComplete` by recording a redacted snapshot — proving
- * the new goal hooks fire end-to-end with a real enable-able plugin.
+ * This is author reference material, not a product feature, and is labelled
+ * that way on all three axes:
+ *   - documented here and at {@link GOAL_INSIGHTS_EXAMPLE};
+ *   - labelled in the UI: the plugin's name and description say "(example)"
+ *     and that it adds no UI;
+ *   - pinned by `index.test.ts` (no `startup` activation, no UI contribution).
  *
- * The hook payload carries only `safeObjective` (the redacted text), never the
- * raw objective — so this demo can never observe stripped PII.
+ * It is not enabled for anyone who did not turn it on. The host's own /goals
+ * console already shows goal activity and analytics, so a plugin panel here
+ * would only duplicate it; the example's observable effect is one redacted
+ * line per event in this plugin's log (Plugins → Goal Insights → Logs).
+ *
+ * Hooks are REGISTERED by returning them from activate() (the manager captures
+ * the return value). The payload carries only `safeObjective` (the redacted
+ * text), never the raw objective, so the example can never observe stripped
+ * PII. Nothing is kept in memory — there is no unbounded log to grow.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import type { GoalHookPayload, PluginHooksAll } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import {
+  definePlugin,
+  definePluginManifest,
+  type GoalHookPayload,
+  type PluginContext,
+  type PluginHooksAll,
+} from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-// In-memory log of observed goal events. Exported for tests; in a real plugin
-// this might drive a dashboard or push a metric.
-interface GoalInsightEntry {
-  kind: "created" | "completed"
-  goalId: string
-  status: string
-  safeObjective: string
-  turnsUsed: number
+/**
+ * Marker for the plugin's status: an example that demonstrates the goal hooks
+ * and contributes no UI. Tests assert against it so the example cannot quietly
+ * start auto-enabling or grow a surface without this changing too.
+ */
+export const GOAL_INSIGHTS_EXAMPLE = {
+  example: true,
+  surface: "plugin-log",
+} as const
+
+/** Longest objective excerpt written to the log. */
+export const OBJECTIVE_EXCERPT_LIMIT = 120
+
+export const manifest = definePluginManifest(manifestJson)
+
+function excerpt(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim()
+  return flat.length > OBJECTIVE_EXCERPT_LIMIT
+    ? `${flat.slice(0, OBJECTIVE_EXCERPT_LIMIT - 1)}…`
+    : flat
 }
 
-const insights: GoalInsightEntry[] = []
-
-/** Test/inspection accessor — the recorded insight log. */
-export function getGoalInsights(): readonly GoalInsightEntry[] {
-  return insights
+/** The hook block, bound to the activation's logger. */
+export function createGoalInsightHooks(logger: PluginContext["logger"]): PluginHooksAll {
+  const record = (kind: "created" | "completed", goal: GoalHookPayload): void => {
+    logger.info(
+      `goal ${kind}: ${goal.goalId} status=${goal.status} turns=${goal.turnsUsed} objective="${excerpt(goal.safeObjective)}"`
+    )
+  }
+  return {
+    onGoalCreate: (goal) => record("created", goal),
+    onGoalComplete: (goal) => record("completed", goal),
+  }
 }
 
-/** Test-only reset. */
-export function __resetGoalInsightsForTesting(): void {
-  insights.length = 0
-}
-
-function record(kind: "created" | "completed", goal: GoalHookPayload): void {
-  insights.push({
-    kind,
-    goalId: goal.goalId,
-    status: goal.status,
-    safeObjective: goal.safeObjective,
-    turnsUsed: goal.turnsUsed,
-  })
-}
-
-const hooks: PluginHooksAll = {
-  onGoalCreate: (goal) => record("created", goal),
-  onGoalComplete: (goal) => record("completed", goal),
-}
-
-const definition: PluginDefinition = {
-  manifest: manifest as never,
-  // Hooks are REGISTERED by returning them from activate() (the manager
-  // captures the return value) — `PluginDefinition` has no static `hooks` field.
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("goal-insights activated (listening for goal lifecycle hooks)")
-    return hooks
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("goal-insights deactivated")
-  },
-}
-
-export default definition
+export default definePlugin({
+  manifest,
+  activate: async (ctx: PluginContext) => createGoalInsightHooks(ctx.logger),
+})

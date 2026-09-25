@@ -1,8 +1,10 @@
 {
   "id": "cognia-workspace-tools",
   "name": "Workspace Tools",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Filesystem and project-aware helpers for plugin authors.",
+  "description": "Read-only agent tools and workflow nodes for the open project: list a folder, read a text file, and regex-search text files. Paths are confined to the active project root; desktop only.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "workflow"],
   "main": "src/index.ts",
@@ -15,12 +17,41 @@
   "permissions": ["filesystem:read"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Reads the open project's files through the desktop host; a browser tab has no project filesystem."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
     "mobile": {
-      "availability": "degraded",
-      "entrypoint": "src/index.ts",
-      "reason": "Capacitor filesystem is restricted to app-scoped paths on mobile; arbitrary workspace paths are unavailable."
+      "availability": "blocked",
+      "reason": "The mobile shell has no open project folder to read; its filesystem is limited to app-scoped storage."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Workspace Tools",
+        "manifest.description": "Read-only agent tools and workflow nodes for the open project: list a folder, read a text file, and regex-search text files. Paths are confined to the active project root; desktop only.",
+        "workflow.nodes.action.listFiles.label": "List workspace files",
+        "workflow.nodes.action.listFiles.description": "List immediate children of a workspace directory.",
+        "workflow.nodes.action.readFile.label": "Read workspace file",
+        "workflow.nodes.action.readFile.description": "Read a UTF-8 text file from the workspace.",
+        "workflow.nodes.action.search.label": "Search workspace",
+        "workflow.nodes.action.search.description": "Search workspace files for a regular-expression pattern."
+      },
+      "zh-CN": {
+        "manifest.name": "工作区工具",
+        "manifest.description": "面向已打开项目的只读 Agent 工具和工作流节点：列出文件夹、读取文本文件、用正则搜索文本文件。路径限制在当前项目根目录内；仅限桌面端。",
+        "workflow.nodes.action.listFiles.label": "列出工作区文件",
+        "workflow.nodes.action.listFiles.description": "列出工作区某个文件夹下的直接子项。",
+        "workflow.nodes.action.readFile.label": "读取工作区文件",
+        "workflow.nodes.action.readFile.description": "读取工作区中的 UTF-8 文本文件。",
+        "workflow.nodes.action.search.label": "搜索工作区",
+        "workflow.nodes.action.search.description": "用正则表达式搜索工作区文件。"
+      }
     }
   }
 }

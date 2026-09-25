@@ -1,9 +1,11 @@
 {
   "id": "pagerduty",
   "name": "PagerDuty",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "type": "frontend",
   "description": "Verified PagerDuty incident webhooks, incident actions, and an on-call responder Bot that triages incidents and posts findings back as notes.",
+  "descriptionKey": "manifest.description",
   "author": "Cognia Official",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -11,15 +13,13 @@
     "cognia": ">=0.1.0"
   },
   "main": "src/index.ts",
-  "activationEvents": ["startup"],
   "capabilities": ["integrations", "bot", "character-pack"],
   "permissions": [
     "integrations:read",
     "integrations:events",
     "integrations:execute",
     "integrations:manage",
-    "agent:control",
-    "network:fetch"
+    "agent:control"
   ],
   "runtimeCompatibility": {
     "tauri": {
@@ -37,6 +37,22 @@
     "mobile": {
       "availability": "degraded",
       "reason": "Webhook ingress and Bot runs require a Desktop or Headless host."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "PagerDuty",
+        "manifest.description": "Verified PagerDuty incident webhooks, incident actions, and an on-call responder Bot that triages incidents and posts findings back as notes.",
+        "approval.postNote.title": "Post triage note to incident {incidentId}?",
+        "approval.postNote.message": "The note was drafted by the on-call responder character from read-only evidence. Approving authorizes exactly this incident note through the PagerDuty account."
+      },
+      "zh-CN": {
+        "manifest.name": "PagerDuty",
+        "manifest.description": "经过验证的 PagerDuty 事件 Webhook、事件操作，以及一个值班响应机器人：分诊事件并把结论作为备注回写。",
+        "approval.postNote.title": "要将分诊备注发布到事件 {incidentId} 吗？",
+        "approval.postNote.message": "此备注由值班响应角色根据只读证据起草。批准后，将仅通过该 PagerDuty 账户发布这一条事件备注。"
+      }
     }
   }
 }

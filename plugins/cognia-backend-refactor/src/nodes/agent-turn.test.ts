@@ -9,7 +9,11 @@
  */
 
 import type { StepExecutionContext } from "@cognia/plugin-sdk"
-import { createAgentTurnNode, executeAgentTurn as executeAgentTurnWithRuntime } from "./agent-turn"
+import {
+  AGENT_TURN_PERMISSION_MODE,
+  createAgentTurnNode,
+  executeAgentTurn as executeAgentTurnWithRuntime,
+} from "./agent-turn"
 import { roleCharacterId } from "../characters/pack"
 
 const mRun = jest.fn()
@@ -125,15 +129,29 @@ describe("executeAgentTurn", () => {
     expect(mRun).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 30_000 }))
   })
 
-  it("asks for bypassPermissions at the call site, not on the character", async () => {
-    // The headless runner has no UI to answer a permission prompt, so the
-    // bypass must be applied — but ONLY here. Pinning it at the call site is
-    // what keeps it off the character definitions, where it would also cover
-    // ordinary interactive chat (see characters/pack.test.ts).
+  it("asks for dontAsk at the call site, not on the character", async () => {
+    // dontAsk runs only the role's pre-approved tools and denies the rest
+    // without prompting — the least privilege an unattended turn can work
+    // with. Pinning it at the call site keeps it off the character
+    // definitions, where it would also cover interactive chat.
     await executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
-    expect(mRun).toHaveBeenCalledWith(
-      expect.objectContaining({ permissionMode: "bypassPermissions" })
-    )
+    expect(mRun).toHaveBeenCalledWith(expect.objectContaining({ permissionMode: "dontAsk" }))
+    expect(AGENT_TURN_PERMISSION_MODE).toBe("dontAsk")
+  })
+
+  it("fails the step when the unattended turn had tools turned away", async () => {
+    mRun.mockResolvedValueOnce({
+      sessionId: "s",
+      text: "partial",
+      status: "needs_approval",
+      needsApproval: [
+        { requestId: "r1", toolName: "WebFetch", at: 1, reason: "denied" },
+        { requestId: "r2", toolName: "WebFetch", at: 2, reason: "denied" },
+      ],
+    })
+    await expect(
+      executeAgentTurn(makeCtx({ prompt: "go", cwd: "/repo", role: "refactorer" }))
+    ).rejects.toThrow(/needed tools .*\(WebFetch\)/)
   })
 })
 

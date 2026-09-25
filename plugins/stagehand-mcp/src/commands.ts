@@ -16,7 +16,6 @@
 
 import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 import { StagehandSetupModal } from "./ui/setup-modal"
-import { I18N_MESSAGES } from "./i18n"
 
 /**
  * Preset ids the `/stagehand <arg>` shorthand can focus, and the words that
@@ -37,34 +36,18 @@ const FOCUS_ALIASES: Record<string, string> = {
 }
 
 /**
- * Resolve a plugin i18n key for command feedback. Prefers `ctx.i18n.t` (the
- * host-merged bundle under `plugin.<id>.*`, resolved against the ACTIVE
- * locale); falls back to the raw module bundle so the command still answers
- * in contexts where the manifest i18n merge has not run (bare contexts,
- * tests). Never hardcode a locale.
- */
-function t(ctx: PluginContext, key: string): string {
-  const viaHost = ctx.i18n?.t?.(key)
-  if (viaHost && viaHost !== key) return viaHost
-  const locale = ctx.i18n?.getCurrentLocale?.() ?? "en"
-  const bundles = I18N_MESSAGES as Record<string, Record<string, string>>
-  return bundles[locale]?.[key] ?? bundles.en[key] ?? key
-}
-
-/**
  * Handle the plugin's DECLARED `/stagehand` command (plugin.json
  * `commands[]`). `/stagehand` alone opens the guide; `/stagehand hosted` /
  * `cloud` / `local` / `stdio` additionally highlights that preset card.
  * Returns `null` when the command isn't ours so the host keeps dispatching.
  */
 export function handleStagehandCommand(
-  ctx: PluginContext,
+  ctx: Pick<PluginContext, "modal" | "i18n">,
   command: string,
   args?: string[]
 ): PluginCommandResult | null {
   if (command !== "stagehand") return null
-  if (!ctx.modal?.openModal) return { handled: true, message: t(ctx, "command.noModal") }
   const focus = args?.[0] ? FOCUS_ALIASES[args[0].toLowerCase()] : undefined
   ctx.modal.openModal(StagehandSetupModal, focus ? { focus } : undefined, { size: "lg" })
-  return { handled: true, message: t(ctx, "command.opened") }
+  return { handled: true, message: ctx.i18n.t("command.opened") }
 }

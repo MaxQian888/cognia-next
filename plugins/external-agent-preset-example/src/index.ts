@@ -12,13 +12,14 @@
  *
  * Registration is fully declarative — the plugin manager's capability dispatch
  * loops read the manifest arrays, so no imperative activate() wiring is needed.
+ *
+ * Installable, not bundled into the app: `node build.mjs` emits CommonJS
+ * `dist/index.js` (the manifest `main`) and `dist/context-provider.js` (the
+ * provider `entry`) plus an install ZIP, with the SDK left to the host.
  */
 
-import type {
-  PluginDefinition,
-  PluginManifest,
-  PluginExternalAgentPresetDef,
-} from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import type { PluginExternalAgentPresetDef } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
 /** Re-exported from the JSON so callers/tests share one source of truth. */
@@ -51,7 +52,7 @@ const examplePreset: PluginExternalAgentPresetDef = {
  * this plugin is deliberately unbundled), so declaring the arrays only in TS
  * meant this reference plugin registered nothing in any runtime.
  */
-export const manifest = manifestJson as unknown as PluginManifest
+export const manifest = definePluginManifest(manifestJson)
 
 /**
  * Typed mirror of the plugin.json preset entry. Exported so the co-located
@@ -61,10 +62,8 @@ export const manifest = manifestJson as unknown as PluginManifest
  */
 export const TYPED_CONTRIBUTIONS = { preset: examplePreset } as const
 
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   // Declarative registration (manifest arrays are dispatched by the manager).
   activate: async () => {},
-}
-
-export default definition
+})

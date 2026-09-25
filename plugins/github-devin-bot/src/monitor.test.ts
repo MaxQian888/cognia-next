@@ -1,5 +1,5 @@
 import { monitor } from "./monitor"
-import { fixture, issue, NOW, pr, SHA } from "./test-fixtures"
+import { fixture, issue, NOW, pr, SHA } from "./devin-bot.test-helpers"
 import { workId } from "./github"
 
 function polling(mode: "implement" | "review" | "repair" = "implement") {

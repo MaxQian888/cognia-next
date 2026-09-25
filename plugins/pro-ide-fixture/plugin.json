@@ -1,8 +1,10 @@
 {
   "id": "cognia-pro-ide-fixture",
   "name": "Pro IDE Contribution (fixture)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Fixture plugin that exercises the managed Pro IDE pathway end to end (ADR-0088): manifest.ide → normalizeIdeManifest → signed proxy VSIX → side-load → broker handshake → contribution render → provider round-trip. Contributes one command and one CodeLens provider that annotates the first line of any file with a lens whose click invokes that command. Use it to verify the whole chain without needing a real third-party plugin.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["editor"],
   "main": "src/index.ts",
@@ -53,6 +55,18 @@
     "mobile": {
       "availability": "blocked",
       "reason": "The managed Pro IDE proxy pathway requires the embedded code-server — unavailable on mobile."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Pro IDE Contribution (fixture)",
+        "manifest.description": "Fixture plugin that exercises the managed Pro IDE pathway end to end (ADR-0088): manifest.ide → normalizeIdeManifest → signed proxy VSIX → side-load → broker handshake → contribution render → provider round-trip. Contributes one command and one CodeLens provider that annotates the first line of any file with a lens whose click invokes that command. Use it to verify the whole chain without needing a real third-party plugin."
+      },
+      "zh-CN": {
+        "manifest.name": "Pro IDE 贡献（测试夹具）",
+        "manifest.description": "端到端验证托管 Pro IDE 通路（ADR-0088）的夹具插件：manifest.ide → normalizeIdeManifest → 签名代理 VSIX → 侧载 → 代理握手 → 贡献渲染 → 提供方往返。贡献一条命令和一个 CodeLens 提供方，在任意文件第一行显示可点击触发该命令的 CodeLens。无需真实第三方插件即可验证整条链路。"
+      }
     }
   }
 }

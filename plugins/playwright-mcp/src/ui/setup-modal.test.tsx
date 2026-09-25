@@ -2,13 +2,37 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { registerPluginI18n, unregisterPluginI18n } from "@cognia/plugin-sdk/api/i18n"
 import { Dialog } from "@cognia/plugin-ui"
+import manifestJson from "../../plugin.json"
+import { PLUGIN_ID } from "../ids"
 import { PlaywrightSetupModal } from "./setup-modal"
-import { setPluginShell } from "../runtime"
+import { setSetupModalHost, type SetupModalHost } from "../runtime"
 
-jest.mock("next-intl", () => ({ useLocale: () => "zh-CN" }))
-const mockPush = jest.fn()
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: mockPush }) }))
+const EN = manifestJson.i18n.locales.en
+const ZH = manifestJson.i18n.locales["zh-CN"]
+
+/**
+ * Register the plugin's own bundle the way the manager does on enable. The
+ * test host renders in English, so the Chinese bundle is registered as the
+ * active locale's to prove every string comes from the bundle rather than
+ * from a literal in the component.
+ */
+function registerBundle(locale: Record<string, string>): void {
+  registerPluginI18n({
+    pluginId: PLUGIN_ID,
+    messages: {
+      en: Object.fromEntries(
+        Object.entries(locale).map(([key, value]) => [`plugin.${PLUGIN_ID}.${key}`, value])
+      ),
+    },
+  })
+}
+
+const navigate = jest.fn(() => true)
+function publishHost(shell?: SetupModalHost["shell"]): void {
+  setSetupModalHost({ shell: shell ?? { execute: jest.fn() }, navigate })
+}
 
 const renderModal = (args?: Record<string, unknown>, onClose = jest.fn()) =>
   // The host mounts plugin modals inside <Dialog><DialogContent>; the bare
@@ -28,9 +52,12 @@ const okShell = () => ({
   })),
 })
 
+beforeEach(() => registerBundle(ZH))
+
 afterEach(() => {
-  setPluginShell(undefined)
-  mockPush.mockClear()
+  setSetupModalHost(undefined)
+  unregisterPluginI18n(PLUGIN_ID)
+  navigate.mockClear()
 })
 
 describe("PlaywrightSetupModal", () => {
@@ -53,14 +80,30 @@ describe("PlaywrightSetupModal", () => {
     expect(screen.getByText(/browser_run_code_unsafe/)).toBeInTheDocument()
   })
 
-  it("deep-links a mode into the MCP gallery and closes", () => {
+  it("renders English from the same bundle", () => {
+    registerBundle(EN)
+    renderModal()
+    expect(screen.getByRole("heading", { name: EN["modal.title"] })).toBeInTheDocument()
+  })
+
+  it("deep-links a mode into the MCP gallery through ctx.ui.navigate and closes", () => {
+    publishHost()
     const onClose = jest.fn()
     renderModal(undefined, onClose)
     fireEvent.click(screen.getByTestId("setup-playwright-cdp"))
     // The `?preset=` param is the MCP panel's deep-link contract — pinned so
     // a rename there fails loudly here rather than silently 404ing users.
-    expect(mockPush).toHaveBeenCalledWith("/settings?section=mcp&preset=playwright-cdp")
+    expect(navigate).toHaveBeenCalledWith("/settings?section=mcp&preset=playwright-cdp")
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps every action at least 36px tall on narrow touch screens", () => {
+    publishHost()
+    renderModal()
+    for (const button of screen.getAllByRole("button")) {
+      if (button.getAttribute("data-slot") === "dialog-close") continue
+      expect(button.className).toMatch(/(^|\s)h-9(\s|$)/)
+    }
   })
 
   it("highlights the card named by the focus arg", () => {
@@ -73,7 +116,7 @@ describe("PlaywrightSetupModal", () => {
 
   it("runs node/npx version checks and reports the toolchain versions", async () => {
     const shell = okShell()
-    setPluginShell(shell as never)
+    publishHost(shell)
     renderModal()
     fireEvent.click(screen.getByTestId("env-check-run"))
     await waitFor(() => expect(screen.getByText(/v22\.11\.0/)).toBeInTheDocument())
@@ -83,27 +126,27 @@ describe("PlaywrightSetupModal", () => {
   })
 
   it("reports missing when the toolchain check exits non-zero", async () => {
-    setPluginShell({
+    publishHost({
       execute: jest.fn(async () => ({
         code: 127,
         success: false,
         stdout: "",
         stderr: "not found",
       })),
-    } as never)
+    })
     renderModal()
     fireEvent.click(screen.getByTestId("env-check-run"))
     await waitFor(() => expect(screen.getByText(/未找到 Node\.js 或 npx/)).toBeInTheDocument())
   })
 
   it("reports an error when the command is denied or throws", async () => {
-    setPluginShell({ execute: jest.fn(async () => Promise.reject(new Error("denied"))) } as never)
+    publishHost({ execute: jest.fn(async () => Promise.reject(new Error("denied"))) })
     renderModal()
     fireEvent.click(screen.getByTestId("env-check-run"))
     await waitFor(() => expect(screen.getByText(/检查未能执行/)).toBeInTheDocument())
   })
 
-  it("shows the unavailable state and hides the button when no shell API is published", () => {
+  it("shows the unavailable state and hides the button when the plugin host is not published", () => {
     renderModal()
     expect(screen.queryByTestId("env-check-run")).not.toBeInTheDocument()
     expect(screen.getByText(/无法执行检查/)).toBeInTheDocument()

@@ -3,9 +3,11 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { ScanConsole } from "./scan-console"
+import { registerStrixBundle, unregisterStrixBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 describe("ScanConsole", () => {
   it("shows the empty state until output streams in", () => {

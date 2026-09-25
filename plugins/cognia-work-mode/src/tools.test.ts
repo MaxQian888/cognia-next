@@ -12,7 +12,7 @@ jest.mock("./runtime", () => ({
   createWorkRuntime: () => mockRuntime,
 }))
 
-import { createWorkTools, WORK_TOOL_NAMES } from "./tools"
+import { createWorkTools, WORK_TOOL_NAMES, WORK_TOOL_TIMEOUTS_MS } from "./tools"
 
 const context = (overrides: Partial<PluginToolContext> = {}): PluginToolContext => ({
   config: {},
@@ -33,6 +33,19 @@ describe("createWorkTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual(WORK_TOOL_NAMES)
     expect(tools.map((tool) => tool.definition.name)).toEqual(WORK_TOOL_NAMES)
     expect(tools.every((tool) => tool.definition.parametersSchema.type === "object")).toBe(true)
+    // The host assigns ownership; a tool must not claim a pluginId itself.
+    expect(tools.every((tool) => !Object.hasOwn(tool, "pluginId"))).toBe(true)
+  })
+
+  it("budgets the tools that run subagents past the 30 s default", () => {
+    const tools = createWorkTools({ pluginId: "cognia-work-mode" } as unknown as WorkPluginContext)
+    const timeouts = Object.fromEntries(tools.map((tool) => [tool.name, tool.definition.timeoutMs]))
+    expect(timeouts).toEqual({
+      work_create_deliverable: WORK_TOOL_TIMEOUTS_MS.create,
+      work_update_deliverable: undefined,
+      work_review_deliverable: WORK_TOOL_TIMEOUTS_MS.review,
+      work_parallelize: WORK_TOOL_TIMEOUTS_MS.parallelize,
+    })
   })
 
   it("forwards create/update inputs and optional message ownership", async () => {

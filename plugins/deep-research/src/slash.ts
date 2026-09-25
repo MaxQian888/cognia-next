@@ -17,15 +17,6 @@ import { buildEngineDeps } from "./runtime"
 import { resolveConfig, type ResearchDepth } from "./tool"
 import type { ResearchMode } from "./types"
 
-const USAGE =
-  "Usage:\n" +
-  "- `/research <question>` — a cited answer.\n" +
-  "- `/research report <topic>` — a multi-section cited report.\n" +
-  "- Prefix with `quick` or `deep` to shrink or raise the research budget " +
-  "(e.g. `/research deep report <topic>`).\n\n" +
-  "（用法：`/research <问题>` 给出带引用的答案；`/research report <主题>` 生成多章节研究报告；" +
-  "可加 `quick`/`deep` 前缀调整预算。）"
-
 export interface ParsedResearchArgs {
   topic: string
   mode: ResearchMode
@@ -60,8 +51,9 @@ export async function handleResearchSlash(
   args: string,
   commandContext?: PluginCommandContext
 ): Promise<PluginCommandResult> {
+  const t = ctx.i18n.t
   const parsed = parseResearchArgs(args)
-  if (!parsed) return { handled: true, message: USAGE }
+  if (!parsed) return { handled: true, message: t("slash.usage") }
 
   // The invoking session routes every model call and web-tool invocation this
   // run makes, so the work is billed to the conversation the user is in.
@@ -88,12 +80,12 @@ export async function handleResearchSlash(
         try {
           ctx.artifact.openArtifact(artifactId)
         } catch (err) {
-          ctx.logger?.warn("deep-research: artifact panel could not be opened", err)
+          ctx.logger.warn("deep-research: artifact panel could not be opened", err)
         }
       }
       return {
         handled: true,
-        message: renderReportCard(report),
+        message: renderReportCard(report, t),
         payload: {
           mode: "report",
           title: report.title,
@@ -109,7 +101,7 @@ export async function handleResearchSlash(
     const result = await runDeepSearch(parsed.topic, deps, config)
     return {
       handled: true,
-      message: renderResultCard(parsed.topic, result),
+      message: renderResultCard(parsed.topic, result, t),
       payload: {
         mode: "search",
         citations: result.citations,
@@ -122,6 +114,6 @@ export async function handleResearchSlash(
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
-    return { handled: true, message: renderErrorCard(classifyResearchError(err), detail) }
+    return { handled: true, message: renderErrorCard(classifyResearchError(err), t, detail) }
   }
 }

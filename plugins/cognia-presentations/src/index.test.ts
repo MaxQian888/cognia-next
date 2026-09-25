@@ -8,13 +8,23 @@ function createCtx() {
   const toolResultRenderers: string[] = []
   const disposers: Array<() => void> = []
   const localeHandlers: Array<() => void> = []
+  const toolDispose = jest.fn()
+  const cardDispose = jest.fn()
   const ctx = {
     pluginId: "cognia-presentations",
-    artifact: { registerRenderer: jest.fn(), openArtifact: jest.fn() },
+    artifact: { registerRenderer: jest.fn(() => jest.fn()), openArtifact: jest.fn() },
     import: { registerImporter: jest.fn(() => jest.fn()) },
-    agent: { registerTool: jest.fn((tool) => registeredTools.push(tool)) },
+    agent: {
+      registerTool: jest.fn((tool) => {
+        registeredTools.push(tool)
+        return toolDispose
+      }),
+    },
     toolResult: {
-      registerToolResultRenderer: jest.fn((name: string) => toolResultRenderers.push(name)),
+      registerToolResultRenderer: jest.fn((name: string, _component: unknown) => {
+        toolResultRenderers.push(name)
+        return cardDispose
+      }),
     },
     i18n: {
       registerTranslations: jest.fn(),
@@ -27,11 +37,19 @@ function createCtx() {
     lifecycle: { onDispose: jest.fn((dispose: () => void) => disposers.push(dispose)) },
     logger: { info: jest.fn() },
   }
-  return { ctx, registeredTools, toolResultRenderers, disposers, localeHandlers }
+  return {
+    ctx,
+    registeredTools,
+    toolResultRenderers,
+    disposers,
+    localeHandlers,
+    toolDispose,
+    cardDispose,
+  }
 }
 
 it("registers the complete Presentations plugin surface", async () => {
-  const { ctx, registeredTools, toolResultRenderers, disposers, localeHandlers } = createCtx()
+  const { ctx, registeredTools, toolResultRenderers, localeHandlers } = createCtx()
   await definition.activate?.(ctx as never)
 
   expect(manifest.id).toBe("cognia-presentations")
@@ -52,9 +70,20 @@ it("registers the complete Presentations plugin surface", async () => {
   )
   for (const tool of registeredTools) expect(Object.hasOwn(tool as object, "pluginId")).toBe(false)
   expect(toolResultRenderers).toEqual([...PRESENTATION_TOOL_NAMES])
-  // locale-change unsubscribe, importer disposer, result-bridge reset
-  expect(disposers).toHaveLength(3)
+  // One shared card component, bound to this activation's openArtifact.
+  const cards = new Set(ctx.toolResult.registerToolResultRenderer.mock.calls.map((call) => call[1]))
+  expect(cards.size).toBe(1)
   expect(localeHandlers).toHaveLength(1)
+})
+
+it("hands every registration to the lifecycle ledger", async () => {
+  const { ctx, disposers, toolDispose, cardDispose } = createCtx()
+  await definition.activate?.(ctx as never)
+  // renderer + locale subscription + importer + every tool + every result card
+  expect(disposers).toHaveLength(3 + PRESENTATION_TOOL_NAMES.length * 2)
+  for (const dispose of disposers) dispose()
+  expect(toolDispose).toHaveBeenCalledTimes(PRESENTATION_TOOL_NAMES.length)
+  expect(cardDispose).toHaveBeenCalledTimes(PRESENTATION_TOOL_NAMES.length)
 })
 
 it("re-registers the importer when the locale changes", async () => {
@@ -71,4 +100,5 @@ it("declares the i18n bundle on the manifest instead of imperative registration"
   expect(ctx.i18n.registerTranslations).not.toHaveBeenCalled()
   expect(manifest.i18n?.locales?.en?.["preview.slides"]).toBe("Slides")
   expect(I18N_MESSAGES["zh-CN"]["preview.slides"]).toBe("幻灯片")
+  expect(manifest.runtimeCompatibility?.mobile?.reason).toContain("Documents/cognia/exports")
 })

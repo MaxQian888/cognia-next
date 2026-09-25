@@ -6,18 +6,18 @@
  * host's generic card would paint as a JSON wall — this card instead shows
  * the recognized text selectable + copyable, the provider that produced it,
  * and an "ask about this" action that appends the text to the composer.
- * Reuses the host's `chat.ocrResult` strings so it reads exactly like the
- * `/ocr` card. Returns `null` for error envelopes — a failure JSON is
- * clearer through the generic renderer.
+ * Its strings (`ocr.*`) live in this plugin's own `manifest.i18n` bundle and
+ * mirror the `/ocr` card's copy. Returns `null` for error envelopes — a
+ * failure JSON is clearer through the generic renderer.
  */
 
-import { useTranslations } from "next-intl"
 import { ScanTextIcon } from "lucide-react"
 
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
 import { blockMediaSrc, type ToolResultRendererProps } from "@cognia/plugin-sdk/api/tool-renderer"
 import { dispatchComposerAppend } from "@cognia/plugin-sdk/api/message-renderer"
 import { Badge, Button, parseToolOutput, PluginImage, ToolCard, useCopy } from "@cognia/plugin-ui"
-import { screenshotBlocks, type ContentBlockLike } from "./screenshot-result-card"
+import { PLUGIN_ID, screenshotBlocks, type ContentBlockLike } from "./screenshot-result-card"
 
 /** The fields of `performCaptureOcr`'s success envelope this card renders. */
 interface ScreenshotOcrOutput {
@@ -59,7 +59,7 @@ function readScreenshotOcrPart(part: unknown): {
 }
 
 export function ScreenshotOcrResultCard({ part }: ToolResultRendererProps) {
-  const t = useTranslations("chat.ocrResult")
+  const t = usePluginTranslations(PLUGIN_ID)
   const { copied, copy } = useCopy({ scope: "screenshot-ocr" })
   const { envelope: output, imageSrc } = readScreenshotOcrPart(part)
   if (!output || output.ok !== true || typeof output.text !== "string") return null
@@ -67,13 +67,13 @@ export function ScreenshotOcrResultCard({ part }: ToolResultRendererProps) {
   const hasText = text.trim().length > 0
 
   return (
-    <ToolCard title={t("title")} testId="screenshot-ocr-result-card">
+    <ToolCard title={t("ocr.title")} testId="screenshot-ocr-result-card">
       <div className="flex items-start gap-2">
         <ScanTextIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1 space-y-1.5">
           {imageSrc ? (
             <div className="max-w-md">
-              <PluginImage src={imageSrc} alt={t("thumbnailAlt")} />
+              <PluginImage src={imageSrc} alt={t("ocr.thumbnailAlt")} />
             </div>
           ) : null}
           {hasText ? (
@@ -84,35 +84,35 @@ export function ScreenshotOcrResultCard({ part }: ToolResultRendererProps) {
               {text}
             </div>
           ) : (
-            <p className="text-xs italic text-muted-foreground">{t("noText")}</p>
+            <p className="text-xs italic text-muted-foreground">{t("ocr.noText")}</p>
           )}
-          <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
             {output.providerId ? (
-              <Badge variant="outline">{t("provider", { id: output.providerId })}</Badge>
+              <Badge variant="outline">{t("ocr.provider", { id: output.providerId })}</Badge>
             ) : null}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-9 text-xs sm:h-7"
               data-testid="screenshot-ocr-copy"
               disabled={!hasText}
               onClick={() => void copy(text)}
             >
-              {copied ? t("copied") : t("copy")}
+              {copied ? t("ocr.copied") : t("ocr.copy")}
             </Button>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-9 text-xs sm:h-7"
               data-testid="screenshot-ocr-ask"
               disabled={!hasText}
               onClick={() => dispatchComposerAppend({ text })}
             >
-              {t("askAbout")}
+              {t("ocr.askAbout")}
             </Button>
           </div>
         </div>

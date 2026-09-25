@@ -2,6 +2,7 @@ import JSZip from "jszip"
 import {
   createPresentation,
   normalizeHexColor,
+  sniffImageMime,
   PPTX_MIME,
   type PresentationDeck,
   type PresentationSlide,
@@ -242,15 +243,21 @@ async function importPicture(
   const target = embed ? rels.get(embed)?.target : undefined
   if (!target) return null
   const path = resolvePart("ppt/slides", target)
-  const mimeType = IMAGE_MIME_BY_EXTENSION[fileExtension(path)]
   const file = zip.file(path)
-  if (!file || !mimeType) {
+  if (!file || !IMAGE_MIME_BY_EXTENSION[fileExtension(path)]) {
     features.add("unsupported media")
     return null
   }
   const bytes = await file.async("uint8array")
   if (bytes.byteLength > MAX_IMPORT_MEDIA_BYTES) {
     features.add("oversized media")
+    return null
+  }
+  // Trust the bytes, not the part name: a `.png` part holding a JPEG (or
+  // something else entirely) would otherwise be re-exported mislabelled.
+  const mimeType = sniffImageMime(bytes)
+  if (!mimeType) {
+    features.add("unsupported media")
     return null
   }
   const name = block.match(/<p:cNvPr\b[^>]*\bname="([^"]*)"/)?.[1]

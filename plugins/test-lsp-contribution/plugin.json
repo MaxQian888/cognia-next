@@ -1,8 +1,10 @@
 {
   "id": "cognia-test-lsp-contribution",
   "name": "Test LSP Contribution (fixture)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Fixture plugin that demonstrates the Phase B LSP contribution pathway (manifest.lspServers + lsp-registry). Ships a single echo-style LSP that responds to initialize, textDocument/completion, hover, and publishDiagnostics — sourced from the same in-process fixture the sidecar tests use. Use this when verifying the end-to-end Skills/Canvas/Artifact LSP plumbing without needing to install a real .vsix.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["lsp-server"],
   "main": "src/index.ts",
@@ -32,13 +34,25 @@
       "reason": "LSP servers spawn through the Node sidecar — desktop only."
     },
     "tauri": {
-      "availability": "degraded",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
       "reason": "Plugin manager registers the echo LSP through lib/plugin/lsp/lsp-registry on enable; the sidecar's CogniaLspClient spawns the fixture as a child process."
     },
     "mobile": {
       "availability": "blocked",
       "reason": "LSP servers spawn through the Node sidecar — unavailable on mobile."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Test LSP Contribution (fixture)",
+        "manifest.description": "Fixture plugin that demonstrates the Phase B LSP contribution pathway (manifest.lspServers + lsp-registry). Ships a single echo-style LSP that responds to initialize, textDocument/completion, hover, and publishDiagnostics — sourced from the same in-process fixture the sidecar tests use. Use this when verifying the end-to-end Skills/Canvas/Artifact LSP plumbing without needing to install a real .vsix."
+      },
+      "zh-CN": {
+        "manifest.name": "测试 LSP 贡献（测试夹具）",
+        "manifest.description": "演示 Phase B LSP 贡献通路（manifest.lspServers + lsp-registry）的夹具插件。附带一个回显式 LSP，响应 initialize、textDocument/completion、hover 与 publishDiagnostics——与 sidecar 测试使用同一个进程内夹具。无需安装真实 .vsix 即可验证技能/画布/产物的端到端 LSP 管线。"
+      }
     }
   }
 }

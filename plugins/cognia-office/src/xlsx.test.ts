@@ -158,8 +158,18 @@ it("round-trips typed cells, optional dimensions, styles, and all unsupported OO
   expect(loaded.getWorksheet("Data")?.getCell("A4").value).toMatchObject({ formula: "1+1" })
 })
 
+it("uses the caller's localized fallback title", async () => {
+  const csv = new TextEncoder().encode("A,1")
+  await expect(importWorkbookXlsx(csv, "", undefined, "工作簿")).resolves.toMatchObject({
+    title: "工作簿",
+  })
+  await expect(importDelimitedWorkbook("A,1", " ", "工作簿")).resolves.toMatchObject({
+    title: "工作簿",
+  })
+})
+
 it("imports delimited data and fails closed when a non-OOXML package cannot be inspected", async () => {
-  const delimited = importDelimitedWorkbook("Name,Enabled\nA,true", "")
+  const delimited = await importDelimitedWorkbook("Name,Enabled\nA,true", "")
   expect(delimited).toMatchObject({
     title: "Workbook",
     sheets: [{ cells: { A1: { value: "Name" }, B2: { value: "true" } } }],

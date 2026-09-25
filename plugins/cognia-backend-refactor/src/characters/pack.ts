@@ -12,14 +12,13 @@
  * repo path at run time (the same pack can refactor any clone).
  *
  * `permissionMode` is deliberately NOT set here either. The headless workflow
- * does need `bypassPermissions` (an interactive prompt would hang a run with
- * no UI to answer it), but a character's mode is consulted for EVERY chat with
- * that character — `resolveSendOptions` falls back
- * `session → mode → character → appSettings` (lib/claude/build-options.ts) —
- * and top-level chat has no permission ceiling. Setting it on the pack meant
- * a user picking "Refactorer" in the character list got un-prompted
- * Edit/Write/Bash. The bypass now lives at the single headless call site that
- * needs it: src/nodes/agent-turn.ts, applied to the resolved send options.
+ * runs its turns in `dontAsk` (only each role's `allowedTools` run, nothing
+ * prompts, everything else is denied), but a character's mode is consulted
+ * for EVERY chat with that character — `resolveSendOptions` falls back
+ * `session → mode → character → appSettings` (lib/claude/build-options.ts).
+ * Setting a mode on the pack would change ordinary interactive chats with a
+ * refactor role too. The mode lives at the single headless call site that
+ * needs it: src/nodes/agent-turn.ts (`AGENT_TURN_PERMISSION_MODE`).
  *
  * `skillIds` are attached in src/skills/definitions.ts wiring (M3): the role's
  * playbooks live as plugin skills and are referenced by their namespaced ids.
@@ -44,7 +43,12 @@ export type RefactorRole = (typeof REFACTOR_ROLES)[number]
 /** Pack id — combined with PLUGIN_ID + localId to form the runtime id. */
 export const REFACTOR_PACK_ID = "refactor-roles"
 
-const READ_TOOLS = ["Read", "Glob", "Grep", "Bash"]
+/**
+ * No Bash for the read-only roles: `dontAsk` pre-approves every listed tool
+ * without limit, and Bash can edit files or `git commit` as well as read. The
+ * reviewer gets the diff from the pipeline's own `git diff` step instead.
+ */
+export const READ_TOOLS = ["Read", "Glob", "Grep"]
 const EDIT_TOOLS = ["Read", "Edit", "Write", "Glob", "Grep", "Bash"]
 
 const ROLE_CHARACTERS: PluginCharacterDef[] = [
@@ -66,7 +70,7 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
       "Turns the analysis into a concrete, ordered refactor plan with acceptance criteria.",
     avatarColor: "oklch(0.66 0.16 290)",
     avatarEmoji: "📐",
-    allowedTools: ["Read", "Glob", "Grep"],
+    allowedTools: READ_TOOLS,
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("dependency-upgrade")],
     systemPrompt:
       "You are a software architect for Go backends. Given an analysis report, design the target architecture and a SAFE, ordered execution plan. Decide the target layering (handler → service → repository with interfaces and dependency injection; group by domain, keep transport thin), how configuration/secrets and errors/responses should be unified, and the dependency/Go-version upgrade order. Sequence the work so each step keeps the build green and is independently reviewable; call out risky migrations and how to de-risk them (parallel-change, expand/contract). Output the plan as ordered steps, each with: module(s) touched, concrete changes, and acceptance criteria the verification gate (`go build/vet/test`, lint) must satisfy. Do not modify any files — you produce the plan only.",
@@ -80,7 +84,7 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     allowedTools: EDIT_TOOLS,
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("refactor-playbook")],
     systemPrompt:
-      "You are a senior Go engineer applying ONE module's refactor from an approved plan. Work in small, behaviour-preserving steps and keep the build green throughout. Prefer the expand/contract (parallel-change) pattern over big-bang rewrites: introduce the new shape, migrate call sites, then remove the old. Apply idiomatic Go — interfaces at consumer boundaries, constructor injection, wrapped errors with `%w`, context propagation, no business logic in handlers. Edit files directly in the working directory; run `go build ./...` and the package's tests as you go to confirm you haven't broken anything. When the module's acceptance criteria are met, summarise exactly what you changed (files + rationale) so the verification gate and reviewer can follow. Never weaken or delete tests to make them pass.",
+      "You are a senior Go engineer applying ONE module's refactor from an approved plan. Work in small, behaviour-preserving steps and keep the build green throughout. Prefer the expand/contract (parallel-change) pattern over big-bang rewrites: introduce the new shape, migrate call sites, then remove the old. Apply idiomatic Go — interfaces at consumer boundaries, constructor injection, wrapped errors with `%w`, context propagation, no business logic in handlers. Edit files directly in the working directory; run `go build ./...` and the package's tests as you go to confirm you haven't broken anything. When the module's acceptance criteria are met, summarise exactly what you changed (files + rationale) so the verification gate and reviewer can follow. Never weaken or delete tests to make them pass. Never run `git commit`: the pipeline commits only after the reviewer and the user approve.",
   },
   {
     localId: "tester",
@@ -102,7 +106,7 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     allowedTools: READ_TOOLS,
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("refactor-playbook")],
     systemPrompt:
-      "You review the refactor with senior-engineer pragmatism. Inspect the change (`git diff`) and flag, by severity: Critical (real bugs — nil deref, races, leaks, broken error handling; security issues; behaviour changes), Important (layering violations, leaked dependencies, missing tests on new branches, inconsistent error/response handling), Optional (naming, docs). Also flag over-engineering: one-call-site abstractions, speculative generality, needless interfaces. Quote `file:line`. Ignore pure style nits a formatter would catch. End with a clear verdict: APPROVE or REQUEST CHANGES, with the blocking items listed. Do not modify files.",
+      "You review the refactor with senior-engineer pragmatism. Inspect the change (the diff you are given; Read new files it lists) and flag, by severity: Critical (real bugs — nil deref, races, leaks, broken error handling; security issues; behaviour changes), Important (layering violations, leaked dependencies, missing tests on new branches, inconsistent error/response handling), Optional (naming, docs). Also flag over-engineering: one-call-site abstractions, speculative generality, needless interfaces. Quote `file:line`. Ignore pure style nits a formatter would catch. List the blocking items, then finish with exactly one final line, either `VERDICT: APPROVE` or `VERDICT: REQUEST CHANGES` — the refactor pipeline reads that line to decide whether anything gets committed, and treats anything else as REQUEST CHANGES. Do not modify files.",
   },
   {
     localId: "doc-writer",
@@ -119,7 +123,7 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
 
 export const REFACTOR_ROLE_PACK = defineCharacterPack({
   id: REFACTOR_PACK_ID,
-  name: "Backend Refactor Roles",
+  name: "Go Backend Refactor Roles",
   description:
     "Six roles that drive a Go backend refactor: analyst, architect, refactorer, test engineer, reviewer, and doc writer.",
   version: "0.1.0",

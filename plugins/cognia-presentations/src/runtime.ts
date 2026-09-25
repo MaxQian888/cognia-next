@@ -1,5 +1,5 @@
-import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI } from "@cognia/plugin-sdk"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { normalizeExportName, summarizeSave } from "./export-file"
 import {
   applyPresentationOperations,
   createPresentation,
@@ -13,9 +13,14 @@ import {
 } from "./model"
 import { exportPptx, importPptx, validatePptxRoundTrip } from "./pptx"
 
-export type PresentationsPluginContext = Pick<FullPluginContext, "pluginId"> & {
-  artifact: PluginArtifactAPI
-  files: PluginFilesAPI
+export type PresentationsPluginContext = Pick<
+  PluginContext,
+  "pluginId" | "artifact" | "files" | "i18n"
+>
+
+/** A `.pptx` filename `ctx.files.save` accepts, built from a title or model-supplied name. */
+export function normalizePptxName(value: string | undefined): string {
+  return normalizeExportName(value, "pptx", "presentation")
 }
 export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
   const read = (artifactId: string) => {
@@ -42,7 +47,8 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
       messageId: options.messageId,
       metadata: {
         sourceOrigin: "tool",
-        userInitiated: true,
+        // Every artifact this runtime creates comes from an agent tool call.
+        userInitiated: false,
         previewable: true,
       },
     })
@@ -113,7 +119,7 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
       const artifact = ctx.artifact.updateArtifact(input.artifactId, {
         content: JSON.stringify(updated),
         expectedVersion: input.expectedVersion,
-        changeDescription: input.changeDescription ?? "Edit presentation",
+        changeDescription: input.changeDescription ?? ctx.i18n.t("history.edit"),
       })
       ctx.artifact.openArtifact(input.artifactId)
       return {
@@ -150,30 +156,37 @@ export function createPresentationsRuntime(ctx: PresentationsPluginContext) {
     ) => {
       const { deck } = read(artifactId)
       if (deck.importedFeatures.length > 0 && !allowUnsupportedFeatureLoss) {
-        throw new Error(
-          `Export would discard unsupported imported features: ${deck.importedFeatures.join(
+        return {
+          ok: false as const,
+          artifactId,
+          requiresConfirmation: true as const,
+          unsupportedFeatures: deck.importedFeatures,
+          error: `Export would discard unsupported imported features: ${deck.importedFeatures.join(
             ", "
-          )}. Set allowUnsupportedFeatureLoss only after user confirmation.`
-        )
+          )}. Ask the user to confirm, then retry with allowUnsupportedFeatureLoss: true.`,
+        }
       }
       const findings = validatePresentation(deck)
       if (findings.some((finding) => finding.severity === "error"))
-        throw new Error("Presentation validation failed before export.")
+        return {
+          ok: false as const,
+          artifactId,
+          findings,
+          error: "The presentation has validation errors; fix them before exporting.",
+        }
       const bytes = await exportPptx(deck)
       const reopened = await validatePptxRoundTrip(bytes)
       if (!reopened.valid || reopened.slideCount !== deck.slides.length)
-        throw new Error("PPTX round-trip validation failed before export.")
-      const result = await ctx.files.save({
-        suggestedName:
-          suggestedName ??
-          `${safe(deck.sourceFilename?.replace(/\.pptx$/i, "") ?? deck.title)}.pptx`,
-        mimeType: PPTX_MIME,
-        bytes,
-      })
-      return { ok: result.saved, artifactId, byteLength: bytes.byteLength }
+        return {
+          ok: false as const,
+          artifactId,
+          error: "The generated PPTX did not reopen with every slide, so nothing was saved.",
+        }
+      const filename = normalizePptxName(
+        suggestedName ?? deck.sourceFilename?.replace(/\.pptx$/i, "") ?? deck.title
+      )
+      const outcome = await ctx.files.save({ suggestedName: filename, mimeType: PPTX_MIME, bytes })
+      return { ...summarizeSave(outcome, filename), artifactId, byteLength: bytes.byteLength }
     },
   }
-}
-function safe(value: string) {
-  return value.replace(/[\\/:*?"<>|]/g, "-").trim() || "presentation"
 }

@@ -1,6 +1,6 @@
 import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 
-import { manifest } from "./index"
+import definition, { manifest } from "./index"
 
 describe("Figma external service reference plugin", () => {
   it("keeps all vendor-specific policy inside the plugin manifest", () => {
@@ -27,6 +27,24 @@ describe("Figma external service reference plugin", () => {
         }),
       ])
     )
+  })
+
+  it("ships no skills, so it does not advertise any", () => {
+    // The settings card renders `skillIds.length` as "N skills"; ids with no
+    // skill behind them would advertise capabilities that do not exist.
+    for (const service of manifest.services ?? []) expect(service.skillIds).toBeUndefined()
+    expect(manifest.skills).toBeUndefined()
+  })
+
+  it("says the desktop-local provider is unavailable on mobile", () => {
+    const desktop = manifest.mcpServerPresets?.find((preset) => preset.id === "figma-desktop")
+    expect(desktop?.description).toMatch(/unavailable on mobile/)
+    expect(manifest.runtimeCompatibility?.mobile?.availability).toBe("degraded")
+    expect(manifest.runtimeCompatibility?.mobile?.reason).toMatch(/Figma Desktop provider/)
+  })
+
+  it("exports the manifest-driven definition", () => {
+    expect(definition.manifest).toBe(manifest)
   })
 
   it("fails closed for newly discovered tools outside reviewed risk overlays", () => {

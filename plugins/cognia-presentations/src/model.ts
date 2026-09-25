@@ -113,6 +113,48 @@ const SLIDE_ELEMENT_TYPES = new Set(["text", "shape", "image", "table", "chart"]
 const SHAPE_KINDS = new Set(["rect", "roundRect", "ellipse"])
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg"])
 
+type ImageMimeType = "image/png" | "image/jpeg"
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const JPEG_SIGNATURE = [0xff, 0xd8, 0xff]
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/
+
+/** The image type the bytes really are (by magic number), or null for anything else. */
+export function sniffImageMime(bytes: Uint8Array): ImageMimeType | null {
+  const startsWith = (signature: number[]) =>
+    bytes.length >= signature.length && signature.every((byte, index) => bytes[index] === byte)
+  if (startsWith(PNG_SIGNATURE)) return "image/png"
+  if (startsWith(JPEG_SIGNATURE)) return "image/jpeg"
+  return null
+}
+
+/** Decode only the first 12 bytes of a base64 payload — enough for a magic number. */
+function base64Prefix(value: string): Uint8Array {
+  const binary = atob(value.slice(0, 16))
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+}
+
+/**
+ * A model-supplied image must be real PNG/JPEG bytes matching its declared
+ * type: the exported PPTX declares the part by extension, and PowerPoint
+ * refuses to open a package whose `image1.png` is actually a JPEG, an SVG, or
+ * a data URL someone pasted in as "base64".
+ */
+function assertImagePayload(label: string, dataBase64: string, mimeType: ImageMimeType): void {
+  if (dataBase64.startsWith("data:"))
+    throw new Error(
+      `Image element ${label} dataBase64 must be raw base64 without a "data:" URL prefix.`
+    )
+  if (dataBase64.length % 4 !== 0 || !BASE64_PATTERN.test(dataBase64))
+    throw new Error(`Image element ${label} dataBase64 is not valid base64.`)
+  const actual = sniffImageMime(base64Prefix(dataBase64))
+  if (!actual) throw new Error(`Image element ${label} bytes are not a PNG or JPEG image.`)
+  if (actual !== mimeType)
+    throw new Error(
+      `Image element ${label} declares ${mimeType} but its bytes are ${actual}; fix mimeType.`
+    )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -162,6 +204,7 @@ export function assertSlideElements(
         throw new Error(`Image element ${label} requires dataBase64 content.`)
       if (typeof element.mimeType !== "string" || !IMAGE_MIME_TYPES.has(element.mimeType))
         throw new Error(`Image element ${label} requires mimeType image/png or image/jpeg.`)
+      assertImagePayload(label, element.dataBase64, element.mimeType as ImageMimeType)
       if (typeof element.alt !== "string")
         throw new Error(`Image element ${label} requires a string alt.`)
     } else if (element.type === "table") {

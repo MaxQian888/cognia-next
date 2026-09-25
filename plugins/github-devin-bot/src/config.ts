@@ -1,5 +1,12 @@
-/** Configuration stays installation-owned; the plugin contains no repository credentials. */
-export const DEFAULT_REPOSITORY = "NJUPT-SAST/sast-approval-next"
+/**
+ * Configuration stays installation-owned; the plugin contains no repository
+ * credentials and no default repository. A default would point every new
+ * installation at somebody else's project, so an unset repository is a setup
+ * error rather than a guess.
+ */
+export const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+export const REPOSITORY_REQUIRED_MESSAGE =
+  "Set the repository (owner/repo on github.com) in this Bot installation's configuration before running it."
 export const MODELS = ["swe-2-medium", "swe-2-high", "swe-2-max"] as const
 export interface Config {
   repository: string
@@ -11,8 +18,11 @@ export interface Config {
 }
 
 export function parseConfig(raw: Record<string, unknown>): Config {
-  const repository = raw.repository ?? DEFAULT_REPOSITORY
-  if (typeof repository !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+  const repository = raw.repository
+  if (repository === undefined || repository === null || repository === "") {
+    throw new Error(REPOSITORY_REQUIRED_MESSAGE)
+  }
+  if (typeof repository !== "string" || !REPOSITORY_PATTERN.test(repository)) {
     throw new Error("repository must be owner/repo")
   }
   const model = raw.model ?? MODELS[0]
@@ -54,11 +64,13 @@ export function parseConfig(raw: Record<string, unknown>): Config {
 export const configSchema = {
   type: "object",
   additionalProperties: false,
+  required: ["repository"],
   properties: {
     repository: {
       type: "string",
       title: "Repository",
-      default: DEFAULT_REPOSITORY,
+      description:
+        "The github.com repository to maintain, as owner/repo. GitHub Enterprise Server is not supported yet.",
       pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
     },
     model: { type: "string", title: "Devin model", enum: [...MODELS], default: MODELS[0] },

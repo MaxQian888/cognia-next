@@ -43,7 +43,11 @@ it("report renders every session visualization into one standalone document", ()
   const html = exportVisualizationReport([a, b], { title: "Report", lang: "en", labels })
   expect(html).toContain("Revenue")
   expect(html).toContain("Share")
-  expect((html.match(/<svg/g) ?? []).length).toBe(2)
+  // Each chart ships its wide and its phone-width layout.
+  expect((html.match(/<svg/g) ?? []).length).toBe(4)
+  expect(html).toContain("@media (max-width:520px)")
+  expect(html).toContain('name="viewport"')
+  expect(html).toContain('class="table-scroll"')
   expect(exportVisualizationReport([], { title: "Report", lang: "en", labels })).toContain(
     "No visualizations."
   )

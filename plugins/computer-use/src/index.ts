@@ -7,13 +7,19 @@
  * `cognia-automation`.
  */
 
-import type { PluginContext, PluginDefinition, PluginTool } from "@cognia/plugin-sdk"
-import { defineSubagent, defineAgentTeamTemplate, defineContextProvider } from "@cognia/plugin-sdk"
-// ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
-// and auto-wired by the plugin manager on enable. The old imperative
-// `registerPluginI18n` / `unregisterPluginI18n` calls are removed; the
-// strings still ship in this file under SLASH_MESSAGES because slash
-// handlers run outside React and pick the locale at call time.
+import {
+  defineAgentTeamTemplate,
+  defineContextProvider,
+  definePlugin,
+  definePluginManifest,
+  definePluginTool,
+  defineSubagent,
+  type PluginContext,
+  type PluginToolRegistration,
+} from "@cognia/plugin-sdk"
+// ADR-0026 §5 §D — the `/cu` strings are declared in plugin.json's `i18n`
+// block; the manager registers them on enable and the command handler reads
+// them through `ctx.i18n.t` at call time, so they follow the app language.
 import type {
   ActionRequest,
   AppLocator,
@@ -39,12 +45,6 @@ import {
 } from "@cognia/plugin-sdk/api/automation"
 import manifestJson from "../plugin.json"
 
-// Plugin-side i18n. Slash-command handlers run outside the React tree so
-// they can't use `useTranslations()` — we ship the strings here and pick the
-// active locale from the host bundle at call time. The
-// `lib/i18n/plugin-i18n-registry` exposes the bundle to the regular
-// `useTranslations()` consumer in case future host UI surfaces want to
-// render the same copy.
 const PLUGIN_ID = "cognia-computer-use"
 
 // Tool names the model sees once exposed through the in-process
@@ -263,6 +263,12 @@ function appStateToolResult(revision: UiStateRevision): { content: ModelContentB
   return { content: frameToModelContent(revision).content }
 }
 
+/**
+ * Budget for the OCR fallbacks: `find_text` / `click_text` capture the whole
+ * primary monitor and run OCR over it, which can outlast the 30 s default.
+ */
+export const OCR_TOOL_TIMEOUT_MS = 60_000
+
 /** Bounds for `wait`, so a model cannot park the turn indefinitely. */
 const WAIT_MIN_MS = 50
 const WAIT_MAX_MS = 10_000
@@ -288,15 +294,19 @@ function buildPluginTools(
     | "findText"
     | "clickText"
   >
-): PluginTool[] {
-  const origin = (context: { sessionId?: string; messageId?: string }) => ({
+): PluginToolRegistration[] {
+  const origin = (context: {
+    sessionId?: string
+    messageId?: string
+    sandboxRuntimeRef?: string
+  }) => ({
     ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context.messageId ? { messageId: context.messageId } : {}),
+    ...(context.sandboxRuntimeRef ? { sandboxRuntimeRef: context.sandboxRuntimeRef } : {}),
   })
   return [
-    {
+    definePluginTool({
       name: TOOL_GET_APP_STATE,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_GET_APP_STATE,
         description: GET_APP_STATE_DESCRIPTION,
@@ -318,10 +328,9 @@ function buildPluginTools(
         )
         return appStateToolResult(revision)
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_LIST_APPS,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_LIST_APPS,
         description: LIST_APPS_DESCRIPTION,
@@ -332,10 +341,9 @@ function buildPluginTools(
       execute: async (_args, context) => {
         return automation.listApps(origin(context))
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_QUERY_ELEMENTS,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_QUERY_ELEMENTS,
         description: QUERY_ELEMENTS_DESCRIPTION,
@@ -362,10 +370,9 @@ function buildPluginTools(
           origin(context)
         )
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_EXPAND_ELEMENT,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_EXPAND_ELEMENT,
         description: EXPAND_ELEMENT_DESCRIPTION,
@@ -386,10 +393,9 @@ function buildPluginTools(
           origin(context)
         )
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_ZOOM,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_ZOOM,
         description: ZOOM_DESCRIPTION,
@@ -415,10 +421,9 @@ function buildPluginTools(
         )
         return zoomToolResult(zoomed)
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_WAIT,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_WAIT,
         description: WAIT_DESCRIPTION,
@@ -436,30 +441,30 @@ function buildPluginTools(
         await new Promise((resolve) => setTimeout(resolve, durationMs))
         return { waitedMs: durationMs }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_FIND_TEXT,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_FIND_TEXT,
         description: FIND_TEXT_DESCRIPTION,
         category: "automation",
         requiresApproval: true,
+        timeoutMs: OCR_TOOL_TIMEOUT_MS,
         parametersSchema: FIND_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args, context) => {
         const input = args as unknown as { query?: string; languages?: string[] }
         return automation.findText(input, origin(context))
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_CLICK_TEXT,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_CLICK_TEXT,
         description: CLICK_TEXT_DESCRIPTION,
         category: "automation",
         requiresApproval: true,
+        timeoutMs: OCR_TOOL_TIMEOUT_MS,
         parametersSchema: CLICK_TEXT_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (args, context) => {
@@ -472,10 +477,9 @@ function buildPluginTools(
         }
         return automation.clickText(input, origin(context))
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: TOOL_PERFORM_ACTION,
-      pluginId: PLUGIN_ID,
       definition: {
         name: TOOL_PERFORM_ACTION,
         description: PERFORM_ACTION_DESCRIPTION,
@@ -487,39 +491,41 @@ function buildPluginTools(
         const input = args as unknown as { request: ActionRequest }
         return automation.performAction(input.request, origin(context))
       },
-    },
+    }),
   ]
 }
 
-const PLUGIN_TOOL_NAMES = [
-  TOOL_GET_APP_STATE,
-  TOOL_LIST_APPS,
-  TOOL_QUERY_ELEMENTS,
-  TOOL_EXPAND_ELEMENT,
-  TOOL_PERFORM_ACTION,
-  TOOL_ZOOM,
-  TOOL_WAIT,
-  TOOL_FIND_TEXT,
-  TOOL_CLICK_TEXT,
-] as const
+type AutomationCapabilities = Awaited<ReturnType<PluginContext["automation"]["capabilities"]>>
 
-const SLASH_MESSAGES: Record<string, { description: string; body: string }> = {
-  en: {
-    description: "Show Computer Use plugin status.",
-    body: "Computer Use is active with app-scoped state, deep AX queries, and revision-bound actions. Characters with `enableComputerUse: true` receive these tools on every send. Tier and consent live under Settings → Automation.",
-  },
-  "zh-CN": {
-    description: "显示 Computer Use 插件状态。",
-    body: "Computer Use 已启用应用级状态、深层 AX 查询和修订绑定动作。启用了 `enableComputerUse: true` 的角色将在每次发送时获得这些工具。等级与授权见“设置 → 自动化”。",
-  },
-}
-
-function pluginLocale(): "en" | "zh-CN" {
-  if (typeof navigator !== "undefined") {
-    const lang = (navigator.language || "en").toLowerCase()
-    if (lang.startsWith("zh")) return "zh-CN"
+/**
+ * The `/cu` reply: what this host's automation backend can actually do right
+ * now, from `ctx.automation.capabilities()` — not a fixed "Computer Use is
+ * active" line that was printed even on a shell with no backend at all.
+ */
+export function describeComputerUse(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  caps: AutomationCapabilities | null,
+  error?: string
+): string {
+  if (!caps) return t("slash.cu.unavailable", { reason: error ?? t("slash.cu.noBackend") })
+  if (caps.platform === "unsupported") {
+    return t("slash.cu.unavailable", { reason: t("slash.cu.noBackend") })
   }
-  return "en"
+  const state = (on: boolean) => t(on ? "slash.cu.state.on" : "slash.cu.state.off")
+  const tree = caps.hasA11yTree || caps.hasUia
+  const usable = tree && caps.hasInputSim && caps.hasScreenshot
+  const lines = [
+    t(usable ? "slash.cu.ready" : "slash.cu.limited", { platform: caps.platform }),
+    "",
+    `- ${t("slash.cu.capability.tree", { state: state(tree) })}`,
+    `- ${t("slash.cu.capability.input", { state: state(caps.hasInputSim) })}`,
+    `- ${t("slash.cu.capability.screenshot", {
+      state: state(caps.hasScreenshot),
+      count: caps.monitors.length,
+    })}`,
+  ]
+  if (usable) lines.push("", t("slash.cu.body"))
+  return lines.join("\n")
 }
 
 // ADR-0032 demo — desktop-automation subagents + a team template wiring them
@@ -540,7 +546,8 @@ const SCREEN_WATCHER = defineSubagent({
 const GUI_DRIVER = defineSubagent({
   id: "gui-driver",
   name: "GUI Driver",
-  description: "Carries out UI instructions via the computer tool, re-checking after each action.",
+  description:
+    "Carries out UI instructions through the app-session Computer Use tools, re-reading state after each action.",
   prompt:
     "Carry out UI instructions through app-session Computer Use. Call get_app_state before every perform_action and immediately after it; stop on any unexpected dialog.",
   tools: ["get_app_state", "list_apps", "query_elements", "expand_element", "perform_action"],
@@ -599,55 +606,30 @@ const DESKTOP_AUTOMATION_TEMPLATE = defineAgentTeamTemplate({
   },
 })
 
-const definition: PluginDefinition = {
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here WINS and would silently drop `commands[]`.
-  manifest: {
-    ...(manifestJson as object),
-    nativeAnthropicTools: [],
-    subagents: [SCREEN_WATCHER, GUI_DRIVER],
-    agentTeamTemplates: [DESKTOP_AUTOMATION_TEMPLATE],
-    // ADR-0026 §5 §D — declarative i18n. The plugin manager merges these
-    // into the host next-intl bundle under `plugin.cognia-computer-use.*`
-    // on enable and removes them on disable.
-    i18n: {
-      locales: {
-        en: {
-          "slash.cu.description": SLASH_MESSAGES.en.description,
-          "slash.cu.body": SLASH_MESSAGES.en.body,
-        },
-        "zh-CN": {
-          "slash.cu.description": SLASH_MESSAGES["zh-CN"].description,
-          "slash.cu.body": SLASH_MESSAGES["zh-CN"].body,
-        },
-      },
-    },
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("computer-use plugin activated")
-    // i18n is wired via `manifest.i18n` above; no imperative
-    // `registerPluginI18n(...)` call here. See ADR-0026 §5 §D.
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  nativeAnthropicTools: [],
+  subagents: [SCREEN_WATCHER, GUI_DRIVER],
+  agentTeamTemplates: [DESKTOP_AUTOMATION_TEMPLATE],
+})
 
-    const locale = pluginLocale()
-    const copy = SLASH_MESSAGES[locale] ?? SLASH_MESSAGES.en
+const definition = definePlugin({
+  manifest,
+  activate: async (ctx: PluginContext) => {
+    ctx.logger.info("computer-use plugin activated")
+    const t = (key: string, params?: Record<string, string | number>) => ctx.i18n.t(key, params)
 
     // Register the app-session tools for the chat-side plugin MCP bridge.
     // The sidecar's plugin-tools bridge (sidecar/builtin-tools/plugin-tools.mjs)
     // synthesizes the MCP server from `SendOptions.pluginTools`, which is
-    // populated by `buildPluginToolsManifest()` from the plugin store.
-    if (ctx.agent?.registerTool) {
-      for (const tool of buildPluginTools(ctx.automation)) {
-        ctx.agent.registerTool(tool)
-      }
-    } else {
-      ctx.logger?.warn(
-        "ctx.agent.registerTool unavailable — computer-use chat path will not surface tools"
-      )
-    }
+    // populated by `buildPluginToolsManifest()` from the plugin store. The
+    // runtime unregisters them on deactivate.
+    for (const tool of buildPluginTools(ctx.automation)) ctx.agent.registerTool(tool)
 
     // Comparative surface guidance — steers the model to the right tool family
-    // (computer_use vs browser_* vs Playwright vs web_fetch). See SURFACE_GUIDANCE.
-    ctx.agent?.context?.registerProvider?.(
+    // (computer_use vs browser_* vs Playwright vs web_fetch). Model-facing, so
+    // it stays in English. See SURFACE_GUIDANCE.
+    ctx.agent.context.registerProvider(
       defineContextProvider({
         id: "computer-use:surface-guidance",
         name: "Automation surface guidance",
@@ -655,27 +637,22 @@ const definition: PluginDefinition = {
       })
     )
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
-    // here — the supported shape per the author-SDK migration table. The
-    // manager owns registration and teardown.
+    // here; the manager owns registration and teardown.
     return {
       onCommand: async (command: string) => {
         if (command !== "cu") return false
-        ctx.ui?.showToast?.(copy.body, "info")
-        return true
+        try {
+          const caps = await ctx.automation.capabilities()
+          return { handled: true, message: describeComputerUse(t, caps) }
+        } catch (err) {
+          // No automation backend on this shell (browser / mobile) or the
+          // desktop backend failed to answer — say so instead of claiming it works.
+          const reason = err instanceof Error ? err.message : String(err)
+          return { handled: true, message: describeComputerUse(t, null, reason) }
+        }
       },
     }
   },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      // i18n teardown handled by the manager when manifest.i18n is in use
-      // (ADR-0026 §5 §D). No imperative unregisterPluginI18n call needed.
-      if (ctx.agent?.unregisterTool) {
-        for (const name of PLUGIN_TOOL_NAMES) {
-          ctx.agent.unregisterTool(name)
-        }
-      }
-    }
-  },
-}
+})
 
 export default definition

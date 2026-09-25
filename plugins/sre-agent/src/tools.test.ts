@@ -13,16 +13,17 @@ describe("createSreTools", () => {
   afterEach(() => clearSrePanelRuntime())
 
   it("registers the SRE tool contract with JSON schemas", () => {
-    const tools = createSreTools({ pluginId: "sre-agent" })
+    const tools = createSreTools()
 
     expect(tools.map((tool) => tool.name)).toEqual([...SRE_TOOL_NAMES])
     expect(tools.map((tool) => tool.definition.name)).toEqual([...SRE_TOOL_NAMES])
-    expect(tools.every((tool) => tool.pluginId === "sre-agent")).toBe(true)
+    // Ownership is the host's to assign from the activated context.
+    expect(tools.every((tool) => tool.pluginId === undefined)).toBe(true)
     expect(tools.every((tool) => tool.definition.parametersSchema.type === "object")).toBe(true)
   })
 
   it("executes evidence tools and validates the agent-drafted table", async () => {
-    const tools = createSreTools({ pluginId: "sre-agent" })
+    const tools = createSreTools()
     const logs = await tools[0].execute(
       {
         environment: "prod",
@@ -42,6 +43,11 @@ describe("createSreTools", () => {
     ).resolves.toMatchObject({ ok: true })
 
     expect(logs).toMatchObject({ ok: true, evidenceIds: ["log_004"] })
+    // Demo data is labelled in the result itself, not only in the docs.
+    expect(logs).toMatchObject({
+      dataSource: "demo-corpus",
+      notice: expect.stringMatching(/^DEMO CORPUS/),
+    })
 
     const validation = await tools[3].execute(
       {
@@ -65,9 +71,14 @@ describe("createSreTools", () => {
   })
 
   it("publishes a validated timeline for explicit adoption by the panel", async () => {
-    const runtime = createSreRuntime({ pluginId: "sre-agent" })
-    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
-    const tools = createSreTools({ pluginId: "sre-agent" }, undefined, runtime)
+    const runtime = createSreRuntime()
+    setSrePanelRuntime({
+      runtime,
+      dexie: null,
+      contextPanels: { setBadge: () => true },
+      confirm: async () => true,
+    })
+    const tools = createSreTools(runtime)
     const draft = {
       rows: [
         {
@@ -94,8 +105,15 @@ describe("createSreTools", () => {
     ])
   })
 
+  it("describes every query tool as answering from the demo corpus", () => {
+    for (const tool of createSreTools()) {
+      if (tool.name === "sre_validate_timeline") continue
+      expect(tool.definition.description).toMatch(/^DEMO CORPUS ONLY/)
+    }
+  })
+
   it("rejects missing required runtime boundaries", async () => {
-    const tools = createSreTools({ pluginId: "sre-agent" })
+    const tools = createSreTools()
 
     await expect(
       tools[0].execute(
@@ -107,7 +125,7 @@ describe("createSreTools", () => {
 
   it("honors lifecycle and turn abort signals", async () => {
     const lifecycle = new AbortController()
-    const tools = createSreTools({ pluginId: "sre-agent" }, lifecycle.signal)
+    const tools = createSreTools(undefined, lifecycle.signal)
     lifecycle.abort()
 
     await expect(
@@ -119,7 +137,7 @@ describe("createSreTools", () => {
 
     const turn = new AbortController()
     turn.abort()
-    const activeTools = createSreTools({ pluginId: "sre-agent" })
+    const activeTools = createSreTools()
     await expect(
       activeTools[2].execute(
         { environment: "prod", startTime: FIXTURE_START, endTime: FIXTURE_END },

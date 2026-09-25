@@ -6,6 +6,7 @@ jest.mock("./runtime", () => ({ buildEngineDeps: jest.fn() }))
 import { buildEngineDeps } from "./runtime"
 import { ResearchToolError } from "./errors"
 import { handleResearchSlash, parseResearchArgs } from "./slash"
+import manifestJson from "../plugin.json"
 
 const mockBuild = buildEngineDeps as jest.MockedFunction<typeof buildEngineDeps>
 
@@ -35,12 +36,28 @@ function okDeps(): EngineDeps {
   return { ai, search: async () => [hit("https://a.com")], read: async () => "content body" }
 }
 
+type Locale = keyof typeof manifestJson.i18n.locales
+
+/** `ctx.i18n.t` over the plugin's own bundle, failing loudly on a missing key. */
+function translator(locale: Locale = "en") {
+  const bundle = manifestJson.i18n.locales[locale] as Record<string, string>
+  return (key: string, params?: Record<string, string | number>) => {
+    const value = bundle[key]
+    if (value === undefined) throw new Error(`missing ${locale} key ${key}`)
+    return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : match
+    )
+  }
+}
+const t = translator()
+
 function ctx(config: Record<string, unknown> = {}): PluginContext {
   return {
     pluginId: "cognia-deep-research",
     configuration: { getAll: () => config },
     artifact: { createArtifact: jest.fn(async () => "art-7"), openArtifact: jest.fn() },
     logger: { info: jest.fn(), warn: jest.fn() },
+    i18n: { t },
   } as unknown as PluginContext
 }
 
@@ -77,7 +94,15 @@ describe("handleResearchSlash", () => {
   it("returns usage for an empty query", async () => {
     const res = await handleResearchSlash(ctx(), "  ")
     expect(res.message).toMatch(/Usage/)
+    // One language per message: no Chinese appended to the English usage.
+    expect(res.message).not.toMatch(/[\u4e00-\u9fff]/)
     expect(mockBuild).not.toHaveBeenCalled()
+  })
+
+  it("answers in the user's locale", async () => {
+    const zhCtx = { ...ctx(), i18n: { t: translator("zh-CN") } } as unknown as PluginContext
+    const res = await handleResearchSlash(zhCtx, "  ")
+    expect(res.message).toContain("用法")
   })
 
   it("renders an actionable card when the host has no model provider", async () => {

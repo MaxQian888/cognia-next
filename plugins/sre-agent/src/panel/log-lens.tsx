@@ -1,14 +1,23 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertTriangleIcon, MaximizeIcon, PinIcon, PinOffIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  MaximizeIcon,
+  PinIcon,
+  PinOffIcon,
+} from "lucide-react"
 import { Button } from "@cognia/plugin-ui"
 import { cn } from "@cognia/plugin-ui"
 import type { SreTimeRange } from "../evidence"
 import type { SreHistogramBucket, SreLogPattern } from "../providers/types"
 import type { SreRuntime } from "../runtime"
 import type { SreIncident } from "../incident/model"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
+import { TOUCH_BUTTON, TOUCH_ICON_BUTTON } from "./touch"
 
 /** Bars the strip draws. Two densities, because a 360px column cannot hold 32. */
 const BUCKETS_NARROW = 16
@@ -92,7 +101,7 @@ export function LogLens({
   onPin: (evidenceIds: string[]) => void
   onRequestWide?: () => void
 }) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const [result, setResult] = useState<LensResult | null>(null)
 
   const coverage = useMemo(() => runtime.provider().coverage, [runtime])
@@ -136,6 +145,19 @@ export function LogLens({
   }, [enabled, result, requestKey])
 
   const pinned = useMemo(() => new Set(pinnedIds), [pinnedIds])
+  // A template is often longer than the column. It truncates to one line and
+  // expands in place — a `title` tooltip alone never reaches a touch screen.
+  const [openTemplates, setOpenTemplates] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleTemplate = useCallback(
+    (id: string) =>
+      setOpenTemplates((previous) => {
+        const next = new Set(previous)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      }),
+    []
+  )
   const pinGroup = useCallback((pattern: SreLogPattern) => onPin(pattern.evidenceIds), [onPin])
 
   const totals = useMemo(() => {
@@ -158,7 +180,7 @@ export function LogLens({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={TOUCH_BUTTON}
             onClick={onRequestWide}
             data-testid="sre-lens-widen"
           >
@@ -170,7 +192,7 @@ export function LogLens({
 
       {!inCoverage && coverage ? (
         <p
-          className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-500"
+          className="flex items-start gap-1.5 text-xs text-warning"
           data-testid="sre-lens-coverage"
         >
           <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
@@ -210,7 +232,7 @@ export function LogLens({
                     bucket.byLevel.error > 0
                       ? "bg-destructive"
                       : bucket.byLevel.warn > 0
-                        ? "bg-amber-500"
+                        ? "bg-warning"
                         : "bg-muted-foreground/40"
                   )}
                   style={{ height: `${Math.round(ratio * 100)}%` }}
@@ -230,38 +252,54 @@ export function LogLens({
                 .slice(0, wide ? PATTERN_LIMIT_WIDE : PATTERN_LIMIT_NARROW)
                 .map((pattern) => {
                   const allPinned = pattern.evidenceIds.every((id) => pinned.has(id))
+                  const open = openTemplates.has(pattern.id)
                   return (
-                    <li
-                      key={pattern.id}
-                      className="flex items-center gap-2 py-1.5"
-                      data-testid="sre-lens-pattern"
-                    >
-                      <span
-                        className="min-w-0 flex-1 truncate font-mono text-xs"
-                        title={pattern.template}
-                      >
-                        {pattern.template}
-                      </span>
-                      <span className="shrink-0 text-xs tabular-nums">
-                        {pattern.count.toLocaleString()}
-                      </span>
-                      <span className="w-14 shrink-0 text-right text-xs text-muted-foreground">
-                        {formatDelta(pattern, t)}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-6 shrink-0"
-                        aria-label={allPinned ? t("lens.pinned") : t("lens.pinGroup")}
-                        disabled={allPinned}
-                        onClick={() => pinGroup(pattern)}
-                      >
-                        {allPinned ? (
-                          <PinOffIcon className="size-3" />
-                        ) : (
-                          <PinIcon className="size-3" />
-                        )}
-                      </Button>
+                    <li key={pattern.id} className="py-1" data-testid="sre-lens-pattern">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex min-h-9 min-w-0 flex-1 items-center gap-1 rounded-sm text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:min-h-0"
+                          aria-expanded={open}
+                          aria-label={open ? t("lens.hideTemplate") : t("lens.showTemplate")}
+                          onClick={() => toggleTemplate(pattern.id)}
+                          data-testid="sre-lens-pattern-toggle"
+                        >
+                          {open ? (
+                            <ChevronDownIcon aria-hidden className="size-3 shrink-0" />
+                          ) : (
+                            <ChevronRightIcon aria-hidden className="size-3 shrink-0" />
+                          )}
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 font-mono text-xs",
+                              open ? "break-all whitespace-pre-wrap" : "truncate"
+                            )}
+                            data-testid="sre-lens-pattern-template"
+                          >
+                            {pattern.template}
+                          </span>
+                        </button>
+                        <span className="shrink-0 text-xs tabular-nums">
+                          {pattern.count.toLocaleString()}
+                        </span>
+                        <span className="w-14 shrink-0 text-right text-xs text-muted-foreground">
+                          {formatDelta(pattern, t)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={TOUCH_ICON_BUTTON}
+                          aria-label={allPinned ? t("lens.pinned") : t("lens.pinGroup")}
+                          disabled={allPinned}
+                          onClick={() => pinGroup(pattern)}
+                        >
+                          {allPinned ? (
+                            <PinOffIcon className="size-3" />
+                          ) : (
+                            <PinIcon className="size-3" />
+                          )}
+                        </Button>
+                      </div>
                     </li>
                   )
                 })}

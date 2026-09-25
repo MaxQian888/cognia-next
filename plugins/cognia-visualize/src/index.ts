@@ -1,69 +1,33 @@
 import {
   defineExporter,
+  definePlugin,
+  definePluginManifest,
   type PluginContext,
-  type PluginDefinition,
-  type PluginManifest,
 } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { exportVisualizationReport } from "./export"
 import { parseVisualization, VISUALIZATION_ARTIFACT_KIND, type VisualizationSpec } from "./model"
 import { createVisualizationRenderer } from "./preview"
+import { createVisualizeRuntime, VISUALIZATION_REPORT_FORMAT } from "./runtime"
 import { createVisualizeTools } from "./tools"
 
-export const manifest = manifestJson as PluginManifest
-
-const EN: Record<string, string> = {
-  "visualize.preview.data": "Data",
-  "visualize.preview.validation": "Validation",
-  "visualize.preview.meta": "{count} data points",
-  "visualize.preview.parseError": "This artifact is not a valid Cognia visualization: {error}",
-  "visualize.preview.col.label": "Label",
-  "visualize.preview.col.value": "Value",
-  "visualize.preview.col.group": "Group",
-  "visualize.preview.col.source": "Source",
-  "visualize.preview.col.target": "Target",
-  "visualize.preview.col.start": "Start",
-  "visualize.preview.col.end": "End",
-  "visualize.preview.col.x": "X",
-  "visualize.preview.col.y": "Y",
-  "visualize.exporter.name": "Visualization report",
-  "visualize.exporter.description":
-    "Export every visualization in this session as one standalone HTML report.",
-  "visualize.report.title": "Visualization report",
-  "visualize.report.empty": "This session contains no Cognia visualizations.",
-}
-
-const ZH_CN: Record<string, string> = {
-  "visualize.preview.data": "数据",
-  "visualize.preview.validation": "校验",
-  "visualize.preview.meta": "{count} 个数据点",
-  "visualize.preview.parseError": "此 artifact 不是有效的 Cognia 可视化：{error}",
-  "visualize.preview.col.label": "标签",
-  "visualize.preview.col.value": "值",
-  "visualize.preview.col.group": "分组",
-  "visualize.preview.col.source": "来源",
-  "visualize.preview.col.target": "目标",
-  "visualize.preview.col.start": "开始",
-  "visualize.preview.col.end": "结束",
-  "visualize.preview.col.x": "X",
-  "visualize.preview.col.y": "Y",
-  "visualize.exporter.name": "可视化报告",
-  "visualize.exporter.description": "将会话中的全部可视化导出为一份独立的 HTML 报告。",
-  "visualize.report.title": "可视化报告",
-  "visualize.report.empty": "此会话中没有 Cognia 可视化。",
-}
+// plugin.json is the manifest source of truth — including the `i18n.locales`
+// bundle the manager registers before activate() runs.
+export const manifest = definePluginManifest(manifestJson)
 
 /**
  * The `visualization-report` exporter renders every visualization artifact in
- * the exported session into one standalone HTML document. Specs are collected
- * through the caller-scoped artifact API (gated by `artifact:read`).
+ * the exported session into one standalone HTML document. The host resolves a
+ * custom exporter only for the plugin that registered it, so it is reached
+ * through `visualize_export_report` (→ `ctx.export.exportSession`). Specs are
+ * collected through the caller-scoped artifact API (gated by `artifact:read`).
  */
-function buildExporter(ctx: PluginContext) {
+function buildExporter(ctx: PluginContext, runtime: ReturnType<typeof createVisualizeRuntime>) {
   return defineExporter({
-    id: "visualization-report",
-    name: ctx.i18n.t("visualize.exporter.name"),
-    description: ctx.i18n.t("visualize.exporter.description"),
-    format: "visualization-report",
+    id: VISUALIZATION_REPORT_FORMAT,
+    name: ctx.i18n.t("exporter.name"),
+    description: ctx.i18n.t("exporter.description"),
+    format: VISUALIZATION_REPORT_FORMAT,
     extension: "html",
     mimeType: "text/html",
     export: async (data) => {
@@ -80,62 +44,43 @@ function buildExporter(ctx: PluginContext) {
         }
       }
       return exportVisualizationReport(specs, {
-        title: data.session?.title ?? ctx.i18n.t("visualize.report.title"),
+        title: data.session?.title ?? ctx.i18n.t("report.title"),
         lang: ctx.i18n.getCurrentLocale() === "zh-CN" ? "zh-CN" : "en",
-        labels: {
-          columns: Object.fromEntries(
-            ["label", "value", "group", "source", "target", "start", "end", "x", "y"].map((key) => [
-              key,
-              ctx.i18n.t(`visualize.preview.col.${key}`),
-            ])
-          ),
-          dataHeading: ctx.i18n.t("visualize.preview.data"),
-          emptyReport: ctx.i18n.t("visualize.report.empty"),
-        },
+        labels: runtime.exportLabels(),
       })
     },
   })
 }
 
-/** Disposers captured per activation context so `deactivate` can release them. */
-const disposersByContext = new WeakMap<PluginContext, Array<() => void>>()
-
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   activate: async (ctx) => {
-    const disposers: Array<() => void> = []
-    disposersByContext.set(ctx, disposers)
-    ctx.i18n.registerTranslations("en", EN)
-    ctx.i18n.registerTranslations("zh-CN", ZH_CN)
-
-    disposers.push(
+    const runtime = createVisualizeRuntime(ctx)
+    ctx.lifecycle.onDispose(
       ctx.artifact.registerRenderer(
         VISUALIZATION_ARTIFACT_KIND,
         createVisualizationRenderer({
-          t: ctx.i18n.t,
+          t: (key, params) => ctx.i18n.t(key, params),
           onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
         })
-      )
+      ),
+      "cognia-visualize:renderer"
     )
 
     // Exporter labels are resolved at registration time, so re-register when
     // the locale changes (same pattern as cognia-documents).
-    let disposeExporter = ctx.export.registerExporter(buildExporter(ctx))
-    disposers.push(() => disposeExporter())
-    disposers.push(
+    let disposeExporter = ctx.export.registerExporter(buildExporter(ctx, runtime))
+    ctx.lifecycle.onDispose(
       ctx.i18n.onLocaleChange(() => {
         disposeExporter()
-        disposeExporter = ctx.export.registerExporter(buildExporter(ctx))
-      })
+        disposeExporter = ctx.export.registerExporter(buildExporter(ctx, runtime))
+      }),
+      "cognia-visualize:locale"
     )
+    ctx.lifecycle.onDispose(() => disposeExporter(), "cognia-visualize:exporter")
 
-    for (const tool of createVisualizeTools(ctx)) disposers.push(ctx.agent.registerTool(tool))
+    for (const tool of createVisualizeTools(ctx))
+      ctx.lifecycle.onDispose(ctx.agent.registerTool(tool), `cognia-visualize:tool:${tool.name}`)
     ctx.logger.info("cognia-visualize plugin activated")
   },
-  deactivate: (ctx) => {
-    for (const dispose of (ctx && disposersByContext.get(ctx)) ?? []) dispose()
-    if (ctx) disposersByContext.delete(ctx)
-    ctx?.logger.info("cognia-visualize plugin deactivated")
-  },
-}
-export default definition
+})

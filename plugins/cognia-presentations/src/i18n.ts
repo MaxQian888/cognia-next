@@ -3,10 +3,10 @@
  * `plugin.json` `i18n.locales` — the manager merges them into the host registry
  * under `plugin.cognia-presentations.*` on enable and tears them down on
  * disable, so activate() does not need an imperative `registerTranslations`
- * pass. This module re-exports that manifest block for two consumers that run
- * without a live `ctx`: the tool-result card (a bundled browser-builtin
- * component cannot use `next-intl`, so it resolves strings through an injected
- * translator — see `card.tsx`) and unit tests asserting en/zh-CN parity.
+ * pass. Runtime code translates through `ctx.i18n.t` (renderer, importer) or
+ * `usePluginTranslations` (the result card); this module re-exports the bundle
+ * for the en/zh-CN parity test and offers the same locale → English → key
+ * lookup for code paths that hold no context.
  */
 
 import manifestJson from "../plugin.json"

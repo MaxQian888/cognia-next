@@ -1,14 +1,19 @@
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+/**
+ * New Eridu Signal appearance pack.
+ *
+ * Purely declarative: the host's appearance bridges register the theme
+ * palette, bundled wallpapers, density profile and one-click theme packs from
+ * plugin.json on enable and remove them on disable, so activate() has no work
+ * to do. The packs never touch motion speed — that is the user's
+ * accessibility preference, not part of a look.
+ */
 
-const definition: PluginDefinition = {
-  manifest: manifest as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("New Eridu Signal appearance contributions registered")
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("New Eridu Signal appearance contributions removed")
-  },
-}
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-export default definition
+export const manifest = definePluginManifest(manifestJson)
+
+export default definePlugin({
+  manifest,
+  activate: () => {},
+})

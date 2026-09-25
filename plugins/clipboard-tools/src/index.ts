@@ -14,13 +14,20 @@
  *   - Agent tools: `clipboard_status`, `clipboard_read_image`,
  *     `clipboard_write_text`, `clipboard_clear`.
  *   - Workflow nodes: `action.readText`, `action.writeText`, `action.clear`.
+ *     Their labels / descriptions localize through `manifest.i18n` keys
+ *     `workflow.nodes.<kind>.label|description`; the English `label` /
+ *     `description` below are the editor's fallback.
+ *
+ * Replacing or emptying the user's clipboard destroys whatever they had copied,
+ * so the two writers require approval. None of the tools take a filesystem
+ * path, so none declares an `access` class.
  */
 import {
   definePlugin,
+  definePluginManifest,
   definePluginTool,
   defineWorkflowNode,
   type PluginContext,
-  type PluginManifest,
   type PluginToolRegistration,
 } from "@cognia/plugin-sdk"
 import type { PluginNodeDef } from "@cognia/plugin-sdk"
@@ -43,11 +50,14 @@ export interface ClipboardStatusResult {
   content: string
 }
 
+export type ClipboardImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+
 export interface ClipboardImageResult {
   ok: true
-  /** Base64-encoded image bytes as the OS handed them over (PNG on every desktop platform). */
+  /** Base64-encoded image bytes as the OS handed them over. */
   base64: string
-  mimeType: "image/png"
+  /** Sniffed from the bytes; PNG (what every desktop platform hands over) when unrecognised. */
+  mimeType: ClipboardImageMime
   byteLength: number
 }
 
@@ -78,6 +88,25 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+/** Identify the image encoding from its magic bytes. */
+export function sniffImageMime(bytes: Uint8Array): ClipboardImageMime {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg"
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif"
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp"
+  }
+  return "image/png"
+}
+
 export async function readClipboardStatus(
   clipboard: ClipboardAPI
 ): Promise<ClipboardStatusResult | ClipboardFailure> {
@@ -101,11 +130,34 @@ export async function readClipboardImage(
     return {
       ok: true,
       base64: bytesToBase64(bytes),
-      mimeType: "image/png",
+      mimeType: sniffImageMime(bytes),
       byteLength: bytes.byteLength,
     }
   } catch (err) {
     return failure(err)
+  }
+}
+
+/**
+ * Shape a clipboard image as an MCP `CallToolResult` so it reaches the model
+ * as a real image block. As a `{ base64 }` field the sidecar JSON-stringified
+ * it into one text block — thousands of tokens a vision model cannot decode.
+ * Failures stay plain `{ ok: false, error }` objects.
+ */
+export function imageToolResult(result: ClipboardImageResult | ClipboardFailure): unknown {
+  if (!result.ok) return result
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          mimeType: result.mimeType,
+          byteLength: result.byteLength,
+        }),
+      },
+      { type: "image", data: result.base64, mimeType: result.mimeType },
+    ],
   }
 }
 
@@ -145,7 +197,6 @@ export function createClipboardTools(clipboard: ClipboardAPI): PluginToolRegistr
         description:
           "Report what the clipboard holds (text and/or image) and return the current clipboard text.",
         category: "clipboard",
-        access: "read",
         retryable: true,
         parametersSchema: { type: "object", properties: {}, additionalProperties: false },
       },
@@ -156,13 +207,12 @@ export function createClipboardTools(clipboard: ClipboardAPI): PluginToolRegistr
       definition: {
         name: "clipboard_read_image",
         description:
-          "Read the image currently on the clipboard as base64 PNG. Desktop only; a browser shell has no image clipboard.",
+          "Read the image currently on the clipboard and return it as an image the model can see. Desktop only; a browser shell has no image clipboard.",
         category: "clipboard",
-        access: "read",
         retryable: true,
         parametersSchema: { type: "object", properties: {}, additionalProperties: false },
       },
-      execute: async () => readClipboardImage(clipboard),
+      execute: async () => imageToolResult(await readClipboardImage(clipboard)),
     }),
     definePluginTool({
       name: "clipboard_write_text",
@@ -170,7 +220,7 @@ export function createClipboardTools(clipboard: ClipboardAPI): PluginToolRegistr
         name: "clipboard_write_text",
         description: "Replace the clipboard contents with the given text.",
         category: "clipboard",
-        access: "write",
+        requiresApproval: true,
         parametersSchema: {
           type: "object",
           properties: {
@@ -188,7 +238,7 @@ export function createClipboardTools(clipboard: ClipboardAPI): PluginToolRegistr
         name: "clipboard_clear",
         description: "Empty the clipboard.",
         category: "clipboard",
-        access: "write",
+        requiresApproval: true,
         parametersSchema: { type: "object", properties: {}, additionalProperties: false },
       },
       execute: async () => clearClipboard(clipboard),
@@ -250,11 +300,12 @@ export function createClipboardWorkflowNodes(clipboard: ClipboardAPI): PluginNod
 
 let disposeWorkflowNodes: Array<() => void> = []
 
+// plugin.json is the manifest source of truth (declared `tools[]`,
+// `permissionJustifications`, the `i18n` bundle with the node labels).
+export const manifest = definePluginManifest(manifestJson)
+
 const definition = definePlugin({
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here WINS and would silently drop the declared
-  // `tools[]` / `permissionJustifications`.
-  manifest: manifestJson as unknown as PluginManifest,
+  manifest,
   activate: async (ctx: PluginContext) => {
     ctx.logger.info("clipboard-tools activated")
     for (const dispose of disposeWorkflowNodes) dispose()

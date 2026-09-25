@@ -1,8 +1,10 @@
 {
   "id": "cognia-e2b-sandbox",
   "name": "E2B Sandbox",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B — useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
+  "description": "Adds the E2B MCP server preset (code execution in ephemeral Firecracker microVM sandboxes via @e2b/mcp-server), E2B connection settings, a /sandbox status report, and a Sandboxes panel. Workspace provisioning and the microVM execution tier are inactive in this build: the e2b SDK is not bundled.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": [
     "mcp-server-preset",
@@ -12,7 +14,9 @@
     "context-panel"
   ],
   "main": "src/index.ts",
-  "author": { "name": "cognia-next" },
+  "author": {
+    "name": "cognia-next"
+  },
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {
@@ -33,7 +37,7 @@
         "secret": true,
         "order": 1,
         "title": "E2B / AgentENV API key",
-        "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled. Saved keys are moved to the OS keyring, so this field clears after save."
+        "description": "For the E2B workspace backend, which is inactive in this build. Saved keys are moved to the OS keyring, so this field clears after save. The E2B MCP server preset does not read this value: enter its key in the preset's own E2B_API_KEY field under Settings → MCP Servers."
       },
       "apiUrl": {
         "type": "string",
@@ -70,6 +74,7 @@
       "id": "sandbox",
       "name": "/sandbox",
       "description": "Show E2B sandbox connection status, live workspaces, and setup steps.",
+      "descriptionKey": "commands.sandbox.description",
       "icon": "Box"
     }
   ],
@@ -83,7 +88,10 @@
       "config": {
         "command": "npx",
         "args": ["-y", "@e2b/mcp-server"],
-        "env": { "E2B_API_KEY": "", "E2B_API_URL": "" }
+        "env": {
+          "E2B_API_KEY": "",
+          "E2B_API_URL": ""
+        }
       },
       "fields": [
         {
@@ -91,7 +99,7 @@
           "label": "E2B / AgentENV API key",
           "placement": "env",
           "secret": true,
-          "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled."
+          "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled. Enter it here: the preset does not read the key saved in the E2B Sandbox plugin settings."
         },
         {
           "key": "E2B_API_URL",
@@ -105,5 +113,91 @@
       "docsUrl": "https://github.com/e2b-dev/mcp-server",
       "tags": ["sandbox", "code", "execution"]
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "E2B Sandbox",
+        "manifest.description": "Adds the E2B MCP server preset (code execution in ephemeral Firecracker microVM sandboxes via @e2b/mcp-server), E2B connection settings, a /sandbox status report, and a Sandboxes panel. Workspace provisioning and the microVM execution tier are inactive in this build: the e2b SDK is not bundled.",
+        "backend.label": "E2B Firecracker",
+        "backend.description": "Runs each turn inside an ephemeral Firecracker microVM sandbox.",
+        "panel.title": "Sandboxes",
+        "panel.subtitle": "E2B workspaces and microVM execution",
+        "panel.status.endpoint": "Endpoint",
+        "panel.status.apiKey": "API key",
+        "panel.status.cloud": "E2B Cloud",
+        "panel.status.keyring": "API key stored in the OS keyring",
+        "panel.status.keyPending": "API key pending keyring migration",
+        "panel.status.keyMissing": "No API key — required for E2B Cloud",
+        "panel.status.sdkDormant": "Inactive in this build: workspace provisioning and the microVM tier need the `e2b` SDK, which is not bundled. The MCP preset still works.",
+        "panel.unavailable": "The E2B Sandbox plugin is not active.",
+        "panel.empty.title": "No live E2B workspaces",
+        "panel.empty.body": "A workspace appears when an integration clones a repository with the E2B backend. The microVM tier then runs commands inside it — it does not provision a second sandbox per session.",
+        "panel.row.session": "Session {id}",
+        "panel.row.currentSession": "This session",
+        "panel.row.sandbox": "Sandbox {id}",
+        "panel.row.owners": "{count} runtime owner(s)",
+        "panel.row.networkOn": "network on",
+        "panel.row.networkOff": "network off",
+        "panel.row.released": "handle released",
+        "panel.row.closing": "closing…",
+        "panel.row.release": "Release",
+        "panel.row.releaseConfirm": "Confirm release",
+        "panel.row.releaseAria": "Release workspace {path}",
+        "panel.row.releaseConfirmAria": "Confirm releasing workspace {path}",
+        "panel.row.releaseFailed": "Failed to release {path}",
+        "panel.hint": "Configure the connection in Settings → Plugins → E2B Sandbox; the E2B preset in Settings → MCP Servers takes its own API key.",
+        "command.sandbox.title": "## E2B sandbox",
+        "command.sandbox.endpoint": "Endpoint: {endpoint}",
+        "command.sandbox.key.keyring": "API key: stored in the OS keyring",
+        "command.sandbox.key.pending": "API key: set (keyring migration pending)",
+        "command.sandbox.key.missing": "API key: not set",
+        "command.sandbox.live": "Live workspaces: {count}",
+        "command.sandbox.sdk": "Workspace provisioning and the microVM tier: inactive in this build — the `e2b` SDK is not bundled",
+        "command.sandbox.hint": "Configure the connection in **Settings → Plugins → E2B Sandbox**. The E2B preset in **Settings → MCP Servers** takes its own API key.",
+        "commands.sandbox.description": "Show E2B sandbox connection status, live workspaces, and setup steps."
+      },
+      "zh-CN": {
+        "manifest.name": "E2B 沙箱",
+        "manifest.description": "提供 E2B MCP 服务器预设（通过 @e2b/mcp-server 在临时 Firecracker 微虚拟机沙箱中执行代码）、E2B 连接设置、/sandbox 状态报告和沙箱面板。本版本中工作区预置与微虚拟机执行层未启用：未内置 e2b SDK。",
+        "backend.label": "E2B Firecracker 微虚拟机",
+        "backend.description": "每一轮都在临时的 Firecracker 微虚拟机沙箱中运行。",
+        "panel.title": "沙箱",
+        "panel.subtitle": "E2B 工作区与 microVM 执行",
+        "panel.status.endpoint": "端点",
+        "panel.status.apiKey": "API 密钥",
+        "panel.status.cloud": "E2B Cloud",
+        "panel.status.keyring": "API 密钥已存入系统钥匙串",
+        "panel.status.keyPending": "API 密钥待迁移至钥匙串",
+        "panel.status.keyMissing": "未配置 API 密钥 —— E2B Cloud 必需",
+        "panel.status.sdkDormant": "此构建中未启用：工作区创建与 microVM 档位需要 `e2b` SDK，而它未被内置。MCP 预设仍可使用。",
+        "panel.unavailable": "E2B Sandbox 插件未启用。",
+        "panel.empty.title": "暂无活动 E2B 工作区",
+        "panel.empty.body": "当集成使用 E2B 后端克隆仓库时会创建工作区；microVM 档位随后在已有工作区内执行命令 —— 不会为每个会话单独创建第二个沙箱。",
+        "panel.row.session": "会话 {id}",
+        "panel.row.currentSession": "当前会话",
+        "panel.row.sandbox": "沙箱 {id}",
+        "panel.row.owners": "{count} 个运行时持有方",
+        "panel.row.networkOn": "网络开启",
+        "panel.row.networkOff": "网络关闭",
+        "panel.row.released": "句柄已释放",
+        "panel.row.closing": "正在关闭…",
+        "panel.row.release": "释放",
+        "panel.row.releaseConfirm": "确认释放",
+        "panel.row.releaseAria": "释放工作区 {path}",
+        "panel.row.releaseConfirmAria": "确认释放工作区 {path}",
+        "panel.row.releaseFailed": "释放 {path} 失败",
+        "panel.hint": "在 设置 → 插件 → E2B Sandbox 配置连接；设置 → MCP Servers 中的 E2B 预设需要单独填写 API 密钥。",
+        "command.sandbox.title": "## E2B 沙箱",
+        "command.sandbox.endpoint": "端点：{endpoint}",
+        "command.sandbox.key.keyring": "API 密钥：已存入系统钥匙串",
+        "command.sandbox.key.pending": "API 密钥：已配置（待迁移至钥匙串）",
+        "command.sandbox.key.missing": "API 密钥：未配置",
+        "command.sandbox.live": "活动工作区：{count} 个",
+        "command.sandbox.sdk": "工作区创建与 microVM 档位：此构建中未启用 —— 未内置 `e2b` SDK",
+        "command.sandbox.hint": "在 **设置 → 插件 → E2B Sandbox** 中配置连接。**设置 → MCP Servers** 中的 E2B 预设需要单独填写 API 密钥。",
+        "commands.sandbox.description": "显示 E2B 沙箱的连接状态、运行中的工作区和配置步骤。"
+      }
+    }
+  }
 }

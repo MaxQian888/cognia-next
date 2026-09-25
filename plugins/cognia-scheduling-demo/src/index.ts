@@ -1,39 +1,42 @@
 /**
- * Scheduling Demo — built-in reference plugin.
+ * Scheduling Demo — opt-in EXAMPLE plugin for the `scheduledTasks` surface.
+ *
+ * Not enabled by default (no `startup` activation event), so a user who never
+ * turns it on never gets its task in their scheduler. Its display strings say
+ * "(example)"; the scheduled-task contribution has no `nameKey`, so the label
+ * is the literal manifest name.
  *
  * Two halves of the scheduledTasks surface:
  *   - DECLARATIVE: `manifest.scheduledTasks[]` → the scheduled-task bridge
- *     creates a real `ScheduledTask` Dexie row (type "plugin") on enable and
- *     deletes it on disable.
+ *     creates a real `ScheduledTask` row (type "plugin", paused because of
+ *     `defaultEnabled: false`) on enable and deletes it on disable.
  *   - IMPERATIVE: the named `handler` ("demoHeartbeat") must resolve to a real
- *     function — registered here via `ctx.scheduler.registerHandler` in
- *     activate, torn down in deactivate. (The handler name in the manifest is
- *     just a reference; builtins can't ship a separately-imported handler
- *     module, so the function is provided at activation.)
+ *     function — registered here via `ctx.scheduler.registerHandler` and
+ *     released through the activation's lifecycle ledger.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import {
+  definePlugin,
+  definePluginManifest,
+  type PluginContext,
+  type PluginTaskResult,
+} from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-const HANDLER_NAME = "demoHeartbeat"
+export const HEARTBEAT_HANDLER = "demoHeartbeat"
 
-let disposeHandler: (() => void) | null = null
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
-  manifest: manifest as never,
+export default definePlugin({
+  manifest,
   activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("scheduling-demo activated")
-    disposeHandler =
-      ctx.scheduler?.registerHandler?.(HANDLER_NAME, async () => {
-        ctx.logger?.info("scheduling-demo heartbeat fired")
-        return { success: true as const }
-      }) ?? null
+    const dispose = ctx.scheduler.registerHandler(
+      HEARTBEAT_HANDLER,
+      async (): Promise<PluginTaskResult> => {
+        ctx.logger.info("scheduling-demo heartbeat fired")
+        return { success: true }
+      }
+    )
+    ctx.lifecycle.onDispose(dispose, "cognia-scheduling-demo:heartbeat-handler")
   },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("scheduling-demo deactivated")
-    disposeHandler?.()
-    disposeHandler = null
-  },
-}
-
-export default definition
+})

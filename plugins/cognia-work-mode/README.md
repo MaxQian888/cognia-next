@@ -18,7 +18,7 @@ The source comparison is documented in
 | Reusable specialist roles                             | Researcher, analyst, and deliverable-reviewer subagents                          |
 | Explicit plan and review criteria                     | Work mode instruction contract + plan-approved team template                     |
 | Independent quality review                            | `work_review_deliverable` creates a linked review artifact                       |
-| Finished documents, reports, tables, decks, and sites | Artifact API: Markdown, CSV-compatible text, or sandboxed HTML                   |
+| Finished documents, reports, tables, decks, and sites | Artifact API: Markdown, a cognia-office workbook, or sandboxed HTML              |
 | In-place iteration and review                         | Artifact versions, annotations, `work_update_deliverable`, and Context Workbench |
 | Local files, apps, connectors, browser, and MCP       | Existing host capabilities and permission gates; the plugin does not bypass them |
 | Sandboxed execution and approvals                     | Existing workspace confinement, OS sandbox, and approval journal                 |
@@ -34,17 +34,35 @@ The source comparison is documented in
 - Tools: `work_create_deliverable`, `work_update_deliverable`,
   `work_review_deliverable`, `work_parallelize`
 
-The plugin requests only `artifact:read`, `artifact:write`, and
-`agent:dispatch`. Folder, shell, network, connector, and computer-use authority
-remain outside the plugin and continue through their existing host gates.
+## Permissions
+
+The plugin requests `artifact:read`, `artifact:write`, `agent:dispatch`, and
+`agent:control`:
+
+- `artifact:read` / `artifact:write` — create, update, open, and review Work
+  artifacts;
+- `agent:dispatch` — run the researcher / analyst / reviewer subagents;
+- `agent:control` — call the `office_create_workbook` tool of its declared
+  dependency, `cognia-office`, when the deliverable is a spreadsheet.
+
+Folder, shell, network, connector, and computer-use authority remain outside
+the plugin and continue through their existing host gates.
 
 ## Deliberate non-equivalence
 
-- Cognia artifacts currently export Markdown documents as DOCX/PDF, while this
-  plugin represents spreadsheets as CSV-compatible text and presentations/sites
-  as previewable HTML. Native XLSX/PPTX authoring remains a separate artifact
-  writer capability, not something this plugin emulates with an unsafe private
-  filesystem path.
+- Documents and reports are Markdown artifacts (exportable as DOCX/PDF);
+  presentations and sites are previewable, sandboxed HTML. Spreadsheets are
+  routed to the `cognia-office` plugin, which writes a native workbook
+  artifact; follow-up spreadsheet edits go through cognia-office's workbook
+  operations, not `work_update_deliverable`. Native PPTX authoring is a
+  separate artifact writer capability, not something this plugin emulates with
+  an unsafe private filesystem path.
+- `work_review_deliverable` reviews at most the first 60,000 characters of a
+  deliverable in one prompt; the result says `truncated: true` when a larger
+  one was cut.
+- The four `work_*` tools are offered in every chat while the plugin is
+  enabled, not only in Work mode: the Plugin SDK has no way yet to scope a
+  plugin tool to a mode.
 - Cloud-offline execution depends on the configured Cognia host. Local-folder
   work cannot continue when no host with that folder is online.
 - The plugin's reviewer evaluates deliverable quality. It does not replace the

@@ -1,30 +1,72 @@
 {
   "id": "cognia-workflow-ai",
   "name": "Workflow AI",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "AI co-pilot for workflows — exposes graph-read, graph-mutation, layout, and run-control tools to the chat panel. Editing tools target the open visual editor; the run tools (wf_run_workflow_typed / wf_run_workflow_by_name / wf_list_workflows / wf_emit_workflow_event) work from ANY chat or IM session without an editor, so an agent can execute published workflows directly.",
+  "description": "AI co-pilot for workflows — graph-read, graph-editing, layout, and run-control tools for the chat agent. The editing tools act on the workflow open in the visual editor; the run tools (wf_run_workflow_typed / wf_run_workflow_by_name / wf_list_workflows / wf_emit_workflow_event) work from any chat or IM session without an editor. All tools are offered in every chat while the plugin is enabled.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
-  "capabilities": ["tools", "commands"],
+  "capabilities": ["tools"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
-  "engines": { "cognia": ">=0.1.0" },
-  "permissions": ["workflow:read", "canvas:write", "canvas:run", "session:read", "connectors:send"],
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [
+    "workflow:read",
+    "canvas:write",
+    "canvas:run",
+    "session:read",
+    "connectors:send",
+    "database:read"
+  ],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
-      "reason": "All tools target the per-editor Zustand store; no native deps."
+      "entrypoint": "src/index.ts",
+      "reason": "The tools run in the renderer: editing tools act on the open editor, and run tools use the same workflow runtime as the toolbar's Run button. Workflow nodes that need the desktop (terminal, sidecar agent turns) fail inside the run, not in the tool."
     },
     "tauri": {
       "availability": "supported",
-      "entrypoint": "src/index.ts",
-      "reason": "Run-control tools delegate to the same `runWorkflow` orchestrator the toolbar's Run button uses; everything else mutates the renderer-side store."
+      "entrypoint": "src/index.ts"
     },
     "mobile": {
       "availability": "supported",
-      "reason": "All tools target the per-editor Zustand store; no native deps."
+      "entrypoint": "src/index.ts",
+      "reason": "Same renderer tools as the browser; editing tools need a workflow editor open on the device, and desktop-only nodes fail inside the run."
+    }
+  },
+  "permissionJustifications": {
+    "workflow:read": "Reads the open editor's graph, validation, last run, the node catalog, templates, and your published workflows.",
+    "canvas:write": "Applies the agent's graph edits, proposals, and auto-layout to the workflow open in the editor (undoable, like your own edits).",
+    "canvas:run": "Runs a workflow when you approve the agent's run request, and wakes a waiting run with an event.",
+    "session:read": "Checks whether the chat is bound to an IM conversation before offering an in-chat run or subscribe card.",
+    "connectors:send": "Records the Approve / Cancel callback for the run or subscribe card it posts into an IM conversation.",
+    "database:read": "Lists your characters, twins, teams, skills, connectors, MCP servers, and plugins so the agent can reference real ones in a node's settings."
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Workflow AI",
+        "manifest.description": "AI co-pilot for workflows — graph-read, graph-editing, layout, and run-control tools for the chat agent. The editing tools act on the workflow open in the visual editor; the run tools (wf_run_workflow_typed / wf_run_workflow_by_name / wf_list_workflows / wf_emit_workflow_event) work from any chat or IM session without an editor. All tools are offered in every chat while the plugin is enabled.",
+        "fanout.title": "Subscribe to “{name}”",
+        "fanout.summary": "Mirror this workflow's run progress into this conversation.",
+        "fanout.approve": "Approve",
+        "fanout.cancel": "Cancel",
+        "fanout.replyHint": "Reply 1 to approve / 2 to cancel"
+      },
+      "zh-CN": {
+        "manifest.name": "工作流 AI",
+        "manifest.description": "工作流的 AI 副驾——为对话 Agent 提供读图、改图、布局与运行控制工具。编辑类工具作用于可视化编辑器中打开的工作流；运行类工具（wf_run_workflow_typed / wf_run_workflow_by_name / wf_list_workflows / wf_emit_workflow_event）可在任意对话或 IM 会话中使用，无需打开编辑器。插件启用期间，所有工具在每个对话中都可用。",
+        "fanout.title": "订阅「{name}」",
+        "fanout.summary": "把这个 workflow 的运行进度同步到当前会话。",
+        "fanout.approve": "同意",
+        "fanout.cancel": "取消",
+        "fanout.replyHint": "回复 1 同意 / 2 取消"
+      }
     }
   }
 }

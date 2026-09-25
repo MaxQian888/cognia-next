@@ -1,8 +1,10 @@
 {
   "id": "cognia-azur-lane-theme",
   "name": "Azur Lane: Azure Anchorage (Unofficial)",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "A complete naval-blue appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
@@ -19,7 +21,6 @@
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
@@ -184,8 +185,7 @@
         "themeId": "azure-anchorage-night",
         "wallpaperId": "enterprise-carrier-dawn",
         "density": "anchorage-bridge",
-        "radius": 0.375,
-        "motionSpeed": 0.75
+        "radius": 0.375
       }
     },
     {
@@ -200,8 +200,7 @@
         "themeId": "azure-anchorage-night",
         "wallpaperId": "belfast-rain-lounge",
         "density": "anchorage-bridge",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -216,8 +215,7 @@
         "themeId": "azure-anchorage-night",
         "wallpaperId": "new-jersey-maintenance-dock",
         "density": "anchorage-bridge",
-        "radius": 0.25,
-        "motionSpeed": 1
+        "radius": 0.25
       }
     },
     {
@@ -232,8 +230,7 @@
         "themeId": "azure-anchorage-night",
         "wallpaperId": "shinano-moonlit-harbor",
         "density": "anchorage-bridge",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -248,9 +245,20 @@
         "themeId": "azure-anchorage-night",
         "wallpaperId": "agir-rain-drydock",
         "density": "anchorage-bridge",
-        "radius": 0.25,
-        "motionSpeed": 0.75
+        "radius": 0.25
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Azur Lane: Azure Anchorage (Unofficial)",
+        "manifest.description": "A complete naval-blue appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets."
+      },
+      "zh-CN": {
+        "manifest.name": "碧蓝航线：蔚蓝港湾（非官方）",
+        "manifest.description": "完整的海军蓝外观包：角色壁纸、完整语义配色、密度控制和一键预设。"
+      }
+    }
+  }
 }

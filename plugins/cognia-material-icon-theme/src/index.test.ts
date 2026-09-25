@@ -12,13 +12,13 @@ import { cleanup, render } from "@testing-library/react"
 
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import {
-  __resetIconThemesForTesting,
   getActiveIconTheme,
   registerIconThemesForPlugin,
   unregisterIconThemesByPlugin,
   type VsCodeIconThemeData,
 } from "@/lib/plugin/bridge/icons-bridge"
-import definition from "./index"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
+import definition, { manifest as moduleManifest } from "./index"
 import manifest from "../plugin.json"
 
 const PUBLIC_ROOT = join(__dirname, "../../../public")
@@ -96,7 +96,9 @@ describe("cognia-material-icon-theme", () => {
     let fetchSpy: jest.SpiedFunction<typeof fetch>
 
     beforeEach(() => {
-      __resetIconThemesForTesting()
+      // The plugin's own teardown, the same call the manager makes on disable —
+      // not a host-internal reset of every theme in the registry.
+      unregisterIconThemesByPlugin(manifest.id)
       // Serve the static export exactly as the shells do: `/plugins/<id>/…`
       // is a file under `public/` (copied to `out/`).
       fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -112,7 +114,7 @@ describe("cognia-material-icon-theme", () => {
     afterEach(() => {
       cleanup()
       fetchSpy.mockRestore()
-      __resetIconThemesForTesting()
+      unregisterIconThemesByPlugin(manifest.id)
     })
 
     it("renders the mirrored Material icons while registered and lucide glyphs after", async () => {
@@ -155,9 +157,15 @@ describe("cognia-material-icon-theme", () => {
     })
   })
 
-  it("activates without host-specific dependencies", async () => {
-    const ctx = { pluginId: manifest.id, logger: { info: jest.fn() } } as never
-    await expect(definition.activate?.(ctx)).resolves.toBeUndefined()
-    await expect(definition.deactivate?.(ctx)).resolves.toBeUndefined()
+  it("exports plugin.json itself as the module manifest and passes the host validator", () => {
+    expect(moduleManifest).toBe(manifest)
+    expect(definition.manifest).toBe(moduleManifest)
+    expect(validatePluginManifest(moduleManifest).errors).toEqual([])
+  })
+
+  it("activates without imperative host work", async () => {
+    const ctx = {} as Parameters<typeof definition.activate>[0]
+    await expect(Promise.resolve(definition.activate(ctx))).resolves.toBeUndefined()
+    expect(definition.deactivate).toBeUndefined()
   })
 })

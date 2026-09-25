@@ -7,7 +7,7 @@
  * feature does not exist.
  */
 
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
@@ -18,8 +18,17 @@ const manifest = JSON.parse(
 ) as PluginManifest & {
   pythonDependencies?: string[]
   pythonVenv?: string
+  bundle_include?: string[]
+  permissionJustifications?: Record<string, string>
   configSchema?: { properties?: Record<string, unknown> }
 }
+
+/** The installer's copy list for this plugin (plugins/distribution.json). */
+const distributionInclude = (
+  JSON.parse(readFileSync(join(__dirname, "..", "distribution.json"), "utf8")) as {
+    bundled: Record<string, { id: string; include: string[] }>
+  }
+).bundled["cognia-laya-guard"]?.include
 
 describe("cognia-laya-guard manifest", () => {
   it("passes validation", () => {
@@ -47,9 +56,46 @@ describe("cognia-laya-guard manifest", () => {
   it("declares exactly the permissions the wiring needs", () => {
     // onConnectorInbound is not a chat-interception hook, so the plugin
     // carries no high-risk permission — python:execute for the host,
-    // network:fetch for the one-time HuggingFace checkpoint download, and
-    // decisions:provide for the laya-local decision provider (ADR-0194).
-    expect(manifest.permissions).toEqual(["python:execute", "network:fetch", "decisions:provide"])
+    // network:fetch for the one-time HuggingFace checkpoint download,
+    // decisions:provide for the laya-local decision provider (ADR-0194), and
+    // connectors:read because the inbound hook reads the text of every IM
+    // message that arrives. Reading inbound traffic is what the grant is for,
+    // so it is declared rather than left implicit in a hook registration.
+    expect(manifest.permissions).toEqual([
+      "python:execute",
+      "network:fetch",
+      "decisions:provide",
+      "connectors:read",
+    ])
+    for (const permission of manifest.permissions ?? []) {
+      expect(manifest.permissionJustifications?.[permission]).toBeTruthy()
+    }
+  })
+
+  it("packs the same files the installer ships", () => {
+    // Two copy lists exist — `cognia plugin build` reads plugin.json
+    // (`pythonMain` + `bundle_include`), the installer stager reads
+    // plugins/distribution.json. A file in one and not the other is a plugin
+    // that works installed from the desktop app and breaks installed from a
+    // built zip (or the reverse).
+    expect(distributionInclude).toBeDefined()
+    const expand = (pattern: string): string[] => {
+      const recursive = /^(.*)\/\*\*\/\*(\.[A-Za-z0-9]+)?$/.exec(pattern)
+      if (!recursive) return [pattern]
+      const [, dir, extension] = recursive
+      return readdirSync(join(__dirname, dir))
+        .filter((name) => !extension || name.endsWith(extension))
+        .map((name) => `${dir}/${name}`)
+    }
+    const installer = [...new Set(distributionInclude!.flatMap(expand))].sort()
+    const built = [
+      ...new Set([
+        "plugin.json",
+        manifest.pythonMain as string,
+        ...(manifest.bundle_include ?? []),
+      ]),
+    ].sort()
+    expect(built).toEqual(installer)
   })
 
   it("contributes the python-backed laya-local decision provider", () => {
@@ -66,6 +112,25 @@ describe("cognia-laya-guard manifest", () => {
     for (const locale of ["en", "zh-CN"]) {
       expect(withProviders.i18n?.locales?.[locale]?.["decisionProvider.label"]).toBeTruthy()
     }
+  })
+
+  it("ships every runtime string in both locales", () => {
+    // main.py translates the inbound note and the provider status through
+    // ctx.i18n.t; a key missing from zh-CN falls back to English at runtime,
+    // which is exactly the regression this pins.
+    const locales = (manifest as { i18n?: { locales?: Record<string, Record<string, string>> } })
+      .i18n?.locales
+    const en = Object.keys(locales?.en ?? {}).sort()
+    expect(en).toEqual(
+      expect.arrayContaining([
+        "inbound.observeNote",
+        "inbound.truncatedNote",
+        "status.loading",
+        "status.notLoaded",
+        "status.retrying",
+      ])
+    )
+    expect(Object.keys(locales?.["zh-CN"] ?? {}).sort()).toEqual(en)
   })
 
   it("scopes network egress to the model hosts", () => {

@@ -10,11 +10,16 @@
  * caption and the "copied to clipboard" state — and reuses the host's image
  * block so the lightbox / lazy-load behaviour matches every other image in
  * the transcript. Returns `null` when no image block is present.
+ *
+ * The text block is a JSON `ScreenshotCaption`; the card localizes it at
+ * render time from the plugin's own `manifest.i18n` bundle. A plain-text
+ * block (transcripts written before the caption was structured) is shown as
+ * it was stored.
  */
 
-import { useTranslations } from "next-intl"
 import { CameraIcon } from "lucide-react"
 
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
 import {
   blockMediaSrc,
   type McpResultBlock,
@@ -29,6 +34,49 @@ import { parseToolOutput, PluginImage, ToolCard } from "@cognia/plugin-ui"
  * `take_screenshot` tool emits, so this card renders both.
  */
 export const SCREENSHOT_PART_TYPE = "screenshot-result"
+
+export const PLUGIN_ID = "cognia-screenshot"
+
+/** The structured caption the capture's text block carries (JSON). */
+export interface ScreenshotCaption {
+  ok: true
+  filename: string
+  /** Encoded byte size. */
+  size: number
+  mimeType: string
+  copiedToClipboard: boolean
+}
+
+/** Human-readable byte size for the caption / command reply ("1.2 MB"). */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** Parse a text block as a `ScreenshotCaption`, or `null` for any other text. */
+export function parseScreenshotCaption(text: string): ScreenshotCaption | null {
+  try {
+    const value = JSON.parse(text) as Partial<ScreenshotCaption> | null
+    if (
+      value &&
+      typeof value === "object" &&
+      typeof value.filename === "string" &&
+      typeof value.size === "number"
+    ) {
+      return {
+        ok: true,
+        filename: value.filename,
+        size: value.size,
+        mimeType: typeof value.mimeType === "string" ? value.mimeType : "image/png",
+        copiedToClipboard: value.copiedToClipboard === true,
+      }
+    }
+  } catch {
+    // Not JSON — a legacy plain-text note.
+  }
+  return null
+}
 /** Structural view of a content block — `McpResultBlock`'s catch-all member keeps union narrowing from helping, so cards read `type`/`text` this way. */
 export interface ContentBlockLike {
   type?: string
@@ -45,7 +93,7 @@ export function screenshotBlocks(part: unknown): McpResultBlock[] {
 }
 
 export function ScreenshotResultCard({ part }: ToolResultRendererProps) {
-  const t = useTranslations("chat.toolCards.screenshot")
+  const t = usePluginTranslations(PLUGIN_ID)
   const blocks = screenshotBlocks(part)
   const image = blocks.find((b) => (b as ContentBlockLike).type === "image")
   const src = image ? blockMediaSrc(image, "image/png") : null
@@ -55,19 +103,27 @@ export function ScreenshotResultCard({ part }: ToolResultRendererProps) {
       const c = b as ContentBlockLike
       return c.type === "text" && typeof c.text === "string" && c.text.trim().length > 0
     })
-    .map((b) => b.text)
+    .map((b) => {
+      const caption = parseScreenshotCaption(b.text)
+      if (!caption) return b.text
+      const base = t("card.note", { filename: caption.filename, size: formatSize(caption.size) })
+      return caption.copiedToClipboard ? `${base} ${t("card.copied")}` : base
+    })
     .join(" ")
 
   return (
-    <ToolCard title={t("title")} testId="screenshot-result-card">
+    <ToolCard title={t("card.title")} testId="screenshot-result-card">
       <div className="flex items-start gap-2">
         <CameraIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="max-w-md">
-            <PluginImage src={src} alt={t("alt")} />
+            <PluginImage src={src} alt={t("card.alt")} />
           </div>
           {note && (
-            <p className="text-[11px] text-muted-foreground" data-testid="screenshot-result-note">
+            <p
+              className="break-words text-[11px] text-muted-foreground"
+              data-testid="screenshot-result-note"
+            >
               {note}
             </p>
           )}

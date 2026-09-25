@@ -1,6 +1,26 @@
 import type { Artifact } from "@cognia/plugin-sdk"
 import type { PluginSubagentDispatchResult } from "@cognia/plugin-sdk"
-import { createWorkRuntime, type WorkPluginContext } from "./runtime"
+import manifestJson from "../plugin.json"
+import {
+  createWorkRuntime,
+  MAX_REVIEW_CONTENT_CHARS,
+  reviewPrompt,
+  type WorkPluginContext,
+} from "./runtime"
+
+type Locale = keyof typeof manifestJson.i18n.locales
+
+/** `ctx.i18n.t` over the plugin's own bundle, failing loudly on a missing key. */
+function translator(locale: Locale = "en") {
+  const bundle = manifestJson.i18n.locales[locale] as Record<string, string>
+  return (key: string, params?: Record<string, string | number>) => {
+    const value = bundle[key]
+    if (value === undefined) throw new Error(`missing ${locale} key ${key}`)
+    return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : match
+    )
+  }
+}
 
 function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
   return {
@@ -18,7 +38,7 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
   }
 }
 
-function makeContext() {
+function makeContext(locale: Locale = "en") {
   const artifacts = new Map<string, Artifact>()
   const createArtifact = jest.fn(
     async (input: Parameters<WorkPluginContext["artifact"]["createArtifact"]>[0]) => {
@@ -67,6 +87,7 @@ function makeContext() {
       openArtifact,
     },
     agent: { dispatchSubagent, invokeDependencyTool },
+    i18n: { t: translator(locale) },
   } as unknown as WorkPluginContext
 
   return { artifacts, createArtifact, ctx, dispatchSubagent, invokeDependencyTool, openArtifact }
@@ -144,9 +165,44 @@ describe("WorkRuntime", () => {
     )
     expect(artifacts.get("artifact-2")).toMatchObject({
       type: "document",
+      title: "Review — Quarterly brief",
       metadata: { derivedFromArtifactId: "source-1", sourceOrigin: "tool" },
     })
+    expect(result.truncated).toBe(false)
     expect(openArtifact).toHaveBeenLastCalledWith("artifact-2")
+  })
+
+  it("names the review artifact in the user's language", async () => {
+    const { artifacts, ctx } = makeContext("zh-CN")
+    artifacts.set("source-1", makeArtifact({ id: "source-1" }))
+    await createWorkRuntime(ctx).reviewDeliverable({ artifactId: "source-1" })
+    expect(artifacts.get("artifact-2")?.title).toBe("审阅 — Quarterly brief")
+  })
+
+  it("caps the deliverable a review puts into one prompt", async () => {
+    const { artifacts, ctx, dispatchSubagent } = makeContext()
+    const huge = "x".repeat(MAX_REVIEW_CONTENT_CHARS + 5_000)
+    artifacts.set("source-1", makeArtifact({ id: "source-1", content: huge }))
+
+    const result = await createWorkRuntime(ctx).reviewDeliverable({ artifactId: "source-1" })
+
+    const prompt = dispatchSubagent.mock.calls[0][1] as string
+    expect(prompt.length).toBeLessThan(MAX_REVIEW_CONTENT_CHARS + 2_000)
+    expect(prompt).toContain(`Only the first ${MAX_REVIEW_CONTENT_CHARS}`)
+    expect(result.truncated).toBe(true)
+  })
+
+  it("leaves a deliverable under the cap whole", () => {
+    const { prompt, truncated } = reviewPrompt(makeArtifact(), ["accurate"])
+    expect(truncated).toBe(false)
+    expect(prompt).toContain("Evidence-backed draft.")
+    expect(prompt).not.toContain("Only the first")
+  })
+
+  it("ships every en message in zh-CN", () => {
+    expect(Object.keys(manifestJson.i18n.locales["zh-CN"]).sort()).toEqual(
+      Object.keys(manifestJson.i18n.locales.en).sort()
+    )
   })
 
   it("fails clearly when a review target does not exist", async () => {

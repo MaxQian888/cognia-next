@@ -28,14 +28,14 @@ Current workspace diff, commit, commit range, or a provided diff.
 
 `Original User Prompt` is authoritative. `Main Agent Diagnosis And Fix Summary` is optional context only and must not narrow, expand, or replace it.
 
-The reviewer subagent writes the full report to the artifacts directory and returns a short user-visible result. Return that result to the user without adding fixes or follow-up actions. A successful result looks like:
+The reviewer subagent saves the full report as a chat artifact (or, when artifacts are unavailable, returns the full report as its reply) and never writes into the reviewed workspace. It answers in the language of the `Original User Prompt`. Return its result to the user without adding fixes or follow-up actions. A successful result looks like:
 
 ```md
 Bugfix review completed.
 
-结论: <从代码看已修复 / 从代码看未修复 / 暂无法确认是否修复 + short explanation>
+<Fixed (per static evidence) / Not fixed (per static evidence) / Cannot confirm the fix — or the Chinese labels 从代码看已修复 / 从代码看未修复 / 暂无法确认是否修复 — plus a short explanation>
 
-Report: <timestamped absolute path>
+Report: <artifact title>
 ```
 
-If the subagent reports artifact write failure, return that failure directly. Do not write missing reports yourself, invent conclusions, repair code, or include runtime metadata or token/tool stats in chat.
+If the subagent returns the full report instead (no artifact tool), relay it unchanged. Do not write reports yourself, invent conclusions, repair code, or include runtime metadata or token/tool stats in chat.

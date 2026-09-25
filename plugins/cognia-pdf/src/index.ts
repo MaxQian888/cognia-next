@@ -1,73 +1,84 @@
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import {
+  defineImporter,
+  definePlugin,
+  definePluginManifest,
+  type PluginContext,
+} from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import { PDF_ARTIFACT_KIND, PDF_MIME } from "./model"
 import { createPdfRenderer } from "./preview"
-import { createPdfRuntime, type PdfPluginContext } from "./runtime"
+import { createPdfRuntime } from "./runtime"
 import { createPdfTools } from "./tools"
 
-export const manifest = manifestJson as PluginManifest
+// plugin.json is the manifest source of truth — including the `i18n.locales`
+// bundle the manager registers before activate() runs.
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
+type Translate = PluginContext["i18n"]["t"]
+
+export default definePlugin({
   manifest,
   activate: async (ctx) => {
-    ctx.i18n.registerTranslations("en", {
-      "pdf.preview.title": "PDF preview",
-      "pdf.preview.unsupported": "Your environment cannot display this PDF preview.",
-      "pdf.preview.error": "Unable to render this PDF artifact.",
-      "pdf.preview.download": "Download PDF",
-      "pdf.importer.name": "PDF document",
-      "pdf.importer.description": "Import a PDF into the Cognia PDF model.",
-    })
-    ctx.i18n.registerTranslations("zh-CN", {
-      "pdf.preview.title": "PDF 预览",
-      "pdf.preview.unsupported": "当前环境无法显示此 PDF 预览。",
-      "pdf.preview.error": "无法渲染此 PDF 文档。",
-      "pdf.preview.download": "下载 PDF",
-      "pdf.importer.name": "PDF 文档",
-      "pdf.importer.description": "将 PDF 导入 Cognia PDF 模型。",
-    })
-    ctx.artifact.registerRenderer(
-      PDF_ARTIFACT_KIND,
-      createPdfRenderer({
-        title: ctx.i18n.t("pdf.preview.title"),
-        unsupported: ctx.i18n.t("pdf.preview.unsupported"),
-        error: ctx.i18n.t("pdf.preview.error"),
-        download: ctx.i18n.t("pdf.preview.download"),
-      })
+    const t: Translate = (key, params) => ctx.i18n.t(key, params)
+    const runtime = createPdfRuntime(ctx)
+
+    ctx.lifecycle.onDispose(
+      ctx.artifact.registerRenderer(
+        PDF_ARTIFACT_KIND,
+        createPdfRenderer({
+          t,
+          onLocaleChange: (handler) => ctx.i18n.onLocaleChange(handler),
+          save: (file) => ctx.files.save(file),
+        })
+      ),
+      "cognia-pdf:renderer"
     )
-    const pdfCtx = ctx as unknown as PdfPluginContext
-    const runtime = createPdfRuntime(pdfCtx)
-    ctx.import.registerImporter({
-      id: "pdf",
-      name: ctx.i18n.t("pdf.importer.name"),
-      description: ctx.i18n.t("pdf.importer.description"),
-      format: "pdf",
-      extensions: ["pdf"],
-      mimeType: PDF_MIME,
-      import: async (source) => {
-        if (typeof source.content === "string")
-          return { success: false, error: "PDF import requires binary content." }
-        try {
-          // Import means "become a PDF artifact": the document model (bytes +
-          // inspection) is what preview/fill/export all operate on.
-          return {
-            success: true,
-            data: await runtime.importPdfBytes({
-              bytes: new Uint8Array(source.content),
-              filename: source.filename,
-            }),
+
+    const buildImporter = () =>
+      defineImporter({
+        id: "pdf",
+        name: t("importer.name"),
+        description: t("importer.description"),
+        format: "pdf",
+        extensions: ["pdf"],
+        mimeType: PDF_MIME,
+        import: async (source) => {
+          if (typeof source.content === "string")
+            return { success: false, error: t("importer.binaryRequired") }
+          try {
+            // Import means "become a PDF artifact": the document model (bytes +
+            // inspection) is what preview/fill/export all operate on. The user
+            // chose this file in the host import flow, so the artifact is theirs.
+            return {
+              success: true,
+              data: await runtime.importPdfBytes({
+                bytes: new Uint8Array(source.content),
+                filename: source.filename,
+                userInitiated: true,
+              }),
+            }
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : t("importer.failed"),
+            }
           }
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : "PDF import failed.",
-          }
-        }
-      },
-    })
-    for (const tool of createPdfTools(pdfCtx)) ctx.agent.registerTool(tool)
+        },
+      })
+    // Importer labels are resolved at registration time — re-register on a
+    // locale change.
+    let disposeImporter = ctx.import.registerImporter(buildImporter())
+    ctx.lifecycle.onDispose(
+      ctx.i18n.onLocaleChange(() => {
+        disposeImporter()
+        disposeImporter = ctx.import.registerImporter(buildImporter())
+      }),
+      "cognia-pdf:locale"
+    )
+    ctx.lifecycle.onDispose(() => disposeImporter(), "cognia-pdf:importer")
+
+    for (const tool of createPdfTools(ctx))
+      ctx.lifecycle.onDispose(ctx.agent.registerTool(tool), `cognia-pdf:tool:${tool.name}`)
     ctx.logger.info("cognia-pdf plugin activated")
   },
-}
-
-export default definition
+})

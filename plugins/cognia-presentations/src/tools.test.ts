@@ -35,5 +35,6 @@ it("marks read-only tools retryable and file-bound tools with timeouts", () => {
   expect(byName.get("presentations_validate")).toMatchObject({ retryable: true })
   expect(byName.get("presentations_preview")).toMatchObject({ retryable: true })
   expect(byName.get("presentations_import_pptx")).toMatchObject({ timeoutMs: 120_000 })
-  expect(byName.get("presentations_export_pptx")).toMatchObject({ timeoutMs: 60_000 })
+  expect(byName.get("presentations_export_pptx")).toMatchObject({ timeoutMs: 120_000 })
+  expect(byName.get("presentations_validate")).toMatchObject({ timeoutMs: 60_000 })
 })

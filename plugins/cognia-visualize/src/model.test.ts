@@ -1,5 +1,6 @@
 import {
   createVisualization,
+  LEGACY_PROFILE_ALIASES,
   parseVisualization,
   recommendProfile,
   validateVisualization,
@@ -7,7 +8,7 @@ import {
 } from "./model"
 
 it("routes intents and validates every supported profile", () => {
-  expect(VISUALIZATION_PROFILES).toHaveLength(22)
+  expect(VISUALIZATION_PROFILES).toHaveLength(19)
   expect(recommendProfile("show the quarterly trend")).toMatchObject({ profile: "line" })
   expect(recommendProfile("draw dependencies")).toMatchObject({ profile: "network" })
   const spec = createVisualization({
@@ -51,4 +52,37 @@ it("parseVisualization rejects malformed payloads with clean errors", () => {
     "Unsupported Cognia visualization schema"
   )
   expect(() => parseVisualization("[1,2]")).toThrow("Unsupported Cognia visualization schema")
+})
+
+it("no longer offers faked profiles but still reads stored ones as what they rendered", () => {
+  for (const legacy of ["histogram", "map", "simulation"]) {
+    expect(VISUALIZATION_PROFILES).not.toContain(legacy)
+    expect(() =>
+      createVisualization({
+        title: "Old",
+        profile: legacy as never,
+        data: [{ label: "a", value: 1 }],
+      })
+    ).toThrow("Unsupported visualization profile")
+    const stored = parseVisualization(
+      JSON.stringify({ schemaVersion: 1, profile: legacy, title: "Old", data: [] })
+    )
+    expect(stored.profile).toBe(LEGACY_PROFILE_ALIASES[legacy])
+  }
+  expect(recommendProfile("show sales by location")).toMatchObject({ profile: "scatter" })
+  expect(recommendProfile("value distribution")).toMatchObject({ profile: "bar" })
+})
+
+it("uses the caller's localized default summary and attaches finding params", () => {
+  const spec = createVisualization(
+    { title: "营收", profile: "bar", data: [{ label: "", value: Number.NaN }] },
+    "营收：1 个数据点。"
+  )
+  expect(spec.accessibility.summary).toBe("营收：1 个数据点。")
+  expect(validateVisualization(spec)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ code: "data.label", params: { index: 1 } }),
+      expect.objectContaining({ code: "data.value", params: { index: 1 } }),
+    ])
+  )
 })

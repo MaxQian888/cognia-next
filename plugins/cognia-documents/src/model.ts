@@ -286,8 +286,31 @@ function rejectChange(model: DocumentModel, changeId: string): void {
   model.changes = model.changes.filter((candidate) => candidate.id !== changeId)
 }
 
-export function validateDocument(model: DocumentModel) {
-  const findings: Array<{ severity: "error" | "warning"; code: string; message: string }> = []
+/**
+ * One validation finding. `message` is the English text tools hand to the
+ * model; `params` carries the values the preview needs to render the same
+ * finding through the `finding.<code>` translation key.
+ */
+export interface DocumentFinding {
+  severity: "error" | "warning"
+  code: string
+  message: string
+  params?: Record<string, string | number>
+}
+
+/**
+ * Imported-feature ids. Documents imported before the ids existed stored the
+ * English label ("tracked changes", "headers/footers"); both spellings map to
+ * the same id so the preview can localize either.
+ */
+export function normalizeFeatureId(feature: string): string {
+  const clean = feature.trim().toLowerCase()
+  if (clean.startsWith("fields")) return "fields"
+  return clean.replace(/[\s/]+/g, "-")
+}
+
+export function validateDocument(model: DocumentModel): DocumentFinding[] {
+  const findings: DocumentFinding[] = []
   if (!model.blocks.length)
     findings.push({
       severity: "warning",
@@ -301,6 +324,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "block.duplicate_id",
         message: `Duplicate block id: ${block.id}`,
+        params: { id: block.id },
       })
     ids.add(block.id)
     if (block.type === "heading" && ![1, 2, 3].includes(block.level))
@@ -308,6 +332,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "block.heading_level",
         message: `Heading ${block.id} has unsupported level ${String(block.level)}.`,
+        params: { id: block.id, level: String(block.level) },
       })
     if (block.type === "table") {
       if (!block.rows.length)
@@ -315,12 +340,14 @@ export function validateDocument(model: DocumentModel) {
           severity: "warning",
           code: "table.empty",
           message: `Table ${block.id} has no rows.`,
+          params: { id: block.id },
         })
       else if (block.rows.some((row) => row.length !== block.rows[0].length))
         findings.push({
           severity: "warning",
           code: "table.ragged",
           message: `Table ${block.id} rows have inconsistent column counts.`,
+          params: { id: block.id },
         })
     }
   }
@@ -331,6 +358,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "comment.duplicate_id",
         message: `Duplicate comment id: ${comment.id}`,
+        params: { id: comment.id },
       })
     anchorIds.add(comment.id)
     if (!ids.has(comment.blockId))
@@ -338,6 +366,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "comment.orphan",
         message: `Comment ${comment.id} has no target block.`,
+        params: { id: comment.id },
       })
   }
   anchorIds.clear()
@@ -347,6 +376,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "change.duplicate_id",
         message: `Duplicate change id: ${change.id}`,
+        params: { id: change.id },
       })
     anchorIds.add(change.id)
     if (!ids.has(change.blockId))
@@ -354,6 +384,7 @@ export function validateDocument(model: DocumentModel) {
         severity: "error",
         code: "change.orphan",
         message: `Change ${change.id} has no target block.`,
+        params: { id: change.id },
       })
   }
   for (const feature of model.importedFeatures)
@@ -361,6 +392,7 @@ export function validateDocument(model: DocumentModel) {
       severity: "warning",
       code: "import.feature",
       message: `Imported feature requires review: ${feature}`,
+      params: { feature: normalizeFeatureId(feature) },
     })
   return findings
 }

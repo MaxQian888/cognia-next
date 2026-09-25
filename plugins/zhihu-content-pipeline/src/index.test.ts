@@ -1,6 +1,7 @@
 import type { PluginToolRegistration } from "@cognia/plugin-sdk"
-import definition from "./index"
-import { getPipelineDb } from "./db/runtime"
+import definition, { manifest } from "./index"
+import manifestJson from "../plugin.json"
+import { getPipelineDb, getReviewHost } from "./db/runtime"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
 import { STATIC_MCP_PRESETS } from "./mcp/presets"
@@ -35,7 +36,9 @@ function buildCtx(withDexie = true) {
       pluginPath: "/plugins/zhihu-content-pipeline",
       logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
       agent: { registerMcpServerPreset, registerTool },
-      session: { startSeededSession: jest.fn() },
+      session: { startSeededSession: jest.fn(), switchSession: jest.fn() },
+      clipboard: { writeText: jest.fn() },
+      ui: { navigate: jest.fn(() => true), showToast: jest.fn() },
       characterPacks: { register: registerPack },
       workflow: {
         registerNode,
@@ -94,6 +97,29 @@ describe("zhihu-content-pipeline manifest", () => {
     expect(m.dexie?.tables.map((x) => x.name)).toEqual(["topics", "research", "drafts"])
     expect(m.i18n?.locales.en).toBeDefined()
     expect(m.i18n?.locales["zh-CN"]).toBeDefined()
+    // Data-only fields come from plugin.json, not a second TS copy.
+    expect(manifest.dexie).toEqual(manifestJson.dexie)
+    expect(manifest.i18n).toEqual(manifestJson.i18n)
+  })
+
+  it("describes what it actually ships — zget is a CLI, not an MCP preset", () => {
+    expect(manifest.description).not.toMatch(/MCP presets that wrap zget/)
+    expect(manifest.description).toMatch(/zget CLI/)
+    expect(manifest.description).toMatch(/nothing is posted to Zhihu/)
+    const presetIds = (manifest.mcpServerPresets ?? []).map((preset) => preset.id)
+    expect(presetIds.some((id) => id.includes("zget"))).toBe(false)
+  })
+
+  it("keeps en and zh-CN bundles in key and placeholder parity, with flat keys", () => {
+    const { en, "zh-CN": zh } = manifestJson.i18n.locales
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
+    const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+    for (const key of Object.keys(en)) {
+      expect(key.startsWith("plugin.")).toBe(false)
+      expect(placeholders(zh[key as keyof typeof zh])).toEqual(
+        placeholders(en[key as keyof typeof en])
+      )
+    }
   })
 
   it("declares the two persistence tools + the zget binary on plugin.json fields", () => {
@@ -112,6 +138,12 @@ describe("zhihu-content-pipeline manifest", () => {
     // The daily workflow's terminal node shells out to `zget`.
     expect(m.requires?.binaries?.map((b) => b.name)).toEqual(["zget"])
   })
+})
+
+it("activates at startup, where its daily cron template needs the save-topics node", () => {
+  // The node is registered only in activate(), and nothing activates a plugin
+  // for a workflow node: without startup, the 09:00 run after a restart fails.
+  expect(manifestJson.activationEvents).toContain("startup")
 })
 
 describe("zhihu-content-pipeline activate (with dexie)", () => {
@@ -143,6 +175,7 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
       onCommand: (command: string) => unknown
     }
     expect(getPipelineDb()).not.toBeNull()
+    expect(getReviewHost()).toEqual({ session: ctx.session, clipboard: ctx.clipboard, ui: ctx.ui })
     // The hook delegates to handleZhihuCommand and surfaces its result.
     await expect(hooks.onCommand("zhihu")).resolves.toEqual({
       handled: true,
@@ -164,6 +197,7 @@ describe("zhihu-content-pipeline activate (with dexie)", () => {
     for (const d of toolDisposers) expect(d).toHaveBeenCalledTimes(1)
     expect(disposeNode).toHaveBeenCalledTimes(1)
     expect(getPipelineDb()).toBeNull()
+    expect(getReviewHost()).toBeNull()
     // Command teardown belongs to the manager for declared commands.
   })
 

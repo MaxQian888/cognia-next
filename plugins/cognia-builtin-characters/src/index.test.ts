@@ -8,8 +8,15 @@
  */
 
 import { isOverlayCharacterId } from "@cognia/plugin-sdk/api/character-pack"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 import { parseLocalPackFile, serializeLocalPackFile } from "@cognia/plugin-sdk"
-import definition, { BUILTIN_LEGACY_ID_TO_LOCAL_ID, BUILTIN_PACK, BUILTIN_PLUGIN_ID } from "./index"
+import definition, {
+  BUILTIN_LEGACY_ID_TO_LOCAL_ID,
+  BUILTIN_PACK,
+  BUILTIN_PLUGIN_ID,
+  manifest,
+} from "./index"
+import manifestJson from "../plugin.json"
 
 describe("cognia-builtin-characters plugin", () => {
   it("declares the character-pack capability with the expected pluginId", () => {
@@ -48,15 +55,15 @@ describe("cognia-builtin-characters plugin", () => {
     }
   })
 
-  it("activate() registers BUILTIN_PACK through the scoped context API", async () => {
+  it("activate() leaves registration to the manager's declarative dispatch", async () => {
+    // The manager registers `manifest.characterPacks` on enable; a second,
+    // imperative registration from activate() only overwrote that entry.
     const register = jest.fn()
-    const ctx = {
-      pluginId: BUILTIN_PLUGIN_ID,
-      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
-      characterPacks: { register },
-    } as unknown as Parameters<NonNullable<typeof definition.activate>>[0]
-    await definition.activate?.(ctx)
-    expect(register).toHaveBeenCalledWith(BUILTIN_PACK)
+    const ctx = { characterPacks: { register } } as unknown as Parameters<
+      typeof definition.activate
+    >[0]
+    await definition.activate(ctx)
+    expect(register).not.toHaveBeenCalled()
   })
 
   it("BUILTIN_PACK round-trips through the canonical pack-file format", () => {
@@ -76,11 +83,15 @@ describe("cognia-builtin-characters plugin", () => {
     }
   })
 
-  it("manifest declares character-pack capability + startup activation", () => {
-    const m = definition.manifest as unknown as Record<string, unknown>
-    expect(m.id).toBe(BUILTIN_PLUGIN_ID)
-    expect(m.capabilities).toContain("character-pack")
-    const packs = m.characterPacks as Array<{ id: string }>
-    expect(packs.map((p) => p.id)).toEqual([BUILTIN_PACK.id])
+  it("manifest is plugin.json plus the pack, with startup activation", () => {
+    expect(definition.manifest).toBe(manifest)
+    // Every plugin.json field survives — a hand-written subset used to drop
+    // author, license, engines and runtimeCompatibility from the module side.
+    expect(manifest).toEqual({ ...manifestJson, characterPacks: [BUILTIN_PACK] })
+    expect(manifest.id).toBe(BUILTIN_PLUGIN_ID)
+    expect(manifest.capabilities).toContain("character-pack")
+    // The default personas must exist without the user opting in.
+    expect(manifest.activationEvents).toEqual(["startup"])
+    expect(validatePluginManifest(manifest).errors).toEqual([])
   })
 })

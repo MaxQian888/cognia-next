@@ -1,8 +1,10 @@
 {
   "id": "zhihu-content-pipeline",
   "name": "Zhihu Content Pipeline",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "A pluggable Zhihu content-creation system: five role characters (scout / editor / researcher / writer / polisher), Zhihu writing skills, and MCP presets that wrap zget-cli, Exa, Fetch, Sequential Thinking, and a CloakBrowser stealth browser. Find hot topics, research, draft a high-vote answer, and save it as a draft.",
+  "description": "A Zhihu content-creation kit: five role characters (scout / editor / researcher / writer / polisher), six Zhihu writing and research skills, MCP presets for Exa, Fetch, Sequential Thinking and a CloakBrowser stealth browser, and the external zget CLI (run by the roles and the topic workflow) for Zhihu hot lists. Find hot topics, research, and draft a high-vote answer; drafts stay in the plugin's local store — nothing is posted to Zhihu.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": [
     "character-pack",
@@ -27,15 +29,19 @@
     "agent:dispatch",
     "extension:workflow",
     "extension:ui",
-    "commands:write"
+    "commands:write",
+    "session:read",
+    "clipboard:write"
   ],
   "permissionJustifications": {
     "session:write": "Starts a Writer-character chat session seeded with the selected topic when you pick one in the /zhihu review panel.",
     "agent:control": "Contributes the five Zhihu role characters, six inline playbook skills, and four MCP server presets.",
     "agent:dispatch": "Contributes the 知乎写作小组 agent-team template (research → write → polish).",
     "extension:workflow": "Contributes the save-topics workflow node and the 知乎选题候选 daily workflow template.",
-    "extension:ui": "Opens the /zhihu topic-review modal.",
-    "commands:write": "Provides the /zhihu slash command."
+    "extension:ui": "Opens the /zhihu topic-review modal and links to Workflows from it.",
+    "commands:write": "Provides the /zhihu slash command.",
+    "session:read": "Reopens the Writer session a saved draft came from when you choose “Open writing session” in the /zhihu review panel.",
+    "clipboard:write": "Copies a saved draft to the clipboard as Markdown when you press Copy in the /zhihu review panel."
   },
   "requires": {
     "binaries": [
@@ -48,9 +54,18 @@
   "activationEvents": ["startup", "onCommand:zhihu"],
   "dexie": {
     "tables": [
-      { "name": "topics", "schema": "&id, status, createdAt" },
-      { "name": "research", "schema": "&id, topicId, createdAt" },
-      { "name": "drafts", "schema": "&id, topicId, status, createdAt" }
+      {
+        "name": "topics",
+        "schema": "&id, status, createdAt"
+      },
+      {
+        "name": "research",
+        "schema": "&id, topicId, createdAt"
+      },
+      {
+        "name": "drafts",
+        "schema": "&id, topicId, status, createdAt"
+      }
     ]
   },
   "tools": [
@@ -62,13 +77,22 @@
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "topicId": { "type": "string", "description": "关联的选题 id（可选）" },
+          "topicId": {
+            "type": "string",
+            "description": "关联的选题 id（可选）"
+          },
           "kind": {
             "type": "string",
             "description": "笔记类型：fact | data | case | source 等"
           },
-          "content": { "type": "string", "description": "笔记正文（提取出的事实/数据/案例）" },
-          "sourceUrl": { "type": "string", "description": "来源链接（可溯源）" }
+          "content": {
+            "type": "string",
+            "description": "笔记正文（提取出的事实/数据/案例）"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "来源链接（可溯源）"
+          }
         },
         "required": ["kind", "content"],
         "additionalProperties": false
@@ -82,12 +106,23 @@
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "topicId": { "type": "string", "description": "关联的选题 id（可选）" },
-          "title": { "type": "string", "description": "回答标题/选题" },
-          "markdownBody": { "type": "string", "description": "终稿正文（Markdown）" },
+          "topicId": {
+            "type": "string",
+            "description": "关联的选题 id（可选）"
+          },
+          "title": {
+            "type": "string",
+            "description": "回答标题/选题"
+          },
+          "markdownBody": {
+            "type": "string",
+            "description": "终稿正文（Markdown）"
+          },
           "images": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "配图文件路径或来源链接（可选）"
           }
         },
@@ -122,7 +157,80 @@
       "id": "zhihu",
       "name": "/zhihu",
       "description": "Open the Zhihu content pipeline panel.",
+      "descriptionKey": "commands.zhihu.description",
       "icon": "PenLine"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Zhihu Content Pipeline",
+        "manifest.description": "A Zhihu content-creation kit: five role characters (scout / editor / researcher / writer / polisher), six Zhihu writing and research skills, MCP presets for Exa, Fetch, Sequential Thinking and a CloakBrowser stealth browser, and the external zget CLI (run by the roles and the topic workflow) for Zhihu hot lists. Find hot topics, research, and draft a high-vote answer; drafts stay in the plugin's local store — nothing is posted to Zhihu.",
+        "review.title": "Zhihu Pipeline — Review",
+        "review.candidates": "Candidate topics",
+        "review.drafts": "Saved drafts",
+        "review.empty": "No candidate topics yet. In Workflows, create a workflow from the “知乎选题候选” template and run it — its last step saves candidates here.",
+        "review.draftsEmpty": "No drafts saved yet.",
+        "review.startWriting": "Start writing",
+        "review.startWritingAria": "Start writing for: {title}",
+        "review.loading": "Loading…",
+        "command.opened": "Opened the Zhihu topic review panel.",
+        "review.subtitle": "Pick a candidate topic to start a Writer session, and reuse what the crew has saved.",
+        "review.openWorkflows": "Open Workflows",
+        "review.startFailed": "The writing session could not start: {message}",
+        "review.research": "Research notes",
+        "review.researchEmpty": "No research notes saved yet — the Researcher role saves them while it works.",
+        "review.researchSource": "Source",
+        "review.draftCopy": "Copy",
+        "review.draftCopyAria": "Copy the draft “{title}” as Markdown",
+        "review.draftCopied": "Draft copied as Markdown.",
+        "review.draftCopyFailed": "The draft could not be copied: {message}",
+        "review.draftShow": "Show",
+        "review.draftHide": "Hide",
+        "review.draftShowAria": "Show the draft “{title}”",
+        "review.draftHideAria": "Hide the draft “{title}”",
+        "review.draftOpenSession": "Open writing session",
+        "review.draftOpenSessionAria": "Open the writing session for “{title}”",
+        "review.draftOpenFailed": "The writing session could not be opened: {message}",
+        "review.loadFailed": "The pipeline data could not be read: {message}",
+        "review.storageUnavailable": "The pipeline has no storage in this shell, so there are no topics, notes or drafts to review.",
+        "session.title": "Zhihu writing: {title}",
+        "commands.zhihu.description": "Open the Zhihu content pipeline panel."
+      },
+      "zh-CN": {
+        "manifest.name": "知乎内容流水线",
+        "manifest.description": "知乎内容创作套件：五个角色（选题 / 编辑 / 研究 / 写作 / 润色）、六个知乎写作与调研技能，Exa、Fetch、Sequential Thinking 和 CloakBrowser 隐身浏览器的 MCP 预设，以及用于获取知乎热榜的外部 zget CLI（由各角色和选题工作流调用）。发现热门话题、调研并起草高赞回答；草稿只保存在插件本地——不会发布到知乎。",
+        "review.title": "知乎流水线 — 审阅",
+        "review.candidates": "候选选题",
+        "review.drafts": "已存草稿",
+        "review.empty": "还没有候选选题。请在「工作流」中用「知乎选题候选」模板创建一个工作流并运行——它的最后一步会把候选选题存到这里。",
+        "review.draftsEmpty": "还没有草稿。",
+        "review.startWriting": "开始写作",
+        "review.startWritingAria": "开始写作：{title}",
+        "review.loading": "加载中…",
+        "command.opened": "已打开知乎选题审阅面板。",
+        "review.subtitle": "选一个候选选题开启写手会话，并复用小组已保存的成果。",
+        "review.openWorkflows": "打开工作流",
+        "review.startFailed": "无法开启写作会话：{message}",
+        "review.research": "调研笔记",
+        "review.researchEmpty": "还没有调研笔记——调研员角色工作时会保存。",
+        "review.researchSource": "来源",
+        "review.draftCopy": "复制",
+        "review.draftCopyAria": "以 Markdown 复制草稿「{title}」",
+        "review.draftCopied": "已按 Markdown 复制草稿。",
+        "review.draftCopyFailed": "无法复制草稿：{message}",
+        "review.draftShow": "展开",
+        "review.draftHide": "收起",
+        "review.draftShowAria": "展开草稿「{title}」",
+        "review.draftHideAria": "收起草稿「{title}」",
+        "review.draftOpenSession": "打开写作会话",
+        "review.draftOpenSessionAria": "打开「{title}」的写作会话",
+        "review.draftOpenFailed": "无法打开写作会话：{message}",
+        "review.loadFailed": "无法读取流水线数据：{message}",
+        "review.storageUnavailable": "当前环境没有为流水线提供存储，因此没有可审阅的选题、笔记或草稿。",
+        "session.title": "知乎写作：{title}",
+        "commands.zhihu.description": "打开知乎内容流水线面板。"
+      }
+    }
+  }
 }

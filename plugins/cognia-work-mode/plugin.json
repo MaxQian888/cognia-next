@@ -1,19 +1,25 @@
 {
   "id": "cognia-work-mode",
   "name": "Work Mode",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Outcome-to-deliverable knowledge work with source-grounded research, parallel specialists, review gates, and artifacts.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "modes", "skills", "subagent", "agent-team-template"],
   "main": "src/index.ts",
-  "author": { "name": "cognia-next" },
+  "author": {
+    "name": "cognia-next"
+  },
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": ["artifact:read", "artifact:write", "agent:dispatch", "agent:control"],
-  "dependencies": { "cognia-office": "^0.1.0" },
+  "dependencies": {
+    "cognia-office": "^0.1.0"
+  },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
@@ -29,6 +35,24 @@
       "availability": "degraded",
       "entrypoint": "src/index.ts",
       "reason": "Review and artifact workflows are available; local-folder and desktop-app actions require a connected desktop host."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Work Mode",
+        "manifest.description": "Outcome-to-deliverable knowledge work with source-grounded research, parallel specialists, review gates, and artifacts.",
+        "artifact.reviewTitle": "Review — {title}",
+        "artifact.updatedByWorkMode": "Updated by Work Mode",
+        "progress.specialists": "{completed}/{total} specialist tasks complete"
+      },
+      "zh-CN": {
+        "manifest.name": "工作模式",
+        "manifest.description": "从目标到交付物的知识工作：基于来源的调研、并行专家、评审关卡与产物。",
+        "artifact.reviewTitle": "审阅 — {title}",
+        "artifact.updatedByWorkMode": "由工作模式更新",
+        "progress.specialists": "已完成 {completed}/{total} 个专家任务"
+      }
     }
   }
 }

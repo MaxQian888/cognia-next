@@ -4,10 +4,10 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import { runPreflight } from "./lib/preflight"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
 // A functional useLiveQuery: run the querier and re-run it when deps change,
 // so selection/triage tests see the same async data flow as the real hook.
-jest.mock("dexie-react-hooks", () => ({
+jest.mock("@cognia/plugin-ui", () => ({
+  ...jest.requireActual<typeof import("@cognia/plugin-ui")>("@cognia/plugin-ui"),
   useLiveQuery: (querier: () => Promise<unknown>, deps?: unknown[]) => {
     const React = jest.requireActual<typeof import("react")>("react")
     const { act } =
@@ -62,11 +62,26 @@ jest.mock("./db", () => ({
 
 let mockRuntime: {
   terminal: object
-  dexie: object
+  dexie: object | null
   securityScans?: object
-  ui?: { showToast: jest.Mock; showConfirmDialog: jest.Mock } | null
-  contextPanels?: { setBadge: jest.Mock } | null
+  ui: { showToast: jest.Mock; showConfirmDialog: jest.Mock }
+  contextPanels: { setBadge: jest.Mock }
+  formatDate: (date: Date, options?: Intl.DateTimeFormatOptions) => string
 } | null = null
+
+/** The smallest runtime `activate()` could have parked. */
+function wired(
+  overrides: Partial<NonNullable<typeof mockRuntime>> = {}
+): NonNullable<typeof mockRuntime> {
+  return {
+    terminal: {},
+    dexie: {},
+    ui: { showToast: jest.fn(), showConfirmDialog: jest.fn().mockResolvedValue(true) },
+    contextPanels: { setBadge: jest.fn() },
+    formatDate: (date) => date.toISOString(),
+    ...overrides,
+  }
+}
 let mockPendingTarget: string | null = null
 let mockActiveScan: { runId: string; controller: AbortController } | null = null
 jest.mock("./runtime", () => ({
@@ -103,6 +118,10 @@ import {
 import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./lib/strix-runner"
 import { StrixPanel } from "./StrixPanel"
 import type { StrixFinding, StrixRun } from "./types"
+import { en, registerStrixBundle, unregisterStrixBundle } from "./i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 /** The workbench hands a panel the resource in front, not plugin/view ids. */
 const PANEL_PROPS = {
@@ -126,14 +145,25 @@ describe("StrixPanel", () => {
     })
   })
 
-  it("renders the unavailable state when the runtime is not wired", () => {
+  it("says the runtime is unwired — not that Docker is missing — when activate never ran", () => {
     mockRuntime = null
     render(<StrixPanel {...PANEL_PROPS} />)
-    expect(screen.getByTestId("strix-unavailable")).toBeInTheDocument()
+    const unavailable = screen.getByTestId("strix-unavailable")
+    expect(unavailable).toHaveAttribute("data-reason", "runtime")
+    expect(unavailable).toHaveTextContent(en("panel.unavailable.runtime"))
+    expect(unavailable).not.toHaveTextContent(en("preflight.dockerMissing"))
+  })
+
+  it("says storage is unavailable when the plugin has no Dexie", () => {
+    mockRuntime = wired({ dexie: null })
+    render(<StrixPanel {...PANEL_PROPS} />)
+    const unavailable = screen.getByTestId("strix-unavailable")
+    expect(unavailable).toHaveAttribute("data-reason", "storage")
+    expect(unavailable).toHaveTextContent(en("panel.unavailable.storage"))
   })
 
   it("does not draw a title bar of its own — the workbench header owns it", async () => {
-    mockRuntime = { terminal: {}, dexie: {} }
+    mockRuntime = wired()
     render(<StrixPanel {...PANEL_PROPS} />)
     await waitFor(() => expect(screen.getByTestId("strix-panel")).toBeInTheDocument())
     expect(screen.queryByText("Security")).not.toBeInTheDocument()
@@ -141,19 +171,13 @@ describe("StrixPanel", () => {
 
   it("clears its rail badge while no scan is running", async () => {
     const setBadge = jest.fn()
-    mockRuntime = { terminal: {}, dexie: {}, contextPanels: { setBadge } }
+    mockRuntime = wired({ contextPanels: { setBadge } })
     render(<StrixPanel {...PANEL_PROPS} />)
     await waitFor(() => expect(setBadge).toHaveBeenCalledWith("security", 0))
   })
 
-  it("survives a shell that refused the panel registration and has no badge sink", async () => {
-    mockRuntime = { terminal: {}, dexie: {}, contextPanels: null }
-    render(<StrixPanel {...PANEL_PROPS} />)
-    await waitFor(() => expect(screen.getByTestId("strix-panel")).toBeInTheDocument())
-  })
-
   it("renders the panel + runs preflight when the runtime is wired", async () => {
-    mockRuntime = { terminal: {}, dexie: {} }
+    mockRuntime = wired()
     render(<StrixPanel {...PANEL_PROPS} />)
     expect(screen.getByTestId("strix-panel")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId("strix-preflight-ok")).toBeInTheDocument())
@@ -165,7 +189,7 @@ describe("StrixPanel", () => {
         "ctx.terminal.spawn failed: terminal host socket connect failed: Connection refused (os error 61)"
       )
     )
-    mockRuntime = { terminal: {}, dexie: {} }
+    mockRuntime = wired()
 
     render(<StrixPanel {...PANEL_PROPS} />)
 
@@ -173,7 +197,7 @@ describe("StrixPanel", () => {
   })
 
   it("renders the form only after prefs resolve — defaults must land on first mount", async () => {
-    mockRuntime = { terminal: {}, dexie: {} }
+    mockRuntime = wired()
     render(<StrixPanel {...PANEL_PROPS} />)
     // getPref resolves on a microtask; until then the skeleton stands in.
     expect(screen.getByTestId("strix-form-loading")).toBeInTheDocument()
@@ -181,7 +205,7 @@ describe("StrixPanel", () => {
   })
 
   it("prefills the target stashed by `/security <target>`", async () => {
-    mockRuntime = { terminal: {}, dexie: {} }
+    mockRuntime = wired()
     mockPendingTarget = "https://cmd.example"
     render(<StrixPanel {...PANEL_PROPS} />)
     await waitFor(() =>
@@ -226,13 +250,11 @@ describe("StrixPanel scan lifecycle", () => {
     const showToast = jest.fn()
     const showConfirmDialog = jest.fn().mockResolvedValue(true)
     const setBadge = jest.fn()
-    mockRuntime = {
-      terminal: {},
-      dexie: {},
+    mockRuntime = wired({
       securityScans: { registerRunController, syncExecutionRun },
       ui: { showToast, showConfirmDialog },
       contextPanels: { setBadge },
-    }
+    })
     return { registerRunController, syncExecutionRun, showToast, showConfirmDialog, setBadge }
   }
 
@@ -370,6 +392,42 @@ describe("StrixPanel scan lifecycle", () => {
     expect(purgeRunArtifacts).not.toHaveBeenCalled()
   })
 
+  it("fails closed when the confirmation dialog itself fails", async () => {
+    const user = userEvent.setup()
+    const { showConfirmDialog, showToast } = fullRuntime()
+    showConfirmDialog.mockRejectedValue(new Error("no dialog host"))
+    mockedListRuns.mockResolvedValue([run()])
+    render(<StrixPanel {...PANEL_PROPS} />)
+
+    await user.click(await screen.findByRole("tab", { name: "History" }))
+    await user.click(await screen.findByTestId("strix-history-delete"))
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        en("error.actionFailed", { message: "no dialog host" }),
+        "error"
+      )
+    )
+    expect(deleteRun).not.toHaveBeenCalled()
+    expect(purgeRunArtifacts).not.toHaveBeenCalled()
+  })
+
+  it("asks with localized confirm and cancel labels", async () => {
+    const user = userEvent.setup()
+    const { showConfirmDialog } = fullRuntime()
+    mockedListRuns.mockResolvedValue([run()])
+    render(<StrixPanel {...PANEL_PROPS} />)
+    await user.click(await screen.findByRole("tab", { name: "History" }))
+    await user.click(await screen.findByTestId("strix-clear-all"))
+    await waitFor(() =>
+      expect(showConfirmDialog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          confirmLabel: en("confirm.clearAll.confirm"),
+          cancelLabel: en("confirm.cancel"),
+        })
+      )
+    )
+  })
+
   it("clear-all purges every artifact directory, not just the rows", async () => {
     const user = userEvent.setup()
     const { showConfirmDialog } = fullRuntime()
@@ -473,6 +531,45 @@ describe("StrixPanel scan lifecycle", () => {
     await waitFor(() => expect(screen.getByTestId("strix-console-truncated")).toBeInTheDocument())
   })
 
+  it("reports a scan that could not start instead of leaving an unhandled rejection", async () => {
+    const user = userEvent.setup()
+    const { showToast } = fullRuntime()
+    mockedRunScan.mockRejectedValue(new Error("pty refused"))
+    render(<StrixPanel {...PANEL_PROPS} />)
+    await armForm(user)
+    await user.click(screen.getByTestId("strix-start"))
+
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        en("error.startFailed", { message: "pty refused" }),
+        "error"
+      )
+    )
+    // The form is usable again.
+    await waitFor(() => expect(screen.getByTestId("strix-start")).toBeInTheDocument())
+  })
+
+  it("translates a stored error code rather than rendering stored English", async () => {
+    const user = userEvent.setup()
+    fullRuntime()
+    mockedListRuns.mockResolvedValue([
+      run({
+        status: "error",
+        error: "Strix reported an error (exit 1).",
+        errorCode: "strixError",
+        errorParams: { exit: 1 },
+      }),
+    ])
+    render(<StrixPanel {...PANEL_PROPS} />)
+    await user.click(await screen.findByRole("tab", { name: "History" }))
+    await user.click(await screen.findByTestId("strix-history-open"))
+    await waitFor(() =>
+      expect(screen.getByTestId("strix-run-error")).toHaveTextContent(
+        en("run.error.strixError", { exit: 1 })
+      )
+    )
+  })
+
   it("surfaces a scan error as a toast and an error banner on the run", async () => {
     const user = userEvent.setup()
     const { showToast } = fullRuntime()
@@ -491,6 +588,24 @@ describe("StrixPanel scan lifecycle", () => {
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith("Scan failed", "error"))
     await waitFor(() => expect(screen.getByTestId("strix-run-error")).toBeInTheDocument())
+  })
+
+  it("reports a triage write that failed", async () => {
+    const user = userEvent.setup()
+    const { showToast } = fullRuntime()
+    jest.mocked(addSuppressionRule).mockRejectedValueOnce(new Error("quota"))
+    mockedListRuns.mockResolvedValue([run()])
+    mockedListFindings.mockResolvedValue([finding()])
+    render(<StrixPanel {...PANEL_PROPS} />)
+    await user.click(await screen.findByRole("tab", { name: "History" }))
+    await user.click(await screen.findByTestId("strix-history-open"))
+    await user.click(await screen.findByTestId("strix-suppress-rule"))
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        en("error.actionFailed", { message: "quota" }),
+        "error"
+      )
+    )
   })
 
   it("mutes a rule class through the finding card", async () => {

@@ -3,10 +3,12 @@
  */
 import { render, screen } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { applyTimeline, createIncident, type SreIncident } from "../incident/model"
 import { PhaseStrip } from "./phase-strip"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
 
 const ROW = {
   time: "12:02",

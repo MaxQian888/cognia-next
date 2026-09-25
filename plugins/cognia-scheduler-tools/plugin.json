@@ -1,8 +1,10 @@
 {
   "id": "cognia-scheduler-tools",
   "name": "Scheduler Tools",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Lets an in-chat agent create, list, cancel, and run scheduled tasks (gated by the scheduler permission policy), and ships a Schedule digest Bot.",
+  "description": "Lets an in-chat agent list and create scheduled tasks, and — with your approval each time — delete or run one. Every action follows the scheduler's \"Allow agents to manage scheduled tasks\" switch and permission policy. Also ships a Schedule digest Bot.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "scheduler", "bot"],
   "permissions": ["settings:read", "database:read", "database:write", "agent:control"],
@@ -26,6 +28,30 @@
     "mobile": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Scheduler Tools",
+        "manifest.description": "Lets an in-chat agent list and create scheduled tasks, and — with your approval each time — delete or run one. Every action follows the scheduler's \"Allow agents to manage scheduled tasks\" switch and permission policy. Also ships a Schedule digest Bot.",
+        "digest.active": "{active} active of {total}",
+        "digest.paused": "{count} paused",
+        "digest.failing": "{count} failing",
+        "digest.stale": "{count} stale",
+        "digest.separator": ", ",
+        "digest.progress": "Schedule read"
+      },
+      "zh-CN": {
+        "manifest.name": "定时任务工具",
+        "manifest.description": "让对话中的 Agent 列出和创建定时任务，并在你每次批准后删除或运行任务。所有操作都遵循调度器的“允许 Agent 管理定时任务”开关与权限策略。另附一个日程摘要机器人。",
+        "digest.active": "共 {total} 个任务，{active} 个运行中",
+        "digest.paused": "{count} 个已暂停",
+        "digest.failing": "{count} 个运行失败",
+        "digest.stale": "{count} 个长期未运行",
+        "digest.separator": "，",
+        "digest.progress": "已读取计划任务"
+      }
     }
   },
   "bots": [

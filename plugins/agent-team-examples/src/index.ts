@@ -1,5 +1,11 @@
 /**
- * Agent Team Examples — reference plugin (ADR-0032).
+ * Agent Team Examples — opt-in EXAMPLE plugin (ADR-0032).
+ *
+ * Not enabled by default (no `startup` activation event): a user turns it on
+ * from the Plugins page to try the examples, and every contribution is named
+ * "(example)" so it is never mistaken for a curated default in a picker. The
+ * names are literal because subagent / team-template / adapter defs carry no
+ * `nameKey` the pickers could resolve through the plugin i18n bundle.
  *
  * Demonstrates the `subagent` + `agent-team-template` capabilities end-to-end:
  * three subagents (researcher / coder / tester) and two team templates
@@ -12,16 +18,24 @@
  * `manifest.agentTeamTemplates`, so no imperative activate() wiring is needed.
  */
 
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
-import { defineSubagent, defineAgentTeamTemplate } from "@cognia/plugin-sdk"
+import {
+  defineAgentTeamTemplate,
+  definePlugin,
+  definePluginManifest,
+  defineSubagent,
+} from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 import { demoSharedMemoryAdapter } from "./demo-adapter"
 import { demoBalanceAdapter } from "./demo-balance-adapter"
 
 const PLUGIN_ID = "cognia-agent-team-examples"
 
+/** Suffix every contributed display name carries, so an example never reads as a default. */
+export const EXAMPLE_NAME_SUFFIX = " (example)"
+
 const researcher = defineSubagent({
   id: "researcher",
-  name: "Researcher",
+  name: `Researcher${EXAMPLE_NAME_SUFFIX}`,
   description: "Gathers context, reads source material, and produces a findings brief.",
   prompt:
     "You are a researcher. Investigate the assigned topic using the available read/search tools, then produce a concise findings brief with citations. Never modify files.",
@@ -32,7 +46,7 @@ const researcher = defineSubagent({
 
 const coder = defineSubagent({
   id: "coder",
-  name: "Coder",
+  name: `Coder${EXAMPLE_NAME_SUFFIX}`,
   description: "Implements changes against a brief and keeps the build green.",
   prompt:
     "You are an implementer. Turn the researcher's brief into working code with minimal, surgical changes. Run the project's checks before declaring done.",
@@ -43,7 +57,7 @@ const coder = defineSubagent({
 
 const tester = defineSubagent({
   id: "tester",
-  name: "Tester",
+  name: `Tester${EXAMPLE_NAME_SUFFIX}`,
   description: "Writes failing tests first, then verifies the implementation passes them.",
   prompt:
     "You are a test author. Write tests that capture the required behavior, confirm they fail for the right reason, then verify the implementation makes them pass.",
@@ -54,7 +68,7 @@ const tester = defineSubagent({
 
 const researchPair = defineAgentTeamTemplate({
   id: "research-pair",
-  name: "Research Pair",
+  name: `Research Pair${EXAMPLE_NAME_SUFFIX}`,
   description: "A researcher feeds a coder — investigate, then implement.",
   category: "research",
   icon: "Search",
@@ -97,7 +111,7 @@ const researchPair = defineAgentTeamTemplate({
 
 const tddTrio = defineAgentTeamTemplate({
   id: "tdd-trio",
-  name: "TDD Trio",
+  name: `TDD Trio${EXAMPLE_NAME_SUFFIX}`,
   description: "Researcher + coder + tester running a test-driven loop.",
   category: "development",
   icon: "FlaskConical",
@@ -162,24 +176,20 @@ const tddTrio = defineAgentTeamTemplate({
   },
 })
 
-export const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: "Agent Team Examples",
-  version: "0.1.0",
-  type: "frontend",
-  capabilities: ["subagent", "agent-team-template", "shared-memory-adapter", "balance-adapter"],
-  main: "src/index.ts",
+// Spread plugin.json so no field it declares is dropped (a built-in's module
+// manifest is merged OVER its JSON at discovery); only the TypeScript-authored
+// contribution arrays are added here.
+export const manifest = definePluginManifest({
+  ...manifestJson,
   subagents: [researcher, coder, tester],
   agentTeamTemplates: [researchPair, tddTrio],
   sharedMemoryAdapters: [demoSharedMemoryAdapter],
   balanceAdapters: [demoBalanceAdapter],
-} as PluginManifest
+})
 
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   // Registration is declarative (manifest arrays are dispatched by the plugin
   // manager). The lifecycle hook is required by the type but has no work here.
   activate: async () => {},
-}
-
-export default definition
+})

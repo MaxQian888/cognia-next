@@ -1,6 +1,11 @@
 import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import type { StrixFinding, StrixRun } from "../types"
-import { counterId, createMockTerminal, immediateSleep, type CommandResolver } from "./mock-shell"
+import {
+  counterId,
+  createMockTerminal,
+  immediateSleep,
+  type CommandResolver,
+} from "./mock-shell.test-helpers"
 import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./strix-runner"
 
 function fakeDexie() {
@@ -105,6 +110,9 @@ describe("runScan", () => {
     expect(run.findingsCount).toBe(0)
     expect(dexie.runs.at(-1)?.error).toMatch(/INCONCLUSIVE/)
     expect(dexie.runs.at(-1)?.status).toBe("error")
+    // The panel renders the code, translated; the English stays for the journal.
+    expect(dexie.runs.at(-1)?.errorCode).toBe("reportUnreadable")
+    expect(dexie.runs.at(-1)?.errorParams).toEqual({ detail: expect.any(String) })
   })
 
   it("marks the run errored when strix exits 1", async () => {
@@ -116,6 +124,7 @@ describe("runScan", () => {
     const run = await runScan({ target: "x" }, deps(terminal, dexie.api))
     expect(run.status).toBe("error")
     expect(run.error).toBeTruthy()
+    expect(run.errorCode).toBeDefined()
   })
 
   it("errors when the scan directory can't be prepared", async () => {
@@ -127,6 +136,7 @@ describe("runScan", () => {
     const run = await runScan({ target: "x" }, deps(terminal, dexie.api))
     expect(run.status).toBe("error")
     expect(run.exitCode).toBe(1)
+    expect(run).toMatchObject({ errorCode: "setupFailed", errorParams: { exit: 1 } })
   })
 
   it("cancels when the signal is aborted", async () => {

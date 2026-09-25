@@ -9,7 +9,8 @@ import {
   type SreIncident,
   type SreIncidentPhase,
 } from "../incident/model"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 const PHASE_ICON = {
   done: CheckIcon,
@@ -39,7 +40,7 @@ export function PhaseStrip({
   incident: SreIncident
   compact?: boolean
 }) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const current = derivePhase(incident)
 
   return (
@@ -69,7 +70,7 @@ export function PhaseStrip({
             <Icon
               className={cn(
                 "size-3.5 shrink-0",
-                state === "done" && "text-green-600 dark:text-green-500",
+                state === "done" && "text-success",
                 state === "current" && "text-primary",
                 state === "todo" && "text-muted-foreground/50"
               )}

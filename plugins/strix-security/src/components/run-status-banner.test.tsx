@@ -3,10 +3,12 @@
  */
 import { render, screen } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { RunStatusBanner } from "./run-status-banner"
 import type { StrixRun } from "../types"
+import { en, registerStrixBundle, unregisterStrixBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 const run = (over: Partial<StrixRun> = {}): StrixRun => ({
   runId: "r1",
@@ -27,6 +29,18 @@ describe("RunStatusBanner", () => {
   it("shows a live indicator while the scan is running", () => {
     render(<RunStatusBanner run={run({ status: "running" })} />)
     expect(screen.getByTestId("strix-run-running")).toHaveTextContent("https://x")
+    // The spinner stops for people who asked the OS for reduced motion.
+    const spinner = screen.getByTestId("strix-run-running").querySelector("svg")
+    expect(spinner?.getAttribute("class")).toContain("motion-reduce:animate-none")
+  })
+
+  it("translates an interrupted run from its code", () => {
+    render(
+      <RunStatusBanner
+        run={run({ status: "cancelled", error: "English", errorCode: "interrupted" })}
+      />
+    )
+    expect(screen.getByTestId("strix-run-cancelled")).toHaveTextContent(en("run.error.interrupted"))
   })
 
   it("surfaces the failure reason for an errored run", () => {

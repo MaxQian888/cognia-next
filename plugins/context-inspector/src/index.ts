@@ -1,73 +1,107 @@
 /**
- * Context Inspector — built-in plugin.
+ * Context Inspector — built-in DEVELOPER plugin.
  *
  * The reference consumer for DECLARATIVE webview-backed context panels: the
  * manifest overlay below carries two `webviews[]` entries (inline HTML, no
  * entry module — which is exactly why a `builtin://` plugin can use this
- * path) and a `contextPanels[]` entry referencing the first by id. The module
- * registers nothing imperatively; enabling the plugin exercises the whole
- * declarative chain — validation → context-panels bridge → webview bridge →
- * panel registry → workbench render → in-frame RPC.
+ * path) and a `contextPanels[]` entry referencing the first by id. Enabling the
+ * plugin exercises the whole declarative chain — validation → context-panels
+ * bridge → webview bridge → panel registry → workbench render → in-frame RPC.
  *
  * The second webview (`inspector-probe`) exists to be named by an in-frame
  * `api.register({ webview })` call — the panel's "register(probe)" button —
  * so the dynamic-registration arm of the mirrored API is reachable by hand,
  * not just from unit tests.
  *
- * The panel itself is a developer tool: it shows the live active context,
- * workbench state, and this frame's visibility, with controls covering every
- * mirrored method (`setBadge` / `reveal` / `setMode` / `setPinned` /
- * `register` / `dispose`) plus `acquireCogniaWebviewApi().setState` so its
- * counters survive the iframe remount a workbench collapse causes.
+ * Opt-in: it is a developer tool, so plugin.json declares no
+ * `activationEvents` — it stays off until the user enables it on the Plugins
+ * page (the SDK exposes no developer-mode signal to gate it on instead), and
+ * both the plugin and its panel are labelled "Developer".
+ *
+ * Localization: a webview document is outside the host's i18n pipeline, so
+ * its strings are baked into the HTML. `activate()` captures `ctx.i18n.t`, and
+ * each webview's `html` is a getter the webview bridge reads when it
+ * registers the frames — which the manager does AFTER `activate()` returns — so
+ * the document carries the user's language. Before activation (validation,
+ * discovery) the getter falls back to the English bundle. A language switch
+ * reaches the frames the next time the plugin is enabled: declarative webview
+ * HTML is resolved once per enable by the host.
+ *
+ * `session:read` is used: the in-frame `getActiveContext()` RPC only returns a
+ * `session` resource to a plugin holding that permission.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 import {
   buildInspectorHtml,
   buildProbeHtml,
   INSPECTOR_PANEL_ID,
   PROBE_WEBVIEW_ID,
+  resolveInspectorStrings,
+  type InspectorStrings,
 } from "./inspector-html"
 
-const definition: PluginDefinition = {
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here would silently drop identity fields.
-  manifest: {
-    ...(manifestJson as object),
-    webviews: [
-      {
-        id: INSPECTOR_PANEL_ID,
-        title: "Context Inspector",
-        titleKey: "panel.inspector",
-        html: buildInspectorHtml(),
+type Translate = (key: string) => string
+
+const ENGLISH = manifestJson.i18n.locales.en as Record<string, string>
+const englishTranslate: Translate = (key) => ENGLISH[key] ?? key
+
+/** `ctx.i18n.t` while the plugin is active; English otherwise. */
+let translate: Translate = englishTranslate
+
+/** The frame string table in the current language. */
+export function currentInspectorStrings(): InspectorStrings {
+  return resolveInspectorStrings(translate)
+}
+
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  webviews: [
+    {
+      id: INSPECTOR_PANEL_ID,
+      title: ENGLISH["panel.inspector"],
+      titleKey: "panel.inspector",
+      get html() {
+        return buildInspectorHtml(currentInspectorStrings())
       },
-      {
-        id: PROBE_WEBVIEW_ID,
-        title: "Inspector probe",
-        titleKey: "panel.probe",
-        html: buildProbeHtml(),
+    },
+    {
+      id: PROBE_WEBVIEW_ID,
+      title: ENGLISH["panel.probe"],
+      titleKey: "panel.probe",
+      get html() {
+        return buildProbeHtml(currentInspectorStrings())
       },
-    ],
-    contextPanels: [
-      {
-        id: INSPECTOR_PANEL_ID,
-        kind: "webview",
-        webview: INSPECTOR_PANEL_ID,
-        resourceKinds: ["session"],
-        activity: "inspect",
-        labelKey: "panel.inspector",
-        label: "Context Inspector",
-        icon: "SearchCode",
-        order: 40,
-        retention: "stateful",
-      },
-    ],
-  } as never,
+    },
+  ],
+  contextPanels: [
+    {
+      id: INSPECTOR_PANEL_ID,
+      kind: "webview",
+      webview: INSPECTOR_PANEL_ID,
+      resourceKinds: ["session"],
+      activity: "inspect",
+      labelKey: "panel.inspector",
+      label: ENGLISH["panel.inspector"],
+      icon: "SearchCode",
+      order: 40,
+      retention: "stateful",
+    },
+  ],
+})
+
+const definition = definePlugin({
+  manifest,
   activate: (ctx: PluginContext) => {
-    // Both surfaces are declarative; nothing to register here.
+    // Both surfaces are declarative; activation only supplies the translator
+    // the webview HTML getters read when the bridge registers the frames.
+    translate = (key) => ctx.i18n.t(key)
+    ctx.lifecycle.onDispose(() => {
+      translate = englishTranslate
+    }, "context-inspector:translator")
     ctx.logger.info("context-inspector activated")
   },
-}
+})
 
 export default definition

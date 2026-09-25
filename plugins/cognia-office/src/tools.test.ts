@@ -38,7 +38,8 @@ it("executes every namespaced Office tool through the runtime", async () => {
   const ctx = context()
   const tools = createOfficeTools(ctx)
   expect(tools.map((tool) => tool.name)).toEqual(OFFICE_TOOL_NAMES)
-  expect(tools.every((tool) => tool.pluginId === "cognia-office")).toBe(true)
+  // The host assigns ownership; a registration never claims a plugin id.
+  expect(tools.every((tool) => tool.pluginId === undefined)).toBe(true)
 
   await tools[0].execute(
     {
@@ -94,12 +95,33 @@ it("executes every namespaced Office tool through the runtime", async () => {
   })
 })
 
-it("requires a session before synchronizing to Lark", async () => {
+it("returns an actionable error instead of syncing to Lark outside a session", async () => {
   const sync = createOfficeTools(context())[7]
-  await expect(sync.execute({ artifactId: "a1" }, { config: {} })).rejects.toThrow(
-    "requires a chat session"
-  )
+  await expect(sync.execute({ artifactId: "a1" }, { config: {} })).resolves.toMatchObject({
+    ok: false,
+    artifactId: "a1",
+    error: expect.stringContaining("chat session"),
+  })
   expect(mockRuntime.syncLark).not.toHaveBeenCalled()
+})
+
+it("gives dialog and network tools a budget beyond the 30s default", () => {
+  const tools = createOfficeTools(context())
+  const timeouts = Object.fromEntries(tools.map((tool) => [tool.name, tool.definition.timeoutMs]))
+  expect(timeouts).toMatchObject({
+    office_import_xlsx: 120_000,
+    office_export_xlsx: 120_000,
+    office_sync_lark: 120_000,
+  })
+  // No Office tool takes a filesystem path, so none declares an access class.
+  expect(tools.every((tool) => tool.definition.access === undefined)).toBe(true)
+})
+
+it("describes union cell values with anyOf rather than a type array", () => {
+  const tools = createOfficeTools(context())
+  const json = JSON.stringify(tools[0].definition.parametersSchema)
+  expect(json).not.toContain('"type":["string","number","boolean"]')
+  expect(json).toContain('"anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"}]')
 })
 
 it("declares JSON schemas for the structural row and column operations", () => {

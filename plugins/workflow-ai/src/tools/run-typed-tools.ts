@@ -15,18 +15,19 @@
  * plugin is disabled) — this file is only the plugin registration wrapper.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { getWorkflowApi } from "../store-bridge"
-const PLUGIN_ID = "cognia-workflow-ai"
+import { WORKFLOW_RUN_TIMEOUT_MS } from "./run-tools"
 
-export function buildRunTypedTools(): PluginTool[] {
+export function buildRunTypedTools(): PluginToolRegistration[] {
   const runner = getWorkflowApi().getRunnerToolDefinition()
   return [
-    {
+    definePluginTool({
       name: runner.name,
-      pluginId: PLUGIN_ID,
-      definition: runner.definition,
+      // The shared runner definition carries no budget; a typed run waits for
+      // the whole graph, so give it the same ceiling as wf_run_workflow.
+      definition: { ...runner.definition, timeoutMs: WORKFLOW_RUN_TIMEOUT_MS },
       execute: async (args) => getWorkflowApi().executeRunWorkflowTyped(args),
-    },
+    }),
   ]
 }

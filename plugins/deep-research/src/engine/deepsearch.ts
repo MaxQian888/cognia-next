@@ -9,10 +9,11 @@
  */
 import { unwrapUntrustedContent } from "@cognia/plugin-sdk"
 
-import type { DeepSearchConfig, DeepSearchResult, EngineDeps } from "../types"
+import type { DeepSearchConfig, DeepSearchResult, EngineDeps, EngineMessageKey } from "../types"
 import { DEFAULT_CONFIG } from "../types"
 import { decideNextAction, type ActionDecision } from "./actions"
 import { draftAnswer } from "./answer"
+import { engineText, reportEngineProgress } from "./progress"
 import { beastReason, shouldForceAnswer } from "./budget"
 import { evaluateAnswer } from "./evaluate"
 import { runReadStep } from "./read-step"
@@ -33,7 +34,7 @@ export async function runDeepSearch(
 ): Promise<DeepSearchResult> {
   const config: DeepSearchConfig = { ...DEFAULT_CONFIG, ...configOverride }
   const state = initState(question, config)
-  deps.reportProgress?.(0, "Planning research…")
+  reportEngineProgress(deps, 0, "progress.planning")
 
   while (true) {
     if (deps.signal?.aborted) {
@@ -46,7 +47,8 @@ export async function runDeepSearch(
 
     const { decision, tokens } = await decideNextAction(state, deps.ai, deps.signal)
     state.tokensUsed += tokens
-    deps.reportProgress?.(progress(state), describe(decision))
+    const step = describe(decision)
+    reportEngineProgress(deps, progress(state), step.key, step.params)
 
     if (decision.action === "search") {
       const { added, tokens: t } = await runSearchStep(decision.queries, state, deps)
@@ -93,7 +95,7 @@ async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSe
 
   if (evaluation.pass) {
     recordStep(state, "answer", "accepted")
-    deps.reportProgress?.(1, "Done")
+    reportEngineProgress(deps, 1, "progress.done")
     return {
       answer,
       citations,
@@ -120,11 +122,11 @@ async function tryAnswer(state: ResearchState, deps: EngineDeps): Promise<DeepSe
  */
 function abortResult(state: ResearchState, deps: EngineDeps): DeepSearchResult {
   recordStep(state, "answer", "aborted")
-  deps.reportProgress?.(1, "Cancelled")
+  reportEngineProgress(deps, 1, "progress.cancelled")
   return {
     answer: state.evolvingReport
-      ? `Research was cancelled. Findings gathered so far:\n\n${state.evolvingReport}`
-      : "Research was cancelled before an answer could be drafted.",
+      ? engineText(deps, "answer.cancelledWithFindings", { findings: state.evolvingReport })
+      : engineText(deps, "answer.cancelledEmpty"),
     citations: state.knowledge.map((k) => ({
       url: k.url,
       title: unwrapUntrustedContent(k.title),
@@ -147,7 +149,7 @@ async function finalize(
   const { answer, citations, tokens } = await draftAnswer(state, deps.ai, true)
   state.tokensUsed += tokens
   recordStep(state, "answer", `forced (${reason})`)
-  deps.reportProgress?.(1, "Done")
+  reportEngineProgress(deps, 1, "progress.done")
   return {
     answer,
     citations,
@@ -162,15 +164,21 @@ function progress(state: ResearchState): number {
   return Math.min(0.95, state.step / state.config.maxSteps)
 }
 
-function describe(decision: ActionDecision): string {
+function describe(decision: ActionDecision): {
+  key: EngineMessageKey
+  params?: Record<string, string | number>
+} {
   switch (decision.action) {
     case "search":
-      return `🔍 Searching: ${decision.queries.join(", ").slice(0, 80)}`
+      return {
+        key: "progress.searching",
+        params: { queries: decision.queries.join(", ").slice(0, 80) },
+      }
     case "read":
-      return `📖 Reading ${decision.urls.length} source(s)`
+      return { key: "progress.reading", params: { count: decision.urls.length } }
     case "reflect":
-      return `🤔 Refining: ${decision.gaps.join("; ").slice(0, 80)}`
+      return { key: "progress.refining", params: { gaps: decision.gaps.join("; ").slice(0, 80) } }
     case "answer":
-      return "✍️ Drafting answer"
+      return { key: "progress.drafting" }
   }
 }

@@ -16,23 +16,6 @@
 
 import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 import { ReviewModal } from "./ui/review-modal"
-import { I18N_MESSAGES } from "./i18n"
-
-/**
- * Resolve a plugin i18n key for command feedback. Prefers `ctx.i18n.t` (the
- * host-merged bundle under `plugin.<id>.*`, resolved against the ACTIVE
- * locale); falls back to the raw module bundle so the command still answers in
- * contexts where the manifest i18n merge has not run (bare contexts, tests).
- * Never hardcode a locale — the earlier `I18N_MESSAGES["zh-CN"]` lookup made
- * every toast Chinese regardless of the user's language.
- */
-function t(ctx: PluginContext, key: string): string {
-  const viaHost = ctx.i18n?.t?.(key)
-  if (viaHost && viaHost !== key) return viaHost
-  const locale = ctx.i18n?.getCurrentLocale?.() ?? "en"
-  const bundles = I18N_MESSAGES as Record<string, Record<string, string>>
-  return bundles[locale]?.[key] ?? bundles.en[key] ?? key
-}
 
 /**
  * Handle the plugin's DECLARED `/zhihu` command (plugin.json `commands[]`).
@@ -40,11 +23,12 @@ function t(ctx: PluginContext, key: string): string {
  * other plugins; otherwise a `PluginCommandResult` owning the response.
  */
 export function handleZhihuCommand(
-  ctx: PluginContext,
+  ctx: Pick<PluginContext, "modal" | "i18n">,
   command: string
 ): PluginCommandResult | null {
   if (command !== "zhihu") return null
-  if (!ctx.modal) return { handled: true, message: t(ctx, "command.noModal") }
-  ctx.modal.openModal(ReviewModal)
-  return { handled: true, message: t(ctx, "command.opened") }
+  // `lg`: the host sizes the dialog; the modal body itself sets no width, so
+  // it can never overflow a 375px screen.
+  ctx.modal.openModal(ReviewModal, undefined, { size: "lg" })
+  return { handled: true, message: ctx.i18n.t("command.opened") }
 }

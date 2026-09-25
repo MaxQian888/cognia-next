@@ -1,8 +1,10 @@
 {
   "id": "cognia-browser-tools",
   "name": "Browser Tools",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Host-neutral Agent browser loop with structured snapshots, ref actions, multi-page control, file bridge, console, and network inspection.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
@@ -13,8 +15,28 @@
   "permissions": ["agent:control", "session:read"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "browser": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "The embedded preview engine exists only in the desktop app. In a browser tab the tools work only while the remote Chromium engine is enabled and healthy; otherwise each call returns a browser_feature_unsupported error."
+    },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "The mobile app has no embedded preview engine. The tools drive the remote Chromium engine of a paired desktop or cloud host and return a browser_feature_unsupported error when it is not enabled and healthy."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Browser Tools",
+        "manifest.description": "Host-neutral Agent browser loop with structured snapshots, ref actions, multi-page control, file bridge, console, and network inspection."
+      },
+      "zh-CN": {
+        "manifest.name": "浏览器工具",
+        "manifest.description": "与宿主无关的 Agent 浏览器循环：结构化快照、基于引用的操作、多页面控制、文件桥接、控制台与网络检查。"
+      }
+    }
   }
 }

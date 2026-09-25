@@ -1,11 +1,13 @@
 {
   "id": "cognia-rfc-toolkit",
   "name": "RFC Toolkit",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Structured technical-design (RFC) workflow: task-type-aware planning guides and output templates, a self-critique checklist, and a syntax-safe Mermaid diagram generator. Generic mechanism ported from the aiden-plugins arch bundle; vendor-specific tooling removed.",
+  "description": "Structured technical-design (RFC) skills: task-type-aware planning guides and output templates, a self-critique checklist, and a syntax-safe Mermaid diagram generator. Ported from the aiden-plugins arch bundle with vendor-specific tooling removed. Desktop only; install it with the Cognia CLI (see README).",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["skills"],
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -21,7 +23,7 @@
     },
     "tauri": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "mobile": {
       "availability": "blocked",
@@ -31,8 +33,9 @@
   "skills": [
     {
       "id": "cognia-rfc-toolkit:rfc-write-plan",
-      "name": "rfc-write-plan",
-      "description": "Structured technical-design (RFC) planning. Use when the user needs a technical proposal, a design document, or a structured plan for a bug fix, a new feature, or a refactor — it loads the matching task guide and output template, researches the codebase, and writes a precise design document.",
+      "slug": "rfc-write-plan",
+      "name": "RFC: write a design plan",
+      "description": "Write a technical proposal, design doc, or structured plan for a bug fix, new feature, or refactor: loads the matching task guide and template, researches the codebase, and writes the document to the path you give.",
       "source": {
         "kind": "local-bundle",
         "path": "skills/rfc-write-plan"
@@ -41,8 +44,9 @@
     },
     {
       "id": "cognia-rfc-toolkit:rfc-reflect",
-      "name": "rfc-reflect",
-      "description": "Technical-proposal critique and evaluation. Use to check a draft design/RFC for completeness and soundness, assess whether gathered knowledge is sufficient and correctly applied, or critically review the current proposal — especially for complex requirements.",
+      "slug": "rfc-reflect",
+      "name": "RFC: critique a proposal",
+      "description": "Critically review a draft design or RFC for completeness, soundness, and whether the gathered knowledge is sufficient and correctly applied.",
       "source": {
         "kind": "local-bundle",
         "path": "skills/rfc-reflect"
@@ -50,8 +54,9 @@
     },
     {
       "id": "cognia-rfc-toolkit:mermaid-visualizer",
-      "name": "mermaid-visualizer",
-      "description": "Generate syntactically correct and visually clear Mermaid diagrams (flowcharts, sequence diagrams, state diagrams, etc.) with clean layout and error-free syntax.",
+      "slug": "mermaid-visualizer",
+      "name": "Mermaid diagrams",
+      "description": "Generate syntactically correct, cleanly laid-out Mermaid diagrams (flowcharts, sequence, state, and more).",
       "source": {
         "kind": "local-bundle",
         "path": "skills/mermaid-visualizer"
@@ -60,9 +65,7 @@
     }
   ],
   "bundle_include": [
-    "plugin.json",
     "README.md",
-    "src/index.ts",
     "skills/rfc-write-plan/SKILL.md",
     "skills/rfc-write-plan/references/bugfix-guide.txt",
     "skills/rfc-write-plan/references/bugfix-template.md",
@@ -73,5 +76,17 @@
     "skills/rfc-reflect/SKILL.md",
     "skills/mermaid-visualizer/SKILL.md",
     "skills/mermaid-visualizer/references/syntax-rules.md"
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "RFC Toolkit",
+        "manifest.description": "Structured technical-design (RFC) skills: task-type-aware planning guides and output templates, a self-critique checklist, and a syntax-safe Mermaid diagram generator. Ported from the aiden-plugins arch bundle with vendor-specific tooling removed. Desktop only; install it with the Cognia CLI (see README)."
+      },
+      "zh-CN": {
+        "manifest.name": "RFC 工具箱",
+        "manifest.description": "结构化技术设计（RFC）技能：按任务类型的规划指南与输出模板、自检清单，以及语法安全的 Mermaid 图表生成器。移植自 aiden-plugins 架构包，去除了厂商专用工具。仅限桌面端；请用 Cognia CLI 安装（见 README）。"
+      }
+    }
+  }
 }

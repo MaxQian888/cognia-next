@@ -7,8 +7,10 @@
  *    writer / polisher, each carrying its playbook skill.
  *  - **skills** — inline Zhihu writing / research / de-AI / illustration
  *    playbooks adapted from the matching skills in skills-test.
- *  - **MCP presets** — zget (bundled wrapper), Exa, Fetch, Sequential
- *    Thinking, and a CloakBrowser-backed Playwright preset.
+ *  - **MCP presets** — Exa, Fetch, Sequential Thinking, and a
+ *    CloakBrowser-backed Playwright preset. zget is NOT a preset: it has no
+ *    MCP server, so the roles run the external `zget` CLI through Bash and the
+ *    topic workflow runs it from a terminal node (`requires.binaries`).
  *  - **Dexie tables** — topics / research / drafts (the pipeline's products).
  *  - **plugin tools** — zhihu_save_research / zhihu_save_draft (how the
  *    writing crew persists, since agents can't reach `ctx.dexie`). The same
@@ -18,12 +20,13 @@
  *  - **workflow template** — 知乎选题候选 (热点 → 打分 → 候选入库).
  *  - **agent-team template** — 知乎写作小组 (调研 → 写作 → 配图 → 终稿).
  *
- * Lifecycle (mirrors `cognia-backend-refactor`): declarative manifest entries
- * (characterPacks / skills / mcpServerPresets / dexie / i18n) ride the plugin
- * manager's OVERLAY_REGISTRY dispatch on enable. We additionally register
- * imperatively the pieces that need runtime values: the character pack (dev
- * hot-reload coherence), and the persist tools + save-topics node (both close
- * over the `ctx.dexie` handle, which the manifest can't hold).
+ * Lifecycle: `dexie`, `tools`, `commands` and the i18n bundle are plain data
+ * in plugin.json; `characterPacks` / `skills` / `mcpServerPresets` /
+ * templates are authored in TypeScript and merged over it below. The manager
+ * registers all of them on enable (OVERLAY_REGISTRY dispatch, Dexie and i18n
+ * enable steps). `activate()` additionally registers what needs runtime
+ * values: the character pack (dev hot-reload coherence), and the persist tools
+ * + save-topics node, which close over the `ctx.dexie` handle.
  *
  * `workflowTemplates` / `agentTeamTemplates` stay on the legacy manifest
  * fields ON PURPOSE: the workflow editor's plugin-capabilities section and the
@@ -34,8 +37,7 @@
  * deprecation diagnostic is acknowledged and tracked as a platform follow-up.
  */
 
-import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
-import { I18N_MESSAGES } from "./i18n"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
 import { STATIC_MCP_PRESETS } from "./mcp/presets"
@@ -43,7 +45,7 @@ import { makePersistTools } from "./tools/persist"
 import { makeSaveTopicsNode } from "./nodes/save-topics"
 import { TOPIC_DISCOVERY_TEMPLATE } from "./workflow/template"
 import { WRITING_CREW_TEMPLATE } from "./team/template"
-import { setPipelineDbFromDexie, setPluginSession } from "./db/runtime"
+import { setPipelineDbFromDexie, setReviewHost } from "./db/runtime"
 import { handleZhihuCommand } from "./commands"
 import manifestJson from "../plugin.json"
 
@@ -60,29 +62,23 @@ function runDisposers(): void {
   }
 }
 
+// Spread plugin.json via `definePluginManifest`: `builtinManifest()` merges
+// module-over-JSON, so a hand-written subset here WINS and would silently drop
+// `commands[]` / `tools[]` / `dexie` / `i18n` — while still type-checking the
+// added contribution fields (excess keys fail to compile).
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  characterPacks: [ZHIHU_ROLE_PACK],
+  skills: ZHIHU_SKILLS,
+  mcpServerPresets: STATIC_MCP_PRESETS,
+  workflowTemplates: [TOPIC_DISCOVERY_TEMPLATE],
+  agentTeamTemplates: [WRITING_CREW_TEMPLATE],
+})
+
 const definition = definePlugin({
-  // Spread plugin.json via `definePluginManifest`: `builtinManifest()` merges
-  // module-over-JSON, so a hand-written subset here WINS and would silently
-  // drop `commands[]` / `tools[]` / `permissionJustifications` — while still
-  // type-checking the added contribution fields (excess keys fail to compile).
-  manifest: definePluginManifest({
-    ...manifestJson,
-    characterPacks: [ZHIHU_ROLE_PACK],
-    skills: ZHIHU_SKILLS,
-    mcpServerPresets: STATIC_MCP_PRESETS,
-    workflowTemplates: [TOPIC_DISCOVERY_TEMPLATE],
-    agentTeamTemplates: [WRITING_CREW_TEMPLATE],
-    dexie: {
-      tables: [
-        { name: "topics", schema: "&id, status, createdAt" },
-        { name: "research", schema: "&id, topicId, createdAt" },
-        { name: "drafts", schema: "&id, topicId, status, createdAt" },
-      ],
-    },
-    i18n: { locales: I18N_MESSAGES },
-  }),
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("zhihu-content-pipeline plugin activated")
+  manifest,
+  activate: async (ctx) => {
+    ctx.logger.info("zhihu-content-pipeline plugin activated")
     // Imperative registration mirrors the declarative manifest so the pack is
     // present under dev hot-reload before the manifest walker runs. The MCP
     // presets ride the declarative manifest (all npx/uvx-spawnable); zget is
@@ -99,7 +95,7 @@ const definition = definePlugin({
     // runtime singleton also lets the review modal read the tables. Without
     // dexie the pack/skills/presets/templates still work.
     setPipelineDbFromDexie(ctx.dexie)
-    setPluginSession(ctx.session)
+    setReviewHost({ session: ctx.session, clipboard: ctx.clipboard, ui: ctx.ui })
     if (ctx.dexie) {
       for (const tool of makePersistTools(ctx.dexie)) {
         activateDisposers.push(ctx.agent.registerTool(tool))
@@ -111,7 +107,7 @@ const definition = definePlugin({
       // node regardless of dispatch order.
       ctx.workflow.refreshTemplateWarnings()
     } else {
-      ctx.logger?.warn(
+      ctx.logger.warn(
         "zhihu-content-pipeline: no Dexie handle — persistence (save-topics node, save tools) disabled"
       )
     }
@@ -127,7 +123,7 @@ const definition = definePlugin({
   deactivate: async () => {
     runDisposers()
     setPipelineDbFromDexie(null)
-    setPluginSession(null)
+    setReviewHost(null)
   },
 })
 

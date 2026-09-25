@@ -287,13 +287,9 @@ describe("sandbox_bash tier routing", () => {
 })
 
 describe("deactivate", () => {
-  it("unregisters every tool", async () => {
+  it("leaves tool teardown to the host's contribution cleanup", () => {
     installTransport()
-    const removed: string[] = []
-    await definition.deactivate?.({
-      agent: { unregisterTool: (n: string) => removed.push(n) },
-    } as unknown as Parameters<NonNullable<typeof definition.deactivate>>[0])
-    expect(removed.sort()).toEqual([...SANDBOXED_TOOL_NAMES].sort())
+    expect(definition.deactivate).toBeUndefined()
   })
 })
 

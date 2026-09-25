@@ -30,15 +30,23 @@ test("the install ZIP contains a standalone executable entry and its declared fi
       if (runtime.availability === "supported") assert.ok(archive.file(runtime.entrypoint))
     }
 
-    // Match the host's CommonJS contract; any unbundled dependency fails here.
+    // Match the host's CommonJS contract: the SDK is the one shared module the
+    // entry may require (the host supplies it); any other unbundled dependency
+    // fails here. `definePlugin` / `definePluginManifest` are identity seams.
+    const required = []
     const pluginModule = { exports: {} }
     runInNewContext(entry, {
       module: pluginModule,
       exports: pluginModule.exports,
       require: (id) => {
+        required.push(id)
+        if (id === "@cognia/plugin-sdk") {
+          return { definePlugin: (definition) => definition, definePluginManifest: (m) => m }
+        }
         throw new Error(`Unexpected runtime dependency: ${id}`)
       },
     })
+    assert.deepEqual(required, ["@cognia/plugin-sdk"])
     assert.deepEqual(JSON.parse(JSON.stringify(pluginModule.exports.default.manifest)), manifest)
     assert.equal(await pluginModule.exports.default.activate({}), undefined)
 

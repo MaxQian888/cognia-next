@@ -12,9 +12,8 @@
  * mapping logic stays trivially unit-testable.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -22,11 +21,10 @@ const WORKFLOW_ID_SCHEMA = {
     "Workflow id to target. Omit if exactly one editor is open and you want to act on it.",
 } as const
 
-export function buildDiagnosticTools(): PluginTool[] {
+export function buildDiagnosticTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_explain_validation",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_explain_validation",
         description:
@@ -49,10 +47,9 @@ export function buildDiagnosticTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_explain_last_run",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_explain_last_run",
         description:
@@ -75,6 +72,6 @@ export function buildDiagnosticTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

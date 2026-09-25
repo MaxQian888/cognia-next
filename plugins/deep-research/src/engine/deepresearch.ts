@@ -26,6 +26,7 @@ import type {
   SectionResult,
 } from "../types"
 import { runDeepSearch } from "./deepsearch"
+import { engineText, reportEngineProgress } from "./progress"
 import { coherenceMessages, outlineMessages } from "./prompts"
 
 const SCOUT_RESULTS = 8
@@ -44,7 +45,7 @@ export async function runDeepResearch(
   configOverride: Partial<DeepSearchConfig> = {}
 ): Promise<DeepResearchResult> {
   let tokens = 0
-  deps.reportProgress?.(0.02, "🛰️ Scoping the landscape…")
+  reportEngineProgress(deps, 0.02, "progress.scoping")
   const emptyOutline: ResearchOutline = {
     title: topic,
     sections: [{ heading: topic, question: topic }],
@@ -97,9 +98,11 @@ export async function runDeepResearch(
       const result = await runDeepSearch(section.question, sectionDeps, sectionConfig)
       tokens += result.usage.totalTokens
       done += 1
-      deps.reportProgress?.(
+      reportEngineProgress(
+        deps,
         0.1 + 0.8 * (done / Math.max(1, outline.sections.length)),
-        `📝 Section ${done}/${outline.sections.length}: ${section.heading}`
+        "progress.section",
+        { done, total: outline.sections.length, heading: section.heading }
       )
       return {
         heading: section.heading,
@@ -118,7 +121,7 @@ export async function runDeepResearch(
   // are kept below only if a real section happened to share the URL anyway.
   const usable = sections.filter((s) => !s.aborted)
 
-  deps.reportProgress?.(0.95, "🧵 Weaving the report together…")
+  reportEngineProgress(deps, 0.95, "progress.weaving")
   const citations = dedupeCitations(usable.flatMap((s) => s.citations))
   const globalIndex = new Map(citations.map((c, i) => [normalizeUrl(c.url), i + 1]))
   for (const section of usable) {
@@ -140,7 +143,7 @@ export async function runDeepResearch(
   )
   tokens += reportTokens
 
-  deps.reportProgress?.(1, "Done")
+  reportEngineProgress(deps, 1, "progress.done")
   return {
     topic,
     title: outline.title,
@@ -267,11 +270,11 @@ function cancelledReport(
   tokens: number,
   deps: EngineDeps
 ): DeepResearchResult {
-  deps.reportProgress?.(1, "Cancelled")
+  reportEngineProgress(deps, 1, "progress.cancelled")
   return {
     topic,
     title: outline.title,
-    report: `# ${outline.title}\n\n_Research was cancelled before any section completed._`,
+    report: `# ${outline.title}\n\n_${engineText(deps, "report.cancelledEmpty")}_`,
     outline,
     sections: [],
     citations: [],

@@ -1,7 +1,9 @@
 {
   "id": "figma-external-service",
   "name": "Figma External Service",
-  "description": "Reference external-service plugin for Figma MCP, Skills, resources, prompts, Code Connect, and assets.",
+  "nameKey": "manifest.name",
+  "description": "Reference external-service plugin for Figma MCP: design context, resources, prompts, Code Connect, and assets.",
+  "descriptionKey": "manifest.description",
   "version": "1.0.0",
   "type": "frontend",
   "main": "src/index.ts",
@@ -21,7 +23,7 @@
     },
     "mobile": {
       "availability": "degraded",
-      "reason": "Remote MCP requires a configured runtime gateway; the desktop-local provider is unavailable."
+      "reason": "Remote MCP requires a configured runtime gateway. The Figma Desktop provider is unavailable on mobile: it connects to the Figma desktop app on the same computer (127.0.0.1)."
     }
   },
   "mcpServerPresets": [
@@ -78,7 +80,7 @@
     {
       "id": "figma-desktop",
       "name": "Figma Desktop",
-      "description": "Local MCP endpoint exposed by the Figma desktop app in Dev Mode.",
+      "description": "Local MCP endpoint exposed by the Figma desktop app in Dev Mode. Desktop only: it needs the Figma desktop app running on the same computer, so it is unavailable on mobile.",
       "icon": "🎨",
       "transport": "http",
       "config": { "url": "http://127.0.0.1:3845/mcp" },
@@ -113,12 +115,6 @@
       "label": "Figma",
       "description": "Design context, canvas editing, Code Connect, assets, resources, and prompts through interchangeable reviewed MCP providers.",
       "icon": "🎨",
-      "skillIds": [
-        "figma-use",
-        "figma-design-to-code",
-        "figma-code-connect",
-        "figma-generate-diagram"
-      ],
       "fallbackPolicy": "never",
       "providers": [
         {
@@ -139,5 +135,17 @@
         }
       ]
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Figma External Service",
+        "manifest.description": "Reference external-service plugin for Figma MCP: design context, resources, prompts, Code Connect, and assets."
+      },
+      "zh-CN": {
+        "manifest.name": "Figma 外部服务",
+        "manifest.description": "Figma MCP 的参考外部服务插件：设计上下文、资源、提示词、Code Connect 与素材。"
+      }
+    }
+  }
 }

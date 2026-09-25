@@ -27,6 +27,7 @@ const manifest = manifestJson as unknown as {
     transport: string
     languages: string[]
   }>
+  runtimeCompatibility: Record<string, { availability: string; reason?: string }>
 }
 
 describe("manifest", () => {
@@ -42,6 +43,16 @@ describe("manifest", () => {
     expect(command.startsWith("/")).toBe(false)
     expect(command.includes("..")).toBe(false)
     expect(existsSync(join(PLUGIN_ROOT, command))).toBe(true)
+  })
+
+  it("is fully supported on the desktop and blocked, with a reason, elsewhere", () => {
+    // Nothing is missing on Tauri — the sidecar spawns the echo server and the
+    // registry wires it — so "degraded" would be a false claim.
+    expect(manifest.runtimeCompatibility.tauri.availability).toBe("supported")
+    for (const shell of ["browser", "mobile"]) {
+      expect(manifest.runtimeCompatibility[shell].availability).toBe("blocked")
+      expect(manifest.runtimeCompatibility[shell].reason).toBeTruthy()
+    }
   })
 })
 

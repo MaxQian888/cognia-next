@@ -1,5 +1,5 @@
-import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI, PluginOcrAPI } from "@cognia/plugin-sdk/context"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { normalizeExportName, summarizeSave } from "./export-file"
 import {
   extractPdfPages,
   fillPdfFields,
@@ -18,10 +18,11 @@ import {
   type PdfArtifactDocument,
 } from "./model"
 
-export type PdfPluginContext = Pick<FullPluginContext, "pluginId"> & {
-  artifact: PluginArtifactAPI
-  files: PluginFilesAPI
-  ocr: PluginOcrAPI
+export type PdfPluginContext = Pick<PluginContext, "artifact" | "files" | "ocr" | "i18n">
+
+/** A `.pdf` filename `ctx.files.save` accepts, built from a title or model-supplied name. */
+export function normalizePdfName(value: string | undefined): string {
+  return normalizeExportName(value, "pdf", "document")
 }
 
 export interface PdfValidationFinding {
@@ -62,7 +63,7 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
 
   async function createArtifact(
     document: PdfArtifactDocument,
-    options: { sessionId?: string; messageId?: string }
+    options: { sessionId?: string; messageId?: string; userInitiated?: boolean }
   ) {
     const artifactId = await ctx.artifact.createArtifact({
       title: document.title,
@@ -75,7 +76,9 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
       messageId: options.messageId,
       metadata: {
         sourceOrigin: "tool",
-        userInitiated: true,
+        // Agent tool calls create artifacts on the model's behalf; only the
+        // host import flow (the user picked a file) passes `true`.
+        userInitiated: options.userInitiated ?? false,
         previewable: true,
       },
     })
@@ -101,9 +104,10 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
           )[0]
       if (!file) return { ok: false as const, cancelled: true as const }
       if (file.bytes.byteLength > PDF_MAX_BYTES) {
-        throw new Error(
-          `PDF exceeds the ${Math.floor(PDF_MAX_BYTES / 1024 / 1024)}MB size limit: ${file.name}`
-        )
+        return {
+          ok: false as const,
+          error: `PDF exceeds the ${Math.floor(PDF_MAX_BYTES / 1024 / 1024)}MB size limit: ${file.name}`,
+        }
       }
       return api.importPdfBytes({
         bytes: file.bytes,
@@ -123,12 +127,13 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
       password?: string
       sessionId?: string
       messageId?: string
+      userInitiated?: boolean
     }) => {
       const inspection = await inspectPdf(input.bytes, input.password)
       const title =
         input.title?.trim() ||
         (input.filename ? stripExtension(input.filename) : "") ||
-        "PDF document"
+        ctx.i18n.t("import.untitled")
       const document = createPdfArtifactDocument({
         title,
         ...(input.filename ? { sourceFilename: input.filename } : {}),
@@ -171,7 +176,7 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
       const artifact = ctx.artifact.updateArtifact(input.artifactId, {
         content: JSON.stringify(updated),
         expectedVersion: input.expectedVersion,
-        changeDescription: input.changeDescription ?? "Fill PDF form fields",
+        changeDescription: input.changeDescription ?? ctx.i18n.t("history.fill"),
       })
       ctx.artifact.openArtifact(input.artifactId)
       return {
@@ -291,21 +296,23 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
 
     exportPdf: async (artifactId: string, suggestedName?: string, password?: string) => {
       const { document } = readArtifact(artifactId)
+      const bytes = base64ToBytes(document.dataBase64)
       // Re-open validation only makes sense for documents we can parse; encrypted
       // bytes without a password are exported as stored.
       if (!document.inspection.encrypted || password) {
-        const reopened = await inspectPdf(base64ToBytes(document.dataBase64), password)
+        const reopened = await inspectPdf(bytes, password)
         if (reopened.pageCount !== document.inspection.pageCount) {
-          throw new Error("PDF validation failed before export.")
+          return {
+            ok: false as const,
+            artifactId,
+            error:
+              "The stored PDF no longer reopens with its recorded page count; nothing was saved.",
+          }
         }
       }
-      const bytes = base64ToBytes(document.dataBase64)
-      const result = await ctx.files.save({
-        suggestedName: safeFilename(suggestedName ?? `${document.title}.pdf`),
-        mimeType: PDF_MIME,
-        bytes,
-      })
-      return { ok: result.saved, artifactId, byteLength: bytes.byteLength }
+      const filename = normalizePdfName(suggestedName ?? document.title)
+      const outcome = await ctx.files.save({ suggestedName: filename, mimeType: PDF_MIME, bytes })
+      return { ...summarizeSave(outcome, filename), artifactId, byteLength: bytes.byteLength }
     },
   }
 
@@ -314,9 +321,4 @@ export function createPdfRuntime(ctx: PdfPluginContext) {
 
 function stripExtension(filename: string): string {
   return filename.replace(/\.pdf$/i, "")
-}
-
-function safeFilename(value: string): string {
-  const sanitized = value.replace(/[\\/:*?"<>|]/g, "-").trim() || "document"
-  return sanitized.toLowerCase().endsWith(".pdf") ? sanitized : `${sanitized}.pdf`
 }

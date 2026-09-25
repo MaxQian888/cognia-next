@@ -1,30 +1,31 @@
 {
   "id": "cognia-external-agent-preset-example",
   "name": "External Agent Preset Example",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Reference plugin demonstrating the external-agent-preset capability and the declarative contextProviders manifest field.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["external-agent-preset", "context-provider"],
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "tauri": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "mobile": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     }
   },
   "externalAgentPresets": [
@@ -48,8 +49,20 @@
     {
       "id": "env-banner",
       "label": "Environment Banner",
-      "entry": "src/context-provider.ts",
+      "entry": "dist/context-provider.js",
       "export": "createEnvBannerProvider"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "External Agent Preset Example",
+        "manifest.description": "Reference plugin demonstrating the external-agent-preset capability and the declarative contextProviders manifest field."
+      },
+      "zh-CN": {
+        "manifest.name": "外部 Agent 预设示例",
+        "manifest.description": "演示 external-agent-preset 能力与声明式 contextProviders 清单字段的参考插件。"
+      }
+    }
+  }
 }

@@ -1,8 +1,10 @@
 {
   "id": "cognia-builtin-characters",
   "name": "Cognia Built-in Characters",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "First-party character pack shipping Cognia's default personas, including the immutable read-only Support Agent.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["character-pack"],
   "main": "src/index.ts",
@@ -23,5 +25,17 @@
       "entrypoint": "src/index.ts"
     },
     "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Cognia Built-in Characters",
+        "manifest.description": "First-party character pack shipping Cognia's default personas, including the immutable read-only Support Agent."
+      },
+      "zh-CN": {
+        "manifest.name": "Cognia 内置角色",
+        "manifest.description": "官方角色包，提供 Cognia 的默认角色，包括不可修改的只读支持助手。"
+      }
+    }
   }
 }

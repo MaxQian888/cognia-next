@@ -10,6 +10,8 @@ JS `entry`, which is exactly what marks them python-backed — see
 inline; every other public method is behaviour.
 """
 
+import hashlib
+
 import cognia
 
 
@@ -111,8 +113,11 @@ class MemoryWorkspace:
         path = (handle or {}).get("path") if isinstance(handle, dict) else None
         if path not in self._handles:
             raise RuntimeError("unknown workspace handle: %r" % (path,))
-        # A real backend would shell out to git; the demo returns a stable sha.
-        return "sha-" + str(abs(hash(message)) % 10**7)
+        # A real backend would shell out to git; the demo returns a stable,
+        # git-shaped id derived from the message. `hashlib`, not `hash()`:
+        # str hashing is salted per process (PYTHONHASHSEED), so `hash()` gave
+        # the same message a different "sha" after every host restart.
+        return "sha-" + hashlib.sha1(str(message).encode("utf-8")).hexdigest()[:7]
 
     def remove(self, handle=None, **_kwargs):
         path = (handle or {}).get("path") if isinstance(handle, dict) else None

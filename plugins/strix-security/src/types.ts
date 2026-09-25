@@ -36,6 +36,13 @@ export interface CodeLocation {
   label?: string
 }
 
+/**
+ * Stable reasons a run stopped short. Translated at render time as
+ * `run.error.<code>` from the plugin bundle.
+ */
+export type StrixRunErrorCode =
+  "setupFailed" | "reportUnreadable" | "strixError" | "exception" | "interrupted"
+
 /** A scan run record (Dexie `runs` table, keyed by `runId`). */
 export interface StrixRun {
   runId: string
@@ -49,8 +56,17 @@ export interface StrixRun {
   findingsCount: number
   /** Timestamp the user acknowledged authorization for this target. */
   authorizedAt: number
-  /** Populated when status === "error". */
+  /**
+   * English detail for the run journal, SARIF and logs. The panel never
+   * renders it when {@link errorCode} is present — stored prose cannot follow
+   * a language switch, so the panel translates the code instead. Legacy rows
+   * written before codes existed still fall back to it.
+   */
   error?: string
+  /** Why the run ended in `error` (or was reconciled to `cancelled`). */
+  errorCode?: StrixRunErrorCode
+  /** Values the translated `run.error.<code>` message interpolates. */
+  errorParams?: Record<string, string | number>
   /**
    * The vulnerability report was produced but could not be parsed.
    *

@@ -1,10 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+} from "react"
+import type { PluginContext } from "@cognia/plugin-sdk"
 import {
   THINKING_LEVELS,
   clampThinkingLevel,
+  definePlugin,
+  definePluginManifest,
   resolveThinkingLevel,
   thinkingLevelPatch,
   type ThinkingLevel,
@@ -13,10 +23,49 @@ import {
   effortSurfaceForSession,
   subscribeEffortSurface,
 } from "@cognia/plugin-sdk/api/effort-surface"
-import type { ExtensionProps } from "@cognia/plugin-sdk/extensions"
+import type { ChatInputEffortSlotContext, ExtensionProps } from "@cognia/plugin-sdk/extensions"
+import { usePluginTranslations, type PluginTranslate } from "@cognia/plugin-sdk/api/i18n"
 import { Button, PluginImage, Popover, PopoverContent, PopoverTrigger, cn } from "@cognia/plugin-ui"
 
 import manifestJson from "../plugin.json"
+
+export const manifest = definePluginManifest(manifestJson)
+
+const PLUGIN_ID = manifestJson.id
+
+/**
+ * The English strings this plugin ships, used when the host's lookup has no
+ * entry for a key. The manager registers the bundle before any declarative
+ * extension renders, but a control that outlives a disable (or renders in a
+ * harness with no manager) would otherwise print `level.high.name` where a
+ * word belongs.
+ */
+const ENGLISH_BUNDLE: Readonly<Record<string, string>> = manifestJson.i18n.locales.en
+
+function interpolate(template: string, params: Parameters<PluginTranslate>[1]): string {
+  if (!params) return template
+  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+    params[name] !== undefined ? String(params[name]) : match
+  )
+}
+
+/**
+ * `usePluginTranslations` — the same lookup as `ctx.i18n.t`, re-rendering on a
+ * language switch — with this plugin's own English bundle as the last resort
+ * instead of the raw key.
+ */
+function useDialTranslations(): PluginTranslate {
+  const translate = usePluginTranslations(PLUGIN_ID)
+  return useCallback(
+    (key, params) => {
+      const value = translate(key, params)
+      if (value !== key) return value
+      const english = ENGLISH_BUNDLE[key]
+      return english === undefined ? key : interpolate(english, params)
+    },
+    [translate]
+  )
+}
 
 type PluginSession = NonNullable<ReturnType<PluginContext["session"]["getCurrentSession"]>>
 
@@ -79,20 +128,63 @@ function usePluginRuntime() {
     getNoSession
   )
 
-  const [, rerender] = useState(0)
-  useEffect(() => {
-    if (!ctx) return
-    return ctx.i18n.onLocaleChange(() => rerender((value) => value + 1))
-  }, [ctx])
-
   return { ctx, session }
 }
 
-export function AnimeEffortControl({ pluginId }: ExtensionProps) {
-  const { ctx, session } = usePluginRuntime()
+/** The slot context the composer passes (`ChatInputEffortSlotContext`), read defensively. */
+function readSlotContext(context: ExtensionProps["context"]): Partial<ChatInputEffortSlotContext> {
+  if (!context) return {}
+  return {
+    sessionId: typeof context.sessionId === "string" ? context.sessionId : undefined,
+    disabled: context.disabled === true,
+    compact: context.compact === true,
+  }
+}
+
+/**
+ * The session of the composer this dial sits in. Usually that is the focused
+ * session; when the slot names a different one (a split view, a detached
+ * composer) its row is fetched and kept fresh on every session change, so the
+ * dial never writes a depth into a conversation the user is not typing in.
+ */
+function useSlotSession(
+  ctx: PluginContext | null,
+  focused: PluginSession | null,
+  slotSessionId: string | undefined
+): PluginSession | null {
+  const [slotRow, setSlotRow] = useState<PluginSession | null>(null)
+  const needsLookup = Boolean(ctx && slotSessionId && focused?.id !== slotSessionId)
+  useEffect(() => {
+    if (!ctx || !slotSessionId || !needsLookup) return
+    let alive = true
+    const load = () => {
+      void ctx.session.getSession(slotSessionId).then((row) => {
+        if (alive) setSlotRow((row as PluginSession | null) ?? null)
+      })
+    }
+    load()
+    const unsubscribe = ctx.session.onSessionChange(load)
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [ctx, slotSessionId, needsLookup])
+  if (!slotSessionId || !needsLookup) return focused
+  return slotRow?.id === slotSessionId ? slotRow : null
+}
+
+export function AnimeEffortControl({ pluginId, context }: ExtensionProps) {
+  const { ctx, session: focusedSession } = usePluginRuntime()
+  const slot = readSlotContext(context)
+  const session = useSlotSession(ctx, focusedSession, slot.sessionId)
+  // The host chip this dial replaces is disabled while a reply streams; a
+  // depth changed mid-turn would apply to a turn that already started.
+  const streaming = slot.disabled === true
   const [pending, setPending] = useState<ThinkingLevel | null>(null)
-  const t = (key: string, params?: Record<string, string | number | boolean>) =>
-    ctx?.i18n.t(key, params) ?? key
+  // Strings come from the plugin's own bundle, not the context: the control can
+  // render before `activate` publishes one, and must not show raw keys then.
+  const t = useDialTranslations()
+  const radioRefs = useRef(new Map<ThinkingLevel, HTMLButtonElement>())
 
   // The host's own answer, not a second derivation of it. Which tiers to offer
   // depends on four things this row does not carry (the runtime lane executing
@@ -135,7 +227,7 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
   // Display the tier the NEXT turn will really use: a persisted level this
   // surface cannot honour folds down to the deepest one it can.
   const level = clampThinkingLevel(pending ?? resolveThinkingLevel(session), offered)
-  const usable = Boolean(ctx && session && levels.length > 0)
+  const usable = Boolean(ctx && session && levels.length > 0 && !streaming)
   // An `aria-label` REPLACES the element's text for assistive tech, and the
   // visible label deliberately pairs the caption with the live tier. Naming only
   // the caption would drop the half that carries the value, leaving a
@@ -147,8 +239,12 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
       ? t("control.unsupported")
       : t("control.aria", { level: t(`level.${level}.name`) })
 
+  // One tab stop for the whole group (a radio group is ONE control): the
+  // checked tier, or the first one if the checked tier is not on offer.
+  const tabStop = levels.includes(level) ? level : levels[0]
+
   const selectLevel = async (next: ThinkingLevel) => {
-    if (!ctx || !session || pending) return
+    if (!ctx || !session || pending || streaming) return
     setPending(next)
     try {
       // `thinkingLevelPatch` rather than a hand-written pair: `effort` is what
@@ -165,6 +261,37 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
     }
   }
 
+  // Arrow keys move the checked tier, the WAI-ARIA radio-group contract (focus
+  // and selection travel together). Ignored while a write is in flight, so the
+  // focused radio and the checked one never disagree.
+  const onRadioKeyDown = (event: KeyboardEvent<HTMLButtonElement>, item: ThinkingLevel) => {
+    const index = levels.indexOf(item)
+    let nextIndex: number
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        nextIndex = (index + 1) % levels.length
+        break
+      case "ArrowUp":
+      case "ArrowLeft":
+        nextIndex = (index - 1 + levels.length) % levels.length
+        break
+      case "Home":
+        nextIndex = 0
+        break
+      case "End":
+        nextIndex = levels.length - 1
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    if (!session || pending || streaming) return
+    const next = levels[nextIndex]
+    radioRefs.current.get(next)?.focus()
+    if (next !== level) void selectLevel(next)
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -175,8 +302,11 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
           disabled={!usable}
           aria-label={triggerLabel}
           title={t("control.label")}
-          className="aef-trigger"
+          className="aef-trigger touch-hit"
           data-level={level}
+          // Folded toolbar: the host chip shrinks to a glyph, so the dial does
+          // too (the value moves to the tooltip / accessible name).
+          data-compact={slot.compact || undefined}
         >
           {/* One line, glyph then value, the shape of every other chip on the
               composer row where this control stands in for the host's effort
@@ -186,7 +316,9 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
           <span className="aef-trigger-mark" aria-hidden>
             <span />
           </span>
-          <strong className="aef-trigger-value">{t(`level.${level}.name`)}</strong>
+          {slot.compact ? null : (
+            <strong className="aef-trigger-value">{t(`level.${level}.name`)}</strong>
+          )}
         </Button>
       </PopoverTrigger>
 
@@ -228,7 +360,12 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
           </div>
         </div>
 
-        <div className="aef-levels" role="radiogroup" aria-label={t("panel.levelAria")}>
+        <div
+          className="aef-levels"
+          role="radiogroup"
+          aria-label={t("panel.levelAria")}
+          aria-busy={pending !== null}
+        >
           {levels.map((item) => {
             const active = item === level
             // Numbered by the tier's place in the FULL vocabulary, so the badge
@@ -238,11 +375,20 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
             return (
               <button
                 key={item}
+                ref={(node) => {
+                  if (node) radioRefs.current.set(item, node)
+                  else radioRefs.current.delete(item)
+                }}
                 type="button"
                 role="radio"
                 aria-checked={active}
-                disabled={!session || pending !== null}
+                // `aria-disabled` rather than `disabled` while a write is in
+                // flight: a disabled button drops keyboard focus to <body>.
+                aria-disabled={pending !== null || undefined}
+                disabled={!session}
+                tabIndex={item === tabStop ? 0 : -1}
                 onClick={() => void selectLevel(item)}
+                onKeyDown={(event) => onRadioKeyDown(event, item)}
                 className={cn("aef-level", active && "aef-level--active")}
                 data-level={item}
               >
@@ -254,7 +400,7 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
                   </span>
                   <span>{t(`level.${item}.desc`)}</span>
                 </span>
-                <span className="aef-state">
+                <span className="aef-state" data-syncing={active && pending !== null}>
                   {active ? t(pending ? "panel.applying" : "panel.current") : ""}
                 </span>
               </button>
@@ -278,6 +424,12 @@ export const ANIME_EFFORT_CSS = String.raw`
   --aef-plate: oklch(.22 .021 249);
   --aef-ink: oklch(.97 .004 249);
 }
+.aef-trigger[data-compact] {
+  /* Folded toolbar: the host dropped the declared width box, so the trigger
+     sizes to its glyph like the host's own folded chip. */
+  width: auto;
+  padding: 0 .375rem;
+}
 .aef-trigger {
   height: 1.75rem;
   /* The surface hands this control a fixed-width box, not a measurement —
@@ -292,7 +444,15 @@ export const ANIME_EFFORT_CSS = String.raw`
   font-size: 11px;
   font-weight: 400;
 }
-.aef-trigger:hover { color: var(--foreground); }
+/* Hover styling only where a pointer can hover: on touch the hover state
+   sticks to the last tapped element and reads as a second, phantom selection. */
+@media (hover: hover) {
+  .aef-trigger:hover { color: var(--foreground); }
+  .aef-level:not([aria-disabled="true"]):hover {
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
+    color: var(--foreground);
+  }
+}
 .aef-trigger-mark {
   position: relative;
   display: grid;
@@ -330,7 +490,13 @@ export const ANIME_EFFORT_CSS = String.raw`
   white-space: nowrap;
 }
 .aef-panel {
+  display: flex;
   width: min(25rem, calc(100vw - 1rem));
+  /* Never taller than the space the popover actually has (Radix publishes it
+     on the content element), so on a short or phone-sized window the tier
+     list scrolls inside the panel instead of running off-screen. */
+  max-height: min(36rem, var(--radix-popover-content-available-height, calc(100dvh - 2rem)));
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--foreground) 16%, transparent);
   border-radius: var(--radius-panel);
@@ -340,6 +506,7 @@ export const ANIME_EFFORT_CSS = String.raw`
 }
 .aef-hero {
   position: relative;
+  flex: none;
   height: 10.5rem;
   overflow: hidden;
   border-bottom: 1px solid color-mix(in oklab, var(--aef-accent) 25%, transparent);
@@ -382,7 +549,7 @@ export const ANIME_EFFORT_CSS = String.raw`
 }
 .aef-hero-copy > span {
   color: var(--aef-accent);
-  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: .14em;
 }
 .aef-hero-copy h3 {
@@ -393,8 +560,8 @@ export const ANIME_EFFORT_CSS = String.raw`
 }
 .aef-hero-copy p {
   margin: 0;
-  color: color-mix(in oklab, var(--aef-ink) 66%, transparent);
-  font-size: 10px;
+  color: color-mix(in oklab, var(--aef-ink) 72%, transparent);
+  font-size: 11px;
   line-height: 1.45;
 }
 .aef-signal {
@@ -420,7 +587,13 @@ export const ANIME_EFFORT_CSS = String.raw`
   background: var(--aef-accent);
   box-shadow: 0 0 7px color-mix(in oklab, var(--aef-accent) 55%, transparent);
 }
-.aef-levels { padding: .45rem; }
+.aef-levels {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .45rem;
+}
 .aef-level {
   display: grid;
   width: 100%;
@@ -434,10 +607,10 @@ export const ANIME_EFFORT_CSS = String.raw`
   background: transparent;
   color: var(--muted-foreground);
   text-align: left;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
 }
-.aef-level:hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); color: var(--foreground); }
 .aef-level:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.aef-level[aria-disabled="true"] { cursor: progress; }
 .aef-level--active {
   border-left-color: var(--aef-accent);
   background: linear-gradient(90deg, color-mix(in oklab, var(--aef-accent) 12%, transparent), transparent 72%);
@@ -445,54 +618,64 @@ export const ANIME_EFFORT_CSS = String.raw`
 }
 .aef-index {
   color: color-mix(in oklab, var(--aef-accent) 76%, var(--muted-foreground));
-  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .aef-level-copy { display: flex; min-width: 0; flex-direction: column; gap: .18rem; }
 .aef-level-heading { display: flex; min-width: 0; align-items: baseline; gap: .45rem; }
-.aef-level-heading strong { color: inherit; font-size: 12px; line-height: 1; }
+.aef-level-heading strong { color: inherit; font-size: 12px; line-height: 1.1; }
 .aef-level-heading small {
   overflow: hidden;
   color: color-mix(in oklab, var(--muted-foreground) 72%, transparent);
-  font: 500 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .08em;
+  font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .04em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .aef-level-copy > span:last-child {
   overflow: hidden;
-  font-size: 9px;
-  line-height: 1.3;
+  font-size: 11px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .aef-state {
   color: var(--aef-accent);
-  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: .08em;
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .04em;
   text-transform: uppercase;
+}
+/* Touch: every tier row clears the 36px minimum target (the trigger gets the
+   host's own \`touch-hit\` expansion, like every other composer chip). */
+@media (pointer: coarse) {
+  .aef-level { min-height: 2.75rem; }
+}
+/* Short windows (landscape phones, a docked desktop window): shrink the art
+   first, then drop it, so the tiers — the actual control — keep the room. */
+@media (max-height: 600px) {
+  .aef-hero { height: 7rem; }
+  .aef-hero-copy p { display: none; }
+}
+@media (max-height: 420px) {
+  .aef-hero { display: none; }
 }
 /* Top level on purpose. The stylesheet is wrapped in @scope before injection,
    and only TOP-LEVEL keyframes are hoisted back out of it. Left inside the
    media query this name would be dropped and the animation below would
    reference nothing. */
 @keyframes aef-pulse { 50% { opacity: .45; } }
+/* A progress cue, not decoration: it runs only while the tier write is in
+   flight, and not at all for a user who asked for reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
-  .aef-level--active .aef-state { animation: aef-pulse 1.8s ease-in-out infinite; }
+  .aef-state[data-syncing="true"] { animation: aef-pulse 1.2s ease-in-out infinite; }
 }
 `
 
-const definition: PluginDefinition = {
-  // `as unknown as` like the other builtins that import their own manifest:
-  // the JSON module widens `capabilities` / `permissions` to `string[]`, which
-  // does not overlap the literal unions on `PluginManifest`.
-  manifest: manifestJson as unknown as PluginDefinition["manifest"],
-  activate: async (context) => {
+export default definePlugin({
+  manifest,
+  activate: (context) => {
     publishPluginContext(context)
-    context.logger.info("Tactical Mind Dial activated")
   },
   deactivate: () => {
     publishPluginContext(null)
   },
-}
-
-export default definition
+})

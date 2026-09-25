@@ -85,10 +85,17 @@ export interface SreTimelineDraft {
 }
 
 export interface SreValidationIssue {
+  /**
+   * Stable identifier (`row.evidence_unknown`). The panel translates it as
+   * `validation.<code>`; the agent repairs against it.
+   */
   code: string
+  /** English detail for the agent and logs. The panel never renders it. */
   message: string
   rowIndex?: number
   evidenceId?: string
+  /** Values the translated message interpolates (`{source}`, `{kind}`, `{value}`). */
+  params?: Record<string, string>
 }
 
 export interface SreValidationResult {

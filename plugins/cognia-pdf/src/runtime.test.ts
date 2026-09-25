@@ -9,7 +9,10 @@ jest.mock("./pdf-engine", () => ({
 
 import * as pdfEngine from "./pdf-engine"
 import { PDF_ARTIFACT_KIND, PDF_MAX_BYTES } from "./model"
-import { createPdfRuntime, type PdfPluginContext } from "./runtime"
+import manifestJson from "../plugin.json"
+import { createPdfRuntime, normalizePdfName, type PdfPluginContext } from "./runtime"
+
+const EN = manifestJson.i18n.locales.en as Record<string, string>
 
 const inspectPdf = jest.mocked(pdfEngine.inspectPdf)
 const fillPdfFields = jest.mocked(pdfEngine.fillPdfFields)
@@ -82,7 +85,16 @@ function context() {
     size: 3,
     bytes: Uint8Array.from([1, 2, 3]),
   }
-  const save = jest.fn(async () => ({ saved: true }))
+  const save = jest.fn(
+    async (): Promise<{
+      saved: boolean
+      platform?: "desktop" | "mobile" | "web"
+      location?: string
+    }> => ({
+      saved: true,
+      platform: "desktop",
+    })
+  )
   const ocrExtract = jest.fn(async () => ({
     providerId: "tesseract-wasm",
     cached: false,
@@ -104,6 +116,7 @@ function context() {
       save,
     },
     ocr: { extract: ocrExtract },
+    i18n: { t: (key: string) => EN[key] ?? key },
   } as unknown as PdfPluginContext
   return { artifacts, ctx, save, updateArtifact, ocrExtract, file }
 }
@@ -137,8 +150,51 @@ it("imports, fills, validates, previews, and exports a PDF artifact", async () =
   )
   await expect(runtime.validate("pdf-1")).resolves.toMatchObject({ ok: true, findings: [] })
   expect(runtime.preview("pdf-1")).toEqual({ ok: true, artifactId: "pdf-1" })
-  await expect(runtime.exportPdf("pdf-1", "filled.pdf")).resolves.toMatchObject({ ok: true })
+  await expect(runtime.exportPdf("pdf-1", "filled.pdf")).resolves.toMatchObject({
+    ok: true,
+    saved: true,
+    filename: "filled.pdf",
+    message: expect.stringContaining("save dialog"),
+  })
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ suggestedName: "filled.pdf" }))
+  // Tool calls create artifacts on the model's behalf.
+  expect(ctx.artifact.getArtifact("pdf-1")?.metadata?.userInitiated).toBe(false)
+  expect(updateArtifact.mock.calls[0][1].changeDescription).toBe("Fill PDF form fields")
+})
+
+it("marks host-import artifacts as user-initiated", async () => {
+  const { ctx } = context()
+  const runtime = createPdfRuntime(ctx)
+  const imported = await runtime.importPdfBytes({
+    bytes: Uint8Array.from([1]),
+    filename: "mine.pdf",
+    userInitiated: true,
+  })
+  expect(ctx.artifact.getArtifact(imported.artifactId)?.metadata?.userInitiated).toBe(true)
+})
+
+it("tells the model where a mobile export landed and reports a cancelled save", async () => {
+  const { ctx, save } = context()
+  const runtime = createPdfRuntime(ctx)
+  await runtime.importPdf({})
+  save.mockResolvedValueOnce({
+    saved: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/form.pdf",
+  })
+  await expect(runtime.exportPdf("pdf-1")).resolves.toMatchObject({
+    ok: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/form.pdf",
+    message: expect.stringContaining("Documents/cognia/exports"),
+  })
+  save.mockResolvedValueOnce({ saved: false })
+  await expect(runtime.exportPdf("pdf-1")).resolves.toMatchObject({
+    ok: false,
+    cancelled: true,
+  })
+  expect(normalizePdfName("scan.PDF")).toBe("scan.pdf")
+  expect(normalizePdfName("")).toBe("document.pdf")
 })
 
 it("stores the engine's reopened inspection instead of re-inspecting after fill", async () => {
@@ -160,7 +216,10 @@ it("imports from an authorized attachment handle and enforces the size cap", asy
 
   const huge = { ...file, bytes: new Uint8Array(PDF_MAX_BYTES + 1) }
   ctx.files.readAttachment = jest.fn(async () => huge)
-  await expect(runtime.importPdf({ handle: "huge" })).rejects.toThrow("size limit")
+  await expect(runtime.importPdf({ handle: "huge" })).resolves.toMatchObject({
+    ok: false,
+    error: expect.stringContaining("size limit"),
+  })
 })
 
 it("returns cancelled when the file picker is dismissed", async () => {
@@ -261,7 +320,10 @@ it("refuses export when the reopened page count diverges", async () => {
   await runtime.importPdf({})
   inspectPdf.mockResolvedValue({ ...INSPECTION, pageCount: 9 })
 
-  await expect(runtime.exportPdf("pdf-1")).rejects.toThrow("validation failed")
+  await expect(runtime.exportPdf("pdf-1")).resolves.toMatchObject({
+    ok: false,
+    error: expect.stringContaining("page count"),
+  })
   expect(save).not.toHaveBeenCalled()
 })
 

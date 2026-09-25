@@ -1,6 +1,27 @@
 import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
 import type { PluginManifest } from "@cognia/plugin-sdk"
-import definition from "./index"
+import manifestJson from "../plugin.json"
+import definition, { currentInspectorStrings } from "./index"
+import { INSPECTOR_STRING_KEYS } from "./inspector-html"
+
+const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
+
+function activateWith(locale: "en" | "zh-CN") {
+  const disposers: Array<() => void> = []
+  const info = jest.fn()
+  const ctx = {
+    logger: { info },
+    i18n: { t: (key: string) => LOCALES[locale][key] ?? key },
+    lifecycle: { onDispose: (dispose: () => void) => disposers.push(dispose) },
+  }
+  return {
+    ctx,
+    info,
+    dispose: () => {
+      for (const dispose of disposers.reverse()) dispose()
+    },
+  }
+}
 
 describe("context-inspector plugin definition", () => {
   const manifest = definition.manifest as PluginManifest
@@ -26,15 +47,16 @@ describe("context-inspector plugin definition", () => {
         expect.objectContaining({
           id: "inspector",
           titleKey: "panel.inspector",
-          html: expect.stringContaining("<main>"),
         }),
         expect.objectContaining({
           id: "inspector-probe",
           titleKey: "panel.probe",
-          html: expect.stringContaining("Inspector probe"),
         }),
       ])
     )
+    for (const webview of manifest.webviews ?? []) {
+      expect(webview.html).toContain("<main>")
+    }
     // Neither webview mounts in a view container.
     for (const webview of manifest.webviews ?? []) {
       expect(webview).not.toHaveProperty("containerId")
@@ -67,10 +89,40 @@ describe("context-inspector plugin definition", () => {
     expect(result.valid).toBe(true)
   })
 
-  it("activates without registering anything", async () => {
-    const info = jest.fn()
-    const hooks = await definition.activate({ logger: { info } } as never)
+  it("is opt-in and labelled as a developer tool", () => {
+    // No activation events: it never auto-enables (and never lazily activates
+    // on a session workbench) for users who did not ask for it.
+    expect(manifest.activationEvents).toBeUndefined()
+    expect(manifest.name).toMatch(/Developer/)
+    expect(LOCALES.en["panel.inspector"]).toMatch(/Developer/)
+    expect(LOCALES["zh-CN"]["panel.inspector"]).toMatch(/开发者/)
+  })
+
+  it("ships every frame string in both locales", () => {
+    for (const locale of ["en", "zh-CN"]) {
+      for (const key of INSPECTOR_STRING_KEYS) {
+        expect(LOCALES[locale][`frame.${key}`]).toEqual(expect.any(String))
+      }
+    }
+    expect(Object.keys(LOCALES["zh-CN"]).sort()).toEqual(Object.keys(LOCALES.en).sort())
+  })
+
+  it("activates without registering anything and bakes the user's language into the frames", async () => {
+    // Before activation (discovery / validation) the frames read English.
+    expect(currentInspectorStrings().title).toBe(LOCALES.en["frame.title"])
+    const { ctx, info, dispose } = activateWith("zh-CN")
+    const hooks = await definition.activate(ctx as never)
     expect(info).toHaveBeenCalled()
     expect(hooks).toBeUndefined()
+    // The webview bridge reads `html` after activate() returns.
+    const inspector = manifest.webviews?.find((webview) => webview.id === "inspector")
+    expect(inspector?.html).toContain(LOCALES["zh-CN"]["frame.title"])
+    expect(inspector?.html).toContain(LOCALES["zh-CN"]["frame.gateNote"])
+    const probe = manifest.webviews?.find((webview) => webview.id === "inspector-probe")
+    expect(probe?.html).toContain(LOCALES["zh-CN"]["frame.probeTitle"])
+    // Disposing the activation falls back to English.
+    dispose()
+    expect(inspector?.html).toContain(LOCALES.en["frame.title"])
+    expect(inspector?.html).not.toContain(LOCALES["zh-CN"]["frame.title"])
   })
 })

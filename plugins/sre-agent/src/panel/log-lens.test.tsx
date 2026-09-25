@@ -4,12 +4,14 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import type { SreHistogramBucket, SreLogPattern } from "../providers/types"
 import type { SreRuntime } from "../runtime"
 import { createIncident, type SreIncident } from "../incident/model"
 import { baselineWindow, coversWindow, LogLens } from "./log-lens"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
 
 const WINDOW = { startTime: "2026-08-04T12:02:00.000Z", endTime: "2026-08-04T12:05:20.000Z" }
 
@@ -112,6 +114,26 @@ describe("LogLens", () => {
     await waitFor(() => expect(screen.getByText("10 records")).toBeInTheDocument())
     expect(screen.getByText("3 errors")).toBeInTheDocument()
     expect(screen.getByTestId("sre-lens-histogram").children).toHaveLength(2)
+  })
+
+  it("expands a long template in place instead of relying on a hover tooltip", async () => {
+    const template = "gateway provider.timeout provider=<*> upstream_latency_ms=<*> attempt=<*>"
+    render(
+      <LogLens
+        {...defaults}
+        runtime={runtimeWith({ buckets: [bucket(4)], patterns: [pattern({ template })] })}
+      />
+    )
+    const toggle = await screen.findByTestId("sre-lens-pattern-toggle")
+    const text = screen.getByTestId("sre-lens-pattern-template")
+    expect(text).toHaveTextContent(template)
+    expect(text.className).toContain("truncate")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(toggle).toHaveAccessibleName("Show the full template")
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(toggle).toHaveAccessibleName("Hide the full template")
+    expect(screen.getByTestId("sre-lens-pattern-template").className).not.toContain("truncate")
   })
 
   it("never queries while another panel is in front", () => {

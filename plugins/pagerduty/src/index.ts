@@ -13,17 +13,27 @@
  * literal prefix, not Bearer. Write endpoints additionally require a `From`
  * header naming the acting user's login email; it arrives as action input
  * (`from`) because account credential fields never reach handlers.
+ *
+ * Service region: REST calls go to the US region (`api.pagerduty.com`) unless
+ * the host supplies `apiBaseUrl`. The host resolves a per-account API origin
+ * for GitHub credentials only (ADR-0176), and account config never reaches a
+ * handler, so an EU-region account (`api.eu.pagerduty.com`) cannot be
+ * addressed yet. The integration description says so; webhook ingress is
+ * region-independent and still works.
+ *
+ * Retries: PagerDuty redelivers a webhook it did not see acknowledged, and
+ * every attempt carries the same `event.id`. The v3 webhook documentation
+ * names no per-delivery id header, so `ingress.deliveryIdHeader` stays unset
+ * and the normalizer derives the delivery id from `event.id` instead — the
+ * host's unique `[accountId+deliveryId]` index then drops the retry.
  */
 
-import {
-  definePlugin,
-  definePluginManifest,
-  type PluginContext,
-  type PluginManifest,
-} from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
 import type {
   BotHandlerV1,
   BotRunContextV1,
+  IntegrationAccountStatus,
+  IntegrationAccountStatusProvider,
   IntegrationActionHandlerContext,
   IntegrationProviderContext,
   IntegrationResourcePage,
@@ -131,13 +141,18 @@ export function normalizePagerDuty(
         }
       : undefined
 
+  // `event.id` is unique per PagerDuty event and identical across its
+  // redeliveries, so it — not the host's per-request delivery id — is what a
+  // retry must collide on. Envelopes whose sender never assigned one keep the
+  // host delivery id (nothing better identifies them).
+  const deliveryId = event?.id ? `pd:${event.id}` : delivery.deliveryId
   return {
     schemaVersion: 1 as const,
-    // `event.id` is unique per PagerDuty event; fall back to the delivery id
-    // for envelopes whose sender never assigned one.
-    id: event?.id ? `${delivery.deliveryId}:${event.id}` : `${delivery.deliveryId}:${eventType}`,
+    // Envelope ids are unique across accounts, so the account scopes it: two
+    // accounts subscribed to one PagerDuty tenant each keep their copy.
+    id: event?.id ? `pd:${context.accountId}:${event.id}` : `${delivery.deliveryId}:${eventType}`,
     ...context,
-    deliveryId: delivery.deliveryId,
+    deliveryId,
     eventType,
     resource,
     actor: event?.agent
@@ -399,18 +414,43 @@ export async function listPagerDutyResources(
   }
 }
 
-export async function checkPagerDutyHealth(context: IntegrationProviderContext) {
+const HEALTH_RECOVERY: Partial<
+  Record<PagerDutyIntegrationError["category"], IntegrationAccountStatus["recoveryAction"]>
+> = {
+  authentication: "reauthorize",
+  permission: "review-permissions",
+  rate_limit: "retry",
+  transient: "retry",
+}
+
+/**
+ * One cheap authenticated read. The failure category rides on `code` so the
+ * account card can say WHY the account is unhealthy and offer the matching
+ * recovery, instead of a bare "degraded".
+ */
+export const checkPagerDutyHealth: IntegrationAccountStatusProvider = async (context) => {
+  const checkedAt = new Date().toISOString()
   try {
     await pagerDutyRequest(context, "/incidents?limit=1")
-    return { health: "healthy" as const }
+    return { health: "healthy", checkedAt, lastHealthyAt: checkedAt }
   } catch (error) {
-    if (error instanceof PagerDutyIntegrationError && error.category === "authentication") {
-      return { health: "revoked" as const }
+    if (error instanceof PagerDutyIntegrationError) {
+      return {
+        health: error.category === "authentication" ? "revoked" : "degraded",
+        code: error.category,
+        message: error.message,
+        checkedAt,
+        recoveryAction: HEALTH_RECOVERY[error.category],
+        ...(error.retryAfter ? { rateLimit: { retryAt: error.retryAfter } } : {}),
+      }
     }
-    if (error instanceof PagerDutyIntegrationError && error.category === "transient") {
-      return { health: "degraded" as const }
+    return {
+      health: "degraded",
+      code: "unreachable",
+      message: error instanceof Error ? error.message : String(error),
+      checkedAt,
+      recoveryAction: "retry",
     }
-    return { health: "degraded" as const }
   }
 }
 
@@ -436,7 +476,8 @@ export const pagerDutyIntegration: PluginIntegrationDef = {
   id: "pagerduty",
   label: "PagerDuty",
   description:
-    "Incident webhooks with key-rotation signature support, incident actions, and on-call triage.",
+    "Incident webhooks with key-rotation signature support, incident actions, and on-call triage. " +
+    "Incident actions use the US service region (api.pagerduty.com); EU-region accounts are not supported yet.",
   category: "incident-management",
   icon: "Siren",
   authStrategies: [
@@ -806,10 +847,8 @@ export function createIncidentResponder(context: PluginContext): BotHandlerV1 {
 
     const noteInput = { incidentId, content: findings.slice(0, 4000), from }
     const decision = await run.step.waitForApproval("post-note", {
-      title: `Post triage note to incident ${incidentId}?`,
-      message:
-        "The note was drafted by the on-call responder character from read-only evidence. " +
-        "Approving authorizes exactly this incident note through the PagerDuty account.",
+      title: context.i18n.t("approval.postNote.title", { incidentId }),
+      message: context.i18n.t("approval.postNote.message"),
       risk: "medium",
       detail: {
         incident: {
@@ -831,12 +870,18 @@ export function createIncidentResponder(context: PluginContext): BotHandlerV1 {
     if (!decision.approvalId) {
       throw new Error("Host did not return a verifiable approval reference")
     }
+    // The broker resolves the account from the run's credential binding and
+    // refuses a mismatch; the event's own binding names that same account.
+    const accountId = run.event.binding?.integrationAccountId
+    if (!accountId) {
+      throw new Error("Incident event did not arrive on a PagerDuty account binding")
+    }
     run.signal.throwIfAborted()
 
     const posted = await run.step.run("post-note", async () => {
       const job = await context.integrations.executeAction({
         integrationId: "pagerduty",
-        accountId: "",
+        accountId,
         binding: { runId: run.runId, slotId: "pagerduty" },
         approval: { interruptId: decision.approvalId as string },
         actionId: "addIncidentNote",
@@ -873,7 +918,7 @@ export const incidentResponder: BotHandlerV1 = (run) => {
 // Manifest + definition
 // ---------------------------------------------------------------------------
 
-export const manifest: PluginManifest = definePluginManifest({
+export const manifest = definePluginManifest({
   ...manifestJson,
   integrations: [pagerDutyIntegration],
   bots: [INCIDENT_RESPONDER_BOT],
@@ -884,7 +929,7 @@ const definition = definePlugin({
   manifest,
   activate: async (ctx: PluginContext) => {
     activeContext = ctx
-    ctx.logger?.info("pagerduty plugin activated")
+    ctx.logger.info("pagerduty plugin activated")
   },
   deactivate: async () => {
     activeContext = undefined

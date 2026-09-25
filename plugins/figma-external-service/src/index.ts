@@ -1,12 +1,13 @@
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 
 import manifestJson from "../plugin.json"
 
-export const manifest = manifestJson as unknown as PluginManifest
+// plugin.json is the whole contribution surface: the service, its two MCP
+// providers and their reviewed tool-risk overlays are all declarative, so
+// activation has nothing to register imperatively.
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   activate: async () => {},
-}
-
-export default definition
+})

@@ -1,9 +1,12 @@
 /**
  * Agent skill (playbook) that teaches the model when + how to use the
- * `deep_research` tool. Inline markdown, registered via the host skill
- * registry; auto-unregistered on disable.
+ * `deep_research` tool. Inline markdown, declared on the plugin manifest —
+ * the manager registers it in the skill registry on enable and drops it on
+ * disable. Its id is namespaced `<pluginId>:<slug>` like every plugin skill.
  */
-import { defineSkill, type PluginContext, type PluginSkillDef } from "@cognia/plugin-sdk"
+import { defineSkill, type PluginSkillDef } from "@cognia/plugin-sdk"
+
+import { PLUGIN_ID } from "./config"
 
 const PLAYBOOK = `# Deep Research
 
@@ -36,14 +39,12 @@ never strip or invent citations. If the result carries \`gaveUp\`, say the
 answer was produced under budget limits.`
 
 export const DEEP_RESEARCH_SKILL: PluginSkillDef = defineSkill({
-  id: "deep-research",
-  name: "Deep Research",
-  description: "Playbook for the autonomous web deep-research tool.",
+  id: `${PLUGIN_ID}:deep-research`,
+  slug: "deep-research",
+  name: "Deep Research playbook",
+  description:
+    "Teaches the assistant when to run the deep_research tool (current, citable, multi-source questions), which depth and mode to pick, and how to present its cited answer.",
   source: { kind: "inline", markdown: PLAYBOOK },
   scope: "global",
   allowedTools: ["deep_research"],
 })
-
-export function registerResearchSkill(ctx: PluginContext): void {
-  ctx.agent.registerSkill(DEEP_RESEARCH_SKILL)
-}

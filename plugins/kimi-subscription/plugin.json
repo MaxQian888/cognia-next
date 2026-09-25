@@ -1,8 +1,10 @@
 {
   "id": "cognia-kimi-subscription",
   "name": "Kimi Code Subscription Example",
+  "nameKey": "manifest.name",
   "version": "0.2.0",
   "description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["subscription-provider"],
   "permissions": [],
@@ -153,5 +155,17 @@
         "retrieve": false
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Kimi Code Subscription Example",
+        "manifest.description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel."
+      },
+      "zh-CN": {
+        "manifest.name": "Kimi Code 订阅示例",
+        "manifest.description": "可安装的 Kimi Code 会员订阅提供方示例，使用 Cognia 共享的账户面板。"
+      }
+    }
+  }
 }

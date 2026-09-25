@@ -64,9 +64,10 @@ jest.mock("@cognia/plugin-sdk/api/browser", () => {
 jest.mock("@cognia/plugin-sdk", () => ({
   defineContextProvider: (p: unknown) => p,
   definePlugin: (p: unknown) => p,
+  definePluginManifest: (m: unknown) => m,
   definePluginTool: (tool: unknown) => tool,
 }))
-import definition from "./index"
+import definition, { WAIT_FOR_MAX_TIMEOUT_MS } from "./index"
 import * as browserModule from "@cognia/plugin-sdk/api/browser"
 
 const browserTestModule = browserModule as unknown as {
@@ -96,17 +97,22 @@ const browserApi = {
 /** `ctx.session.getCurrentSessionId` — the plugin's only session lookup. */
 const activeSessionMock = jest.fn<string | null, []>(() => "session-1")
 
-type Tools = Record<string, (args: unknown) => Promise<unknown>>
+type ToolExecute = (args: unknown, callCtx?: { sessionId?: string }) => Promise<unknown>
+type Tools = Record<string, ToolExecute>
 type ToolRegistration = {
   name: string
   definition: {
     description: string
+    requiresApproval?: boolean
+    access?: "read" | "write"
+    pathParams?: string[]
+    timeoutMs?: number
     parametersSchema: {
       required?: string[]
-      properties?: Record<string, { enum?: readonly string[] }>
+      properties?: Record<string, { enum?: readonly string[]; maximum?: number }>
     }
   }
-  execute: (args: unknown) => Promise<unknown>
+  execute: ToolExecute
 }
 
 async function collectTools(): Promise<Tools> {
@@ -117,7 +123,7 @@ async function collectTools(): Promise<Tools> {
     session: { getCurrentSessionId: activeSessionMock },
     browser: browserApi,
     agent: {
-      registerTool: (t: { name: string; execute: (a: unknown) => Promise<unknown> }) => {
+      registerTool: (t: { name: string; execute: ToolExecute }) => {
         tools[t.name] = t.execute
       },
       context: { registerProvider: jest.fn() },
@@ -346,6 +352,72 @@ describe("browser-tools plugin", () => {
     })
     expect(result).toEqual({ ok: false, error: "No active chat session" })
     expect(engine.evaluate).not.toHaveBeenCalled()
+  })
+
+  it("browser_annotate files the annotation under the calling chat, not the focused one", async () => {
+    engine.evaluate.mockResolvedValueOnce({
+      ok: true,
+      value: JSON.stringify({
+        ok: true,
+        error: null,
+        selection: { pageUrl: "http://localhost:3000/", selector: "#a" },
+      }),
+    })
+    // The user switched to another chat while the agent was still working.
+    activeSessionMock.mockReturnValue("focused-elsewhere")
+    const tools = await collectTools()
+    const result = (await tools.browser_annotate(
+      { ref: "e1", comment: "Tighten the spacing.", intent: "change", severity: "suggestion" },
+      { sessionId: "calling-session" }
+    )) as { ok: boolean }
+    expect(result.ok).toBe(true)
+    expect(saveBrowserAnnotationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "calling-session" })
+    )
+  })
+
+  it("requires approval for code evaluation and file uploads, and confines upload paths", async () => {
+    const registrations = await collectRegistrations()
+    expect(registrations.browser_evaluate.definition.requiresApproval).toBe(true)
+    expect(registrations.browser_set_files.definition).toMatchObject({
+      requiresApproval: true,
+      access: "read",
+      pathParams: ["paths"],
+    })
+    // Tools without filesystem paths declare no access class.
+    expect(registrations.browser_click.definition.access).toBeUndefined()
+    expect(registrations.browser_navigate.definition.access).toBeUndefined()
+  })
+
+  it("bounds browser_wait_for's timeout in the schema, the executor, and the tool budget", async () => {
+    const registrations = await collectRegistrations()
+    const waitFor = registrations.browser_wait_for
+    expect(waitFor.definition.parametersSchema.properties?.timeoutMs.maximum).toBe(
+      WAIT_FOR_MAX_TIMEOUT_MS
+    )
+    expect(waitFor.definition.timeoutMs).toBeGreaterThan(WAIT_FOR_MAX_TIMEOUT_MS)
+    await waitFor.execute({ text: "Done", timeoutMs: 10 * 60_000 })
+    expect(engine.waitForText).toHaveBeenCalledWith("Done", {
+      mode: undefined,
+      timeoutMs: WAIT_FOR_MAX_TIMEOUT_MS,
+    })
+    await waitFor.execute({ networkIdle: true, timeoutMs: -5 })
+    expect(engine.waitForNetworkIdle).toHaveBeenCalledWith({ timeoutMs: 0 })
+  })
+
+  it("returns a structured error when the engine router refuses the call", async () => {
+    const tools = await collectTools()
+    engine.readConsole.mockRejectedValueOnce(
+      Object.assign(new Error("Remote browser is not enabled or healthy"), {
+        name: "BrowserSessionError",
+        code: "browser_feature_unsupported",
+      })
+    )
+    await expect(tools.browser_read_console({})).resolves.toEqual({
+      ok: false,
+      code: "browser_feature_unsupported",
+      error: "Remote browser is not enabled or healthy",
+    })
   })
 
   it("browser_press_key forwards the chord (and optional ref) and refreshes the snapshot", async () => {
@@ -707,11 +779,35 @@ describe("browser-tools plugin", () => {
     expect(res.snapshot.generation).toBe(3)
   })
 
-  it("browser_screenshot returns ok + base64 on success", async () => {
+  it("browser_screenshot returns an MCP image block the model can see", async () => {
     const tools = await collectTools()
-    const res = (await tools.browser_screenshot({})) as { ok: boolean; base64: string }
+    const res = (await tools.browser_screenshot({})) as {
+      content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
+    }
     expect(engine.screenshot).toHaveBeenCalled()
-    expect(res).toMatchObject({ ok: true, base64: "AAAA", width: 10, height: 10 })
+    expect(res.content[0].type).toBe("text")
+    expect(JSON.parse(res.content[0].text ?? "")).toEqual({
+      ok: true,
+      scope: "viewport",
+      width: 10,
+      height: 10,
+    })
+    expect(res.content[1]).toEqual({ type: "image", data: "AAAA", mimeType: "image/png" })
+  })
+
+  it("browser_screenshot labels a JPEG capture with its real mime type", async () => {
+    engine.screenshot.mockResolvedValueOnce({
+      bytes: "/9j/",
+      width: 4,
+      height: 4,
+      capturedAt: 0,
+      format: "jpeg",
+    } as never)
+    const tools = await collectTools()
+    const res = (await tools.browser_screenshot({})) as {
+      content: Array<{ type: string; mimeType?: string }>
+    }
+    expect(res.content[1]).toMatchObject({ type: "image", mimeType: "image/jpeg" })
   })
 
   it("browser_screenshot forwards full-page and element scopes", async () => {
@@ -751,17 +847,6 @@ describe("browser-tools plugin", () => {
     expect(net.entries).toEqual([])
     const page = (await tools.browser_get_page({})) as { url: string; title: string }
     expect(page).toEqual({ url: "http://localhost/", title: "t" })
-  })
-
-  it("ignores activation when the host exposes no registerTool", async () => {
-    const ctx = {
-      pluginId: "cognia-browser-tools",
-      logger: { info: jest.fn() },
-      session: { getCurrentSessionId: activeSessionMock },
-      browser: browserApi,
-      agent: {},
-    }
-    await expect(definition.activate!(ctx as never)).resolves.toBeUndefined()
   })
 
   it("registers an availability context provider and deactivates cleanly", async () => {

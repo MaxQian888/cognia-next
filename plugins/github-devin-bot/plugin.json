@@ -1,9 +1,11 @@
 {
   "id": "github-devin-bot",
   "name": "GitHub Devin Bot",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "type": "frontend",
-  "description": "A GitHub repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval.",
+  "description": "A github.com repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval. GitHub Enterprise Server is not supported yet.",
+  "descriptionKey": "manifest.description",
   "author": "Cognia Official",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -11,13 +13,11 @@
     "cognia": ">=0.1.0"
   },
   "main": "dist/index.js",
-  "activationEvents": ["startup"],
   "dependencies": {
     "github-delivery": ">=3.0.0"
   },
   "capabilities": ["bot"],
   "permissions": [
-    "integrations:read",
     "integrations:execute",
     "agent:control",
     "agent:dispatch-external",
@@ -25,9 +25,7 @@
     "filesystem:write",
     "network:fetch",
     "git:read",
-    "git:write",
-    "database:read",
-    "database:write"
+    "git:write"
   ],
   "runtimeCompatibility": {
     "tauri": {
@@ -52,7 +50,7 @@
       "id": "repository-monitor",
       "name": "GitHub Devin Bot",
       "version": "1.0.0",
-      "description": "Monitor GitHub issues, pull requests, and CI with approval or explicitly authorized automatic publication.",
+      "description": "Monitor github.com issues, pull requests, and CI with approval or explicitly authorized automatic publication. GitHub Enterprise Server is not supported yet.",
       "executor": "handler",
       "entry": "dist/index.js",
       "export": "githubDevinBot",
@@ -136,11 +134,12 @@
       "configSchema": {
         "type": "object",
         "additionalProperties": false,
+        "required": ["repository"],
         "properties": {
           "repository": {
             "type": "string",
             "title": "Repository",
-            "default": "NJUPT-SAST/sast-approval-next",
+            "description": "The github.com repository to maintain, as owner/repo. GitHub Enterprise Server is not supported yet.",
             "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
           },
           "model": {
@@ -180,5 +179,23 @@
         }
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "GitHub Devin Bot",
+        "manifest.description": "A github.com repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval. GitHub Enterprise Server is not supported yet.",
+        "approval.publishReview.title": "Publish this GitHub review?",
+        "approval.publishPatch.title": "Publish this patch and open a pull request?",
+        "approval.publish.message": "Review the exact content and target revision. Test results below are agent-reported; no automatic merge is performed."
+      },
+      "zh-CN": {
+        "manifest.name": "GitHub Devin 机器人",
+        "manifest.description": "由 Devin SWE-2 驱动的 github.com 仓库维护机器人，执行与发布审批均可配置。暂不支持 GitHub Enterprise Server。",
+        "approval.publishReview.title": "要发布这条 GitHub 评审吗？",
+        "approval.publishPatch.title": "要发布此补丁并创建拉取请求吗？",
+        "approval.publish.message": "请核对确切内容和目标修订版本。下方测试结果由智能体自行报告；不会执行任何自动合并。"
+      }
+    }
+  }
 }

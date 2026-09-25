@@ -1,601 +1,610 @@
+import type {
+  PluginContext,
+  PluginNodeDef,
+  PluginToolContext,
+  PluginToolRegistration,
+} from "@cognia/plugin-sdk"
+
+import manifestJson from "../plugin.json"
+import workspaceTools, {
+  READ_DEFAULT_MAX_BYTES,
+  READ_MAX_FILE_BYTES,
+  READ_MAX_RETURN_BYTES,
+  SEARCH_MAX_FILE_BYTES,
+  SEARCH_MAX_MATCHES,
+  SEARCH_TIME_BUDGET_MS,
+  SEARCH_TOOL_TIMEOUT_MS,
+  WORKSPACE_TOOL_NAMES,
+  manifest,
+  resolveInWorkspace,
+} from "./index"
+
 /**
- * @jest-environment jsdom
+ * An in-memory project the fake `ctx.workspace` serves. Keys are paths
+ * relative to the root; a value is file content, or `{ size }` for a file
+ * whose size matters but whose bytes do not.
  */
+type FakeFile = string | { size: number; content?: string }
 
-import type { PluginContext } from "@cognia/plugin-sdk"
-import type { PluginNodeDef } from "@cognia/plugin-sdk"
+interface FakeWorkspaceOptions {
+  root?: string
+  files?: Record<string, FakeFile>
+  /** Paths the walk treats as git-ignored unless `includeIgnored`. */
+  ignored?: string[]
+}
 
-// Controllable fs double so the desktop tool paths (list / read / search) can
-// run under jsdom without a real Tauri host. The factory is hoisted, so it
-// references the mocks lazily.
-const mockReadDir = jest.fn(async (_p: string) => [] as Array<Record<string, unknown>>)
-const mockReadTextFile = jest.fn(async (_p: string) => "")
-// `lstat` backs the symlink guard and `stat` the pre-read size bound; both
-// default to "ordinary small file" so existing cases are unaffected.
-const mockLstat = jest.fn(async (_p: string) => ({ isSymlink: false }) as Record<string, unknown>)
-const mockStat = jest.fn(async (_p: string) => ({ size: 10 }) as Record<string, unknown>)
-jest.mock(
-  "@tauri-apps/plugin-fs",
-  () => ({
-    readDir: (...a: unknown[]) => (mockReadDir as (...x: unknown[]) => unknown)(...a),
-    readTextFile: (...a: unknown[]) => (mockReadTextFile as (...x: unknown[]) => unknown)(...a),
-    lstat: (...a: unknown[]) => (mockLstat as (...x: unknown[]) => unknown)(...a),
-    stat: (...a: unknown[]) => (mockStat as (...x: unknown[]) => unknown)(...a),
-  }),
-  { virtual: true }
-)
+interface WalkOpts {
+  relPath?: string
+  includeIgnored?: boolean
+  includeDirs?: boolean
+  maxEntries?: number
+  maxDepth?: number
+}
 
-import workspaceTools, { __setWorkspaceRootForTesting } from "./index"
+function sizeOf(file: FakeFile): number {
+  return typeof file === "string" ? file.length : file.size
+}
 
-// Every tool now resolves paths against the OPEN WORKSPACE and rejects
-// anything outside it, so the suite has to declare one.
-const WS = "/ws"
-beforeEach(() => __setWorkspaceRootForTesting(WS))
-afterEach(() => __setWorkspaceRootForTesting(undefined))
+function createFakeWorkspace(options: FakeWorkspaceOptions = {}) {
+  let root: string | undefined = options.root ?? "/ws"
+  const files = new Map(Object.entries(options.files ?? {}))
+  const ignored = new Set(options.ignored ?? [])
 
-/** ctx that reports a Tauri host so the desktop tool bodies run. */
-const makeDesktopCtx = () => {
-  const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
-  const definitions: Record<string, { parametersSchema?: unknown }> = {}
-  const nodes: Record<string, PluginNodeDef> = {}
+  const dirsOf = () => {
+    const dirs = new Set<string>()
+    for (const path of files.keys()) {
+      const parts = path.split("/")
+      for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"))
+    }
+    return dirs
+  }
+
+  const workspace = {
+    getActiveRoot: jest.fn(() => root),
+    acquire: jest.fn(async (spec: { kind: string; path: string }) => ({
+      root: spec.path,
+      origin: "local-path" as const,
+      ephemeral: false,
+    })),
+    walk: jest.fn(async (_handle: unknown, opts: WalkOpts = {}) => {
+      const base = opts.relPath ?? ""
+      const dirs = dirsOf()
+      if (base && !dirs.has(base)) throw new Error(`not a directory: ${base}`)
+      const prefix = base ? `${base}/` : ""
+      const depthOf = (path: string) => path.slice(prefix.length).split("/").length
+      const maxDepth = opts.maxDepth ?? 24
+      const isIgnored = (path: string) =>
+        !opts.includeIgnored && [...ignored].some((i) => path === i || path.startsWith(`${i}/`))
+      const entries: Array<{
+        relPath: string
+        absolutePath: string
+        isDir: boolean
+        size: number
+        mtimeMs: number | null
+      }> = []
+      let skippedSensitive = 0
+      let truncated = false
+      const candidates: Array<[string, boolean]> = [
+        ...[...dirs].map((d) => [d, true] as [string, boolean]),
+        ...[...files.keys()].map((f) => [f, false] as [string, boolean]),
+      ]
+      for (const [path, isDir] of candidates.sort(([a], [b]) => a.localeCompare(b))) {
+        if (!path.startsWith(prefix) || depthOf(path) > maxDepth || isIgnored(path)) continue
+        if (!isDir && path.split("/").pop() === ".env") {
+          skippedSensitive += 1
+          continue
+        }
+        if (isDir && !opts.includeDirs) continue
+        if (entries.length >= (opts.maxEntries ?? 5000)) {
+          truncated = true
+          break
+        }
+        entries.push({
+          relPath: path,
+          absolutePath: `${root}/${path}`,
+          isDir,
+          size: isDir ? 0 : sizeOf(files.get(path)!),
+          mtimeMs: null,
+        })
+      }
+      return { entries, truncated, skippedSensitive }
+    }),
+    read: jest.fn(async (_handle: unknown, rel: string, opts?: { maxBytes?: number }) => {
+      const file = files.get(rel)
+      if (file === undefined) throw new Error(`read ${rel}: No such file or directory`)
+      const text = typeof file === "string" ? file : (file.content ?? "x".repeat(file.size))
+      const cap = opts?.maxBytes
+      return cap !== undefined && text.length > cap
+        ? `${text.slice(0, cap)}\n... (truncated)`
+        : text
+    }),
+  }
+  return {
+    workspace,
+    setRoot: (next: string | undefined) => {
+      root = next
+    },
+  }
+}
+
+function activate(fake: ReturnType<typeof createFakeWorkspace>) {
+  const tools = new Map<string, PluginToolRegistration>()
+  const nodes = new Map<string, PluginNodeDef>()
+  const disposers: Array<() => void> = []
   const ctx = {
     pluginId: "cognia-workspace-tools",
-    capabilities: { tauri: true },
-    workspace: { getActiveRoot: () => WS },
-    logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    workspace: fake.workspace,
+    logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    lifecycle: {
+      onDispose: jest.fn((dispose: () => void) => {
+        disposers.push(dispose)
+      }),
+    },
     agent: {
-      registerTool: ({
-        name,
-        execute,
-        definition,
-      }: {
-        name: string
-        execute: (args: unknown) => Promise<unknown>
-        definition?: { parametersSchema?: unknown }
-      }) => {
-        tools[name] = execute
-        // Capture the definition too: the harness used to drop it, which is
-        // why all three tools shipping an EMPTY parametersSchema went
-        // unnoticed — the model saw no parameter names at all.
-        definitions[name] = definition ?? {}
+      registerTool: (tool: PluginToolRegistration) => {
+        tools.set(tool.name, tool)
+        return () => undefined
       },
     },
     workflow: {
-      registerNode: (node: PluginNodeDef) => {
-        nodes[node.kind] = node
+      registerNode: jest.fn((node: PluginNodeDef) => {
+        nodes.set(node.kind, node)
         return jest.fn()
-      },
+      }),
     },
-  } as unknown as import("@cognia/plugin-sdk").PluginContext
-  return { ctx, tools, definitions, nodes }
+  } as unknown as PluginContext
+  void workspaceTools.activate(ctx)
+  const call = (
+    name: string,
+    args: Record<string, unknown>,
+    callCtx: Partial<PluginToolContext> = {}
+  ) =>
+    tools.get(name)!.execute(args, { config: {}, ...callCtx }) as Promise<Record<string, unknown>>
+  return { ctx, tools, nodes, disposers, call }
 }
 
-const makeCtx = () => {
-  const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
-  const nodes: Record<string, PluginNodeDef> = {}
-  const ctx: Partial<PluginContext> = {
-    pluginId: "cognia-workspace-tools",
-    capabilities: { tauri: false } as never,
-    workspace: { getActiveRoot: () => WS } as never,
-    logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
-    agent: {
-      registerTool: ({
-        name,
-        execute,
-      }: {
-        name: string
-        execute: (args: unknown) => Promise<unknown>
-      }) => {
-        tools[name] = execute
-      },
-    } as never,
-    workflow: {
-      registerNode: (node: PluginNodeDef) => {
-        nodes[node.kind] = node
-        return jest.fn()
-      },
-    } as never,
-  }
-  return { ctx: ctx as PluginContext, tools, nodes }
-}
-
-describe("workspace-tools (built-in)", () => {
-  it("declares workflow capability for contributed nodes", () => {
-    expect(workspaceTools.manifest.capabilities).toEqual(["tools", "workflow"])
+describe("manifest", () => {
+  it("adopts plugin.json itself as the manifest", () => {
+    expect(manifest).toEqual(manifestJson)
+    expect(workspaceTools.manifest).toBe(manifest)
   })
 
-  it("registers three tools on activate", async () => {
-    const { ctx, tools } = makeCtx()
-    await workspaceTools.activate?.(ctx)
-    expect(Object.keys(tools).sort()).toEqual([
-      "workspace_list_files",
-      "workspace_read_file",
-      "workspace_search",
-    ])
+  it("is desktop-only, and says so with a reason for each blocked surface", () => {
+    const compat = manifestJson.runtimeCompatibility
+    expect(compat.tauri.availability).toBe("supported")
+    expect(compat.browser).toMatchObject({ availability: "blocked", reason: expect.any(String) })
+    expect(compat.mobile).toMatchObject({ availability: "blocked", reason: expect.any(String) })
   })
 
-  it("registers workflow nodes for the same workspace abilities", async () => {
-    const { ctx, nodes } = makeCtx()
-    await workspaceTools.activate?.(ctx)
-    expect(Object.keys(nodes).sort()).toEqual([
+  it("describes what the plugin actually ships", () => {
+    expect(manifestJson.description).toMatch(/agent tools/)
+    expect(manifestJson.description).not.toMatch(/plugin authors/)
+  })
+
+  it("localizes every workflow node it registers, in both locales", () => {
+    const { nodes } = activate(createFakeWorkspace())
+    const en = manifestJson.i18n.locales.en as Record<string, string>
+    const zh = manifestJson.i18n.locales["zh-CN"] as Record<string, string>
+    for (const node of nodes.values()) {
+      for (const field of ["label", "description"] as const) {
+        const key = `workflow.nodes.${node.kind}.${field}`
+        expect(en[key]).toBe(node[field])
+        expect(zh[key]).toEqual(expect.any(String))
+      }
+    }
+  })
+})
+
+describe("registration", () => {
+  it("registers three read-only path tools with real schemas", () => {
+    const { tools } = activate(createFakeWorkspace())
+    expect([...tools.keys()].sort()).toEqual([...WORKSPACE_TOOL_NAMES].sort())
+    for (const tool of tools.values()) {
+      expect(tool.pluginId).toBeUndefined()
+      expect(tool.definition.access).toBe("read")
+      expect(tool.definition.pathParams).toEqual(["path"])
+      const schema = tool.definition.parametersSchema as {
+        properties: Record<string, unknown>
+        additionalProperties: boolean
+      }
+      expect(Object.keys(schema.properties).length).toBeGreaterThan(0)
+      expect(schema.additionalProperties).toBe(false)
+    }
+    expect(tools.get("workspace_search")!.definition.timeoutMs).toBe(SEARCH_TOOL_TIMEOUT_MS)
+    const readSchema = tools.get("workspace_read_file")!.definition.parametersSchema as {
+      properties: { maxBytes: { maximum: number } }
+    }
+    expect(readSchema.properties.maxBytes.maximum).toBe(READ_MAX_RETURN_BYTES)
+  })
+
+  it("registers the workflow nodes with teardown on the plugin lifecycle", () => {
+    const { nodes, tools, ctx, disposers } = activate(createFakeWorkspace())
+    expect([...nodes.keys()].sort()).toEqual([
       "action.listFiles",
       "action.readFile",
       "action.search",
     ])
-    expect(nodes["action.listFiles"]).toMatchObject({
-      label: "List workspace files",
-      category: "plugin",
-      desktopOnly: true,
-      defaultParams: { path: "." },
-    })
-    expect(nodes["action.readFile"].paramsSchema.required).toEqual(["path"])
-    expect(nodes["action.search"].paramsSchema.required).toEqual(["pattern"])
-  })
-
-  it("returns the desktop-only diagnostic when not running in Tauri", async () => {
-    const { ctx, tools } = makeCtx()
-    await workspaceTools.activate?.(ctx)
-    const list = await tools.workspace_list_files({ path: "." })
-    expect(list).toMatchObject({ ok: false })
-  })
-
-  it("workspace_read_file requires a path arg", async () => {
-    const { ctx, tools } = makeCtx()
-    await workspaceTools.activate?.(ctx)
-    // In browser fallback, both no-path and missing-path return ok=false.
-    const result = await tools.workspace_read_file({})
-    expect(result).toMatchObject({ ok: false })
-  })
-
-  it("deactivate runs without throwing", async () => {
-    const { ctx } = makeCtx()
-    await workspaceTools.activate?.(ctx)
-    await expect(workspaceTools.deactivate?.(ctx)).resolves.not.toThrow()
-  })
-
-  it("workspace_search returns ok:false on an invalid regex instead of throwing", async () => {
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    // Unbalanced character class — `new RegExp("[(")` throws; the guard must
-    // catch it and surface a structured error rather than crash the tool.
-    const result = (await tools.workspace_search({ pattern: "[(" })) as {
-      ok: boolean
-      error?: string
-    }
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/invalid regex/i)
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  it("workspace_search still rejects an empty pattern", async () => {
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_search({ pattern: "" })) as { ok: boolean }
-    expect(result.ok).toBe(false)
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  it("gives every agent tool a real parameter schema", async () => {
-    // `sidecar-tools-bridge` forwards `parametersSchema` verbatim as the MCP
-    // tool's jsonSchema. An empty `{ properties: {} }` — which all three tools
-    // shipped — means the model is handed a tool with no parameter names and
-    // has to guess them from the description.
-    const { ctx, definitions } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    for (const name of ["workspace_list_files", "workspace_read_file", "workspace_search"]) {
-      const schema = definitions[name]?.parametersSchema as {
-        properties?: Record<string, unknown>
-        additionalProperties?: boolean
-      }
-      expect(Object.keys(schema?.properties ?? {}).length).toBeGreaterThan(0)
-      expect(schema.additionalProperties).toBe(false)
-    }
-    expect(
-      Object.keys(
-        (definitions.workspace_search.parametersSchema as { properties: Record<string, unknown> })
-          .properties
-      ).sort()
-    ).toEqual(["ignoreCase", "path", "pattern"])
-    expect(
-      (definitions.workspace_read_file.parametersSchema as { required: string[] }).required
-    ).toEqual(["path"])
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  it("declares the tool schema its workflow node uses", async () => {
-    // The node and the tool are the same operation; they must not drift.
-    const { ctx, definitions, nodes } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    expect(definitions.workspace_read_file.parametersSchema).toBe(
-      nodes["action.readFile"].paramsSchema
+    expect(ctx.lifecycle.onDispose).toHaveBeenCalledTimes(3)
+    expect(disposers).toHaveLength(3)
+    // Same schema for the node inspector and the model-facing tool.
+    expect(nodes.get("action.search")!.paramsSchema).toBe(
+      tools.get("workspace_search")!.definition.parametersSchema
     )
-    await workspaceTools.deactivate?.(ctx)
+  })
+})
+
+describe("project root", () => {
+  it("resolves the root on every call, not once at activation", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "a" } })
+    const { call } = activate(fake)
+    await call("workspace_list_files", {})
+    fake.setRoot("/other")
+    const second = await call("workspace_list_files", {})
+    expect(second).toMatchObject({ ok: true, path: "/other" })
+    expect(fake.workspace.acquire).toHaveBeenLastCalledWith({ kind: "local-path", path: "/other" })
   })
 
-  describe("desktop tool bodies (Tauri host)", () => {
-    beforeEach(() => {
-      mockReadDir.mockReset()
-      mockReadTextFile.mockReset()
-    })
-
-    it("workspace_list_files maps fs entries to a normalized shape", async () => {
-      mockReadDir.mockResolvedValue([
-        { name: "a.ts", isFile: true, isDirectory: false },
-        { name: "sub", isFile: false, isDirectory: true },
-      ])
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_list_files({ path: "src" })) as {
-        ok: boolean
-        path: string
-        entries: Array<{ name: string; isFile: boolean; isDirectory: boolean }>
-      }
-      expect(result.ok).toBe(true)
-      expect(result.path).toBe(`${WS}/src`)
-      expect(result.entries).toEqual([
-        { name: "a.ts", isFile: true, isDirectory: false },
-        { name: "sub", isFile: false, isDirectory: true },
-      ])
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("workspace_read_file returns content and flags truncation past maxBytes", async () => {
-      mockReadTextFile.mockResolvedValue("0123456789")
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_read_file({ path: "f.txt", maxBytes: 4 })) as {
-        ok: boolean
-        content: string
-        truncated: boolean
-      }
-      expect(result.ok).toBe(true)
-      expect(result.content).toBe("0123")
-      expect(result.truncated).toBe(true)
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("workspace_search walks the tree, matches lines, and skips unreadable files", async () => {
-      // root has a dotdir (skipped), a normal dir, a matching file, and an
-      // unreadable file (readTextFile rejects → swallowed).
-      mockReadDir.mockImplementation(async (dir: string) => {
-        if (dir === WS) {
-          return [
-            { name: ".git", isDirectory: true, isFile: false },
-            { name: "src", isDirectory: true, isFile: false },
-            { name: "readme.md", isDirectory: false, isFile: true },
-            { name: "binary.bin", isDirectory: false, isFile: true },
-          ]
-        }
-        if (dir === `${WS}/src`) {
-          return [{ name: "app.ts", isDirectory: false, isFile: true }]
-        }
-        return []
-      })
-      mockReadTextFile.mockImplementation(async (path: string) => {
-        if (path === `${WS}/binary.bin`) throw new Error("not utf-8")
-        if (path === `${WS}/src/app.ts`) return "const TODO = 1\nconst ok = 2"
-        if (path === `${WS}/readme.md`) return "nothing here"
-        return ""
-      })
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_search({ pattern: "TODO" })) as {
-        ok: boolean
-        matches: Array<{ path: string; line: number; text: string }>
-      }
-      expect(result.ok).toBe(true)
-      expect(result.matches).toEqual([
-        { path: `${WS}/src/app.ts`, line: 1, text: "const TODO = 1" },
-      ])
-      // The dotdir was never descended into.
-      expect(mockReadDir).not.toHaveBeenCalledWith(`${WS}/.git`)
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("never descends into dependency/build directories", async () => {
-      // Dot-directories were the only exclusion, so a search at a real project
-      // root read every file under node_modules as UTF-8.
-      mockReadDir.mockImplementation(async (dir: string) => {
-        if (dir === WS) {
-          return [
-            { name: "node_modules", isDirectory: true, isFile: false },
-            { name: "target", isDirectory: true, isFile: false },
-            { name: "dist", isDirectory: true, isFile: false },
-            { name: "src", isDirectory: true, isFile: false },
-          ]
-        }
-        if (dir === `${WS}/src`) return [{ name: "app.ts", isDirectory: false, isFile: true }]
-        return []
-      })
-      mockReadTextFile.mockResolvedValue("const TODO = 1")
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      await tools.workspace_search({ pattern: "TODO" })
-      for (const skipped of [`${WS}/node_modules`, `${WS}/target`, `${WS}/dist`]) {
-        expect(mockReadDir).not.toHaveBeenCalledWith(skipped)
-      }
-      expect(mockReadDir).toHaveBeenCalledWith(`${WS}/src`)
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("skips oversized files and reports the sweep as truncated", async () => {
-      mockReadDir.mockImplementation(async (dir: string) =>
-        dir === WS ? [{ name: "bundle.js", isDirectory: false, isFile: true }] : []
-      )
-      // 512KB cap — a bundle/lockfile read as text.
-      mockReadTextFile.mockResolvedValue(`TODO${"x".repeat(600 * 1024)}`)
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_search({ pattern: "TODO" })) as {
-        matches: unknown[]
-        truncated: boolean
-      }
-      expect(result.matches).toEqual([])
-      expect(result.truncated).toBe(true)
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("stops descending past the depth cap", async () => {
-      // Every directory contains one more directory — unbounded without a cap.
-      mockReadDir.mockImplementation(async () => [
-        { name: "deeper", isDirectory: true, isFile: false },
-      ])
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_search({ pattern: "TODO" })) as { truncated: boolean }
-      expect(result.truncated).toBe(true)
-      // depth 0..12 inclusive → 13 readDir calls, then the cap trips.
-      expect(mockReadDir.mock.calls.length).toBeLessThanOrEqual(14)
-      await workspaceTools.deactivate?.(ctx)
-    })
+  it("reuses the host handle while the root stays the same", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "a" } })
+    const { call } = activate(fake)
+    await call("workspace_list_files", {})
+    await call("workspace_read_file", { path: "a.txt" })
+    expect(fake.workspace.acquire).toHaveBeenCalledTimes(1)
   })
 
-  describe("workflow node executors", () => {
-    beforeEach(() => {
-      mockReadDir.mockReset()
-      mockReadTextFile.mockReset()
-    })
-
-    it("action.listFiles delegates to the existing listFiles implementation", async () => {
-      mockReadDir.mockResolvedValue([{ name: "a.ts", isFile: true, isDirectory: false }])
-      const { ctx, nodes } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = await nodes["action.listFiles"].execute({
-        params: { path: "src" },
-      } as never)
-      expect(result.output).toMatchObject({
-        ok: true,
-        path: `${WS}/src`,
-        entries: [{ name: "a.ts", isFile: true, isDirectory: false }],
+  it("fails closed when no project is open", async () => {
+    const fake = createFakeWorkspace()
+    fake.setRoot(undefined)
+    const { call } = activate(fake)
+    for (const name of WORKSPACE_TOOL_NAMES) {
+      await expect(call(name, { path: "a.txt", pattern: "x" })).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/No project is open/),
       })
-      await workspaceTools.deactivate?.(ctx)
-    })
+    }
+    expect(fake.workspace.acquire).not.toHaveBeenCalled()
+  })
 
-    it("action.readFile delegates to the existing readFile implementation", async () => {
-      mockReadTextFile.mockResolvedValue("abcdef")
-      const { ctx, nodes } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = await nodes["action.readFile"].execute({
-        params: { path: "note.txt", maxBytes: 3 },
-      } as never)
-      expect(result.output).toMatchObject({
-        ok: true,
-        path: `${WS}/note.txt`,
-        content: "abc",
-        truncated: true,
-      })
-      await workspaceTools.deactivate?.(ctx)
+  it("reports a refused acquire, then retries it on the next call", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "a" } })
+    fake.workspace.acquire.mockRejectedValueOnce(new Error("not inside a workspace"))
+    const { call } = activate(fake)
+    await expect(call("workspace_list_files", {})).resolves.toEqual({
+      ok: false,
+      error: "workspace_list_files: not inside a workspace",
     })
+    await expect(call("workspace_list_files", {})).resolves.toMatchObject({ ok: true })
+    expect(fake.workspace.acquire).toHaveBeenCalledTimes(2)
+  })
+})
 
-    it("action.search delegates to the existing search implementation", async () => {
-      mockReadDir.mockResolvedValue([{ name: "readme.md", isDirectory: false, isFile: true }])
-      mockReadTextFile.mockResolvedValue("hello\nneedle")
-      const { ctx, nodes } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = await nodes["action.search"].execute({
-        params: { pattern: "needle", path: "." },
-      } as never)
-      expect(result.output).toMatchObject({
-        ok: true,
-        pattern: "needle",
-        matches: [{ path: `${WS}/readme.md`, line: 2, text: "needle" }],
-      })
-      await workspaceTools.deactivate?.(ctx)
+describe("confinement", () => {
+  it("resolveInWorkspace keeps relative, dotted, and in-root absolute paths", () => {
+    expect(resolveInWorkspace("/ws", undefined)).toEqual({ ok: true, path: "/ws", rel: "" })
+    expect(resolveInWorkspace("/ws/", "./src/../lib/a.ts")).toEqual({
+      ok: true,
+      path: "/ws/lib/a.ts",
+      rel: "lib/a.ts",
+    })
+    expect(resolveInWorkspace("/ws", "/ws/src")).toEqual({ ok: true, path: "/ws/src", rel: "src" })
+    expect(resolveInWorkspace("C:\\ws", "src\\a.ts")).toMatchObject({ ok: true, rel: "src/a.ts" })
+  })
+
+  it("rejects traversal, outside absolute paths, and look-alike prefixes", () => {
+    expect(resolveInWorkspace("/ws", "../etc/passwd")).toMatchObject({ ok: false })
+    expect(resolveInWorkspace("/ws", "/etc/passwd")).toMatchObject({ ok: false })
+    expect(resolveInWorkspace("/ws", "/ws-evil/a")).toMatchObject({ ok: false })
+    expect(resolveInWorkspace("/ws", 42)).toMatchObject({ ok: false, error: /string/ })
+  })
+
+  it("refuses an escaping path before any host call", async () => {
+    const fake = createFakeWorkspace()
+    const { call } = activate(fake)
+    await expect(call("workspace_read_file", { path: "../../.ssh/id_rsa" })).resolves.toMatchObject(
+      {
+        ok: false,
+        error: expect.stringMatching(/escapes the workspace/),
+      }
+    )
+    await expect(call("workspace_search", { pattern: "x", path: "/etc" })).resolves.toMatchObject({
+      ok: false,
+    })
+    expect(fake.workspace.walk).not.toHaveBeenCalled()
+    expect(fake.workspace.read).not.toHaveBeenCalled()
+  })
+
+  it("surfaces the host's own symlink refusal as a structured error", async () => {
+    const fake = createFakeWorkspace({ files: { "docs/a.md": "x" } })
+    fake.workspace.walk.mockRejectedValueOnce(new Error("path escapes workspace: /Users/me/.ssh"))
+    const { call } = activate(fake)
+    await expect(call("workspace_list_files", { path: "docs" })).resolves.toEqual({
+      ok: false,
+      error: "workspace_list_files: path escapes workspace: /Users/me/.ssh",
     })
   })
 })
 
-describe("workspace confinement", () => {
-  // This describe sits outside the "desktop tool bodies" block, so it needs its
-  // own reset — otherwise `not.toHaveBeenCalled()` below would read calls made
-  // by earlier tests and pass vacuously.
-  beforeEach(() => {
-    mockReadDir.mockReset()
-    mockReadDir.mockResolvedValue([])
-    mockReadTextFile.mockReset()
-    mockReadTextFile.mockResolvedValue("")
-    mockLstat.mockReset()
-    mockLstat.mockResolvedValue({ isSymlink: false })
-    mockStat.mockReset()
-    mockStat.mockResolvedValue({ size: 10 })
+describe("workspace_list_files", () => {
+  it("lists immediate children, including git-ignored ones, with file sizes", async () => {
+    const fake = createFakeWorkspace({
+      files: { "src/a.ts": "aa", "src/deep/b.ts": "b", "dist/x.js": "x", "README.md": "hello" },
+      ignored: ["dist"],
+    })
+    const { call } = activate(fake)
+    const result = await call("workspace_list_files", {})
+    expect(result).toEqual({
+      ok: true,
+      path: "/ws",
+      entries: [
+        { name: "dist", isDirectory: true, isFile: false },
+        { name: "README.md", isDirectory: false, isFile: true, size: 5 },
+        { name: "src", isDirectory: true, isFile: false },
+      ],
+      truncated: false,
+    })
+    expect(fake.workspace.walk).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ includeIgnored: true, includeDirs: true, maxDepth: 1 })
+    )
   })
 
-  // These tools import `@tauri-apps/plugin-fs` directly and MUST keep doing so:
-  // `ctx.fs` confines every path to `<plugin_dir>/data` (`resolve_scoped` in
-  // crates/cognia-plugin-runtime), which is the plugin's private data dir, not
-  // the user's workspace — routing through it would break the plugin, not
-  // secure it. So the declared `filesystem:read` permission gates nothing here
-  // and confinement has to live in the plugin.
-  const ESCAPES = [
-    "../../etc/passwd",
-    "/etc/passwd",
-    "src/../../../../root/.ssh/id_rsa",
-    "./../outside",
-  ]
-
-  it.each(ESCAPES)("workspace_read_file rejects %s", async (path) => {
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_read_file({ path })) as { ok: boolean; error?: string }
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/escapes the workspace/)
-    expect(mockReadTextFile).not.toHaveBeenCalled()
-    await workspaceTools.deactivate?.(ctx)
+  it("reports credential files the host withheld", async () => {
+    const fake = createFakeWorkspace({ files: { ".env": "SECRET=1", "a.txt": "a" } })
+    const { call } = activate(fake)
+    await expect(call("workspace_list_files", {})).resolves.toMatchObject({
+      withheldCredentialFiles: 1,
+    })
   })
+})
 
-  it.each(ESCAPES)("workspace_list_files rejects %s", async (path) => {
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_list_files({ path })) as { ok: boolean; error?: string }
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/escapes the workspace/)
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  it("workspace_search rejects a root outside the workspace", async () => {
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_search({ pattern: "x", path: "../.." })) as {
-      ok: boolean
-      error?: string
-    }
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/escapes the workspace/)
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  it("allows an absolute path that is genuinely inside the workspace", async () => {
-    mockReadTextFile.mockResolvedValue("inside")
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_read_file({ path: `${WS}/src/a.ts` })) as {
-      ok: boolean
-      path?: string
-    }
-    expect(result.ok).toBe(true)
-    expect(result.path).toBe(`${WS}/src/a.ts`)
-    await workspaceTools.deactivate?.(ctx)
-  })
-
-  // The lexical resolver above cannot see a symlink, and git tracks symlinks —
-  // so cloning a hostile repo into the workspace is enough to plant a link to
-  // ~/.ssh that `readTextFile` / `readDir` follow straight out of the tree.
-  describe("symlink escape", () => {
-    /** Report `link` (and nothing else) as a symlink. */
-    const linkAt = (link: string) =>
-      mockLstat.mockImplementation(async (p: string) => ({ isSymlink: p === link }))
-
-    it("workspace_read_file rejects a symlinked final component", async () => {
-      linkAt(`${WS}/notes.txt`)
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_read_file({ path: "notes.txt" })) as {
-        ok: boolean
-        error?: string
-      }
-      expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/escapes the workspace via symlink/)
-      expect(mockReadTextFile).not.toHaveBeenCalled()
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("workspace_read_file rejects a symlinked intermediate directory", async () => {
-      linkAt(`${WS}/docs`)
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_read_file({ path: "docs/id_rsa" })) as {
-        ok: boolean
-        error?: string
-      }
-      expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/escapes the workspace via symlink/)
-      expect(mockReadTextFile).not.toHaveBeenCalled()
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("workspace_list_files rejects a symlinked directory", async () => {
-      linkAt(`${WS}/docs`)
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_list_files({ path: "docs" })) as {
-        ok: boolean
-        error?: string
-      }
-      expect(result.ok).toBe(false)
-      expect(result.error).toMatch(/escapes the workspace via symlink/)
-      expect(mockReadDir).not.toHaveBeenCalled()
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("workspace_search does not follow a symlinked entry", async () => {
-      mockReadDir.mockResolvedValue([
-        { name: "escape", isDirectory: false, isFile: false, isSymlink: true },
-        { name: "real.ts", isDirectory: false, isFile: true, isSymlink: false },
-      ])
-      mockReadTextFile.mockResolvedValue("hit")
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_search({ pattern: "hit" })) as {
-        ok: boolean
-        matches: Array<{ path: string }>
-      }
-      expect(result.ok).toBe(true)
-      expect(result.matches.map((m) => m.path)).toEqual([`${WS}/real.ts`])
-      expect(mockReadTextFile).not.toHaveBeenCalledWith(`${WS}/escape`)
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("treats an unstattable component as clean so the real error surfaces", async () => {
-      mockLstat.mockRejectedValue(new Error("ENOENT"))
-      mockReadTextFile.mockRejectedValue(new Error("no such file"))
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      await expect(tools.workspace_read_file({ path: "missing.ts" })).rejects.toThrow(
-        /no such file/
-      )
-      await workspaceTools.deactivate?.(ctx)
-    })
-
-    it("allows a workspace root that is itself reached through a symlink", async () => {
-      linkAt(WS)
-      mockReadTextFile.mockResolvedValue("inside")
-      const { ctx, tools } = makeDesktopCtx()
-      await workspaceTools.activate?.(ctx)
-      const result = (await tools.workspace_read_file({ path: "a.ts" })) as { ok: boolean }
-      expect(result.ok).toBe(true)
-      await workspaceTools.deactivate?.(ctx)
+describe("workspace_read_file", () => {
+  it("requires a path", async () => {
+    const { call } = activate(createFakeWorkspace())
+    await expect(call("workspace_read_file", {})).resolves.toEqual({
+      ok: false,
+      error: "path is required",
     })
   })
 
-  // A multi-GB file used to be pulled into a string before its length was
-  // checked, so the bound has to be enforced from `stat` instead.
-  it("workspace_search skips an oversized file without reading it", async () => {
-    mockReadDir.mockResolvedValue([
-      { name: "huge.bin", isDirectory: false, isFile: true, isSymlink: false },
+  it("sizes the file first, then reads it capped at maxBytes", async () => {
+    const fake = createFakeWorkspace({ files: { "src/a.ts": "0123456789" } })
+    const { call } = activate(fake)
+    const result = await call("workspace_read_file", { path: "src/a.ts", maxBytes: 4 })
+    expect(result).toMatchObject({ ok: true, path: "/ws/src/a.ts", size: 10, truncated: true })
+    expect(result.content).toMatch(/^0123/)
+    const walkOrder = fake.workspace.walk.mock.invocationCallOrder[0]
+    const readOrder = fake.workspace.read.mock.invocationCallOrder[0]
+    expect(walkOrder).toBeLessThan(readOrder)
+    expect(fake.workspace.read).toHaveBeenCalledWith(expect.anything(), "src/a.ts", {
+      maxBytes: 4,
+    })
+  })
+
+  it("defaults and clamps maxBytes", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "a" } })
+    const { call } = activate(fake)
+    await call("workspace_read_file", { path: "a.txt" })
+    await call("workspace_read_file", { path: "a.txt", maxBytes: 10 ** 9 })
+    expect(fake.workspace.read.mock.calls.map((c) => c[2])).toEqual([
+      { maxBytes: READ_DEFAULT_MAX_BYTES },
+      { maxBytes: READ_MAX_RETURN_BYTES },
     ])
-    mockStat.mockResolvedValue({ size: 512 * 1024 + 1 })
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_search({ pattern: "x" })) as {
-      ok: boolean
-      truncated: boolean
-    }
-    expect(result.ok).toBe(true)
-    expect(result.truncated).toBe(true)
-    expect(mockReadTextFile).not.toHaveBeenCalled()
-    await workspaceTools.deactivate?.(ctx)
   })
 
-  it("fails closed when no workspace is open", async () => {
-    __setWorkspaceRootForTesting(null)
-    const { ctx, tools } = makeDesktopCtx()
-    await workspaceTools.activate?.(ctx)
-    const result = (await tools.workspace_read_file({ path: "a.ts" })) as {
-      ok: boolean
-      error?: string
+  it("refuses an oversized file without reading it", async () => {
+    const fake = createFakeWorkspace({ files: { "big.log": { size: READ_MAX_FILE_BYTES + 1 } } })
+    const { call } = activate(fake)
+    await expect(call("workspace_read_file", { path: "big.log" })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/read limit/),
+    })
+    expect(fake.workspace.read).not.toHaveBeenCalled()
+  })
+
+  it("explains a directory, a missing file, and a withheld credential file", async () => {
+    const fake = createFakeWorkspace({ files: { "src/a.ts": "a", ".env": "S=1" } })
+    const { call } = activate(fake)
+    await expect(call("workspace_read_file", { path: "src" })).resolves.toMatchObject({
+      error: expect.stringMatching(/is a directory/),
+    })
+    await expect(call("workspace_read_file", { path: "." })).resolves.toMatchObject({
+      error: expect.stringMatching(/is a directory/),
+    })
+    await expect(call("workspace_read_file", { path: "src/nope.ts" })).resolves.toMatchObject({
+      error: expect.stringMatching(/does not exist, or the host withholds/),
+    })
+    await expect(call("workspace_read_file", { path: ".env" })).resolves.toMatchObject({
+      ok: false,
+    })
+    expect(fake.workspace.read).not.toHaveBeenCalled()
+  })
+
+  it("turns a host read failure (e.g. a binary file) into a structured error", async () => {
+    const fake = createFakeWorkspace({ files: { "img.png": "x" } })
+    fake.workspace.read.mockRejectedValueOnce(new Error("stream did not contain valid UTF-8"))
+    const { call } = activate(fake)
+    await expect(call("workspace_read_file", { path: "img.png" })).resolves.toEqual({
+      ok: false,
+      error: "workspace_read_file: stream did not contain valid UTF-8",
+    })
+  })
+})
+
+describe("workspace_search", () => {
+  it("matches lines across the tree and reports where", async () => {
+    const fake = createFakeWorkspace({
+      files: { "src/a.ts": "const foo = 1\nbar\nFOO()", "b.md": "nothing" },
+    })
+    const { call } = activate(fake)
+    await expect(call("workspace_search", { pattern: "foo", ignoreCase: true })).resolves.toEqual({
+      ok: true,
+      pattern: "foo",
+      matches: [
+        { path: "/ws/src/a.ts", line: 1, text: "const foo = 1" },
+        { path: "/ws/src/a.ts", line: 3, text: "FOO()" },
+      ],
+      truncated: false,
+    })
+  })
+
+  it("skips dependency, build and dot folders — unless the search starts inside one", async () => {
+    const fake = createFakeWorkspace({
+      files: {
+        "node_modules/x/i.js": "needle",
+        ".git/config": "needle",
+        "dist/app.js": "needle",
+        "src/ok.ts": "needle",
+      },
+    })
+    const { call } = activate(fake)
+    const all = await call("workspace_search", { pattern: "needle" })
+    expect((all.matches as Array<{ path: string }>).map((m) => m.path)).toEqual(["/ws/src/ok.ts"])
+    expect(all.truncatedReasons).toEqual(["skipped-directories"])
+
+    const inside = await call("workspace_search", { pattern: "needle", path: "dist" })
+    expect((inside.matches as Array<{ path: string }>).map((m) => m.path)).toEqual([
+      "/ws/dist/app.js",
+    ])
+  })
+
+  it("skips an oversized file without reading it", async () => {
+    const fake = createFakeWorkspace({
+      files: { "big.min.js": { size: SEARCH_MAX_FILE_BYTES + 1 }, "a.ts": "needle" },
+    })
+    const { call } = activate(fake)
+    const result = await call("workspace_search", { pattern: "needle" })
+    expect(result).toMatchObject({ ok: true, truncatedReasons: ["oversized-files"] })
+    expect(fake.workspace.read.mock.calls.map((c) => c[1])).toEqual(["a.ts"])
+  })
+
+  it("stops at the match cap", async () => {
+    const lines = Array.from({ length: SEARCH_MAX_MATCHES + 50 }, () => "hit").join("\n")
+    const { call } = activate(createFakeWorkspace({ files: { "a.txt": lines } }))
+    const result = await call("workspace_search", { pattern: "hit" })
+    expect(result.matches).toHaveLength(SEARCH_MAX_MATCHES)
+    expect(result.truncatedReasons).toEqual(["max-matches"])
+  })
+
+  it("returns what it has once the time budget is spent", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "hit", "b.txt": "hit" } })
+    const { call } = activate(fake)
+    let now = 1_000
+    const spy = jest.spyOn(Date, "now").mockImplementation(() => now)
+    fake.workspace.read.mockImplementation(async () => {
+      now += SEARCH_TIME_BUDGET_MS + 1
+      return "hit"
+    })
+    try {
+      const result = await call("workspace_search", { pattern: "hit" })
+      expect(result).toMatchObject({ ok: true, truncated: true })
+      expect(result.truncatedReasons).toContain("time-budget")
+    } finally {
+      spy.mockRestore()
     }
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/No workspace is open/)
-    await workspaceTools.deactivate?.(ctx)
+  })
+
+  it("honours cancellation before and during the sweep", async () => {
+    const fake = createFakeWorkspace({
+      files: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`f${i}.txt`, "hit"])),
+    })
+    const { call } = activate(fake)
+    const before = new AbortController()
+    before.abort()
+    await expect(
+      call("workspace_search", { pattern: "hit" }, { signal: before.signal })
+    ).resolves.toEqual({ ok: false, error: "The call was cancelled." })
+    expect(fake.workspace.walk).not.toHaveBeenCalled()
+
+    const during = new AbortController()
+    fake.workspace.read.mockImplementation(async () => {
+      during.abort()
+      return "hit"
+    })
+    await expect(
+      call("workspace_search", { pattern: "hit" }, { signal: during.signal })
+    ).resolves.toEqual({ ok: false, error: "The call was cancelled." })
+    expect(fake.workspace.read.mock.calls.length).toBeLessThan(20)
+  })
+
+  it("refuses empty, invalid and catastrophic patterns before touching the project", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "a" } })
+    const { call } = activate(fake)
+    await expect(call("workspace_search", { pattern: "" })).resolves.toMatchObject({
+      error: "pattern is required",
+    })
+    await expect(call("workspace_search", { pattern: "(" })).resolves.toMatchObject({
+      error: expect.stringMatching(/^Invalid regex pattern/),
+    })
+    await expect(call("workspace_search", { pattern: "(a+)+$" })).resolves.toMatchObject({
+      error: expect.stringMatching(/^Unsupported regex pattern: nested quantifiers/),
+    })
+    await expect(call("workspace_search", { pattern: "(a)\\1" })).resolves.toMatchObject({
+      error: expect.stringMatching(/backreferences/),
+    })
+    expect(fake.workspace.walk).not.toHaveBeenCalled()
+  })
+
+  it("tests only the head of a very long line", async () => {
+    const long = `${"a".repeat(5_000)}needle`
+    const { call } = activate(createFakeWorkspace({ files: { "a.txt": long } }))
+    await expect(call("workspace_search", { pattern: "needle" })).resolves.toMatchObject({
+      matches: [],
+    })
+  })
+
+  it("skips files the host cannot read as text", async () => {
+    const fake = createFakeWorkspace({ files: { "a.bin": "x", "b.txt": "needle" } })
+    fake.workspace.read.mockImplementation(async (_h: unknown, rel: string) => {
+      if (rel === "a.bin") throw new Error("stream did not contain valid UTF-8")
+      return "needle"
+    })
+    const { call } = activate(fake)
+    await expect(call("workspace_search", { pattern: "needle" })).resolves.toMatchObject({
+      ok: true,
+      matches: [{ path: "/ws/b.txt", line: 1, text: "needle" }],
+    })
+  })
+
+  it("reports a walk failure as a structured error", async () => {
+    const fake = createFakeWorkspace()
+    const { call } = activate(fake)
+    await expect(call("workspace_search", { pattern: "x", path: "nope" })).resolves.toEqual({
+      ok: false,
+      error: "workspace_search: not a directory: nope",
+    })
+  })
+})
+
+describe("workflow nodes", () => {
+  it("delegate to the same implementations as the tools", async () => {
+    const fake = createFakeWorkspace({ files: { "a.txt": "needle" } })
+    const { nodes } = activate(fake)
+    const signal = new AbortController().signal
+    const run = (kind: string, params: Record<string, unknown>) =>
+      nodes.get(kind)!.execute({ params, signal } as never) as Promise<{
+        output: Record<string, unknown>
+      }>
+
+    await expect(run("action.listFiles", { path: "." })).resolves.toMatchObject({
+      output: { ok: true, entries: [{ name: "a.txt" }] },
+    })
+    await expect(run("action.readFile", { path: "a.txt" })).resolves.toMatchObject({
+      output: { ok: true, content: "needle" },
+    })
+    await expect(run("action.search", { pattern: "needle" })).resolves.toMatchObject({
+      output: { ok: true, matches: [{ line: 1 }] },
+    })
+  })
+
+  it("stops a search node when the run is cancelled", async () => {
+    const { nodes } = activate(createFakeWorkspace({ files: { "a.txt": "needle" } }))
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      nodes.get("action.search")!.execute({
+        params: { pattern: "needle" },
+        signal: controller.signal,
+      } as never)
+    ).resolves.toEqual({ output: { ok: false, error: "The call was cancelled." } })
   })
 })

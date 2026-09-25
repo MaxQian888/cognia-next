@@ -108,13 +108,27 @@ opens, when it switches repository, and after a rescan; the side conversation
 reads the same answer, because a model answering from a stale wiki without
 saying so is the same defect as a badge that never appears.
 
+**Rescan** runs in the background. A full scan is minutes of model calls and
+the host bounds an `onA2UIAction` hook call far below that, so the hook paints
+the button as "Scanning…" (disabled, with a spinner) and returns at once; the
+scan task then repaints every panel open on that wiki with the result, or with
+a "Rescan failed" banner carrying the scan's own error. A second click while a
+scan runs joins it rather than starting another.
+
+Panel state (which wiki and page a panel shows) is kept per surface and is
+dropped when the host destroys the surface (`onA2UISurfaceDestroy`). The
+manifest's only surface placeholder is `{resourceKey}`, which for a project
+file includes its path, so the reader still resolves one surface per file it
+is opened on; a per-project surface needs a `{projectId}`-style placeholder
+the host does not offer yet.
+
 ## Tests
 
 ```bash
 pnpm plugin:repowiki:test
 ```
 
-283 tests. Upstream shipped 164; the rest came from rewriting the suites the
+326 tests. Upstream shipped 164; the rest came from rewriting the suites the
 layer swap invalidated rather than deleting them — the properties they pinned
 (project-id determinism, the "empty changed-set means re-analyse everything"
 contract, the PageRank ranking) all survive the port, only their transports

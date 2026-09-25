@@ -11,43 +11,40 @@
  *
  * Two entry points:
  *   - `deep_research` agent tool — model-invoked, streams step progress.
- *   - `/research <question>` slash — user-invoked, answers into the chat.
+ *   - `/research <question>` slash — user-invoked, answers into the chat in
+ *     the user's language (strings live in plugin.json `i18n.locales`).
+ *
+ * The playbook skill (`cognia-deep-research:deep-research`) rides the
+ * manifest, so it is reachable from the composer's skill picker.
  */
-import {
-  definePlugin,
-  type PluginContext,
-  type PluginDefinition,
-  type PluginManifest,
-} from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest, type PluginContext } from "@cognia/plugin-sdk"
 
-import { registerResearchSkill } from "./skill"
+import { DEEP_RESEARCH_SKILL } from "./skill"
 import { handleResearchSlash } from "./slash"
 import { registerDeepResearchTool } from "./tool"
 import manifestJson from "../plugin.json"
 
-const definition: PluginDefinition = definePlugin({
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here WINS and would silently drop `commands[]`.
-  manifest: manifestJson as unknown as PluginManifest,
+// Spread plugin.json (commands, tools, i18n bundle, config schema) and add the
+// playbook skill, which the manager registers on enable — the plugin no longer
+// registers it imperatively as well.
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  skills: [DEEP_RESEARCH_SKILL],
+})
+
+export default definePlugin({
+  manifest,
   activate: (ctx: PluginContext) => {
-    ctx.logger.info("deep-research activated")
     registerDeepResearchTool(ctx)
-    registerResearchSkill(ctx)
-    // `/research` is DECLARED in plugin.json (`commands[]`). It used to ALSO be
-    // registered imperatively, so the registry held two entries: the manifest
-    // one (which, lacking an `onCommand` hook, always answered "Plugin command
-    // not handled") and the working imperative one. Returning the hook makes
-    // the declared entry the real one, and the duplicate disappears.
+    // `/research` is DECLARED in plugin.json (`commands[]`); returning the
+    // hook makes the declared entry the real one.
     return {
       onCommand: async (command, args, context) => {
         if (command !== "research") return false
         // Returning the report as the command's own `message` puts it in the
-        // conversation. It used to be shown as a toast — a multi-page cited
-        // report in a transient popup, unreadable and unscrollable.
+        // conversation — a multi-page cited report in a toast is unreadable.
         return handleResearchSlash(ctx, args.join(" "), context)
       },
     }
   },
 })
-
-export default definition

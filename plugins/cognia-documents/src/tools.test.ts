@@ -64,15 +64,33 @@ it("surfaces runtime errors from tool execution", async () => {
   ).rejects.toThrow("Document artifact not found")
 })
 
-it("requires sessionId for transcript export outside a session", async () => {
+it("returns an actionable error for transcript export outside a session", async () => {
+  const exportSession = jest.fn()
   const tools = createDocumentTools({
     pluginId: "cognia-documents",
-    export: { exportSession: jest.fn() },
+    export: { exportSession },
   } as never)
   const exportTool = tools.find((tool) => tool.name === "documents_export_transcript")!
-  await expect(exportTool.execute({}, { config: {} } as never)).rejects.toThrow(
-    "sessionId is required"
-  )
+  await expect(exportTool.execute({}, { config: {} } as never)).resolves.toMatchObject({
+    ok: false,
+    error: expect.stringContaining("pass sessionId"),
+  })
+  expect(exportSession).not.toHaveBeenCalled()
+})
+
+it("gives file-dialog tools a budget beyond the 30s default and no path access class", () => {
+  const tools = createDocumentTools({ pluginId: "cognia-documents" } as never)
+  const timeouts = Object.fromEntries(tools.map((tool) => [tool.name, tool.definition.timeoutMs]))
+  expect(timeouts).toMatchObject({
+    documents_import_docx: 120_000,
+    documents_export_docx: 120_000,
+    documents_export_transcript: 120_000,
+  })
+  // No Documents tool takes a filesystem path, so none declares an access class.
+  tools.forEach((tool) => {
+    expect(tool.definition.access).toBeUndefined()
+    expect(tool).not.toHaveProperty("pluginId")
+  })
 })
 
 it("uses the calling session for transcript export when sessionId is omitted", async () => {

@@ -4,7 +4,12 @@
  * returned object renders as the result. Heavy lifting runs entirely in-plugin
  * over the host's public web + model APIs.
  */
-import { defineTool, type PluginContext, type PluginToolContext } from "@cognia/plugin-sdk"
+import {
+  definePluginTool,
+  defineTool,
+  type PluginContext,
+  type PluginToolContext,
+} from "@cognia/plugin-sdk"
 
 import { persistReport } from "./artifacts"
 import { readEngineConfig } from "./config"
@@ -37,9 +42,16 @@ export function resolveConfig(
   return { ...DEPTH_PRESETS[depth ?? "standard"], ...base }
 }
 
+/**
+ * A research loop runs many model calls and page reads; the default 30 s
+ * tool budget would cut every standard-depth run off mid-loop.
+ */
+export const DEEP_RESEARCH_TIMEOUT_MS = 300_000
+
 /** The declarative definition, also mirrored in `plugin.json` for discovery. */
 export const DEEP_RESEARCH_TOOL = defineTool({
   name: "deep_research",
+  timeoutMs: DEEP_RESEARCH_TIMEOUT_MS,
   description:
     "Run an autonomous web research loop (search → read → reason → cited answer) " +
     "for a multi-hop or knowledge-intensive question. mode='search' returns a " +
@@ -65,12 +77,13 @@ export const DEEP_RESEARCH_TOOL = defineTool({
 })
 
 export function registerDeepResearchTool(ctx: PluginContext): void {
-  ctx.agent.registerTool({
-    name: DEEP_RESEARCH_TOOL.name,
-    pluginId: ctx.pluginId,
-    definition: DEEP_RESEARCH_TOOL,
-    execute: (args, toolCtx) => runResearchTool(ctx, (args ?? {}) as ResearchToolArgs, toolCtx),
-  })
+  ctx.agent.registerTool(
+    definePluginTool({
+      name: DEEP_RESEARCH_TOOL.name,
+      definition: DEEP_RESEARCH_TOOL,
+      execute: (args, toolCtx) => runResearchTool(ctx, (args ?? {}) as ResearchToolArgs, toolCtx),
+    })
+  )
 }
 
 export async function runResearchTool(

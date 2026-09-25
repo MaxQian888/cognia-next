@@ -1,8 +1,10 @@
 {
   "id": "cognia-python-runtime-demo",
   "name": "Python Runtime Contributions Demo",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "First-party reference for python-backed module-bridge contributions: an OCR provider, an AI provider, a decision provider, a workspace backend, and a flag-gated connector — all executing in the Python subprocess.",
+  "descriptionKey": "manifest.description",
   "type": "python",
   "capabilities": [
     "python",
@@ -74,6 +76,18 @@
     "mobile": {
       "availability": "blocked",
       "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Python Runtime Contributions Demo",
+        "manifest.description": "First-party reference for python-backed module-bridge contributions: an OCR provider, an AI provider, a decision provider, a workspace backend, and a flag-gated connector — all executing in the Python subprocess."
+      },
+      "zh-CN": {
+        "manifest.name": "Python 运行时贡献示例",
+        "manifest.description": "Python 驱动的模块桥贡献的官方参考：OCR 提供方、AI 提供方、决策提供方、工作区后端和一个受开关控制的连接器——全部在 Python 子进程中运行。"
+      }
     }
   }
 }

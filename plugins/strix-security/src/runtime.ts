@@ -9,24 +9,33 @@
 // `/security <target>` dispatch can arrive while no panel is mounted and must
 // survive until one is.
 
-import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
-import type { PluginDexieAPI, PluginUIAPI } from "@cognia/plugin-sdk"
-import type { PluginSecurityScansAPI, PluginTerminalAPI } from "@cognia/plugin-sdk"
+import type {
+  PluginContextPanelAPI,
+  PluginDexieAPI,
+  PluginI18nAPI,
+  PluginSecurityScansAPI,
+  PluginTerminalAPI,
+  PluginUIAPI,
+} from "@cognia/plugin-sdk"
+
 export interface StrixRuntime {
   terminal: PluginTerminalAPI
-  dexie: PluginDexieAPI
+  /**
+   * Null when the manifest's Dexie tables could not be mounted. The panel then
+   * says storage is unavailable — not that Docker is missing — and offers no
+   * scan it could not record.
+   */
+  dexie: PluginDexieAPI | null
   securityScans: PluginSecurityScansAPI
   /**
-   * Host-owned dialogs/toasts — the panel never falls back to
-   * `window.confirm`, which does not exist inside a workbench iframe.
+   * Host-owned dialogs/toasts. Always present: a confirmation that cannot be
+   * shown must not be treated as a "yes" (the old `?? true` did exactly that).
    */
-  ui?: PluginUIAPI | null
-  /**
-   * The workbench API the panel was registered through, so a running scan can
-   * put a count on its own rail button. Null when registration was refused —
-   * the panel still works, it just cannot announce itself from off-screen.
-   */
-  contextPanels?: PluginContextPanelAPI | null
+  ui: Pick<PluginUIAPI, "showConfirmDialog" | "showToast">
+  /** The workbench API the panel was registered through (rail badge). */
+  contextPanels: Pick<PluginContextPanelAPI, "setBadge">
+  /** `ctx.i18n.formatDate` — dates follow the APP locale, not the OS one. */
+  formatDate: PluginI18nAPI["formatDate"]
 }
 
 let runtime: StrixRuntime | null = null

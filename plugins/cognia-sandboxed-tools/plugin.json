@@ -1,8 +1,10 @@
 {
   "id": "cognia-sandboxed-tools",
   "name": "Sandboxed Tools",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the host's sandbox backend: the sandbox_exec command on the Tauri desktop, or the cognia-sandbox-exec helper on a Node host. A host with neither refuses the call instead of running it unconfined.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
@@ -31,6 +33,18 @@
     "headless": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Sandboxed Tools",
+        "manifest.description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the host's sandbox backend: the sandbox_exec command on the Tauri desktop, or the cognia-sandbox-exec helper on a Node host. A host with neither refuses the call instead of running it unconfined."
+      },
+      "zh-CN": {
+        "manifest.name": "沙箱工具",
+        "manifest.description": "操作系统级沙箱中的 Bash / Edit / Write / text_editor 工具（ADR-0028）。会话启用沙箱模式后，这些工具会替换 SDK 内置工具，经宿主的沙箱后端执行：桌面端使用 sandbox_exec 命令，Node 宿主使用 cognia-sandbox-exec 辅助程序。两者都不具备的宿主会拒绝调用，而不是在无约束环境中运行。"
+      }
     }
   }
 }

@@ -29,6 +29,11 @@ function context(): { ctx: PluginContext; recorded: Recorded } {
     agent: { invokeTool: recorded.invokeTool },
     ai: { chat: recorded.chat, embed: recorded.embed },
     logger: { info: jest.fn(), warn: recorded.warn },
+    i18n: {
+      t: jest.fn(
+        (key: string, params?: Record<string, unknown>) => `${key}|${params?.count ?? ""}`
+      ),
+    },
   } as unknown as PluginContext
   return { ctx, recorded }
 }
@@ -41,6 +46,13 @@ describe("buildEngineDeps", () => {
     expect(typeof deps.read).toBe("function")
     expect(typeof deps.ai.chat).toBe("function")
     expect(typeof deps.ai.embed).toBe("function")
+  })
+
+  it("renders the engine's user-facing text through the plugin's i18n", () => {
+    const { ctx } = context()
+    const deps = buildEngineDeps(ctx)
+    expect(deps.text?.("progress.reading", { count: 3 })).toBe("progress.reading|3")
+    expect(ctx.i18n.t).toHaveBeenCalledWith("progress.reading", { count: 3 })
   })
 
   it("routes model calls to the run's session", async () => {

@@ -28,10 +28,9 @@
  * successful resolution.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { A2UISegmentContent, WorkflowSummary } from "@cognia/plugin-sdk/api/workflow-run"
 import { formatToolError, getWorkflowApi } from "../store-bridge"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 function newBindingId(): string {
   return "wfb_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10)
@@ -43,11 +42,13 @@ function summariesToBullets(candidates: WorkflowSummary[]): string {
     .join("\n")
 }
 
-export function buildRunByNameTools(): PluginTool[] {
+/** The plugin's `ctx.i18n.t` — the fan-out card is user-facing IM copy. */
+export type WorkflowAiTranslate = (key: string, params?: Record<string, string | number>) => string
+
+export function buildRunByNameTools(t: WorkflowAiTranslate): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_list_workflows",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_workflows",
         description:
@@ -75,10 +76,9 @@ export function buildRunByNameTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_run_workflow_by_name",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_run_workflow_by_name",
         description:
@@ -206,10 +206,9 @@ export function buildRunByNameTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_subscribe_workflow_fanout",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_subscribe_workflow_fanout",
         description:
@@ -312,11 +311,10 @@ export function buildRunByNameTools(): PluginTool[] {
             }),
           ])
 
-          const surface = buildFanoutApprovalSurface({
-            workflowName: resolvedName,
-            approveActionId,
-            cancelActionId,
-          })
+          const surface = buildFanoutApprovalSurface(
+            { workflowName: resolvedName, approveActionId, cancelActionId },
+            t
+          )
 
           return {
             ok: true,
@@ -331,7 +329,7 @@ export function buildRunByNameTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }
 
@@ -341,13 +339,18 @@ export function buildRunByNameTools(): PluginTool[] {
  * WeCom template_card, wechat-personal numeric mirror) render it
  * identically — just with different copy.
  */
-function buildFanoutApprovalSurface(input: {
-  workflowName: string
-  approveActionId: string
-  cancelActionId: string
-}): A2UISegmentContent {
-  const title = `订阅「${input.workflowName}」`
-  const summary = "把这个 workflow 的运行进度同步到当前会话。"
+export function buildFanoutApprovalSurface(
+  input: {
+    workflowName: string
+    approveActionId: string
+    cancelActionId: string
+  },
+  t: WorkflowAiTranslate
+): A2UISegmentContent {
+  const title = t("fanout.title", { name: input.workflowName })
+  const summary = t("fanout.summary")
+  const approveLabel = t("fanout.approve")
+  const cancelLabel = t("fanout.cancel")
   const components: Record<string, unknown> = {
     root: {
       component: "Card",
@@ -358,18 +361,23 @@ function buildFanoutApprovalSurface(input: {
     actions: { component: "Row", children: ["approve", "cancel"] },
     approve: {
       component: "Button",
-      text: "Approve",
+      text: approveLabel,
       action: "approve",
       value: input.approveActionId,
     },
     cancel: {
       component: "Button",
-      text: "Cancel",
+      text: cancelLabel,
       action: "cancel",
       value: input.cancelActionId,
     },
   }
-  const mirrorLines = [`# ${title}`, summary, "[Approve] [Cancel]", "回复 1 同意 / 2 取消"]
+  const mirrorLines = [
+    `# ${title}`,
+    summary,
+    `[${approveLabel}] [${cancelLabel}]`,
+    t("fanout.replyHint"),
+  ]
   return {
     components,
     dataModel: {},

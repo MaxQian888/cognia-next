@@ -9,8 +9,19 @@ import {
 import { projectPluginWorkflowTemplate } from "@/lib/workflow/templates/project-plugin-workflow-template"
 import { validateGraphIntegrity } from "@/lib/workflow/definition/validate"
 import { nodeKind, PLUGIN_ID } from "../ids"
+import {
+  APPROVE_VERDICT_PATTERN,
+  CLEAN_TREE_CHECK,
+  COMMIT_COMMAND,
+  REQUEST_CHANGES_VERDICT,
+  REVIEW_DIFF_COMMAND,
+} from "./template"
+import { READ_TOOLS, REFACTOR_ROLE_PACK } from "../characters/pack"
+import { evaluateConditionGroup } from "@/lib/workflow/runtime/conditions"
+import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 
 const AGENT_TURN = nodeKind("agent.turn")
+const PIPELINE_STOP = nodeKind("pipeline.stop")
 
 function edgesFrom(source: string) {
   return REFACTOR_PIPELINE_TEMPLATE.edges.filter((e) => e.source === source)
@@ -44,7 +55,7 @@ describe("REFACTOR_PIPELINE_TEMPLATE shape", () => {
     expect(edgesFrom("fix1").map((e) => e.target)).toEqual(["gate2"])
     const fromGate2 = edgesFrom("gate2")
     expect(fromGate2.find((e) => e.sourceHandle === "success")?.target).toBe("ok2")
-    expect(fromGate2.find((e) => e.sourceHandle === "failure")?.target).toBe("failnote")
+    expect(fromGate2.find((e) => e.sourceHandle === "failure")?.target).toBe("stopGate")
   })
 
   it("converges both verified paths on the shared tail through okN passthroughs", () => {
@@ -61,9 +72,98 @@ describe("REFACTOR_PIPELINE_TEMPLATE shape", () => {
     expect(okKinds).toEqual(["flow.set", "flow.set"])
   })
 
-  it("ends the second failure at a dead-end leaf (no proceed, no cycle)", () => {
-    expect(edgesFrom("failnote")).toHaveLength(0)
+  it("ends every give-up path on a stop node that FAILS the run", () => {
+    // The old give-up leaf was a flow.set, which completes — so a run that
+    // could not build was recorded as a success.
+    const stops = REFACTOR_PIPELINE_TEMPLATE.nodes.filter((n) => n.type === PIPELINE_STOP)
+    expect(stops.map((n) => n.id).sort()).toEqual(
+      ["stopChanges", "stopDirty", "stopGate", "stopRejected"].sort()
+    )
+    for (const n of stops) {
+      expect(edgesFrom(n.id)).toHaveLength(0)
+      expect(String((n.data.params as { reason?: string }).reason).length).toBeGreaterThan(20)
+    }
+    expect(REFACTOR_PIPELINE_TEMPLATE.nodes.some((n) => n.id === "failnote")).toBe(false)
     expect(REFACTOR_PIPELINE_TEMPLATE.edges.some((e) => e.target === "trigger")).toBe(false)
+  })
+
+  it("refuses to start on a dirty working tree", () => {
+    expect(edgesFrom("trigger").map((e) => e.target)).toEqual(["clean"])
+    const clean = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "clean")
+    expect(clean?.data.params).toMatchObject({ command: CLEAN_TREE_CHECK, onFailure: "branch" })
+    const fromClean = edgesFrom("clean")
+    expect(fromClean.find((e) => e.sourceHandle === "success")?.target).toBe("analyze")
+    expect(fromClean.find((e) => e.sourceHandle === "failure")?.target).toBe("stopDirty")
+  })
+
+  it("hands the read-only reviewer the diff, since it holds no Bash to run git", () => {
+    expect(edgesFrom("cover").map((e) => e.target)).toEqual(["diff"])
+    expect(edgesFrom("diff").map((e) => e.target)).toEqual(["review"])
+    const diff = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "diff")
+    expect(diff?.data.params).toMatchObject({ command: REVIEW_DIFF_COMMAND, onFailure: "throw" })
+    const review = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "review")
+    expect(String(review?.data.params?.prompt)).toContain("{{ $node['diff'].output }}")
+    for (const role of ["analyst", "architect", "reviewer"]) {
+      const character = REFACTOR_ROLE_PACK.characters.find((c) => c.localId === role)
+      expect(character?.allowedTools).toEqual(READ_TOOLS)
+    }
+    expect(READ_TOOLS).not.toContain("Bash")
+  })
+
+  it("only reaches docs + commit when the reviewer's verdict is APPROVE", () => {
+    expect(edgesFrom("review").map((e) => e.target)).toEqual(["verdict"])
+    const verdict = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "verdict")!
+    expect(verdict.type).toBe("flow.branch")
+    expect(verdict.typeVersion).toBe(2)
+    const fromVerdict = edgesFrom("verdict")
+    expect(fromVerdict.find((e) => e.sourceHandle === "true")?.target).toBe("doc")
+    expect(fromVerdict.find((e) => e.sourceHandle === "false")?.target).toBe("stopChanges")
+    // The handles the edges use are the ones the editor/orchestrator emit.
+    expect(
+      outputHandlesFor({ kind: "flow.branch", typeVersion: 2, params: {} })?.map((h) => h.id)
+    ).toEqual(["true", "false"])
+  })
+
+  it("evaluates the verdict condition fail-closed", () => {
+    const verdict = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "verdict")!
+    const group = (
+      verdict.data.params as { conditions: Parameters<typeof evaluateConditionGroup>[0] }
+    ).conditions
+    const decide = (text: string) =>
+      evaluateConditionGroup({
+        ...group,
+        conditions: group.conditions.map((c) => ({ ...c, left: text })),
+      })
+    expect(decide("Looks good.\nVERDICT: APPROVE")).toBe(true)
+    expect(decide(`Blocking: nil deref.\n${REQUEST_CHANGES_VERDICT}`)).toBe(false)
+    expect(decide("I would approve this.")).toBe(false)
+    expect(decide("VERDICT: APPROVE\nVERDICT: REQUEST CHANGES")).toBe(false)
+    expect(decide("verdict: approve")).toBe(false)
+    expect(new RegExp(APPROVE_VERDICT_PATTERN).test("VERDICT: APPROVED")).toBe(false)
+  })
+
+  it("puts a human approval, showing the files, between the reviewer and the commit", () => {
+    expect(edgesFrom("doc").map((e) => e.target)).toEqual(["summary"])
+    expect(edgesFrom("summary").map((e) => e.target)).toEqual(["approve"])
+    const approve = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "approve")!
+    expect(approve.type).toBe("action.approval.request")
+    expect(String((approve.data.params as { message?: string }).message)).toContain(
+      "$node['summary'].output"
+    )
+    expect((approve.data.params as { onTimeout?: string }).onTimeout).toBe("reject")
+    const fromApprove = edgesFrom("approve")
+    expect(fromApprove.find((e) => e.sourceHandle === "approved")?.target).toBe("commit")
+    expect(fromApprove.find((e) => e.sourceHandle === "rejected")?.target).toBe("stopRejected")
+    expect(edgesTo("commit").map((e) => e.source)).toEqual(["approve"])
+  })
+
+  it("stages only what the run changed, never `git add -A`", () => {
+    const commit = REFACTOR_PIPELINE_TEMPLATE.nodes.find((n) => n.id === "commit")!
+    const command = String((commit.data.params as { command?: string }).command)
+    expect(command).toBe(COMMIT_COMMAND)
+    expect(command).not.toMatch(/git add (-A|--all|\.)(\s|$)/)
+    expect(command).toContain("git add --update")
+    expect(command).toContain("--exclude-standard")
   })
 
   it("drives every agent step through the plugin's agent.turn node, scoped to repoPath", () => {
@@ -76,8 +176,11 @@ describe("REFACTOR_PIPELINE_TEMPLATE shape", () => {
     }
   })
 
-  it("requires the agent.turn plugin node kind", () => {
-    expect(REFACTOR_PIPELINE_TEMPLATE.requires?.pluginNodeKinds).toEqual([AGENT_TURN])
+  it("requires both plugin node kinds it uses", () => {
+    expect(REFACTOR_PIPELINE_TEMPLATE.requires?.pluginNodeKinds).toEqual([
+      AGENT_TURN,
+      PIPELINE_STOP,
+    ])
   })
 
   it("projects into a graph the host validator accepts (legal DAG, no illegal cycle)", () => {
@@ -103,7 +206,16 @@ describe("REFACTOR_PIPELINE_TEMPLATE requires resolution", () => {
     paramsSchema: {},
   } as unknown as NodeCatalogEntry
 
-  afterEach(() => removePluginCatalogEntry(AGENT_TURN))
+  const stopEntry = {
+    ...catalogEntry,
+    kind: PIPELINE_STOP,
+    label: "Stop pipeline (fail run)",
+  } as unknown as NodeCatalogEntry
+
+  afterEach(() => {
+    removePluginCatalogEntry(AGENT_TURN)
+    removePluginCatalogEntry(PIPELINE_STOP)
+  })
 
   it("warns when the agent.turn node is not in the catalog", () => {
     removePluginCatalogEntry(AGENT_TURN)
@@ -112,8 +224,9 @@ describe("REFACTOR_PIPELINE_TEMPLATE requires resolution", () => {
     expect(result.warnings.some((w) => w.code === "missing-plugin-node")).toBe(true)
   })
 
-  it("resolves once the agent.turn node is registered in the catalog", () => {
+  it("resolves once both plugin nodes are registered in the catalog", () => {
     addPluginCatalogEntry(catalogEntry)
+    addPluginCatalogEntry(stopEntry)
     const result = validateWorkflowTemplateRequires(REFACTOR_PIPELINE_TEMPLATE)
     expect(result.warnings).toEqual([])
     expect(result.ok).toBe(true)

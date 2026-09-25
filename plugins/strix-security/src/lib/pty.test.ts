@@ -1,6 +1,6 @@
 import type { PluginTerminalAPI } from "@cognia/plugin-sdk"
 import { captureCommand, openPty, quietShell, runCommand, safeKill, ScanAbortError } from "./pty"
-import { createMockTerminal, counterId, immediateSleep } from "./mock-shell"
+import { createMockTerminal, counterId, immediateSleep } from "./mock-shell.test-helpers"
 
 /** Minimal terminal stub with byte-level emit control. */
 function byteTerminal() {

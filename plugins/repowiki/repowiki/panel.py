@@ -83,6 +83,8 @@ DEFAULT_LABELS: dict[str, str] = {
     "panel.rescan": "Rescan",
     "panel.partialScan": "Partial scan",
     "panel.snapshot": "Snapshot",
+    "panel.scanning": "Scanning…",
+    "panel.scanFailed": "Rescan failed",
 }
 
 
@@ -97,12 +99,19 @@ def build_panel(
     projects: list[dict[str, Any]] | None = None,
     live: bool = True,
     labels: Mapping[str, str] | None = None,
+    scanning: bool = False,
+    scan_error: str = "",
 ) -> list[dict[str, Any]]:
     """Return the component list for the reader surface.
 
     The root id must be ``"root"``: the host fixes it when the surface is
     created and no message changes it, so a tree without one renders the
     surface's "no content" state.
+
+    ``scanning`` is a rescan running in the background: the button stays where
+    the user clicked it, says so, and is disabled so a second click cannot
+    start a second scan. ``scan_error`` is the last rescan's failure — scan
+    output relayed under a translated title, with the button offered again.
     """
     warnings = warnings or []
     projects = projects or []
@@ -117,7 +126,7 @@ def build_panel(
     # A rehydrated wiki is a snapshot: it reads fine, but the checkout behind
     # it was released, so rescan is the way back to live files — offered even
     # when nothing reports stale.
-    show_rescan = stale or unknown or not live
+    show_rescan = stale or unknown or not live or scanning or bool(scan_error)
     # Why the check could not be answered goes in the banner, not on the badge.
     # A hover has no touch equivalent and A2UI has no tooltip field, so a
     # reason attached to the Badge would be a string nothing ever renders —
@@ -127,6 +136,8 @@ def build_panel(
         warnings = [*warnings, text["panel.freshnessUnknownReason"].format(reason=reason)]
 
     root_children = ["header"]
+    if scan_error:
+        root_children.append("scan-error")
     if warnings:
         root_children.append("warnings")
     root_children.append("body")
@@ -222,13 +233,25 @@ def build_panel(
             }
         )
     if show_rescan:
+        rescan: dict[str, Any] = {
+            "id": "rescan",
+            "component": "Button",
+            "text": text["panel.scanning"] if scanning else text["panel.rescan"],
+            "variant": "outline",
+            "action": ACTION_RESCAN,
+        }
+        if scanning:
+            # `loading` disables the button and shows the host's spinner.
+            rescan["loading"] = True
+        components.append(rescan)
+    if scan_error:
         components.append(
             {
-                "id": "rescan",
-                "component": "Button",
-                "text": text["panel.rescan"],
-                "variant": "outline",
-                "action": ACTION_RESCAN,
+                "id": "scan-error",
+                "component": "Alert",
+                "variant": "error",
+                "title": text["panel.scanFailed"],
+                "message": scan_error,
             }
         )
     if warnings:

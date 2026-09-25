@@ -25,7 +25,18 @@ import type {
 
 export type SreLogLevel = NonNullable<SreLogEvidence["level"]>
 
-/** What kind of backend is answering — surfaced to the user, never branched on. */
+/**
+ * What kind of backend is answering.
+ *
+ * `"fixture"` is the bundled DEMO CORPUS — one recorded 2026-08 Qwen timeout
+ * incident — and is, today, the only provider that exists. It is dormant by
+ * design as a real evidence source, and labelled so on three axes: here; in
+ * every tool result (`dataSource: "demo-corpus"`, see `runtime.ts`) and the
+ * manifest's tool/subagent descriptions; and in the panel's demo banner
+ * (`panel/demo-notice.tsx`). `runtime.test.ts`, `index.test.ts` and
+ * `incident-panel.test.tsx` pin all three. `"remote"` is reserved for a live
+ * observability backend.
+ */
 export type SreProviderKind = "fixture" | "remote"
 
 export interface SreLogFilter extends SreTimeRange {

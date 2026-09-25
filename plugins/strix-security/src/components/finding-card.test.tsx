@@ -4,10 +4,12 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { FindingCard } from "./finding-card"
 import type { StrixFinding } from "../types"
+import { registerStrixBundle, unregisterStrixBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 const base: StrixFinding = {
   runId: "r",

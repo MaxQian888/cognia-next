@@ -12,17 +12,12 @@
  * every shell but stays off until the user enables it.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-const definition: PluginDefinition = {
-  manifest: manifest as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("Material Icon Theme file icons registered")
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("Material Icon Theme file icons removed")
-  },
-}
+export const manifest = definePluginManifest(manifestJson)
 
-export default definition
+export default definePlugin({
+  manifest,
+  activate: () => {},
+})

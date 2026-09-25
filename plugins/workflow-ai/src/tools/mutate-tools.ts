@@ -19,14 +19,12 @@
  * touched nodes so the user can see what the assistant did.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
 import type { WorkflowNodeKind } from "@cognia/plugin-sdk"
 import type { ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 import { coerceProposalOp, KNOWN_PROPOSAL_OP_TYPES } from "@cognia/plugin-sdk/api/workflow-editor"
 import { nanoid } from "nanoid"
-
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -44,11 +42,10 @@ function markAuthoredByAi(patch: Record<string, unknown>): Record<string, unknow
   return { ...patch, authoredBy: "ai" }
 }
 
-export function buildMutateTools(): PluginTool[] {
+export function buildMutateTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_add_node",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_add_node",
         description:
@@ -93,10 +90,9 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_remove_node",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_remove_node",
         description:
@@ -130,10 +126,9 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_connect_edge",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_connect_edge",
         description:
@@ -178,10 +173,9 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_disconnect_edge",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_disconnect_edge",
         description: "Remove one edge by id. Undoable.",
@@ -214,10 +208,9 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_configure_node",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_configure_node",
         description:
@@ -258,10 +251,9 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_batch_apply",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_batch_apply",
         description:
@@ -374,6 +366,6 @@ export function buildMutateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

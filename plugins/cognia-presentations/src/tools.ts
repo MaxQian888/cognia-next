@@ -1,4 +1,4 @@
-import type { PluginToolDef, PluginToolRegistration } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { PresentationOperation } from "./model"
 import { createPresentationsRuntime, type PresentationsPluginContext } from "./runtime"
 
@@ -41,8 +41,14 @@ const slideElement = {
     shape: { enum: ["rect", "roundRect", "ellipse"] },
     fill: { type: "string", description: "Hex fill without # (shape)" },
     line: { type: "string", description: "Hex outline without # (shape)" },
-    dataBase64: { type: "string", description: "Base64 image bytes (image)" },
-    mimeType: { enum: ["image/png", "image/jpeg"] },
+    dataBase64: {
+      type: "string",
+      description: "Raw base64 PNG/JPEG bytes without a data: URL prefix (image)",
+    },
+    mimeType: {
+      enum: ["image/png", "image/jpeg"],
+      description: "Must match the image bytes (PNG or JPEG magic number).",
+    },
     alt: { type: "string", description: "Alt text (image, required for accessibility)" },
     rows: {
       type: "array",
@@ -75,106 +81,143 @@ const operations = {
     additionalProperties: false,
   },
 } as const
+/** A file dialog stays open while the user decides — outlast the 30 s default. */
+const FILE_DIALOG_TIMEOUT_MS = 120_000
+/** Building and re-opening a PPTX with embedded images can outrun the default. */
+const PACKAGE_TIMEOUT_MS = 60_000
+
 export function createPresentationTools(ctx: PresentationsPluginContext): PluginToolRegistration[] {
   const runtime = createPresentationsRuntime(ctx)
   return [
-    tool(
-      PRESENTATION_TOOL_NAMES[0],
-      "Create a structured native PPTX-ready presentation artifact.",
-      {
-        type: "object",
-        properties: { title: { type: "string", minLength: 1 }, operations },
-        required: ["title"],
-        additionalProperties: false,
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[0],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[0],
+        description: "Create a structured native PPTX-ready presentation artifact.",
+        parametersSchema: {
+          type: "object",
+          properties: { title: { type: "string", minLength: 1 }, operations },
+          required: ["title"],
+          additionalProperties: false,
+        },
       },
-      (args, tc) =>
+      execute: async (args, tc) =>
         runtime.create({
           ...(args as { title: string; operations?: PresentationOperation[] }),
           sessionId: tc.sessionId,
           messageId: tc.messageId,
-        })
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[1],
-      "Import an authorized PPTX attachment or choose a PPTX file.",
-      {
-        type: "object",
-        properties: {
-          handle: { type: "string", minLength: 1 },
-          title: { type: "string", minLength: 1 },
+        }),
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[1],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[1],
+        description:
+          "Import an authorized PPTX attachment, or open the file picker when no handle is given.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "string", minLength: 1 },
+            title: { type: "string", minLength: 1 },
+          },
+          additionalProperties: false,
         },
-        additionalProperties: false,
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
       },
-      (args, tc) =>
+      execute: async (args, tc) =>
         runtime.importPptx({
           ...(args as { handle?: string; title?: string }),
           sessionId: tc.sessionId,
           messageId: tc.messageId,
         }),
-      { timeoutMs: 120_000 }
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[2],
-      "Inspect slides, elements, speaker notes, sources, and compatibility findings.",
-      artifactOnly,
-      (args) => runtime.inspect((args as { artifactId: string }).artifactId),
-      { retryable: true }
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[3],
-      "Apply slide operations atomically with optimistic version checking.",
-      {
-        type: "object",
-        properties: {
-          artifactId,
-          expectedVersion: { type: "integer", minimum: 1 },
-          operations,
-          changeDescription: { type: "string" },
-        },
-        required: ["artifactId", "expectedVersion", "operations"],
-        additionalProperties: false,
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[2],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[2],
+        description:
+          "Inspect slides, elements, speaker notes, sources, and compatibility findings.",
+        parametersSchema: artifactOnly,
+        retryable: true,
       },
-      (args) =>
+      execute: async (args) => runtime.inspect((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[3],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[3],
+        description: "Apply slide operations atomically with optimistic version checking.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId,
+            expectedVersion: { type: "integer", minimum: 1 },
+            operations,
+            changeDescription: { type: "string" },
+          },
+          required: ["artifactId", "expectedVersion", "operations"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) =>
         runtime.apply(
           args as {
             artifactId: string
             expectedVersion: number
             operations: PresentationOperation[]
+            changeDescription?: string
           }
-        )
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[4],
-      "Validate slide bounds, readability, accessibility, and native PPTX round-trip integrity.",
-      artifactOnly,
-      (args) => runtime.validate((args as { artifactId: string }).artifactId),
-      { retryable: true }
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[5],
-      "Open the plugin-owned responsive slide preview.",
-      artifactOnly,
-      (args) => runtime.preview((args as { artifactId: string }).artifactId),
-      { retryable: true }
-    ),
-    tool(
-      PRESENTATION_TOOL_NAMES[6],
-      "Validate and save a native PPTX presentation.",
-      {
-        type: "object",
-        properties: {
-          artifactId,
-          suggestedName: { type: "string" },
-          allowUnsupportedFeatureLoss: {
-            type: "boolean",
-            description:
-              "Required to export an imported PPTX containing unsupported native features.",
-          },
-        },
-        required: ["artifactId"],
-        additionalProperties: false,
+        ),
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[4],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[4],
+        description:
+          "Validate slide bounds, readability, accessibility, and native PPTX round-trip integrity.",
+        parametersSchema: artifactOnly,
+        retryable: true,
+        timeoutMs: PACKAGE_TIMEOUT_MS,
       },
-      (args) => {
+      execute: async (args) => runtime.validate((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[5],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[5],
+        description: "Open the plugin-owned responsive slide preview.",
+        parametersSchema: artifactOnly,
+        retryable: true,
+      },
+      execute: async (args) => runtime.preview((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: PRESENTATION_TOOL_NAMES[6],
+      definition: {
+        name: PRESENTATION_TOOL_NAMES[6],
+        description:
+          "Validate and save a native PPTX presentation. Desktop shows a save dialog, mobile " +
+          "saves to Documents/cognia/exports, web downloads it; relay the returned message.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId,
+            suggestedName: {
+              type: "string",
+              description: "File name without a path; .pptx is added when missing.",
+            },
+            allowUnsupportedFeatureLoss: {
+              type: "boolean",
+              description:
+                "Required to export an imported PPTX containing unsupported native features.",
+            },
+          },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
+      },
+      execute: async (args) => {
         const input = args as {
           artifactId: string
           suggestedName?: string
@@ -186,20 +229,6 @@ export function createPresentationTools(ctx: PresentationsPluginContext): Plugin
           input.allowUnsupportedFeatureLoss
         )
       },
-      { timeoutMs: 60_000 }
-    ),
+    }),
   ]
-}
-function tool(
-  name: string,
-  description: string,
-  parametersSchema: Record<string, unknown>,
-  execute: (...args: Parameters<PluginToolRegistration["execute"]>) => unknown | Promise<unknown>,
-  options?: Pick<PluginToolDef, "retryable" | "timeoutMs">
-): PluginToolRegistration {
-  return {
-    name,
-    definition: { name, description, parametersSchema, ...options },
-    execute: async (...args) => execute(...args),
-  }
 }

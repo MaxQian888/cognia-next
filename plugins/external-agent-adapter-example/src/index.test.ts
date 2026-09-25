@@ -2,13 +2,12 @@ import type {
   ExternalAgentConfig,
   ExternalAgentMessage,
   ExternalAgentMessageDeltaEvent,
-  PluginManifest,
 } from "@cognia/plugin-sdk"
-import definition, { TYPED_CONTRIBUTIONS } from "./index"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
+import definition, { manifest, TYPED_CONTRIBUTIONS } from "./index"
 import manifestJson from "../plugin.json"
 import { createDemoEchoAdapter, DEMO_ADAPTER_ID } from "./demo-adapter"
 
-const manifest = manifestJson as unknown as PluginManifest
 const PLUGIN_ID = "cognia-external-agent-adapter-example"
 const PROTOCOL = `${PLUGIN_ID}:${DEMO_ADAPTER_ID}`
 
@@ -52,6 +51,20 @@ describe("external-agent-adapter-example plugin", () => {
 })
 
 describe("plugin.json is the shipped source of truth", () => {
+  it("is the module manifest, and passes the installer's validation", () => {
+    expect(manifest).toEqual(manifestJson)
+    expect(validatePluginManifest(manifest).errors).toEqual([])
+  })
+
+  it("installs from the built bundles and stays opt-in", () => {
+    expect(manifest.main).toBe("dist/index.js")
+    expect(manifest.externalAgentAdapters?.[0].entry).toBe("dist/demo-adapter.js")
+    for (const runtime of Object.values(manifest.runtimeCompatibility ?? {})) {
+      if (runtime?.availability === "supported") expect(runtime.entrypoint).toBe("dist/index.js")
+    }
+    expect(manifest.activationEvents).toBeUndefined()
+  })
+
   it("matches the typed adapter definition", () => {
     expect(manifest.externalAgentAdapters?.[0]).toEqual(TYPED_CONTRIBUTIONS.adapter)
   })

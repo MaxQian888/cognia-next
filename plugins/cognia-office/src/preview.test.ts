@@ -2,8 +2,20 @@
 
 import * as XLSX from "xlsx"
 import type { Artifact } from "@cognia/plugin-sdk"
-import { applyWorkbookOperations, createWorkbook, WORKBOOK_ARTIFACT_KIND } from "./model"
-import { createWorkbookRenderer, type PreviewTranslator } from "./preview"
+import manifestJson from "../plugin.json"
+import {
+  applyWorkbookOperations,
+  createWorkbook,
+  UNSUPPORTED_FEATURES,
+  WORKBOOK_ARTIFACT_KIND,
+} from "./model"
+import {
+  createWorkbookRenderer as createRenderer,
+  preloadWorkbookPreviewEngine,
+  type PreviewTranslator,
+} from "./preview"
+
+const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
 
 function artifact(content: string): Artifact {
   return {
@@ -24,17 +36,16 @@ function artifact(content: string): Artifact {
 }
 
 function translator(
-  overrides: Record<string, string> = {}
+  overrides: Record<string, string> = {},
+  locale = "en"
 ): jest.MockedFunction<PreviewTranslator> {
   const labels: Record<string, string> = {
-    "office.preview.sheets": "Sheets",
-    "office.preview.validation": "Validation",
-    "office.preview.empty": "Empty",
-    "office.preview.corner": "Row numbers",
-    "office.preview.filtered": "Filtered",
-    "office.preview.frozen": "Frozen",
-    "office.preview.truncatedRows": "first {count} of {total} rows",
-    "office.preview.truncatedColumns": "first {count} of {total} columns",
+    ...LOCALES.en,
+    ...LOCALES[locale],
+    "preview.sheets": "Sheets",
+    "preview.empty": "Empty",
+    "preview.truncatedRows": "first {count} of {total} rows",
+    "preview.truncatedColumns": "first {count} of {total} columns",
     ...overrides,
   }
   return jest.fn((key, params) => {
@@ -44,6 +55,16 @@ function translator(
     return text
   })
 }
+
+function createWorkbookRenderer(t: PreviewTranslator, onLocaleChange = () => () => {}) {
+  return createRenderer({ t, onLocaleChange })
+}
+
+beforeAll(async () => {
+  await preloadWorkbookPreviewEngine()
+})
+
+afterEach(() => document.body.replaceChildren())
 
 it("renders sheet tabs, row and column headers, formulas, and updates in place", () => {
   const first = applyWorkbookOperations(createWorkbook("PnL", "Trades"), [
@@ -100,6 +121,102 @@ it("renders validation severity, location, and remediation", () => {
   )
   expect(container.textContent).toContain("confirming")
   handle.dispose()
+})
+
+it("localizes known unsupported-feature warnings and re-renders on a locale switch", () => {
+  const workbook = createWorkbook("Warnings", "Data")
+  workbook.unsupportedFeatures.push(UNSUPPORTED_FEATURES.pivotTables)
+  let locale = "en"
+  let onLocale: () => void = () => {}
+  const t = jest.fn((key: string) => LOCALES[locale][key] ?? key) as PreviewTranslator
+  const container = document.createElement("div")
+  createRenderer({
+    t,
+    onLocaleChange: (handler) => {
+      onLocale = handler
+      return () => {}
+    },
+  }).mount(artifact(JSON.stringify(workbook)), container)
+  expect(container.querySelector('[data-severity="warning"]')).toHaveTextContent(
+    UNSUPPORTED_FEATURES.pivotTables
+  )
+  locale = "zh-CN"
+  onLocale()
+  expect(container.querySelector('[data-severity="warning"]')).toHaveTextContent(
+    "包含数据透视表，无法编辑或无损保留。"
+  )
+  expect(container.querySelector(".copv-tabs")).toHaveAttribute("aria-label", "工作表")
+})
+
+it("names the renderer through the translator", () => {
+  expect(createWorkbookRenderer(translator()).name).toBe("Cognia Office Workbook")
+})
+
+it("shows a localized error instead of throwing on an invalid artifact", () => {
+  const container = document.createElement("div")
+  expect(() =>
+    createWorkbookRenderer(translator()).mount(artifact("{not json"), container)
+  ).not.toThrow()
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "This artifact is not a valid Cognia workbook"
+  )
+})
+
+it("moves between sheets with the arrow keys and keeps focus on the selected tab", () => {
+  const workbook = applyWorkbookOperations(createWorkbook("Keys", "One"), [
+    { op: "addSheet", title: "Two" },
+    { op: "addSheet", title: "Three" },
+  ])
+  const container = document.createElement("div")
+  document.body.appendChild(container)
+  createWorkbookRenderer(translator()).mount(artifact(JSON.stringify(workbook)), container)
+  const tabs = () => [...container.querySelectorAll<HTMLButtonElement>(".copv-tab")]
+  expect(tabs().map((tab) => tab.tabIndex)).toEqual([0, -1, -1])
+  tabs()[0].focus()
+  tabs()[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }))
+  expect(tabs()[1]).toHaveAttribute("aria-selected", "true")
+  expect(document.activeElement).toBe(tabs()[1])
+  tabs()[1].dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }))
+  expect(document.activeElement).toBe(tabs()[2])
+  tabs()[2].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }))
+  expect(document.activeElement).toBe(tabs()[0])
+  const panel = container.querySelector('[role="tabpanel"]')!
+  expect(tabs()[0].getAttribute("aria-controls")).toBe(panel.id)
+})
+
+it("keeps focus on the focused sheet tab across artifact updates", () => {
+  const workbook = applyWorkbookOperations(createWorkbook("Focus", "One"), [
+    { op: "addSheet", title: "Two" },
+  ])
+  const container = document.createElement("div")
+  document.body.appendChild(container)
+  const handle = createWorkbookRenderer(translator()).mount(
+    artifact(JSON.stringify(workbook)),
+    container
+  )
+  container.querySelectorAll<HTMLButtonElement>(".copv-tab")[1].click()
+  container.querySelectorAll<HTMLButtonElement>(".copv-tab")[1].focus()
+  const updated = applyWorkbookOperations(workbook, [
+    { op: "setCell", sheet: "Two", cell: "A1", value: { type: "string", value: "new" } },
+  ])
+  handle.update?.(artifact(JSON.stringify(updated)))
+  expect(document.activeElement).toBe(container.querySelectorAll(".copv-tab")[1])
+  const grid = container.querySelector(".copv-grid")
+  expect(grid).toHaveAttribute("tabindex", "0")
+  expect(grid).toHaveAttribute("aria-label", "Sheet Two")
+})
+
+it("ships touch-sized, focus-visible, reduced-motion-aware tab styles", () => {
+  const container = document.createElement("div")
+  createWorkbookRenderer(translator()).mount(
+    artifact(JSON.stringify(createWorkbook("Styles"))),
+    container
+  )
+  const css = container.querySelector("style")?.textContent ?? ""
+  expect(css).toContain("@media (pointer:coarse) { .copv-tab { min-height:36px; } }")
+  expect(css).toContain(".copv-tab:focus-visible")
+  expect(css).toContain("@media (hover:hover)")
+  expect(css).toContain("prefers-reduced-motion")
 })
 
 it("renders empty sheets and clamps the active tab after an update", () => {
@@ -259,4 +376,39 @@ it("caps rendering for very large workbooks and reports the truncation", () => {
   const notice = container.querySelector(".copv-limited")
   expect(notice).toHaveTextContent("first 300 of 350 rows")
   expect(notice).toHaveTextContent("first 60 of")
+})
+
+it("renders a loading line until the number-format engine arrives", async () => {
+  await jest.isolateModulesAsync(async () => {
+    const fresh = await import("./preview")
+    const container = document.createElement("div")
+    const handle = fresh
+      .createWorkbookRenderer({ t: translator(), onLocaleChange: () => () => {} })
+      .mount(artifact(JSON.stringify(createWorkbook("Lazy"))), container)
+    expect(container.querySelector('[role="status"]')).toHaveTextContent(
+      "Loading workbook preview…"
+    )
+    await fresh.preloadWorkbookPreviewEngine()
+    await Promise.resolve()
+    expect(container.querySelector(".copv-tabs")).not.toBeNull()
+    handle.dispose()
+  })
+})
+
+it("keeps the grid scroll on update but resets it for a newly selected sheet", () => {
+  const workbook = applyWorkbookOperations(createWorkbook("Scroll", "One"), [
+    { op: "setCell", sheet: "One", cell: "A1", value: { type: "string", value: "a" } },
+    { op: "addSheet", title: "Two" },
+    { op: "setCell", sheet: "Two", cell: "A1", value: { type: "string", value: "b" } },
+  ])
+  const container = document.createElement("div")
+  const handle = createWorkbookRenderer(translator()).mount(
+    artifact(JSON.stringify(workbook)),
+    container
+  )
+  container.querySelector<HTMLElement>(".copv-grid")!.scrollTop = 120
+  handle.update?.(artifact(JSON.stringify(workbook)))
+  expect(container.querySelector<HTMLElement>(".copv-grid")!.scrollTop).toBe(120)
+  container.querySelectorAll<HTMLButtonElement>(".copv-tab")[1].click()
+  expect(container.querySelector<HTMLElement>(".copv-grid")!.scrollTop).toBe(0)
 })

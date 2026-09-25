@@ -1,10 +1,12 @@
 {
   "id": "cognia-python-demo",
   "name": "Python Demo",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, and a declarative A2UI context panel.",
+  "descriptionKey": "manifest.description",
   "type": "python",
-  "capabilities": ["tools", "hooks", "context-panel"],
+  "capabilities": ["python", "hooks", "context-panel"],
   "pythonMain": "main.py",
   "contextPanels": [
     {
@@ -29,10 +31,26 @@
   "i18n": {
     "locales": {
       "en": {
-        "panel.demo": "Python demo"
+        "manifest.name": "Python Demo",
+        "manifest.description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, and a declarative A2UI context panel.",
+        "panel.demo": "Python demo",
+        "panel.title": "Python demo",
+        "panel.heading": "Python demo panel",
+        "panel.intro": "This panel is **declarative**: plugin.json names a surface and a build tool, and the host renders the A2UI components that tool pushes — no JavaScript module, no webview.",
+        "panel.outline.runtime": "Runtime",
+        "panel.outline.frames": "Frames",
+        "panel.outline.environments": "Environments"
       },
       "zh-CN": {
-        "panel.demo": "Python 示例"
+        "manifest.name": "Python 示例",
+        "manifest.description": "Python 运行时的官方参考插件：工具、流式输出、钩子、生命周期、配置，以及声明式 A2UI 上下文面板。",
+        "panel.demo": "Python 示例",
+        "panel.title": "Python 示例",
+        "panel.heading": "Python 示例面板",
+        "panel.intro": "这个面板是**声明式**的：plugin.json 声明一个 surface 和一个构建工具，宿主渲染该工具推送的 A2UI 组件——没有 JavaScript 模块，也没有 webview。",
+        "panel.outline.runtime": "运行时",
+        "panel.outline.frames": "帧",
+        "panel.outline.environments": "环境"
       }
     }
   },

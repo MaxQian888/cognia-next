@@ -290,6 +290,8 @@ describe("registerDeepResearchTool", () => {
     expect(registerTool).toHaveBeenCalledTimes(1)
     const tool = registerTool.mock.calls[0][0]
     expect(tool.name).toBe("deep_research")
+    expect(Object.hasOwn(tool, "pluginId")).toBe(false)
+    expect(tool.definition.timeoutMs).toBe(300_000)
     const out = (await tool.execute({ query: "q" }, undefined)) as { ok: boolean }
     expect(out.ok).toBe(true)
   })

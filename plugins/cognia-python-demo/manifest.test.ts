@@ -58,4 +58,50 @@ describe("cognia-python-demo manifest", () => {
     expect(manifest.i18n?.locales?.en?.[labelKey]).toBeTruthy()
     expect(manifest.i18n?.locales?.["zh-CN"]?.[labelKey]).toBeTruthy()
   })
+
+  it("ships every string main.py resolves through ctx.i18n.t in both locales", () => {
+    // `build_demo_panel` paints the surface title, the outline and the intro
+    // from these keys (PANEL_LABELS in main.py); a key missing from zh-CN is
+    // an English string in a Chinese panel.
+    const en = Object.keys(manifest.i18n?.locales?.en ?? {}).sort()
+    expect(en).toEqual(
+      expect.arrayContaining([
+        "panel.title",
+        "panel.heading",
+        "panel.intro",
+        "panel.outline.runtime",
+        "panel.outline.frames",
+        "panel.outline.environments",
+      ])
+    )
+    expect(Object.keys(manifest.i18n?.locales?.["zh-CN"] ?? {}).sort()).toEqual(en)
+  })
+
+  it("tags itself python and registers its tools by decorator", () => {
+    // The `tools` capability gates the manifest's `tools[]` field; this
+    // plugin's tools are `@tool` functions the host discovers at load.
+    expect(manifest.capabilities).toContain("python")
+    expect(manifest.capabilities).not.toContain("tools")
+    expect(manifest).not.toHaveProperty("tools")
+  })
+
+  it("pairs the optional chat-interception example with its permission", () => {
+    // main.py keeps `onMessageSend` as a clearly-marked optional example; the
+    // host aborts the whole Python load when that hook is declared without
+    // `hooks:chat-intercept`, so the two must be kept (or removed) together.
+    const source = readFileSync(join(__dirname, "main.py"), "utf8")
+    const declaresIntercept = source.includes('@hook("onMessageSend")')
+    expect(manifest.permissions?.includes("hooks:chat-intercept") ?? false).toBe(declaresIntercept)
+    if (declaresIntercept) expect(source).toContain("OPTIONAL, HIGH-RISK EXAMPLE")
+  })
+
+  it("answers only its own surfaces' actions", () => {
+    // `onA2UIAction` is a broadcast; the demo namespaces its action and
+    // filters on the manifest's surface prefix.
+    const source = readFileSync(join(__dirname, "main.py"), "utf8")
+    const prefix = (manifest.contextPanels?.[0] as { surface?: string }).surface?.split("{")[0]
+    expect(prefix).toBe("cognia-python-demo:")
+    expect(source).toContain(`SURFACE_PREFIX = "${prefix}"`)
+    expect(source).toContain('ACTION_OPEN_SECTION = "python-demo:open-section"')
+  })
 })

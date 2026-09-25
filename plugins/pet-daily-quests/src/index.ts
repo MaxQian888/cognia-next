@@ -8,20 +8,36 @@
  *    ctx.pet.onEvent (interaction kinds advance quests), registers the
  *    QuestsTab into `pet.console.tab`, and returns `{ onGoalComplete }` so
  *    the goal quest advances too (hooks are registered by RETURNING them).
- *  - Claims grant rewards via ctx.pet.emitEvent("workflowRun", …) — the host
- *    clamps against the per-plugin daily budget; the tab shows the remainder.
+ *  - Claims grant rewards via ctx.pet.emitEvent — the host clamps against the
+ *    per-plugin daily budget; the tab shows the remainder. A failed grant is
+ *    reported with a localized toast and leaves the quest claimable.
  *  - Day rollover is a lazy date-check inside the quest store — no scheduler.
+ *
+ * The desktop pet exists only in the Tauri shell, so the manifest blocks the
+ * browser, mobile and headless profiles rather than loading a quest board for
+ * a pet that is not there.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import type { PluginHooksAll } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest, type PluginHooksAll } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 import type { QuestState } from "./quest-engine"
 import { configureQuestStore, disposeQuestStore, handleQuestEvent } from "./quest-store"
-import { I18N_MESSAGES } from "./i18n"
 import { QuestsTab } from "./quests-tab"
-import manifest from "../plugin.json"
+
+/** plugin.json verbatim — including the `i18n.locales` bundle the tab reads. */
+export const manifest = definePluginManifest(manifestJson)
 
 const STORAGE_KEY = "quests"
+
+/**
+ * The pet event kind a claimed reward is emitted as. `workflowRun` is the only
+ * non-nurture kind `ctx.pet.emitEvent` accepts today, and it is not neutral:
+ * the host also counts it as a workflow run (achievements, stat growth, the
+ * proactive "a workflow just ran" line). A dedicated neutral reward kind needs
+ * a host change to the pet event vocabulary; until it lands this constant is
+ * the one place to switch.
+ */
+export const REWARD_EVENT_KIND = "workflowRun"
 
 const INTERACTION_KINDS = new Set([
   "fed",
@@ -40,43 +56,39 @@ const hooks: PluginHooksAll = {
   onGoalComplete: () => handleQuestEvent("goalComplete"),
 }
 
-const definition: PluginDefinition = {
-  // The module-side manifest overlays plugin.json via `builtinManifest()` —
-  // this is what carries the declarative i18n bundle into the host.
-  manifest: { ...(manifest as object), i18n: { locales: I18N_MESSAGES } } as never,
-  activate: async (ctx: PluginContext) => {
-    const stored = (await ctx.storage.get<QuestState>(STORAGE_KEY)) ?? undefined
-    configureQuestStore(stored, {
+export default definePlugin({
+  manifest,
+  activate: async (ctx) => {
+    configureQuestStore(await ctx.storage.get<QuestState>(STORAGE_KEY), {
       persist: (state) => ctx.storage.set(STORAGE_KEY, state),
-      reward: async (reward) =>
-        (await ctx.pet.emitEvent("workflowRun", {
+      reward: (reward) =>
+        ctx.pet.emitEvent(REWARD_EVENT_KIND, {
           xp: reward.xp,
           coins: reward.coins,
           meta: { questId: "daily" },
-        })) ?? { grantedXp: 0, grantedCoins: 0 },
+        }),
       getRemainingBudget: () => ctx.pet.getRemainingBudget(),
+      reportClaimFailure: (questId, error) => {
+        ctx.logger.warn(`Claiming the "${questId}" quest reward failed`, error)
+        ctx.ui.showToast(ctx.i18n.t("claimFailed"), "error")
+      },
     })
 
     // Direct care interactions advance quests regardless of who performed
     // them (user / another plugin / a workflow) — the pet only gets fed once.
-    disposeEvents =
-      ctx.pet.onEvent((event) => {
-        if (INTERACTION_KINDS.has(event.kind)) handleQuestEvent(event.kind)
-      }) ?? null
+    disposeEvents = ctx.pet.onEvent((event) => {
+      if (INTERACTION_KINDS.has(event.kind)) handleQuestEvent(event.kind)
+    })
 
     disposeExtension = ctx.extensions.registerExtension("pet.console.tab", QuestsTab)
 
-    ctx.logger?.info("pet-daily-quests activated")
     return hooks
   },
-  deactivate: async (ctx?: PluginContext) => {
+  deactivate: () => {
     disposeEvents?.()
     disposeEvents = null
     disposeExtension?.()
     disposeExtension = null
     disposeQuestStore()
-    ctx?.logger?.info("pet-daily-quests deactivated")
   },
-}
-
-export default definition
+})

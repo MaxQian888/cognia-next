@@ -14,7 +14,8 @@ const status: E2BConnectionStatus = { endpoint: "", kind: "cloud", apiKey: "miss
 function runtime() {
   return {
     pool: new E2BSandboxPool(),
-    ui: null,
+    ui: { showToast: jest.fn() },
+    provisioningAvailable: false,
     getConnectionStatus: () => status,
   }
 }

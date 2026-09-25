@@ -1,4 +1,8 @@
-import type { PluginTool } from "@cognia/plugin-sdk"
+import {
+  combineAbortSignals,
+  definePluginTool,
+  type PluginToolRegistration,
+} from "@cognia/plugin-sdk"
 import type {
   CreateDeliverableInput,
   ParallelWorkInput,
@@ -6,7 +10,6 @@ import type {
   UpdateDeliverableInput,
   WorkPluginContext,
 } from "./runtime"
-import { combineAbortSignals } from "@cognia/plugin-sdk"
 import { createWorkRuntime } from "./runtime"
 
 const DELIVERABLE_KINDS = ["document", "report", "spreadsheet", "presentation", "site"]
@@ -26,19 +29,30 @@ const [
   PARALLELIZE_TOOL,
 ] = WORK_TOOL_NAMES
 
+/**
+ * Per-tool budgets. A registered tool without `timeoutMs` gets 30 s; review
+ * and parallel dispatch run whole subagent turns, and a spreadsheet goes
+ * through cognia-office's workbook writer.
+ */
+export const WORK_TOOL_TIMEOUTS_MS = {
+  create: 120_000,
+  review: 300_000,
+  parallelize: 600_000,
+} as const
+
 export function createWorkTools(
   ctx: WorkPluginContext,
   lifecycleSignal?: AbortSignal
-): PluginTool[] {
+): PluginToolRegistration[] {
   const runtime = createWorkRuntime(ctx)
   return [
-    {
+    definePluginTool({
       name: CREATE_DELIVERABLE_TOOL,
-      pluginId: ctx.pluginId,
       definition: {
         name: CREATE_DELIVERABLE_TOOL,
         description:
-          "Create and open a finished knowledge-work artifact: document/report (Markdown), spreadsheet (CSV-compatible text), presentation, or site (HTML).",
+          "Create and open a finished knowledge-work artifact: document/report (Markdown), spreadsheet (a native workbook via cognia-office), presentation, or site (HTML).",
+        timeoutMs: WORK_TOOL_TIMEOUTS_MS.create,
         parametersSchema: {
           type: "object",
           properties: {
@@ -56,10 +70,9 @@ export function createWorkTools(
           ...(toolCtx.sessionId ? { sessionId: toolCtx.sessionId } : {}),
           ...(toolCtx.messageId ? { messageId: toolCtx.messageId } : {}),
         }),
-    },
-    {
+    }),
+    definePluginTool({
       name: UPDATE_DELIVERABLE_TOOL,
-      pluginId: ctx.pluginId,
       definition: {
         name: UPDATE_DELIVERABLE_TOOL,
         description:
@@ -77,14 +90,14 @@ export function createWorkTools(
         },
       },
       execute: async (args) => runtime.updateDeliverable(args as unknown as UpdateDeliverableInput),
-    },
-    {
+    }),
+    definePluginTool({
       name: REVIEW_DELIVERABLE_TOOL,
-      pluginId: ctx.pluginId,
       definition: {
         name: REVIEW_DELIVERABLE_TOOL,
         description:
-          "Run an independent reviewer subagent against explicit criteria and create a linked review artifact.",
+          "Run an independent reviewer subagent against explicit criteria and create a linked review artifact. Very large deliverables are reviewed from their start only (the result says `truncated`).",
+        timeoutMs: WORK_TOOL_TIMEOUTS_MS.review,
         parametersSchema: {
           type: "object",
           properties: {
@@ -115,14 +128,14 @@ export function createWorkTools(
           combined?.cleanup()
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: PARALLELIZE_TOOL,
-      pluginId: ctx.pluginId,
       definition: {
         name: PARALLELIZE_TOOL,
         description:
           "Run 1–4 independent research, analysis, or review tasks concurrently. Do not use for simultaneous writes to one mutable source.",
+        timeoutMs: WORK_TOOL_TIMEOUTS_MS.parallelize,
         parametersSchema: {
           type: "object",
           properties: {
@@ -157,6 +170,6 @@ export function createWorkTools(
           combined?.cleanup()
         }
       },
-    },
+    }),
   ]
 }

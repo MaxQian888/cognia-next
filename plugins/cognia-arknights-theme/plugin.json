@@ -1,8 +1,10 @@
 {
   "id": "cognia-arknights-theme",
   "name": "Arknights: Rhodes Operations (Unofficial)",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "An original, highly customizable tactical-industrial appearance pack inspired by Arknights. Includes complete light and dark palettes, generated wallpapers, density profiles, and one-click theme packs.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
@@ -33,7 +35,6 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
@@ -185,7 +186,7 @@
     },
     {
       "id": "reed-flame-shadow-field-clinic",
-      "name": "焰影苇草 · 雨夜诊所",
+      "name": "Reed the Flame Shadow · Rain-Night Clinic",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/reed-flame-shadow-field-clinic.webp",
@@ -196,7 +197,7 @@
     },
     {
       "id": "necrass-moonlit-memorial",
-      "name": "死芒 · 月下静水",
+      "name": "Necrass · Moonlit Still Water",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/necrass-moonlit-memorial.webp",
@@ -207,7 +208,7 @@
     },
     {
       "id": "exusiai-new-covenant-dawn-platform",
-      "name": "新约能天使 · 黎明站台",
+      "name": "Exusiai the New Covenant · Dawn Platform",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/exusiai-new-covenant-dawn-platform.webp",
@@ -218,7 +219,7 @@
     },
     {
       "id": "leizi-thunderbringer-storm-pavilion",
-      "name": "司霆惊蛰 · 山雨将至",
+      "name": "Leizi the Thunderbringer · Gathering Storm",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/leizi-thunderbringer-storm-pavilion.webp",
@@ -229,7 +230,7 @@
     },
     {
       "id": "wisadel-londinium-rooftop",
-      "name": "维什戴尔 · 雨后伦蒂尼姆",
+      "name": "Wiš'adel · Londinium After Rain",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/wisadel-londinium-rooftop.webp",
@@ -240,7 +241,7 @@
     },
     {
       "id": "lappland-decadenza-opera",
-      "name": "荒芜拉普兰德 · 月下歌剧院",
+      "name": "Lappland the Decadenza · Moonlit Opera",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/lappland-decadenza-opera.webp",
@@ -251,7 +252,7 @@
     },
     {
       "id": "kaltsit-esperanta-containment-hangar",
-      "name": "凯尔希·思衡托 · 收容机库",
+      "name": "Kal'tsit Esperanta · Containment Hangar",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/kaltsit-esperanta-containment-hangar.webp",
@@ -262,7 +263,7 @@
     },
     {
       "id": "hoshiguma-breacher-night-stall",
-      "name": "斩业星熊 · 龙门夜摊",
+      "name": "Hoshiguma the Breacher · Lungmen Night Stall",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/hoshiguma-breacher-night-stall.webp",
@@ -273,7 +274,7 @@
     },
     {
       "id": "yu-courtyard-kitchen",
-      "name": "余 · 灶火余温",
+      "name": "Yu · Hearth Embers",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/yu-courtyard-kitchen.webp",
@@ -284,7 +285,7 @@
     },
     {
       "id": "blaze-igniting-spark-maintenance",
-      "name": "烛煌 · 黎明检修",
+      "name": "Blaze the Igniting Spark · Dawn Maintenance",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/blaze-igniting-spark-maintenance.webp",
@@ -295,7 +296,7 @@
     },
     {
       "id": "surtr-rooftop-ice-cream",
-      "name": "史尔特尔 · 天台冰淇淋",
+      "name": "Surtr · Rooftop Ice Cream",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/surtr-rooftop-ice-cream.webp",
@@ -306,7 +307,7 @@
     },
     {
       "id": "skadi-corrupting-heart-lighthouse",
-      "name": "浊心斯卡蒂 · 灯塔夜曲",
+      "name": "Skadi the Corrupting Heart · Lighthouse Nocturne",
       "source": {
         "kind": "image",
         "relPath": "assets/operators/skadi-corrupting-heart-lighthouse.webp",
@@ -380,7 +381,7 @@
     {
       "id": "lemuen-rain-transit",
       "name": "LEMUEN // Rain Transit",
-      "description": "A quiet Laterano night scene with Lemuen, low-motion surfaces, and spacious field density for unobtrusive reading.",
+      "description": "A quiet Laterano night scene with Lemuen, restrained surfaces, and spacious field density for unobtrusive reading.",
       "preview": {
         "light": "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp",
         "dark": "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp"
@@ -389,8 +390,7 @@
         "themeId": "rhodes-operations-dark",
         "wallpaperId": "lemuen-rain-transit",
         "density": "rhodes-field",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -405,14 +405,13 @@
         "themeId": "rhodes-operations-dark",
         "wallpaperId": "surtr-rooftop-ice-cream",
         "density": "rhodes-command",
-        "radius": 0.25,
-        "motionSpeed": 0.75
+        "radius": 0.25
       }
     },
     {
       "id": "skadi-lighthouse-night",
       "name": "SKADI // Lighthouse Nocturne",
-      "description": "Deep coastal blues and restrained crimson details for a calm low-motion workspace.",
+      "description": "Deep coastal blues and restrained crimson details for a calm, quiet workspace.",
       "preview": {
         "light": "/plugins/cognia-arknights-theme/assets/operators/skadi-corrupting-heart-lighthouse.webp",
         "dark": "/plugins/cognia-arknights-theme/assets/operators/skadi-corrupting-heart-lighthouse.webp"
@@ -421,8 +420,7 @@
         "themeId": "rhodes-operations-dark",
         "wallpaperId": "skadi-corrupting-heart-lighthouse",
         "density": "rhodes-field",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -437,8 +435,7 @@
         "themeId": "rhodes-operations-dark",
         "wallpaperId": "operations-deck-dark",
         "density": "rhodes-command",
-        "radius": 0.25,
-        "motionSpeed": 1
+        "radius": 0.25
       }
     },
     {
@@ -453,33 +450,42 @@
         "themeId": "rhodes-operations-light",
         "wallpaperId": "operations-deck-light",
         "density": "rhodes-field",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
       "id": "contingency",
       "name": "CONTINGENCY // Black",
-      "description": "A zero-radius high-tempo command profile with the dark grid wallpaper and full tactical color ramp.",
+      "description": "A zero-radius command profile with the dark grid wallpaper and full tactical color ramp.",
       "applies": {
         "themeId": "rhodes-operations-dark",
         "wallpaperId": "contingency-grid",
         "density": "rhodes-command",
-        "radius": 0,
-        "motionSpeed": 1.5
+        "radius": 0
       }
     },
     {
       "id": "medical",
       "name": "MEDICAL // Quiet Shift",
-      "description": "Low-motion light surfaces with a calm briefing gradient and roomy field density.",
+      "description": "Soft light surfaces with a calm briefing gradient and roomy field density.",
       "applies": {
         "themeId": "rhodes-operations-light",
         "wallpaperId": "medical-briefing",
         "density": "rhodes-field",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Arknights: Rhodes Operations (Unofficial)",
+        "manifest.description": "An original, highly customizable tactical-industrial appearance pack inspired by Arknights. Includes complete light and dark palettes, generated wallpapers, density profiles, and one-click theme packs."
+      },
+      "zh-CN": {
+        "manifest.name": "明日方舟：罗德岛作战（非官方）",
+        "manifest.description": "受《明日方舟》启发的原创战术工业风外观包，可高度自定义：完整的浅色与深色配色、生成的壁纸、密度方案和一键主题包。"
+      }
+    }
+  }
 }

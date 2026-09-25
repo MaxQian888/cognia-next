@@ -1,8 +1,8 @@
 # AI-tool evals for cognia-web-tools. Run with `pnpm plugin:eval plugins/web-tools`.
 #
-# Offline cases (default, CI) verify the tool CONTRACT against the deterministic
-# `evals.harness.mjs`. Online cases (`--online`, run inside the app) verify that
-# the model SELECTS the right tool for a prompt.
+# Offline cases (default, CI) run the plugin's real tools against the fixture
+# host in `evals.harness.mjs` (no network). Online cases (`--online`, run inside
+# the app) verify that the model SELECTS the right tool for a prompt.
 #
 # The promoted host built-ins `web_search` / `web_fetch` are intentionally not
 # covered here — they are host tools, not this plugin's contribution.
@@ -64,3 +64,24 @@ evals:
       callsTool: web_research
       output:
         includes: '"ok":false'
+
+  - name: "web_research refuses more seed URLs than it reads"
+    prompt: "Research these eleven pages"
+    args:
+      query: "Compare these pages"
+      urls:
+        - "https://example.com/1"
+        - "https://example.com/2"
+        - "https://example.com/3"
+        - "https://example.com/4"
+        - "https://example.com/5"
+        - "https://example.com/6"
+        - "https://example.com/7"
+        - "https://example.com/8"
+        - "https://example.com/9"
+        - "https://example.com/10"
+        - "https://example.com/11"
+    expect:
+      callsTool: web_research
+      output:
+        regex: '"ok":false.*at most 10'

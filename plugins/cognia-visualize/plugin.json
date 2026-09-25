@@ -1,8 +1,10 @@
 {
   "id": "cognia-visualize",
   "name": "Cognia Visualize",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "exporters"],
   "main": "src/index.ts",
@@ -10,8 +12,72 @@
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "permissions": ["artifact:read", "artifact:write", "filesystem:write"],
+  "permissions": ["artifact:read", "artifact:write", "filesystem:write", "export:session"],
   "activationEvents": ["startup"],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Cognia Visualize",
+        "manifest.description": "Plugin-owned accessible visualization routing, authoring, validation, responsive preview, and export.",
+        "renderer.name": "Cognia Visualization",
+        "preview.data": "Data",
+        "preview.validation": "Validation",
+        "preview.meta": "{count} data points",
+        "preview.parseError": "This artifact is not a valid Cognia visualization: {error}",
+        "preview.col.label": "Label",
+        "preview.col.value": "Value",
+        "preview.col.group": "Group",
+        "preview.col.source": "Source",
+        "preview.col.target": "Target",
+        "preview.col.start": "Start",
+        "preview.col.end": "End",
+        "preview.col.x": "X",
+        "preview.col.y": "Y",
+        "exporter.name": "Visualization report",
+        "exporter.description": "Export every visualization in this session as one standalone HTML report.",
+        "report.title": "Visualization report",
+        "report.empty": "This session contains no Cognia visualizations.",
+        "summary.default": "{title}: {count} data points.",
+        "history.update": "Update visualization",
+        "finding.data.empty": "Visualization requires at least one data point.",
+        "finding.data.label": "Data point {index} requires a label.",
+        "finding.data.value": "Data point {index} has a non-finite value.",
+        "finding.a11y.summary": "An accessibility summary is required.",
+        "finding.graph.edge": "{profile} data points require source and target.",
+        "finding.time.start": "{profile} data points require start dates."
+      },
+      "zh-CN": {
+        "manifest.name": "Cognia 可视化",
+        "manifest.description": "插件自带的无障碍可视化推荐、创作、校验、响应式预览与导出。",
+        "renderer.name": "Cognia 可视化",
+        "preview.data": "数据",
+        "preview.validation": "校验",
+        "preview.meta": "{count} 个数据点",
+        "preview.parseError": "此 artifact 不是有效的 Cognia 可视化：{error}",
+        "preview.col.label": "标签",
+        "preview.col.value": "值",
+        "preview.col.group": "分组",
+        "preview.col.source": "来源",
+        "preview.col.target": "目标",
+        "preview.col.start": "开始",
+        "preview.col.end": "结束",
+        "preview.col.x": "X",
+        "preview.col.y": "Y",
+        "exporter.name": "可视化报告",
+        "exporter.description": "将会话中的全部可视化导出为一份独立的 HTML 报告。",
+        "report.title": "可视化报告",
+        "report.empty": "此会话中没有 Cognia 可视化。",
+        "summary.default": "{title}：{count} 个数据点。",
+        "history.update": "更新可视化",
+        "finding.data.empty": "可视化至少需要一个数据点。",
+        "finding.data.label": "第 {index} 个数据点缺少标签。",
+        "finding.data.value": "第 {index} 个数据点的值不是有限数字。",
+        "finding.a11y.summary": "需要提供无障碍摘要。",
+        "finding.graph.edge": "{profile} 的数据点需要 source 和 target。",
+        "finding.time.start": "{profile} 的数据点需要开始日期。"
+      }
+    }
+  },
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
@@ -21,9 +87,9 @@
       "reason": "Authoring, validation, listing, and JSON export are available; the artifact preview panel and file save pickers require a UI shell."
     },
     "mobile": {
-      "availability": "degraded",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
-      "reason": "Authoring, preview, and report export are available; native save dialogs depend on the connected shell."
+      "reason": "Authoring and the preview (with a phone-width chart layout) work on mobile; SVG/HTML/JSON and session-report exports are saved to Documents/cognia/exports on the device."
     }
   }
 }

@@ -1,8 +1,10 @@
 {
   "id": "cognia-ocr",
   "name": "OCR",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Extract text and structured Markdown from any image or PDF. Wraps the cognia-next OCR subsystem (ADR-0024) and exposes it as an agent tool plus a /ocr slash command.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "commands"],
   "main": "src/index.ts",
@@ -17,21 +19,25 @@
     "database:write",
     "native:filesystem",
     "automation:screenshot",
-    "native:screen"
+    "native:screen",
+    "session:write",
+    "extension:ui"
   ],
   "activationEvents": ["startup", "onCommand:ocr"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Images passed inline (data URLs) are recognized with the browser-capable and cloud providers; reading a file by path and screen OCR need the desktop app and return an error here."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     },
     "mobile": {
-      "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Images passed inline (data URLs) are recognized with the cloud and on-device web providers; reading a file by path and screen OCR need the desktop app and return an error here."
     }
   },
   "commands": [
@@ -39,7 +45,52 @@
       "id": "ocr",
       "name": "/ocr",
       "description": "Extract text from an image or PDF.",
+      "descriptionKey": "commands.ocr.description",
       "icon": "ScanText"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "OCR",
+        "manifest.description": "Extract text and structured Markdown from any image or PDF. Wraps the cognia-next OCR subsystem (ADR-0024) and exposes it as an agent tool plus a /ocr slash command.",
+        "command.notReady": "OCR is not ready yet — no recognition provider is available. Check Settings → OCR.",
+        "command.failed": "OCR could not read that source.",
+        "command.done": "Text recognized with {provider}.",
+        "command.notAttached": "There is no open chat to show the result card in. Recognized text:",
+        "card.title": "Text recognized",
+        "card.thumbnailAlt": "Source image",
+        "card.noText": "No text recognized.",
+        "card.provider": "Provider: {id}",
+        "card.languages": "Languages: {langs}",
+        "card.confidence": "Confidence: {pct}%",
+        "card.cached": "Cached",
+        "card.duration": "{ms} ms",
+        "card.copy": "Copy text",
+        "card.copied": "Copied",
+        "card.askAbout": "Ask about this",
+        "commands.ocr.description": "Extract text from an image or PDF."
+      },
+      "zh-CN": {
+        "manifest.name": "文字识别",
+        "manifest.description": "从任意图片或 PDF 中提取文字与结构化 Markdown。封装 cognia-next 的 OCR 子系统（ADR-0024），以 Agent 工具和 /ocr 命令提供。",
+        "command.notReady": "OCR 尚未就绪——没有可用的识别引擎。请检查“设置 → OCR”。",
+        "command.failed": "OCR 无法读取该来源。",
+        "command.done": "已使用 {provider} 识别文本。",
+        "command.notAttached": "当前没有打开的会话可显示结果卡片。识别出的文本：",
+        "card.title": "已识别文本",
+        "card.thumbnailAlt": "源图像",
+        "card.noText": "未识别到文本。",
+        "card.provider": "识别引擎：{id}",
+        "card.languages": "语言：{langs}",
+        "card.confidence": "置信度：{pct}%",
+        "card.cached": "缓存命中",
+        "card.duration": "{ms} 毫秒",
+        "card.copy": "复制文本",
+        "card.copied": "已复制",
+        "card.askAbout": "追问此内容",
+        "commands.ocr.description": "从图片或 PDF 中提取文字。"
+      }
+    }
+  }
 }

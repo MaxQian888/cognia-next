@@ -59,6 +59,7 @@ export async function markInterruptedRuns(
     status: "cancelled" as const,
     endedAt: input.cutoff,
     error: input.error,
+    errorCode: "interrupted" as const,
   }))
   await runsTable(dexie).bulkPut(reconciled)
   return reconciled

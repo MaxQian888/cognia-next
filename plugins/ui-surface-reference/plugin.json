@@ -1,8 +1,10 @@
 {
   "id": "ui-surface-reference",
   "name": "UI Surface Reference",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Reference plugin exercising every supported Cognia plugin UI surface.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "author": { "name": "cognia-next" },
   "license": "MIT",
@@ -198,6 +200,8 @@
   "i18n": {
     "locales": {
       "en": {
+        "manifest.name": "UI Surface Reference",
+        "manifest.description": "Reference plugin exercising every supported Cognia plugin UI surface.",
         "surfaces.composerAction": "Composer action",
         "surfaces.composerMenu": "Composer menu",
         "surfaces.contextPanel": "Context panel",
@@ -220,6 +224,8 @@
         "surfaces.config": "Configuration"
       },
       "zh-CN": {
+        "manifest.name": "UI 界面参考",
+        "manifest.description": "演示所有受支持的 Cognia 插件 UI 界面的参考插件。",
         "surfaces.composerAction": "输入操作",
         "surfaces.composerMenu": "输入菜单",
         "surfaces.contextPanel": "上下文面板",

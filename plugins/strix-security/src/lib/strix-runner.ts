@@ -86,6 +86,8 @@ export async function runScan(opts: ScanOptions, deps: RunScanDeps): Promise<Str
         endedAt: deps.now(),
         exitCode: setup,
         error: `Could not prepare the scan directory (exit ${setup}).`,
+        errorCode: "setupFailed",
+        errorParams: { exit: setup },
       })
       return run
     }
@@ -124,6 +126,8 @@ export async function runScan(opts: ScanOptions, deps: RunScanDeps): Promise<Str
         : errored
           ? `Strix reported an error (exit ${exitCode}).`
           : undefined,
+      errorCode: unreadable ? "reportUnreadable" : errored ? "strixError" : undefined,
+      errorParams: unreadable ? { detail: vulns.detail } : errored ? { exit: exitCode } : undefined,
     })
     return run
   } catch (err) {
@@ -131,10 +135,13 @@ export async function runScan(opts: ScanOptions, deps: RunScanDeps): Promise<Str
       await update({ status: "cancelled", endedAt: deps.now() })
       return run
     }
+    const message = err instanceof Error ? err.message : String(err)
     await update({
       status: "error",
       endedAt: deps.now(),
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
+      errorCode: "exception",
+      errorParams: { message },
     })
     return run
   } finally {

@@ -4,13 +4,20 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import type { SreRuntime } from "../runtime"
 import { createIncident, type SreIncident, type SreIncidentStatus } from "../incident/model"
 import { groupIncidents, IncidentList } from "./incident-list"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
 
-const RUNTIME = { sources: async () => [] } as unknown as SreRuntime
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
+
+function runtime(demo = true): SreRuntime {
+  return {
+    sources: async () => [],
+    provider: () => ({ id: "demo", kind: demo ? "fixture" : "remote", demo, coverage: null }),
+  } as Partial<SreRuntime> as SreRuntime
+}
 
 function incident(id: string, status: SreIncidentStatus, title = id): SreIncident {
   return {
@@ -32,11 +39,11 @@ function renderList(
 ) {
   const props = {
     incidents,
-    runtime: RUNTIME,
+    runtime: runtime(),
     canCreate: true,
     onOpen: jest.fn(),
-    onCreate: jest.fn(),
-    onCreateFromAlert: jest.fn(),
+    onNew: jest.fn(),
+    onOpenDemo: jest.fn(),
     ...overrides,
   }
   render(<IncidentList {...props} />)
@@ -65,8 +72,42 @@ describe("IncidentList", () => {
     await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
     await userEvent.click(screen.getByTestId("sre-create-incident"))
     await userEvent.click(screen.getByTestId("sre-create-from-alert"))
-    expect(props.onCreate).toHaveBeenCalledTimes(1)
-    expect(props.onCreateFromAlert).toHaveBeenCalledTimes(1)
+    expect(props.onNew).toHaveBeenCalledTimes(1)
+    expect(props.onOpenDemo).toHaveBeenCalledTimes(1)
+    // The one-click path is the demo walk-through, and says so.
+    expect(screen.getByTestId("sre-create-from-alert")).toHaveTextContent("Open the demo incident")
+  })
+
+  it("offers no demo incident when a live backend answers", async () => {
+    renderList([], { runtime: runtime(false) })
+    await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
+    expect(screen.queryByTestId("sre-create-from-alert")).not.toBeInTheDocument()
+  })
+
+  it("keeps 'New incident' reachable once incidents exist", async () => {
+    const props = renderList([incident("a", "investigating")])
+    await userEvent.click(screen.getByTestId("sre-new-incident"))
+    expect(props.onNew).toHaveBeenCalledTimes(1)
+  })
+
+  it("names severity in words and an icon, not colour alone", () => {
+    renderList([{ ...incident("a", "investigating"), severity: "critical" }])
+    const severity = screen.getByTestId("sre-severity")
+    expect(severity).toHaveTextContent("critical")
+    expect(severity.querySelector("svg")).not.toBeNull()
+  })
+
+  it("shows the whole title instead of truncating it", () => {
+    const title = "gateway upstream timeout after the 12:02 deploy of the router config"
+    renderList([incident("a", "investigating", title)])
+    const row = screen.getByTestId("sre-incident-row")
+    expect(row).toHaveTextContent(title)
+    expect(row.querySelector(".truncate")).toBeNull()
+  })
+
+  it("tags the demo incident", () => {
+    renderList([{ ...incident("a", "investigating"), demo: true }])
+    expect(screen.getByTestId("sre-incident-demo-tag")).toHaveTextContent("Demo corpus")
   })
 
   it("disables session-scoped creation when there is no session in front", async () => {
@@ -74,6 +115,11 @@ describe("IncidentList", () => {
     await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
     expect(screen.getByTestId("sre-create-incident")).toBeDisabled()
     expect(screen.getByTestId("sre-create-from-alert")).toBeEnabled()
+    expect(
+      screen.getByText(
+        "Open a conversation first — an incident belongs to the session it was opened from."
+      )
+    ).toBeInTheDocument()
   })
 
   it("counts every group in the filter row, not just the visible one", () => {

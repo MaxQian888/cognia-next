@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 
-import definition from "./index"
+import { createTestPluginContext } from "@cognia/plugin-sdk/testing"
+
+import definition, { manifest as moduleManifest } from "./index"
 import manifest from "../plugin.json"
 
 const pluginRoot = resolve(__dirname, "..")
@@ -113,14 +115,31 @@ describe("cognia-rfc-toolkit plugin", () => {
     ).toBe(true)
   })
 
-  it("logs activation and deactivation without registering privileged runtime behavior", async () => {
-    const info = jest.fn()
-    const context = { logger: { info } }
+  it("adopts plugin.json verbatim and registers nothing imperatively", async () => {
+    expect(moduleManifest).toBe(manifest)
+    const { ctx, calls } = createTestPluginContext({ pluginId: manifest.id })
+    await definition.activate(ctx)
+    expect(calls).toEqual([])
+    expect(definition.deactivate).toBeUndefined()
+  })
 
-    await definition.activate?.(context as never)
-    await definition.deactivate?.(context as never)
+  it("is installable: main is the CLI build output, never the TypeScript source", () => {
+    // The desktop loader evaluates `main` as CommonJS, and `cognia plugin
+    // build` writes its esbuild output to `main` — pointing it at
+    // src/index.ts made the build refuse to overwrite its own input.
+    expect(manifest.main).toBe("dist/index.js")
+    expect(manifest.runtimeCompatibility.tauri.entrypoint).toBe("dist/index.js")
+    expect(manifest.bundle_include).not.toContain("src/index.ts")
+    const readme = readFileSync(join(pluginRoot, "README.md"), "utf8")
+    expect(readme).toContain("cognia plugin build --path plugins/cognia-rfc-toolkit")
+    expect(readme).toContain("cognia plugin install")
+  })
 
-    expect(info).toHaveBeenNthCalledWith(1, "cognia-rfc-toolkit activated")
-    expect(info).toHaveBeenNthCalledWith(2, "cognia-rfc-toolkit deactivated")
+  it("gives every skill a namespaced id, a slug, and a user-facing name", () => {
+    for (const skill of manifest.skills) {
+      expect(skill.id).toBe(`cognia-rfc-toolkit:${skill.slug}`)
+      expect(skill.name).not.toBe(skill.slug)
+      expect(skill.description.length).toBeGreaterThan(40)
+    }
   })
 })

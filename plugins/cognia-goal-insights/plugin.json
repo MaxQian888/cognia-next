@@ -1,8 +1,10 @@
 {
   "id": "cognia-goal-insights",
-  "name": "Goal Insights",
+  "name": "Goal Insights (example)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Reference plugin exercising the goal lifecycle hooks: records a redacted summary each time a goal is created or reaches a terminal status.",
+  "description": "Example plugin (opt-in) for plugin authors: shows how to receive goal lifecycle hooks. It adds no UI — each goal created or finished is written as one redacted line to this plugin's log (Plugins → Goal Insights → Logs).",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["hooks"],
   "main": "src/index.ts",
@@ -12,10 +14,30 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Goal Insights (example)",
+        "manifest.description": "Example plugin (opt-in) for plugin authors: shows how to receive goal lifecycle hooks. It adds no UI — each goal created or finished is written as one redacted line to this plugin's log (Plugins → Goal Insights → Logs)."
+      },
+      "zh-CN": {
+        "manifest.name": "目标洞察（示例）",
+        "manifest.description": "面向插件作者的示例插件（需手动开启）：演示如何接收目标生命周期钩子。它不添加界面——每个目标的创建或完成都会以一行脱敏记录写入本插件日志（插件 → 目标洞察 → 日志）。"
+      }
+    }
   }
 }

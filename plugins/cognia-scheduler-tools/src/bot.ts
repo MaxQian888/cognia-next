@@ -83,17 +83,25 @@ export function buildScheduleDigest(
   }
 }
 
-/** One line for the run list. Plain text, because that is what a summary is. */
-export function describeScheduleDigest(digest: ScheduleDigest): string {
-  const parts = [`${digest.active} active of ${digest.total}`]
-  if (digest.paused > 0) parts.push(`${digest.paused} paused`)
-  if (digest.failing.length > 0) parts.push(`${digest.failing.length} failing`)
-  if (digest.stale.length > 0) parts.push(`${digest.stale.length} stale`)
-  return parts.join(", ")
+/** The plugin's `ctx.i18n.t`: keys live in plugin.json `i18n.locales`. */
+export type DigestTranslate = (key: string, params?: Record<string, string | number>) => string
+
+/**
+ * One line for the run list, in the user's language. Plain text, because that
+ * is what a summary is.
+ */
+export function describeScheduleDigest(digest: ScheduleDigest, t: DigestTranslate): string {
+  const parts = [t("digest.active", { active: digest.active, total: digest.total })]
+  if (digest.paused > 0) parts.push(t("digest.paused", { count: digest.paused }))
+  if (digest.failing.length > 0) parts.push(t("digest.failing", { count: digest.failing.length }))
+  if (digest.stale.length > 0) parts.push(t("digest.stale", { count: digest.stale.length }))
+  return parts.join(t("digest.separator"))
 }
 
 export interface ScheduleDigestDeps {
   listTasks: () => Promise<ScheduledTask[]>
+  /** Resolves the digest's user-facing text at run time, in the current locale. */
+  t: DigestTranslate
   now?: () => number
 }
 
@@ -117,12 +125,12 @@ export function createScheduleDigestBot(deps: ScheduleDigestDeps): BotHandlerV1 
       return buildScheduleDigest(tasks, (deps.now ?? Date.now)(), staleAfterDays)
     })
 
-    ctx.progress({ fraction: 1, message: "Schedule read" })
+    ctx.progress({ fraction: 1, message: deps.t("digest.progress") })
     if (digest.failing.length > 0) {
       ctx.log("warn", "scheduled tasks are failing", { names: digest.failing })
     }
 
-    return { summary: describeScheduleDigest(digest), output: digest }
+    return { summary: describeScheduleDigest(digest, deps.t), output: digest }
   })
 }
 

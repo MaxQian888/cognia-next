@@ -1,8 +1,10 @@
 {
   "id": "cognia-skill-recorder",
   "name": "Skill Recorder",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Record a desktop workflow and turn it into a generated Skill (record-and-replay). Captures clicks / typing / scrolls plus the on-screen elements, then an LLM drafts a reusable SKILL.md you review and save.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["commands", "tools"],
   "main": "src/index.ts",
@@ -17,7 +19,7 @@
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Recording needs a native global input hook + screen capture (record_* Tauri commands) \u2014 desktop only."
+      "reason": "Recording needs a native global input hook + screen capture (record_* Tauri commands) — desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -26,7 +28,7 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Needs a native global input hook + screen capture \u2014 unavailable on mobile."
+      "reason": "Needs a native global input hook + screen capture — unavailable on mobile."
     }
   },
   "commands": [
@@ -34,7 +36,26 @@
       "id": "record-skill",
       "name": "/record-skill",
       "description": "Record a desktop workflow and turn it into a generated Skill.",
+      "descriptionKey": "commands.record-skill.description",
       "icon": "Video"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Skill Recorder",
+        "manifest.description": "Record a desktop workflow and turn it into a generated Skill (record-and-replay). Captures clicks / typing / scrolls plus the on-screen elements, then an LLM drafts a reusable SKILL.md you review and save.",
+        "command.opened": "Opened the skill recorder. Use its floating controller to start recording.",
+        "command.openFailed": "Could not open the skill recorder: {error}",
+        "commands.record-skill.description": "Record a desktop workflow and turn it into a generated Skill."
+      },
+      "zh-CN": {
+        "manifest.name": "技能录制器",
+        "manifest.description": "录制一段桌面操作流程并生成技能（录制与回放）。捕获点击、输入、滚动及屏幕元素，再由大模型起草可复用的 SKILL.md，供你审阅保存。",
+        "command.opened": "已打开技能录制器，请使用悬浮控制条开始录制。",
+        "command.openFailed": "无法打开技能录制器：{error}",
+        "commands.record-skill.description": "录制桌面操作流程，并生成一个技能。"
+      }
+    }
+  }
 }

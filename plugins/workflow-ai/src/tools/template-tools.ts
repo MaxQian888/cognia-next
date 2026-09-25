@@ -18,13 +18,12 @@
  * never mutates the editor store directly.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 import type { CopilotSlotValues } from "@cognia/plugin-sdk/api/workflow-editor"
 import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
 import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -125,11 +124,10 @@ function shortId(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
-export function buildTemplateTools(): PluginTool[] {
+export function buildTemplateTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_list_templates",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_templates",
         description:
@@ -164,10 +162,9 @@ export function buildTemplateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_apply_template",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_apply_template",
         description:
@@ -251,6 +248,6 @@ export function buildTemplateTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

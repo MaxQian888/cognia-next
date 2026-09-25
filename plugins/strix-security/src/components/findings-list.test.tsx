@@ -4,12 +4,16 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { FindingsList } from "./findings-list"
-import { I18N_MESSAGES } from "../i18n"
+import { EN_MESSAGES, ZH_MESSAGES } from "../i18n.test-helpers"
+
+const I18N_MESSAGES = { en: EN_MESSAGES, "zh-CN": ZH_MESSAGES }
 import { FINDING_STATES, SEVERITY_ORDER } from "../types"
 import type { FindingStateRow, StrixFinding, SuppressionRule } from "../types"
+import { registerStrixBundle, unregisterStrixBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 function finding(over: Partial<StrixFinding> = {}): StrixFinding {
   return {
@@ -186,26 +190,26 @@ describe("triage translation keys", () => {
     // a missing entry would render the raw identifier `false-positive` to the
     // user. FINDING_STATES is the closed set the select renders from.
     for (const locale of ["en", "zh-CN"] as const) {
-      const messages = I18N_MESSAGES[locale] as Record<string, string>
+      const messages = I18N_MESSAGES[locale]
       for (const state of FINDING_STATES) {
-        expect([
+        expect([locale, state, typeof messages[`triage.state.${state}`]]).toEqual([
           locale,
           state,
-          typeof messages[`plugin.strix-security.triage.state.${state}`],
-        ]).toEqual([locale, state, "string"])
+          "string",
+        ])
       }
     }
   })
 
   it("carries every severity label in both locales", () => {
     for (const locale of ["en", "zh-CN"] as const) {
-      const messages = I18N_MESSAGES[locale] as Record<string, string>
+      const messages = I18N_MESSAGES[locale]
       for (const severity of SEVERITY_ORDER) {
-        expect([
+        expect([locale, severity, typeof messages[`severity.${severity}`]]).toEqual([
           locale,
           severity,
-          typeof messages[`plugin.strix-security.severity.${severity}`],
-        ]).toEqual([locale, severity, "string"])
+          "string",
+        ])
       }
     }
   })
@@ -220,13 +224,9 @@ describe("triage translation keys", () => {
       "export.sarif",
     ]
     for (const locale of ["en", "zh-CN"] as const) {
-      const messages = I18N_MESSAGES[locale] as Record<string, string>
+      const messages = I18N_MESSAGES[locale]
       for (const key of keys) {
-        expect([locale, key, typeof messages[`plugin.strix-security.${key}`]]).toEqual([
-          locale,
-          key,
-          "string",
-        ])
+        expect([locale, key, typeof messages[key]]).toEqual([locale, key, "string"])
       }
     }
   })

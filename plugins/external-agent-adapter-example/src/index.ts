@@ -16,14 +16,17 @@
  *
  * Registration is fully declarative — the plugin manager's capability dispatch
  * loops read the manifest arrays, so no imperative activate() wiring is needed.
+ *
+ * Installable, not bundled into the app: `node build.mjs` emits CommonJS
+ * `dist/index.js` (the manifest `main`) and `dist/demo-adapter.js` (the
+ * adapter `entry`) plus an install ZIP, with the SDK left to the host.
  */
 
-import type { ExternalAgentProtocol } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import type {
-  PluginDefinition,
+  ExternalAgentProtocol,
   PluginExternalAgentAdapterDef,
   PluginExternalAgentPresetDef,
-  PluginManifest,
 } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
@@ -37,14 +40,18 @@ const demoAdapter: PluginExternalAgentAdapterDef = {
   id: ADAPTER_ID,
   label: "Demo Echo Protocol",
   description: "A reference external-agent protocol adapter (echo, no subprocess).",
-  entry: "src/demo-adapter.ts",
+  // The installed bundle `build.mjs` emits from `src/demo-adapter.ts`; the
+  // host imports it separately on enable.
+  entry: "dist/demo-adapter.js",
   export: "createDemoEchoAdapter",
 }
 
 /**
  * Preset that drives the contributed adapter. `protocol` references the
- * namespaced adapter id — a plugin's own protocol falls outside the closed
- * `ExternalAgentProtocol` union, so the cast is expected for plugin presets.
+ * namespaced adapter id. The SDK still types `protocol` as the closed
+ * `ExternalAgentProtocol` union of built-ins, so a plugin's own
+ * `${pluginId}:${adapterId}` needs this narrowing cast until the SDK widens it
+ * to a template type.
  */
 const demoPreset: PluginExternalAgentPresetDef = {
   id: "demo-echo-agent",
@@ -71,7 +78,7 @@ const demoPreset: PluginExternalAgentPresetDef = {
  * `demoAdapter` / `demoPreset` below are kept as TYPED mirrors of the JSON so
  * a change to either shape still fails the build.
  */
-export const manifest = manifestJson as unknown as PluginManifest
+export const manifest = definePluginManifest(manifestJson)
 
 /**
  * Typed mirrors of the two plugin.json entries. Exported so the co-located
@@ -84,10 +91,8 @@ export const TYPED_CONTRIBUTIONS = {
   preset: demoPreset,
 } as const
 
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   // Declarative registration (manifest arrays are dispatched by the manager).
   activate: async () => {},
-}
-
-export default definition
+})

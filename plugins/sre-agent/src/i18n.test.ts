@@ -1,41 +1,46 @@
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { I18N_MESSAGES } from "./i18n"
-import { PLUGIN_ID } from "./ids"
+import manifestJson from "../plugin.json"
 
-const PREFIX = `plugin.${PLUGIN_ID}.`
 const SRC = join(__dirname)
+const en: Record<string, string> = manifestJson.i18n.locales.en
+const zh: Record<string, string> = manifestJson.i18n.locales["zh-CN"]
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) return walk(full)
-    return entry.isFile() && /\.tsx?$/.test(entry.name) && !entry.name.includes(".test.")
+    return entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.test(-helpers)?\./.test(entry.name)
       ? [full]
       : []
   })
 }
 
-describe("plugin i18n bundle", () => {
-  const en = Object.keys(I18N_MESSAGES.en)
-  const zh = Object.keys(I18N_MESSAGES["zh-CN"])
-
-  it("keys every string under this plugin's namespace", () => {
-    expect(en.every((key) => key.startsWith(PREFIX))).toBe(true)
+describe("plugin i18n bundle (plugin.json)", () => {
+  it("uses flat keys — the manager adds the plugin.sre-agent. prefix", () => {
+    expect(Object.keys(en).every((key) => !key.startsWith("plugin."))).toBe(true)
   })
 
   it("holds the same key set in both locales", () => {
-    expect([...en].sort()).toEqual([...zh].sort())
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
   })
 
   it("leaves no string untranslated", () => {
-    // Both sides are widened to `string` on purpose: the bundle is `as const`,
-    // so TypeScript proves the two literal unions cannot overlap and rejects
-    // the comparison outright — which would make this assertion unwritable
-    // even though it is exactly the runtime drift worth catching.
-    const zhBundle = I18N_MESSAGES["zh-CN"] as Record<string, string>
-    const enBundle = I18N_MESSAGES.en as Record<string, string>
-    expect(en.filter((key) => zhBundle[key] === enBundle[key])).toEqual([])
+    // `detail.windowRange` is pure interpolation, identical in every language.
+    const identical = Object.keys(en).filter(
+      (key) => zh[key] === en[key] && key !== "detail.windowRange"
+    )
+    expect(identical).toEqual([])
+  })
+
+  it("keeps every placeholder in both locales", () => {
+    const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+    for (const key of Object.keys(en)) {
+      expect({ key, placeholders: placeholders(zh[key]) }).toEqual({
+        key,
+        placeholders: placeholders(en[key]),
+      })
+    }
   })
 
   /**
@@ -44,6 +49,21 @@ describe("plugin i18n bundle", () => {
    * template-built key family the panel uses is enumerated here instead.
    */
   it("carries every key the panel builds at runtime", () => {
+    const validationCodes = [
+      "timeline.empty",
+      "row.invalid",
+      "row.evidence_missing",
+      "row.confidence_invalid",
+      "row.evidence_unknown",
+      "row.source_uncited",
+      "row.metrics_only_event",
+      "row.component_unsupported",
+      "row.claim_unsupported",
+      "row.event_unsupported",
+      "row.sensitive_text",
+      "finding.evidence_unknown",
+      "finding.sensitive_text",
+    ]
     const dynamic = [
       ...["scope", "evidence", "attribution", "conclusion"].map((p) => `phase.${p}`),
       ...["investigating", "unconfirmed", "resolved", "dismissed"].map((s) => `status.${s}`),
@@ -53,9 +73,17 @@ describe("plugin i18n bundle", () => {
       ...["timeline.empty", "validation.missing", "validation.failed", "status.closed"].map(
         (b) => `conclusion.blocked.${b}`
       ),
+      ...validationCodes.map((code) => `validation.${code}`),
+      ...["error.save", "error.delete", "error.pin", "error.validate"],
     ]
-    const missing = dynamic.filter((key) => !en.includes(`${PREFIX}${key}`))
-    expect(missing).toEqual([])
+    expect(dynamic.filter((key) => !(key in en))).toEqual([])
+  })
+
+  it("translates every code the validator can emit", () => {
+    const validator = readFileSync(join(SRC, "validator.ts"), "utf8")
+    const codes = [...validator.matchAll(/issue\(\s*"([^"]+)"/g)].map((match) => match[1])
+    expect(codes.length).toBeGreaterThan(10)
+    expect(codes.filter((code) => !(`validation.${code}` in en))).toEqual([])
   })
 
   it("carries every literal key the source actually asks for", () => {
@@ -67,25 +95,26 @@ describe("plugin i18n bundle", () => {
       for (const match of source.matchAll(/\bt\(\s*"([^"$]+)"/g)) used.add(match[1])
     }
     expect(used.size).toBeGreaterThan(20)
-    const missing = [...used].filter((key) => !en.includes(`${PREFIX}${key}`))
-    expect(missing).toEqual([])
+    expect([...used].filter((key) => !(key in en))).toEqual([])
   })
 
   it("declares no key nothing reads", () => {
-    const files = walk(SRC)
-    const source = files.map((file) => readFileSync(file, "utf8")).join("\n")
-    const orphans = en
-      .map((key) => key.slice(PREFIX.length))
-      .filter((key) => {
-        if (source.includes(`"${key}"`)) return false
-        // Template-built families: `phase.scope` is reached as `phase.${phase}`,
-        // and `conclusion.blocked.timeline.empty` as `conclusion.blocked.${b}` —
-        // so every prefix has to be tried, not just the longest one.
-        const segments = key.split(".")
-        return !segments.some((_segment, index) =>
-          source.includes(`${segments.slice(0, index + 1).join(".")}.$`)
-        )
-      })
+    const source = walk(SRC)
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n")
+    // The manifest's own nameKey / descriptionKey read their keys too.
+    const manifestKeys = new Set([manifestJson.nameKey, manifestJson.descriptionKey])
+    const orphans = Object.keys(en).filter((key) => {
+      if (manifestKeys.has(key)) return false
+      if (source.includes(`"${key}"`)) return false
+      // Template-built families: `phase.scope` is reached as `phase.${phase}`,
+      // and `validation.row.evidence_unknown` as `validation.${issue.code}` —
+      // so every prefix has to be tried, not just the longest one.
+      const segments = key.split(".")
+      return !segments.some((_segment, index) =>
+        source.includes(`${segments.slice(0, index + 1).join(".")}.$`)
+      )
+    })
     expect(orphans).toEqual([])
   })
 })

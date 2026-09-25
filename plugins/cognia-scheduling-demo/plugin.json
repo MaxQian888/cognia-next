@@ -1,8 +1,10 @@
 {
   "id": "cognia-scheduling-demo",
-  "name": "Scheduling Demo",
+  "name": "Scheduling Demo (example)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Reference plugin exercising the scheduledTasks contribution: a benign daily task whose handler logs a heartbeat.",
+  "description": "Example plugin (opt-in): a benign, paused-by-default daily task whose handler logs a heartbeat, showing the scheduledTasks contribution. Enabling it adds one example row to the scheduler; disabling removes it.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["scheduler"],
   "main": "src/index.ts",
@@ -12,20 +14,43 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
   },
   "scheduledTasks": [
     {
-      "name": "demo-heartbeat",
-      "description": "Logs a heartbeat once a day — demonstrates a plugin-contributed scheduled task.",
+      "name": "Heartbeat (example)",
+      "description": "Example task: logs a heartbeat once a day to show a plugin-contributed scheduled task. Paused until you resume it.",
       "handler": "demoHeartbeat",
-      "trigger": { "type": "interval", "seconds": 86400 },
+      "trigger": {
+        "type": "interval",
+        "seconds": 86400
+      },
       "defaultEnabled": false,
-      "tags": ["demo"]
+      "tags": ["example"]
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Scheduling Demo (example)",
+        "manifest.description": "Example plugin (opt-in): a benign, paused-by-default daily task whose handler logs a heartbeat, showing the scheduledTasks contribution. Enabling it adds one example row to the scheduler; disabling removes it."
+      },
+      "zh-CN": {
+        "manifest.name": "定时任务示例（示例）",
+        "manifest.description": "示例插件（需手动开启）：一个默认暂停的无害每日任务，其处理函数只记录一次心跳，用于演示 scheduledTasks 贡献。启用后会在调度器中添加一条示例任务，停用即移除。"
+      }
+    }
+  }
 }

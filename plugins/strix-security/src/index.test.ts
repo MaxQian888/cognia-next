@@ -7,7 +7,8 @@ jest.mock("./runtime", () => ({
 }))
 jest.mock("./db", () => ({ markInterruptedRuns: jest.fn().mockResolvedValue([]) }))
 
-import definition from "./index"
+import definition, { manifest } from "./index"
+import manifestJson from "../plugin.json"
 import { markInterruptedRuns } from "./db"
 import { abortActiveScan, clearStrixRuntime, setPendingTarget, setStrixRuntime } from "./runtime"
 import type { PluginContext } from "@cognia/plugin-sdk"
@@ -23,7 +24,11 @@ function fakeCtx(over: Partial<PluginContext> = {}): PluginContext {
     ui: { showToast: jest.fn(), showConfirmDialog: jest.fn() } as never,
     securityScans: { syncExecutionRun: jest.fn(), registerRunController: jest.fn() } as never,
     contextPanels: { register, reveal, setBadge: jest.fn() },
-    logger: { info: jest.fn(), error: jest.fn() },
+    i18n: {
+      t: (key: string) => `t:${key}`,
+      formatDate: jest.fn(() => "formatted"),
+    },
+    logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     ...over,
   } as unknown as PluginContext
 }
@@ -31,6 +36,15 @@ function fakeCtx(over: Partial<PluginContext> = {}): PluginContext {
 beforeEach(() => jest.clearAllMocks())
 
 describe("strix-security plugin lifecycle", () => {
+  it("is plugin.json, with its i18n bundle as flat keys", () => {
+    expect(manifest).toEqual(manifestJson)
+    expect(definition.manifest).toBe(manifest)
+    const en = manifestJson.i18n.locales.en
+    const zh = manifestJson.i18n.locales["zh-CN"]
+    expect(Object.keys(en).every((key) => !key.startsWith("plugin."))).toBe(true)
+    expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
+  })
+
   it("registers the panel in the right-hand workbench, not a left rail container", async () => {
     await definition.activate(fakeCtx())
 
@@ -38,6 +52,7 @@ describe("strix-security plugin lifecycle", () => {
     expect(register).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "security",
+        label: "t:panel.title",
         activity: "review",
         resourceKinds: ["session"],
         preferredMode: "wide",
@@ -49,14 +64,19 @@ describe("strix-security plugin lifecycle", () => {
     expect((definition.manifest as { commands?: unknown[] }).commands).toHaveLength(1)
   })
 
-  it("hands the panel the workbench + host-UI APIs", async () => {
-    await definition.activate(fakeCtx())
+  it("hands the panel the workbench, host-UI and app-locale date APIs", async () => {
+    const ctx = fakeCtx()
+    await definition.activate(ctx)
     expect(setStrixRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
         contextPanels: expect.objectContaining({ setBadge: expect.any(Function) }),
         ui: expect.objectContaining({ showConfirmDialog: expect.any(Function) }),
       })
     )
+    const bridged = jest.mocked(setStrixRuntime).mock.calls[0][0]
+    const at = new Date(0)
+    expect(bridged.formatDate(at, { month: "short" })).toBe("formatted")
+    expect(ctx.i18n.formatDate).toHaveBeenCalledWith(at, { month: "short" })
   })
 
   it("reconciles orphaned running rows and mirrors them onto the run journal", async () => {
@@ -102,23 +122,34 @@ describe("strix-security plugin lifecycle", () => {
     expect(setPendingTarget).toHaveBeenCalledWith("./local app")
   })
 
-  it("reports the command unhandled when the shell has no workbench to reveal into", async () => {
-    const hooks = (await definition.activate(
-      fakeCtx({ contextPanels: undefined } as never)
-    )) as unknown as { onCommand?: (c: string, a: string[]) => Promise<boolean> }
+  it("reports the command unhandled when the workbench cannot reveal the panel", async () => {
+    reveal.mockReturnValueOnce(false)
+    const hooks = (await definition.activate(fakeCtx())) as unknown as {
+      onCommand?: (c: string, a: string[]) => Promise<boolean>
+    }
     expect(await hooks?.onCommand?.("security", [])).toBe(false)
   })
 
-  it("still registers the panel but logs when dexie is unavailable", async () => {
-    const logger = { info: jest.fn(), error: jest.fn() }
+  it("still registers the panel — which then says storage is missing — when dexie is unavailable", async () => {
+    const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
     await definition.activate(fakeCtx({ dexie: undefined, logger } as never))
-    expect(setStrixRuntime).not.toHaveBeenCalled()
+    expect(setStrixRuntime).toHaveBeenCalledWith(expect.objectContaining({ dexie: null }))
+    expect(markInterruptedRuns).not.toHaveBeenCalled()
     expect(logger.error).toHaveBeenCalled()
     expect(register).toHaveBeenCalled()
   })
 
+  it("logs a failed reconciliation instead of dropping it", async () => {
+    const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
+    ;(markInterruptedRuns as jest.Mock).mockRejectedValueOnce(new Error("idb closed"))
+    await definition.activate(fakeCtx({ logger } as never))
+    await waitFor(() =>
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("idb closed"))
+    )
+  })
+
   it("keeps the tools working when the panel registration is refused", async () => {
-    const logger = { info: jest.fn(), error: jest.fn() }
+    const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
     register.mockImplementationOnce(() => {
       throw new Error("Permission denied: extension:ui is required to register a context panel")
     })

@@ -11,6 +11,8 @@ import {
 
 const runtime = {} as SreRuntime
 const dexie = {} as PluginDexieAPI
+const contextPanels = { setBadge: jest.fn(() => true) }
+const confirm = jest.fn(async () => true)
 
 function activity(index: number) {
   return { tool: "sre_query_logs", evidenceIds: [`log_${index}`], at: `t${index}` }
@@ -21,8 +23,8 @@ describe("panel runtime bridge", () => {
 
   it("hands the panel what activate parked, and nothing after deactivate", () => {
     expect(peekSrePanelRuntime()).toBeNull()
-    setSrePanelRuntime({ runtime, dexie, contextPanels: null })
-    expect(peekSrePanelRuntime()).toEqual({ runtime, dexie, contextPanels: null })
+    setSrePanelRuntime({ runtime, dexie, contextPanels, confirm })
+    expect(peekSrePanelRuntime()).toEqual({ runtime, dexie, contextPanels, confirm })
     clearSrePanelRuntime()
     expect(peekSrePanelRuntime()).toBeNull()
   })
@@ -33,7 +35,7 @@ describe("panel runtime bridge", () => {
   })
 
   it("fans activity out to subscribers in order", () => {
-    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels, confirm })
     const seen: number[] = []
     const unsubscribe = subscribeSreToolActivity((latest) => seen.push(latest.length))
 
@@ -49,7 +51,7 @@ describe("panel runtime bridge", () => {
   })
 
   it("keeps only the most recent window of activity", () => {
-    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels, confirm })
     for (let index = 0; index < 60; index += 1) notifySreToolActivity(activity(index))
     const recent = recentSreToolActivity()
     expect(recent).toHaveLength(50)
@@ -57,14 +59,14 @@ describe("panel runtime bridge", () => {
   })
 
   it("forgets activity and listeners on deactivate", () => {
-    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels, confirm })
     const seen: number[] = []
     subscribeSreToolActivity((latest) => seen.push(latest.length))
     notifySreToolActivity(activity(1))
     clearSrePanelRuntime()
     expect(recentSreToolActivity()).toEqual([])
 
-    setSrePanelRuntime({ runtime, dexie: null, contextPanels: null })
+    setSrePanelRuntime({ runtime, dexie: null, contextPanels, confirm })
     notifySreToolActivity(activity(2))
     expect(seen).toEqual([1])
   })

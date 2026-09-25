@@ -15,6 +15,7 @@ trade; the durable copies are the analyzer cache and the RAG snapshot on disk.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -161,6 +162,12 @@ def on_config_updated(config: dict) -> None:
 
 async def on_shutdown() -> None:
     """Release every checkout we cloned; leave the user's own folders alone."""
+    # A panel rescan still running would write into stores this is about to
+    # abandon; cancel it rather than let it outlive the plugin.
+    for task in list(_RESCANS.values()):
+        task.cancel()
+    _RESCANS.clear()
+    _RESCAN_ERRORS.clear()
     for result in list(_SCANS.values()):
         if result.handle.ephemeral:
             try:
@@ -953,6 +960,13 @@ def repowiki_list() -> dict:
     parameters={"projectId": {"type": "string", "required": True}},
 )
 async def repowiki_delete(projectId: str) -> dict:
+    # A panel rescan still running would re-register the project, and rewrite
+    # its snapshot and index, after this delete. Stop it and let it unwind first.
+    rescan = _RESCANS.pop(projectId, None)
+    if rescan is not None:
+        rescan.cancel()
+        await asyncio.gather(rescan, return_exceptions=True)
+    _RESCAN_ERRORS.pop(projectId, None)
     result = _SCANS.pop(projectId, None)
     _INDEXES.pop(projectId, None)
     _FRESHNESS.pop(projectId, None)
@@ -1235,6 +1249,23 @@ async def repowiki_file_chunks(projectId: str = "", path: str = "") -> dict:
 
 _PANEL_STATE: dict[str, dict] = {}
 
+#: The prefix every surface this plugin owns carries — the manifest's
+#: ``surface: "cognia-repowiki:{resourceKey}"``. ``onA2UIAction`` and
+#: ``onA2UISurfaceDestroy`` are broadcasts, so this is how a hook tells its own
+#: surfaces from another plugin's.
+_SURFACE_PREFIX = "cognia-repowiki:"
+
+#: project_id -> the rescan a panel's Rescan button started, running in the
+#: background. Held here because the event loop keeps only a weak reference to
+#: a task (an unreferenced one can be collected mid-scan), and so a second
+#: click on the same repository joins the running scan instead of starting a
+#: second one.
+_RESCANS: dict[str, asyncio.Task] = {}
+
+#: project_id -> why the last panel rescan failed. Shown on every panel open
+#: on that wiki until the next rescan starts.
+_RESCAN_ERRORS: dict[str, str] = {}
+
 #: Last freshness answer per project id. Keyed by project, not by surface: two
 #: panels on the same wiki are looking at the same checkout, and asking git the
 #: same question twice would be the only difference.
@@ -1307,6 +1338,8 @@ async def _push_panel(surfaceId: str, *, create: bool = False) -> dict:
         staleness=_FRESHNESS.get(state["projectId"]) if result else None,
         live=result.project is not None if result else True,
         labels=_LABELS,
+        scanning=bool(result) and state["projectId"] in _RESCANS,
+        scan_error=_RESCAN_ERRORS.get(state["projectId"], "") if result else "",
     )
 
     if create:
@@ -1393,6 +1426,59 @@ def repowiki_panel_context(resource: dict | None = None) -> dict:
     return {"text": "\n".join(lines), "projectId": project_id}
 
 
+async def _push_project_panels(project_id: str) -> None:
+    """Repaint every open panel showing ``project_id``'s wiki.
+
+    Best-effort per surface: one panel the host has already torn down must not
+    keep the others from learning that their scan finished.
+    """
+    for surface_id, state in list(_PANEL_STATE.items()):
+        if state.get("projectId") != project_id:
+            continue
+        try:
+            await _push_panel(surface_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("panel refresh failed for %s: %s", surface_id, exc)
+
+
+async def _rescan_in_background(project_id: str, source: str) -> None:
+    """The Rescan button's scan, off the action hook's call.
+
+    A full scan makes one model call per module — minutes on a real
+    repository — and the host bounds a hook call far below that. Run inline,
+    the click showed nothing until it finished, and a scan that outlived the
+    hook's budget was abandoned with the panel still claiming it was current.
+    Here the hook returns at once with the panel saying "Scanning…", and this
+    task paints the outcome — the fresh wiki, or the failure — when it lands.
+    """
+    try:
+        # `source`, not `handle.root`: a URL-ingested repo's clone path does
+        # not outlive its release, so re-scanning it means re-acquiring the
+        # source, not pointing at a deleted directory.
+        await repowiki_scan(source)
+        await _refresh_freshness(project_id)
+    except Exception as exc:  # noqa: BLE001 — shown on the panel, not raised into the loop
+        logger.warning("panel rescan failed for %s: %s", project_id, exc)
+        _RESCAN_ERRORS[project_id] = str(exc) or type(exc).__name__
+    finally:
+        _RESCANS.pop(project_id, None)
+    await _push_project_panels(project_id)
+
+
+@hook("onA2UISurfaceDestroy")
+def repowiki_panel_destroyed(payload):
+    """Forget a panel's page and repository once the host drops its surface.
+
+    ``_PANEL_STATE`` is keyed by surface, and a context panel resolves one
+    surface per resource, so without this every file the reader was ever
+    opened on stays in memory for the life of the plugin process. The payload
+    is the destroyed surface's id; any other plugin's surface is ignored.
+    """
+    if isinstance(payload, str) and payload.startswith(_SURFACE_PREFIX):
+        _PANEL_STATE.pop(payload, None)
+    return None
+
+
 @hook("onA2UIAction")
 async def repowiki_panel_action(payload):
     """Clicks in the panel come back here — the return trip, still no JS.
@@ -1405,7 +1491,7 @@ async def repowiki_panel_action(payload):
         return payload
     action = payload.get("action") or ""
     surface_id = payload.get("surfaceId") or ""
-    if not action.startswith("repowiki:") or not surface_id.startswith("cognia-repowiki:"):
+    if not action.startswith("repowiki:") or not surface_id.startswith(_SURFACE_PREFIX):
         return payload
 
     data = payload.get("data") or {}
@@ -1420,14 +1506,16 @@ async def repowiki_panel_action(payload):
         await _refresh_freshness(state["projectId"])
         await _push_panel(surface_id)
     elif action == ACTION_RESCAN:
-        result = _SCANS.get(state["projectId"])
-        if result:
-            # `source`, not `handle.root`: a URL-ingested repo's clone path
-            # does not outlive its release, so re-scanning it means
-            # re-acquiring the source, not pointing at a deleted directory.
-            await repowiki_scan(result.source or result.handle.root)
-            await _refresh_freshness(state["projectId"])
-            await _push_panel(surface_id)
+        project_id = state["projectId"]
+        result = _SCANS.get(project_id)
+        if result and project_id not in _RESCANS:
+            _RESCAN_ERRORS.pop(project_id, None)
+            _RESCANS[project_id] = asyncio.get_running_loop().create_task(
+                _rescan_in_background(project_id, result.source or result.handle.root)
+            )
+            # Every panel on this wiki says "Scanning…" now; the task repaints
+            # them with the outcome.
+            await _push_project_panels(project_id)
     elif action == ACTION_OPEN_CITATION:
         path = str(data.get("path") or "")
         if path:

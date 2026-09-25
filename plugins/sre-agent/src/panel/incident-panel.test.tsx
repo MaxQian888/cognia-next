@@ -4,12 +4,11 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 let bridge: {
   runtime: unknown
   dexie: unknown
-  contextPanels: { setBadge: jest.Mock } | null
+  contextPanels: { setBadge: jest.Mock }
+  confirm: jest.Mock
 } | null = null
 const activityListeners = new Set<(latest: unknown[]) => void>()
 let activity: unknown[] = []
@@ -27,6 +26,10 @@ import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 import type { SreIncident } from "../incident/model"
 import { activityForIncident, IncidentPanel, unpinnedAgentEvidence } from "./incident-panel"
 import { createIncident } from "../incident/model"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
 
 const WINDOW = { startTime: "2026-08-04T12:02:00.000Z", endTime: "2026-08-04T12:05:20.000Z" }
 
@@ -38,7 +41,12 @@ const RESOURCE = {
 
 function stubRuntime(overrides: Record<string, unknown> = {}) {
   return {
-    provider: () => ({ id: "qwen-timeout-fallback", kind: "fixture", coverage: WINDOW }),
+    provider: () => ({
+      id: "qwen-timeout-fallback",
+      kind: "fixture",
+      demo: true,
+      coverage: WINDOW,
+    }),
     histogram: async () => [],
     patterns: async () => [],
     sources: async () => [],
@@ -47,6 +55,7 @@ function stubRuntime(overrides: Record<string, unknown> = {}) {
       records: [],
       evidenceIds: ids ?? [],
       provider: "qwen-timeout-fallback",
+      dataSource: "demo-corpus",
     }),
     resolveEvidenceIds: (ids: string[]) => ids,
     validateTimeline: async () => ({ ok: true, issues: [], evidenceCount: 1 }),
@@ -83,6 +92,17 @@ function incident(overrides: Partial<SreIncident> = {}): SreIncident {
       sessionId: "sess_1",
     }),
     ...overrides,
+  }
+}
+
+function makeBridge(
+  overrides: { runtime?: unknown; dexie?: unknown; confirm?: jest.Mock } = {}
+): NonNullable<typeof bridge> {
+  return {
+    runtime: overrides.runtime ?? stubRuntime(),
+    dexie: "dexie" in overrides ? overrides.dexie : fakeDexie(),
+    contextPanels: { setBadge: jest.fn() },
+    confirm: overrides.confirm ?? jest.fn(async () => true),
   }
 }
 
@@ -129,46 +149,130 @@ describe("IncidentPanel", () => {
   })
 
   it("warns that nothing will be saved when the shell gave it no storage", async () => {
-    bridge = { runtime: stubRuntime(), dexie: null, contextPanels: null }
+    bridge = makeBridge({ dexie: null })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-panel")).toBeInTheDocument())
     expect(screen.getByText(/Incidents cannot be saved in this shell/)).toBeInTheDocument()
   })
 
+  it("labels every view as the demo corpus while the demo backend answers", async () => {
+    bridge = makeBridge({ dexie: fakeDexie([incident()]) })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
+    expect(screen.getByTestId("sre-demo-notice")).toHaveTextContent("Demo corpus")
+    expect(screen.getByTestId("sre-demo-notice")).toHaveTextContent("not from your systems")
+    await userEvent.click(screen.getByTestId("sre-incident-row"))
+    expect(screen.getByTestId("sre-demo-notice")).toBeInTheDocument()
+  })
+
+  it("drops the demo label once a live backend answers", async () => {
+    bridge = makeBridge({
+      runtime: stubRuntime({
+        provider: () => ({ id: "live", kind: "remote", demo: false, coverage: null }),
+      }),
+    })
+    renderPanel()
+    await waitFor(() => expect(screen.getByTestId("sre-panel")).toBeInTheDocument())
+    expect(screen.queryByTestId("sre-demo-notice")).not.toBeInTheDocument()
+  })
+
+  it("reports a failed load with a retry instead of an empty list", async () => {
+    let fail = true
+    const dexie = fakeDexie([incident()])
+    const table = dexie.table()
+    bridge = makeBridge({
+      dexie: {
+        table: () => ({
+          ...table,
+          toArray: async () => {
+            if (fail) throw new Error("quota")
+            return table.toArray()
+          },
+        }),
+      },
+    })
+    renderPanel()
+    await waitFor(() =>
+      expect(screen.getByTestId("sre-load-error")).toHaveTextContent(
+        "Incidents could not be loaded: quota"
+      )
+    )
+    fail = false
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
+    expect(screen.queryByTestId("sre-load-error")).not.toBeInTheDocument()
+  })
+
   it("lists stored incidents and opens the one that was clicked", async () => {
-    bridge = {
-      runtime: stubRuntime(),
-      dexie: fakeDexie([incident()]),
-      contextPanels: { setBadge: jest.fn() },
-    }
+    bridge = makeBridge({ dexie: fakeDexie([incident()]) })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
 
     await userEvent.click(screen.getByTestId("sre-incident-row"))
     expect(screen.getByTestId("sre-phase-strip")).toBeInTheDocument()
     expect(screen.getByTestId("sre-timeline")).toBeInTheDocument()
+    // The full incident is readable, not just a truncated header.
+    expect(screen.getByTestId("sre-incident-title")).toHaveTextContent("gateway upstream timeout")
+    expect(screen.getByTestId("sre-incident-details")).toHaveTextContent("prod")
+    expect(screen.getByTestId("sre-incident-details")).toHaveTextContent(WINDOW.startTime)
   })
 
   it("pushes the open-incident count onto its own rail button", async () => {
-    const setBadge = jest.fn()
-    bridge = {
-      runtime: stubRuntime(),
+    bridge = makeBridge({
       dexie: fakeDexie([incident(), incident({ id: "inc_2", status: "resolved" })]),
-      contextPanels: { setBadge },
-    }
+    })
     renderPanel()
-    await waitFor(() => expect(setBadge).toHaveBeenCalledWith("incidents", 1))
+    await waitFor(() => expect(bridge?.contextPanels.setBadge).toHaveBeenCalledWith("incidents", 1))
   })
 
-  it("creates an incident from the session in front and persists it", async () => {
+  it("opens an incident from what the person describes and persists it", async () => {
     const dexie = fakeDexie()
-    bridge = { runtime: stubRuntime(), dexie, contextPanels: null }
+    bridge = makeBridge({ dexie })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-create-incident")).toBeInTheDocument())
 
     await userEvent.click(screen.getByTestId("sre-create-incident"))
+    // An empty description is refused, not saved under a placeholder title.
+    await userEvent.click(screen.getByTestId("sre-create-submit"))
+    expect(screen.getByRole("alert")).toHaveTextContent("Describe the incident first.")
+    expect(dexie.store.size).toBe(0)
+
+    await userEvent.type(screen.getByTestId("sre-create-title"), "checkout p99 above 2s")
+    await userEvent.clear(screen.getByTestId("sre-create-environment"))
+    await userEvent.type(screen.getByTestId("sre-create-environment"), "staging")
+    await userEvent.click(screen.getByTestId("sre-create-submit"))
     await waitFor(() => expect(screen.getByTestId("sre-phase-strip")).toBeInTheDocument())
-    expect([...dexie.store.values()][0]).toMatchObject({ sessionId: "sess_1" })
+    expect([...dexie.store.values()][0]).toMatchObject({
+      sessionId: "sess_1",
+      title: "checkout p99 above 2s",
+      environment: "staging",
+      window: WINDOW,
+    })
+    expect([...dexie.store.values()][0].demo).toBeUndefined()
+  })
+
+  it("opens the demo incident tagged as demo, never as a real page", async () => {
+    const dexie = fakeDexie()
+    bridge = makeBridge({ dexie })
+    renderPanel()
+    await userEvent.click(await screen.findByTestId("sre-create-from-alert"))
+    await waitFor(() => expect(screen.getByTestId("sre-phase-strip")).toBeInTheDocument())
+    const [stored] = [...dexie.store.values()]
+    expect(stored).toMatchObject({ demo: true, status: "unconfirmed" })
+    expect(screen.getByTestId("sre-incident-details")).toHaveTextContent(
+      "gateway provider timeout and fallback increased"
+    )
+  })
+
+  it("keeps 'New incident' reachable when incidents already exist", async () => {
+    const dexie = fakeDexie([incident()])
+    bridge = makeBridge({ dexie })
+    renderPanel()
+    await userEvent.click(await screen.findByTestId("sre-new-incident"))
+    expect(screen.getByTestId("sre-create-form")).toBeInTheDocument()
+    await userEvent.type(screen.getByTestId("sre-create-title"), "second one")
+    await userEvent.click(screen.getByTestId("sre-create-submit"))
+    await waitFor(() => expect(dexie.store.size).toBe(2))
   })
 
   it("fetches evidence before pinning it, so the validator can resolve the ids", async () => {
@@ -186,7 +290,7 @@ describe("IncidentPanel", () => {
       },
     ]
     const dexie = fakeDexie([incident()])
-    bridge = { runtime: stubRuntime({ queryLogs }), dexie, contextPanels: null }
+    bridge = makeBridge({ runtime: stubRuntime({ queryLogs }), dexie })
     renderPanel()
 
     await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
@@ -223,11 +327,7 @@ describe("IncidentPanel", () => {
       },
     ]
     const dexie = fakeDexie([incident()])
-    bridge = {
-      runtime: stubRuntime({ queryLogs, resolveEvidenceIds }),
-      dexie,
-      contextPanels: null,
-    }
+    bridge = makeBridge({ runtime: stubRuntime({ queryLogs, resolveEvidenceIds }), dexie })
     renderPanel()
 
     await userEvent.click(await screen.findByTestId("sre-incident-row"))
@@ -264,7 +364,7 @@ describe("IncidentPanel", () => {
       },
     ]
     const dexie = fakeDexie([incident({ evidenceIds: ["log_004"] })])
-    bridge = { runtime: stubRuntime(), dexie, contextPanels: null }
+    bridge = makeBridge({ dexie })
     renderPanel()
 
     await userEvent.click(await screen.findByTestId("sre-incident-row"))
@@ -275,7 +375,7 @@ describe("IncidentPanel", () => {
   })
 
   it("reports agent activity honestly when there has been none", async () => {
-    bridge = { runtime: stubRuntime(), dexie: fakeDexie([incident()]), contextPanels: null }
+    bridge = makeBridge({ dexie: fakeDexie([incident()]) })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
     await userEvent.click(screen.getByTestId("sre-incident-row"))
@@ -286,7 +386,7 @@ describe("IncidentPanel", () => {
 
   it("offers dismiss on an open incident and reopen once it is closed", async () => {
     const dexie = fakeDexie([incident()])
-    bridge = { runtime: stubRuntime(), dexie, contextPanels: null }
+    bridge = makeBridge({ dexie })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
     await userEvent.click(screen.getByTestId("sre-incident-row"))
@@ -296,15 +396,82 @@ describe("IncidentPanel", () => {
     expect(dexie.store.get("inc_1")?.status).toBe("dismissed")
   })
 
-  it("deletes an incident and returns to the list", async () => {
+  it("deletes an incident only after a destructive confirmation", async () => {
     const dexie = fakeDexie([incident()])
-    bridge = { runtime: stubRuntime(), dexie, contextPanels: null }
+    const confirm = jest.fn(async () => true)
+    bridge = makeBridge({ dexie, confirm })
     renderPanel()
     await waitFor(() => expect(screen.getByTestId("sre-incident-row")).toBeInTheDocument())
     await userEvent.click(screen.getByTestId("sre-incident-row"))
     await userEvent.click(screen.getByTestId("sre-delete"))
 
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Delete this incident?",
+        message: expect.stringContaining("gateway upstream timeout"),
+        variant: "destructive",
+      })
+    )
     await waitFor(() => expect(screen.getByTestId("sre-incident-empty")).toBeInTheDocument())
     expect(dexie.store.size).toBe(0)
+  })
+
+  it("keeps the incident when the confirmation is declined", async () => {
+    const dexie = fakeDexie([incident()])
+    bridge = makeBridge({ dexie, confirm: jest.fn(async () => false) })
+    renderPanel()
+    await userEvent.click(await screen.findByTestId("sre-incident-row"))
+    await userEvent.click(screen.getByTestId("sre-delete"))
+    await waitFor(() => expect(bridge?.confirm).toHaveBeenCalled())
+    expect(screen.getByTestId("sre-phase-strip")).toBeInTheDocument()
+    expect(dexie.store.size).toBe(1)
+  })
+
+  it("reports a failed delete and keeps the row", async () => {
+    const dexie = fakeDexie([incident()])
+    const table = dexie.table()
+    bridge = makeBridge({
+      dexie: {
+        table: () => ({
+          ...table,
+          delete: async () => {
+            throw new Error("locked")
+          },
+        }),
+      },
+    })
+    renderPanel()
+    await userEvent.click(await screen.findByTestId("sre-incident-row"))
+    await userEvent.click(screen.getByTestId("sre-delete"))
+    await waitFor(() =>
+      expect(screen.getByTestId("sre-action-error")).toHaveTextContent(
+        "The incident could not be deleted: locked"
+      )
+    )
+    expect(screen.getByTestId("sre-phase-strip")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss this message" }))
+    expect(screen.queryByTestId("sre-action-error")).not.toBeInTheDocument()
+  })
+
+  it("reports a failed evidence fetch instead of swallowing it", async () => {
+    activity = [
+      { tool: "sre_query_logs", evidenceIds: ["log_003"], at: "2026-08-04T12:20:00.000Z" },
+    ]
+    bridge = makeBridge({
+      runtime: stubRuntime({
+        queryLogs: async () => {
+          throw new Error("backend down")
+        },
+      }),
+      dexie: fakeDexie([incident()]),
+    })
+    renderPanel()
+    await userEvent.click(await screen.findByTestId("sre-incident-row"))
+    await userEvent.click(screen.getByTestId("sre-pin-agent-evidence"))
+    await waitFor(() =>
+      expect(screen.getByTestId("sre-action-error")).toHaveTextContent(
+        "Evidence could not be pinned: backend down"
+      )
+    )
   })
 })

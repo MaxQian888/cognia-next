@@ -1,5 +1,6 @@
-import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import { exportDocx, importDocx, validateDocxRoundTrip } from "./docx"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { exportDocx, importDocx, validateDocxRoundTrip, type DocxImportLabels } from "./docx"
+import { normalizeExportName, summarizeSave } from "./export-file"
 import {
   applyDocumentOperations,
   createDocument,
@@ -12,10 +13,7 @@ import {
   type DocumentOperation,
 } from "./model"
 
-export type DocumentsPluginContext = Pick<
-  FullPluginContext,
-  "pluginId" | "artifact" | "files" | "export"
->
+export type DocumentsPluginContext = Pick<PluginContext, "artifact" | "files" | "export" | "i18n">
 
 export interface DocumentProgress {
   signal?: AbortSignal
@@ -26,7 +24,17 @@ function assertActive(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError")
 }
 
+/** The importer's user-visible defaults, resolved in the active locale. */
+export function docxImportLabels(t: PluginContext["i18n"]["t"]): DocxImportLabels {
+  return {
+    emptyComment: t("import.emptyComment"),
+    unknownAuthor: t("import.unknownAuthor"),
+    untitled: t("import.untitled"),
+  }
+}
+
 export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
+  const t = (key: string, params?: Record<string, string | number>) => ctx.i18n.t(key, params)
   const read = (artifactId: string) => {
     const artifact = ctx.artifact.getArtifact(artifactId)
     if (!artifact) throw new Error(`Document artifact not found: ${artifactId}`)
@@ -49,7 +57,8 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
       messageId: options.messageId,
       metadata: {
         sourceOrigin: "tool",
-        userInitiated: true,
+        // Every artifact this runtime creates comes from an agent tool call.
+        userInitiated: false,
         previewable: true,
       },
     })
@@ -80,7 +89,7 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
       progress?: DocumentProgress
     ) => {
       assertActive(progress?.signal)
-      progress?.reportProgress?.(10, "Reading DOCX file")
+      progress?.reportProgress?.(10, t("progress.readingDocx"))
       const file = input.handle
         ? await ctx.files.readAttachment(input.handle)
         : (
@@ -91,11 +100,15 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
           )[0]
       if (!file) return { ok: false as const, cancelled: true as const }
       assertActive(progress?.signal)
-      progress?.reportProgress?.(40, "Parsing DOCX structure")
-      const model = await importDocx(file.bytes, file.name)
-      if (input.title?.trim()) model.title = input.title.trim()
+      progress?.reportProgress?.(40, t("progress.parsingDocx"))
+      const model = await importDocx(
+        file.bytes,
+        file.name,
+        docxImportLabels(ctx.i18n.t),
+        input.title
+      )
       assertActive(progress?.signal)
-      progress?.reportProgress?.(80, "Creating document artifact")
+      progress?.reportProgress?.(80, t("progress.creatingArtifact"))
       return { ok: true as const, artifactId: await createArtifact(model, input), model }
     },
     inspect: (artifactId: string) => {
@@ -120,7 +133,7 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
         content: JSON.stringify(updated),
         title: updated.title,
         expectedVersion: input.expectedVersion,
-        changeDescription: input.changeDescription ?? "Edit document",
+        changeDescription: input.changeDescription ?? t("history.edit"),
       })
       ctx.artifact.openArtifact(input.artifactId)
       return {
@@ -132,10 +145,10 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
     },
     validate: async (artifactId: string, progress?: DocumentProgress) => {
       const { model } = read(artifactId)
-      progress?.reportProgress?.(20, "Validating document model")
+      progress?.reportProgress?.(20, t("progress.validatingModel"))
       const findings = validateDocument(model)
       assertActive(progress?.signal)
-      progress?.reportProgress?.(60, "Generating DOCX package")
+      progress?.reportProgress?.(60, t("progress.generatingDocx"))
       const bytes = await exportDocx(model)
       assertActive(progress?.signal)
       const reopened = await validateDocxRoundTrip(bytes)
@@ -197,32 +210,38 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
     ) => {
       const { model } = read(artifactId)
       if (model.importedFeatures.length > 0 && !allowUnsupportedFeatureLoss) {
-        throw new Error(
-          `Export would discard unsupported imported features: ${model.importedFeatures.join(
+        return {
+          ok: false as const,
+          artifactId,
+          requiresConfirmation: true as const,
+          unsupportedFeatures: model.importedFeatures,
+          error: `Export would discard unsupported imported features: ${model.importedFeatures.join(
             ", "
-          )}. Set allowUnsupportedFeatureLoss only after user confirmation.`
-        )
+          )}. Ask the user to confirm, then retry with allowUnsupportedFeatureLoss: true.`,
+        }
       }
       assertActive(progress?.signal)
-      progress?.reportProgress?.(30, "Generating DOCX package")
+      progress?.reportProgress?.(30, t("progress.generatingDocx"))
       const bytes = await exportDocx(model)
       const reopened = await validateDocxRoundTrip(bytes)
-      if (!reopened.valid) throw new Error("DOCX validation failed before export.")
+      if (!reopened.valid)
+        return {
+          ok: false as const,
+          artifactId,
+          error: "The generated DOCX did not reopen cleanly, so nothing was saved.",
+        }
       assertActive(progress?.signal)
-      progress?.reportProgress?.(80, "Saving DOCX file")
-      const result = await ctx.files.save({
-        suggestedName: normalizeDocxName(suggestedName ?? model.title),
-        mimeType: DOCX_MIME,
-        bytes,
-      })
-      return { ok: result.saved, artifactId, byteLength: bytes.byteLength }
+      progress?.reportProgress?.(80, t("progress.savingDocx"))
+      const filename = normalizeDocxName(suggestedName ?? model.title)
+      const outcome = await ctx.files.save({ suggestedName: filename, mimeType: DOCX_MIME, bytes })
+      return { ...summarizeSave(outcome, filename), artifactId, byteLength: bytes.byteLength }
     },
     exportTranscript: async (
       input: { sessionId: string; suggestedName?: string },
       progress?: DocumentProgress
     ) => {
       assertActive(progress?.signal)
-      progress?.reportProgress?.(20, "Generating DOCX transcript")
+      progress?.reportProgress?.(20, t("progress.generatingTranscript"))
       const result = await ctx.export.exportSession(input.sessionId, { format: "docx" })
       if (!result.success || !result.blob)
         return {
@@ -230,26 +249,16 @@ export function createDocumentsRuntime(ctx: DocumentsPluginContext) {
           error: result.error ?? "Transcript export failed.",
         }
       assertActive(progress?.signal)
+      progress?.reportProgress?.(70, t("progress.savingTranscript"))
       const bytes = new Uint8Array(await result.blob.arrayBuffer())
-      const saved = await ctx.files.save({
-        suggestedName: normalizeDocxName(input.suggestedName ?? result.filename ?? "transcript"),
-        mimeType: DOCX_MIME,
-        bytes,
-      })
-      return {
-        ok: saved.saved,
-        filename: result.filename,
-        byteLength: bytes.byteLength,
-      }
+      const filename = normalizeDocxName(input.suggestedName ?? result.filename ?? "transcript")
+      const outcome = await ctx.files.save({ suggestedName: filename, mimeType: DOCX_MIME, bytes })
+      return { ...summarizeSave(outcome, filename), byteLength: bytes.byteLength }
     },
   }
 }
 
+/** A `.docx` filename `ctx.files.save` accepts, built from a title or model-supplied name. */
 export function normalizeDocxName(value: string): string {
-  const base = safeFilename(value.replace(/\.docx$/i, ""))
-  return `${base}.docx`
-}
-
-function safeFilename(value: string) {
-  return value.replace(/[\\/:*?"<>|]/g, "-").trim() || "document"
+  return normalizeExportName(value, "docx", "document")
 }

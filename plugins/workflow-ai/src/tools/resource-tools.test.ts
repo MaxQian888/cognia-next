@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { PluginContext, PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
+import type { PluginContext, PluginToolRegistration, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildResourceTools as buildResourceToolsWithApi } from "./resource-tools"
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
@@ -27,11 +27,11 @@ const resources = {
   listPlugins: mList.plugins,
 } as unknown as PluginContext["resources"]
 
-function buildResourceTools(): PluginTool[] {
+function buildResourceTools(): PluginToolRegistration[] {
   return buildResourceToolsWithApi(resources)
 }
 
-function findTool(tools: PluginTool[], name: string): PluginTool {
+function findTool(tools: PluginToolRegistration[], name: string): PluginToolRegistration {
   const t = tools.find((x) => x.name === name)
   if (!t) throw new Error(`Tool not found: ${name}`)
   return t

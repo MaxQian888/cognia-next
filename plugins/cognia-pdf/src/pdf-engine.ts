@@ -47,14 +47,28 @@ interface PdfAnnotation {
   options?: Array<{ displayValue?: string; exportValue?: string } | string>
 }
 
+interface PdfViewportLike {
+  width: number
+  height: number
+}
+
+interface PdfRenderTaskLike {
+  promise: Promise<void>
+  cancel: () => void
+}
+
+interface PdfPageLike {
+  getAnnotations: (options?: { intent?: string }) => Promise<PdfAnnotation[]>
+  getViewport: (options: { scale: number }) => PdfViewportLike
+  render: (options: { canvas: HTMLCanvasElement; viewport: PdfViewportLike }) => PdfRenderTaskLike
+}
+
 interface PdfDocumentLike {
   numPages: number
   annotationStorage: {
     setValue: (id: string, value: Record<string, unknown>) => void
   }
-  getPage: (pageNumber: number) => Promise<{
-    getAnnotations: (options?: { intent?: string }) => Promise<PdfAnnotation[]>
-  }>
+  getPage: (pageNumber: number) => Promise<PdfPageLike>
   getMetadata: () => Promise<{ info?: Record<string, unknown> }>
   getSignatures?: () => Promise<Array<unknown> | null>
   hasJSActions?: () => Promise<boolean>
@@ -91,6 +105,77 @@ async function loadPdf(bytes: Uint8Array, password?: string): Promise<PdfDocumen
   pdfjs.GlobalWorkerOptions.workerSrc = resolvePdfWorkerUrl()
   const task = pdfjs.getDocument({ data: bytes.slice(), ...(password ? { password } : {}) })
   return (await task.promise) as unknown as PdfDocumentLike
+}
+
+/**
+ * An opened PDF the preview paints page by page onto a `<canvas>`. The WebViews
+ * this app ships in (Android WebView, WebKitGTK on Linux) have no built-in PDF
+ * viewer, so an `<iframe src="blob:application/pdf">` renders blank there;
+ * pdf.js — already bundled for inspection and form filling — draws the pages
+ * itself on every platform.
+ */
+export interface PdfRenderSession {
+  pageCount: number
+  /**
+   * Paint `pageNumber` (1-based) into `canvas` at `cssWidth` CSS pixels wide,
+   * rasterized at `pixelRatio` for a sharp result on high-DPI screens. A newer
+   * call on the same session cancels the one still painting.
+   */
+  renderPage: (
+    pageNumber: number,
+    canvas: HTMLCanvasElement,
+    options: { cssWidth: number; pixelRatio: number }
+  ) => Promise<{ cssWidth: number; cssHeight: number }>
+  destroy: () => Promise<void>
+}
+
+/** pdf.js reports a cancelled render as a rejection with this name. */
+export function isRenderCancelled(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "RenderingCancelledException"
+  )
+}
+
+export async function openPdfForRender(
+  bytes: Uint8Array,
+  password?: string
+): Promise<PdfRenderSession> {
+  const doc = await loadPdf(bytes, password)
+  let inFlight: PdfRenderTaskLike | null = null
+  return {
+    pageCount: doc.numPages,
+    renderPage: async (pageNumber, canvas, { cssWidth, pixelRatio }) => {
+      if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > doc.numPages) {
+        throw new Error(`PDF page out of range: ${pageNumber}`)
+      }
+      inFlight?.cancel()
+      const page = await doc.getPage(pageNumber)
+      const natural = page.getViewport({ scale: 1 })
+      const width = Math.max(1, cssWidth)
+      const scale = width / natural.width
+      const viewport = page.getViewport({ scale: scale * Math.max(1, pixelRatio) })
+      canvas.width = Math.max(1, Math.floor(viewport.width))
+      canvas.height = Math.max(1, Math.floor(viewport.height))
+      const cssHeight = natural.height * scale
+      canvas.style.width = `${width}px`
+      canvas.style.height = `${cssHeight}px`
+      const task = page.render({ canvas, viewport })
+      inFlight = task
+      try {
+        await task.promise
+      } finally {
+        if (inFlight === task) inFlight = null
+      }
+      return { cssWidth: width, cssHeight }
+    },
+    destroy: async () => {
+      inFlight?.cancel()
+      inFlight = null
+      await doc.destroy()
+    },
+  }
 }
 
 interface FieldWidgets {

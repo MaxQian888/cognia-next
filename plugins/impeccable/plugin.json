@@ -1,8 +1,10 @@
 {
   "id": "cognia-impeccable",
   "name": "Impeccable",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Impeccable 4.0.4 design guidance and anti-pattern detection for frontend critique, audit, refinement, and design direction. The Cognia adapter excludes live-browser automation and hooks.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["skills"],
   "main": "dist/index.js",
@@ -129,13 +131,27 @@
   },
   "skills": [
     {
-      "id": "impeccable",
-      "name": "impeccable",
+      "id": "cognia-impeccable:impeccable",
+      "slug": "impeccable",
+      "name": "Impeccable (frontend design)",
       "description": "Use for frontend design, redesign, critique, audit, polish, accessibility, responsive behavior, typography, layout, color, motion, UX writing, and anti-pattern detection. The Cognia adapter does not provide live-browser control, hooks, or pin/unpin.",
       "source": {
         "kind": "local-bundle",
         "path": "skills/impeccable"
+      },
+      "allowedTools": ["Bash", "Read"]
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Impeccable",
+        "manifest.description": "Impeccable 4.0.4 design guidance and anti-pattern detection for frontend critique, audit, refinement, and design direction. The Cognia adapter excludes live-browser automation and hooks."
+      },
+      "zh-CN": {
+        "manifest.name": "Impeccable",
+        "manifest.description": "Impeccable 4.0.4 设计指导与反模式检测，用于前端评审、审计、打磨与设计方向。Cognia 适配版不含实时浏览器自动化与钩子。"
       }
     }
-  ]
+  }
 }

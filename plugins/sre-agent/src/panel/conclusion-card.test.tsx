@@ -4,8 +4,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import type { SreValidationResult } from "../evidence"
 import {
   applyTimeline,
@@ -15,6 +13,10 @@ import {
   type SreIncident,
 } from "../incident/model"
 import { ConclusionCard } from "./conclusion-card"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
 
 const ROW = {
   time: "12:02",

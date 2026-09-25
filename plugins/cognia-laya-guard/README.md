@@ -6,13 +6,35 @@ inbound connector messages (Lark / Slack / Discord / Telegram). One ~60 ms
 encoder forward pass per message — no LLM call, no network round-trip after
 the checkpoint is cached.
 
+## Shipped, but off until you enable it
+
+The desktop installer seeds this plugin onto disk, but it stays **disabled
+until you enable it** (Plugins → Laya (local System-1) → Enable). Nothing runs,
+provisions or downloads before that.
+
+Enabling it does real work, once:
+
+- the host provisions an isolated Python venv and installs `laya==0.3.5`,
+  which pulls torch + transformers (~3 GB on disk);
+- with `warmup` on (the default) the plugin then starts loading the laya
+  checkpoint in the background, which on first run **downloads the weights
+  from HuggingFace (~1.3 GB per checkpoint; `checkpoint: "auto"` preloads the
+  English and the multilingual one, so budget ~2 GB of disk)**. They are
+  cached afterwards and later starts run offline.
+
+Until the checkpoint is ready every hook passes messages through unmoderated
+and `laya_status` reports `loading`. Disabling the plugin stops it; the
+downloaded weights stay in the HuggingFace cache (`HF_HOME` / `HF_HUB_CACHE`)
+until you clear it.
+
 ## What it does
 
 - **`onConnectorInbound` hook** — scores inbound messages on `spam` /
   `threat` / `harassment` / `toxic` before they reach an agent run. Ships in
   `inboundMode: "observe"`: nothing is dropped; a flagged message keeps
   flowing with its scores attached as labels (`{ action: "annotate" }`,
-  ADR-0194 — shown as chips on the message) and increments `wouldBlock` in
+  ADR-0194 — shown as chips on the message, with a hover note written in the
+  app's language) and increments `wouldBlock` in
   `laya_status`, so you can watch the score distribution on real traffic.
   Flip to `"enforce"` to actually drop. The hook fails open (allows) while the
   model is loading or on any error.
@@ -117,6 +139,10 @@ Validated locally on the real checkpoints (Apple Silicon, MPS):
 - `python:execute` + `network:fetch` (one-time ~1.3 GB checkpoint download
   from HuggingFace; cached afterwards). No chat-interception permission:
   this plugin never sees outgoing prompts.
+- `connectors:read` — the `onConnectorInbound` hook reads the text of every
+  inbound IM message to score it. Scoring is local; the text never leaves
+  this computer.
+- `decisions:provide` — offers `laya-local` as a decision provider.
 - `pythonDependencies: ["laya==0.3.5"]`, isolated venv.
 
 ## Environment preparation
@@ -148,6 +174,16 @@ failure, callers stop re-triggering the load for 5 minutes
 (`retryInSeconds`); saving the plugin config or `laya_status(retry: true)`
 retries at once. The disk preflight checks every checkpoint the configured
 mode needs, not just "some snapshot exists".
+
+## Strings
+
+The label note and the decision provider's status line are translated through
+`ctx.i18n.t` against this manifest's `i18n.locales` (`en`, `zh-CN`), with the
+English text in `main.py`'s `TEXT_DEFAULTS` as the fallback. The language is
+re-read when the provider status is shown, when the config is saved, and at
+most once a minute on the inbound path (only when a label is about to be
+written) — `i18n.onLocaleChange` needs a host-side callback, which a Python
+plugin cannot register (ADR-0145).
 
 ## Development
 

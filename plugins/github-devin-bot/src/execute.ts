@@ -12,6 +12,9 @@ import {
   type Work,
 } from "./github"
 
+/** Branches the Bot publishes; one namespace per product, never a vendor's. */
+export const PUBLICATION_BRANCH_PREFIX = "cognia/github-devin/"
+
 export interface AgentReport {
   summary: string
   review: string
@@ -330,7 +333,7 @@ export async function executeWork(ctx: PluginContext, run: BotRunContextV1, conf
   }
   const publication = await run.step.run("prepare-publication", async () => {
     const marker = `<!-- cognia-github-devin:${workId(work)} -->`
-    const branch = `codex/github-devin/${work.kind}-${work.number}-${initial.targetSha.slice(0, 12)}`
+    const branch = `${PUBLICATION_BRANCH_PREFIX}${work.kind}-${work.number}-${initial.targetSha.slice(0, 12)}`
     const message = `fix: ${work.kind === "issue" ? "resolve issue" : "repair PR"} #${work.number}`
     const actionId = work.mode === "review" ? "reviewPr" : "openPr"
     let verdict = report!.verdict ?? "comment"
@@ -385,12 +388,10 @@ export async function executeWork(ctx: PluginContext, run: BotRunContextV1, conf
   })
   const decision = await run.step.waitForApproval("publish", {
     decisionMode: config.publicationMode === "automatic" ? "policy" : "human",
-    title:
-      work.mode === "review"
-        ? "Publish this GitHub review?"
-        : "Publish this patch and open a pull request?",
-    message:
-      "Review the exact content and target revision. Test results below are agent-reported; no automatic merge is performed.",
+    title: ctx.i18n.t(
+      work.mode === "review" ? "approval.publishReview.title" : "approval.publishPatch.title"
+    ),
+    message: ctx.i18n.t("approval.publish.message"),
     risk: "high",
     timeoutMs: 7 * 24 * 60 * 60_000,
     detail: {
@@ -461,6 +462,11 @@ export async function executeWork(ctx: PluginContext, run: BotRunContextV1, conf
     // the host's approved publication checkpoint even when a matching PR exists.
     const job = await ctx.integrations.executeAction({
       integrationId: "github",
+      // The broker resolves the account from the run's credential binding and
+      // a Bot is never told which account that is (`BotCredentialSlotSnapshot`
+      // says "never WHICH"), so there is no id to pass. The SDK types
+      // `accountId` as required even with `binding`; empty is the only value
+      // the broker accepts alongside one.
       accountId: "",
       binding: { runId: run.runId, slotId: "github" },
       approval: { interruptId: decision.approvalId! },

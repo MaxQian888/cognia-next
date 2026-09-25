@@ -1,8 +1,10 @@
 {
   "id": "cognia-eval",
   "name": "Agent Eval",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Run agent eval datasets and read their results from chat. Wraps the eval engine (lib/ai/eval) as agent tools.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
@@ -24,5 +26,17 @@
       "entrypoint": "src/index.ts"
     },
     "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Agent Eval",
+        "manifest.description": "Run agent eval datasets and read their results from chat. Wraps the eval engine (lib/ai/eval) as agent tools."
+      },
+      "zh-CN": {
+        "manifest.name": "Agent 评测",
+        "manifest.description": "在对话中运行 Agent 评测数据集并查看结果。将评测引擎（lib/ai/eval）封装为 Agent 工具。"
+      }
+    }
   }
 }

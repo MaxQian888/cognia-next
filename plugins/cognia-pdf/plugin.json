@@ -1,8 +1,10 @@
 {
   "id": "cognia-pdf",
   "name": "Cognia PDF",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "importers"],
   "main": "src/index.ts",
@@ -19,6 +21,62 @@
     "database:write"
   ],
   "activationEvents": ["startup"],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Cognia PDF",
+        "manifest.description": "Plugin-owned native PDF inspection, form filling, page extraction, preview, validation, and export.",
+        "renderer.name": "Cognia PDF",
+        "preview.title": "PDF preview",
+        "preview.loading": "Rendering PDF…",
+        "preview.error": "Unable to render this PDF: {error}",
+        "preview.encrypted": "This PDF is password-protected, so it cannot be previewed here. Save it and open it with its password.",
+        "preview.previous": "Previous page",
+        "preview.next": "Next page",
+        "preview.pageOf": "Page {page} of {total}",
+        "preview.pageImage": "{title}, page {page} of {total}",
+        "preview.save": "Save PDF",
+        "preview.saving": "Saving…",
+        "preview.savedDesktop": "Saved {name}.",
+        "preview.savedMobile": "Saved {name} to Documents/cognia/exports.",
+        "preview.savedWeb": "Downloaded {name}.",
+        "preview.saveCancelled": "Save cancelled.",
+        "preview.saveFailed": "Could not save the PDF: {error}",
+        "importer.name": "PDF document",
+        "importer.description": "Import a PDF into the Cognia PDF model.",
+        "importer.binaryRequired": "PDF import requires binary content.",
+        "importer.failed": "PDF import failed.",
+        "import.untitled": "PDF document",
+        "history.fill": "Fill PDF form fields"
+      },
+      "zh-CN": {
+        "manifest.name": "Cognia PDF",
+        "manifest.description": "插件自带的原生 PDF 检查、表单填写、页面提取、预览、校验与导出。",
+        "renderer.name": "Cognia PDF",
+        "preview.title": "PDF 预览",
+        "preview.loading": "正在渲染 PDF…",
+        "preview.error": "无法渲染此 PDF：{error}",
+        "preview.encrypted": "此 PDF 受密码保护，无法在此预览。请保存后使用密码打开。",
+        "preview.previous": "上一页",
+        "preview.next": "下一页",
+        "preview.pageOf": "第 {page} 页，共 {total} 页",
+        "preview.pageImage": "{title}，第 {page} 页，共 {total} 页",
+        "preview.save": "保存 PDF",
+        "preview.saving": "正在保存…",
+        "preview.savedDesktop": "已保存 {name}。",
+        "preview.savedMobile": "已将 {name} 保存到 Documents/cognia/exports。",
+        "preview.savedWeb": "已下载 {name}。",
+        "preview.saveCancelled": "已取消保存。",
+        "preview.saveFailed": "无法保存 PDF：{error}",
+        "importer.name": "PDF 文档",
+        "importer.description": "将 PDF 导入 Cognia PDF 模型。",
+        "importer.binaryRequired": "PDF 导入需要二进制内容。",
+        "importer.failed": "PDF 导入失败。",
+        "import.untitled": "PDF 文档",
+        "history.fill": "填写 PDF 表单字段"
+      }
+    }
+  },
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
@@ -27,9 +85,9 @@
       "reason": "PDF.js processing and preview require a browser Worker and UI shell."
     },
     "mobile": {
-      "availability": "degraded",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
-      "reason": "PDF operations and download are available; native preview depends on the connected WebView."
+      "reason": "Inspection, form filling, page extraction, and the canvas page preview work on mobile; import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
     }
   }
 }

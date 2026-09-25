@@ -1,72 +1,97 @@
-import type { PluginContext } from "@cognia/plugin-sdk"
+import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 
-import anthropicSkills from "./index"
+import anthropicSkills, { manifest, PLUGIN_ID, renderSkillList, STARTER_SKILLS } from "./index"
+import manifestJson from "../plugin.json"
 
-function makeCtx() {
-  const skills: Array<{ id: string }> = []
-  const ctx: Partial<PluginContext> = {
-    pluginId: "cognia-anthropic-skills",
-    logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
-    agent: {
-      registerSkill: (skill: { id: string }) => {
-        skills.push(skill)
-      },
-    } as never,
+type Locale = keyof typeof manifestJson.i18n.locales
+
+/** `ctx.i18n.t` over the plugin's own bundle — same `{name}` interpolation as the host. */
+function translator(locale: Locale) {
+  const bundle = manifestJson.i18n.locales[locale] as Record<string, string>
+  return (key: string, params?: Record<string, string | number>) => {
+    const value = bundle[key]
+    if (value === undefined) throw new Error(`missing ${locale} key ${key}`)
+    return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : match
+    )
   }
-  return { ctx: ctx as PluginContext, skills }
 }
 
-describe("anthropic-skills (built-in)", () => {
-  it("activate registers the three starter skills imperatively", async () => {
-    const { ctx, skills } = makeCtx()
+function makeCtx(locale: Locale = "en") {
+  const registerSkill = jest.fn()
+  const showToast = jest.fn()
+  const ctx = {
+    pluginId: PLUGIN_ID,
+    logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    agent: { registerSkill },
+    ui: { showToast },
+    i18n: { t: translator(locale) },
+  } as unknown as PluginContext
+  return { ctx, registerSkill, showToast }
+}
+
+describe("anthropic-skills (Starter Skills)", () => {
+  it("declares three namespaced skills on the manifest for the declarative walker", () => {
+    expect(manifest.skills?.map((s) => s.id)).toEqual([
+      `${PLUGIN_ID}:code-review`,
+      `${PLUGIN_ID}:data-analysis`,
+      `${PLUGIN_ID}:web-research`,
+    ])
+    for (const skill of manifest.skills ?? []) {
+      expect(skill.source.kind).toBe("inline")
+      expect(skill.slug).toBe(skill.id.slice(`${PLUGIN_ID}:`.length))
+    }
+  })
+
+  it("does not register the manifest skills a second time imperatively", async () => {
+    const { ctx, registerSkill } = makeCtx()
     await anthropicSkills.activate?.(ctx)
-    expect(skills.map((s) => s.id).sort()).toEqual([
-      "anthropic.code-review",
-      "anthropic.data-analysis",
-      "anthropic.web-research",
-    ])
+    expect(registerSkill).not.toHaveBeenCalled()
   })
 
-  it("declares the same skills on the manifest for the declarative walker", () => {
-    const manifest = anthropicSkills.manifest as unknown as { skills: Array<{ id: string }> }
-    expect(manifest.skills.map((s) => s.id)).toEqual([
-      "anthropic.code-review",
-      "anthropic.data-analysis",
-      "anthropic.web-research",
-    ])
+  it("describes the skills truthfully (hand-written, not vendored)", () => {
+    expect(manifestJson.description).not.toMatch(/anthropics\/skills/i)
+    expect(manifestJson.description).toMatch(/hand-written/)
   })
 
-  it("has no deactivate — the manager owns command teardown", () => {
-    // The plugin registers nothing imperatively any more, so there is nothing
-    // for it to undo. Manifest-declared commands are unregistered by
-    // `PluginManager.unregisterPluginSlashCommands`.
-    expect(anthropicSkills.deactivate).toBeUndefined()
+  it("activates lazily on its command, never at startup", () => {
+    expect(manifest.activationEvents).toEqual(["onCommand:skill"])
   })
 
-  it("declares its slash command instead of registering it imperatively", async () => {
-    const { ctx } = makeCtx()
-    const hooks = await anthropicSkills.activate?.(ctx)
-    // The manager owns registration for manifest-declared commands; a plugin
-    // touching the registry itself skips namespacing, conflict detection,
-    // aliases, the command-palette entry and teardown.
-    expect(typeof hooks?.onCommand).toBe("function")
-    const commands = (anthropicSkills.manifest as { commands?: Array<{ id: string }> }).commands
-    expect(commands?.map((c) => c.id)).toEqual(["skill"])
+  it("keeps plugin.json fields when merging the TypeScript skills", () => {
+    expect(manifest.commands?.map((c) => c.id)).toEqual(["skill"])
+    expect(manifest.i18n).toEqual(manifestJson.i18n)
   })
 
-  it("handles its own command and declines others", async () => {
-    const { ctx } = makeCtx()
-    const showToast = jest.fn()
-    ;(ctx as { ui?: unknown }).ui = { showToast }
-    const hooks = await anthropicSkills.activate?.(ctx)
-    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+  it("answers /skill in the conversation with the localized list and composer how-to", async () => {
+    const { ctx, showToast } = makeCtx("en")
+    const hooks = (await anthropicSkills.activate?.(ctx)) as {
+      onCommand: (command: string, args: string[]) => Promise<boolean | PluginCommandResult>
+    }
+    expect(await hooks.onCommand("not-mine", [])).toBe(false)
+    const result = (await hooks.onCommand("skill", [])) as PluginCommandResult
+    expect(result.handled).toBe(true)
+    expect(result.message).toContain("Code Review")
+    expect(result.message).toContain("`@skill:`")
+    // The old toast sent users to character settings, which never listed these.
+    expect(result.message).not.toMatch(/character/i)
     expect(showToast).not.toHaveBeenCalled()
-    expect(await hooks?.onCommand?.("skill", [])).toBe(true)
-    expect(showToast).toHaveBeenCalled()
   })
 
-  it("declares lazy activation for its command", () => {
-    const events = (anthropicSkills.manifest as { activationEvents?: string[] }).activationEvents
-    expect(events).toContain("onCommand:skill")
+  it("renders the zh-CN list from the same keys", () => {
+    const message = renderSkillList(translator("zh-CN"))
+    expect(message).toContain("代码审查")
+    expect(message).toContain("`@skill:`")
+  })
+
+  it("has a matching zh-CN key for every en key", () => {
+    expect(Object.keys(manifestJson.i18n.locales["zh-CN"]).sort()).toEqual(
+      Object.keys(manifestJson.i18n.locales.en).sort()
+    )
+    expect(STARTER_SKILLS).toHaveLength(3)
+  })
+
+  it("has no deactivate — the manager owns command and skill teardown", () => {
+    expect(anthropicSkills.deactivate).toBeUndefined()
   })
 })

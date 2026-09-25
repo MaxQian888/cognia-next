@@ -47,7 +47,7 @@ export async function persistReport(
       },
     })
   } catch (err) {
-    ctx.logger?.warn("deep-research: report artifact could not be saved", err)
+    ctx.logger.warn("deep-research: report artifact could not be saved", err)
     return undefined
   }
 }

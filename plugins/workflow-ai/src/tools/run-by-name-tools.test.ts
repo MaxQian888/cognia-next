@@ -7,8 +7,23 @@ import {
 } from "@/lib/plugin/api/testing"
 import { createWorkflow } from "@/lib/db/workflows"
 import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
-import { buildRunByNameTools } from "./run-by-name-tools"
+import { buildFanoutApprovalSurface, buildRunByNameTools } from "./run-by-name-tools"
 import { configureWorkflowApi } from "../store-bridge"
+import manifestJson from "../../plugin.json"
+
+type Locale = keyof typeof manifestJson.i18n.locales
+
+/** `ctx.i18n.t` over the plugin's own bundle, failing loudly on a missing key. */
+function translator(locale: Locale = "en") {
+  const bundle = manifestJson.i18n.locales[locale] as Record<string, string>
+  return (key: string, params?: Record<string, string | number>) => {
+    const value = bundle[key]
+    if (value === undefined) throw new Error(`missing ${locale} key ${key}`)
+    return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : match
+    )
+  }
+}
 
 async function seedSession(opts: { sessionId: string; bindToIM?: boolean }): Promise<void> {
   await seedPlatformBoundSession({
@@ -26,7 +41,7 @@ async function seedSession(opts: { sessionId: string; bindToIM?: boolean }): Pro
 }
 
 configureWorkflowApi(createWorkflowAuthorAPI() as never)
-const tools = buildRunByNameTools()
+const tools = buildRunByNameTools(translator())
 const listTool = tools.find((t) => t.name === "wf_list_workflows")!
 const runByNameTool = tools.find((t) => t.name === "wf_run_workflow_by_name")!
 const subscribeTool = tools.find((t) => t.name === "wf_subscribe_workflow_fanout")!
@@ -258,5 +273,27 @@ describe("wf_subscribe_workflow_fanout", () => {
       },
       createdBy: "claude-tool",
     })
+  })
+})
+
+describe("fan-out approval card copy", () => {
+  const input = { workflowName: "Deploy", approveActionId: "a", cancelActionId: "c" }
+
+  it("renders the card in the user's language from the plugin bundle", () => {
+    const en = buildFanoutApprovalSurface(input, translator("en"))
+    expect(en.title).toBe("Subscribe to “Deploy”")
+    expect(JSON.stringify(en.components)).toContain('"text":"Approve"')
+    expect(en.widget?.fallbackText).toContain("Reply 1 to approve / 2 to cancel")
+    expect(en.widget?.fallbackText).not.toMatch(/[\u4e00-\u9fff]/)
+
+    const zh = buildFanoutApprovalSurface(input, translator("zh-CN"))
+    expect(zh.title).toBe("订阅「Deploy」")
+    expect(zh.widget?.fallbackText).toContain("回复 1 同意 / 2 取消")
+  })
+
+  it("ships every en key in zh-CN", () => {
+    expect(Object.keys(manifestJson.i18n.locales["zh-CN"]).sort()).toEqual(
+      Object.keys(manifestJson.i18n.locales.en).sort()
+    )
   })
 })

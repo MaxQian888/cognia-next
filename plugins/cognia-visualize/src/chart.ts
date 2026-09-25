@@ -11,11 +11,36 @@ import type { VisualizationSpec } from "./model"
  * set an explicit `color` on the root `<svg>`.
  */
 
-const WIDTH = 720
-const HEIGHT = 400
-const PLOT_LEFT = 132
-const PLOT_RIGHT = 688
 const PALETTE_FALLBACK = "#2563eb"
+
+/**
+ * Drawing surface for one chart. The wide frame (720 units) is what a desktop
+ * panel and the standalone exports use; the compact frame (360 units) is laid
+ * out for a phone-width container, where the wide frame would scale 12-unit
+ * labels down to ~6 CSS px. Same data, re-laid out — not the wide chart shrunk.
+ */
+interface Frame {
+  width: number
+  height: number
+  plotLeft: number
+  plotRight: number
+  compact: boolean
+}
+
+const WIDE: Frame = { width: 720, height: 400, plotLeft: 132, plotRight: 688, compact: false }
+const COMPACT: Frame = { width: 360, height: 400, plotLeft: 92, plotRight: 304, compact: true }
+
+export interface ChartOptions {
+  /** Standalone file: sets an explicit text color instead of inheriting it. */
+  standalone?: boolean
+  /** Phone-width layout (see {@link Frame}). */
+  compact?: boolean
+}
+
+/** Pick the wide or compact length for a truncation/spacing constant. */
+function pick(f: Frame, wide: number, compact: number): number {
+  return f.compact ? compact : wide
+}
 
 export function escapeXml(value: string): string {
   return String(value)
@@ -42,12 +67,13 @@ function color(spec: VisualizationSpec, index: number): string {
 function svgWrap(
   spec: VisualizationSpec,
   body: string,
-  opts: { height?: number; standalone?: boolean } = {}
+  f: Frame,
+  opts: ChartOptions & { height?: number } = {}
 ): string {
-  const height = opts.height ?? HEIGHT
+  const height = opts.height ?? f.height
   const colorStyle = opts.standalone ? ` style="color:#0f172a"` : ""
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${height}" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${f.width} ${height}" ` +
     `role="img" aria-label="${escapeXml(spec.accessibility.summary)}"${colorStyle}>` +
     `<title>${escapeXml(spec.title)}</title>${body}</svg>`
   )
@@ -87,136 +113,152 @@ function extent(values: number[]): { lo: number; hi: number } {
 // Bars (bar, histogram) — sign-aware horizontal bars with a zero axis.
 // ---------------------------------------------------------------------------
 
-function barsSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function barsSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const { lo, hi } = extent(spec.data.map((d) => d.value))
   const span = hi - lo || 1
-  const x = (v: number) => PLOT_LEFT + ((v - lo) / span) * (PLOT_RIGHT - PLOT_LEFT)
+  const x = (v: number) => f.plotLeft + ((v - lo) / span) * (f.plotRight - f.plotLeft)
   const zero = x(0)
   const n = Math.max(spec.data.length, 1)
-  const rowH = Math.min(44, (HEIGHT - 64) / n)
-  let body = `<line x1="${zero}" y1="24" x2="${zero}" y2="${HEIGHT - 24}" stroke="currentColor" opacity="0.25"/>`
+  const rowH = Math.min(44, (f.height - 64) / n)
+  let body = `<line x1="${zero}" y1="24" x2="${zero}" y2="${f.height - 24}" stroke="currentColor" opacity="0.25"/>`
   spec.data.forEach((datum, index) => {
     const y = 32 + index * rowH
     const barH = Math.max(6, rowH * 0.62)
     const x1 = Math.min(x(datum.value), zero)
     const w = Math.max(2, Math.abs(x(datum.value) - zero))
-    const valueX = datum.value >= 0 ? Math.min(x1 + w + 6, PLOT_RIGHT) : Math.max(x1 - 6, PLOT_LEFT)
+    const valueX =
+      datum.value >= 0 ? Math.min(x1 + w + 6, f.plotRight) : Math.max(x1 - 6, f.plotLeft)
     body +=
       `<rect x="${x1}" y="${y}" width="${w}" height="${barH}" rx="3" fill="${escapeXml(color(spec, index))}"/>` +
-      text(4, y + barH / 2 + 4, truncate(datum.label, 16)) +
+      text(4, y + barH / 2 + 4, truncate(datum.label, pick(f, 16, 11))) +
       text(valueX, y + barH / 2 + 4, `${fmt(datum.value)}${spec.unit ?? ""}`, {
         anchor: datum.value >= 0 ? "start" : "end",
         weight: 600,
       })
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 /** Funnel: stages keep their declared order; widths are centered and shrink. */
-function funnelSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function funnelSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const max = Math.max(...spec.data.map((d) => Math.abs(d.value)), 1)
   const n = Math.max(spec.data.length, 1)
-  const rowH = Math.min(56, (HEIGHT - 56) / n)
-  const center = WIDTH / 2
+  const rowH = Math.min(56, (f.height - 56) / n)
+  const center = f.width / 2
   let body = ""
   spec.data.forEach((datum, index) => {
     const y = 24 + index * rowH
-    const w = Math.max(24, (Math.abs(datum.value) / max) * 560)
+    const w = Math.max(24, (Math.abs(datum.value) / max) * (f.width - 160))
     const barH = Math.max(10, rowH - 8)
     body +=
       `<rect x="${center - w / 2}" y="${y}" width="${w}" height="${barH}" rx="4" fill="${escapeXml(color(spec, index))}"/>` +
-      text(center, y + barH / 2 + 4, truncate(datum.label, 24), {
+      text(center, y + barH / 2 + 4, truncate(datum.label, pick(f, 24, 14)), {
         anchor: "middle",
         weight: 600,
-        opacity: w > 180 ? 1 : 0,
+        opacity: w > pick(f, 180, 110) ? 1 : 0,
       }) +
       text(center + w / 2 + 8, y + barH / 2 + 4, `${fmt(datum.value)}${spec.unit ?? ""}`, {
         weight: 600,
       })
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Line / area / simulation — ordered points over index (or x when present).
 // ---------------------------------------------------------------------------
 
-function lineSvg(spec: VisualizationSpec, filled: boolean, opts: { standalone?: boolean }): string {
+function lineSvg(spec: VisualizationSpec, filled: boolean, f: Frame, opts: ChartOptions): string {
   const values = spec.data.map((d) => d.value)
   const { lo, hi } = extent(values)
   const span = hi - lo || 1
   const n = spec.data.length
   const px = (i: number) =>
-    PLOT_LEFT + (n > 1 ? (i / (n - 1)) * (PLOT_RIGHT - PLOT_LEFT) : (PLOT_RIGHT - PLOT_LEFT) / 2)
-  const py = (v: number) => HEIGHT - 48 - ((v - lo) / span) * (HEIGHT - 96)
+    f.plotLeft +
+    (n > 1 ? (i / (n - 1)) * (f.plotRight - f.plotLeft) : (f.plotRight - f.plotLeft) / 2)
+  const py = (v: number) => f.height - 48 - ((v - lo) / span) * (f.height - 96)
   const points = spec.data.map((d, i) => `${px(i)},${py(d.value)}`).join(" ")
   const baseY = py(Math.max(lo, 0))
-  let body = `<line x1="${PLOT_LEFT}" y1="${baseY}" x2="${PLOT_RIGHT}" y2="${baseY}" stroke="currentColor" opacity="0.25"/>`
+  let body = `<line x1="${f.plotLeft}" y1="${baseY}" x2="${f.plotRight}" y2="${baseY}" stroke="currentColor" opacity="0.25"/>`
   if (filled && n > 1)
-    body += `<polygon points="${PLOT_LEFT},${baseY} ${points} ${PLOT_RIGHT},${baseY}" fill="${escapeXml(color(spec, 0))}" opacity="0.18"/>`
+    body += `<polygon points="${f.plotLeft},${baseY} ${points} ${f.plotRight},${baseY}" fill="${escapeXml(color(spec, 0))}" opacity="0.18"/>`
   if (n > 1)
     body += `<polyline points="${points}" fill="none" stroke="${escapeXml(color(spec, 0))}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
-  const labelEvery = Math.max(1, Math.ceil(n / 12))
+  const labelEvery = Math.max(1, Math.ceil(n / pick(f, 12, 5)))
   spec.data.forEach((d, i) => {
     body += `<circle cx="${px(i)}" cy="${py(d.value)}" r="3.5" fill="${escapeXml(color(spec, i))}"/>`
     if (i % labelEvery === 0)
-      body += text(px(i), HEIGHT - 24, truncate(d.label, 10), {
+      body += text(px(i), f.height - 24, truncate(d.label, pick(f, 10, 8)), {
         anchor: "middle",
         size: 11,
         opacity: 0.75,
       })
   })
-  body += text(PLOT_LEFT, 36, `${fmt(hi)}${spec.unit ?? ""}`, { size: 11, opacity: 0.6 })
-  body += text(PLOT_LEFT, HEIGHT - 44, `${fmt(lo)}${spec.unit ?? ""}`, { size: 11, opacity: 0.6 })
-  return svgWrap(spec, body, opts)
+  body += text(f.plotLeft, 36, `${fmt(hi)}${spec.unit ?? ""}`, { size: 11, opacity: 0.6 })
+  body += text(f.plotLeft, f.height - 44, `${fmt(lo)}${spec.unit ?? ""}`, {
+    size: 11,
+    opacity: 0.6,
+  })
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Scatter / map — x/y positioned points colored by group.
 // ---------------------------------------------------------------------------
 
-function scatterSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function scatterSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const xs = spec.data.map((d, i) => d.x ?? i)
   const ys = spec.data.map((d) => d.y ?? d.value)
   const xe = extent(xs)
   const ye = extent(ys)
   const px = (v: number) =>
-    PLOT_LEFT + ((v - xe.lo) / (xe.hi - xe.lo || 1)) * (PLOT_RIGHT - PLOT_LEFT)
-  const py = (v: number) => HEIGHT - 48 - ((v - ye.lo) / (ye.hi - ye.lo || 1)) * (HEIGHT - 96)
+    f.plotLeft + ((v - xe.lo) / (xe.hi - xe.lo || 1)) * (f.plotRight - f.plotLeft)
+  const py = (v: number) => f.height - 48 - ((v - ye.lo) / (ye.hi - ye.lo || 1)) * (f.height - 96)
   const groups = [...new Set(spec.data.map((d) => d.group ?? ""))]
   let body =
-    `<line x1="${PLOT_LEFT}" y1="${HEIGHT - 48}" x2="${PLOT_RIGHT}" y2="${HEIGHT - 48}" stroke="currentColor" opacity="0.25"/>` +
-    `<line x1="${PLOT_LEFT}" y1="48" x2="${PLOT_LEFT}" y2="${HEIGHT - 48}" stroke="currentColor" opacity="0.25"/>`
+    `<line x1="${f.plotLeft}" y1="${f.height - 48}" x2="${f.plotRight}" y2="${f.height - 48}" stroke="currentColor" opacity="0.25"/>` +
+    `<line x1="${f.plotLeft}" y1="48" x2="${f.plotLeft}" y2="${f.height - 48}" stroke="currentColor" opacity="0.25"/>`
   spec.data.forEach((d, i) => {
     const cx = px(xs[i])
     const cy = py(ys[i])
     body += `<circle cx="${cx}" cy="${cy}" r="6" fill="${escapeXml(color(spec, Math.max(groups.indexOf(d.group ?? ""), 0)))}" opacity="0.85"><title>${escapeXml(d.label)}: ${fmt(d.value)}${escapeXml(spec.unit ?? "")}</title></circle>`
   })
+  let height = f.height
   if (groups.length > 1) {
+    // Legend rows wrap under the plot so no entry runs off a narrow frame.
+    const step = pick(f, 120, 88)
+    const perRow = Math.max(1, Math.floor((f.width - 8) / step))
+    const rows = Math.ceil(groups.length / perRow)
+    height = f.height + (rows - 1) * 16
     groups.forEach((g, i) => {
+      const x = 8 + (i % perRow) * step
+      const y = f.height - 26 + Math.floor(i / perRow) * 16
       body +=
-        `<rect x="${PLOT_LEFT + i * 120}" y="${HEIGHT - 26}" width="10" height="10" rx="2" fill="${escapeXml(color(spec, i))}"/>` +
-        text(PLOT_LEFT + i * 120 + 14, HEIGHT - 17, truncate(g, 14), { size: 11, opacity: 0.8 })
+        `<rect x="${x}" y="${y}" width="10" height="10" rx="2" fill="${escapeXml(color(spec, i))}"/>` +
+        text(x + 14, y + 9, truncate(g, pick(f, 14, 10)), { size: 11, opacity: 0.8 })
     })
   }
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, { ...opts, height })
 }
 
 // ---------------------------------------------------------------------------
 // Pie / donut — proportional arcs + legend.
 // ---------------------------------------------------------------------------
 
-function pieSvg(spec: VisualizationSpec, donut: boolean, opts: { standalone?: boolean }): string {
+function pieSvg(spec: VisualizationSpec, donut: boolean, f: Frame, opts: ChartOptions): string {
   const slices = spec.data.map((d) => Math.max(0, d.value))
   let total = slices.reduce((a, b) => a + b, 0)
   if (total <= 0) {
     slices.fill(1)
     total = slices.length
   }
-  const cx = 190
-  const cy = 200
-  const r = 140
-  const inner = donut ? 78 : 0
+  // Wide: pie left, legend right. Compact: pie on top, legend below it.
+  const cx = f.compact ? f.width / 2 : 190
+  const cy = f.compact ? 140 : 200
+  const r = f.compact ? 116 : 140
+  const inner = donut ? (f.compact ? 64 : 78) : 0
+  const legendX = f.compact ? 16 : 380
+  const legendTop = f.compact ? 290 : 96
   let angle = -Math.PI / 2
   let body = ""
   const point = (a: number, radius: number) =>
@@ -236,27 +278,28 @@ function pieSvg(spec: VisualizationSpec, donut: boolean, opts: { standalone?: bo
       body += `<path d="M${cx},${cy} L${point(angle, r)} A${r},${r} 0 ${large} 1 ${point(a1, r)} Z" fill="${c}"/>`
     }
     angle = a1
-    const ly = 96 + i * 24
+    const ly = legendTop + i * 24
     body +=
-      `<rect x="380" y="${ly - 10}" width="12" height="12" rx="2" fill="${c}"/>` +
+      `<rect x="${legendX}" y="${ly - 10}" width="12" height="12" rx="2" fill="${c}"/>` +
       text(
-        398,
+        legendX + 18,
         ly,
-        `${truncate(d.label, 20)} — ${fmt(d.value)}${spec.unit ?? ""} (${Math.round((slices[i] / total) * 100)}%)`
+        `${truncate(d.label, pick(f, 20, 16))} — ${fmt(d.value)}${spec.unit ?? ""} (${Math.round((slices[i] / total) * 100)}%)`
       )
   })
-  return svgWrap(spec, body, opts)
+  const height = f.compact ? Math.max(f.height, legendTop + spec.data.length * 24) : f.height
+  return svgWrap(spec, body, f, { ...opts, height })
 }
 
 // ---------------------------------------------------------------------------
 // Radar — one axis per datum, polygon through normalized values.
 // ---------------------------------------------------------------------------
 
-function radarSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function radarSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const n = spec.data.length
-  const cx = WIDTH / 2
+  const cx = f.width / 2
   const cy = 205
-  const r = 140
+  const r = pick(f, 140, 112)
   const max = Math.max(...spec.data.map((d) => Math.abs(d.value)), 1)
   const angle = (i: number) => -Math.PI / 2 + (i / Math.max(n, 3)) * Math.PI * 2
   const point = (i: number, ratio: number) =>
@@ -273,7 +316,7 @@ function radarSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): stri
       text(
         cx + Math.cos(angle(i)) * (r + 22),
         cy + Math.sin(angle(i)) * (r + 22) + 4,
-        truncate(d.label, 12),
+        truncate(d.label, pick(f, 12, 9)),
         { anchor: "middle", size: 11 }
       )
   })
@@ -281,21 +324,21 @@ function radarSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): stri
     const poly = spec.data.map((d, i) => point(i, Math.abs(d.value) / max)).join(" ")
     body += `<polygon points="${poly}" fill="${escapeXml(color(spec, 0))}" opacity="0.25" stroke="${escapeXml(color(spec, 0))}" stroke-width="2"/>`
   }
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Gauge — semicircle arc scaled to the largest value.
 // ---------------------------------------------------------------------------
 
-function gaugeSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function gaugeSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const datum = spec.data[0]
   const value = datum?.value ?? 0
   const max = Math.max(...spec.data.map((d) => Math.abs(d.value)), Math.abs(value), 1)
   const ratio = Math.min(Math.abs(value) / max, 1)
-  const cx = WIDTH / 2
-  const cy = 300
-  const r = 190
+  const cx = f.width / 2
+  const cy = pick(f, 300, 260)
+  const r = pick(f, 190, 150)
   const point = (a: number) => `${cx + Math.cos(a) * r},${cy + Math.sin(a) * r}`
   const start = Math.PI
   const end = start + ratio * Math.PI
@@ -307,61 +350,62 @@ function gaugeSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): stri
       : "") +
     text(cx, cy - 30, `${fmt(value)}${spec.unit ?? ""}`, {
       anchor: "middle",
-      size: 56,
+      size: pick(f, 56, 44),
       weight: 700,
     }) +
-    text(cx, cy + 34, truncate(datum?.label ?? spec.title, 30), {
+    text(cx, cy + 34, truncate(datum?.label ?? spec.title, pick(f, 30, 22)), {
       anchor: "middle",
       size: 14,
       opacity: 0.7,
     })
-  return svgWrap(spec, body, { ...opts, height: 340 })
+  return svgWrap(spec, body, f, { ...opts, height: pick(f, 340, 300) })
 }
 
 // ---------------------------------------------------------------------------
 // Metric — one headline value, remaining data as small multiples.
 // ---------------------------------------------------------------------------
 
-function metricSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function metricSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const primary = spec.data[0]
   const rest = spec.data.slice(1, 5)
   let body = ""
   if (primary) {
     body +=
-      text(WIDTH / 2, 190, `${fmt(primary.value)}${spec.unit ?? ""}`, {
+      text(f.width / 2, 190, `${fmt(primary.value)}${spec.unit ?? ""}`, {
         anchor: "middle",
-        size: 104,
+        size: pick(f, 104, 72),
         weight: 700,
       }) +
-      text(WIDTH / 2, 236, truncate(primary.label, 40), {
+      text(f.width / 2, 236, truncate(primary.label, pick(f, 40, 26)), {
         anchor: "middle",
         size: 18,
         opacity: 0.75,
       })
     if (primary.group)
-      body += text(WIDTH / 2, 262, truncate(primary.group, 40), {
+      body += text(f.width / 2, 262, truncate(primary.group, pick(f, 40, 26)), {
         anchor: "middle",
         size: 13,
         opacity: 0.55,
       })
   }
   rest.forEach((d, i) => {
-    const x = WIDTH / 2 + (i - (rest.length - 1) / 2) * 150
+    const x = f.width / 2 + (i - (rest.length - 1) / 2) * pick(f, 150, 84)
     body +=
       text(x, 330, `${fmt(d.value)}${spec.unit ?? ""}`, {
         anchor: "middle",
-        size: 24,
+        size: pick(f, 24, 18),
         weight: 650,
-      }) + text(x, 352, truncate(d.label, 16), { anchor: "middle", size: 12, opacity: 0.7 })
+      }) +
+      text(x, 352, truncate(d.label, pick(f, 16, 10)), { anchor: "middle", size: 12, opacity: 0.7 })
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Timeline / gantt — bars positioned on a parsed date axis.
 // ---------------------------------------------------------------------------
 
-function timelineSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function timelineSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const starts = spec.data.map((d) => Date.parse(d.start ?? ""))
   const ends = spec.data.map((d, i) => Date.parse(d.end ?? "") || starts[i])
   const validStarts = starts.filter(Number.isFinite)
@@ -369,16 +413,16 @@ function timelineSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): s
   const lo = validStarts.length ? Math.min(...validStarts) : 0
   const hi = validEnds.length ? Math.max(...validEnds, lo + 1) : lo + 1
   const span = hi - lo || 1
-  const px = (t: number) => PLOT_LEFT + ((t - lo) / span) * (PLOT_RIGHT - PLOT_LEFT)
+  const px = (t: number) => f.plotLeft + ((t - lo) / span) * (f.plotRight - f.plotLeft)
   const n = Math.max(spec.data.length, 1)
-  const rowH = Math.min(44, (HEIGHT - 64) / n)
+  const rowH = Math.min(44, (f.height - 64) / n)
   let body =
-    `<line x1="${PLOT_LEFT}" y1="${HEIGHT - 30}" x2="${PLOT_RIGHT}" y2="${HEIGHT - 30}" stroke="currentColor" opacity="0.25"/>` +
-    text(PLOT_LEFT, HEIGHT - 10, new Date(lo).toISOString().slice(0, 10), {
+    `<line x1="${f.plotLeft}" y1="${f.height - 30}" x2="${f.plotRight}" y2="${f.height - 30}" stroke="currentColor" opacity="0.25"/>` +
+    text(f.plotLeft, f.height - 10, new Date(lo).toISOString().slice(0, 10), {
       size: 11,
       opacity: 0.7,
     }) +
-    text(PLOT_RIGHT, HEIGHT - 10, new Date(hi).toISOString().slice(0, 10), {
+    text(f.plotRight, f.height - 10, new Date(hi).toISOString().slice(0, 10), {
       anchor: "end",
       size: 11,
       opacity: 0.7,
@@ -390,27 +434,27 @@ function timelineSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): s
     const e = Math.max(Number.isFinite(ends[i]) ? ends[i] : s, s)
     body +=
       `<rect x="${px(s)}" y="${y}" width="${Math.max(3, px(e) - px(s))}" height="${barH}" rx="${barH / 2}" fill="${escapeXml(color(spec, i))}"/>` +
-      text(4, y + barH / 2 + 4, truncate(d.label, 16))
+      text(4, y + barH / 2 + 4, truncate(d.label, pick(f, 16, 11)))
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Heatmap — group × label grid, cell opacity encodes value.
 // ---------------------------------------------------------------------------
 
-function heatmapSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function heatmapSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const rows = [...new Set(spec.data.map((d) => d.group ?? ""))]
   const cols = [...new Set(spec.data.map((d) => d.label))]
   const max = Math.max(...spec.data.map((d) => Math.abs(d.value)), 1)
-  const cellW = (PLOT_RIGHT - PLOT_LEFT) / Math.max(cols.length, 1)
-  const cellH = (HEIGHT - 96) / Math.max(rows.length, 1)
+  const cellW = (f.plotRight - f.plotLeft) / Math.max(cols.length, 1)
+  const cellH = (f.height - 96) / Math.max(rows.length, 1)
   let body = ""
   spec.data.forEach((d) => {
     const cx = cols.indexOf(d.label)
     const cy = rows.indexOf(d.group ?? "")
     if (cx < 0 || cy < 0) return
-    const x = PLOT_LEFT + cx * cellW
+    const x = f.plotLeft + cx * cellW
     const y = 40 + cy * cellH
     body +=
       `<rect x="${x + 2}" y="${y + 2}" width="${Math.max(2, cellW - 4)}" height="${Math.max(2, cellH - 4)}" rx="4" fill="${escapeXml(color(spec, 0))}" opacity="${Math.max(0.08, Math.abs(d.value) / max)}"/>` +
@@ -420,7 +464,7 @@ function heatmapSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): st
   })
   cols.forEach((c, i) => {
     body += text(
-      PLOT_LEFT + i * cellW + cellW / 2,
+      f.plotLeft + i * cellW + cellW / 2,
       30,
       truncate(c, Math.max(6, Math.floor(cellW / 8))),
       {
@@ -432,22 +476,25 @@ function heatmapSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): st
   })
   rows.forEach((r, i) => {
     if (r)
-      body += text(4, 40 + i * cellH + cellH / 2 + 4, truncate(r, 14), { size: 11, opacity: 0.75 })
+      body += text(4, 40 + i * cellH + cellH / 2 + 4, truncate(r, pick(f, 14, 11)), {
+        size: 11,
+        opacity: 0.75,
+      })
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Treemap — slice-and-dice layout proportional to value.
 // ---------------------------------------------------------------------------
 
-function treemapSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function treemapSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const total = spec.data.reduce((a, d) => a + Math.max(0, d.value), 0) || spec.data.length || 1
   let body = ""
   let x = 8
   let y = 32
-  let w = WIDTH - 16
-  let h = HEIGHT - 48
+  let w = f.width - 16
+  let h = f.height - 48
   let horizontal = true
   spec.data.forEach((d, i) => {
     const share = Math.max(0.02, Math.max(0, d.value) / total)
@@ -470,7 +517,7 @@ function treemapSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): st
     }
     horizontal = !horizontal
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -486,7 +533,7 @@ function quartile(sorted: number[], q: number): number {
   )
 }
 
-function boxSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function boxSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const groups = new Map<string, number[]>()
   for (const d of spec.data) {
     const key = d.group ?? d.label
@@ -498,13 +545,13 @@ function boxSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string
   const all = [...groups.values()].flat()
   const { lo, hi } = extent(all)
   const span = hi - lo || 1
-  const py = (v: number) => HEIGHT - 56 - ((v - lo) / span) * (HEIGHT - 120)
-  const colW = (PLOT_RIGHT - PLOT_LEFT) / Math.max(keys.length, 1)
+  const py = (v: number) => f.height - 56 - ((v - lo) / span) * (f.height - 120)
+  const colW = (f.plotRight - f.plotLeft) / Math.max(keys.length, 1)
   let body = ""
   keys.forEach((key, i) => {
     const values = (groups.get(key) ?? []).sort((a, b) => a - b)
     if (!values.length) return
-    const cx = PLOT_LEFT + i * colW + colW / 2
+    const cx = f.plotLeft + i * colW + colW / 2
     const bw = Math.min(64, colW * 0.5)
     const q1 = quartile(values, 0.25)
     const med = quartile(values, 0.5)
@@ -517,16 +564,19 @@ function boxSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string
       `<line x1="${cx - bw / 4}" y1="${py(min)}" x2="${cx + bw / 4}" y2="${py(min)}" stroke="${escapeXml(color(spec, i))}" stroke-width="2"/>` +
       `<rect x="${cx - bw / 2}" y="${py(q3)}" width="${bw}" height="${Math.max(2, py(q1) - py(q3))}" fill="${escapeXml(color(spec, i))}" opacity="0.35" stroke="${escapeXml(color(spec, i))}"/>` +
       `<line x1="${cx - bw / 2}" y1="${py(med)}" x2="${cx + bw / 2}" y2="${py(med)}" stroke="${escapeXml(color(spec, i))}" stroke-width="3"/>` +
-      text(cx, HEIGHT - 30, truncate(key, 14), { anchor: "middle", size: 11 })
+      text(cx, f.height - 30, truncate(key, Math.max(4, Math.floor(colW / 7))), {
+        anchor: "middle",
+        size: 11,
+      })
   })
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 // ---------------------------------------------------------------------------
 // Graph (network / sankey / process) — layered node-link diagram.
 // ---------------------------------------------------------------------------
 
-function graphSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function graphSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   const order: string[] = []
   const layerOf = new Map<string, number>()
   const isSource = new Set<string>()
@@ -547,13 +597,14 @@ function graphSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): stri
   for (const node of order) layers[layerOf.get(node) ?? 1].push(node)
   if (!layers[0].length && !layers[2].length && layers[1].length)
     layers[1].forEach((_, i) => (i % 2 === 0 ? layers[0] : layers[2]).push(layers[1][i]))
-  const pos = new Map<string, { x: number; y: number }>()
-  const colX = [120, 360, 600]
+  const pos = new Map<string, { x: number; y: number; column: number }>()
+  const colX = [f.width / 6, f.width / 2, (f.width * 5) / 6]
   layers.forEach((nodes, layer) => {
     nodes.forEach((node, i) => {
       pos.set(node, {
         x: colX[layer],
-        y: 60 + i * ((HEIGHT - 120) / Math.max(nodes.length - 1, 1)),
+        y: 60 + i * ((f.height - 120) / Math.max(nodes.length - 1, 1)),
+        column: layer,
       })
     })
   })
@@ -567,11 +618,18 @@ function graphSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): stri
     body += `<path d="M${a.x},${a.y} C${(a.x + b.x) / 2},${a.y} ${(a.x + b.x) / 2},${b.y} ${b.x},${b.y}" fill="none" stroke="${escapeXml(color(spec, 0))}" stroke-width="${width}" opacity="0.55"><title>${escapeXml(`${d.source} → ${d.target}: ${fmt(d.value)}${spec.unit ?? ""}`)}</title></path>`
   }
   for (const [node, p] of pos) {
+    // Labels stay out of each other's way and inside the frame: left column
+    // grows rightwards, right column leftwards, middle column sits below.
+    const label = truncate(node, pick(f, 18, 10))
     body +=
       `<circle cx="${p.x}" cy="${p.y}" r="9" fill="${escapeXml(color(spec, layerOf.get(node) ?? 0))}"/>` +
-      text(p.x + 14, p.y + 4, truncate(node, 18), { size: 12, weight: 600 })
+      (p.column === 1
+        ? text(p.x, p.y + 24, label, { size: 12, weight: 600, anchor: "middle" })
+        : p.column === 2
+          ? text(p.x - 14, p.y + 4, label, { size: 12, weight: 600, anchor: "end" })
+          : text(p.x + 14, p.y + 4, label, { size: 12, weight: 600 }))
   }
-  return svgWrap(spec, body, opts)
+  return svgWrap(spec, body, f, opts)
 }
 
 /** Data-table columns, emitted only when some datum actually carries them. */
@@ -602,66 +660,76 @@ export function visualizationColumns(spec: VisualizationSpec): VisualizationColu
 // real <table> element instead).
 // ---------------------------------------------------------------------------
 
-function tableSvg(spec: VisualizationSpec, opts: { standalone?: boolean }): string {
+function tableSvg(spec: VisualizationSpec, f: Frame, opts: ChartOptions): string {
   let body = ""
   spec.data.slice(0, 20).forEach((d, i) => {
     const y = 44 + i * 18
     if (i % 2 === 0)
-      body += `<rect x="4" y="${y - 13}" width="${WIDTH - 8}" height="18" fill="currentColor" opacity="0.04"/>`
+      body += `<rect x="4" y="${y - 13}" width="${f.width - 8}" height="18" fill="currentColor" opacity="0.04"/>`
     body +=
-      text(12, y, truncate(d.label, 40)) +
-      text(WIDTH - 12, y, `${fmt(d.value)}${spec.unit ?? ""}`, { anchor: "end", weight: 600 })
+      text(12, y, truncate(d.label, pick(f, 40, 24))) +
+      text(f.width - 12, y, `${fmt(d.value)}${spec.unit ?? ""}`, { anchor: "end", weight: 600 })
   })
-  return svgWrap(spec, body, { ...opts, height: 60 + spec.data.slice(0, 20).length * 18 })
+  return svgWrap(spec, body, f, { ...opts, height: 60 + spec.data.slice(0, 20).length * 18 })
 }
 
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export function buildChartSvg(
-  spec: VisualizationSpec,
-  opts: { standalone?: boolean } = {}
-): string {
+export function buildChartSvg(spec: VisualizationSpec, options: ChartOptions = {}): string {
+  const f = options.compact ? COMPACT : WIDE
+  const opts: ChartOptions = { standalone: options.standalone }
   switch (spec.profile) {
     case "line":
-    case "simulation":
-      return lineSvg(spec, false, opts)
+      return lineSvg(spec, false, f, opts)
     case "area":
-      return lineSvg(spec, true, opts)
+      return lineSvg(spec, true, f, opts)
     case "scatter":
-    case "map":
-      return scatterSvg(spec, opts)
+      return scatterSvg(spec, f, opts)
     case "pie":
-      return pieSvg(spec, false, opts)
+      return pieSvg(spec, false, f, opts)
     case "donut":
-      return pieSvg(spec, true, opts)
+      return pieSvg(spec, true, f, opts)
     case "radar":
-      return radarSvg(spec, opts)
+      return radarSvg(spec, f, opts)
     case "gauge":
-      return gaugeSvg(spec, opts)
+      return gaugeSvg(spec, f, opts)
     case "metric":
-      return metricSvg(spec, opts)
+      return metricSvg(spec, f, opts)
     case "timeline":
     case "gantt":
-      return timelineSvg(spec, opts)
+      return timelineSvg(spec, f, opts)
     case "heatmap":
-      return heatmapSvg(spec, opts)
+      return heatmapSvg(spec, f, opts)
     case "treemap":
-      return treemapSvg(spec, opts)
+      return treemapSvg(spec, f, opts)
     case "box":
-      return boxSvg(spec, opts)
+      return boxSvg(spec, f, opts)
     case "network":
     case "sankey":
     case "process":
-      return graphSvg(spec, opts)
+      return graphSvg(spec, f, opts)
     case "funnel":
-      return funnelSvg(spec, opts)
+      return funnelSvg(spec, f, opts)
     case "table":
-      return tableSvg(spec, opts)
+      return tableSvg(spec, f, opts)
     case "bar":
-    case "histogram":
-    default:
-      return barsSvg(spec, opts)
+      return barsSvg(spec, f, opts)
   }
+}
+
+/**
+ * Both layouts of one chart, toggled by CSS: the wide SVG by default, the
+ * compact one inside a narrow container (preview) or viewport (exported HTML).
+ * No script measures anything, so the right layout is there on first paint.
+ */
+export function buildResponsiveChartSvg(
+  spec: VisualizationSpec,
+  options: ChartOptions = {}
+): string {
+  return (
+    `<div class="cviz-svg-wide">${buildChartSvg(spec, { ...options, compact: false })}</div>` +
+    `<div class="cviz-svg-compact">${buildChartSvg(spec, { ...options, compact: true })}</div>`
+  )
 }

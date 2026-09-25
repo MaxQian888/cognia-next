@@ -1,7 +1,8 @@
 import type { Artifact } from "@cognia/plugin-sdk"
 import type { PluginArtifactAPI } from "@cognia/plugin-sdk"
 import type { BuiltInSkillResult } from "@cognia/plugin-sdk"
-import { createOfficeRuntime, type OfficePluginContext } from "./runtime"
+import manifestJson from "../plugin.json"
+import { createOfficeRuntime, normalizeXlsxName, type OfficePluginContext } from "./runtime"
 import { createWorkbook, WORKBOOK_ARTIFACT_KIND } from "./model"
 import { exportWorkbookXlsx, XLSX_MIME } from "./xlsx"
 
@@ -46,7 +47,17 @@ function context() {
       return next
     }
   )
-  const save = jest.fn(async () => ({ saved: true }))
+  const save = jest.fn(
+    async (): Promise<{
+      saved: boolean
+      platform?: "desktop" | "mobile" | "web"
+      location?: string
+    }> => ({
+      saved: true,
+      platform: "desktop",
+    })
+  )
+  const en = manifestJson.i18n.locales.en as Record<string, string>
   const invokeBuiltIn = jest.fn(
     async (
       _skillId: string,
@@ -67,6 +78,7 @@ function context() {
     },
     files: { save, open: jest.fn(), readAttachment: jest.fn() },
     skills: { invokeBuiltIn, listBuiltIns: jest.fn() },
+    i18n: { t: (key: string) => en[key] ?? key },
   } as unknown as OfficePluginContext
   return { artifacts, createArtifact, ctx, invokeBuiltIn, save, updateArtifact }
 }
@@ -105,7 +117,14 @@ it("creates, inspects, atomically edits, validates, and exports a native workboo
   expect(runtime.validate(created.artifactId).ok).toBe(true)
   await expect(runtime.exportXlsx(created.artifactId, "recon.xlsx")).resolves.toMatchObject({
     ok: true,
+    saved: true,
+    filename: "recon.xlsx",
+    message: expect.stringContaining("save dialog"),
     byteLength: expect.any(Number),
+  })
+  expect((ctx.artifact.createArtifact as jest.Mock).mock.calls[0][0].metadata).toMatchObject({
+    sourceOrigin: "tool",
+    userInitiated: false,
   })
   expect(save).toHaveBeenCalledWith(
     expect.objectContaining({ suggestedName: "recon.xlsx", bytes: expect.any(Uint8Array) })
@@ -141,9 +160,12 @@ it("requires explicit acknowledgement before exporting unsupported imported feat
   workbook.unsupportedFeatures = ["Pivot tables cannot be preserved losslessly."]
   artifacts.set(created.artifactId, { ...artifact, content: JSON.stringify(workbook) })
 
-  await expect(runtime.exportXlsx(created.artifactId)).rejects.toThrow(
-    "allowUnsupportedFeatureLoss"
-  )
+  await expect(runtime.exportXlsx(created.artifactId)).resolves.toMatchObject({
+    ok: false,
+    requiresConfirmation: true,
+    unsupportedFeatures: ["Pivot tables cannot be preserved losslessly."],
+    error: expect.stringContaining("allowUnsupportedFeatureLoss"),
+  })
   expect(save).not.toHaveBeenCalled()
   await expect(runtime.exportXlsx(created.artifactId, undefined, true)).resolves.toMatchObject({
     ok: true,
@@ -168,6 +190,35 @@ it("creates a workbook from delimited content and chooses a safe default filenam
       mimeType: XLSX_MIME,
     })
   )
+})
+
+it("reports where a mobile export landed, and a cancelled save as not written", async () => {
+  const { ctx, save } = context()
+  const runtime = createOfficeRuntime(ctx)
+  const created = await runtime.create({ title: "Mobile" })
+  save.mockResolvedValueOnce({
+    saved: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/Mobile.xlsx",
+  })
+  await expect(runtime.exportXlsx(created.artifactId)).resolves.toMatchObject({
+    ok: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/Mobile.xlsx",
+    message: expect.stringContaining("Documents/cognia/exports"),
+  })
+  save.mockResolvedValueOnce({ saved: false })
+  await expect(runtime.exportXlsx(created.artifactId)).resolves.toMatchObject({
+    ok: false,
+    saved: false,
+    cancelled: true,
+  })
+})
+
+it("normalizes model-supplied export names", () => {
+  expect(normalizeXlsxName("q3/report")).toBe("q3-report.xlsx")
+  expect(normalizeXlsxName("report.XLSX")).toBe("report.xlsx")
+  expect(normalizeXlsxName("")).toBe("workbook.xlsx")
 })
 
 it("imports from authorized attachments and from the picker, including cancellation", async () => {

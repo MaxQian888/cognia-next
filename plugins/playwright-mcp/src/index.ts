@@ -15,91 +15,38 @@
  *  - `playwright-cdp` — `--cdp-endpoint <CDP_ENDPOINT>`: attach to a Chrome
  *    or Edge the user launched with `--remote-debugging-port`.
  *
+ * Both presets are declared in plugin.json (`mcpServerPresets`), so the
+ * manager registers them on enable; nothing is registered imperatively.
+ *
  * The `/browser` command opens the setup modal (`ctx.modal.openModal`) which
  * compares all four modes and deep-links into Settings → MCP Servers via
- * the panel's `?preset=` param.
+ * the panel's `?preset=` param (`ctx.ui.navigate`).
  *
  * Part of M3 of the plugin-first Computer Use plan.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { defineMcpServerPreset, definePluginManifest } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { I18N_MESSAGES } from "./i18n"
 import { handleBrowserCommand } from "./commands"
-import { setPluginShell } from "./runtime"
+import { setSetupModalHost } from "./runtime"
 
-const PLAYWRIGHT_ISOLATED_PRESET = defineMcpServerPreset({
-  id: "playwright-isolated",
-  name: "Playwright — Isolated",
-  description:
-    "Disposable in-memory browser profile — nothing persists between runs — driven headless so no window opens.",
-  icon: "🎬",
-  transport: "stdio",
-  config: {
-    command: "npx",
-    args: ["-y", "@playwright/mcp@latest", "--isolated", "--headless"],
-  },
-  fields: [],
-  runtime: "both",
-  docsUrl: "https://github.com/microsoft/playwright-mcp",
-  tags: ["web", "browser", "automation"],
-})
+// plugin.json is the whole manifest: the two presets (`mcpServerPresets`) and
+// the i18n bundle are declarative, so the manager registers the presets on
+// enable (`OVERLAY_REGISTRY_CAPABILITIES["mcp-server-preset"]`) and drops them
+// on disable — for the built-in and for an installed copy alike.
+export const manifest = definePluginManifest(manifestJson)
 
-const PLAYWRIGHT_CDP_PRESET = defineMcpServerPreset({
-  id: "playwright-cdp",
-  name: "Playwright — Attach over CDP",
-  description:
-    "Attach to a Chrome or Edge you launched yourself with --remote-debugging-port — for dev loops and inspecting a live session.",
-  icon: "🖥️",
-  transport: "stdio",
-  config: {
-    command: "npx",
-    args: ["-y", "@playwright/mcp@latest", "--cdp-endpoint", "<CDP_ENDPOINT>"],
-  },
-  fields: [
-    {
-      key: "CDP_ENDPOINT",
-      label: "CDP endpoint",
-      placement: "arg-replace",
-      token: "<CDP_ENDPOINT>",
-      placeholder: "http://localhost:9222",
-      description:
-        "Start the browser first, e.g. chrome --remote-debugging-port=9222, then paste its CDP URL.",
-    },
-  ],
-  runtime: "both",
-  docsUrl: "https://github.com/microsoft/playwright-mcp",
-  tags: ["web", "browser", "automation", "cdp"],
-})
+export default definePlugin({
+  manifest,
+  activate: async (ctx) => {
+    ctx.logger.info("playwright-mcp plugin activated")
 
-const PLAYWRIGHT_PRESETS = [PLAYWRIGHT_ISOLATED_PRESET, PLAYWRIGHT_CDP_PRESET]
-
-const definition: PluginDefinition = {
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here would WIN and silently drop `commands[]`.
-  manifest: definePluginManifest({
-    ...manifestJson,
-    mcpServerPresets: PLAYWRIGHT_PRESETS,
-    i18n: { locales: I18N_MESSAGES },
-  }),
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("playwright-mcp plugin activated")
-
-    // The setup modal's environment check reaches `ctx.shell` through this
-    // slot — modal components only receive PluginModalProps. Cleared via
-    // the generation lifecycle so a re-activation can't leak a stale API.
-    setPluginShell(ctx.shell)
-    ctx.lifecycle?.onDispose(() => setPluginShell(undefined), "playwright-mcp:shell")
-
-    // The manifest-driven registration already happens in
-    // PluginManager.registerPluginContributions (M1·T5). The imperative
-    // call here is a no-op idempotency belt-and-suspenders for users who
-    // load the plugin via the dynamic ctx.agent path rather than through
-    // the manifest reader.
-    for (const preset of PLAYWRIGHT_PRESETS) {
-      ctx.agent?.registerMcpServerPreset?.(preset)
-    }
+    // The setup modal's environment check and "Set up in Settings" reach the
+    // host through this slot — modal components only receive
+    // PluginModalProps. Cleared via the generation lifecycle so a
+    // re-activation can't leak a stale API.
+    setSetupModalHost({ shell: ctx.shell, navigate: (href) => ctx.ui.navigate(href) })
+    ctx.lifecycle.onDispose(() => setSetupModalHost(undefined), "playwright-mcp:modal-host")
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
     // here — the supported shape per the author-SDK migration table. The
@@ -110,6 +57,4 @@ const definition: PluginDefinition = {
         handleBrowserCommand(ctx, command, args) ?? false,
     }
   },
-}
-
-export default definition
+})

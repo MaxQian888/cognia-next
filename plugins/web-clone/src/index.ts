@@ -15,30 +15,23 @@
  * exercised identically everywhere. Desktop only: the engine is a Node
  * process reached via Tauri.
  *
- * User-facing strings go through `ctx.i18n` (bundles registered at activate,
- * keys auto-prefixed `plugin.cognia-web-clone.`); `englishT` below keeps the
- * command usable where `ctx.i18n` is absent (tests, unusual hosts).
+ * Relative paths resolve under the active project root
+ * (`ctx.workspace.getActiveRoot()`). User-facing strings live in plugin.json
+ * (`i18n.locales`) and translate through `ctx.i18n.t`.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
+import type { PluginCommandContext, PluginContext, PluginWebCloneInput } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { WEBCLONE_I18N, interpolateWebCloneMessage, type WebCloneMessageKey } from "./i18n"
+import { englishWebCloneT, type WebCloneTranslate } from "./i18n"
+
+export type { WebCloneTranslate } from "./i18n"
 
 const CODEGEN_FRAMEWORKS = ["vue", "react", "angular", "svelte", "jquery"] as const
 type CodegenFramework = (typeof CODEGEN_FRAMEWORKS)[number]
 
 const FRAMEWORK_HINTS = ["vue", "react", "svelte"] as const
 type FrameworkHint = (typeof FRAMEWORK_HINTS)[number]
-
-export type WebCloneTranslate = (
-  key: WebCloneMessageKey | string,
-  params?: Record<string, string | number | boolean>
-) => string
-
-/** English-table translator used when no host i18n API is available. */
-const englishT: WebCloneTranslate = (key, params) =>
-  interpolateWebCloneMessage(WEBCLONE_I18N.en[key as WebCloneMessageKey] ?? key, params)
 
 /** Machine-checkable parse failures — translated at the command boundary. */
 export type WebCloneParseError =
@@ -309,7 +302,7 @@ export function resolveOutput(
   parsed: ParsedCommand,
   rootDir: string | null,
   stamp: string,
-  t: WebCloneTranslate = englishT
+  t: WebCloneTranslate = englishWebCloneT
 ): string {
   const explicit = parsed.output
   if (explicit) {
@@ -337,7 +330,7 @@ export function resolveOutput(
 export function resolveInputPath(
   path: string,
   rootDir: string | null,
-  t: WebCloneTranslate = englishT
+  t: WebCloneTranslate = englishWebCloneT
 ): string {
   if (startsWithTilde(path)) throw new Error(t("tildeUnsupported", { path }))
   if (isAbsolutePath(path)) return path
@@ -415,6 +408,51 @@ function translateParseError(e: WebCloneParseError, t: WebCloneTranslate): strin
   }
 }
 
+/** Thrown by {@link raceAbort} when the caller's signal fires first. */
+class WebCloneCancelled extends Error {
+  constructor() {
+    super("web-clone cancelled")
+    this.name = "WebCloneCancelled"
+  }
+}
+
+/**
+ * Settle with `work`, or reject with {@link WebCloneCancelled} as soon as
+ * `signal` aborts. The Tauri command itself cannot be cancelled from the
+ * renderer (the runner is killed only by its own timeout), so this stops the
+ * command from WAITING — the user gets their answer at once — and the message
+ * says a started snapshot may still finish.
+ */
+function raceAbort<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work
+  if (signal.aborted) return Promise.reject(new WebCloneCancelled())
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new WebCloneCancelled())
+    signal.addEventListener("abort", onAbort, { once: true })
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+export interface WebCloneCommandDeps {
+  invoke: (cmd: string, args: Record<string, unknown>) => Promise<{ envelope: WebCloneEnvelope }>
+  rootDir: () => string | null
+  now: () => number
+  t?: WebCloneTranslate
+  /** The invoking host's cancellation signal (`PluginCommandContext.signal`). */
+  signal?: AbortSignal
+  /** The invoking host's progress sink (`PluginCommandContext.reportProgress`). */
+  reportProgress?: (progress: number, message?: string) => void
+}
+
 /**
  * Run a parsed `/web-clone` command. Exported for tests (deps injectable).
  * Returns `{ ok, message }` — `ok` drives the toast severity; `message` is
@@ -423,14 +461,9 @@ function translateParseError(e: WebCloneParseError, t: WebCloneTranslate): strin
  */
 export async function runWebCloneCommand(
   raw: string,
-  deps: {
-    invoke: (cmd: string, args: Record<string, unknown>) => Promise<{ envelope: WebCloneEnvelope }>
-    rootDir: () => string | null
-    now: () => number
-    t?: WebCloneTranslate
-  }
+  deps: WebCloneCommandDeps
 ): Promise<{ ok: boolean; message: string }> {
-  const t = deps.t ?? englishT
+  const t = deps.t ?? englishWebCloneT
   const parsed = parseWebCloneArgs(raw)
   if (parsed.help) {
     return { ok: true, message: t("usage") }
@@ -445,16 +478,22 @@ export async function runWebCloneCommand(
   let output: string
   let convertLocal: string | undefined
   try {
-    output = resolveOutput(parsed, deps.rootDir(), String(deps.now()), t)
+    const rootDir = deps.rootDir()
+    output = resolveOutput(parsed, rootDir, String(deps.now()), t)
     if (parsed.convertLocal) {
-      convertLocal = resolveInputPath(parsed.convertLocal, deps.rootDir(), t)
+      convertLocal = resolveInputPath(parsed.convertLocal, rootDir, t)
     }
   } catch (err) {
     return { ok: false, message: `web-clone: ${err instanceof Error ? err.message : String(err)}` }
   }
+  if (deps.signal?.aborted) return { ok: false, message: t("cancelled") }
   const job = buildJob(parsed, output, convertLocal)
+  deps.reportProgress?.(
+    0,
+    parsed.convertLocal ? t("progressConvert") : t("progressSnapshot", { url: parsed.url ?? "" })
+  )
   try {
-    const { envelope } = await deps.invoke("web_clone_snapshot", { job })
+    const { envelope } = await raceAbort(deps.invoke("web_clone_snapshot", { job }), deps.signal)
     if (!envelope.ok || !envelope.result) {
       const error = envelope.error?.message ?? "unknown error"
       return {
@@ -465,6 +504,7 @@ export async function runWebCloneCommand(
             : t("failed", { error }),
       }
     }
+    deps.reportProgress?.(1)
     const r = envelope.result
     if (parsed.convertLocal || r.mode === "convert") {
       return { ok: true, message: t("resultConvert", { output: r.output }) }
@@ -481,6 +521,7 @@ export async function runWebCloneCommand(
           : t("resultSnapshot", { output: r.output, fetched, total }),
     }
   } catch (err) {
+    if (err instanceof WebCloneCancelled) return { ok: false, message: t("cancelled") }
     return {
       ok: false,
       message: t("failed", { error: err instanceof Error ? err.message : String(err) }),
@@ -488,60 +529,54 @@ export async function runWebCloneCommand(
   }
 }
 
-const definition: PluginDefinition = {
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here WINS and would silently drop `commands[]`.
-  manifest: {
-    ...(manifestJson as object),
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("web-clone plugin activated")
+// plugin.json is the manifest source of truth — `commands[]` and the
+// `i18n.locales` bundle the manager registers before `activate()` runs.
+export const manifest = definePluginManifest(manifestJson)
 
-    for (const locale of ["en", "zh-CN"] as const) {
-      ctx.i18n?.registerTranslations?.(locale, { ...WEBCLONE_I18N[locale] })
-    }
-    const t: WebCloneTranslate = (key, params) => {
-      const viaHost = ctx.i18n?.t?.(key, params)
-      // The host returns the bare key when the message is missing.
-      if (typeof viaHost === "string" && viaHost !== key) return viaHost
-      return englishT(key, params)
-    }
+export default definePlugin({
+  manifest,
+  activate: (ctx: PluginContext) => {
+    const t: WebCloneTranslate = (key, params) => ctx.i18n.t(key, params)
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
     // here. `hooks.onCommand` receives whitespace-split argv, so the raw tail
     // is rejoined for handlers that parse their own argument string. The
     // structured `{ handled, message }` return makes the result line the
     // command's chat response — not a generic placeholder.
+    ctx.logger.info("web-clone plugin activated")
     return {
-      onCommand: async (command: string, args: string[]) => {
+      onCommand: async (command: string, args: string[], context?: PluginCommandContext) => {
         if (command !== "web-clone") return false
-        if (!readHostCapabilities().tauri) {
+        if (!ctx.capabilities.tauri) {
           const message = t("desktopOnly")
-          ctx.ui?.showToast?.(message, "error")
+          ctx.ui.showToast(message, "error")
           return { handled: true, message }
         }
-        const { invoke } = await import("@tauri-apps/api/core")
-        const result = await runWebCloneCommand(args.join(" "), {
-          invoke: (cmd, a) =>
-            invoke<{ envelope: WebCloneEnvelope }>(cmd, a as Record<string, unknown>),
-          rootDir: () => {
-            try {
-              return ctx.git?.getRoot() ?? null
-            } catch {
-              // ctx.git is permission-gated (`git:read`). A denial degrades
-              // to the "no open workspace" hint rather than a raw
-              // PermissionError surfacing as the command's reply.
-              return null
-            }
+        const result = await runWebCloneCommand(context?.rawArgs ?? args.join(" "), {
+          // The snapshot engine is a host tool: the host runs it (desktop
+          // only), checks this plugin's network allowlist against the target,
+          // and requires the network + filesystem permissions it declares.
+          invoke: async (_cmd, { job }) => {
+            const outcome = await ctx.agent.invokeTool(
+              "web_clone",
+              { job: job as PluginWebCloneInput["job"] },
+              {
+                ...(context?.signal ? { signal: context.signal } : {}),
+                ...(context?.sessionId ? { sessionId: context.sessionId } : {}),
+              }
+            )
+            if (!outcome.ok) throw new Error(outcome.error)
+            return { envelope: outcome.envelope as WebCloneEnvelope }
           },
+          rootDir: () => ctx.workspace.getActiveRoot() ?? null,
           now: () => Date.now(),
           t,
+          signal: context?.signal,
+          reportProgress: context?.reportProgress,
         })
-        ctx.ui?.showToast?.(result.message, result.ok ? "success" : "error")
+        ctx.ui.showToast(result.message, result.ok ? "success" : "error")
         return { handled: true, message: result.message }
       },
     }
   },
-}
-
-export default definition
+})

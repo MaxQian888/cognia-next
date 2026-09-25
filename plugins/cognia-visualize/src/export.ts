@@ -1,4 +1,4 @@
-import { buildChartSvg, escapeXml, visualizationColumns } from "./chart"
+import { buildChartSvg, buildResponsiveChartSvg, escapeXml, visualizationColumns } from "./chart"
 import type { VisualizationSpec } from "./model"
 
 /** Localized strings the standalone exports need; resolved by `ctx.i18n.t`. */
@@ -25,7 +25,8 @@ function tableHtml(spec: VisualizationSpec, labels: VisualizationExportLabels): 
       return `<tr>${cells}</tr>`
     })
     .join("")
-  return `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`
+  // Wide tables scroll inside their own box instead of widening a phone page.
+  return `<div class="table-scroll"><table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div>`
 }
 
 const PAGE_STYLE =
@@ -34,7 +35,9 @@ const PAGE_STYLE =
   ".summary{color:#475569;margin:0 0 24px}.chart{border:1px solid #e2e8f0;border-radius:10px;padding:12px}" +
   ".chart svg{display:block;width:100%;height:auto}table{width:100%;border-collapse:collapse;font-size:.875rem}" +
   "th,td{border:1px solid #e2e8f0;padding:6px 10px;text-align:left}th{background:#f1f5f9}" +
-  ".viz{border-top:1px solid #e2e8f0;padding-top:24px;margin-top:32px}.viz:first-of-type{border-top:0;margin-top:0;padding-top:0}"
+  ".viz{border-top:1px solid #e2e8f0;padding-top:24px;margin-top:32px}.viz:first-of-type{border-top:0;margin-top:0;padding-top:0}" +
+  ".table-scroll{overflow-x:auto}.cviz-svg-compact{display:none}" +
+  "@media (max-width:520px){body{padding:16px}.cviz-svg-wide{display:none}.cviz-svg-compact{display:block}}"
 
 export function exportVisualizationSvg(spec: VisualizationSpec): Uint8Array {
   return new TextEncoder().encode(buildChartSvg(spec, { standalone: true }))
@@ -48,10 +51,10 @@ export function exportVisualizationHtml(
   const body =
     `<h1>${escapeXml(spec.title)}</h1>` +
     `<p class="summary">${escapeXml(spec.accessibility.summary)}</p>` +
-    `<div class="chart">${buildChartSvg(spec, { standalone: true })}</div>` +
+    `<div class="chart">${buildResponsiveChartSvg(spec, { standalone: true })}</div>` +
     `<h2>${escapeXml(labels.dataHeading)}</h2>${tableHtml(spec, labels)}`
   return new TextEncoder().encode(
-    `<!doctype html><html lang="${escapeXml(lang)}"><meta charset="utf-8"><title>${escapeXml(spec.title)}</title><style>${PAGE_STYLE}</style><body><main>${body}</main></body></html>`
+    `<!doctype html><html lang="${escapeXml(lang)}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeXml(spec.title)}</title><style>${PAGE_STYLE}</style><body><main>${body}</main></body></html>`
   )
 }
 
@@ -69,13 +72,14 @@ export function exportVisualizationReport(
       (spec) =>
         `<section class="viz"><h1>${escapeXml(spec.title)}</h1>` +
         `<p class="summary">${escapeXml(spec.accessibility.summary)}</p>` +
-        `<div class="chart">${buildChartSvg(spec, { standalone: true })}</div>` +
+        `<div class="chart">${buildResponsiveChartSvg(spec, { standalone: true })}</div>` +
         `<h2>${escapeXml(options.labels.dataHeading)}</h2>${tableHtml(spec, options.labels)}</section>`
     )
     .join("")
   const body = sections || `<p class="summary">${escapeXml(options.labels.emptyReport)}</p>`
   return (
     `<!doctype html><html lang="${escapeXml(options.lang)}"><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>${escapeXml(options.title)}</title><style>${PAGE_STYLE}</style>` +
     `<body><main><h1>${escapeXml(options.title)}</h1>${body}</main></body></html>`
   )

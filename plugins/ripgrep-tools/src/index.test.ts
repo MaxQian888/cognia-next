@@ -19,7 +19,7 @@ import {
   resolveCwd,
   CliTemplateError,
 } from "@cognia/plugin-sdk"
-import type { PluginCliArgvToken, PluginCliToolDef } from "@cognia/plugin-sdk"
+import type { PluginCliArgvToken, PluginCliToolDef, PluginContext } from "@cognia/plugin-sdk"
 import definition from "./index"
 import manifest from "../plugin.json"
 
@@ -37,6 +37,22 @@ describe("ripgrep-tools manifest", () => {
     expect(definition.manifest.id).toBe("ripgrep-tools")
     expect(definition.manifest.permissions).toEqual(["cli:execute"])
     expect(definition.manifest.cliTools).toHaveLength(1)
+  })
+
+  it("is plugin.json itself, adopted through definePluginManifest", () => {
+    expect(definition.manifest).toEqual(manifest)
+  })
+
+  it("activates with a log line and nothing else", async () => {
+    const info = jest.fn()
+    await definition.activate({ logger: { info } } as unknown as PluginContext)
+    expect(info).toHaveBeenCalledWith(expect.stringMatching(/manifest-driven/))
+  })
+
+  it("tells the model each result element is one JSON-encoded event", () => {
+    expect(tool.outputParse).toBe("lines")
+    expect(tool.description).toMatch(/each element is ONE ripgrep --json event/)
+    expect((tool.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false)
   })
 
   it("declares an activation event so activate() is reachable", () => {
@@ -163,7 +179,9 @@ describe("ripgrep_search argv template", () => {
       tool.parameters as { properties: Record<string, { type?: string; minimum?: number }> }
     ).properties
     expect(props.maxCount).toMatchObject({ type: "integer", minimum: 1 })
-    expect(props.contextLines).toMatchObject({ type: "integer", minimum: 0 })
+    // Bounded: an unbounded -C multiplies every match into its surroundings
+    // and fills the 500 KB output cap with context instead of hits.
+    expect(props.contextLines).toMatchObject({ type: "integer", minimum: 0, maximum: 10 })
     expect(props.maxDepth).toMatchObject({ type: "integer", minimum: 1 })
   })
 

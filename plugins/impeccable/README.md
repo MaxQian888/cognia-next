@@ -2,7 +2,7 @@
 
 An installable Cognia plugin packaging the Impeccable 4.0.4 frontend-design skill.
 
-The plugin contributes one desktop skill, `impeccable`, with its design references, deterministic anti-pattern detector, and supporting agents. It requests no Cognia plugin permissions; any file, shell, image, or network action remains behind the active chat session's normal permission gates.
+The plugin contributes one desktop skill, **Impeccable (frontend design)** (`cognia-impeccable:impeccable`), with its design references, deterministic anti-pattern detector, and supporting agents. It requests no Cognia plugin permissions; any file, shell, image, or network action remains behind the active chat session's normal permission gates.
 
 ## Safety profile
 
@@ -24,14 +24,18 @@ pnpm exec node plugins/impeccable/build.mjs
 ```
 
 That writes `plugins/impeccable/dist/index.js` and the installable
-`plugins/impeccable/dist/cognia-impeccable-0.1.0.zip`. Install the zip into a
-running Cognia desktop instance, e.g.:
+`plugins/impeccable/dist/cognia-impeccable-0.1.0.zip`. The manifest's `main`
+is `dist/index.js`, so the plugin cannot load — from the ZIP or from this
+directory — until that build has run. Install the zip into a running Cognia
+desktop instance, e.g.:
 
 ```bash
 cognia plugin install plugins/impeccable/dist/cognia-impeccable-0.1.0.zip --json
 ```
 
-After enabling the plugin, attach the `impeccable` skill to a character or team in Cognia's skill picker, then ask for a design task such as `audit the settings screen` or `polish the onboarding form`.
+(or use the local `.zip` install action in the desktop app's **Plugins** panel).
+
+After enabling the plugin, turn the skill on for a conversation from the chat composer's skill picker (type `@skill:` and pick **Impeccable (frontend design)**), then ask for a design task such as `audit the settings screen` or `polish the onboarding form`. The skill pre-approves only `Bash` and `Read`, which its detector scripts and references need; anything else still goes through the session's normal permission prompts.
 
 The local-bundle skill is desktop-only because Cognia reads its supporting files through the desktop filesystem bridge.
 

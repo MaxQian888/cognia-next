@@ -1,49 +1,60 @@
 /**
- * Share Watch — built-in reference plugin for the public-share-link hooks.
+ * Share Watch — opt-in EXAMPLE plugin for the public-share-link hooks.
  *
- * Returns a `hooks` block from activate() (the manager captures the return
- * value) that records every share link created or revoked. The create payload
- * carries only the fragment-stripped URL, so this demo can never observe the
- * `#k=` decryption key (zero-knowledge red-line, ADR-0037).
+ * Author reference material, labelled that way on all three axes:
+ *   - documented here and at {@link SHARE_WATCH_EXAMPLE};
+ *   - labelled in the UI: the plugin's name and description say "(example)"
+ *     and that it adds no UI;
+ *   - pinned by `index.test.ts` (no `startup` activation, no UI contribution).
+ *
+ * The host offers no share-scoped extension point for a panel, so the
+ * example's observable effect is one line per event in this plugin's log
+ * (Plugins → Share Watch → Logs). The create payload carries only the
+ * fragment-stripped URL, so the example can never observe the `#k=` decryption
+ * key (zero-knowledge red-line, ADR-0037). Nothing is kept in memory.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import type { PluginHooksAll, ShareLinkHookPayload } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import {
+  definePlugin,
+  definePluginManifest,
+  type PluginContext,
+  type PluginHooksAll,
+  type ShareLinkHookPayload,
+} from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-interface ShareWatchEntry {
-  kind: "created" | "revoked"
-  code: string
-  url?: string
+/**
+ * Marker for the plugin's status: an example that demonstrates the share-link
+ * hooks and contributes no UI. Pinned by the tests.
+ */
+export const SHARE_WATCH_EXAMPLE = {
+  example: true,
+  surface: "plugin-log",
+} as const
+
+export const manifest = definePluginManifest(manifestJson)
+
+/** Defence in depth: never let a key fragment reach the log, whatever the host sends. */
+function withoutFragment(url: string): string {
+  const hash = url.indexOf("#")
+  return hash === -1 ? url : url.slice(0, hash)
 }
 
-const log: ShareWatchEntry[] = []
-
-/** Test/inspection accessor — the recorded share-link log. */
-export function getShareWatchLog(): readonly ShareWatchEntry[] {
-  return log
+/** The hook block, bound to the activation's logger. */
+export function createShareWatchHooks(logger: PluginContext["logger"]): PluginHooksAll {
+  return {
+    onShareLinkCreate: (link: ShareLinkHookPayload) => {
+      logger.info(
+        `share link created: ${link.code} (${link.kind}) ${link.url ? withoutFragment(link.url) : ""}`.trim()
+      )
+    },
+    onShareLinkRevoke: (code: string) => {
+      logger.info(`share link revoked: ${code}`)
+    },
+  }
 }
 
-/** Test-only reset. */
-export function __resetShareWatchForTesting(): void {
-  log.length = 0
-}
-
-const hooks: PluginHooksAll = {
-  onShareLinkCreate: (link: ShareLinkHookPayload) =>
-    void log.push({ kind: "created", code: link.code, url: link.url }),
-  onShareLinkRevoke: (code: string) => void log.push({ kind: "revoked", code }),
-}
-
-const definition: PluginDefinition = {
-  manifest: manifest as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("share-watch activated (listening for share-link hooks)")
-    return hooks
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("share-watch deactivated")
-  },
-}
-
-export default definition
+export default definePlugin({
+  manifest,
+  activate: async (ctx: PluginContext) => createShareWatchHooks(ctx.logger),
+})

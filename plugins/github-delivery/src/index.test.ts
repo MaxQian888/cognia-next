@@ -2,6 +2,7 @@ import type {
   IntegrationActionHandlerContext,
   IntegrationProviderContext,
   IntegrationVerifiedDelivery,
+  PluginContext,
 } from "@cognia/plugin-sdk"
 import githubPlugin, {
   GithubIntegrationError,
@@ -274,7 +275,38 @@ describe("GitHub Delivery v3 official plugin", () => {
       commits: [],
     })
     await expect(githubExports.runIssueLoop({}, context)).rejects.toThrow("unavailable")
-    await expect(githubPlugin.activate({} as never)).resolves.toBeUndefined()
+  })
+
+  it("activates without touching the dormant v2 Dexie tables", async () => {
+    const info = jest.fn()
+    const dexie = jest.fn()
+    const pluginContext = {
+      logger: { debug: jest.fn(), info, warn: jest.fn(), error: jest.fn() },
+      get dexie() {
+        dexie()
+        return undefined
+      },
+    } as Partial<PluginContext> as PluginContext
+    await expect(githubPlugin.activate(pluginContext)).resolves.toBeUndefined()
+    expect(info).toHaveBeenCalledWith("GitHub Delivery v3 activated with host-owned credentials")
+    expect(dexie).not.toHaveBeenCalled()
+    // Declared only for a v2 rollback; see DORMANT_V2_DEXIE_TABLES.
+    expect(githubPlugin.manifest.dexie?.tables.map((table) => table.name)).toEqual([
+      ...githubExports.DORMANT_V2_DEXIE_TABLES,
+    ])
+  })
+
+  it("states which surfaces each runtime really has", () => {
+    const compatibility = githubPlugin.manifest.runtimeCompatibility
+    for (const runtime of ["browser", "mobile"] as const) {
+      expect(compatibility?.[runtime]?.reason).toMatch(/^API actions only/)
+      expect(compatibility?.[runtime]?.reason).toMatch(
+        /webhook events need the Desktop or Headless/
+      )
+    }
+    expect(compatibility?.headless?.reason).toMatch(/webhook events are available/)
+    // The installed ZIP ships the bundle, not the TypeScript source.
+    expect(compatibility?.tauri?.entrypoint).toBe(githubPlugin.manifest.main)
   })
 
   it.each([
@@ -511,11 +543,11 @@ describe("GitHub Delivery v3 official plugin", () => {
           },
         ],
       },
-    })) as unknown as IntegrationProviderContext["authenticatedRequest"]
+    })) as jest.Mock
 
     await expect(
       listGithubResources(
-        { accountId: "account-1", kind: "repository", query: "cognia", cursor: "2", limit: 25 },
+        { accountId: "account-1", kind: "repository", cursor: "2", limit: 25 },
         providerContext(authenticatedRequest)
       )
     ).resolves.toMatchObject({
@@ -530,6 +562,92 @@ describe("GitHub Delivery v3 official plugin", () => {
       nextCursor: "3",
       rateLimit: { limit: 5000, remaining: 4999 },
     })
+    expect(authenticatedRequest).toHaveBeenCalledTimes(1)
+    expect(authenticatedRequest.mock.calls[0][0]).toContain("per_page=25&page=2")
+  })
+
+  function repositoryPages(pages: string[][]) {
+    return jest.fn(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page"))
+      const names = pages[page - 1] ?? []
+      return {
+        status: 200,
+        headers:
+          page < pages.length
+            ? {
+                link: `<https://api.github.com/installation/repositories?page=${page + 1}>; rel="next"`,
+              }
+            : {},
+        data: { repositories: names.map((full_name) => ({ full_name })) },
+      }
+    }) as jest.Mock
+  }
+
+  it("walks upstream pages until a search has matches instead of returning a blank page", async () => {
+    const request = repositoryPages([
+      ["acme/one", "acme/two"],
+      ["acme/three"],
+      ["cognia/cognia-next", "acme/four"],
+    ])
+    const result = await listGithubResources(
+      { accountId: "account-1", kind: "repository", query: "Cognia", limit: 10 },
+      providerContext(request)
+    )
+    expect(result.items.map((item) => item.id)).toEqual(["cognia/cognia-next"])
+    expect(result.nextCursor).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(3)
+    // Searches read full upstream pages; the limit bounds the matches returned.
+    expect(request.mock.calls.every(([url]) => String(url).includes("per_page=100"))).toBe(true)
+  })
+
+  it("resumes a truncated search inside the same upstream page", async () => {
+    const request = repositoryPages([["team/a", "team/b", "team/c"], ["team/d"]])
+    const first = await listGithubResources(
+      { accountId: "account-1", kind: "repository", query: "team", limit: 2 },
+      providerContext(request)
+    )
+    expect(first.items.map((item) => item.id)).toEqual(["team/a", "team/b"])
+    expect(first.nextCursor).toBe("1:2")
+    const second = await listGithubResources(
+      { accountId: "account-1", kind: "repository", query: "team", limit: 2, cursor: "1:2" },
+      providerContext(request)
+    )
+    expect(second.items.map((item) => item.id)).toEqual(["team/c", "team/d"])
+    expect(second.nextCursor).toBeUndefined()
+  })
+
+  it("bounds how many upstream pages one search call walks", async () => {
+    const request = repositoryPages(Array.from({ length: 30 }, (_, index) => [`acme/${index}`]))
+    const result = await listGithubResources(
+      { accountId: "account-1", kind: "repository", query: "nothing-matches", limit: 5 },
+      providerContext(request)
+    )
+    expect(result.items).toEqual([])
+    expect(request).toHaveBeenCalledTimes(10)
+    expect(result.nextCursor).toBe("11")
+  })
+
+  it("keeps the PAT listing for every page of a search", async () => {
+    const request = jest.fn(async (url: string) => {
+      if (url.includes("/installation/repositories")) return { status: 403, headers: {}, data: {} }
+      const page = Number(new URL(url).searchParams.get("page"))
+      return {
+        status: 200,
+        headers:
+          page === 1 ? { link: '<https://api.github.com/user/repos?page=2>; rel="next"' } : {},
+        data: page === 1 ? [{ full_name: "me/alpha" }] : [{ full_name: "me/target" }],
+      }
+    }) as jest.Mock
+    const result = await listGithubResources(
+      { accountId: "account-1", kind: "repository", query: "target" },
+      providerContext(request)
+    )
+    expect(result.items.map((item) => item.id)).toEqual(["me/target"])
+    expect(request.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/installation/repositories",
+      "/user/repos",
+      "/user/repos",
+    ])
   })
 
   it("returns permission-aware App health and classifies API failures", async () => {

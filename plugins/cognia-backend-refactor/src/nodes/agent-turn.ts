@@ -28,6 +28,32 @@ import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../character
 export const AGENT_TURN_KIND = "agent.turn"
 export const AGENT_TURN_DEFAULT_TIMEOUT_SEC = 600
 
+/**
+ * Permission mode for the headless turn: `dontAsk`, the least-privileged mode
+ * that still lets an unattended run work.
+ *
+ * - A headless run has no UI to answer a permission prompt, so `default` /
+ *   `acceptEdits` would turn every Bash call (`go build`, `go test`,
+ *   `git diff`) into a denial and the role could not verify its own work.
+ * - `dontAsk` never prompts: it runs exactly the tools the role's character
+ *   pre-approves (`allowedTools` — read/search tools, plus Edit/Write/Bash for
+ *   the editing roles that run `go`) and DENIES everything else (web fetches,
+ *   MCP servers, other plugins' tools, …). A read-only role holds no Bash, so
+ *   it cannot edit or commit even if its prompt is subverted by repo content.
+ * - `bypassPermissions`, used before, approved every tool the session could
+ *   reach — strictly more than any role needs.
+ *
+ * Scoped to THIS call site rather than to the character definitions: a
+ * character's `permissionMode` is consulted for every interactive chat with
+ * that character too.
+ *
+ * On a provider that does not pre-approve by `allowedTools` (the AI-SDK path
+ * for non-Claude models), `dontAsk` allows only read-only tools, so the
+ * editing roles cannot edit there; the pipeline is built for the Claude
+ * Agent SDK path.
+ */
+export const AGENT_TURN_PERMISSION_MODE = "dontAsk" as const
+
 interface AgentTurnParams {
   role?: string
   characterId?: string
@@ -81,7 +107,7 @@ export async function executeAgentTurn(
     typeof params.timeoutSec === "number" && params.timeoutSec > 0
       ? params.timeoutSec
       : AGENT_TURN_DEFAULT_TIMEOUT_SEC
-  ctx.log?.("info", `agent.turn: running ${characterId} in ${cwd}`)
+  ctx.log("info", `agent.turn: running ${characterId} in ${cwd}`)
 
   const result = await runtime.runCharacterTurn({
     characterId,
@@ -90,14 +116,17 @@ export async function executeAgentTurn(
     ...(params.sessionId?.trim() ? { sessionId: params.sessionId.trim() } : {}),
     timeoutMs: timeoutSec * 1000,
     ...(ctx.signal ? { signal: ctx.signal } : {}),
-    // Scoped to THIS call site rather than to the character definitions: a
-    // character's `permissionMode` is consulted for every interactive chat
-    // with that character too, which would silently hand un-prompted
-    // Edit/Write/Bash to anyone picking a refactor role from the character
-    // list. A headless run has no UI to answer a prompt, so it would otherwise
-    // hang forever waiting on one.
-    permissionMode: "bypassPermissions",
+    permissionMode: AGENT_TURN_PERMISSION_MODE,
   })
+
+  // A tool the role needed was turned away (nobody is there to approve it).
+  // Carrying on would hand the next step a half-done turn as if it were done.
+  if (result.status === "needs_approval") {
+    const denied = [...new Set((result.needsApproval ?? []).map((denial) => denial.toolName))]
+    throw new Error(
+      `agent.turn: ${characterId} needed tools this unattended run cannot approve (${denied.join(", ") || "unknown"}). Grant them to the role, or run the step interactively.`
+    )
+  }
 
   return {
     output: {

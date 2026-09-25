@@ -236,6 +236,7 @@ describe("markInterruptedRuns", () => {
       status: "cancelled",
       endedAt: 500,
       error: "interrupted",
+      errorCode: "interrupted",
     })
     expect(rows("runs").get("old")?.status).toBe("cancelled")
     // A genuinely finished run is untouched.

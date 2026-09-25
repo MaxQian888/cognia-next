@@ -4,7 +4,8 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react"
 import { Alert, AlertDescription } from "@cognia/plugin-ui"
 import { Button } from "@cognia/plugin-ui"
 import type { PreflightStatus } from "../types"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 interface Props {
   status: PreflightStatus | null
@@ -13,7 +14,7 @@ interface Props {
 }
 
 export function PreflightBanner({ status, checking, onRecheck }: Props) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
 
   if (checking || !status) {
     return (
@@ -21,7 +22,7 @@ export function PreflightBanner({ status, checking, onRecheck }: Props) {
         className="flex items-center gap-2 rounded-md border p-2 text-xs text-muted-foreground"
         data-testid="strix-preflight-checking"
       >
-        <Loader2 className="size-3.5 animate-spin" />
+        <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
         {t("preflight.checking")}
       </div>
     )
@@ -30,7 +31,7 @@ export function PreflightBanner({ status, checking, onRecheck }: Props) {
   if (status.docker && status.strix) {
     return (
       <div
-        className="flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-xs text-emerald-700 dark:text-emerald-400"
+        className="flex items-center gap-2 rounded-md border border-success/40 bg-success/10 p-2 text-xs text-success"
         data-testid="strix-preflight-ok"
       >
         <CheckCircle2 className="size-3.5" />

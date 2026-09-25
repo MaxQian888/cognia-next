@@ -22,8 +22,9 @@
  * would orphan existing user customisations.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { defineCharacterPack } from "@cognia/plugin-sdk"
+import { defineCharacterPack, definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+
 export const BUILTIN_PACK = defineCharacterPack({
   id: "builtin",
   name: "Cognia Built-ins",
@@ -121,22 +122,23 @@ export const BUILTIN_LEGACY_ID_TO_LOCAL_ID: Readonly<Record<string, string>> = O
   char_builtin_support: "support",
 })
 
-export const BUILTIN_PLUGIN_ID = "cognia-builtin-characters"
+export const BUILTIN_PLUGIN_ID = manifestJson.id
 
-const definition: PluginDefinition = {
-  manifest: {
-    id: BUILTIN_PLUGIN_ID,
-    name: "Cognia Built-in Characters",
-    version: "1.0.0",
-    type: "frontend",
-    capabilities: ["character-pack"],
-    main: "src/index.ts",
-    characterPacks: [BUILTIN_PACK],
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("cognia-builtin-characters activated")
-    ctx.characterPacks.register(BUILTIN_PACK)
-  },
-}
+/**
+ * plugin.json plus the one TypeScript-authored field. `characterPacks` lives
+ * here, next to the prompts it carries and the legacy-id map that must agree
+ * with it; the browser builtin registry merges this manifest over the JSON at
+ * discovery, and the manager's `character-pack` overlay dispatch registers the
+ * pack on enable and drops it on disable. `activate()` therefore has nothing to
+ * register — a second, imperative `ctx.characterPacks.register` only replaced
+ * the entry the manager had just written.
+ *
+ * The plugin keeps `activationEvents: ["startup"]`: the default personas (and
+ * the read-only Support Agent) must exist for every user without opting in.
+ */
+export const manifest = definePluginManifest({ ...manifestJson, characterPacks: [BUILTIN_PACK] })
 
-export default definition
+export default definePlugin({
+  manifest,
+  activate: () => {},
+})

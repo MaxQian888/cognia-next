@@ -1,5 +1,5 @@
 import { executeWork, parseReport } from "./execute"
-import { fixture, SHA } from "./test-fixtures"
+import { fixture, SHA } from "./devin-bot.test-helpers"
 import { monitor } from "./monitor"
 
 it("reuses the live issue #25 report without requiring an unused review field", async () => {
@@ -122,6 +122,10 @@ it.each([
       })
     )
     expect(f.mocks.publish).not.toHaveBeenCalled()
+    expect(f.mocks.approval).toHaveBeenCalledWith(
+      "publish",
+      expect.objectContaining({ title: "Publish this GitHub review?" })
+    )
   }
 )
 
@@ -254,8 +258,15 @@ it("publishes only the exact approved patch and PR content", async () => {
     approvalId: "approval",
     snapshotId: "snapshot",
     message: "fix: resolve issue #7",
-    branch: expect.stringContaining("codex/github-devin/"),
+    branch: expect.stringMatching(/^cognia\/github-devin\/issue-7-/),
   })
+  expect(f.mocks.approval).toHaveBeenCalledWith(
+    "publish",
+    expect.objectContaining({
+      title: "Publish this patch and open a pull request?",
+      message: expect.stringContaining("no automatic merge is performed"),
+    })
+  )
   const approved = (
     f.mocks.approval.mock.calls[0] as unknown as [
       string,

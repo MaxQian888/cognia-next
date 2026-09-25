@@ -1,7 +1,9 @@
 {
   "id": "github-delivery",
   "name": "GitHub Delivery",
+  "nameKey": "manifest.name",
   "description": "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
+  "descriptionKey": "manifest.description",
   "author": {
     "name": "Cognia Official",
     "publicKey": "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0="
@@ -22,19 +24,19 @@
   "runtimeCompatibility": {
     "tauri": {
       "availability": "supported",
-      "entrypoint": "src/index.ts"
+      "entrypoint": "dist/index.js"
     },
     "browser": {
       "availability": "degraded",
-      "reason": "HTTP and event actions remain available, but runIssueLoop requires the desktop host."
+      "reason": "API actions only: webhook events need the Desktop or Headless host to receive them, and runIssueLoop needs the desktop app."
     },
     "mobile": {
       "availability": "degraded",
-      "reason": "HTTP and event actions remain available, but runIssueLoop requires the desktop host."
+      "reason": "API actions only: webhook events need the Desktop or Headless host to receive them, and runIssueLoop needs the desktop app."
     },
     "headless": {
       "availability": "degraded",
-      "reason": "HTTP and event actions remain available, but runIssueLoop requires the desktop host."
+      "reason": "API actions and webhook events are available; runIssueLoop needs the desktop app."
     }
   },
   "integrations": [
@@ -1109,5 +1111,17 @@
         "schema": "++id, [repoFullName+at], runId, &[runId+stepId+at]"
       }
     ]
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "GitHub Delivery",
+        "manifest.description": "GitHub pull request, issue, review, release, tag, and Issue→PR delivery."
+      },
+      "zh-CN": {
+        "manifest.name": "GitHub 交付",
+        "manifest.description": "GitHub 拉取请求、议题、评审、发布、标签，以及从议题到 PR 的交付。"
+      }
+    }
   }
 }

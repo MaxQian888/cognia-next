@@ -1,13 +1,17 @@
-import type { PluginContext } from "@cognia/plugin-sdk"
-
-import { DEEP_RESEARCH_SKILL, registerResearchSkill } from "./skill"
+import { DEEP_RESEARCH_SKILL } from "./skill"
 
 describe("DEEP_RESEARCH_SKILL", () => {
   it("is an inline, global playbook gated to the deep_research tool", () => {
-    expect(DEEP_RESEARCH_SKILL.id).toBe("deep-research")
+    expect(DEEP_RESEARCH_SKILL.id).toBe("cognia-deep-research:deep-research")
+    expect(DEEP_RESEARCH_SKILL.slug).toBe("deep-research")
     expect(DEEP_RESEARCH_SKILL.scope).toBe("global")
     expect(DEEP_RESEARCH_SKILL.allowedTools).toEqual(["deep_research"])
     expect(DEEP_RESEARCH_SKILL.source.kind).toBe("inline")
+  })
+
+  it("describes itself to the user, not just to the model", () => {
+    expect(DEEP_RESEARCH_SKILL.name).toBe("Deep Research playbook")
+    expect(DEEP_RESEARCH_SKILL.description).toMatch(/deep_research/)
   })
 
   it("teaches the model when to reach for the tool and what depth means", () => {
@@ -17,14 +21,5 @@ describe("DEEP_RESEARCH_SKILL", () => {
     expect(markdown).toContain("quick")
     expect(markdown).toContain("deep")
     expect(markdown).toMatch(/citation/i)
-  })
-})
-
-describe("registerResearchSkill", () => {
-  it("registers the skill on the agent registry", () => {
-    const registerSkill = jest.fn()
-    const ctx = { agent: { registerSkill } } as unknown as PluginContext
-    registerResearchSkill(ctx)
-    expect(registerSkill).toHaveBeenCalledWith(DEEP_RESEARCH_SKILL)
   })
 })

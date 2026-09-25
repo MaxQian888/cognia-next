@@ -19,92 +19,90 @@
  *   3. exposes a read-only `record_skill_status` agent tool.
  *
  * Desktop-only: recording needs a native global input hook. The manifest marks
- * browser and mobile `blocked`, so `activate` never runs there.
+ * browser and mobile `blocked` (headless inherits browser), so `activate` only
+ * ever runs in the Tauri shell and needs no platform check of its own.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import {
+  definePlugin,
+  definePluginManifest,
+  definePluginTool,
+  type PluginCommandResult,
+  type PluginContext,
+} from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
-let availabilityDispose: (() => void) | undefined
+// plugin.json is the manifest source of truth — `commands[]` and the
+// `i18n.locales` bundle the manager registers before `activate()` runs.
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here would WIN and silently drop `commands[]`.
-  manifest: {
-    ...(manifestJson as object),
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("skill-recorder plugin activated")
-
-    // Publish before anything else: the entry points read this to decide
-    // whether to render at all.
-    availabilityDispose = ctx.recorder.publishAvailability()
-
-    ctx.agent?.registerTool?.({
+function recordSkillStatusTool(ctx: PluginContext) {
+  return definePluginTool({
+    name: "record_skill_status",
+    definition: {
       name: "record_skill_status",
-      pluginId: ctx.pluginId,
-      definition: {
-        name: "record_skill_status",
-        description: "Report whether a desktop skill recording is currently in progress.",
-        parametersSchema: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-      } as never,
-      execute: async () => {
-        if (!ctx.capabilities.tauri) {
-          return { ok: false as const, error: "desktop-only" }
-        }
-        try {
-          // The store is the authority on flow phase; the native status is the
-          // authority on whether capture is actually running. Prefer the store
-          // when it has a session, so "paused" and "reviewing" are not reported
-          // as "not recording".
-          const local = ctx.recorder.statusSnapshot()
-          if (local.phase !== "idle") {
-            return {
-              ok: true as const,
-              recording: local.recording,
-              phase: local.phase,
-              stepCount: local.stepCount,
-            }
-          }
-          const status = await ctx.recorder.status()
+      description: "Report whether a desktop skill recording is currently in progress.",
+      parametersSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    execute: async () => {
+      try {
+        // The store is the authority on flow phase; the native status is the
+        // authority on whether capture is actually running. Prefer the store
+        // when it has a session, so "paused" and "reviewing" are not reported
+        // as "not recording".
+        const local = ctx.recorder.statusSnapshot()
+        if (local.phase !== "idle") {
           return {
             ok: true as const,
-            recording: status.recording,
-            phase: status.phase ?? "idle",
-            stepCount: status.stepCount,
+            recording: local.recording,
+            phase: local.phase,
+            stepCount: local.stepCount,
           }
-        } catch (err) {
-          return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
         }
-      },
-    })
+        const status = await ctx.recorder.status()
+        return {
+          ok: true as const,
+          recording: status.recording,
+          phase: status.phase ?? "idle",
+          stepCount: status.stepCount,
+        }
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  })
+}
+
+export default definePlugin({
+  manifest,
+  activate: (ctx) => {
+    // Publish before anything else: the entry points read this to decide
+    // whether to render at all. Withdrawn on dispose, so the toolbar button and
+    // the shortcut disappear with the plugin instead of failing at preflight.
+    ctx.lifecycle.onDispose(ctx.recorder.publishAvailability(), "skill-recorder:availability")
+    ctx.agent.registerTool(recordSkillStatusTool(ctx))
+    ctx.logger.info("skill-recorder plugin activated")
 
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
-    // here — the supported shape per the author-SDK migration table. The
-    // manager owns registration and teardown, so `deactivate` has nothing to
-    // undo for it.
+    // here; the manager owns its registration and teardown.
     return {
-      onCommand: async (command: string) => {
+      onCommand: (command: string): boolean | PluginCommandResult => {
         if (command !== "record-skill") return false
-        if (!ctx.capabilities.tauri) {
-          ctx.ui?.showToast?.("Skill recording is desktop-only.", "error")
-          return true
+        try {
+          ctx.recorder.open("plugin-command")
+          return { handled: true, message: ctx.i18n.t("command.opened") }
+        } catch (err) {
+          const message = ctx.i18n.t("command.openFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+          ctx.ui.showToast(message, "error")
+          return { handled: true, message }
         }
-        ctx.recorder.open("plugin-command")
-        return true
       },
     }
   },
-  deactivate: async () => {
-    // Withdraws every entry point at once. Without this the toolbar button and
-    // the shortcut would survive a disable and fail at the preflight instead.
-    availabilityDispose?.()
-    availabilityDispose = undefined
-  },
-}
-
-export default definition
+})

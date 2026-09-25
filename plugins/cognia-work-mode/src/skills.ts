@@ -59,7 +59,7 @@ const SPREADSHEET_DELIVERABLE = inlineSkill(
 - Never hide assumptions inside formulas; label units, currencies, dates, and scenarios.
 - Check totals, denominator choices, missing values, duplicates, outliers, and sign conventions.
 - Use formulas that are explainable and stable when rows are added.
-- For a Cognia artifact, emit clean CSV-compatible content unless the user requested an interactive HTML table.
+- Deliver it with work_create_deliverable (kind "spreadsheet"): pass clean CSV content, and cognia-office turns it into a native workbook artifact. Use an HTML table only when the user asked for an interactive page.
 - Include a compact data dictionary and validation notes with the delivery.`
 )
 

@@ -1,9 +1,8 @@
 "use client"
 
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import type {
   LinkMatcherProps,
-  PluginContext,
-  PluginDefinition,
   PluginModalProps,
   PluginQuickActionInput,
   PluginViewProps,
@@ -13,6 +12,13 @@ import type { ExtensionProps } from "@cognia/plugin-sdk/extensions"
 import { Button } from "@cognia/plugin-ui"
 import manifestJson from "../plugin.json"
 
+/**
+ * The stylesheet `manifest.styles` points at, compiled in: a `builtin://`
+ * plugin has no install directory to read `styles.css` from, so the browser
+ * builtin registry hands this string to `loadPluginStyles` as `bundledStyles`.
+ * `styles.css` keeps the same rules for an installed copy; the co-located test
+ * pins the two byte-for-byte.
+ */
 export const REFERENCE_PLUGIN_CSS = `.ref-badge,
 [data-tree-node="reference-root"] {
   outline: 2px solid rgb(239, 68, 68);
@@ -197,15 +203,15 @@ export function ReferenceConfig({ config, onSave }: ConfigComponentProps) {
   )
 }
 
-const definition: PluginDefinition = {
-  manifest: manifestJson as PluginDefinition["manifest"],
-  activate: async (context: PluginContext) => {
-    context.logger.info("ui-surface-reference activated")
+export const manifest = definePluginManifest(manifestJson)
+
+export default definePlugin({
+  manifest,
+  activate: (context) => {
+    // Selection actions carry `run` handlers, which plugin.json cannot hold.
     context.quickActions.registerMany(selectionReferenceActions)
     return {
       onCommand: async (command) => command === "reference.open",
     }
   },
-}
-
-export default definition
+})

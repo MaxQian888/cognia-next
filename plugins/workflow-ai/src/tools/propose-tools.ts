@@ -19,13 +19,12 @@
  * the user clicks Apply on the rendered card.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
 import type { ProposalPayload } from "@cognia/plugin-sdk/api/workflow-editor"
 import { summarizeOps, type ProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 import { coerceProposalOp } from "@cognia/plugin-sdk/api/workflow-editor"
 import { workflowEditorRevision } from "@cognia/plugin-sdk/api/workflow-editor"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -137,11 +136,10 @@ function nextProposalId(): string {
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-export function buildProposeTools(): PluginTool[] {
+export function buildProposeTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_propose_batch",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_propose_batch",
         description:
@@ -247,6 +245,6 @@ export function buildProposeTools(): PluginTool[] {
           return formatToolError(err) as ProposeBatchToolResult
         }
       },
-    },
+    }),
   ]
 }

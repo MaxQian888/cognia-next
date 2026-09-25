@@ -21,7 +21,7 @@ import {
 } from "@/lib/workflow/editor/store-registry"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
-import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
+import type { PluginToolRegistration, PluginToolContext } from "@cognia/plugin-sdk"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
 import { buildRunTools, __resetActiveRunsForTesting } from "./run-tools"
 import { configureWorkflowApi } from "../store-bridge"
@@ -47,7 +47,7 @@ function workflow(id: string): VisualWorkflow {
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
 
-function findTool(tools: PluginTool[], name: string): PluginTool {
+function findTool(tools: PluginToolRegistration[], name: string): PluginToolRegistration {
   const tool = tools.find((t) => t.name === name)
   if (!tool) throw new Error(`Tool not found: ${name}`)
   return tool

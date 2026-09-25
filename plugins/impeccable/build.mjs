@@ -16,6 +16,10 @@ export async function buildPlugin({ outputDirectory = resolve(pluginRoot, "dist"
     format: "cjs",
     platform: "neutral",
     target: "es2022",
+    // The host loader hands out its own `@cognia/plugin-sdk` instance
+    // (`lib/plugin/core/shared-modules.ts`); inlining it would bundle the
+    // host's capability layer into the plugin.
+    external: ["@cognia/plugin-sdk"],
     write: false,
   })
   const bundle = result.outputFiles[0].contents

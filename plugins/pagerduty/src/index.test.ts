@@ -1,4 +1,4 @@
-import {
+import definition, {
   INCIDENT_RESPONDER_BOT,
   PAGERDUTY_ONCALL_PACK,
   PagerDutyIntegrationError,
@@ -20,6 +20,7 @@ import type {
   IntegrationActionHandlerContext,
   IntegrationProviderContext,
   IntegrationVerifiedDelivery,
+  PluginContext,
 } from "@cognia/plugin-sdk"
 
 const CONTEXT = { pluginId: "pagerduty", integrationId: "pagerduty", accountId: "acct-1" }
@@ -63,7 +64,8 @@ describe("normalizePagerDuty", () => {
     const envelope = normalizePagerDuty(delivery(incidentEvent()), CONTEXT)
     expect(envelope.schemaVersion).toBe(1)
     expect(envelope.eventType).toBe("incident.triggered")
-    expect(envelope.id).toBe("del-1:ev-1")
+    expect(envelope.id).toBe("pd:acct-1:ev-1")
+    expect(envelope.deliveryId).toBe("pd:ev-1")
     expect(envelope.resource).toEqual({
       kind: "incident",
       id: "P1ABC",
@@ -105,6 +107,22 @@ describe("normalizePagerDuty", () => {
     expect((payload.service as { id: string }).id).toBe("SVC1")
   })
 
+  it("gives every redelivery of one PagerDuty event the same delivery id", () => {
+    // PagerDuty retries an unacknowledged webhook with the same `event.id`;
+    // the host assigns each HTTP attempt its own delivery id. The envelope's
+    // deliveryId is what the host dedupes on, so a retry must collide.
+    const first = normalizePagerDuty(delivery(incidentEvent(), { deliveryId: "http-1" }), CONTEXT)
+    const retry = normalizePagerDuty(delivery(incidentEvent(), { deliveryId: "http-2" }), CONTEXT)
+    expect(retry.deliveryId).toBe(first.deliveryId)
+    expect(retry.id).toBe(first.id)
+    const otherAccount = normalizePagerDuty(delivery(incidentEvent()), {
+      ...CONTEXT,
+      accountId: "acct-2",
+    })
+    expect(otherAccount.deliveryId).toBe(first.deliveryId)
+    expect(otherAccount.id).not.toBe(first.id)
+  })
+
   it("falls back to delivery.eventType and deliveryId when the event is sparse", () => {
     const envelope = normalizePagerDuty(
       delivery({ event: {} }, { eventType: "incident.annotated" }),
@@ -112,6 +130,7 @@ describe("normalizePagerDuty", () => {
     )
     expect(envelope.eventType).toBe("incident.annotated")
     expect(envelope.id).toBe("del-1:incident.annotated")
+    expect(envelope.deliveryId).toBe("del-1")
     expect(envelope.resource).toBeUndefined()
     expect(envelope.actor).toBeUndefined()
     expect(envelope.occurredAt).toBe("2026-09-17T00:00:00.000Z")
@@ -309,25 +328,75 @@ describe("listPagerDutyResources", () => {
 })
 
 describe("checkPagerDutyHealth", () => {
-  const ctx = (status: number): IntegrationProviderContext => ({
+  const ctx = (
+    status: number,
+    headers: Record<string, string> = {},
+    data: unknown = {}
+  ): IntegrationProviderContext => ({
     pluginId: "pagerduty",
     integrationId: "pagerduty",
     accountId: "acct-1",
     authenticatedRequest: (async () => ({
       status,
-      headers: {} as Record<string, string>,
-      data: {},
+      headers,
+      data,
     })) as IntegrationProviderContext["authenticatedRequest"],
   })
 
-  it("reports healthy on 2xx", async () => {
-    await expect(checkPagerDutyHealth(ctx(200))).resolves.toEqual({ health: "healthy" })
+  it("reports healthy on 2xx with a check timestamp", async () => {
+    const status = await checkPagerDutyHealth(ctx(200))
+    expect(status).toEqual({
+      health: "healthy",
+      checkedAt: expect.any(String),
+      lastHealthyAt: status.checkedAt,
+    })
   })
-  it("reports revoked on 401", async () => {
-    await expect(checkPagerDutyHealth(ctx(401))).resolves.toEqual({ health: "revoked" })
+  it("reports revoked on 401 and asks for reauthorization", async () => {
+    await expect(
+      checkPagerDutyHealth(ctx(401, {}, { error: { message: "Invalid token" } }))
+    ).resolves.toEqual({
+      health: "revoked",
+      code: "authentication",
+      message: "PagerDuty API authentication: Invalid token",
+      checkedAt: expect.any(String),
+      recoveryAction: "reauthorize",
+    })
+  })
+  it("names the permission problem on 403", async () => {
+    await expect(checkPagerDutyHealth(ctx(403))).resolves.toMatchObject({
+      health: "degraded",
+      code: "permission",
+      recoveryAction: "review-permissions",
+    })
+  })
+  it("carries the retry hint on rate limiting", async () => {
+    await expect(checkPagerDutyHealth(ctx(429, { "retry-after": "30" }))).resolves.toMatchObject({
+      health: "degraded",
+      code: "rate_limit",
+      recoveryAction: "retry",
+      rateLimit: { retryAt: "30" },
+    })
   })
   it("reports degraded on transient failure", async () => {
-    await expect(checkPagerDutyHealth(ctx(503))).resolves.toEqual({ health: "degraded" })
+    await expect(checkPagerDutyHealth(ctx(503))).resolves.toMatchObject({
+      health: "degraded",
+      code: "transient",
+      recoveryAction: "retry",
+    })
+  })
+  it("reports an unreachable API instead of throwing", async () => {
+    const unreachable: IntegrationProviderContext = {
+      ...ctx(200),
+      authenticatedRequest: async () => {
+        throw new Error("fetch failed")
+      },
+    }
+    await expect(checkPagerDutyHealth(unreachable)).resolves.toMatchObject({
+      health: "degraded",
+      code: "unreachable",
+      message: "fetch failed",
+      recoveryAction: "retry",
+    })
   })
 })
 
@@ -390,6 +459,44 @@ describe("manifest contributions", () => {
     expect(manifest.bots?.[0]?.id).toBe("incident-responder")
     expect(manifest.characterPacks?.[0]?.id).toBe("oncall")
   })
+
+  it("opens triage only for incidents that still need a responder", () => {
+    const types =
+      INCIDENT_RESPONDER_BOT.triggers[0] && "types" in INCIDENT_RESPONDER_BOT.triggers[0]
+        ? INCIDENT_RESPONDER_BOT.triggers[0].types
+        : []
+    expect(types).toEqual(["incident.triggered", "incident.reopened", "incident.unacknowledged"])
+    expect(types).not.toContain("incident.resolved")
+    // Every trigger type is one the integration actually emits.
+    const emitted = pagerDutyIntegration.eventTypes.map((type) => type.id)
+    for (const type of types ?? []) expect(emitted).toContain(type)
+  })
+
+  it("asks for least privilege and stays opt-in", () => {
+    // Every REST call goes through the host broker's authenticatedRequest.
+    expect(manifest.permissions).not.toContain("network:fetch")
+    expect(manifest.permissions).toContain("agent:control")
+    expect(manifest.activationEvents).toBeUndefined()
+  })
+
+  it("documents the US-only REST region and relies on event.id for retries", () => {
+    expect(pagerDutyIntegration.description).toMatch(/EU-region accounts are not supported/)
+    expect(pagerDutyIntegration.allowedOrigins).toEqual(["https://api.pagerduty.com"])
+    expect(pagerDutyIntegration.ingress?.deliveryIdHeader).toBeUndefined()
+  })
+})
+
+describe("plugin definition", () => {
+  it("captures the context on activate and releases it on deactivate", async () => {
+    const info = jest.fn()
+    const ctx: Partial<PluginContext> = {
+      logger: { debug: jest.fn(), info, warn: jest.fn(), error: jest.fn() },
+    }
+    await definition.activate(ctx as PluginContext)
+    expect(info).toHaveBeenCalledWith("pagerduty plugin activated")
+    await definition.deactivate?.(ctx as PluginContext)
+    expect(() => incidentResponder(runContext() as never)).toThrow("not active")
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -412,6 +519,7 @@ function runContext(overrides: Record<string, unknown> = {}) {
       triggerId: "incident-needs-triage",
       occurredAt: 1,
       receivedAt: 1,
+      binding: { integrationAccountId: "acct_pd" },
       resource: {
         kind: "incident",
         id: "P1ABC",
@@ -445,6 +553,16 @@ function runContext(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** `ctx.i18n.t` over the plugin's own en bundle, as the host resolves it. */
+const EN_MESSAGES = (
+  manifest.i18n as { locales: Record<string, Record<string, string>> } | undefined
+)?.locales.en
+
+function translate(key: string, params?: Record<string, string | number>) {
+  const template = EN_MESSAGES?.[key] ?? key
+  return template.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? `{${name}}`))
+}
+
 function pluginContext(turnResult: unknown, jobResult: unknown) {
   const runCharacterTurn = jest.fn(async () => turnResult)
   const executeAction = jest.fn(async () => jobResult)
@@ -452,6 +570,7 @@ function pluginContext(turnResult: unknown, jobResult: unknown) {
     context: {
       agent: { runCharacterTurn },
       integrations: { executeAction },
+      i18n: { t: jest.fn(translate) },
     },
     runCharacterTurn,
     executeAction,
@@ -476,6 +595,8 @@ describe("incidentResponder handler", () => {
     expect(run.step.waitForApproval).toHaveBeenCalledWith(
       "post-note",
       expect.objectContaining({
+        title: "Post triage note to incident P1ABC?",
+        message: expect.stringContaining("Approving authorizes exactly this incident note"),
         risk: "medium",
         detail: expect.objectContaining({
           approvedActions: [
@@ -494,6 +615,7 @@ describe("incidentResponder handler", () => {
     expect(executeAction).toHaveBeenCalledWith(
       expect.objectContaining({
         integrationId: "pagerduty",
+        accountId: "acct_pd",
         actionId: "addIncidentNote",
         binding: { runId: "run-1", slotId: "pagerduty" },
         approval: { interruptId: "interrupt-1" },
@@ -574,6 +696,24 @@ describe("incidentResponder handler", () => {
     await expect(createIncidentResponder(context as never)(runContext() as never)).rejects.toThrow(
       "boom"
     )
+  })
+
+  it("fails closed when the event names no PagerDuty account", async () => {
+    const { context, executeAction } = pluginContext(TRIAGE_DONE, JOB_OK)
+    const run = runContext({ event: { ...runContext().event, binding: undefined } })
+    await expect(createIncidentResponder(context as never)(run as never)).rejects.toThrow(
+      "account binding"
+    )
+    expect(executeAction).not.toHaveBeenCalled()
+  })
+
+  it("ships the approval text in English and Chinese", () => {
+    const locales = (manifest.i18n as { locales: Record<string, Record<string, string>> }).locales
+    for (const key of ["approval.postNote.title", "approval.postNote.message"]) {
+      expect(locales.en[key]).toBeTruthy()
+      expect(locales["zh-CN"][key]).toBeTruthy()
+    }
+    expect(locales["zh-CN"]["approval.postNote.title"]).toContain("{incidentId}")
   })
 
   it("throws when invoked without activation", () => {

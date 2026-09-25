@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 interface Props {
   text: string
@@ -13,7 +14,7 @@ interface Props {
 const PIN_THRESHOLD_PX = 24
 
 export function ScanConsole({ text, truncated = false }: Props) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const ref = useRef<HTMLPreElement>(null)
   // Only auto-scroll while the reader is already at the bottom — yanking the
   // scroll back on every chunk makes it impossible to read earlier output

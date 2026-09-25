@@ -1,8 +1,10 @@
 {
   "id": "cognia-clipboard-tools",
   "name": "Clipboard Tools",
+  "nameKey": "manifest.name",
   "version": "0.2.0",
   "description": "Read, write, inspect and clear the clipboard from agent tools and workflow nodes, through the host's permission-guarded clipboard API.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "workflow"],
   "main": "src/index.ts",
@@ -23,27 +25,36 @@
       "name": "clipboard_status",
       "description": "Report what the clipboard holds (text and/or image) and return the current clipboard text.",
       "category": "clipboard",
-      "access": "read",
       "retryable": true,
-      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+      "parametersSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
     },
     {
       "name": "clipboard_read_image",
-      "description": "Read the image currently on the clipboard as base64 PNG. Desktop only; a browser shell has no image clipboard.",
+      "description": "Read the image currently on the clipboard and return it as an image the model can see. Desktop only; a browser shell has no image clipboard.",
       "category": "clipboard",
-      "access": "read",
       "retryable": true,
-      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+      "parametersSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
     },
     {
       "name": "clipboard_write_text",
       "description": "Replace the clipboard contents with the given text.",
       "category": "clipboard",
-      "access": "write",
+      "requiresApproval": true,
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "text": { "type": "string", "description": "The text to place on the clipboard." }
+          "text": {
+            "type": "string",
+            "description": "The text to place on the clipboard."
+          }
         },
         "required": ["text"],
         "additionalProperties": false
@@ -53,8 +64,12 @@
       "name": "clipboard_clear",
       "description": "Empty the clipboard.",
       "category": "clipboard",
-      "access": "write",
-      "parametersSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+      "requiresApproval": true,
+      "parametersSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
     }
   ],
   "activationEvents": ["startup"],
@@ -72,6 +87,30 @@
       "availability": "degraded",
       "entrypoint": "src/index.ts",
       "reason": "Clipboard read/write is restricted in the mobile WebView (no synchronous read; user-gesture required); image clipboard is unavailable."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Clipboard Tools",
+        "manifest.description": "Read, write, inspect and clear the clipboard from agent tools and workflow nodes, through the host's permission-guarded clipboard API.",
+        "workflow.nodes.action.readText.label": "Read clipboard text",
+        "workflow.nodes.action.readText.description": "Read the current OS or browser clipboard text.",
+        "workflow.nodes.action.writeText.label": "Write clipboard text",
+        "workflow.nodes.action.writeText.description": "Replace the OS or browser clipboard text with the given value.",
+        "workflow.nodes.action.clear.label": "Clear clipboard",
+        "workflow.nodes.action.clear.description": "Empty the OS or browser clipboard."
+      },
+      "zh-CN": {
+        "manifest.name": "剪贴板工具",
+        "manifest.description": "通过宿主带权限保护的剪贴板 API，在 Agent 工具和工作流节点中读取、写入、检查和清空剪贴板。",
+        "workflow.nodes.action.readText.label": "读取剪贴板文本",
+        "workflow.nodes.action.readText.description": "读取当前系统或浏览器剪贴板中的文本。",
+        "workflow.nodes.action.writeText.label": "写入剪贴板文本",
+        "workflow.nodes.action.writeText.description": "用指定内容替换系统或浏览器剪贴板中的文本。",
+        "workflow.nodes.action.clear.label": "清空剪贴板",
+        "workflow.nodes.action.clear.description": "清空系统或浏览器剪贴板。"
+      }
     }
   }
 }

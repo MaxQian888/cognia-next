@@ -1,8 +1,10 @@
 {
   "id": "cognia-presentations",
   "name": "Cognia Presentations",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Plugin-owned native PPTX authoring, import, preview, validation, and export.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "importers"],
   "main": "src/index.ts",
@@ -15,6 +17,8 @@
   "i18n": {
     "locales": {
       "en": {
+        "manifest.name": "Cognia Presentations",
+        "manifest.description": "Plugin-owned native PPTX authoring, import, preview, validation, and export.",
         "renderer.name": "Cognia Presentation",
         "preview.slides": "Slides",
         "preview.slideOf": "Slide {index} of {total}",
@@ -34,9 +38,14 @@
         "card.warnings": "Warnings: {count}",
         "card.exported": "Exported {size}",
         "card.open": "Open",
-        "card.version": "v{version}"
+        "card.version": "v{version}",
+        "preview.slideRole": "slide",
+        "preview.parseError": "This artifact is not a valid Cognia presentation: {error}",
+        "history.edit": "Edit presentation"
       },
       "zh-CN": {
+        "manifest.name": "Cognia 演示文稿",
+        "manifest.description": "插件自带的原生 PPTX 撰写、导入、预览、校验与导出。",
         "renderer.name": "Cognia 演示文稿",
         "preview.slides": "幻灯片",
         "preview.slideOf": "第 {index} 张，共 {total} 张",
@@ -56,7 +65,10 @@
         "card.warnings": "警告：{count}",
         "card.exported": "已导出 {size}",
         "card.open": "打开",
-        "card.version": "版本 {version}"
+        "card.version": "版本 {version}",
+        "preview.slideRole": "幻灯片",
+        "preview.parseError": "此 artifact 不是有效的 Cognia 演示文稿：{error}",
+        "history.edit": "编辑演示文稿"
       }
     }
   },
@@ -69,9 +81,9 @@
       "reason": "Authoring and PPTX validation are available; interactive preview and file pickers require a UI shell."
     },
     "mobile": {
-      "availability": "degraded",
+      "availability": "supported",
       "entrypoint": "src/index.ts",
-      "reason": "Authoring, preview, and download are available; native file dialogs depend on the connected shell."
+      "reason": "Authoring, validation, and preview work on mobile; PPTX import uses the system file picker and exports are saved to Documents/cognia/exports on the device."
     }
   }
 }

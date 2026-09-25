@@ -146,6 +146,29 @@ export interface EngineLogger {
   warn: (message: string, ...args: unknown[]) => void
 }
 
+/**
+ * Every user-facing string the engine produces — progress cards and the
+ * text of a cancelled run. Keys of the plugin's i18n bundle
+ * (`plugin.json` → `i18n.locales`).
+ */
+export type EngineMessageKey =
+  | "progress.planning"
+  | "progress.searching"
+  | "progress.reading"
+  | "progress.refining"
+  | "progress.drafting"
+  | "progress.done"
+  | "progress.cancelled"
+  | "progress.scoping"
+  | "progress.section"
+  | "progress.weaving"
+  | "answer.cancelledWithFindings"
+  | "answer.cancelledEmpty"
+  | "report.cancelledEmpty"
+
+/** Renders an {@link EngineMessageKey} in the user's language. */
+export type EngineText = (key: EngineMessageKey, params?: Record<string, string | number>) => string
+
 /** Everything the engine needs, injected. Fully mockable in tests. */
 export interface EngineDeps {
   ai: AiBridge
@@ -154,5 +177,10 @@ export interface EngineDeps {
   logger?: EngineLogger
   /** Streamed to the user as progress cards (0..1, message). */
   reportProgress?: (progress: number, message?: string) => void
+  /**
+   * Renders the engine's user-facing strings. `buildEngineDeps` binds it to
+   * the plugin's `ctx.i18n.t`; an engine unit test may omit it and read keys.
+   */
+  text?: EngineText
   signal?: AbortSignal
 }

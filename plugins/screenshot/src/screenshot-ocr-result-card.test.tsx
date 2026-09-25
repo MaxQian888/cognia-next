@@ -1,8 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
+import { registerPluginI18n, unregisterPluginI18n } from "@cognia/plugin-sdk/api/i18n"
 
 const copy = jest.fn()
 jest.mock("@cognia/plugin-ui", () => ({
@@ -13,7 +14,32 @@ jest.mock("@cognia/plugin-ui", () => ({
   useCopy: () => ({ copied: false, copy }),
 }))
 
+import manifestJson from "../plugin.json"
 import { ScreenshotOcrResultCard } from "./screenshot-ocr-result-card"
+import { PLUGIN_ID } from "./screenshot-result-card"
+
+/** Register the plugin's own bundle the way the manager does on enable. */
+function registerBundle() {
+  const locales = manifestJson.i18n.locales as Record<string, Record<string, string>>
+  registerPluginI18n({
+    pluginId: PLUGIN_ID,
+    messages: Object.fromEntries(
+      Object.entries(locales).map(([locale, dict]) => [
+        locale,
+        Object.fromEntries(
+          Object.entries(dict).map(([key, value]) => [`plugin.${PLUGIN_ID}.${key}`, value])
+        ),
+      ])
+    ),
+  })
+}
+
+beforeEach(() => registerBundle())
+afterEach(() => {
+  // Unmount first: unregistering re-renders every mounted consumer.
+  cleanup()
+  unregisterPluginI18n(PLUGIN_ID)
+})
 
 function part(output: unknown): ToolUIPart {
   return {
@@ -38,8 +64,14 @@ describe("ScreenshotOcrResultCard", () => {
     expect(screen.getByTestId("screenshot-ocr-result-card")).toBeInTheDocument()
     expect(screen.getByTestId("screenshot-ocr-text").textContent).toBe("hello world")
     expect(screen.getByText(/Provider: tesseract-wasm/)).toBeInTheDocument()
+    expect(screen.getByText("Text recognized")).toBeInTheDocument()
     expect(screen.getByTestId("screenshot-ocr-copy")).toBeEnabled()
+    expect(screen.getByTestId("screenshot-ocr-copy")).toHaveTextContent("Copy text")
+    expect(screen.getByTestId("screenshot-ocr-ask")).toHaveTextContent("Ask about this")
     expect(screen.getByTestId("screenshot-ocr-ask")).toBeEnabled()
+    // ≥ 36px touch targets on small (touch) screens.
+    expect(screen.getByTestId("screenshot-ocr-copy").className).toContain("h-9")
+    expect(screen.getByTestId("screenshot-ocr-ask").className).toContain("h-9")
   })
 
   it("parses a JSON-string output (the serialized wire shape)", () => {

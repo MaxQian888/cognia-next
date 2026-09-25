@@ -1,6 +1,13 @@
-import definition, { getGoalInsights, __resetGoalInsightsForTesting } from "./index"
-import manifest from "../plugin.json"
-import type { GoalHookPayload, PluginHooksAll } from "@cognia/plugin-sdk"
+import type { GoalHookPayload, PluginContext, PluginHooksAll } from "@cognia/plugin-sdk"
+
+import definition, {
+  createGoalInsightHooks,
+  GOAL_INSIGHTS_EXAMPLE,
+  manifest,
+  OBJECTIVE_EXCERPT_LIMIT,
+} from "./index"
+import manifestJson from "../plugin.json"
+
 const payload = (over: Partial<GoalHookPayload> = {}): GoalHookPayload => ({
   goalId: "g1",
   sessionId: "s1",
@@ -11,36 +18,49 @@ const payload = (over: Partial<GoalHookPayload> = {}): GoalHookPayload => ({
   ...over,
 })
 
-beforeEach(() => {
-  __resetGoalInsightsForTesting()
-})
+function makeCtx() {
+  const info = jest.fn()
+  const ctx = { pluginId: manifestJson.id, logger: { info } } as unknown as PluginContext
+  return { ctx, info }
+}
 
-describe("cognia-goal-insights", () => {
-  it("declares the hooks capability and returns hooks from activate()", async () => {
-    expect(manifest.id).toBe("cognia-goal-insights")
-    expect(manifest.capabilities).toContain("hooks")
-    const ctx = { pluginId: manifest.id, logger: { info: jest.fn() } } as never
+describe("cognia-goal-insights (example)", () => {
+  it("returns goal hooks from activate()", async () => {
+    const { ctx } = makeCtx()
     const hooks = (await definition.activate?.(ctx)) as PluginHooksAll
-    expect(hooks?.onGoalComplete).toBeInstanceOf(Function)
+    expect(hooks.onGoalCreate).toBeInstanceOf(Function)
+    expect(hooks.onGoalComplete).toBeInstanceOf(Function)
   })
 
-  it("records a redacted snapshot on goal create + complete", async () => {
-    const ctx = { pluginId: manifest.id, logger: { info: jest.fn() } } as never
-    const hooks = (await definition.activate?.(ctx)) as PluginHooksAll
+  it("writes one redacted line per lifecycle event to the plugin log", async () => {
+    const { ctx, info } = makeCtx()
+    const hooks = createGoalInsightHooks(ctx.logger)
     await hooks.onGoalCreate?.(payload({ goalId: "g1" }))
     await hooks.onGoalComplete?.(payload({ goalId: "g1", status: "completed", turnsUsed: 4 }))
 
-    const log = getGoalInsights()
-    expect(log).toHaveLength(2)
-    expect(log[0]).toMatchObject({ kind: "created", goalId: "g1" })
-    expect(log[1]).toMatchObject({ kind: "completed", goalId: "g1", turnsUsed: 4 })
-    // Only the redacted objective is ever recorded.
-    expect(log[1].safeObjective).toBe("ship the thing")
+    expect(info).toHaveBeenCalledTimes(2)
+    expect(info.mock.calls[0][0]).toContain("goal created: g1")
+    expect(info.mock.calls[1][0]).toContain("goal completed: g1 status=completed turns=4")
+    expect(info.mock.calls[1][0]).toContain('objective="ship the thing"')
   })
 
-  it("activate returns hooks and deactivate is no-throw with a minimal context", async () => {
-    const ctx = { pluginId: manifest.id, logger: { info: jest.fn() } } as never
-    await expect(definition.activate?.(ctx)).resolves.toBeDefined()
-    await expect(definition.deactivate?.(ctx)).resolves.toBeUndefined()
+  it("bounds the objective excerpt it logs", async () => {
+    const { ctx, info } = makeCtx()
+    const hooks = createGoalInsightHooks(ctx.logger)
+    await hooks.onGoalCreate?.(payload({ safeObjective: "x".repeat(OBJECTIVE_EXCERPT_LIMIT * 3) }))
+    const logged = /objective="([^"]*)"/.exec(info.mock.calls[0][0] as string)?.[1] ?? ""
+    expect(logged.length).toBe(OBJECTIVE_EXCERPT_LIMIT)
+    expect(logged.endsWith("…")).toBe(true)
+  })
+
+  // Rule 7: an example is documented at the const, labelled in the UI, and
+  // pinned here — all three must change together.
+  it("is labelled and gated as an opt-in example with no UI surface", () => {
+    expect(GOAL_INSIGHTS_EXAMPLE).toEqual({ example: true, surface: "plugin-log" })
+    expect(manifestJson).not.toHaveProperty("activationEvents")
+    expect(manifest.activationEvents ?? []).not.toContain("startup")
+    expect(manifestJson.name).toContain("(example)")
+    expect(manifestJson.description).toMatch(/adds no UI/)
+    expect(manifest.extensions ?? []).toEqual([])
   })
 })

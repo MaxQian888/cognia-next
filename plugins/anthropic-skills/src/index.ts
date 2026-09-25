@@ -1,28 +1,46 @@
 /**
- * Anthropic Skills — bundled built-in plugin.
+ * Starter Skills (`cognia-anthropic-skills`) — bundled built-in plugin.
  *
- * Registers three starter Agent Skills (code review, data analysis, web
- * research) sourced inline so the plugin ships with working content out of
- * the box, no filesystem dependencies. Each skill follows the standard
- * SKILL.md YAML frontmatter + markdown body convention; the host's
- * `resolveSkillMarkdown` returns the inline body verbatim and the
- * skills-bridge folds it into the system prompt at send time.
+ * Contributes three hand-written starter skills (code review, data analysis,
+ * web research). They follow the Agent Skills convention (SKILL.md YAML
+ * frontmatter + markdown body) and are sourced inline, so the plugin ships
+ * working content with no filesystem dependency. They are NOT copies of the
+ * anthropics/skills repository — the plugin id keeps its historical name only
+ * so existing installs are not orphaned.
  *
- * Authors can later swap any of these for `local-folder` sources that
- * point at a checked-out copy of anthropics/skills — the registration
- * surface is the same.
+ * Registration is declarative: `manifest.skills` is walked by the plugin
+ * manager's overlay dispatch on enable and dropped on disable. The host's
+ * `resolveSkillMarkdown` returns an inline body verbatim and the skills bridge
+ * folds it into the system prompt of a conversation that turned the skill on.
  *
- * Part of the plugin-first Computer Use plan (M4).
+ * Activation is lazy (`onCommand:skill`): nothing runs for users who never
+ * enable the plugin or type `/skill`.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import { defineSkill } from "@cognia/plugin-sdk"
+import {
+  definePlugin,
+  definePluginManifest,
+  defineSkill,
+  type PluginCommandResult,
+  type PluginContext,
+  type PluginSkillDef,
+} from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
+export const PLUGIN_ID = "cognia-anthropic-skills"
+
+/** Registry id for a skill this plugin contributes (`<pluginId>:<slug>`). */
+export function starterSkillId(slug: string): string {
+  return `${PLUGIN_ID}:${slug}`
+}
+
 const CODE_REVIEW = defineSkill({
-  id: "anthropic.code-review",
+  id: starterSkillId("code-review"),
+  slug: "code-review",
   name: "Code Review",
-  description: "Review code changes carefully and produce structured findings.",
+  description:
+    "Review a diff or files for bugs, security issues, and missing tests, with file:line findings and suggested fixes.",
+  category: "development",
   source: {
     kind: "inline",
     markdown: `---
@@ -44,9 +62,12 @@ When the user asks you to review code:
 })
 
 const DATA_ANALYSIS = defineSkill({
-  id: "anthropic.data-analysis",
+  id: starterSkillId("data-analysis"),
+  slug: "data-analysis",
   name: "Data Analysis",
-  description: "Analyze tabular data and produce clear statistical summaries.",
+  description:
+    "Inspect tabular data, check quality, and report statistics with stated uncertainty.",
+  category: "data-analysis",
   source: {
     kind: "inline",
     markdown: `---
@@ -68,9 +89,11 @@ When the user asks you to analyze data:
 })
 
 const WEB_RESEARCH = defineSkill({
-  id: "anthropic.web-research",
+  id: starterSkillId("web-research"),
+  slug: "web-research",
   name: "Web Research",
-  description: "Conduct thorough web research with source quality checks.",
+  description: "Research a topic from primary sources, cross-check claims, and cite URLs.",
+  category: "productivity",
   source: {
     kind: "inline",
     markdown: `---
@@ -91,42 +114,48 @@ When the user asks you to research a topic:
   },
 })
 
-const definition: PluginDefinition = {
-  // The runtime treats the manifest as the source of truth; the bundled
-  // `plugin.json` next to this file is loaded by the browser-builtin
-  // registry. `skills` is declared in `capabilities` so the plugin manager
-  // walks the `skills` array on enable and registers each entry with the
-  // M1·T3 overlay.
-  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
-  // hand-written subset here would WIN and silently drop `commands[]`.
-  manifest: {
-    ...(manifestJson as object),
-    skills: [CODE_REVIEW, DATA_ANALYSIS, WEB_RESEARCH],
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("anthropic-skills plugin activated")
-    // Imperative path mirrors the declarative manifest registration so the
-    // plugin still works when loaded via dev-mode hot reload before the
-    // manifest walker runs.
-    ctx.agent?.registerSkill?.(CODE_REVIEW)
-    ctx.agent?.registerSkill?.(DATA_ANALYSIS)
-    ctx.agent?.registerSkill?.(WEB_RESEARCH)
+export const STARTER_SKILLS: readonly PluginSkillDef[] = [CODE_REVIEW, DATA_ANALYSIS, WEB_RESEARCH]
 
+/** i18n key prefix per skill, for the `/skill` listing. */
+const SKILL_MESSAGE_KEYS: Record<string, string> = {
+  [CODE_REVIEW.id]: "skill.codeReview",
+  [DATA_ANALYSIS.id]: "skill.dataAnalysis",
+  [WEB_RESEARCH.id]: "skill.webResearch",
+}
+
+// Spread plugin.json (commands, activation, i18n bundle) and add only the
+// TypeScript-authored skills; the manager registers them on enable, so the
+// plugin never registers them a second time imperatively.
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  skills: [...STARTER_SKILLS],
+})
+
+/** The plugin's `ctx.i18n.t`, narrowed to the params this plugin passes. */
+export type SkillListTranslate = (key: string, params?: Record<string, string | number>) => string
+
+/** The `/skill` response: the localized skill list plus how to turn one on. */
+export function renderSkillList(t: SkillListTranslate): string {
+  const lines = [`### ${t("skill.title")}`, "", t("skill.intro"), ""]
+  for (const skill of STARTER_SKILLS) {
+    const key = SKILL_MESSAGE_KEYS[skill.id]
+    lines.push(t("skill.item", { name: t(`${key}.name`), description: t(`${key}.description`) }))
+  }
+  lines.push("", t("skill.howTo"))
+  return lines.join("\n")
+}
+
+export default definePlugin({
+  manifest,
+  activate: async (ctx: PluginContext) => {
     // The slash command is DECLARED in plugin.json (`commands[]`) and handled
-    // here — the supported shape per the author-SDK migration table. The
-    // manager owns registration (namespaced id, conflict detection, aliases,
-    // command-palette entry, idle-clock refresh) and teardown.
+    // here. The manager owns registration (namespaced id, conflict detection,
+    // aliases, command-palette entry, idle-clock refresh) and teardown.
     return {
-      onCommand: async (command: string) => {
+      onCommand: async (command: string): Promise<boolean | PluginCommandResult> => {
         if (command !== "skill") return false
-        ctx.ui?.showToast?.(
-          "Available skills from anthropic-skills plugin: code-review, data-analysis, web-research. Attach via the character settings.",
-          "info"
-        )
-        return true
+        return { handled: true, message: renderSkillList(ctx.i18n.t) }
       },
     }
   },
-}
-
-export default definition
+})

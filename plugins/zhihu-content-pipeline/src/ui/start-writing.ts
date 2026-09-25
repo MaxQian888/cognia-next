@@ -9,9 +9,8 @@
  * it better than a group chat.
  *
  * Dependencies are injected so the handoff is unit-testable without the chat
- * runtime. NOTE (verify in-app): seeding the first user message persists it to
- * the transcript; whether the agent auto-replies or needs a nudge is a
- * chat-runtime behavior to confirm under `pnpm tauri dev`.
+ * runtime. `ctx.session.startSeededSession` creates the session, persists the
+ * seed as its first user message and moves the UI to it in one call.
  */
 
 import { zhihuRoleCharacterId } from "../characters/pack"
@@ -41,22 +40,29 @@ export interface StartWritingDeps {
     characterId?: string
     seedUserMessage?: string
   }) => Promise<{ sessionId: string }>
-  markTopicStatus: (id: string, status: TopicStatus) => Promise<void>
+  markTopicStatus: (id: string, status: TopicStatus, sessionId?: string) => Promise<void>
+  /** The session's title in the user's language (`session.title`). */
+  sessionTitle: (topicTitle: string) => string
 }
 
 /**
- * Mark the topic selected, open a Writer-character chat session seeded with the
- * topic instruction, and activate it. Returns the new session id.
+ * Open a Writer-character chat session seeded with the topic instruction, then
+ * mark the topic `selected` and record the session. Returns the session id.
+ *
+ * The order matters: marking first stranded the topic — out of the candidate
+ * list, with no session behind it — whenever the session failed to start.
+ * The seed stays in Chinese on purpose: it instructs the Writer on a Chinese
+ * platform, it is content, not interface.
  */
 export async function startWritingForTopic(
   topic: Pick<TopicRow, "id" | "title" | "url" | "reason">,
   deps: StartWritingDeps
 ): Promise<string> {
-  await deps.markTopicStatus(topic.id, "selected")
   const { sessionId } = await deps.startSeededSession({
-    title: `知乎写作：${topic.title}`,
+    title: deps.sessionTitle(topic.title),
     characterId: zhihuRoleCharacterId("writer"),
     seedUserMessage: buildWritingSeed(topic),
   })
+  await deps.markTopicStatus(topic.id, "selected", sessionId)
   return sessionId
 }

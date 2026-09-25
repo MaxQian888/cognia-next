@@ -1,5 +1,26 @@
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import baseManifest from "../plugin.json"
+/**
+ * Game Worlds appearance collection.
+ *
+ * Eight world palettes, forty character wallpapers, two density profiles and
+ * one theme pack per wallpaper, generated from the specs below so a palette
+ * change reaches every pack that uses it. plugin.json carries the same arrays
+ * materialized (static readers — lint, packaging, the marketplace listing —
+ * see only the file), and the co-located test deep-equals the two, so neither
+ * can drift. Everything is declarative: the host's appearance bridges register
+ * the contributions on enable and remove them on disable. No pack touches
+ * motion speed — that is the user's accessibility preference, not part of a
+ * look.
+ */
+
+import {
+  defineDensityPreset,
+  definePlugin,
+  definePluginManifest,
+  defineTheme,
+  defineThemePack,
+  defineWallpaper,
+} from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
 type WorldPalette = {
   background: string
@@ -80,7 +101,7 @@ const baseTokens = {
 }
 
 function createWorldTheme(id: string, name: string, palette: WorldPalette) {
-  return {
+  return defineTheme({
     id,
     name,
     isDark: true,
@@ -117,7 +138,7 @@ function createWorldTheme(id: string, name: string, palette: WorldPalette) {
       "--wf-status-waiting": palette.primary,
       "--effort-ultra": palette.accent,
     },
-  }
+  })
 }
 
 const worldThemes = [
@@ -276,7 +297,6 @@ type WallpaperSpec = {
   description: string
   density: "cinematic-calm" | "tactical-compact"
   radius: number
-  motionSpeed: number
 }
 
 const wallpaperSpecs: WallpaperSpec[] = [
@@ -289,7 +309,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A quiet violet sunrise beyond the lunar observation deck.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "mei-origin-hyperion-rain",
@@ -300,7 +319,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Rain, tea, and restrained violet light on the garden deck.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "elysia-ego-crystal-garden",
@@ -311,7 +329,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Soft rose crystal light with generous, luminous workspace.",
     density: "cinematic-calm",
     radius: 0.875,
-    motionSpeed: 0.75,
   },
   {
     id: "shorekeeper-black-shores-blue-hour",
@@ -322,7 +339,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A star-blue coast and a single luminous butterfly.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "camellya-rain-greenhouse",
@@ -333,7 +349,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Wet glass, quiet foliage, and restrained crimson accents.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.75,
   },
   {
     id: "jinhsi-jinzhou-dawn",
@@ -344,7 +359,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Warm mountain air and pale ceremonial teal at sunrise.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "lucia-crimson-weave-metro-dawn",
@@ -355,7 +369,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A measured maintenance break in a rain-dark service bay.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.5,
   },
   {
     id: "bianca-stigmata-cathedral-light",
@@ -366,7 +379,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Graphite surfaces shaped by quiet silver window light.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.5,
   },
   {
     id: "selena-capriccio-empty-stage",
@@ -377,7 +389,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A dark concert hall balanced by cyan frame light.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "groza-elmo-briefing",
@@ -388,7 +399,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Amber expedition light over disciplined tactical surfaces.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.5,
   },
   {
     id: "suomi-snow-outpost",
@@ -399,7 +409,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A warm lantern against a blue winter outpost.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "makiatto-rain-overwatch",
@@ -410,7 +419,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A muted rooftop pause with a distant city horizon.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.5,
   },
   {
     id: "lyfe-infinite-sight-lab-dawn",
@@ -421,7 +429,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Crystal-blue calibration light inside a living laboratory.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.5,
   },
   {
     id: "chenxing-jade-arc-lantern-rain",
@@ -432,7 +439,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Warm archive lanterns framed by a rain-blue mountain city.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "katya-blue-bolt-frost-terminal",
@@ -443,7 +449,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Clean glacial light and a spacious silent terminal.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.75,
   },
   {
     id: "rapi-red-hood-ark-hangar",
@@ -454,7 +459,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Scarlet equipment light against a warm hangar sunrise.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.5,
   },
   {
     id: "cinderella-glass-observatory",
@@ -465,7 +469,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Moonlit white machinery reflected across silent glass.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "dorothy-eden-rain-garden",
@@ -476,7 +479,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Rose-white garden light and a calm skyline after rain.",
     density: "cinematic-calm",
     radius: 0.875,
-    motionSpeed: 0.75,
   },
   {
     id: "hoshino-abydos-afternoon",
@@ -487,7 +489,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A warm empty classroom with a gentle pink-cyan balance.",
     density: "cinematic-calm",
     radius: 0.875,
-    motionSpeed: 0.75,
   },
   {
     id: "aris-millennium-night",
@@ -498,7 +499,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Deep blue clubroom light with crisp cyan focus accents.",
     density: "tactical-compact",
     radius: 0.625,
-    motionSpeed: 0.75,
   },
   {
     id: "hina-gehenna-before-dawn",
@@ -509,7 +509,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A quiet violet office designed for focused late work.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.5,
   },
   {
     id: "shalom-mbcc-rain-corridor",
@@ -520,7 +519,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Controlled graphite noir with a restrained wine accent.",
     density: "tactical-compact",
     radius: 0.25,
-    motionSpeed: 0.5,
   },
   {
     id: "adela-fog-salon",
@@ -531,7 +529,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Midnight salon mirrors, pale structure, and blue steel.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "hamel-silent-theater",
@@ -542,7 +539,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Violet stage water and a broad meditative workspace.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "bronya-truth-snow-workshop",
@@ -553,7 +549,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Clean cyan machinery against a broad winter morning.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.5,
   },
   {
     id: "fu-hua-vicissitude-tea-pavilion",
@@ -564,7 +559,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Warm phoenix dusk and a calm mountain workspace.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "changli-jinzhou-summer-rain",
@@ -575,7 +569,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A warm strategy room framed by cool Jinzhou rain.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
   {
     id: "phoebe-basilica-morning",
@@ -586,7 +579,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Airy gold-blue garden light with generous quiet space.",
     density: "cinematic-calm",
     radius: 0.875,
-    motionSpeed: 0.5,
   },
   {
     id: "liv-babylonia-healing-garden",
@@ -597,7 +589,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Soft white medical light settling into a living garden.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "vera-rozen-night-garage",
@@ -608,7 +599,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Cerberus red task lights over a focused graphite bay.",
     density: "tactical-compact",
     radius: 0.25,
-    motionSpeed: 0.5,
   },
   {
     id: "daiyan-elmo-rain-melody",
@@ -619,7 +609,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A quiet cabin melody overlooking a rain-softened route.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "klukai-safehouse-dawn",
@@ -630,7 +619,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Warm blind light and disciplined purple tactical surfaces.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.75,
   },
   {
     id: "fenny-coronet-training-break",
@@ -641,7 +629,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "A warm empty training hall with bright field accents.",
     density: "tactical-compact",
     radius: 0.5,
-    motionSpeed: 0.75,
   },
   {
     id: "mauxir-shadow-ka-desert-twilight",
@@ -652,7 +639,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Warm desert distance balanced by restrained cyan containment light.",
     density: "tactical-compact",
     radius: 0.375,
-    motionSpeed: 0.5,
   },
   {
     id: "scarlet-black-shadow-snow-shrine",
@@ -663,7 +649,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Blue winter silence held beside a low scarlet hearth.",
     density: "cinematic-calm",
     radius: 0.5,
-    motionSpeed: 0.5,
   },
   {
     id: "modernia-ark-greenhouse",
@@ -674,7 +659,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Soft glasshouse daylight across graphite-gold machinery.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.5,
   },
   {
     id: "shiroko-abydos-bike-dawn",
@@ -685,7 +669,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Cyan morning air over an open desert-school rooftop.",
     density: "cinematic-calm",
     radius: 0.75,
-    motionSpeed: 0.75,
   },
   {
     id: "mika-trinity-rain-courtyard",
@@ -696,7 +679,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Pale violet rain and a softly rounded academy workspace.",
     density: "cinematic-calm",
     radius: 0.875,
-    motionSpeed: 0.5,
   },
   {
     id: "zoya-syndicate-garage-dawn",
@@ -707,7 +689,6 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Hard graphite structure cut by a single warm sunrise.",
     density: "tactical-compact",
     radius: 0.25,
-    motionSpeed: 0.5,
   },
   {
     id: "cabernet-after-banquet",
@@ -718,26 +699,27 @@ const wallpaperSpecs: WallpaperSpec[] = [
     description: "Wine-red elegance in a quiet New City night kitchen.",
     density: "cinematic-calm",
     radius: 0.625,
-    motionSpeed: 0.5,
   },
 ]
 
 const assetBase = "/plugins/cognia-game-worlds-theme/"
 
-const wallpapers = wallpaperSpecs.map(({ id, name, asset }) => ({
-  id,
-  name,
-  source: {
-    kind: "image",
-    relPath: asset,
-    mime: "image/webp",
-    width: 1672,
-    height: 941,
-  },
-}))
+const wallpapers = wallpaperSpecs.map(({ id, name, asset }) =>
+  defineWallpaper({
+    id,
+    name,
+    source: {
+      kind: "image",
+      relPath: asset,
+      mime: "image/webp",
+      width: 1672,
+      height: 941,
+    },
+  })
+)
 
 const densityPresets = [
-  {
+  defineDensityPreset({
     name: "cinematic-calm",
     vars: {
       "--density-spacing": "1rem",
@@ -746,8 +728,8 @@ const densityPresets = [
       "--density-gap": "0.875rem",
       "--density-line-height": "1.6",
     },
-  },
-  {
+  }),
+  defineDensityPreset({
     name: "tactical-compact",
     vars: {
       "--density-spacing": "0.75rem",
@@ -756,42 +738,38 @@ const densityPresets = [
       "--density-gap": "0.625rem",
       "--density-line-height": "1.45",
     },
-  },
+  }),
 ]
 
-const themePacks = wallpaperSpecs.map((spec) => ({
-  id: spec.id,
-  name: spec.packName,
-  description: spec.description,
-  preview: {
-    light: `${assetBase}${spec.asset}`,
-    dark: `${assetBase}${spec.asset}`,
-  },
-  applies: {
-    themeId: spec.themeId,
-    wallpaperId: spec.id,
-    density: spec.density,
-    radius: spec.radius,
-    motionSpeed: spec.motionSpeed,
-  },
-}))
+const themePacks = wallpaperSpecs.map((spec) =>
+  defineThemePack({
+    id: spec.id,
+    name: spec.packName,
+    description: spec.description,
+    preview: {
+      light: `${assetBase}${spec.asset}`,
+      dark: `${assetBase}${spec.asset}`,
+    },
+    applies: {
+      themeId: spec.themeId,
+      wallpaperId: spec.id,
+      density: spec.density,
+      radius: spec.radius,
+    },
+  })
+)
 
-export const gameWorldsManifest = {
-  ...baseManifest,
+/** The four contribution arrays, as plugin.json must carry them. */
+export const GAME_WORLDS_APPEARANCE = {
   themes: worldThemes,
   wallpapers,
   densityPresets,
   themePacks,
 }
 
-const definition: PluginDefinition = {
-  manifest: gameWorldsManifest as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("Game Worlds appearance contributions registered")
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("Game Worlds appearance contributions removed")
-  },
-}
+export const manifest = definePluginManifest({ ...manifestJson, ...GAME_WORLDS_APPEARANCE })
 
-export default definition
+export default definePlugin({
+  manifest,
+  activate: () => {},
+})

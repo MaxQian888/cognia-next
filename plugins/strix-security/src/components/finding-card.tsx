@@ -12,14 +12,15 @@ import {
   type Severity,
   type StrixFinding,
 } from "../types"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 
 const SEVERITY_CLASS: Record<Severity, string> = {
-  critical: "bg-red-600 text-white hover:bg-red-600",
-  high: "bg-orange-500 text-white hover:bg-orange-500",
-  medium: "bg-amber-500 text-black hover:bg-amber-500",
-  low: "bg-yellow-400 text-black hover:bg-yellow-400",
-  info: "bg-slate-400 text-white hover:bg-slate-400",
+  critical: "bg-destructive text-destructive-foreground hover:bg-destructive",
+  high: "bg-destructive/75 text-destructive-foreground hover:bg-destructive/75",
+  medium: "bg-warning text-warning-foreground hover:bg-warning",
+  low: "bg-warning/50 text-warning-foreground hover:bg-warning/50",
+  info: "bg-muted text-muted-foreground hover:bg-muted",
 }
 
 function Section({ title, text, code }: { title: string; text?: string; code?: string }) {
@@ -46,7 +47,7 @@ function locationLine(location: CodeLocation): string {
 }
 
 function CodeLocations({ locations }: { locations: CodeLocation[] }) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   if (locations.length === 0) return null
   return (
     <div className="mt-2" data-testid="strix-finding-locations">
@@ -97,7 +98,7 @@ export function FindingCard({
   onSuppressRule,
   onUnsuppressRule,
 }: FindingCardProps) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   // A finding written before fingerprinting existed has no stable identity, so
   // a verdict recorded against it could not survive a rescan. Triage is hidden
   // rather than offered-and-silently-lost.

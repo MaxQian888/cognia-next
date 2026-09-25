@@ -1,8 +1,10 @@
 {
   "id": "cognia-anime-effort",
   "name": "Tactical Mind Dial",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "An original tactical-anime reasoning intensity console for the active conversation.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "author": "cognia-next",
   "license": "MIT",
@@ -14,7 +16,6 @@
   "permissions": ["extension:ui", "session:read", "session:write"],
   "main": "src/index.tsx",
   "styles": "styles.css",
-  "activationEvents": ["startup"],
   "extensions": [
     {
       "point": "chat.input.effort",
@@ -29,6 +30,8 @@
   "i18n": {
     "locales": {
       "en": {
+        "manifest.name": "Tactical Mind Dial",
+        "manifest.description": "An original tactical-anime reasoning intensity console for the active conversation.",
         "control.label": "Mind intensity",
         "control.aria": "Mind intensity: {level}",
         "control.unavailable": "Open a conversation to adjust its mind intensity",
@@ -65,6 +68,8 @@
         "level.ultracode.desc": "Cognia's deepest profile, with dynamic workflow tools enabled."
       },
       "zh-CN": {
+        "manifest.name": "战术思维旋钮",
+        "manifest.description": "为当前对话调节推理强度的原创战术动漫风控制台。",
         "control.label": "思考强度",
         "control.aria": "思考强度：{level}",
         "control.unavailable": "打开一个对话后才能调整思考强度",
@@ -114,6 +119,10 @@
     "mobile": {
       "availability": "supported",
       "entrypoint": "src/index.tsx"
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "A composer control for the interactive chat surface; a headless host has no composer to render it in."
     }
   }
 }

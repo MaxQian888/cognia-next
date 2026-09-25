@@ -1,8 +1,17 @@
 import type { PluginCommandResult, PluginContext } from "@cognia/plugin-sdk"
 
-import definition from "./index"
+import definition, { manifest as moduleManifest } from "./index"
 import manifestJson from "../plugin.json"
+import { DEEP_RESEARCH_SKILL } from "./skill"
 import { DEEP_RESEARCH_TOOL } from "./tool"
+
+/** `ctx.i18n.t` over the plugin's own English bundle. */
+function t(key: string, params?: Record<string, string | number>): string {
+  const value = (manifestJson.i18n.locales.en as Record<string, string>)[key] ?? key
+  return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+    params?.[name] !== undefined ? String(params[name]) : match
+  )
+}
 
 function ctx(): PluginContext {
   return {
@@ -10,6 +19,7 @@ function ctx(): PluginContext {
     configuration: { getAll: () => ({}) },
     logger: { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() },
     agent: { registerTool: jest.fn(), registerSkill: jest.fn() },
+    i18n: { t },
   } as unknown as PluginContext
 }
 
@@ -91,6 +101,15 @@ describe("manifest", () => {
     expect(declared.name).toBe(DEEP_RESEARCH_TOOL.name)
     expect(declared.description).toBe(DEEP_RESEARCH_TOOL.description)
     expect(declared.parametersSchema).toEqual(DEEP_RESEARCH_TOOL.parametersSchema)
+    expect(declared.timeoutMs).toBe(DEEP_RESEARCH_TOOL.timeoutMs)
+    expect(DEEP_RESEARCH_TOOL.timeoutMs).toBeGreaterThan(30_000)
+  })
+
+  it("declares the namespaced playbook skill on the manifest, merged over plugin.json", () => {
+    expect(moduleManifest.skills).toEqual([DEEP_RESEARCH_SKILL])
+    expect(moduleManifest.skills?.[0]?.id).toBe("cognia-deep-research:deep-research")
+    expect(moduleManifest.commands).toEqual(manifestJson.commands)
+    expect(moduleManifest.i18n).toEqual(manifestJson.i18n)
   })
 
   it("keeps manifest defaults in sync with the engine defaults", () => {
@@ -108,16 +127,15 @@ describe("manifest", () => {
 })
 
 describe("activate", () => {
-  it("registers the tool and the skill", () => {
+  it("registers the tool, and leaves the manifest skill to the manager", () => {
     const c = ctx()
     definition.activate(c)
     const agent = c.agent as unknown as { registerTool: jest.Mock; registerSkill: jest.Mock }
     expect(agent.registerTool).toHaveBeenCalledWith(
       expect.objectContaining({ name: "deep_research" })
     )
-    expect(agent.registerSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "deep-research" })
-    )
+    expect(Object.hasOwn(agent.registerTool.mock.calls[0][0], "pluginId")).toBe(false)
+    expect(agent.registerSkill).not.toHaveBeenCalled()
   })
 
   it("declares /research and handles it via the returned hook", async () => {

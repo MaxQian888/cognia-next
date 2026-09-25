@@ -1,9 +1,11 @@
-import type {
-  BotHandlerV1,
-  PluginBotDef,
-  PluginContext,
-  PluginDefinition,
+import {
+  definePlugin,
+  definePluginManifest,
+  type BotHandlerV1,
+  type PluginBotDef,
+  type PluginContext,
 } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 import { configSchema, parseConfig } from "./config"
 import { executeWork } from "./execute"
 import { monitor } from "./monitor"
@@ -13,7 +15,7 @@ export const githubDevinBotDef = {
   name: "GitHub Devin Bot",
   version: "1.0.0",
   description:
-    "Monitor GitHub issues, pull requests, and CI with approval or explicitly authorized automatic publication.",
+    "Monitor github.com issues, pull requests, and CI with approval or explicitly authorized automatic publication. GitHub Enterprise Server is not supported yet.",
   executor: "handler",
   entry: "dist/index.js",
   export: "githubDevinBot",
@@ -85,53 +87,21 @@ export const githubDevinBotDef = {
   configSchema,
 } satisfies PluginBotDef
 
-export const manifest = {
-  id: "github-devin-bot",
-  name: "GitHub Devin Bot",
-  version: "1.0.0",
-  type: "frontend",
-  description:
-    "A GitHub repository maintenance Bot powered by Devin SWE-2, with configurable execution and publication approval.",
-  author: "Cognia Official",
-  license: "MIT",
-  minAppVersion: "0.1.0",
-  engines: { cognia: ">=0.1.0" },
-  main: "dist/index.js",
-  activationEvents: ["startup"],
-  dependencies: { "github-delivery": ">=3.0.0" },
-  capabilities: ["bot"],
-  permissions: [
-    "integrations:read",
-    "integrations:execute",
-    "agent:control",
-    "agent:dispatch-external",
-    "filesystem:read",
-    "filesystem:write",
-    "network:fetch",
-    "git:read",
-    "git:write",
-    "database:read",
-    "database:write",
-  ],
-  runtimeCompatibility: {
-    tauri: { availability: "supported", entrypoint: "dist/index.js" },
-    headless: {
-      availability: "supported",
-      entrypoint: "dist/index.js",
-    },
-    browser: {
-      availability: "degraded",
-      reason:
-        "Execution requires a paired Desktop or Headless host with Devin CLI and isolated-workspace support.",
-    },
-    mobile: {
-      availability: "degraded",
-      reason:
-        "Execution requires a paired Desktop or Headless host with Devin CLI and isolated-workspace support.",
-    },
-  },
+/**
+ * `plugin.json` holds identity, permissions and runtime compatibility; the Bot
+ * definition is authored here next to the handler it names. `build.mjs`
+ * regenerates `plugin.json` from this merge so the installed manifest and the
+ * built-in module cannot drift.
+ *
+ * github.com only: Bot-bound reads go through
+ * `ctx.integrations.authenticatedRequest(binding, url)`, which confines them to
+ * the bound account's API origin, but the SDK does not tell a Bot what that
+ * origin is — so a GitHub Enterprise Server account cannot be addressed yet.
+ */
+export const manifest = definePluginManifest({
+  ...manifestJson,
   bots: [githubDevinBotDef],
-} as const
+})
 
 /** Captured on activation exactly as other first-party contributed handlers are wired. */
 let activeContext: PluginContext | undefined
@@ -149,13 +119,12 @@ export const githubDevinBot: BotHandlerV1 = (run) => {
   return createGithubDevinBot(activeContext)(run)
 }
 
-const definition: PluginDefinition = {
-  manifest: manifest as unknown as PluginDefinition["manifest"],
+export default definePlugin({
+  manifest,
   activate: (context) => {
     activeContext = context
   },
   deactivate: () => {
     activeContext = undefined
   },
-}
-export default definition
+})

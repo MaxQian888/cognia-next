@@ -1,8 +1,10 @@
 {
   "id": "cognia-game-worlds-theme",
   "name": "Game Worlds: Anime Collection (Unofficial)",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "A broad game-wallpaper collection with eight visual worlds, 40 character scenes, complete semantic themes, density controls, and one-click presets.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
@@ -39,7 +41,6 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -1041,8 +1042,7 @@
         "themeId": "finality-cosmos",
         "wallpaperId": "kiana-finality-lunar-dawn",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1057,8 +1057,7 @@
         "themeId": "finality-cosmos",
         "wallpaperId": "mei-origin-hyperion-rain",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1073,8 +1072,7 @@
         "themeId": "finality-cosmos",
         "wallpaperId": "elysia-ego-crystal-garden",
         "density": "cinematic-calm",
-        "radius": 0.875,
-        "motionSpeed": 0.75
+        "radius": 0.875
       }
     },
     {
@@ -1089,8 +1087,7 @@
         "themeId": "resonance-tide",
         "wallpaperId": "shorekeeper-black-shores-blue-hour",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1105,8 +1102,7 @@
         "themeId": "resonance-tide",
         "wallpaperId": "camellya-rain-greenhouse",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.75
+        "radius": 0.625
       }
     },
     {
@@ -1121,8 +1117,7 @@
         "themeId": "resonance-tide",
         "wallpaperId": "jinhsi-jinzhou-dawn",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1137,8 +1132,7 @@
         "themeId": "construct-signal",
         "wallpaperId": "lucia-crimson-weave-metro-dawn",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -1153,8 +1147,7 @@
         "themeId": "construct-signal",
         "wallpaperId": "bianca-stigmata-cathedral-light",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -1169,8 +1162,7 @@
         "themeId": "construct-signal",
         "wallpaperId": "selena-capriccio-empty-stage",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1185,8 +1177,7 @@
         "themeId": "elmo-expedition",
         "wallpaperId": "groza-elmo-briefing",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -1201,8 +1192,7 @@
         "themeId": "elmo-expedition",
         "wallpaperId": "suomi-snow-outpost",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1217,8 +1207,7 @@
         "themeId": "elmo-expedition",
         "wallpaperId": "makiatto-rain-overwatch",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -1233,8 +1222,7 @@
         "themeId": "containment-frost",
         "wallpaperId": "lyfe-infinite-sight-lab-dawn",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -1249,8 +1237,7 @@
         "themeId": "containment-frost",
         "wallpaperId": "chenxing-jade-arc-lantern-rain",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1265,8 +1252,7 @@
         "themeId": "containment-frost",
         "wallpaperId": "katya-blue-bolt-frost-terminal",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.75
+        "radius": 0.5
       }
     },
     {
@@ -1281,8 +1267,7 @@
         "themeId": "ark-scarlet",
         "wallpaperId": "rapi-red-hood-ark-hangar",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -1297,8 +1282,7 @@
         "themeId": "ark-scarlet",
         "wallpaperId": "cinderella-glass-observatory",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1313,8 +1297,7 @@
         "themeId": "ark-scarlet",
         "wallpaperId": "dorothy-eden-rain-garden",
         "density": "cinematic-calm",
-        "radius": 0.875,
-        "motionSpeed": 0.75
+        "radius": 0.875
       }
     },
     {
@@ -1329,8 +1312,7 @@
         "themeId": "academy-blue-hour",
         "wallpaperId": "hoshino-abydos-afternoon",
         "density": "cinematic-calm",
-        "radius": 0.875,
-        "motionSpeed": 0.75
+        "radius": 0.875
       }
     },
     {
@@ -1345,8 +1327,7 @@
         "themeId": "academy-blue-hour",
         "wallpaperId": "aris-millennium-night",
         "density": "tactical-compact",
-        "radius": 0.625,
-        "motionSpeed": 0.75
+        "radius": 0.625
       }
     },
     {
@@ -1361,8 +1342,7 @@
         "themeId": "academy-blue-hour",
         "wallpaperId": "hina-gehenna-before-dawn",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -1377,8 +1357,7 @@
         "themeId": "minos-noir",
         "wallpaperId": "shalom-mbcc-rain-corridor",
         "density": "tactical-compact",
-        "radius": 0.25,
-        "motionSpeed": 0.5
+        "radius": 0.25
       }
     },
     {
@@ -1393,8 +1372,7 @@
         "themeId": "minos-noir",
         "wallpaperId": "adela-fog-salon",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1409,8 +1387,7 @@
         "themeId": "minos-noir",
         "wallpaperId": "hamel-silent-theater",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1425,8 +1402,7 @@
         "themeId": "finality-cosmos",
         "wallpaperId": "bronya-truth-snow-workshop",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -1441,8 +1417,7 @@
         "themeId": "finality-cosmos",
         "wallpaperId": "fu-hua-vicissitude-tea-pavilion",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1457,8 +1432,7 @@
         "themeId": "resonance-tide",
         "wallpaperId": "changli-jinzhou-summer-rain",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     },
     {
@@ -1473,8 +1447,7 @@
         "themeId": "resonance-tide",
         "wallpaperId": "phoebe-basilica-morning",
         "density": "cinematic-calm",
-        "radius": 0.875,
-        "motionSpeed": 0.5
+        "radius": 0.875
       }
     },
     {
@@ -1489,8 +1462,7 @@
         "themeId": "construct-signal",
         "wallpaperId": "liv-babylonia-healing-garden",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1505,8 +1477,7 @@
         "themeId": "construct-signal",
         "wallpaperId": "vera-rozen-night-garage",
         "density": "tactical-compact",
-        "radius": 0.25,
-        "motionSpeed": 0.5
+        "radius": 0.25
       }
     },
     {
@@ -1521,8 +1492,7 @@
         "themeId": "elmo-expedition",
         "wallpaperId": "daiyan-elmo-rain-melody",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1537,8 +1507,7 @@
         "themeId": "elmo-expedition",
         "wallpaperId": "klukai-safehouse-dawn",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.75
+        "radius": 0.375
       }
     },
     {
@@ -1553,8 +1522,7 @@
         "themeId": "containment-frost",
         "wallpaperId": "fenny-coronet-training-break",
         "density": "tactical-compact",
-        "radius": 0.5,
-        "motionSpeed": 0.75
+        "radius": 0.5
       }
     },
     {
@@ -1569,8 +1537,7 @@
         "themeId": "containment-frost",
         "wallpaperId": "mauxir-shadow-ka-desert-twilight",
         "density": "tactical-compact",
-        "radius": 0.375,
-        "motionSpeed": 0.5
+        "radius": 0.375
       }
     },
     {
@@ -1585,8 +1552,7 @@
         "themeId": "ark-scarlet",
         "wallpaperId": "scarlet-black-shadow-snow-shrine",
         "density": "cinematic-calm",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -1601,8 +1567,7 @@
         "themeId": "ark-scarlet",
         "wallpaperId": "modernia-ark-greenhouse",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.5
+        "radius": 0.75
       }
     },
     {
@@ -1617,8 +1582,7 @@
         "themeId": "academy-blue-hour",
         "wallpaperId": "shiroko-abydos-bike-dawn",
         "density": "cinematic-calm",
-        "radius": 0.75,
-        "motionSpeed": 0.75
+        "radius": 0.75
       }
     },
     {
@@ -1633,8 +1597,7 @@
         "themeId": "academy-blue-hour",
         "wallpaperId": "mika-trinity-rain-courtyard",
         "density": "cinematic-calm",
-        "radius": 0.875,
-        "motionSpeed": 0.5
+        "radius": 0.875
       }
     },
     {
@@ -1649,8 +1612,7 @@
         "themeId": "minos-noir",
         "wallpaperId": "zoya-syndicate-garage-dawn",
         "density": "tactical-compact",
-        "radius": 0.25,
-        "motionSpeed": 0.5
+        "radius": 0.25
       }
     },
     {
@@ -1665,9 +1627,20 @@
         "themeId": "minos-noir",
         "wallpaperId": "cabernet-after-banquet",
         "density": "cinematic-calm",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Game Worlds: Anime Collection (Unofficial)",
+        "manifest.description": "A broad game-wallpaper collection with eight visual worlds, 40 character scenes, complete semantic themes, density controls, and one-click presets."
+      },
+      "zh-CN": {
+        "manifest.name": "游戏世界：动漫合集（非官方）",
+        "manifest.description": "丰富的游戏壁纸合集：八个视觉世界、40 个角色场景、完整的语义主题、密度控制和一键预设。"
+      }
+    }
+  }
 }

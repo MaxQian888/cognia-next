@@ -5,20 +5,16 @@
  * bridges register the complete theme palettes, bundled wallpapers, density
  * profiles, and theme packs from plugin.json on enable and remove them on
  * disable. Keeping this entry side-effect free preserves browser, Tauri, and
- * mobile parity.
+ * mobile parity. The packs never touch motion speed — that is the user's
+ * accessibility preference, not part of a look.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-const definition: PluginDefinition = {
-  manifest: manifest as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("Rhodes Operations appearance contributions registered")
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger?.info("Rhodes Operations appearance contributions removed")
-  },
-}
+export const manifest = definePluginManifest(manifestJson)
 
-export default definition
+export default definePlugin({
+  manifest,
+  activate: () => {},
+})

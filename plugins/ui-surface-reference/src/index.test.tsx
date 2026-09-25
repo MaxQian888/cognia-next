@@ -1,10 +1,14 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { render, screen } from "@testing-library/react"
 import manifest from "../plugin.json"
-import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import {
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
+import definition, {
+  REFERENCE_PLUGIN_CSS,
   REFERENCE_SURFACE_IDS,
   ReferenceComposerAction,
   ReferenceLinkMatcher,
+  manifest as moduleManifest,
   referenceTreeProvider,
   selectionReferenceActions,
 } from "./index"
@@ -31,6 +35,35 @@ describe("ui-surface-reference", () => {
     }
     expect(REFERENCE_SURFACE_IDS).toContain("view-container")
     expect(REFERENCE_SURFACE_IDS).toHaveLength(14)
+  })
+
+  it("exports plugin.json itself as the module manifest", () => {
+    expect(moduleManifest).toBe(manifest)
+    expect(definition.manifest).toBe(moduleManifest)
+  })
+
+  it("ships the same stylesheet to builtin and installed copies", () => {
+    // `bundledStyles` (the constant) reaches a builtin; `manifest.styles`
+    // (the file) reaches an installed copy. Two sources for one stylesheet are
+    // only safe while they are the same bytes.
+    expect(manifest.styles).toBe("styles.css")
+    expect(readFileSync(join(__dirname, "..", manifest.styles), "utf8").trim()).toBe(
+      REFERENCE_PLUGIN_CSS.trim()
+    )
+  })
+
+  it("registers the handler-backed selection actions and answers its own command", async () => {
+    const registerMany = jest.fn()
+    const ctx = { quickActions: { registerMany } } as unknown as Parameters<
+      typeof definition.activate
+    >[0]
+    const hooks = await definition.activate(ctx)
+    expect(registerMany).toHaveBeenCalledWith(selectionReferenceActions)
+    await expect(
+      Promise.resolve(
+        hooks && "onCommand" in hooks ? hooks.onCommand?.("reference.open", []) : null
+      )
+    ).resolves.toBe(true)
   })
 
   it("keeps a matched URL navigable and preserves its inline children", () => {

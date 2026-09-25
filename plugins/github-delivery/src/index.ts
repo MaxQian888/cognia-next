@@ -1,4 +1,4 @@
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import type {
   IntegrationAccountStatusProvider,
   IntegrationActionHandler,
@@ -8,6 +8,9 @@ import type {
   IntegrationVerifiedDelivery,
   PluginIntegrationDef,
 } from "@cognia/plugin-sdk"
+
+import manifestJson from "../plugin.json"
+
 const API_ORIGIN = "https://api.github.com"
 const API_VERSION = "2022-11-28"
 const REQUIRED_APP_PERMISSIONS = [
@@ -158,53 +161,143 @@ interface GithubRepository {
   owner?: { login?: string }
 }
 
+type RepositoryListing = "installation" | "pat"
+
+/**
+ * One upstream page of repositories. The listing mode is fixed by the first
+ * page: an App installation answers `/installation/repositories`; a PAT gets
+ * 403/404 there and lists `/user/repos` instead.
+ */
+async function fetchRepositoryPage(
+  context: IntegrationProviderContext,
+  mode: RepositoryListing | undefined,
+  page: number,
+  perPage: number
+): Promise<{
+  mode: RepositoryListing
+  repositories: GithubRepository[]
+  headers: Record<string, string>
+}> {
+  const headers = { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION }
+  if (mode !== "pat") {
+    const response = await context.authenticatedRequest<{ repositories?: GithubRepository[] }>(
+      `${apiOrigin(context)}/installation/repositories?per_page=${perPage}&page=${page}`,
+      { headers }
+    )
+    const patFallback = mode === undefined && (response.status === 403 || response.status === 404)
+    if (!patFallback) {
+      if (response.status < 200 || response.status >= 300) {
+        await githubRequest(context, "/installation/repositories")
+      }
+      return {
+        mode: "installation",
+        repositories: response.data.repositories ?? [],
+        headers: response.headers,
+      }
+    }
+  }
+  const response = await context.authenticatedRequest<GithubRepository[]>(
+    `${apiOrigin(context)}/user/repos?per_page=${perPage}&page=${page}&affiliation=owner,collaborator,organization_member`,
+    { headers }
+  )
+  if (response.status < 200 || response.status >= 300) {
+    await githubRequest(context, "/user")
+  }
+  return { mode: "pat", repositories: response.data, headers: response.headers }
+}
+
+/** Upper bound on upstream pages one filtered search call walks (100 repos each). */
+const SEARCH_PAGE_BUDGET = 10
+
+/**
+ * `"<page>"` or, mid-page during a search, `"<page>:<matches already returned
+ * from that page>"`. Anything unparseable restarts at page 1.
+ */
+function parseResourceCursor(cursor: string | undefined): { page: number; skip: number } {
+  const [pagePart, skipPart] = (cursor ?? "1").split(":")
+  const page = Math.max(Math.trunc(Number(pagePart)) || 1, 1)
+  const skip = Math.max(Math.trunc(Number(skipPart ?? "0")) || 0, 0)
+  return { page, skip }
+}
+
+function toRepositoryRef(repository: GithubRepository & { full_name: string }) {
+  return {
+    kind: "repository",
+    id: repository.full_name,
+    name: repository.full_name,
+    url: repository.html_url,
+    parent: repository.owner?.login
+      ? { kind: "installation", id: repository.owner.login }
+      : undefined,
+  }
+}
+
+function hasFullName(
+  repository: GithubRepository
+): repository is GithubRepository & { full_name: string } {
+  return Boolean(repository.full_name)
+}
+
+/**
+ * GitHub has no server-side name filter for installation or `/user/repos`
+ * listings, so a search walks upstream pages until it has `limit` matches.
+ * Filtering one page and returning the upstream cursor (the previous
+ * behaviour) answered most searches with an empty page and a `nextCursor`,
+ * and a repository on page 3 was only ever found by paging through blanks.
+ * The cursor records how many matches of a page were already returned, so
+ * truncating to `limit` never drops the rest of that page.
+ */
 export const listGithubResources: IntegrationResourceProvider = async (query, context) => {
   if (query.kind !== "repository") throw new Error(`Unsupported GitHub resource kind ${query.kind}`)
-  const page = Math.max(Number(query.cursor ?? "1") || 1, 1)
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 100)
-  let response = await context.authenticatedRequest<{
-    repositories?: GithubRepository[]
-  }>(`${apiOrigin(context)}/installation/repositories?per_page=${limit}&page=${page}`, {
-    headers: { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION },
-  })
-  let repositories: GithubRepository[]
-  if (response.status === 403 || response.status === 404) {
-    const patResponse = await context.authenticatedRequest<GithubRepository[]>(
-      `${apiOrigin(context)}/user/repos?per_page=${limit}&page=${page}&affiliation=owner,collaborator,organization_member`,
-      { headers: { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION } }
-    )
-    if (patResponse.status < 200 || patResponse.status >= 300) {
-      await githubRequest(context, "/user")
-    }
-    response = { ...patResponse, data: { repositories: patResponse.data } }
-    repositories = patResponse.data
-  } else {
-    if (response.status < 200 || response.status >= 300) {
-      await githubRequest(context, "/installation/repositories")
-    }
-    repositories = response.data.repositories ?? []
-  }
   const normalizedQuery = query.query?.trim().toLowerCase()
-  const items = repositories
-    .filter((repository) => repository.full_name)
-    .filter(
-      (repository) =>
-        !normalizedQuery || repository.full_name!.toLowerCase().includes(normalizedQuery)
-    )
-    .map((repository) => ({
-      kind: "repository",
-      id: repository.full_name!,
-      name: repository.full_name!,
-      url: repository.html_url,
-      parent: repository.owner?.login
-        ? { kind: "installation", id: repository.owner.login }
-        : undefined,
-    }))
+  let { page, skip } = parseResourceCursor(query.cursor)
+
+  if (!normalizedQuery) {
+    const result = await fetchRepositoryPage(context, undefined, page, limit)
+    return {
+      items: result.repositories.filter(hasFullName).map(toRepositoryRef),
+      nextCursor: nextCursor(result.headers.link),
+      syncedAt: new Date().toISOString(),
+      rateLimit: rateLimit(result.headers),
+    }
+  }
+
+  const items: ReturnType<typeof toRepositoryRef>[] = []
+  let mode: RepositoryListing | undefined
+  let headers: Record<string, string> = {}
+  let cursor: string | undefined
+  for (let scanned = 0; ; scanned += 1) {
+    const result = await fetchRepositoryPage(context, mode, page, 100)
+    mode = result.mode
+    headers = result.headers
+    const matches = result.repositories
+      .filter(hasFullName)
+      .filter((repository) => repository.full_name.toLowerCase().includes(normalizedQuery))
+      .slice(skip)
+    const room = limit - items.length
+    items.push(...matches.slice(0, room).map(toRepositoryRef))
+    if (matches.length > room) {
+      cursor = `${page}:${skip + room}`
+      break
+    }
+    const next = nextCursor(result.headers.link)
+    if (!next) {
+      cursor = undefined
+      break
+    }
+    page = parseResourceCursor(next).page
+    skip = 0
+    if (items.length >= limit || scanned + 1 >= SEARCH_PAGE_BUDGET) {
+      cursor = String(page)
+      break
+    }
+  }
   return {
     items,
-    nextCursor: nextCursor(response.headers.link),
+    nextCursor: cursor,
     syncedAt: new Date().toISOString(),
-    rateLimit: rateLimit(response.headers),
+    rateLimit: rateLimit(headers),
   }
 }
 
@@ -927,102 +1020,55 @@ export const workflowKindAliases = {
   ),
 }
 
-export const manifest: PluginManifest = {
-  id: "github-delivery",
-  name: "GitHub Delivery",
-  description: "GitHub pull request, issue, review, release, tag, and Issue→PR delivery.",
-  author: { name: "Cognia Official", publicKey: "HywtZKOopAEuRqZGzXIfdqo9ID/FfBgXFvKIj9TF4N0=" },
-  version: "3.0.0",
-  engines: { cognia: ">=0.1.0" },
-  type: "frontend",
-  capabilities: ["integrations"],
-  permissions: [
-    "integrations:read",
-    "integrations:events",
-    "integrations:execute",
-    "integrations:manage",
-  ],
-  main: "dist/index.js",
-  runtimeCompatibility: {
-    tauri: { availability: "supported", entrypoint: "src/index.ts" },
-    browser: {
-      availability: "degraded",
-      reason:
-        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
-    },
-    mobile: {
-      availability: "degraded",
-      reason:
-        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
-    },
-    headless: {
-      availability: "degraded",
-      reason:
-        "HTTP and event actions remain available, but runIssueLoop requires the desktop host.",
-    },
+/**
+ * Contributions derived from the runtime tables above. `plugin.json` holds
+ * everything else (identity, permissions, runtime compatibility, services,
+ * Dexie tables) and is regenerated from this merge by
+ * `scripts/plugin/build-github-delivery.ts`, so the JSON an installer reads and
+ * the module the built-in registry loads cannot drift.
+ */
+const browserSiteProviders = [
+  {
+    id: "github-web",
+    label: "GitHub Web",
+    description: "Explicit-confirmation fallback through an isolated github.com browser profile.",
+    allowedDomains: ["github.com"],
+    loginStartUrl: "https://github.com/login",
+    persistentProfile: true,
+    allowUploads: true,
+    allowDownloads: true,
+    operations: actionDefinitions.map((action) => ({
+      id: `web-${action.id}`,
+      operationId: `github.${action.id}`,
+      label: action.id,
+      risk: action.risk,
+    })),
   },
-  integrations: [githubIntegration],
-  browserSiteProviders: [
-    {
-      id: "github-web",
-      label: "GitHub Web",
-      description: "Explicit-confirmation fallback through an isolated github.com browser profile.",
-      allowedDomains: ["github.com"],
-      loginStartUrl: "https://github.com/login",
-      persistentProfile: true,
-      allowUploads: true,
-      allowDownloads: true,
-      operations: actionDefinitions.map((action) => ({
-        id: `web-${action.id}`,
-        operationId: `github.${action.id}`,
-        label: action.id,
-        risk: action.risk,
-      })),
-    },
-  ],
-  services: [
-    {
-      id: "github",
-      label: "GitHub",
-      description: "GitHub API, verified webhooks, Inbox events, and an explicit Browser fallback.",
-      fallbackPolicy: "confirm",
-      providers: [
-        {
-          id: "api",
-          kind: "integration",
-          contributionId: "github",
-          priority: 100,
-          surfaces: ["chat", "workflow", "inbox"],
-        },
-        {
-          id: "web",
-          kind: "browser",
-          contributionId: "github-web",
-          priority: 10,
-          surfaces: ["chat", "workflow"],
-        },
-      ],
-    },
-  ],
-  workflowKindAliases,
-  dexie: {
-    tables: [
-      { name: "repos", schema: "&fullName, credentialMode, createdAt" },
-      {
-        name: "workOrders",
-        schema: "++id, [status+repoFullName], issueNumber, prNumber, createdAt, updatedAt",
-      },
-      { name: "events", schema: "&deliveryId, [repoFullName+seenAt], kind, source" },
-      { name: "audit", schema: "++id, [repoFullName+at], runId, &[runId+stepId+at]" },
-    ],
-  },
-}
+]
 
-const definition: PluginDefinition = {
+/**
+ * Dormant by design: `manifest.dexie.tables` (`repos`, `workOrders`, `events`,
+ * `audit`) are the v2 plugin's storage. v3 keeps every piece of state in the
+ * host Integration runtime and never calls `ctx.dexie`; the declaration stays
+ * only so a one-major rollback to the signed v2 bundle
+ * (`packages/plugin-sdk/contract/compat/github-delivery-2.0.0.zip`) finds the
+ * rows it wrote. The host boot registry deliberately skips them
+ * (`lib/plugin/dexie/builtin-manifests.test.ts` → `KNOWN_UNREGISTERED`), no
+ * surface renders them, and `index.test.ts` pins that activation never
+ * touches `ctx.dexie`. Drop the block together with the v2 compat bundle.
+ */
+export const DORMANT_V2_DEXIE_TABLES = ["repos", "workOrders", "events", "audit"] as const
+
+export const manifest = definePluginManifest({
+  ...manifestJson,
+  integrations: [githubIntegration],
+  browserSiteProviders,
+  workflowKindAliases,
+})
+
+export default definePlugin({
   manifest,
   activate: async (context) => {
-    context.logger?.info("GitHub Delivery v3 activated with host-owned credentials")
+    context.logger.info("GitHub Delivery v3 activated with host-owned credentials")
   },
-}
-
-export default definition
+})

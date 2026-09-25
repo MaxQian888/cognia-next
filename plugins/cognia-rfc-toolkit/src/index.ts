@@ -1,25 +1,23 @@
 /**
- * cognia-rfc-toolkit — declarative skill-bundle plugin.
+ * cognia-rfc-toolkit — declarative, installable skill plugin.
  *
- * All contributions (three local-bundle skills) are declared in plugin.json
- * and registered by the host's overlay dispatch, so this entry carries no
- * imperative registration. The manifest is imported rather than restated so
- * plugin.json stays the single source of truth.
+ * All contributions (three local-bundle skills) are declared in plugin.json and registered by the
+ * host's overlay dispatch on enable, so this entry carries no imperative
+ * registration. The manifest is imported rather than restated so plugin.json
+ * stays the single source of truth.
+ *
+ * Not bundled with the app: `cognia plugin build` compiles this file to
+ * `dist/index.js` (the manifest's `main`) and packs the install ZIP — see the
+ * README.
  */
 
-import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
-import manifest from "../plugin.json"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
-const definition: PluginDefinition = {
-  manifest: manifest as unknown as PluginManifest,
+export const manifest = definePluginManifest(manifestJson)
 
-  activate: async (ctx: PluginContext) => {
-    ctx.logger.info("cognia-rfc-toolkit activated")
-  },
-
-  deactivate: async (ctx?: PluginContext) => {
-    ctx?.logger.info("cognia-rfc-toolkit deactivated")
-  },
-}
-
-export default definition
+export default definePlugin({
+  manifest,
+  // Everything is declarative; activation has no work to do.
+  activate: async () => {},
+})

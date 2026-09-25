@@ -12,47 +12,50 @@ const writeImageMock = jest.fn()
 const appendPartMock = jest.fn()
 const registerPartRendererMock = jest.fn()
 
-import screenshotPlugin, { captureToToolResult } from "./index"
+import manifestJson from "../plugin.json"
+import screenshotPlugin, { CAPTURE_TOOL_TIMEOUT_MS, captureToToolResult } from "./index"
 import { SCREENSHOT_PART_TYPE } from "./screenshot-result-card"
 
+const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
+
 /**
- * Minimal working plugin-i18n stand-in: `registerTranslations` fills a
- * per-locale table and `t` resolves `en` with `{param}` interpolation — the
- * same contract as `lib/plugin/api/i18n-api.ts`, so tests assert on the real
- * registered copy instead of a hard-coded echo.
+ * `ctx.i18n.t` stand-in that resolves the plugin's own manifest bundle (en)
+ * with `{param}` interpolation — the same lookup the manager wires up — so
+ * tests assert on the real shipped copy.
  */
-const makeI18n = () => {
-  const tables: Record<string, Record<string, string>> = {}
-  return {
-    tables,
-    registerTranslations: jest.fn((locale: string, msgs: Record<string, string>) => {
-      tables[locale] = { ...(tables[locale] ?? {}), ...msgs }
-    }),
-    t: jest.fn((key: string, params?: Record<string, string | number | boolean>) => {
-      const raw = tables["en"]?.[key] ?? key
-      return raw.replace(/\{(\w+)\}/g, (m, p) =>
-        params && params[p] !== undefined ? String(params[p]) : m
-      )
-    }),
-    getCurrentLocale: jest.fn(() => "en"),
-  }
-}
+const makeI18n = () => ({
+  t: jest.fn((key: string, params?: Record<string, string | number | boolean>) => {
+    const raw = LOCALES.en[key] ?? key
+    return raw.replace(/\{(\w+)\}/g, (m, p) =>
+      params && params[p] !== undefined ? String(params[p]) : m
+    )
+  }),
+  getCurrentLocale: jest.fn(() => "en"),
+})
+
+type ToolDefinition = { timeoutMs?: number; requiresApproval?: boolean }
 
 const makeCtx = () => {
-  const tools: Record<string, (args: unknown) => Promise<unknown>> = {}
+  const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {}
+  const definitions: Record<string, ToolDefinition> = {}
   const i18n = makeI18n()
   const ctx: Partial<PluginContext> = {
     pluginId: "cognia-screenshot",
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
+    ui: { showToast: jest.fn() } as never,
+    toolResult: { registerToolResultRenderer: jest.fn(() => () => {}) } as never,
     agent: {
       registerTool: ({
         name,
+        definition,
         execute,
       }: {
         name: string
-        execute: (args: unknown) => Promise<unknown>
+        definition: ToolDefinition
+        execute: (args: Record<string, unknown>) => Promise<unknown>
       }) => {
         tools[name] = execute
+        definitions[name] = definition
       },
     } as never,
     ocr: { extract: extractMock } as never,
@@ -66,7 +69,7 @@ const makeCtx = () => {
     i18n: i18n as never,
     messagePart: { registerPartRenderer: registerPartRendererMock } as never,
   }
-  return { ctx: ctx as PluginContext, tools, i18n }
+  return { ctx: ctx as PluginContext, tools, definitions, i18n }
 }
 
 const mockFile = {
@@ -175,30 +178,23 @@ describe("screenshot (built-in)", () => {
     expect(typeof registerPartRendererMock.mock.calls[0][1]).toBe("function")
   })
 
-  it("registers matching en + zh-CN toast translations", async () => {
-    const { ctx, i18n } = makeCtx()
-    await screenshotPlugin.activate?.(ctx)
-    expect(i18n.registerTranslations).toHaveBeenCalledWith(
-      "en",
-      expect.objectContaining({
-        "toast.captured": expect.any(String),
-        "toast.copied": expect.any(String),
-        "toast.failed": expect.any(String),
-        "toast.notAttached": expect.any(String),
-      })
-    )
-    expect(i18n.registerTranslations).toHaveBeenCalledWith(
-      "zh-CN",
-      expect.objectContaining({
-        "toast.captured": expect.any(String),
-        "toast.copied": expect.any(String),
-        "toast.failed": expect.any(String),
-        "toast.notAttached": expect.any(String),
-      })
-    )
-    expect(Object.keys(i18n.tables["en"] ?? {}).sort()).toEqual(
-      Object.keys(i18n.tables["zh-CN"] ?? {}).sort()
-    )
+  it("ships its strings in plugin.json's i18n bundle with matching en + zh-CN keys", () => {
+    const manifest = screenshotPlugin.manifest as { i18n?: { locales?: Record<string, object> } }
+    expect(manifest.i18n?.locales).toBe(manifestJson.i18n.locales)
+    expect(Object.keys(LOCALES["zh-CN"]).sort()).toEqual(Object.keys(LOCALES.en).sort())
+    for (const key of ["toast.captured", "toast.failed", "card.title", "ocr.title"]) {
+      expect(LOCALES.en[key]).toEqual(expect.any(String))
+    }
+  })
+
+  it("gives the picker-blocking capture tools a long budget", async () => {
+    const { ctx, definitions } = makeCtx()
+    await screenshotPlugin.activate(ctx)
+    expect(CAPTURE_TOOL_TIMEOUT_MS).toBe(120_000)
+    expect(definitions.take_screenshot.timeoutMs).toBe(CAPTURE_TOOL_TIMEOUT_MS)
+    expect(definitions.extract_screenshot_ocr.timeoutMs).toBe(CAPTURE_TOOL_TIMEOUT_MS)
+    // The monitor listing is a quick read — default budget.
+    expect(definitions.list_screenshot_monitors.timeoutMs).toBeUndefined()
   })
 
   it("handles its declared command and ignores everyone else's", async () => {
@@ -240,9 +236,13 @@ describe("screenshot (built-in)", () => {
       mcpContent: Array<{ type: string; data?: string; text?: string }>
     }
     expect(part.type).toBe(SCREENSHOT_PART_TYPE)
-    // Text block first — the card draws it as the localized caption — then the image.
+    // Text block first — the structured caption the card localizes — then the image.
     expect(part.mcpContent[0].type).toBe("text")
-    expect(part.mcpContent[0].text).toContain("screenshot.png")
+    expect(JSON.parse(part.mcpContent[0].text ?? "{}")).toMatchObject({
+      filename: "screenshot.png",
+      size: 9,
+      copiedToClipboard: true,
+    })
     expect(part.mcpContent[1].type).toBe("image")
     expect(part.mcpContent[1].data?.length).toBeGreaterThan(0)
   })
@@ -328,7 +328,7 @@ describe("screenshot (built-in)", () => {
     // Agent calls don't touch the clipboard unless they ask: a capture the
     // model takes for itself must not overwrite what the user copied.
     expect(writeImageMock).not.toHaveBeenCalled()
-    expect(result.content[0].text).not.toContain("copied to clipboard")
+    expect(JSON.parse(result.content[0].text ?? "{}")).toMatchObject({ copiedToClipboard: false })
   })
 
   it("copies to the clipboard only when the tool call asks for it", async () => {
@@ -346,7 +346,7 @@ describe("screenshot (built-in)", () => {
       copyToClipboard: true,
     })) as { content: Array<{ type: string; text?: string }> }
     expect(writeImageMock).toHaveBeenCalledWith(Uint8Array.from([65, 66, 67]), "png")
-    expect(result.content[0].text).toContain("copied to clipboard")
+    expect(JSON.parse(result.content[0].text ?? "{}")).toMatchObject({ copiedToClipboard: true })
   })
 
   it("forwards monitorId/region/format to automation.screenshot in native mode", async () => {
@@ -576,7 +576,7 @@ describe("screenshot (built-in)", () => {
     expect(result.content[1].data?.length).toBeGreaterThan(0)
   })
 
-  it("notes the clipboard copy in the image caption when it succeeded", () => {
+  it("carries a structured caption (incl. the clipboard copy) ahead of the image", () => {
     expect(
       captureToToolResult({
         ok: true,
@@ -588,7 +588,16 @@ describe("screenshot (built-in)", () => {
       })
     ).toEqual({
       content: [
-        { type: "text", text: "shot.png (12 bytes), copied to clipboard" },
+        {
+          type: "text",
+          text: JSON.stringify({
+            ok: true,
+            filename: "shot.png",
+            size: 12,
+            mimeType: "image/png",
+            copiedToClipboard: true,
+          }),
+        },
         { type: "image", data: "AAAA", mimeType: "image/png" },
       ],
     })

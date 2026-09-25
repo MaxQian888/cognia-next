@@ -1,8 +1,10 @@
 {
   "id": "cognia-share-watch",
-  "name": "Share Watch",
+  "name": "Share Watch (example)",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Reference plugin exercising the public-share-link hooks: records each link created or revoked (fragment-stripped URL only — never the decryption key).",
+  "description": "Example plugin (opt-in) for plugin authors: shows how to receive public-share-link hooks. It adds no UI — each link created or revoked is written as one line (share code and fragment-free URL, never the key) to this plugin's log (Plugins → Share Watch → Logs).",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["hooks"],
   "main": "src/index.ts",
@@ -12,10 +14,30 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Share Watch (example)",
+        "manifest.description": "Example plugin (opt-in) for plugin authors: shows how to receive public-share-link hooks. It adds no UI — each link created or revoked is written as one line (share code and fragment-free URL, never the key) to this plugin's log (Plugins → Share Watch → Logs)."
+      },
+      "zh-CN": {
+        "manifest.name": "分享监听（示例）",
+        "manifest.description": "面向插件作者的示例插件（需手动开启）：演示如何接收公开分享链接钩子。它不添加界面——每个链接的创建或撤销都会以一行记录（分享码和不含片段的网址，绝不含密钥）写入本插件日志（插件 → 分享监听 → 日志）。"
+      }
+    }
   }
 }

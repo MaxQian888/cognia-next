@@ -1,15 +1,24 @@
-import * as XLSX from "xlsx"
 import type { ArtifactRenderer } from "@cognia/plugin-sdk"
+import { decodeCell, decodeRange, encodeCell, encodeColumn } from "./a1"
 import {
   parseWorkbook,
+  unsupportedFeatureId,
   validateWorkbook,
   type WorkbookCell,
   type WorkbookDocument,
   type WorkbookSheet,
+  type WorkbookValidationFinding,
 } from "./model"
+import { loadSheetJs } from "./xlsx"
 
 /** Resolves a plugin i18n key at render time so locale switches take effect. */
 export type PreviewTranslator = (key: string, params?: Record<string, string | number>) => string
+
+export interface WorkbookPreviewDeps {
+  t: PreviewTranslator
+  /** Called once per mount; must return a disposer. */
+  onLocaleChange: (handler: () => void) => () => void
+}
 
 const ROW_HEADER_WIDTH = 46
 const COLUMN_HEADER_HEIGHT = 24
@@ -17,6 +26,31 @@ const DEFAULT_COLUMN_WIDTH = 84
 const DEFAULT_ROW_HEIGHT = 24
 const MAX_PREVIEW_ROWS = 300
 const MAX_PREVIEW_COLUMNS = 60
+
+/**
+ * SheetJS's number-format engine (SSF) is the only part of the spreadsheet
+ * stack the preview needs. It loads with the first mounted workbook, not at
+ * plugin activation; mounts render a loading line until it resolves.
+ */
+type NumberFormatter = (format: string, value: number) => string
+let formatNumber: NumberFormatter | null = null
+let formatterLoad: Promise<void> | null = null
+
+export function preloadWorkbookPreviewEngine(): Promise<void> {
+  formatterLoad ??= loadSheetJs().then(
+    (sheetJs) => {
+      formatNumber = (format, value) => sheetJs.SSF.format(format, value)
+    },
+    (error: unknown) => {
+      // A failed chunk load must be retryable on the next mount.
+      formatterLoad = null
+      throw error
+    }
+  )
+  return formatterLoad
+}
+
+let mountSequence = 0
 
 const PREVIEW_STYLES = `
 .copv { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--background); color:var(--foreground); font-family:var(--font-sans); font-size:13px; }
@@ -29,8 +63,11 @@ const PREVIEW_STYLES = `
 .copv-findings li[data-severity="error"]::before { background:var(--destructive); }
 .copv-findings li[data-severity="error"] { color:var(--destructive); }
 .copv-findings li[data-severity="warning"] { color:var(--foreground); }
+.copv-status { padding:24px; color:var(--muted-foreground); font-size:13px; text-align:center; }
+.copv-status[role="alert"] { color:var(--destructive); }
 .copv-empty { flex:1; display:grid; place-items:center; color:var(--muted-foreground); font-size:13px; padding:32px; text-align:center; }
-.copv-grid { flex:1; min-height:0; overflow:auto; }
+.copv-grid { flex:1; min-height:0; overflow:auto; outline:none; }
+.copv-grid:focus-visible { box-shadow:inset 0 0 0 2px var(--ring); }
 .copv-table { border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:12.5px; }
 .copv-corner { position:sticky; top:0; left:0; z-index:5; background:var(--muted); border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
 .copv-colhdr { position:sticky; top:0; z-index:4; height:${COLUMN_HEADER_HEIGHT}px; background:var(--muted); color:var(--muted-foreground); font-weight:500; font-size:11px; text-align:center; border-right:1px solid var(--border); border-bottom:1px solid var(--border); user-select:none; overflow:hidden; }
@@ -46,16 +83,21 @@ const PREVIEW_STYLES = `
 .copv-filtered::after { content:""; position:absolute; right:1px; bottom:1px; width:0; height:0; border:4px solid transparent; border-right-color:var(--primary); border-bottom-color:var(--primary); }
 .copv-limited { padding:6px 12px; color:var(--muted-foreground); font-size:11.5px; border-top:1px solid var(--border); background:var(--muted); position:sticky; left:0; }
 .copv-tabs { flex:none; display:flex; gap:2px; padding:0 8px; border-top:1px solid var(--border); background:var(--muted); overflow-x:auto; }
-.copv-tab { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; margin:4px 0; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--muted-foreground); font:inherit; font-size:12px; white-space:nowrap; cursor:pointer; }
-.copv-tab:hover { background:var(--accent); color:var(--accent-foreground); }
+.copv-tab { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:6px 12px; margin:4px 0; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--muted-foreground); font:inherit; font-size:12px; white-space:nowrap; cursor:pointer; transition:background-color .15s ease-out, color .15s ease-out; }
+.copv-tab:focus-visible { outline:2px solid var(--ring); outline-offset:1px; }
+@media (hover:hover) { .copv-tab:hover { background:var(--accent); color:var(--accent-foreground); } }
+@media (pointer:coarse) { .copv-tab { min-height:36px; } }
+@media (prefers-reduced-motion:reduce) { .copv-tab { transition:none; } }
 .copv-tab[aria-selected="true"] { background:var(--background); color:var(--foreground); border-color:var(--border); font-weight:600; }
 .copv-chip { padding:1px 6px; border-radius:999px; background:var(--accent); color:var(--accent-foreground); font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; }
 `
 
-export function createWorkbookRenderer(t: PreviewTranslator): ArtifactRenderer {
+export function createWorkbookRenderer(deps: WorkbookPreviewDeps): ArtifactRenderer {
   return {
-    name: "Cognia Office Workbook",
+    name: deps.t("renderer.name"),
     mount: (artifact, container) => {
+      const t = deps.t
+      const mountId = ++mountSequence
       const style = document.createElement("style")
       style.textContent = PREVIEW_STYLES
       container.appendChild(style)
@@ -63,33 +105,112 @@ export function createWorkbookRenderer(t: PreviewTranslator): ArtifactRenderer {
       root.className = "copv"
       container.appendChild(root)
 
+      let disposed = false
       let activeSheet = 0
-      let current = parseWorkbook(artifact.content)
-      const render = () =>
-        renderWorkbook(root, current, activeSheet, t, (index) => {
+      let renderedSheet = -1
+      let content = artifact.content
+      let loadError: string | undefined
+
+      const render = () => {
+        const focusKey = activeFocusKey(root)
+        const scroller = root.querySelector<HTMLElement>(".copv-grid")
+        // Keep the scroll position across an update or locale switch of the
+        // same sheet; a newly selected sheet starts at its top-left.
+        const scroll =
+          scroller && renderedSheet === activeSheet
+            ? { top: scroller.scrollTop, left: scroller.scrollLeft }
+            : null
+        if (loadError) {
+          root.replaceChildren(statusLine(t("preview.loadError", { error: loadError }), true))
+          return
+        }
+        if (!formatNumber) {
+          root.replaceChildren(statusLine(t("preview.loading"), false))
+          return
+        }
+        let workbook: WorkbookDocument
+        try {
+          workbook = parseWorkbook(content)
+        } catch (error) {
+          root.replaceChildren(
+            statusLine(
+              t("preview.parseError", {
+                error: error instanceof Error ? error.message : String(error),
+              }),
+              true
+            )
+          )
+          return
+        }
+        activeSheet = Math.max(0, Math.min(activeSheet, workbook.sheets.length - 1))
+        renderedSheet = activeSheet
+        renderWorkbook(root, workbook, activeSheet, t, mountId, (index, focus) => {
           activeSheet = index
           render()
+          if (focus) focusTab(root, index)
         })
+        const next = root.querySelector<HTMLElement>(".copv-grid")
+        if (next && scroll) {
+          next.scrollTop = scroll.top
+          next.scrollLeft = scroll.left
+        }
+        restoreFocus(root, focusKey)
+      }
+
+      const disposeLocale = deps.onLocaleChange(render)
       render()
+      if (!formatNumber) {
+        preloadWorkbookPreviewEngine().then(
+          () => {
+            if (!disposed) render()
+          },
+          (error: unknown) => {
+            loadError = error instanceof Error ? error.message : String(error)
+            if (!disposed) render()
+          }
+        )
+      }
       return {
         update: (updatedArtifact) => {
-          const scroller = root.querySelector<HTMLElement>(".copv-grid")
-          const scroll = scroller
-            ? { top: scroller.scrollTop, left: scroller.scrollLeft }
-            : undefined
-          current = parseWorkbook(updatedArtifact.content)
-          activeSheet = Math.min(activeSheet, current.sheets.length - 1)
+          content = updatedArtifact.content
           render()
-          const next = root.querySelector<HTMLElement>(".copv-grid")
-          if (next && scroll) {
-            next.scrollTop = scroll.top
-            next.scrollLeft = scroll.left
-          }
         },
-        dispose: () => container.replaceChildren(),
+        dispose: () => {
+          disposed = true
+          disposeLocale()
+          container.replaceChildren()
+        },
       }
     },
   }
+}
+
+function statusLine(text: string, isError: boolean): HTMLElement {
+  const line = document.createElement("p")
+  line.className = "copv-status"
+  line.setAttribute("role", isError ? "alert" : "status")
+  line.textContent = text
+  return line
+}
+
+/** The `data-focus-key` of the focused control inside `root`, if any. */
+function activeFocusKey(root: HTMLElement): string | undefined {
+  const active = root.ownerDocument.activeElement
+  if (!(active instanceof HTMLElement) || !root.contains(active)) return undefined
+  return active.dataset.focusKey
+}
+
+/** Re-renders replace the DOM; put keyboard focus back on the same control. */
+function restoreFocus(root: HTMLElement, key: string | undefined): void {
+  if (!key) return
+  const target = [...root.querySelectorAll<HTMLElement>("[data-focus-key]")].find(
+    (element) => element.dataset.focusKey === key
+  )
+  target?.focus({ preventScroll: true })
+}
+
+function focusTab(root: HTMLElement, index: number): void {
+  root.querySelector<HTMLElement>(`[data-focus-key="sheet:${index}"]`)?.focus()
 }
 
 function renderWorkbook(
@@ -97,38 +218,53 @@ function renderWorkbook(
   workbook: WorkbookDocument,
   activeSheet: number,
   t: PreviewTranslator,
-  selectSheet: (index: number) => void
+  mountId: number,
+  selectSheet: (index: number, moveFocus: boolean) => void
 ): void {
   root.replaceChildren()
   const findings = validateWorkbook(workbook)
   if (findings.length) root.appendChild(renderFindings(findings, t))
 
   const sheet = workbook.sheets[activeSheet]
+  const panel = document.createElement("div")
+  panel.className = "copv-panel"
+  panel.style.cssText = "flex:1;min-height:0;display:flex;flex-direction:column"
+  panel.id = `copv-panel-${mountId}`
+  panel.setAttribute("role", "tabpanel")
+  panel.setAttribute("aria-labelledby", `copv-tab-${mountId}-${activeSheet}`)
   if (sheet) {
     const { content, limited } = renderSheet(sheet, t)
-    root.appendChild(content)
+    panel.appendChild(content)
     if (limited) {
       const notice = document.createElement("div")
       notice.className = "copv-limited"
       notice.setAttribute("role", "note")
       notice.textContent = limited
-      root.appendChild(notice)
+      panel.appendChild(notice)
     }
   } else {
-    root.appendChild(emptyState(t))
+    panel.appendChild(emptyState(t))
   }
-  root.appendChild(renderTabs(workbook, activeSheet, t, selectSheet))
+  root.appendChild(panel)
+  root.appendChild(renderTabs(workbook, activeSheet, t, mountId, selectSheet))
 }
 
-function renderFindings(
-  findings: ReturnType<typeof validateWorkbook>,
-  t: PreviewTranslator
-): HTMLElement {
+/** A finding in the active locale; unrecognised text stays as the model wrote it. */
+export function localizeFinding(finding: WorkbookValidationFinding, t: PreviewTranslator): string {
+  if (finding.code === "feature.unsupported") {
+    const id = unsupportedFeatureId(finding.message)
+    const message = id ? t(`feature.${id}`) : finding.message
+    return `${message} ${t("finding.featureUnsupported.remediation")}`
+  }
+  return `${finding.message} ${finding.remediation}`
+}
+
+function renderFindings(findings: WorkbookValidationFinding[], t: PreviewTranslator): HTMLElement {
   const validation = document.createElement("div")
   validation.className = "copv-findings"
   validation.setAttribute("role", "status")
   const heading = document.createElement("strong")
-  heading.textContent = `${t("office.preview.validation")} (${findings.length})`
+  heading.textContent = `${t("preview.validation")} (${findings.length})`
   validation.appendChild(heading)
   const list = document.createElement("ul")
   for (const finding of findings) {
@@ -136,7 +272,7 @@ function renderFindings(
     item.dataset.severity = finding.severity
     const location = [finding.sheet, finding.cell].filter(Boolean).join("!")
     const text = document.createElement("span")
-    text.textContent = `${location ? `${location}: ` : ""}${finding.message} ${finding.remediation}`
+    text.textContent = `${location ? `${location}: ` : ""}${localizeFinding(finding, t)}`
     item.appendChild(text)
     list.appendChild(item)
   }
@@ -144,33 +280,62 @@ function renderFindings(
   return validation
 }
 
+/**
+ * WAI-ARIA tabs: one tab stop (roving tabindex), arrow keys / Home / End move
+ * between sheets and select them.
+ */
 function renderTabs(
   workbook: WorkbookDocument,
   activeSheet: number,
   t: PreviewTranslator,
-  selectSheet: (index: number) => void
+  mountId: number,
+  selectSheet: (index: number, moveFocus: boolean) => void
 ): HTMLElement {
   const tabs = document.createElement("nav")
   tabs.className = "copv-tabs"
   tabs.setAttribute("role", "tablist")
-  tabs.setAttribute("aria-label", t("office.preview.sheets"))
+  tabs.setAttribute("aria-label", t("preview.sheets"))
+  const last = workbook.sheets.length - 1
   workbook.sheets.forEach((sheet, index) => {
     const button = document.createElement("button")
     button.type = "button"
     button.className = "copv-tab"
+    button.id = `copv-tab-${mountId}-${index}`
+    button.dataset.focusKey = `sheet:${index}`
     button.setAttribute("role", "tab")
     button.setAttribute("aria-selected", String(index === activeSheet))
+    button.setAttribute("aria-controls", `copv-panel-${mountId}`)
+    button.tabIndex = index === activeSheet ? 0 : -1
     const title = document.createElement("span")
     title.textContent = sheet.title
     button.appendChild(title)
     if (sheet.filter) {
-      button.appendChild(chip(t("office.preview.filtered")))
+      button.appendChild(chip(t("preview.filtered")))
       button.title = sheet.filter
     }
     if (sheet.freeze && ((sheet.freeze.rows ?? 0) > 0 || (sheet.freeze.columns ?? 0) > 0)) {
-      button.appendChild(chip(t("office.preview.frozen")))
+      button.appendChild(chip(t("preview.frozen")))
     }
-    button.addEventListener("click", () => selectSheet(index))
+    button.addEventListener("click", () => selectSheet(index, false))
+    button.addEventListener("keydown", (event) => {
+      const target =
+        event.key === "ArrowRight"
+          ? index === last
+            ? 0
+            : index + 1
+          : event.key === "ArrowLeft"
+            ? index === 0
+              ? last
+              : index - 1
+            : event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? last
+                : null
+      if (target === null) return
+      event.preventDefault()
+      selectSheet(target, true)
+    })
     tabs.appendChild(button)
   })
   return tabs
@@ -186,7 +351,7 @@ function chip(text: string): HTMLElement {
 function emptyState(t: PreviewTranslator): HTMLElement {
   const el = document.createElement("div")
   el.className = "copv-empty"
-  el.textContent = t("office.preview.empty")
+  el.textContent = t("preview.empty")
   return el
 }
 
@@ -207,12 +372,12 @@ function sheetGeometry(sheet: WorkbookSheet): SheetGeometry {
   for (const ref of Object.keys(sheet.cells)) {
     const match = /^([A-Z]+)(\d+)$/.exec(ref)
     if (!match) continue
-    const cell = XLSX.utils.decode_cell(ref)
+    const cell = decodeCell(ref)
     maxRow = Math.max(maxRow, cell.r)
     maxColumn = Math.max(maxColumn, cell.c)
   }
   for (const merge of sheet.merges) {
-    const range = XLSX.utils.decode_range(merge)
+    const range = decodeRange(merge)
     maxRow = Math.max(maxRow, range.e.r)
     maxColumn = Math.max(maxColumn, range.e.c)
   }
@@ -222,7 +387,7 @@ function sheetGeometry(sheet: WorkbookSheet): SheetGeometry {
   const columnCount = Math.min(totalColumns, MAX_PREVIEW_COLUMNS)
 
   const columnWidth = (column: number) => {
-    const dimension = sheet.columnDimensions?.[XLSXColumn(column)]
+    const dimension = sheet.columnDimensions?.[encodeColumn(column)]
     return dimension?.width
       ? Math.max(24, Math.min(400, dimension.width * 7))
       : DEFAULT_COLUMN_WIDTH
@@ -258,10 +423,15 @@ function renderSheet(
 
   const viewport = document.createElement("div")
   viewport.className = "copv-grid"
+  // A scrollable region must be reachable from the keyboard to be scrolled.
+  viewport.tabIndex = 0
+  viewport.dataset.focusKey = "grid"
+  viewport.setAttribute("role", "region")
+  viewport.setAttribute("aria-label", t("preview.grid", { name: sheet.title }))
   const frozenRows = Math.min(sheet.freeze?.rows ?? 0, geometry.rowCount)
   const frozenColumns = Math.min(sheet.freeze?.columns ?? 0, geometry.columnCount)
   const mergeMap = createMergeMap(sheet.merges)
-  const filterRange = sheet.filter ? XLSX.utils.decode_range(sheet.filter) : undefined
+  const filterRange = sheet.filter ? decodeRange(sheet.filter) : undefined
 
   const table = document.createElement("table")
   table.className = "copv-table"
@@ -274,7 +444,7 @@ function renderSheet(
   for (let column = 0; column < geometry.columnCount; column += 1) {
     const col = document.createElement("col")
     col.style.width = `${geometry.columnWidth(column)}px`
-    if (sheet.columnDimensions?.[XLSXColumn(column)]?.hidden) col.hidden = true
+    if (sheet.columnDimensions?.[encodeColumn(column)]?.hidden) col.hidden = true
     colgroup.appendChild(col)
   }
   table.appendChild(colgroup)
@@ -283,13 +453,13 @@ function renderSheet(
   const headerRow = document.createElement("tr")
   const corner = document.createElement("th")
   corner.className = "copv-corner"
-  corner.setAttribute("aria-label", t("office.preview.corner"))
+  corner.setAttribute("aria-label", t("preview.corner"))
   headerRow.appendChild(corner)
   for (let column = 0; column < geometry.columnCount; column += 1) {
     const th = document.createElement("th")
     th.className = "copv-colhdr"
     th.scope = "col"
-    th.textContent = XLSXColumn(column)
+    th.textContent = encodeColumn(column)
     if (column < frozenColumns) {
       th.style.left = `${geometry.columnLeft(column)}px`
       th.style.zIndex = "5"
@@ -323,7 +493,7 @@ function renderSheet(
     tr.appendChild(rowHeader)
 
     for (let column = 0; column < geometry.columnCount; column += 1) {
-      const ref = XLSX.utils.encode_cell({ r: row, c: column })
+      const ref = encodeCell({ r: row, c: column })
       const merge = mergeMap.get(ref)
       if (merge?.skip) continue
       const td = document.createElement("td")
@@ -361,14 +531,14 @@ function renderSheet(
   const parts: string[] = []
   if (geometry.totalRows > geometry.rowCount)
     parts.push(
-      t("office.preview.truncatedRows", {
+      t("preview.truncatedRows", {
         count: geometry.rowCount,
         total: geometry.totalRows,
       })
     )
   if (geometry.totalColumns > geometry.columnCount)
     parts.push(
-      t("office.preview.truncatedColumns", {
+      t("preview.truncatedColumns", {
         count: geometry.columnCount,
         total: geometry.totalColumns,
       })
@@ -399,9 +569,9 @@ function displayValue(cell: WorkbookCell): string {
     if (Number.isNaN(date.getTime())) return String(cell.value)
     return formatDate(date, format)
   }
-  if (cell.type === "number" && format) {
+  if (cell.type === "number" && format && formatNumber) {
     try {
-      return XLSX.SSF.format(format, cell.value as number)
+      return formatNumber(format, cell.value as number)
     } catch {
       return String(cell.value)
     }
@@ -410,9 +580,9 @@ function displayValue(cell: WorkbookCell): string {
 }
 
 function formatDate(date: Date, format: string | undefined): string {
-  if (format) {
+  if (format && formatNumber) {
     try {
-      return XLSX.SSF.format(format, toSerial(date))
+      return formatNumber(format, toSerial(date))
     } catch {
       // fall through to ISO formatting
     }
@@ -441,11 +611,11 @@ function applyCellStyle(element: HTMLElement, style: WorkbookCell["style"]): voi
 function createMergeMap(ranges: string[]) {
   const map = new Map<string, { skip: boolean; rowSpan: number; colSpan: number }>()
   for (const ref of ranges) {
-    const range = XLSX.utils.decode_range(ref)
+    const range = decodeRange(ref)
     if (range.s.r < 0 || range.s.c < 0) continue
     for (let row = range.s.r; row <= range.e.r; row += 1) {
       for (let column = range.s.c; column <= range.e.c; column += 1) {
-        map.set(XLSX.utils.encode_cell({ r: row, c: column }), {
+        map.set(encodeCell({ r: row, c: column }), {
           skip: row !== range.s.r || column !== range.s.c,
           rowSpan: range.e.r - range.s.r + 1,
           colSpan: range.e.c - range.s.c + 1,
@@ -459,15 +629,4 @@ function createMergeMap(ranges: string[]) {
 function cssColor(value: string): string {
   const clean = value.replace(/^#/, "")
   return clean.length === 8 ? `#${clean.slice(2)}` : `#${clean}`
-}
-
-function XLSXColumn(index: number): string {
-  let value = index + 1
-  let result = ""
-  while (value > 0) {
-    value -= 1
-    result = String.fromCharCode(65 + (value % 26)) + result
-    value = Math.floor(value / 26)
-  }
-  return result
 }

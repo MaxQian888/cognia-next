@@ -15,10 +15,8 @@
  * Approval: never. Reads are safe and idempotent.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, resolveStore } from "../store-bridge"
-
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -30,11 +28,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
-export function buildReadTools(): PluginTool[] {
+export function buildReadTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_read_graph",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_read_graph",
         description:
@@ -86,10 +83,9 @@ export function buildReadTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_read_selection",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_read_selection",
         description:
@@ -117,10 +113,9 @@ export function buildReadTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_read_node",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_read_node",
         description:
@@ -168,10 +163,9 @@ export function buildReadTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_get_validation_errors",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_get_validation_errors",
         description:
@@ -201,10 +195,9 @@ export function buildReadTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_get_last_run",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_get_last_run",
         description:
@@ -231,6 +224,6 @@ export function buildReadTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

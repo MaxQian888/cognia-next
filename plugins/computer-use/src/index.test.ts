@@ -3,10 +3,24 @@
  * app-session automation client.
  */
 
-import definition from "./index"
-import type { ActionRequest } from "@cognia/plugin-sdk"
-import type { PluginTool } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
+import definition, { describeComputerUse, OCR_TOOL_TIMEOUT_MS } from "./index"
+import type { ActionRequest, PluginToolRegistration } from "@cognia/plugin-sdk"
+
+type PluginTool = PluginToolRegistration
+
+const LOCALES = manifestJson.i18n.locales as Record<string, Record<string, string>>
+
+/** `ctx.i18n.t` stand-in over the shipped bundle, `{param}` interpolation. */
+function translator(locale: "en" | "zh-CN") {
+  return (key: string, params?: Record<string, string | number>) =>
+    (LOCALES[locale][key] ?? key).replace(/\{(\w+)\}/g, (m, name: string) =>
+      params?.[name] !== undefined ? String(params[name]) : m
+    )
+}
+
 const mockedAutomation = {
+  capabilities: jest.fn(),
   getAppState: jest.fn(),
   listApps: jest.fn(),
   queryElements: jest.fn(),
@@ -19,29 +33,26 @@ const mockedAutomation = {
 
 interface MockAgentContext {
   pluginId: string
-  logger?: { info: jest.Mock; warn: jest.Mock }
+  logger: { info: jest.Mock; warn: jest.Mock }
   automation: typeof mockedAutomation
-  agent?: {
+  i18n: { t: (key: string, params?: Record<string, string | number>) => string }
+  agent: {
     registerTool: jest.Mock<void, [PluginTool]>
-    unregisterTool: jest.Mock<void, [string]>
     context: { registerProvider: jest.Mock }
   }
 }
 
-function buildContext(options: { withAgent?: boolean } = {}): MockAgentContext {
-  const context: MockAgentContext = {
+function buildContext(locale: "en" | "zh-CN" = "en"): MockAgentContext {
+  return {
     pluginId: "cognia-computer-use",
     logger: { info: jest.fn(), warn: jest.fn() },
     automation: mockedAutomation,
-  }
-  if (options.withAgent !== false) {
-    context.agent = {
+    i18n: { t: translator(locale) },
+    agent: {
       registerTool: jest.fn(),
-      unregisterTool: jest.fn(),
       context: { registerProvider: jest.fn() },
-    }
+    },
   }
-  return context
 }
 
 async function getTool(name: string): Promise<PluginTool> {
@@ -97,16 +108,18 @@ function buildRevision(overrides: Partial<Record<string, unknown>> = {}): Record
 }
 
 describe("computer-use plugin activate()", () => {
-  it("declares i18n and leaves manifest commands to the host manager", async () => {
-    const context = buildContext()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.activate(context as any)
-
+  it("ships its /cu strings in plugin.json's i18n bundle (both locales)", () => {
     const manifest = definition.manifest as {
       i18n?: { locales?: Record<string, Record<string, string>> }
     }
+    expect(manifest.i18n?.locales).toBe(manifestJson.i18n.locales)
     expect(manifest.i18n?.locales?.en?.["slash.cu.description"]).toBeDefined()
-    expect(manifest.i18n?.locales?.["zh-CN"]?.["slash.cu.body"]).toBeDefined()
+    expect(Object.keys(LOCALES["zh-CN"]).sort()).toEqual(Object.keys(LOCALES.en).sort())
+    // The TS overlay keeps the declarative contributions plugin.json cannot hold.
+    expect(definition.manifest.subagents?.map((s) => s.id)).toEqual([
+      "screen-watcher",
+      "gui-driver",
+    ])
   })
 
   it("registers only the canonical app-session tools", async () => {
@@ -127,7 +140,8 @@ describe("computer-use plugin activate()", () => {
       "zoom",
     ])
     for (const tool of tools) {
-      expect(tool.pluginId).toBe("cognia-computer-use")
+      // Ownership is assigned by the host from the activated context.
+      expect(tool.pluginId).toBeUndefined()
       expect(tool.definition.parametersSchema).toBeDefined()
       // `wait` drives nothing and reveals nothing; prompting for a sleep would
       // train the operator to click through prompts.
@@ -148,11 +162,15 @@ describe("computer-use plugin activate()", () => {
     expect(text).toMatch(/browser_\*/)
   })
 
-  it("warns when the host cannot register tools", async () => {
-    const context = buildContext({ withAgent: false })
+  it("gives the OCR fallbacks a longer budget than the default", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.activate(context as any)
-    expect(context.logger!.warn).toHaveBeenCalled()
+    const tools = context.agent.registerTool.mock.calls.map((call) => call[0])
+    const budget = (name: string) => tools.find((t) => t.name === name)?.definition.timeoutMs
+    expect(budget("find_text")).toBe(OCR_TOOL_TIMEOUT_MS)
+    expect(budget("click_text")).toBe(OCR_TOOL_TIMEOUT_MS)
+    expect(budget("wait")).toBeUndefined()
   })
 
   it("routes all tool calls directly to the canonical client", async () => {
@@ -376,29 +394,78 @@ describe("published tool schemas", () => {
   })
 })
 
-describe("computer-use plugin deactivate()", () => {
-  it("unregisters all canonical tools", async () => {
-    const context = buildContext()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.deactivate!(context as any)
+type CommandHooks = {
+  onCommand: (command: string) => Promise<boolean | { handled: boolean; message?: string }>
+}
 
-    expect(context.agent!.unregisterTool.mock.calls.map((call) => call[0]).sort()).toEqual([
-      "click_text",
-      "expand_element",
-      "find_text",
-      "get_app_state",
-      "list_apps",
-      "perform_action",
-      "query_elements",
-      "wait",
-      "zoom",
-    ])
+const FULL_CAPS = {
+  platform: "macos",
+  hasUia: false,
+  hasInputSim: true,
+  hasScreenshot: true,
+  hasEvents: true,
+  hasA11yTree: true,
+  monitors: [{ id: "m1" }, { id: "m2" }],
+}
+
+describe("/cu", () => {
+  async function runCu(locale: "en" | "zh-CN" = "en") {
+    const context = buildContext(locale)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hooks = (await definition.activate(context as any)) as unknown as CommandHooks
+    return hooks.onCommand("cu") as Promise<{ handled: boolean; message: string }>
+  }
+
+  it("reports the live backend capabilities in the app language", async () => {
+    mockedAutomation.capabilities.mockResolvedValue(FULL_CAPS)
+    const outcome = await runCu()
+    expect(outcome.handled).toBe(true)
+    expect(outcome.message).toContain("Computer Use is available on this desktop (macos)")
+    expect(outcome.message).toContain("Screen capture: available (2 monitors)")
+    expect(outcome.message).toContain(LOCALES.en["slash.cu.body"])
+
+    mockedAutomation.capabilities.mockResolvedValue(FULL_CAPS)
+    const zh = await runCu("zh-CN")
+    expect(zh.message).toContain("此桌面（macos）可以使用 Computer Use")
   })
 
-  it("survives missing context or agent", async () => {
-    await expect(definition.deactivate!()).resolves.toBeUndefined()
-    const context = buildContext({ withAgent: false })
+  it("says so honestly when the backend lacks a capability", async () => {
+    mockedAutomation.capabilities.mockResolvedValue({ ...FULL_CAPS, hasInputSim: false })
+    const outcome = await runCu()
+    expect(outcome.message).toContain("only partly available")
+    expect(outcome.message).toContain("Mouse and keyboard input: unavailable")
+    expect(outcome.message).not.toContain(LOCALES.en["slash.cu.body"])
+  })
+
+  it("reports unavailability when the shell has no automation backend", async () => {
+    mockedAutomation.capabilities.mockRejectedValue(new Error("NOT_SUPPORTED: desktop only"))
+    const outcome = await runCu()
+    expect(outcome.message).toBe("Computer Use is not available here: NOT_SUPPORTED: desktop only")
+    mockedAutomation.capabilities.mockResolvedValue({ ...FULL_CAPS, platform: "unsupported" })
+    expect((await runCu()).message).toMatch(/not available here: this app has no native/)
+  })
+
+  it("ignores other commands", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await expect(definition.deactivate!(context as any)).resolves.toBeUndefined()
+    const hooks = (await definition.activate(context as any)) as unknown as CommandHooks
+    await expect(hooks.onCommand("other")).resolves.toBe(false)
+    expect(mockedAutomation.capabilities).not.toHaveBeenCalled()
+  })
+
+  it("describeComputerUse treats a Windows UIA tree as an accessibility tree", () => {
+    const text = describeComputerUse(translator("en"), {
+      ...FULL_CAPS,
+      platform: "windows",
+      hasA11yTree: false,
+      hasUia: true,
+    } as never)
+    expect(text).toContain("Accessibility tree: available")
+  })
+})
+
+describe("computer-use plugin teardown", () => {
+  it("leaves tool unregistration to the runtime (no redundant deactivate)", () => {
+    expect(definition.deactivate).toBeUndefined()
   })
 })

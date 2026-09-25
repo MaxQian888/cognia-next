@@ -1,8 +1,10 @@
 {
   "id": "ripgrep-tools",
   "name": "Ripgrep Tools",
+  "nameKey": "manifest.name",
   "version": "0.2.0",
   "description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["cli-tools"],
   "main": "src/index.ts",
@@ -26,7 +28,7 @@
   "cliTools": [
     {
       "name": "ripgrep_search",
-      "description": "Search file contents in the workspace with ripgrep. Returns matching lines as ripgrep --json events (one JSON object per line). Exit code 1 (no matches) is a successful empty result. The search path is confined to the workspace root; credential paths (.ssh, .aws, id_rsa, …) are always refused. Prefer the built-in `grep` for most searches — it normalizes results; use this when you need raw --json or flags grep lacks.",
+      "description": "Search file contents in the workspace with ripgrep. Returns an array of strings: each element is ONE ripgrep --json event (a JSON object encoded as a string — parse each element; \"match\" events carry path, line_number and lines). Exit code 1 (no matches) is a successful empty result. The search path is confined to the workspace root; credential paths (.ssh, .aws, id_rsa, …) are always refused. Output is capped at 500 KB. Prefer the built-in `grep` for most searches — it normalizes results; use this when you need raw --json or flags grep lacks.",
       "access": "read",
       "confinedPathParams": ["path"],
       "parameters": {
@@ -78,7 +80,8 @@
           "contextLines": {
             "type": "integer",
             "minimum": 0,
-            "description": "Show this many lines of context around each match (-C)"
+            "maximum": 10,
+            "description": "Show this many lines of context around each match (-C), at most 10"
           },
           "maxDepth": {
             "type": "integer",
@@ -107,7 +110,8 @@
             "description": "Stop after this many matches per file (--max-count)"
           }
         },
-        "required": ["pattern"]
+        "required": ["pattern"],
+        "additionalProperties": false
       },
       "binary": { "kind": "requires", "name": "rg" },
       "argv": [
@@ -155,6 +159,18 @@
     "headless": {
       "availability": "blocked",
       "reason": "CLI tools run through the Tauri plugin_cli_exec command; unavailable in headless hosts."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Ripgrep Tools",
+        "manifest.description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code."
+      },
+      "zh-CN": {
+        "manifest.name": "Ripgrep 工具",
+        "manifest.description": "声明式命令行包装工具的官方参考插件：零插件代码即可把 ripgrep 作为 Agent 工具。"
+      }
     }
   }
 }

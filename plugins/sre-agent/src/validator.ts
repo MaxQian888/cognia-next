@@ -9,7 +9,7 @@ import {
 function issue(
   code: string,
   message: string,
-  extra: Pick<SreValidationIssue, "rowIndex" | "evidenceId"> = {}
+  extra: Pick<SreValidationIssue, "rowIndex" | "evidenceId" | "params"> = {}
 ): SreValidationIssue {
   return { code, message, ...extra }
 }
@@ -139,7 +139,10 @@ export function validateTimelineDraft(
     for (const source of row.sources ?? []) {
       if (source !== "file" && !citedSources.has(source)) {
         issues.push(
-          issue("row.source_uncited", `source "${source}" has no cited evidence`, { rowIndex })
+          issue("row.source_uncited", `source "${source}" has no cited evidence`, {
+            rowIndex,
+            params: { source },
+          })
         )
       }
     }
@@ -165,7 +168,7 @@ export function validateTimelineDraft(
           issue(
             "row.claim_unsupported",
             `${unsupported.kind} value "${unsupported.value}" is not present in cited evidence`,
-            { rowIndex }
+            { rowIndex, params: { kind: unsupported.kind, value: unsupported.value } }
           )
         )
       }

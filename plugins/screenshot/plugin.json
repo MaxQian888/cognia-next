@@ -1,8 +1,10 @@
 {
   "id": "cognia-screenshot",
   "name": "Screenshot",
+  "nameKey": "manifest.name",
   "version": "0.2.0",
   "description": "Capture a screen / window image — into the chat, onto the clipboard, or back to the agent as a visible image or OCR text.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["tools", "commands"],
   "main": "src/index.ts",
@@ -42,7 +44,54 @@
       "id": "screenshot",
       "name": "/screenshot",
       "description": "Capture a screen image into the chat and copy it to the clipboard. Pass `native` for a prompt-free desktop capture.",
+      "descriptionKey": "commands.screenshot.description",
       "icon": "Camera"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Screenshot",
+        "manifest.description": "Capture a screen / window image — into the chat, onto the clipboard, or back to the agent as a visible image or OCR text.",
+        "toast.captured": "Captured {filename} ({size}).",
+        "toast.copied": "Copied to clipboard.",
+        "toast.failed": "Screenshot failed: {error}.",
+        "toast.unknownError": "unknown error",
+        "toast.notAttached": "The image could not be attached to a chat session.",
+        "card.title": "Screenshot",
+        "card.alt": "Captured screen",
+        "card.note": "{filename} ({size})",
+        "card.copied": "Copied to clipboard.",
+        "ocr.title": "Text recognized",
+        "ocr.thumbnailAlt": "Source image",
+        "ocr.noText": "No text recognized.",
+        "ocr.provider": "Provider: {id}",
+        "ocr.copy": "Copy text",
+        "ocr.copied": "Copied",
+        "ocr.askAbout": "Ask about this",
+        "commands.screenshot.description": "Capture a screen image into the chat and copy it to the clipboard. Pass `native` for a prompt-free desktop capture."
+      },
+      "zh-CN": {
+        "manifest.name": "截图",
+        "manifest.description": "截取屏幕或窗口图像——发送到对话、复制到剪贴板，或以可见图像或 OCR 文本交还给 Agent。",
+        "toast.captured": "已截取 {filename}（{size}）。",
+        "toast.copied": "已复制到剪贴板。",
+        "toast.failed": "截图失败：{error}。",
+        "toast.unknownError": "未知错误",
+        "toast.notAttached": "无法将截图附加到会话中。",
+        "card.title": "截图",
+        "card.alt": "屏幕截图",
+        "card.note": "{filename}（{size}）",
+        "card.copied": "已复制到剪贴板。",
+        "ocr.title": "已识别文本",
+        "ocr.thumbnailAlt": "源图像",
+        "ocr.noText": "未识别到文本。",
+        "ocr.provider": "识别引擎：{id}",
+        "ocr.copy": "复制文本",
+        "ocr.copied": "已复制",
+        "ocr.askAbout": "追问此内容",
+        "commands.screenshot.description": "截取屏幕图像放入对话并复制到剪贴板。传入 `native` 可在桌面端免提示截图。"
+      }
+    }
+  }
 }

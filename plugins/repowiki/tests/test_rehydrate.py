@@ -236,6 +236,9 @@ async def test_rescan_uses_the_source_so_a_dead_clone_path_is_never_walked(repo,
             "data": {},
         }
     )
+    # The action hook hands the scan to a background task and returns; wait
+    # for that task the way the panel does — by its outcome.
+    await main._RESCANS[project_id]
 
     assert host.specs[-1] == {"kind": "auto", "input": str(repo)}
     assert main._SCANS[project_id].project is not None

@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx"
+import { decodeCell, decodeColumn, decodeRange, encodeCell, encodeColumn, encodeRange } from "./a1"
 
 export const WORKBOOK_SCHEMA_VERSION = 1 as const
 export const WORKBOOK_ARTIFACT_KIND = "cognia-office/workbook"
@@ -64,6 +64,39 @@ export type WorkbookOperation =
   | { op: "deleteRows"; sheet: string; row: number; count?: number }
   | { op: "insertColumns"; sheet: string; column: string; count?: number }
   | { op: "deleteColumns"; sheet: string; column: string; count?: number }
+
+/**
+ * The OOXML features an imported workbook can carry that this model cannot
+ * round-trip. `unsupportedFeatures` stores the English sentence (tools hand it
+ * to the model verbatim, and older artifacts already hold it); the preview
+ * maps it back to its id to show the `feature.<id>` translation.
+ */
+export const UNSUPPORTED_FEATURES = {
+  macros: "Macros are present and will not be preserved when this workbook is exported.",
+  pivotTables: "Pivot tables are present and cannot be edited or preserved losslessly.",
+  charts: "Complex charts are present and cannot be edited or preserved losslessly.",
+  externalLinks: "External workbook links are present and will not be preserved.",
+  drawings: "Embedded images or drawing shapes are present and will not be preserved.",
+  comments: "Cell comments are present and will not be preserved.",
+  tables: "Structured tables are present and will be flattened to plain cell ranges.",
+  slicers: "Slicers or timelines are present and will not be preserved.",
+  connections: "External data connections are present and will not be preserved.",
+  controls: "Form or ActiveX controls are present and will not be preserved.",
+  conditionalFormatting: "Conditional formatting is present and will not be preserved.",
+  dataValidation: "Cell data validation rules are present and will not be preserved.",
+  hyperlinks: "Cell hyperlinks are present and will not be preserved.",
+  sheetProtection: "Sheet protection is present and will not be preserved.",
+  legacyDrawings: "Legacy comment drawings are present and will not be preserved.",
+  uninspectable: "The workbook package could not be inspected for unsupported OOXML features.",
+} as const
+export type UnsupportedFeatureId = keyof typeof UNSUPPORTED_FEATURES
+
+/** The id of a stored unsupported-feature sentence, or undefined for free text. */
+export function unsupportedFeatureId(message: string): UnsupportedFeatureId | undefined {
+  return (Object.keys(UNSUPPORTED_FEATURES) as UnsupportedFeatureId[]).find(
+    (id) => UNSUPPORTED_FEATURES[id] === message
+  )
+}
 
 export interface WorkbookValidationFinding {
   severity: "error" | "warning"
@@ -277,7 +310,7 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
     case "setRange": {
       const rangeRef = operation.range.toUpperCase()
       if (!isRangeRef(rangeRef)) throw new Error(`invalid range: ${operation.range}`)
-      const range = XLSX.utils.decode_range(rangeRef)
+      const range = decodeRange(rangeRef)
       const expectedRows = range.e.r - range.s.r + 1
       const expectedColumns = range.e.c - range.s.c + 1
       if (
@@ -288,9 +321,8 @@ function applyOperation(workbook: WorkbookDocument, operation: WorkbookOperation
       }
       operation.values.forEach((row, rowOffset) =>
         row.forEach((cell, columnOffset) => {
-          sheet.cells[
-            XLSX.utils.encode_cell({ r: range.s.r + rowOffset, c: range.s.c + columnOffset })
-          ] = normalizeCell(cell)
+          sheet.cells[encodeCell({ r: range.s.r + rowOffset, c: range.s.c + columnOffset })] =
+            normalizeCell(cell)
         })
       )
       break
@@ -389,11 +421,11 @@ function shiftSheetAxis(
 
   const cells: Record<string, WorkbookCell> = {}
   for (const [ref, cell] of Object.entries(sheet.cells)) {
-    const decoded = XLSX.utils.decode_cell(ref)
+    const decoded = decodeCell(ref)
     const next = mapCoordinate(decoded[axis])
     if (next === null) continue
     decoded[axis] = next
-    cells[XLSX.utils.encode_cell(decoded)] = cell
+    cells[encodeCell(decoded)] = cell
   }
   sheet.cells = cells
 
@@ -401,7 +433,7 @@ function shiftSheetAxis(
     const remapped = remapRangeAxis(ref, axis, at, count, mode)
     if (!remapped) return []
     // A merge that shrinks to a single cell is degenerate — drop it.
-    const range = XLSX.utils.decode_range(remapped)
+    const range = decodeRange(remapped)
     return range.s.r === range.e.r && range.s.c === range.e.c ? [] : [remapped]
   })
   if (sheet.filter) {
@@ -431,11 +463,11 @@ function shiftSheetAxis(
   if (dimensions) {
     const remapped: typeof dimensions = {}
     for (const [key, dimension] of Object.entries(dimensions)) {
-      const index = axis === "r" ? Number(key) - 1 : XLSX.utils.decode_col(key)
+      const index = axis === "r" ? Number(key) - 1 : columnKeyIndex(key)
       if (!Number.isInteger(index) || index < 0) continue
       const next = mapCoordinate(index)
       if (next === null) continue
-      remapped[axis === "r" ? String(next + 1) : XLSX.utils.encode_col(next)] = dimension
+      remapped[axis === "r" ? String(next + 1) : encodeColumn(next)] = dimension
     }
     if (axis === "r") sheet.rowDimensions = remapped
     else sheet.columnDimensions = remapped
@@ -455,7 +487,7 @@ function remapRangeAxis(
   count: number,
   mode: "insert" | "delete"
 ): string | null {
-  const range = XLSX.utils.decode_range(ref)
+  const range = decodeRange(ref)
   const shiftStart = (value: number): number =>
     mode === "insert"
       ? value >= at
@@ -479,7 +511,16 @@ function remapRangeAxis(
   range.s[axis] = shiftStart(range.s[axis])
   range.e[axis] = shiftEnd(range.e[axis])
   if (range.s[axis] > range.e[axis]) return null
-  return XLSX.utils.encode_range(range)
+  return encodeRange(range)
+}
+
+/** A stored column-dimension key's index, or -1 when the key is malformed. */
+function columnKeyIndex(key: string): number {
+  try {
+    return decodeColumn(key)
+  } catch {
+    return -1
+  }
 }
 
 function createSheet(title: string, id: number): WorkbookSheet {
@@ -506,13 +547,13 @@ function requireText(value: string, label: string): string {
 
 function isCellRef(value: string): boolean {
   try {
-    const decoded = XLSX.utils.decode_cell(value)
+    const decoded = decodeCell(value)
     return (
       decoded.r >= 0 &&
       decoded.c >= 0 &&
       decoded.r < WORKBOOK_MAX_ROW &&
       decoded.c < WORKBOOK_MAX_COLUMN &&
-      XLSX.utils.encode_cell(decoded) === value
+      encodeCell(decoded) === value
     )
   } catch {
     return false
@@ -521,7 +562,7 @@ function isCellRef(value: string): boolean {
 
 function isRangeRef(value: string): boolean {
   try {
-    const range = XLSX.utils.decode_range(value)
+    const range = decodeRange(value)
     return (
       range.s.r >= 0 &&
       range.s.c >= 0 &&
@@ -544,7 +585,7 @@ function rowIndex(value: number): number {
 function columnIndex(value: string): number {
   const column = value.toUpperCase()
   if (!/^[A-Z]{1,3}$/.test(column)) throw new Error(`invalid column: ${value}`)
-  const index = XLSX.utils.decode_col(column)
+  const index = decodeColumn(column)
   if (index < 0 || index >= WORKBOOK_MAX_COLUMN) throw new Error(`invalid column: ${value}`)
   return index
 }

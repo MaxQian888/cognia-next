@@ -1,28 +1,45 @@
 /**
- * Markdown rendering for chat surfaces (tool result + slash card). The plugin
- * manages its own user-facing strings (bilingual), independent of the app's
- * next-intl baseline — same convention the other in-tree plugins follow.
+ * Markdown rendering for chat surfaces (the `/research` command's answer).
+ *
+ * Every user-facing string comes from the plugin's own i18n bundle
+ * (`plugin.json` → `i18n.locales`) through the caller's `ctx.i18n.t`, so the
+ * card reads in the user's language — one language per card, never an
+ * English + Chinese pair glued together. The agent-tool result text
+ * ({@link errorText}) is model-facing and stays English.
  */
 import type { ResearchErrorCode } from "./errors"
 import type { Citation, DeepResearchResult, DeepSearchResult } from "./types"
 
-export function renderResultCard(question: string, result: DeepSearchResult): string {
+/** The plugin's `ctx.i18n.t`. */
+export type ResearchTranslate = (key: string, params?: Record<string, string | number>) => string
+
+// Explicit locale: bare toLocaleString picks up the host's, so digit grouping
+// differed between user machines for the same run.
+function formatTokens(tokens: number): string {
+  return tokens.toLocaleString("en-US")
+}
+
+export function renderResultCard(
+  question: string,
+  result: DeepSearchResult,
+  t: ResearchTranslate
+): string {
   const lines: string[] = []
-  lines.push(`### 🔬 Deep Research`)
+  lines.push(`### 🔬 ${t("card.title")}`)
   lines.push(`> ${question}`)
   lines.push("")
   lines.push(result.answer.trim())
-  const sources = renderSources(result.citations)
+  const sources = renderSources(result.citations, t)
   if (sources) {
     lines.push("")
     lines.push(sources)
   }
   lines.push("")
-  lines.push(renderFooter(result))
+  lines.push(renderFooter(result, t))
   return lines.join("\n")
 }
 
-function renderSources(citations: Citation[]): string {
+function renderSources(citations: Citation[], t: ResearchTranslate): string {
   if (citations.length === 0) return ""
   const seen = new Set<string>()
   const items: string[] = []
@@ -34,69 +51,49 @@ function renderSources(citations: Citation[]): string {
       `${items.length + 1}. [${c.title || c.url}](${c.url})${date ? ` (${date.slice(0, 24)})` : ""}`
     )
   }
-  return `**Sources**\n${items.join("\n")}`
+  return `**${t("card.sources")}**\n${items.join("\n")}`
 }
 
-function renderFooter(result: DeepSearchResult): string {
-  const steps = result.steps.length
-  // Explicit locale: bare toLocaleString picks up the host's, so digit
-  // grouping differed between user machines for the same run.
-  const tokens = result.usage.totalTokens.toLocaleString("en-US")
+function renderFooter(result: DeepSearchResult, t: ResearchTranslate): string {
   const note = result.aborted
-    ? "⚠️ cancelled — partial findings"
+    ? t("card.noteCancelled")
     : result.gaveUp
-      ? "⚠️ answered under budget limits — may be incomplete"
-      : "✓ evidence-checked"
-  return `*${steps} steps · ${tokens} tokens · ${note}*`
+      ? t("card.noteBudget")
+      : t("card.noteChecked")
+  return `*${t("card.footer", {
+    steps: result.steps.length,
+    tokens: formatTokens(result.usage.totalTokens),
+    note,
+  })}*`
 }
 
 /** Render a DeepResearch report (already full markdown) with a small footer. */
-export function renderReportCard(result: DeepResearchResult): string {
+export function renderReportCard(result: DeepResearchResult, t: ResearchTranslate): string {
   const ran = result.sections.length
   const planned = result.outline.sections.length
-  const sectionCount = ran < planned ? `${ran}/${planned}` : `${ran}`
-  const partial = result.gaveUp ? " · ⚠️ partial" : ""
-  const footer = `*${sectionCount} sections · ${result.usage.totalTokens.toLocaleString("en-US")} tokens · deep research report${partial}*`
-  return `${result.report.trim()}\n\n${footer}`
+  const sections = ran < planned ? `${ran}/${planned}` : `${ran}`
+  const footer = t(result.gaveUp ? "report.footerPartial" : "report.footer", {
+    sections,
+    tokens: formatTokens(result.usage.totalTokens),
+  })
+  return `${result.report.trim()}\n\n*${footer}*`
 }
 
 /**
- * Bilingual card for a failure the user can act on.
- *
- * One entry per {@link ResearchErrorCode}: a card that only says "something
- * went wrong" costs the user a support round-trip, and every code below names
- * a different setting to change.
+ * i18n key of the card for a failure the user can act on — one per
+ * {@link ResearchErrorCode}: a card that only says "something went wrong"
+ * costs the user a support round-trip, and every code below names a
+ * different setting to change.
  */
-const ERROR_CARDS: Record<ResearchErrorCode, string> = {
-  NO_PROVIDER:
-    "⚠️ **Deep Research** needs an AI model provider.\n\n" +
-    "No model is configured for this plugin to use. Configure a provider in settings, then try again.\n\n" +
-    "（深度研究需要先在设置中配置一个 AI 模型提供方。）",
-  NO_AI_PERMISSION:
-    "⚠️ **Deep Research** needs permission to use the AI model.\n\n" +
-    "The research loop calls the model to rewrite queries, judge sources, and draft the answer. " +
-    "Grant the model access when prompted, then try again.\n\n" +
-    "（深度研究需要「使用 AI 模型」的权限，请在弹出的授权提示中允许后重试。）",
-  WEB_DISABLED:
-    "⚠️ **Deep Research** is disabled because web tools are turned off.\n\n" +
-    "Enable web tools in Settings, then try again.\n\n" +
-    "（联网工具已关闭，请在设置中启用后重试。）",
-  NO_SEARCH_PROVIDER:
-    "⚠️ **Deep Research** needs a web search provider.\n\n" +
-    "Enable one and add its API key in Settings → Search, then try again.\n\n" +
-    "（请在「设置 → 搜索」中启用一个搜索服务并填写 API Key。）",
-  RATE_LIMITED:
-    "⚠️ **Deep Research** hit the outbound rate limit.\n\n" +
-    "Too many web requests in a short window. Wait a moment, then try again.\n\n" +
-    "（联网请求过于频繁，请稍后重试。）",
-  BLOCKED:
-    "⚠️ **Deep Research** was blocked by a safety guard.\n\n" +
-    "The request contained sensitive data, or targeted an address the app refuses to fetch.\n\n" +
-    "（请求被安全策略拦截：包含敏感数据，或目标地址不被允许访问。）",
-  TOOL_UNAVAILABLE:
-    "⚠️ **Deep Research** cannot reach the app's web tools on this host.\n\n" +
-    "（当前运行环境未提供联网搜索/抓取工具。）",
-  FAILED: "⚠️ **Deep Research** failed.",
+const ERROR_CARD_KEYS: Record<ResearchErrorCode, string> = {
+  NO_PROVIDER: "error.noProvider",
+  NO_AI_PERMISSION: "error.noAiPermission",
+  WEB_DISABLED: "error.webDisabled",
+  NO_SEARCH_PROVIDER: "error.noSearchProvider",
+  RATE_LIMITED: "error.rateLimited",
+  BLOCKED: "error.blocked",
+  TOOL_UNAVAILABLE: "error.toolUnavailable",
+  FAILED: "error.failed",
 }
 
 /** One-line text summaries for the agent-tool return value. */
@@ -113,8 +110,12 @@ const ERROR_TEXT: Record<ResearchErrorCode, string> = {
 }
 
 /** Render the chat card for a classified failure, appending the detail. */
-export function renderErrorCard(code: ResearchErrorCode, detail?: string): string {
-  const card = ERROR_CARDS[code]
+export function renderErrorCard(
+  code: ResearchErrorCode,
+  t: ResearchTranslate,
+  detail?: string
+): string {
+  const card = `⚠️ ${t(ERROR_CARD_KEYS[code])}`
   return detail && code === "FAILED" ? `${card}\n\n\`${detail}\`` : card
 }
 

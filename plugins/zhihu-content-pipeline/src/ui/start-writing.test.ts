@@ -31,24 +31,29 @@ describe("buildWritingSeed", () => {
 })
 
 describe("startWritingForTopic", () => {
-  it("marks selected, then opens a Writer-character session seeded with the topic", async () => {
-    const startSeededSession = jest.fn(async () => ({ sessionId: "sess_1" }))
-    const markTopicStatus = jest.fn(async (_id: string, _status: string) => undefined)
+  const sessionTitle = (title: string) => `Zhihu writing: ${title}`
 
-    const id = await startWritingForTopic(topic, { startSeededSession, markTopicStatus })
+  it("opens a Writer-character session seeded with the topic, then marks it selected", async () => {
+    const startSeededSession = jest.fn(async () => ({ sessionId: "sess_1" }))
+    const markTopicStatus = jest.fn(async () => undefined)
+
+    const id = await startWritingForTopic(topic, {
+      startSeededSession,
+      markTopicStatus,
+      sessionTitle,
+    })
 
     expect(id).toBe("sess_1")
-    expect(markTopicStatus).toHaveBeenCalledWith("topic_1", "selected")
     expect(startSeededSession).toHaveBeenCalledWith({
-      title: `知乎写作：${topic.title}`,
+      title: `Zhihu writing: ${topic.title}`,
       characterId: zhihuRoleCharacterId("writer"),
       seedUserMessage: buildWritingSeed(topic),
     })
+    // The session id is recorded so a later draft can reopen it.
+    expect(markTopicStatus).toHaveBeenCalledWith("topic_1", "selected", "sess_1")
   })
 
-  it("marks the topic selected BEFORE opening the session", async () => {
-    // Order matters: a session that opens against a topic still marked
-    // `candidate` leaves the review list offering it again.
+  it("marks the topic selected only AFTER the session has started", async () => {
     const order: string[] = []
     await startWritingForTopic(topic, {
       startSeededSession: jest.fn(async () => {
@@ -58,7 +63,22 @@ describe("startWritingForTopic", () => {
       markTopicStatus: jest.fn(async () => {
         order.push("status")
       }),
+      sessionTitle,
     })
-    expect(order).toEqual(["status", "session"])
+    expect(order).toEqual(["session", "status"])
+  })
+
+  it("leaves the topic a candidate when the session fails to start", async () => {
+    const markTopicStatus = jest.fn(async () => undefined)
+    await expect(
+      startWritingForTopic(topic, {
+        startSeededSession: jest.fn(async () => {
+          throw new Error("no chat runtime")
+        }),
+        markTopicStatus,
+        sessionTitle,
+      })
+    ).rejects.toThrow("no chat runtime")
+    expect(markTopicStatus).not.toHaveBeenCalled()
   })
 })

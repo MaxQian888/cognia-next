@@ -1,11 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { ShieldAlert } from "lucide-react"
-import { Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@cognia/plugin-ui"
+import { Skeleton, Tabs, TabsContent, TabsList, TabsTrigger, useLiveQuery } from "@cognia/plugin-ui"
 import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
 import { useElementWidth } from "@cognia/plugin-sdk/api/context-panel"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
 import { toSarifLog } from "@cognia/plugin-sdk/api/security-findings"
 import { downloadBlob } from "@cognia/plugin-sdk"
 import type {
@@ -17,7 +17,7 @@ import type {
   StrixRun,
   SuppressionRule,
 } from "./types"
-import { PANEL_ID } from "./ids"
+import { PANEL_ID, PLUGIN_ID } from "./ids"
 import {
   clearActiveScan,
   consumePendingTarget,
@@ -25,7 +25,6 @@ import {
   peekStrixRuntime,
   setActiveScan,
 } from "./runtime"
-import { usePluginT } from "./use-plugin-t"
 import {
   addSuppressionRule,
   clearAllRuns,
@@ -77,11 +76,12 @@ const WIDE_FINDINGS_PX = 880
 const uuid = () => crypto.randomUUID()
 const now = () => Date.now()
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 type Tab = "scan" | "history"
 
 export function StrixPanel(_props: ContextPanelRenderProps) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const rt = peekStrixRuntime()
 
   const [tab, setTab] = useState<Tab>("scan")
@@ -106,6 +106,18 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
   const dexie = rt?.dexie ?? null
   const terminal = rt?.terminal ?? null
   const securityScans = rt?.securityScans ?? null
+  const ui = rt?.ui ?? null
+
+  /**
+   * A write the user asked for failed. Said out loud — every triage, delete
+   * and clear used to be `void` and a rejected IndexedDB write vanished.
+   */
+  const reportFailure = useCallback(
+    (key: "error.actionFailed" | "error.startFailed", error: unknown) => {
+      ui?.showToast(t(key, { message: messageOf(error) }), "error")
+    },
+    [ui, t]
+  )
 
   const runsQuery = useLiveQuery(() => (dexie ? listRuns(dexie) : Promise.resolve([])), [dexie])
   const runs = runsQuery ?? NO_RUNS
@@ -142,30 +154,34 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
   const onStateChange = useCallback(
     (finding: StrixFinding, state: FindingState) => {
       if (!dexie || !target || !finding.fingerprint) return
-      void setFindingState(dexie, {
+      setFindingState(dexie, {
         target,
         fingerprint: finding.fingerprint,
         state,
         now: now(),
-      })
+      }).catch((error: unknown) => reportFailure("error.actionFailed", error))
     },
-    [dexie, target]
+    [dexie, target, reportFailure]
   )
 
   const onSuppressRule = useCallback(
     (finding: StrixFinding) => {
       if (!dexie || !target || !finding.ruleId) return
-      void addSuppressionRule(dexie, { target, ruleId: finding.ruleId, now: now() })
+      addSuppressionRule(dexie, { target, ruleId: finding.ruleId, now: now() }).catch(
+        (error: unknown) => reportFailure("error.actionFailed", error)
+      )
     },
-    [dexie, target]
+    [dexie, target, reportFailure]
   )
 
   const onUnsuppressRule = useCallback(
     (finding: StrixFinding) => {
       if (!dexie || !target || !finding.ruleId) return
-      void removeSuppressionRule(dexie, suppressionRuleId(target, finding.ruleId))
+      removeSuppressionRule(dexie, suppressionRuleId(target, finding.ruleId)).catch(
+        (error: unknown) => reportFailure("error.actionFailed", error)
+      )
     },
-    [dexie, target]
+    [dexie, target, reportFailure]
   )
 
   /**
@@ -225,9 +241,14 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
     }
   }, [dexie])
 
+  /**
+   * Run one scan. Never rejects: `ScanForm` fires this and forgets it, so a
+   * failure that escaped here (the PTY refused to open, the run row could not
+   * be written) would be an unhandled rejection the user never hears about.
+   */
   const onStart = useCallback(
     async (opts: ScanOptions) => {
-      if (!terminal || !dexie || !securityScans) return
+      if (!terminal || !dexie || !securityScans || !ui) return
       setConsoleOut({ text: "", truncated: false })
       const controller = new AbortController()
       let unregisterController: (() => void) | undefined
@@ -266,18 +287,19 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
             // A terminal transition fires exactly once per run (the final
             // update) — a toast is how the end of a scan reaches a user who
             // is not looking at this panel.
-            const ui = peekStrixRuntime()?.ui
             if (r.status === "done") {
-              ui?.showToast(t("toast.scanDone", { count: r.findingsCount }), "success")
+              ui.showToast(t("toast.scanDone", { count: r.findingsCount }), "success")
             } else if (r.status === "error") {
-              ui?.showToast(t("toast.scanFailed"), "error")
+              ui.showToast(t("toast.scanFailed"), "error")
             } else if (r.status === "cancelled") {
-              ui?.showToast(t("toast.scanCancelled"), "info")
+              ui.showToast(t("toast.scanCancelled"), "info")
             }
           },
         })
         await setPref(dexie, "lastTarget", opts.target)
         await setPref(dexie, "lastModel", opts.model ?? "")
+      } catch (error) {
+        reportFailure("error.startFailed", error)
       } finally {
         unregisterController?.()
         clearActiveScan()
@@ -285,13 +307,13 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
         abortRef.current = null
       }
     },
-    [terminal, dexie, securityScans, t]
+    [terminal, dexie, securityScans, ui, t, reportFailure]
   )
 
   // Announce a running scan on the panel's own rail button. Without it the
   // only way to learn a scan is still going is to come back and look.
   useEffect(() => {
-    rt?.contextPanels?.setBadge(PANEL_ID, isScanning ? 1 : 0)
+    rt?.contextPanels.setBadge(PANEL_ID, isScanning ? 1 : 0)
   }, [rt, isScanning])
 
   const onCancel = useCallback(() => {
@@ -309,55 +331,71 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
   // rows left them on disk forever with no GC path.
   const onDelete = useCallback(
     (runId: string) => {
-      if (!dexie) return
+      if (!dexie || !ui) return
       const run = runs.find((r) => r.runId === runId)
       // Deleting a live run would orphan its PTY and its artifacts.
       if (run?.status === "running") return
       void (async () => {
-        const confirmed =
-          (await rt?.ui?.showConfirmDialog?.({
+        try {
+          // Fails closed: a dialog that cannot be shown is not a "yes".
+          const confirmed = await ui.showConfirmDialog({
             title: t("confirm.deleteRun.title"),
             message: t("confirm.deleteRun.message", { target: run?.target ?? runId }),
             confirmLabel: t("confirm.deleteRun.confirm"),
+            cancelLabel: t("confirm.cancel"),
             variant: "destructive",
-          })) ?? true
-        if (!confirmed) return
-        if (selectedRunId === runId) setSelectedRunId(null)
-        if (terminal) {
-          await purgeRunArtifacts(runId, { terminal, randomId: uuid, sleep, pollMs: 400 })
+          })
+          if (!confirmed) return
+          if (selectedRunId === runId) setSelectedRunId(null)
+          if (terminal) {
+            await purgeRunArtifacts(runId, { terminal, randomId: uuid, sleep, pollMs: 400 })
+          }
+          await deleteRun(dexie, runId)
+        } catch (error) {
+          reportFailure("error.actionFailed", error)
         }
-        await deleteRun(dexie, runId)
       })()
     },
-    [dexie, terminal, rt, t, runs, selectedRunId]
+    [dexie, terminal, ui, t, runs, selectedRunId, reportFailure]
   )
   const onClearAll = useCallback(() => {
-    if (!dexie) return
+    if (!dexie || !ui) return
     void (async () => {
-      const confirmed =
-        (await rt?.ui?.showConfirmDialog?.({
+      try {
+        // Fails closed: a dialog that cannot be shown is not a "yes".
+        const confirmed = await ui.showConfirmDialog({
           title: t("confirm.clearAll.title"),
           message: t("confirm.clearAll.message", { count: runs.length }),
           confirmLabel: t("confirm.clearAll.confirm"),
+          cancelLabel: t("confirm.cancel"),
           variant: "destructive",
-        })) ?? true
-      if (!confirmed) return
-      setSelectedRunId(null)
-      if (terminal) {
-        await purgeAllArtifacts({ terminal, randomId: uuid, sleep, pollMs: 400 })
+        })
+        if (!confirmed) return
+        setSelectedRunId(null)
+        if (terminal) {
+          await purgeAllArtifacts({ terminal, randomId: uuid, sleep, pollMs: 400 })
+        }
+        await clearAllRuns(dexie)
+      } catch (error) {
+        reportFailure("error.actionFailed", error)
       }
-      await clearAllRuns(dexie)
     })()
-  }, [dexie, terminal, rt, t, runs.length])
+  }, [dexie, terminal, ui, t, runs.length, reportFailure])
 
-  if (!rt || !dexie || !terminal) {
+  if (!rt || !dexie) {
+    // Say what is actually missing. This used to print "Docker is not
+    // reachable" for an unwired runtime or missing storage, sending people to
+    // restart a Docker daemon that was never the problem.
     return (
       <div
         className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center"
         data-testid="strix-unavailable"
+        data-reason={rt ? "storage" : "runtime"}
       >
-        <ShieldAlert className="size-6 text-muted-foreground" />
-        <p className="text-xs text-muted-foreground">{t("preflight.dockerMissing")}</p>
+        <ShieldAlert aria-hidden className="size-6 text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">
+          {t(rt ? "panel.unavailable.storage" : "panel.unavailable.runtime")}
+        </p>
       </div>
     )
   }
@@ -420,6 +458,7 @@ export function StrixPanel(_props: ContextPanelRenderProps) {
         <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto p-3">
           <ScanHistory
             runs={runs}
+            formatDate={rt.formatDate}
             selectedRunId={selectedRunId}
             onView={onView}
             onDelete={onDelete}

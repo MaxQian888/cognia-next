@@ -1,8 +1,10 @@
 {
   "id": "pet-daily-quests",
   "name": "Pet Daily Quests",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "A daily quest board for the desktop pet: three rotating care quests per day, with coin and XP rewards granted through the budget-capped pet API.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["pet", "hooks"],
   "permissions": ["pet:read", "pet:interact", "extension:ui"],
@@ -15,12 +17,73 @@
   },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "browser": {
+      "availability": "blocked",
+      "reason": "The desktop pet runs only in the Tauri desktop shell; there is no pet to feed, reward or show a console tab for here."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
     "mobile": {
-      "availability": "degraded",
-      "entrypoint": "src/index.ts",
-      "degradation": "The pet subsystem is desktop/web-only; quests track nothing on mobile."
+      "availability": "blocked",
+      "reason": "The desktop pet runs only in the Tauri desktop shell; there is no pet to feed, reward or show a console tab for here."
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "The desktop pet runs only in the Tauri desktop shell; there is no pet to feed, reward or show a console tab for here."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Pet Daily Quests",
+        "manifest.description": "A daily quest board for the desktop pet: three rotating care quests per day, with coin and XP rewards granted through the budget-capped pet API.",
+        "tab.title": "Daily Quests",
+        "tab.subtitle": "Three fresh care quests every day.",
+        "tab.empty": "Quests are warming up…",
+        "quest.feed3": "Feed your pet 3 times",
+        "quest.play2": "Play together twice",
+        "quest.pet3": "Pet it 3 times",
+        "quest.talk2": "Chat with it twice",
+        "quest.sleep1": "Tuck it in for a nap",
+        "quest.clean1": "Give it a wash",
+        "quest.treat1": "Share a treat",
+        "quest.goal1": "Complete a /goal together",
+        "progress": "{progress}/{count}",
+        "claim": "Claim",
+        "claiming": "Claiming…",
+        "claimed": "Claimed",
+        "claimAria": "Claim the reward for “{quest}”",
+        "claimFailed": "Couldn't claim that reward. It is still waiting for you — try again in a moment.",
+        "reward": "+{xp} XP · +{coins} coins",
+        "budgetLeft": "Today's reward budget left: {xp} XP · {coins} coins",
+        "resetsDaily": "Quests reset at midnight."
+      },
+      "zh-CN": {
+        "manifest.name": "宠物每日任务",
+        "manifest.description": "桌面宠物的每日任务板：每天轮换三项照料任务，通过有预算上限的宠物 API 发放金币与经验奖励。",
+        "tab.title": "每日任务",
+        "tab.subtitle": "每天三个新的照护任务。",
+        "tab.empty": "任务准备中…",
+        "quest.feed3": "喂食 3 次",
+        "quest.play2": "一起玩耍 2 次",
+        "quest.pet3": "抚摸 3 次",
+        "quest.talk2": "聊天 2 次",
+        "quest.sleep1": "哄它睡一觉",
+        "quest.clean1": "给它洗个澡",
+        "quest.treat1": "分享一份零食",
+        "quest.goal1": "一起完成一个 /goal",
+        "progress": "{progress}/{count}",
+        "claim": "领取",
+        "claiming": "领取中…",
+        "claimed": "已领取",
+        "claimAria": "领取「{quest}」的奖励",
+        "claimFailed": "奖励领取失败，任务仍可领取，请稍后再试。",
+        "reward": "+{xp} 经验 · +{coins} 金币",
+        "budgetLeft": "今日剩余奖励额度：{xp} 经验 · {coins} 金币",
+        "resetsDaily": "任务每天零点刷新。"
+      }
     }
   }
 }

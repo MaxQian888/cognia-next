@@ -13,8 +13,14 @@ documentation for plugin authors:
   * ``cognia.ctx``       — the plugin -> host RPC surface (ADR-0145): reach
                            the same ``ctx.*`` APIs a TypeScript plugin gets,
                            from sync *and* async tools
+  * ``ctx.i18n.t``       — user-facing strings from ``plugin.json``
+                           ``i18n.locales`` (see ``_panel_labels``)
 
 Stdlib only; no pythonDependencies, so it loads on any Python >= 3.9.
+
+Copying this as a template? Delete the ``OPTIONAL, HIGH-RISK`` section below
+(``onMessageSend``) together with the ``hooks:chat-intercept`` permission
+unless your plugin genuinely needs to read and rewrite every outgoing message.
 """
 
 import asyncio
@@ -31,17 +37,35 @@ def _format(text):
     return message.upper() if config.get("shout") else message
 
 
-_PANEL_BODY = """## Python demo panel
+#: Every surface this plugin creates starts with this — the manifest's
+#: ``surface: "cognia-python-demo:{resourceKey}"``. ``onA2UIAction`` is a
+#: broadcast to every plugin, so the prefix is how the hook knows a click is ours.
+SURFACE_PREFIX = "cognia-python-demo:"
 
-This panel is **declarative**: `plugin.json` says
+#: A2UI action names are namespaced for the same reason.
+ACTION_OPEN_SECTION = "python-demo:open-section"
 
-```json
+#: The panel's user-facing strings and their English defaults. The
+#: translations live in plugin.json ``i18n.locales`` (en + zh-CN); the host
+#: prefixes them with ``plugin.cognia-python-demo.`` itself, so the keys here
+#: are the flat ones from the manifest.
+PANEL_LABELS = {
+    "panel.title": "Python demo",
+    "panel.heading": "Python demo panel",
+    "panel.intro": (
+        "This panel is **declarative**: plugin.json names a surface and a build "
+        "tool, and the host renders the A2UI components that tool pushes — no "
+        "JavaScript module, no webview."
+    ),
+    "panel.outline.runtime": "Runtime",
+    "panel.outline.frames": "Frames",
+    "panel.outline.environments": "Environments",
+}
+
+#: Code and a diagram — the same in every language, so not translated.
+_PANEL_REFERENCE = """```json
 { "kind": "a2ui", "surface": "cognia-python-demo:{resourceKey}", "activateTool": "build_demo_panel" }
 ```
-
-and the host renders an A2UI surface. No JavaScript module, no webview — the
-body above and the tree beside it are component data pushed from
-`build_demo_panel` over the same stdio channel every other `ctx.*` call uses.
 
 ```mermaid
 sequenceDiagram
@@ -101,6 +125,18 @@ def countdown(start: int = 3):
     yield "liftoff!"
 
 
+# ---------------------------------------------------------------------------
+# OPTIONAL, HIGH-RISK EXAMPLE — chat interception.
+#
+# `onMessageSend` sees, and can rewrite, EVERY outgoing chat message. It is
+# here only to demonstrate the transform-hook shape (and the host's test suite
+# round-trips it). A real plugin should not copy it: delete this hook AND the
+# `hooks:chat-intercept` permission from plugin.json unless reading the whole
+# conversation is the plugin's actual job. The two must go together — a
+# chat-interception hook without the permission aborts the entire Python load.
+# ---------------------------------------------------------------------------
+
+
 @hook("onMessageSend")
 def stamp_outgoing(payload):
     """Transform hook: tag outgoing chat payloads (dict in, dict out).
@@ -157,6 +193,34 @@ async def host_fanout(count: int = 3) -> list:
     return [str(item) for item in results]
 
 
+# ---------------------------------------------------------------------------
+# Declarative context panel
+# ---------------------------------------------------------------------------
+
+
+async def _panel_labels() -> dict:
+    """The panel's strings in the app's language, via ``ctx.i18n.t``.
+
+    ``t`` resolves against this plugin's own manifest bundle (current locale,
+    then English) and echoes the key back when nothing matched, so an echoed
+    key — or a host with no i18n namespace — keeps the English default rather
+    than painting a raw dotted key into the panel. The calls are independent,
+    so they go out concurrently.
+    """
+
+    async def resolve(key, fallback):
+        try:
+            value = await cognia.ctx.i18n.t(key)
+        except Exception:  # noqa: BLE001 — a missing translation is not a failure
+            return fallback
+        return value if isinstance(value, str) and value and value != key else fallback
+
+    values = await asyncio.gather(
+        *[resolve(key, fallback) for key, fallback in PANEL_LABELS.items()]
+    )
+    return dict(zip(PANEL_LABELS, values))
+
+
 @tool(
     name="build_demo_panel",
     description="Build the plugin's context-panel surface. Invoked by the host on first activation.",
@@ -186,7 +250,9 @@ async def build_demo_panel(surfaceId, resource=None):
     created with, and no message changes it.
     """
     kind = (resource or {}).get("kind", "unknown")
-    await cognia.ctx.a2ui.createSurface(surfaceId, "panel", {"title": "Python demo"})
+    text = await _panel_labels()
+    body = f"## {text['panel.heading']}\n\n{text['panel.intro']}\n\n{_PANEL_REFERENCE}"
+    await cognia.ctx.a2ui.createSurface(surfaceId, "panel", {"title": text["panel.title"]})
     await cognia.ctx.a2ui.updateComponents(
         surfaceId,
         [
@@ -194,25 +260,34 @@ async def build_demo_panel(surfaceId, resource=None):
             {
                 "id": "outline",
                 "component": "Tree",
-                "action": "open-section",
+                "action": ACTION_OPEN_SECTION,
                 "defaultExpandedDepth": 1,
                 "nodes": [
                     {
                         "id": "runtime",
-                        "label": "Runtime",
+                        "label": text["panel.outline.runtime"],
                         "icon": "cpu",
                         "children": [
-                            {"id": "runtime/frames", "label": "Frames", "icon": "file-text"},
-                            {"id": "runtime/venv", "label": "Environments", "icon": "package"},
+                            {
+                                "id": "runtime/frames",
+                                "label": text["panel.outline.frames"],
+                                "icon": "file-text",
+                            },
+                            {
+                                "id": "runtime/venv",
+                                "label": text["panel.outline.environments"],
+                                "icon": "package",
+                            },
                         ],
                     },
+                    # The resource kind is data, not chrome: shown as-is.
                     {"id": "resource", "label": kind, "icon": "link"},
                 ],
             },
             {
                 "id": "body",
                 "component": "Markdown",
-                "content": _PANEL_BODY,
+                "content": body,
             },
         ],
     )
@@ -228,7 +303,17 @@ def demo_panel_action(payload):
     A2UI actions are dispatched to every plugin's ``onA2UIAction`` hook, which
     the Python runtime has always supported; the panel class added in ADR-0145
     is what finally gives a Python plugin a surface to receive them from.
+
+    Because it is a broadcast, the hook answers only for surfaces this plugin
+    created (``SURFACE_PREFIX``) and actions it named (``ACTION_OPEN_SECTION``);
+    everything else passes through untouched.
     """
-    if isinstance(payload, dict) and payload.get("action") == "open-section":
-        print(f"python demo panel: section {payload.get('data', {}).get('nodeId')}")
+    if not isinstance(payload, dict):
+        return payload
+    surface_id = payload.get("surfaceId") or ""
+    if not isinstance(surface_id, str) or not surface_id.startswith(SURFACE_PREFIX):
+        return payload
+    if payload.get("action") == ACTION_OPEN_SECTION:
+        data = payload.get("data") or {}
+        cognia.log(f"python demo panel: section {data.get('nodeId')}")
     return payload

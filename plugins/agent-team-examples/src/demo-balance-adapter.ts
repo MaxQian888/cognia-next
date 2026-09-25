@@ -10,11 +10,12 @@
  * overlay registry, which `findBalanceAdapter` consults before the built-ins.
  */
 
-import type { PluginBalanceAdapterDef } from "@cognia/plugin-sdk"
-export const demoBalanceAdapter: PluginBalanceAdapterDef = {
+import { defineBalanceAdapter } from "@cognia/plugin-sdk"
+
+export const demoBalanceAdapter = defineBalanceAdapter({
   id: "cognia-agent-team-examples:demo-balance",
   key: "example-credits",
-  name: "Example Credits (demo)",
+  name: "Example Credits (example)",
   matches: (q) =>
     q.providerKey === "example-credits" || Boolean(q.baseUrl?.includes("credits.example.com")),
   request: (q) => ({
@@ -56,4 +57,4 @@ export const demoBalanceAdapter: PluginBalanceAdapterDef = {
       raw: parsed as Record<string, unknown>,
     }
   },
-}
+})

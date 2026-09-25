@@ -6,7 +6,7 @@ import {
   currentCiFailures,
   currentCiExecutions,
 } from "./github"
-import { fixture, NOW, SHA } from "./test-fixtures"
+import { fixture, NOW, SHA } from "./devin-bot.test-helpers"
 
 it("selects only current-SHA latest attempts while preserving genuinely pending checks", () => {
   const run = { id: 1, workflow_id: 9, head_sha: SHA, status: "in_progress", conclusion: null }

@@ -1,17 +1,43 @@
-import ExcelJS from "exceljs"
-import JSZip from "jszip"
-import * as XLSX from "xlsx"
-import type { WorkBook, WorkSheet } from "xlsx"
+import type * as ExcelJS from "exceljs"
+import type JSZipType from "jszip"
+import type { CellObject, WorkBook, WorkSheet } from "xlsx"
+import { encodeColumn, encodeRange } from "./a1"
 import type { WorkbookCell, WorkbookCellStyle, WorkbookDocument, WorkbookSheet } from "./model"
-import { WORKBOOK_SCHEMA_VERSION } from "./model"
+import { UNSUPPORTED_FEATURES, WORKBOOK_SCHEMA_VERSION } from "./model"
 
 export const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+// The spreadsheet engines are loaded on first use, not at plugin activation:
+// together they are most of this plugin's size, and creating, editing, and
+// previewing a workbook never touches them.
+type ExcelJsModule = typeof ExcelJS
+type SheetJsModule = typeof import("xlsx")
+
+/** A CommonJS module arrives as `default` from some bundlers and flat from others. */
+function interop<T extends object>(mod: T | { default: T }): T {
+  return "default" in mod && mod.default ? (mod.default as T) : (mod as T)
+}
+
+export async function loadSheetJs(): Promise<SheetJsModule> {
+  return interop<SheetJsModule>(await import("xlsx"))
+}
+
+async function loadExcelJs(): Promise<ExcelJsModule> {
+  return interop<ExcelJsModule>(await import("exceljs"))
+}
+
+async function loadJsZip(): Promise<typeof JSZipType> {
+  return interop<typeof JSZipType>(await import("jszip"))
+}
 
 export async function importWorkbookXlsx(
   bytes: Uint8Array,
   title: string,
-  sourceFilename?: string
+  sourceFilename?: string,
+  /** Title when neither `title` nor the filename supplies one (localized by the caller). */
+  fallbackTitle = "Workbook"
 ): Promise<WorkbookDocument> {
+  const XLSX = await loadSheetJs()
   const binary = XLSX.read(bytes, {
     type: "array",
     cellDates: true,
@@ -26,7 +52,7 @@ export async function importWorkbookXlsx(
   await enrichSheetsFromExcelJs(bytes, sheets)
   return {
     schemaVersion: WORKBOOK_SCHEMA_VERSION,
-    title: title.trim() || sourceFilename?.replace(/\.xlsx?$/i, "") || "Workbook",
+    title: title.trim() || sourceFilename?.replace(/\.xlsx?$/i, "") || fallbackTitle,
     sheets,
     unsupportedFeatures,
     recalculateOnOpen: true,
@@ -35,8 +61,9 @@ export async function importWorkbookXlsx(
 }
 
 async function enrichSheetsFromExcelJs(bytes: Uint8Array, sheets: WorkbookSheet[]): Promise<void> {
+  const { Workbook } = await loadExcelJs()
   try {
-    const workbook = new ExcelJS.Workbook()
+    const workbook = new Workbook()
     await workbook.xlsx.load(Uint8Array.from(bytes).buffer)
     workbook.worksheets.forEach((worksheet, index) => {
       const sheet = sheets[index]
@@ -98,11 +125,16 @@ function importExcelJsStyle(cell: ExcelJS.Cell): WorkbookCellStyle | undefined {
   return Object.keys(style).length ? style : undefined
 }
 
-export function importDelimitedWorkbook(content: string, title: string): WorkbookDocument {
+export async function importDelimitedWorkbook(
+  content: string,
+  title: string,
+  fallbackTitle = "Workbook"
+): Promise<WorkbookDocument> {
+  const XLSX = await loadSheetJs()
   const binary = XLSX.read(content, { type: "string", raw: false, cellFormula: true })
   return {
     schemaVersion: WORKBOOK_SCHEMA_VERSION,
-    title: title.trim() || "Workbook",
+    title: title.trim() || fallbackTitle,
     sheets: binary.SheetNames.map((sheetName, index) =>
       importSheet(binary.Sheets[sheetName], sheetName, index)
     ),
@@ -112,7 +144,8 @@ export function importDelimitedWorkbook(content: string, title: string): Workboo
 }
 
 export async function exportWorkbookXlsx(document: WorkbookDocument): Promise<Uint8Array> {
-  const workbook = new ExcelJS.Workbook()
+  const { Workbook } = await loadExcelJs()
+  const workbook = new Workbook()
   workbook.creator = "Cognia Office"
   workbook.created = new Date()
   workbook.modified = new Date()
@@ -142,7 +175,7 @@ function importSheet(sheet: WorkSheet, title: string, index: number): WorkbookSh
     id: `sheet-${index + 1}`,
     title,
     cells,
-    merges: (sheet["!merges"] ?? []).map((range) => XLSX.utils.encode_range(range)),
+    merges: (sheet["!merges"] ?? []).map((range) => encodeRange(range)),
     ...(sheet["!autofilter"]?.ref ? { filter: sheet["!autofilter"].ref } : {}),
     ...(freeze ? { freeze: { rows: freeze.ySplit ?? 0, columns: freeze.xSplit ?? 0 } } : {}),
     ...(sheet["!rows"]
@@ -161,12 +194,7 @@ function importSheet(sheet: WorkSheet, title: string, index: number): WorkbookSh
           columnDimensions: Object.fromEntries(
             sheet["!cols"].flatMap((column, columnIndex) =>
               column && (column.wch !== undefined || column.hidden !== undefined)
-                ? [
-                    [
-                      XLSX.utils.encode_col(columnIndex),
-                      { width: column.wch, hidden: column.hidden },
-                    ],
-                  ]
+                ? [[encodeColumn(columnIndex), { width: column.wch, hidden: column.hidden }]]
                 : []
             )
           ),
@@ -264,7 +292,7 @@ function importCellValue(value: unknown): string | number | boolean {
   return String(value)
 }
 
-function importStyle(cell: XLSX.CellObject): WorkbookCellStyle | undefined {
+function importStyle(cell: CellObject): WorkbookCellStyle | undefined {
   const source = cell.s as unknown as
     | {
         font?: { bold?: boolean; italic?: boolean; color?: { rgb?: string } }
@@ -306,64 +334,46 @@ const DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 
 async function detectUnsupportedFeatures(bytes: Uint8Array, workbook: WorkBook): Promise<string[]> {
   const warnings: string[] = []
-  if (workbook.vbaraw)
-    warnings.push("Macros are present and will not be preserved when this workbook is exported.")
+  if (workbook.vbaraw) warnings.push(UNSUPPORTED_FEATURES.macros)
   try {
+    const JSZip = await loadJsZip()
     const zip = await JSZip.loadAsync(bytes)
     const paths = Object.keys(zip.files)
     const has = (prefix: string) => paths.some((path) => path.startsWith(prefix))
     if (has("xl/pivotTables/") || has("xl/pivotCache/") || has("xl/model/"))
-      warnings.push("Pivot tables are present and cannot be edited or preserved losslessly.")
-    if (has("xl/charts/") || has("xl/chartsheets/"))
-      warnings.push("Complex charts are present and cannot be edited or preserved losslessly.")
-    if (has("xl/externalLinks/"))
-      warnings.push("External workbook links are present and will not be preserved.")
-    if (has("xl/media/") || has("xl/drawings/"))
-      warnings.push("Embedded images or drawing shapes are present and will not be preserved.")
+      warnings.push(UNSUPPORTED_FEATURES.pivotTables)
+    if (has("xl/charts/") || has("xl/chartsheets/")) warnings.push(UNSUPPORTED_FEATURES.charts)
+    if (has("xl/externalLinks/")) warnings.push(UNSUPPORTED_FEATURES.externalLinks)
+    if (has("xl/media/") || has("xl/drawings/")) warnings.push(UNSUPPORTED_FEATURES.drawings)
     if (has("xl/comments") || has("xl/threadedComments/") || has("xl/persons/"))
-      warnings.push("Cell comments are present and will not be preserved.")
-    if (has("xl/tables/"))
-      warnings.push("Structured tables are present and will be flattened to plain cell ranges.")
+      warnings.push(UNSUPPORTED_FEATURES.comments)
+    if (has("xl/tables/")) warnings.push(UNSUPPORTED_FEATURES.tables)
     if (has("xl/slicerCaches/") || has("xl/timelineCaches/"))
-      warnings.push("Slicers or timelines are present and will not be preserved.")
+      warnings.push(UNSUPPORTED_FEATURES.slicers)
     if (has("xl/queryTables/") || has("xl/connections"))
-      warnings.push("External data connections are present and will not be preserved.")
-    if (has("xl/ctrlProps/") || has("xl/activeX/"))
-      warnings.push("Form or ActiveX controls are present and will not be preserved.")
-    if (has("xl/vbaProject") && !workbook.vbaraw)
-      warnings.push("Macros are present and will not be preserved when this workbook is exported.")
+      warnings.push(UNSUPPORTED_FEATURES.connections)
+    if (has("xl/ctrlProps/") || has("xl/activeX/")) warnings.push(UNSUPPORTED_FEATURES.controls)
+    if (has("xl/vbaProject") && !workbook.vbaraw) warnings.push(UNSUPPORTED_FEATURES.macros)
 
     const sheetWarnings = await inspectWorksheetXml(zip, paths)
     warnings.push(...sheetWarnings)
   } catch {
-    warnings.push("The workbook package could not be inspected for unsupported OOXML features.")
+    warnings.push(UNSUPPORTED_FEATURES.uninspectable)
   }
   return warnings
 }
 
 /** Scan worksheet XML for cell-level features the model cannot round-trip. */
-async function inspectWorksheetXml(zip: JSZip, paths: string[]): Promise<string[]> {
+async function inspectWorksheetXml(zip: JSZipType, paths: string[]): Promise<string[]> {
   const checks: Array<{ pattern: RegExp; warning: string }> = [
     {
       pattern: /<conditionalFormatting[\s/>]/,
-      warning: "Conditional formatting is present and will not be preserved.",
+      warning: UNSUPPORTED_FEATURES.conditionalFormatting,
     },
-    {
-      pattern: /<dataValidation[\s/>]/,
-      warning: "Cell data validation rules are present and will not be preserved.",
-    },
-    {
-      pattern: /<hyperlink[\s/>]/,
-      warning: "Cell hyperlinks are present and will not be preserved.",
-    },
-    {
-      pattern: /<sheetProtection[\s/>]/,
-      warning: "Sheet protection is present and will not be preserved.",
-    },
-    {
-      pattern: /<legacyDrawing[\s/>]/,
-      warning: "Legacy comment drawings are present and will not be preserved.",
-    },
+    { pattern: /<dataValidation[\s/>]/, warning: UNSUPPORTED_FEATURES.dataValidation },
+    { pattern: /<hyperlink[\s/>]/, warning: UNSUPPORTED_FEATURES.hyperlinks },
+    { pattern: /<sheetProtection[\s/>]/, warning: UNSUPPORTED_FEATURES.sheetProtection },
+    { pattern: /<legacyDrawing[\s/>]/, warning: UNSUPPORTED_FEATURES.legacyDrawings },
   ]
   const found = new Set<string>()
   for (const path of paths) {

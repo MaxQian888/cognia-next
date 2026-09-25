@@ -12,43 +12,61 @@ import {
  * Imperative artifact renderer for `cognia-presentations/deck` artifacts. The
  * host owns the container and calls mount/update/dispose; every render
  * resolves labels through `t` so a locale switch restyles the chrome without
- * re-mounting. Chrome uses host design tokens (`var(--*)`); only the slide
+ * re-mounting, and keyboard focus returns to the same control after each
+ * re-render. Chrome uses host design tokens (`var(--*)`); only the slide
  * canvas carries deck theme colors, which are deck content.
  */
 export function createPresentationRenderer(
   t: PresentationTranslate,
-  onLocaleChange?: (handler: () => void) => () => void
+  onLocaleChange: (handler: () => void) => () => void
 ): ArtifactRenderer {
   return {
     name: t("renderer.name"),
     mount: (artifact, container) => {
       let active = 0
-      let deck = parsePresentation(artifact.content)
+      let deck: PresentationDeck | null = null
+      let parseError = ""
+      const load = (content: string) => {
+        try {
+          deck = parsePresentation(content)
+          parseError = ""
+        } catch (error) {
+          deck = null
+          parseError = error instanceof Error ? error.message : String(error)
+        }
+      }
       const render = () => {
+        const focusKey = activeFocusKey(container)
+        if (!deck) {
+          const alert = document.createElement("p")
+          alert.setAttribute("role", "alert")
+          alert.style.cssText = "margin:0;padding:16px;font-size:13px;color:var(--destructive)"
+          alert.textContent = t("preview.parseError", { error: parseError })
+          container.replaceChildren(alert)
+          return
+        }
         active = Math.min(Math.max(active, 0), Math.max(0, deck.slides.length - 1))
-        container.replaceChildren(
-          renderDeck(
-            deck,
-            active,
-            (index) => {
-              active = index
-              render()
-            },
-            t
-          )
-        )
+        container.replaceChildren(buildStyles(), renderDeck(deck, active, select, t))
+        restoreFocus(container, focusKey)
+      }
+      const select = (index: number, focusKey?: string) => {
+        if (!deck || index < 0 || index >= deck.slides.length) return
+        active = index
+        render()
+        if (focusKey) restoreFocus(container, focusKey)
       }
       // Chrome labels resolve through `t` at render time — re-render when the
       // host switches locale so a mounted artifact restyles without remount.
-      const disposeLocale = onLocaleChange?.(render)
+      const disposeLocale = onLocaleChange(render)
+      load(artifact.content)
       render()
       return {
         update: (updated) => {
-          deck = parsePresentation(updated.content)
+          load(updated.content)
           render()
         },
         dispose: () => {
-          disposeLocale?.()
+          disposeLocale()
           container.replaceChildren()
         },
       }
@@ -56,10 +74,39 @@ export function createPresentationRenderer(
   }
 }
 
+/** The `data-focus-key` of the focused control inside `container`, if any. */
+function activeFocusKey(container: HTMLElement): string | undefined {
+  const active = container.ownerDocument.activeElement
+  if (!(active instanceof HTMLElement) || !container.contains(active)) return undefined
+  return active.dataset.focusKey
+}
+
+/** Every render replaces the DOM; put keyboard focus back on the same control. */
+function restoreFocus(container: HTMLElement, key: string | undefined): void {
+  if (!key) return
+  const target = [...container.querySelectorAll<HTMLElement>("[data-focus-key]")].find(
+    (element) => element.dataset.focusKey === key
+  )
+  target?.focus({ preventScroll: true })
+}
+
+function buildStyles(): HTMLStyleElement {
+  const style = document.createElement("style")
+  style.textContent = `
+.cpres-thumb { flex:none; max-width:180px; min-height:28px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:5px 10px; border-radius:var(--radius); border:1px solid var(--border); background:var(--card); color:var(--muted-foreground); font:inherit; font-size:12px; cursor:pointer; transition:background-color .15s ease-out, border-color .15s ease-out; }
+.cpres-thumb[aria-pressed="true"] { border-color:var(--primary); background:var(--accent); color:var(--accent-foreground); font-weight:500; }
+.cpres-thumb:focus-visible, .cpres-canvas:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+@media (hover:hover) { .cpres-thumb[aria-pressed="false"]:hover { background:var(--accent); color:var(--accent-foreground); } }
+@media (pointer:coarse) { .cpres-thumb { min-height:36px; padding:8px 12px; } }
+@media (prefers-reduced-motion:reduce) { .cpres-thumb { transition:none; } }
+`
+  return style
+}
+
 function renderDeck(
   deck: PresentationDeck,
   active: number,
-  select: (index: number) => void,
+  select: (index: number, focusKey?: string) => void,
   t: PresentationTranslate
 ) {
   const root = document.createElement("section")
@@ -67,13 +114,15 @@ function renderDeck(
     "display:flex;flex-direction:column;gap:10px;min-height:100%;padding:12px;box-sizing:border-box;background:var(--background);color:var(--foreground)"
 
   const header = document.createElement("header")
-  header.style.cssText = "display:flex;align-items:baseline;justify-content:space-between;gap:12px"
+  header.style.cssText =
+    "display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-width:0"
   const title = document.createElement("h2")
   title.textContent = deck.title
   title.style.cssText =
-    "margin:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+    "margin:0;min-width:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
   const counter = document.createElement("span")
   counter.style.cssText = "flex:none;font-size:12px;color:var(--muted-foreground)"
+  counter.setAttribute("aria-live", "polite")
   counter.textContent = deck.slides.length
     ? t("preview.slideOf", { index: active + 1, total: deck.slides.length })
     : ""
@@ -122,23 +171,44 @@ function renderDeck(
   deck.slides.forEach((slide, index) => {
     const button = document.createElement("button")
     button.type = "button"
+    button.className = "cpres-thumb"
+    button.dataset.focusKey = `slide:${index}`
     button.textContent = `${index + 1}. ${slide.title}`
     button.title = t("preview.slideLabel", { index: index + 1, title: slide.title })
     button.setAttribute("aria-pressed", String(index === active))
-    button.style.cssText =
-      "flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);color:var(--muted-foreground);font-size:12px;cursor:pointer"
-    if (index === active)
-      button.style.cssText +=
-        ";border-color:var(--primary);background:var(--accent);color:var(--accent-foreground);font-weight:500"
     button.addEventListener("click", () => select(index))
     nav.appendChild(button)
   })
   root.appendChild(nav)
 
   const slide = deck.slides[active]
+  // A labelled group, not role="img": an img role would hide every text run,
+  // table cell, and image alt on the slide from assistive technology.
   const canvas = document.createElement("div")
-  canvas.setAttribute("role", "img")
-  canvas.setAttribute("aria-label", slide.title)
+  canvas.className = "cpres-canvas"
+  canvas.setAttribute("role", "group")
+  canvas.setAttribute("aria-roledescription", t("preview.slideRole"))
+  canvas.setAttribute(
+    "aria-label",
+    t("preview.slideLabel", { index: active + 1, title: slide.title })
+  )
+  canvas.tabIndex = 0
+  canvas.dataset.focusKey = "canvas"
+  canvas.addEventListener("keydown", (event) => {
+    const target =
+      event.key === "ArrowRight" || event.key === "PageDown"
+        ? active + 1
+        : event.key === "ArrowLeft" || event.key === "PageUp"
+          ? active - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? deck.slides.length - 1
+              : null
+    if (target === null) return
+    event.preventDefault()
+    select(target, "canvas")
+  })
   canvas.style.cssText =
     `position:relative;width:100%;aspect-ratio:${deck.width}/${deck.height};overflow:hidden;` +
     `container-type:size;border:1px solid var(--border);border-radius:var(--radius);` +

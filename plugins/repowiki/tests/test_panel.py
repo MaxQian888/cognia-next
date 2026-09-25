@@ -248,3 +248,37 @@ def test_a_partial_label_set_falls_back_per_key_rather_than_wholesale():
     components = _by_id(_panel(staleness=STALE, labels={"panel.rescan": "重新扫描"}))
     assert components["rescan"]["text"] == "重新扫描"
     assert components["stale"]["text"] == DEFAULT_LABELS["panel.outOfDateCount"].format(count=3)
+
+
+def test_a_running_rescan_keeps_the_button_but_disables_it_and_says_so():
+    components = _by_id(_panel(scanning=True))
+    rescan = components["rescan"]
+    # Offered even on a current, live wiki: the user just clicked it.
+    assert rescan["text"] == DEFAULT_LABELS["panel.scanning"]
+    assert rescan["loading"] is True
+    assert rescan["action"] == ACTION_RESCAN
+    assert components["header"]["children"][-1] == "rescan"
+
+
+def test_an_idle_rescan_button_is_not_loading():
+    components = _by_id(_panel(staleness=STALE))
+    assert "loading" not in components["rescan"]
+
+
+def test_a_failed_rescan_shows_why_under_a_translated_title_and_offers_it_again():
+    components = _by_id(
+        _panel(scan_error="clone refused", labels={"panel.scanFailed": "重新扫描失败"})
+    )
+    assert components["root"]["children"] == ["header", "scan-error", "body"]
+    alert = components["scan-error"]
+    assert alert["component"] == "Alert"
+    assert alert["variant"] == "error"
+    assert alert["title"] == "重新扫描失败"
+    # The reason is the scan's own output — relayed, not authored.
+    assert alert["message"] == "clone refused"
+    assert components["rescan"]["text"] == DEFAULT_LABELS["panel.rescan"]
+
+
+def test_the_scan_error_sits_above_the_partial_scan_banner():
+    components = _by_id(_panel(scan_error="boom", warnings=["w"]))
+    assert components["root"]["children"] == ["header", "scan-error", "warnings", "body"]

@@ -1,31 +1,21 @@
-/**
- * @jest-environment jsdom
- */
-
 import type { PluginContext } from "@cognia/plugin-sdk"
-// The git store double is gone entirely: the plugin reads the repo root
-// through `ctx.git.getRoot()` now, so the test supplies it on the context.
-jest.mock("@cognia/plugin-sdk/api/host-environment", () => ({
-  readHostCapabilities: jest.fn(() => ({ tauri: true })),
-}))
-
-import { readHostCapabilities } from "@cognia/plugin-sdk/api/host-environment"
-import { invoke } from "@tauri-apps/api/core"
+import manifestJson from "../plugin.json"
 import webClonePlugin, {
+  manifest,
   parseWebCloneArgs,
   resolveOutput,
   resolveInputPath,
   buildJob,
   runWebCloneCommand,
 } from "./index"
-import { interpolateWebCloneMessage } from "./i18n"
+import { englishWebCloneT, interpolateWebCloneMessage } from "./i18n"
 
-const mockCaps = jest.mocked(readHostCapabilities)
-const mockInvoke = jest.mocked(invoke)
+// The snapshot engine is the host's `web_clone` tool, reached through
+// `ctx.agent.invokeTool` — the plugin makes no native call of its own.
+const mockInvoke = jest.fn()
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockCaps.mockReturnValue({ tauri: true } as never)
 })
 
 describe("parseWebCloneArgs", () => {
@@ -148,11 +138,11 @@ describe("resolveOutput", () => {
   })
   it("throws when there is no workspace and no absolute path", () => {
     expect(() => resolveOutput(parseWebCloneArgs("https://x/"), null, "1")).toThrow(
-      /no open workspace/
+      /no open project/
     )
     // Explicit relative -o hits the same refusal on its own branch.
     expect(() => resolveOutput(parseWebCloneArgs("https://x/ -o rel"), null, "1")).toThrow(
-      /no open workspace/
+      /no open project/
     )
   })
   it("joins under a Windows-style root with its separator", () => {
@@ -204,7 +194,7 @@ describe("resolveInputPath", () => {
     expect(resolveInputPath("snapshots/site", "/repo")).toBe("/repo/snapshots/site")
     expect(resolveInputPath("/abs/snap", "/repo")).toBe("/abs/snap")
     expect(() => resolveInputPath("../outside", "/repo")).toThrow(/must stay inside/)
-    expect(() => resolveInputPath("snap", null)).toThrow(/no open workspace/)
+    expect(() => resolveInputPath("snap", null)).toThrow(/no open project/)
     expect(() => resolveInputPath("~/snaps", "/repo")).toThrow(/not expanded/)
     // "."-only input normalizes to the workspace root itself.
     expect(resolveInputPath("./", "/repo")).toBe("/repo")
@@ -377,7 +367,7 @@ describe("runWebCloneCommand", () => {
     const invoke = jest.fn()
     const r = await runWebCloneCommand("https://x/", deps(invoke, null))
     expect(r.ok).toBe(false)
-    expect(r.message).toMatch(/no open workspace/)
+    expect(r.message).toMatch(/no open project/)
     expect(invoke).not.toHaveBeenCalled()
   })
 
@@ -442,142 +432,247 @@ describe("runWebCloneCommand", () => {
   })
 })
 
-describe("plugin definition", () => {
-  const makeCtx = (i18n?: { registerTranslations: jest.Mock; t: jest.Mock }) =>
-    ({
-      pluginId: "cognia-web-clone",
-      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-      ui: { showToast: jest.fn() },
-      git: { getRoot: () => "/repo" },
-      i18n,
-    }) as unknown as PluginContext
+describe("runWebCloneCommand cancellation and progress", () => {
+  const ok = {
+    envelope: {
+      ok: true,
+      result: { output: "/repo/snapshots/x-7", mode: "bundle", stats: { total: 1, fetched: 1 } },
+    },
+  }
 
-  it("declares /web-clone and declines foreign commands via the returned hook", async () => {
-    const hooks = (await webClonePlugin.activate(makeCtx())) as unknown as {
-      onCommand?: (c: string, a: string[]) => Promise<unknown>
-    }
-    // Declared, not imperatively registered — the manager owns registration
-    // (namespacing, conflict detection, palette entry) and teardown.
-    const commands = (webClonePlugin.manifest as { commands?: Array<{ id: string }> }).commands
-    expect(commands?.map((c) => c.id)).toEqual(["web-clone"])
-    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
-    expect(webClonePlugin.deactivate).toBeUndefined()
-    expect(commands).toHaveLength(1)
+  it("does not start when the command was already cancelled", async () => {
+    const invoke = jest.fn().mockResolvedValue(ok)
+    const controller = new AbortController()
+    controller.abort()
+    const r = await runWebCloneCommand("https://x/", {
+      invoke,
+      rootDir: () => "/repo",
+      now: () => 7,
+      signal: controller.signal,
+    })
+    expect(r).toEqual({ ok: false, message: expect.stringMatching(/cancelled/) })
+    expect(invoke).not.toHaveBeenCalled()
   })
 
-  it("registers en + zh-CN translations at activate", async () => {
-    const i18n = { registerTranslations: jest.fn(), t: jest.fn((k: string) => k) }
-    await webClonePlugin.activate(makeCtx(i18n))
-    expect(i18n.registerTranslations).toHaveBeenCalledWith("en", expect.any(Object))
-    expect(i18n.registerTranslations).toHaveBeenCalledWith("zh-CN", expect.any(Object))
+  it("stops waiting as soon as the signal aborts mid-run, and says a started run may finish", async () => {
+    const controller = new AbortController()
+    const invoke = jest.fn(() => new Promise<typeof ok>(() => undefined))
+    const pending = runWebCloneCommand("https://x/", {
+      invoke,
+      rootDir: () => "/repo",
+      now: () => 7,
+      signal: controller.signal,
+    })
+    controller.abort()
+    const r = await pending
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/cancelled/)
+    expect(r.message).toMatch(/keeps running/)
+  })
+
+  it("reports progress at the start and the end of a run", async () => {
+    const reportProgress = jest.fn()
+    const invoke = jest.fn().mockResolvedValue(ok)
+    await runWebCloneCommand("https://x.test/", {
+      invoke,
+      rootDir: () => "/repo",
+      now: () => 7,
+      reportProgress,
+    })
+    expect(reportProgress).toHaveBeenNthCalledWith(1, 0, "Snapshotting https://x.test/…")
+    expect(reportProgress).toHaveBeenLastCalledWith(1)
+  })
+
+  it("labels convert progress separately and skips the final tick on failure", async () => {
+    const reportProgress = jest.fn()
+    const invoke = jest.fn().mockResolvedValue({ envelope: { ok: false, error: { message: "x" } } })
+    await runWebCloneCommand("--convert ./snap", {
+      invoke,
+      rootDir: () => "/repo",
+      now: () => 7,
+      reportProgress,
+    })
+    expect(reportProgress).toHaveBeenCalledTimes(1)
+    expect(reportProgress).toHaveBeenCalledWith(0, "Converting the saved snapshot…")
+  })
+
+  it("reports a failing root lookup instead of mistaking it for a missing project", async () => {
+    const invoke = jest.fn()
+    const r = await runWebCloneCommand("https://x/", {
+      invoke,
+      rootDir: () => {
+        throw new Error("Permission denied: filesystem:read")
+      },
+      now: () => 7,
+    })
+    expect(r).toEqual({ ok: false, message: "web-clone: Permission denied: filesystem:read" })
+    expect(invoke).not.toHaveBeenCalled()
+  })
+})
+
+describe("plugin definition", () => {
+  type Locale = keyof typeof manifestJson.i18n.locales
+  const translator =
+    (locale: Locale) => (key: string, params?: Record<string, string | number | boolean>) =>
+      interpolateWebCloneMessage(
+        (manifestJson.i18n.locales[locale] as Record<string, string>)[key] ?? key,
+        params
+      )
+
+  const makeCtx = (opts: { tauri?: boolean; root?: string | null; locale?: Locale } = {}) =>
+    ({
+      pluginId: "cognia-web-clone",
+      logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      ui: { showToast: jest.fn() },
+      capabilities: { tauri: opts.tauri ?? true, mobile: false },
+      workspace: {
+        getActiveRoot: jest.fn(() => (opts.root === null ? undefined : (opts.root ?? "/repo"))),
+      },
+      i18n: { t: jest.fn(translator(opts.locale ?? "en")) },
+      agent: { invokeTool: mockInvoke },
+    }) as unknown as PluginContext
+
+  type Hooks = {
+    onCommand: (
+      c: string,
+      a: string[],
+      context?: { signal?: AbortSignal; reportProgress?: jest.Mock }
+    ) => Promise<boolean | { handled: boolean; message?: string }>
+  }
+
+  it("adopts plugin.json itself as the manifest, strings included", () => {
+    expect(manifest).toEqual(manifestJson)
+    expect(webClonePlugin.manifest).toBe(manifest)
+    const en = Object.keys(manifestJson.i18n.locales.en)
+    expect(Object.keys(manifestJson.i18n.locales["zh-CN"]).sort()).toEqual([...en].sort())
+    // Reads the active project root, not the Source-Control repo.
+    expect(manifestJson.permissions).toContain("filesystem:read")
+    expect(manifestJson.permissions).not.toContain("git:read")
+    // The host's web_clone egress clamp refuses a plugin with no networkAccess,
+    // and the user names the target page at runtime.
+    expect(manifestJson.networkAccess.allowedDomains).toEqual(["*"])
+  })
+
+  it("declares /web-clone and declines foreign commands via the returned hook", async () => {
+    const hooks = (await webClonePlugin.activate(makeCtx())) as unknown as Hooks
+    // Declared, not imperatively registered — the manager owns registration
+    // (namespacing, conflict detection, palette entry) and teardown.
+    expect(manifestJson.commands.map((c) => c.id)).toEqual(["web-clone"])
+    expect(await hooks.onCommand("not-mine", [])).toBe(false)
+    expect(webClonePlugin.deactivate).toBeUndefined()
   })
 
   it("returns the result message through the structured contract + a success toast", async () => {
     mockInvoke.mockResolvedValue({
+      ok: true,
       envelope: {
         ok: true,
         result: { output: "/repo/snapshots/x-7", mode: "bundle", stats: { total: 2, fetched: 2 } },
       },
     } as never)
     const ctx = makeCtx()
-    const hooks = (await webClonePlugin.activate(ctx)) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ handled: boolean; message?: string }>
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as {
+      handled: boolean
+      message?: string
     }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
     expect(result).toMatchObject({ handled: true })
     expect(result.message).toMatch(/Snapshot written to/)
-    expect(ctx.ui?.showToast).toHaveBeenCalledWith(result.message, "success")
+    expect(ctx.ui.showToast).toHaveBeenCalledWith(result.message, "success")
+  })
+
+  it("resolves relative output under the active project root", async () => {
+    mockInvoke.mockResolvedValue({
+      ok: true,
+      envelope: { ok: true, result: { output: "/proj/out", mode: "bundle", stats: {} } },
+    } as never)
+    const ctx = makeCtx({ root: "/proj" })
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as Hooks
+    await hooks.onCommand("web-clone", ["https://x/", "-o", "out"])
+    expect(ctx.workspace.getActiveRoot).toHaveBeenCalled()
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "web_clone",
+      expect.objectContaining({
+        job: expect.objectContaining({ options: expect.objectContaining({ output: "/proj/out" }) }),
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("hands the command's signal and progress sink to the run", async () => {
+    mockInvoke.mockResolvedValue({
+      ok: true,
+      envelope: { ok: true, result: { output: "/repo/o", mode: "bundle", stats: {} } },
+    } as never)
+    const hooks = (await webClonePlugin.activate(makeCtx())) as unknown as Hooks
+    const reportProgress = jest.fn()
+    await hooks.onCommand("web-clone", ["https://x/"], { reportProgress })
+    expect(reportProgress).toHaveBeenLastCalledWith(1)
+
+    const controller = new AbortController()
+    controller.abort()
+    mockInvoke.mockClear()
+    const cancelled = (await hooks.onCommand("web-clone", ["https://x/"], {
+      signal: controller.signal,
+    })) as { message?: string }
+    expect(cancelled.message).toMatch(/cancelled/)
+    expect(mockInvoke).not.toHaveBeenCalled()
   })
 
   it("surfaces failures as an error toast and a handled result message", async () => {
     mockInvoke.mockResolvedValue({
+      ok: true,
       envelope: { ok: false, error: { name: "E", message: "boom" } },
     } as never)
     const ctx = makeCtx()
-    const hooks = (await webClonePlugin.activate(ctx)) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ handled: boolean; message?: string }>
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as {
+      handled: boolean
+      message?: string
     }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
     expect(result.handled).toBe(true)
     expect(result.message).toMatch(/web-clone failed: boom/)
-    expect(ctx.ui?.showToast).toHaveBeenCalledWith(result.message, "error")
+    expect(ctx.ui.showToast).toHaveBeenCalledWith(result.message, "error")
   })
 
-  it("refuses off the desktop with a handled result, not an invoke", async () => {
-    mockCaps.mockReturnValue({ tauri: false } as never)
+  it("reports a host refusal of the web_clone tool as a failure", async () => {
+    mockInvoke.mockResolvedValue({
+      ok: false,
+      code: "blocked",
+      error: "web_clone to x is outside plugin cognia-web-clone's networkAccess.allowedDomains.",
+    })
     const ctx = makeCtx()
-    const hooks = (await webClonePlugin.activate(ctx)) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ handled: boolean; message?: string }>
-    }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
-    expect(result.handled).toBe(true)
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as { message?: string }
+    expect(result.message).toMatch(/outside plugin cognia-web-clone/)
+    expect(ctx.ui.showToast).toHaveBeenCalledWith(result.message, "error")
+  })
+
+  it("refuses off the desktop (ctx.capabilities) with a handled result, not an invoke", async () => {
+    const ctx = makeCtx({ tauri: false })
+    const hooks = (await webClonePlugin.activate(ctx)) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as { message?: string }
     expect(result.message).toMatch(/desktop app/)
     expect(mockInvoke).not.toHaveBeenCalled()
-    expect(ctx.ui?.showToast).toHaveBeenCalledWith(expect.any(String), "error")
+    expect(ctx.ui.showToast).toHaveBeenCalledWith(expect.any(String), "error")
   })
 
-  it("leaves unknown {params} literal in the fallback interpolator", () => {
-    expect(interpolateWebCloneMessage("x {a} {b}", { a: 1 })).toBe("x 1 {b}")
-    expect(interpolateWebCloneMessage("x {a}", undefined)).toBe("x {a}")
-  })
-
-  it("falls back to English when the host returns the bare key (message missing)", async () => {
-    mockCaps.mockReturnValue({ tauri: false } as never)
-    // Host i18n exists but the key isn't in its registry — `t` returns the key
-    // itself, and the wrapper must fall back to the embedded en table.
-    const i18n = { registerTranslations: jest.fn(), t: jest.fn((k: string) => k) }
-    const hooks = (await webClonePlugin.activate(makeCtx(i18n))) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ message?: string }>
-    }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
-    expect(result.message).toBe("web-clone runs only on the desktop app.")
-  })
-
-  it("degrades a git:read denial to the no-workspace hint", async () => {
-    mockCaps.mockReturnValue({ tauri: true } as never)
-    // The guarded ctx.git.getRoot() throws PermissionError when the manifest
-    // lacks `git:read` — the command must still answer coherently.
-    const denied = {
-      pluginId: "cognia-web-clone",
-      git: {
-        getRoot: () => {
-          throw new Error("Permission denied: git:read")
-        },
-      },
-    } as unknown as PluginContext
-    const hooks = (await webClonePlugin.activate(denied)) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ handled: boolean; message?: string }>
-    }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
-    expect(result.handled).toBe(true)
-    expect(result.message).toMatch(/no open workspace/)
+  it("reports the missing project before invoking anything", async () => {
+    const hooks = (await webClonePlugin.activate(makeCtx({ root: null }))) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as { message?: string }
+    expect(result.message).toMatch(/no open project/)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
-  it("tolerates a ctx missing logger/ui/git/i18n entirely", async () => {
-    mockCaps.mockReturnValue({ tauri: true } as never)
-    const bare = { pluginId: "cognia-web-clone" } as unknown as PluginContext
-    const hooks = (await webClonePlugin.activate(bare)) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ handled: boolean; message?: string }>
-    }
-    // No ctx.git → rootDir null → the command reports the missing workspace
-    // before ever invoking, and the absent ui toast hook must not crash.
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
-    expect(result.handled).toBe(true)
-    expect(result.message).toMatch(/no open workspace/)
-    expect(mockInvoke).not.toHaveBeenCalled()
+  it("translates through ctx.i18n.t in the user's locale", async () => {
+    const hooks = (await webClonePlugin.activate(
+      makeCtx({ tauri: false, locale: "zh-CN" })
+    )) as unknown as Hooks
+    const result = (await hooks.onCommand("web-clone", ["https://x/"])) as { message?: string }
+    expect(result.message).toBe(manifestJson.i18n.locales["zh-CN"].desktopOnly)
   })
 
-  it("prefers host i18n translations over the embedded English table", async () => {
-    mockCaps.mockReturnValue({ tauri: false } as never)
-    const i18n = {
-      registerTranslations: jest.fn(),
-      t: jest.fn((k: string) => (k === "desktopOnly" ? "仅桌面端" : k)),
-    }
-    const hooks = (await webClonePlugin.activate(makeCtx(i18n))) as unknown as {
-      onCommand: (c: string, a: string[]) => Promise<{ message?: string }>
-    }
-    const result = await hooks.onCommand("web-clone", ["https://x/"])
-    expect(result.message).toBe("仅桌面端")
+  it("defaults the exported helpers to the English bundle from plugin.json", () => {
+    expect(englishWebCloneT("desktopOnly")).toBe(manifestJson.i18n.locales.en.desktopOnly)
   })
 })

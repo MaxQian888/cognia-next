@@ -1,8 +1,10 @@
 {
   "id": "cognia-web-clone",
   "name": "Web Clone",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Snapshot a live web page \u2014 HTML + all CSS/JS/image/font assets \u2014 into a self-contained file or a directory bundle, with optional component extraction and framework codegen; --convert re-runs extraction/codegen on a saved snapshot. Adds a /web-clone slash command.",
+  "description": "Snapshot a live web page — HTML + all CSS/JS/image/font assets — into a self-contained file or a directory bundle, with optional component extraction and framework codegen; --convert re-runs extraction/codegen on a saved snapshot. Adds a /web-clone slash command.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["commands"],
   "main": "src/index.ts",
@@ -12,7 +14,11 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch", "filesystem:write", "git:read"],
+  "permissions": ["network:fetch", "filesystem:read", "filesystem:write"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "/web-clone snapshots whatever page the user names, so the host is only known at runtime. The snapshot runs through the host's web_clone tool, which keeps the SSRF private-host guard and the user's opt-in for it."
+  },
   "activationEvents": ["startup", "onCommand:web-clone"],
   "runtimeCompatibility": {
     "browser": {
@@ -37,7 +43,60 @@
       "id": "web-clone",
       "name": "/web-clone",
       "description": "Snapshot a web page into the workspace.",
+      "descriptionKey": "commands.web-clone.description",
       "icon": "Download"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Web Clone",
+        "manifest.description": "Snapshot a live web page — HTML + all CSS/JS/image/font assets — into a self-contained file or a directory bundle, with optional component extraction and framework codegen; --convert re-runs extraction/codegen on a saved snapshot. Adds a /web-clone slash command.",
+        "intro": "Snapshot a web page to disk.",
+        "usage": "Usage: /web-clone <url> | --convert <path> [-o <output>] [-m single|bundle] [--framework vue|react|angular|svelte|jquery] [--framework-hint vue|react|svelte] [--extract-components] [--drafts] [--extract-shared] [--no-typescript] [--max-assets <n>] [--concurrency <n>] [--timeout <ms>] [--max-file-size <bytes>] [--pretty] [--private]",
+        "desktopOnly": "web-clone runs only on the desktop app.",
+        "noWorkspace": "no open project — open a project folder, or pass an absolute path",
+        "outsideWorkspace": "\"{path}\" must stay inside the workspace — remove the \"..\" segments, or pass a full absolute path",
+        "tildeUnsupported": "\"{path}\" uses ~ which is not expanded — pass a full absolute path",
+        "missingValue": "missing a value for {flag}",
+        "unknownFlag": "unknown flag {flag}",
+        "unexpectedArg": "unexpected argument \"{value}\"",
+        "invalidValue": "invalid value \"{value}\" for {flag}",
+        "convertWithUrl": "--convert re-runs codegen on a saved snapshot — drop the URL argument",
+        "progressSnapshot": "Snapshotting {url}…",
+        "progressConvert": "Converting the saved snapshot…",
+        "cancelled": "web-clone was cancelled. A snapshot already started keeps running until its own timeout; its output may still appear in the target folder.",
+        "resultSnapshot": "Snapshot written to {output} ({fetched}/{total} assets fetched).",
+        "resultSnapshotIssues": "Snapshot written to {output} ({fetched}/{total} fetched, {failed} failed, {skipped} skipped).",
+        "resultConvert": "Converted snapshot written to {output}.",
+        "failed": "web-clone failed: {error}",
+        "failedPrivateHost": "web-clone failed: {error} Pass --private to allow private/loopback targets.",
+        "commands.web-clone.description": "Snapshot a web page into the workspace."
+      },
+      "zh-CN": {
+        "manifest.name": "网页克隆",
+        "manifest.description": "把在线网页——HTML 及所有 CSS/JS/图片/字体资源——保存为独立文件或目录包，可选组件提取与框架代码生成；--convert 可对已保存的快照重新提取和生成。提供 /web-clone 命令。",
+        "intro": "将网页快照保存到磁盘。",
+        "usage": "用法：/web-clone <url> | --convert <路径> [-o <输出>] [-m single|bundle] [--framework vue|react|angular|svelte|jquery] [--framework-hint vue|react|svelte] [--extract-components] [--drafts] [--extract-shared] [--no-typescript] [--max-assets <n>] [--concurrency <n>] [--timeout <毫秒>] [--max-file-size <字节>] [--pretty] [--private]",
+        "desktopOnly": "web-clone 仅可在桌面端运行。",
+        "noWorkspace": "没有打开的项目——请打开一个项目文件夹，或传入绝对路径",
+        "outsideWorkspace": "\"{path}\" 必须位于工作区内——请去掉 \"..\" 段，或传入完整绝对路径",
+        "tildeUnsupported": "\"{path}\" 中的 ~ 不会被展开——请传入完整绝对路径",
+        "missingValue": "{flag} 缺少参数值",
+        "unknownFlag": "未知参数 {flag}",
+        "unexpectedArg": "无法识别的参数 \"{value}\"",
+        "invalidValue": "{flag} 的值 \"{value}\" 无效",
+        "convertWithUrl": "--convert 用于对已保存的快照重跑 codegen——请去掉 URL 参数",
+        "progressSnapshot": "正在为 {url} 创建快照…",
+        "progressConvert": "正在转换已保存的快照…",
+        "cancelled": "web-clone 已取消。已开始的快照会继续运行直到自身超时，其输出仍可能出现在目标文件夹中。",
+        "resultSnapshot": "快照已写入 {output}（已获取 {fetched}/{total} 个资源）。",
+        "resultSnapshotIssues": "快照已写入 {output}（{fetched}/{total} 成功，{failed} 失败，{skipped} 跳过）。",
+        "resultConvert": "转换结果已写入 {output}。",
+        "failed": "web-clone 失败：{error}",
+        "failedPrivateHost": "web-clone 失败：{error}（可加 --private 允许内网/本机地址）",
+        "commands.web-clone.description": "把网页快照保存到工作区。"
+      }
+    }
+  }
 }

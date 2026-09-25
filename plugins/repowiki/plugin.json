@@ -1,10 +1,12 @@
 {
   "id": "cognia-repowiki",
   "name": "RepoWiki",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Generate a browsable wiki for any repository — dependency graph, per-module analysis, Mermaid diagrams, and cited search.",
+  "descriptionKey": "manifest.description",
   "type": "python",
-  "capabilities": ["tools", "context-panel", "modes"],
+  "capabilities": ["python", "context-panel", "modes"],
   "pythonMain": "main.py",
   "contextPanels": [
     {
@@ -70,6 +72,8 @@
   "i18n": {
     "locales": {
       "en": {
+        "manifest.name": "RepoWiki",
+        "manifest.description": "Generate a browsable wiki for any repository — dependency graph, per-module analysis, Mermaid diagrams, and cited search.",
         "panel.reader": "RepoWiki",
         "panel.ask": "Ask the wiki",
         "mode.repowiki": "RepoWiki",
@@ -80,9 +84,13 @@
         "panel.freshnessUnknownReason": "Freshness unknown: {reason}",
         "panel.rescan": "Rescan",
         "panel.partialScan": "Partial scan",
-        "panel.snapshot": "Snapshot"
+        "panel.snapshot": "Snapshot",
+        "panel.scanning": "Scanning…",
+        "panel.scanFailed": "Rescan failed"
       },
       "zh-CN": {
+        "manifest.name": "RepoWiki",
+        "manifest.description": "为任意仓库生成可浏览的 Wiki——依赖图、按模块分析、Mermaid 图表与附引用的搜索。",
         "panel.reader": "仓库百科",
         "panel.ask": "向百科提问",
         "mode.repowiki": "仓库百科",
@@ -93,7 +101,9 @@
         "panel.freshnessUnknownReason": "无法判断是否最新：{reason}",
         "panel.rescan": "重新扫描",
         "panel.partialScan": "扫描不完整",
-        "panel.snapshot": "快照"
+        "panel.snapshot": "快照",
+        "panel.scanning": "正在扫描…",
+        "panel.scanFailed": "重新扫描失败"
       }
     }
   },
@@ -107,8 +117,12 @@
     "extension:ui",
     "project:read",
     "session:read",
-    "editor:write"
+    "editor:write",
+    "network:fetch"
   ],
+  "permissionJustifications": {
+    "network:fetch": "Every scan resolves its source through ctx.workspace.acquire, which requires network:fetch; a git URL or owner/repo is cloned there under the host's guard rails (https only, host allow-list, shallow, timed, size-bounded). Model calls go through the host (agent:control), never directly."
+  },
   "configSchema": {
     "type": "object",
     "properties": {

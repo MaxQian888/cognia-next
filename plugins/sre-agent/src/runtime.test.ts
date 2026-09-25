@@ -3,7 +3,7 @@ import { createSreRuntime, defaultIncidentWindow } from "./runtime"
 import type { SreLogProvider } from "./providers/types"
 
 function runtime() {
-  return createSreRuntime({ pluginId: "sre-agent" })
+  return createSreRuntime()
 }
 
 describe("SRE mock runtime", () => {
@@ -237,8 +237,27 @@ describe("SRE runtime over the provider seam", () => {
     expect(runtime().provider()).toEqual({
       id: "qwen-timeout-fallback",
       kind: "fixture",
+      demo: true,
       coverage: WINDOW,
     })
+    expect(createSreRuntime(stubProvider()).provider().demo).toBe(false)
+  })
+
+  it("stamps every demo-corpus result so it cannot pass for live evidence", async () => {
+    // The fixture backend is dormant as a real source; this is one of the
+    // three places that say so (see `SreProviderKind`).
+    const demo = runtime()
+    for (const result of [
+      await demo.queryLogs(QUERY),
+      await demo.queryTrace({ environment: "prod", traceId: FIXTURE_TRACE_ID }),
+      await demo.queryMetrics(QUERY),
+    ]) {
+      expect(result.dataSource).toBe("demo-corpus")
+      expect(result.notice).toMatch(/^DEMO CORPUS: .*not from the user's systems/)
+    }
+    const live = await createSreRuntime(stubProvider()).queryLogs(QUERY)
+    expect(live.dataSource).toBe("live")
+    expect(live).not.toHaveProperty("notice")
   })
 
   it("names the fixture corpus only when a fixture answered", async () => {
@@ -246,9 +265,7 @@ describe("SRE runtime over the provider seam", () => {
       provider: "qwen-timeout-fallback",
       fixture: "qwen-timeout-fallback",
     })
-    const remote = await createSreRuntime({ pluginId: "sre-agent" }, stubProvider()).queryLogs(
-      QUERY
-    )
+    const remote = await createSreRuntime(stubProvider()).queryLogs(QUERY)
     expect(remote.provider).toBe("stub")
     expect(remote).not.toHaveProperty("fixture")
   })
@@ -276,7 +293,6 @@ describe("SRE runtime over the provider seam", () => {
 
   it("redacts a template that carried an unmasked secret", async () => {
     const rt = createSreRuntime(
-      { pluginId: "sre-agent" },
       stubProvider({
         patterns: async () => [
           {
@@ -301,7 +317,6 @@ describe("SRE runtime over the provider seam", () => {
   it("drops sensitive facet fields before the backend sees them", async () => {
     const seen: string[][] = []
     const rt = createSreRuntime(
-      { pluginId: "sre-agent" },
       stubProvider({
         facets: async (_filter, fields) => {
           seen.push([...fields])
@@ -318,7 +333,6 @@ describe("SRE runtime over the provider seam", () => {
 
   it("redacts facet values and source descriptions on the way out", async () => {
     const rt = createSreRuntime(
-      { pluginId: "sre-agent" },
       stubProvider({
         facets: async () => [
           { field: "peer", total: 2, values: [{ value: "10.1.2.3", count: 2 }] },

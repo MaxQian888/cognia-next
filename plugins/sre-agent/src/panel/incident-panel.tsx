@@ -1,15 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeftIcon, ShieldAlertIcon } from "lucide-react"
+import { ArrowLeftIcon, ShieldAlertIcon, XIcon } from "lucide-react"
 import { Button } from "@cognia/plugin-ui"
 import { ScrollArea } from "@cognia/plugin-ui"
 import { useElementWidth } from "@cognia/plugin-sdk/api/context-panel"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
 import { cn } from "@cognia/plugin-ui"
 import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
-import type { PluginDexieAPI } from "@cognia/plugin-sdk"
 import { FIXTURE_ALERT } from "../fixtures"
-import type { SreRuntime } from "../runtime"
 import { defaultIncidentWindow } from "../runtime"
 import {
   applyTimeline,
@@ -23,6 +22,7 @@ import {
   dismissIncident,
   reopenIncident,
   type SreIncident,
+  type SreIncidentSeverity,
 } from "../incident/model"
 import {
   deleteIncident as deleteIncidentRow,
@@ -36,13 +36,15 @@ import {
   subscribeSreToolActivity,
   type SreToolActivity,
 } from "../panel-runtime"
-import { PANEL_ID } from "../ids"
-import { usePluginT } from "../use-plugin-t"
+import { PANEL_ID, PLUGIN_ID } from "../ids"
 import { ConclusionCard } from "./conclusion-card"
-import { IncidentList } from "./incident-list"
+import { CreateIncidentForm, type CreateIncidentValues } from "./create-incident-form"
+import { DemoNotice } from "./demo-notice"
+import { IncidentList, SeverityLabel } from "./incident-list"
 import { LogLens } from "./log-lens"
 import { PhaseStrip } from "./phase-strip"
 import { TimelineTable } from "./timeline-table"
+import { TOUCH_BUTTON, TOUCH_ICON_BUTTON } from "./touch"
 
 /**
  * Width at which the panel stops being a column and starts being a workbench.
@@ -54,6 +56,23 @@ import { TimelineTable } from "./timeline-table"
 const WIDE_AT_PX = 560
 
 const nowIso = () => new Date().toISOString()
+
+const SEVERITIES: readonly SreIncidentSeverity[] = ["info", "warning", "critical"]
+
+/** The demo alert's severity, checked rather than cast: it is JSON. */
+export function alertSeverity(value: unknown): SreIncidentSeverity {
+  return SEVERITIES.includes(value as SreIncidentSeverity)
+    ? (value as SreIncidentSeverity)
+    : "warning"
+}
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/** A failed action, named by the i18n key that describes it. */
+interface PanelError {
+  key: "error.save" | "error.delete" | "error.pin" | "error.validate"
+  message: string
+}
 
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -123,9 +142,11 @@ export function latestAgentTimeline(
  * Incidents are held in component state and written through to the plugin's
  * private Dexie table. Not `useLiveQuery`: this panel is the only writer, so a
  * live query would buy nothing but a second source of truth to keep in step.
+ * Every write, query and delete reports its failure in the panel; nothing is
+ * fire-and-forget.
  */
 export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const bridge = peekSrePanelRuntime()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const width = useElementWidth(containerRef)
@@ -139,7 +160,11 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
    * effect from having to write state synchronously just to unblock the render.
    */
   const [rowsLoaded, setRowsLoaded] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [actionError, setActionError] = useState<PanelError | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
   const [validating, setValidating] = useState(false)
   const [activity, setActivity] = useState<readonly SreToolActivity[]>(() =>
     recentSreToolActivity()
@@ -153,22 +178,23 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
   useEffect(() => {
     if (!dexie) return
     let cancelled = false
-    const load = sessionId
-      ? listIncidentsForSession(dexie as PluginDexieAPI, sessionId)
-      : listIncidents(dexie as PluginDexieAPI)
+    const load = sessionId ? listIncidentsForSession(dexie, sessionId) : listIncidents(dexie)
     load
       .then((rows) => {
         if (cancelled) return
         setIncidents(rows)
+        setLoadError(null)
         setRowsLoaded(true)
       })
-      .catch(() => {
-        if (!cancelled) setRowsLoaded(true)
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setLoadError(messageOf(error))
+        setRowsLoaded(true)
       })
     return () => {
       cancelled = true
     }
-  }, [dexie, sessionId])
+  }, [dexie, sessionId, loadAttempt])
 
   const loaded = !dexie || rowsLoaded
 
@@ -181,7 +207,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
   // way to learn an investigation is running is to open the panel and look —
   // which is the one thing a person on call does not have time to do.
   useEffect(() => {
-    bridge?.contextPanels?.setBadge(PANEL_ID, openCount)
+    bridge?.contextPanels.setBadge(PANEL_ID, openCount)
   }, [bridge, openCount])
 
   /** Write one incident through to state and, when there is one, to storage. */
@@ -191,7 +217,10 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
         const without = previous.filter((entry) => entry.id !== incident.id)
         return [...without, incident].sort(compareIncidents)
       })
-      if (dexie) void putIncident(dexie, incident)
+      if (!dexie) return
+      putIncident(dexie, incident).catch((error: unknown) =>
+        setActionError({ key: "error.save", message: messageOf(error) })
+      )
     },
     [dexie]
   )
@@ -209,34 +238,43 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
     [save]
   )
 
-  const createHere = useCallback(() => {
-    if (!runtime) return
-    openIncident(
-      createIncident({
-        id: newId(),
-        now: nowIso(),
-        title: t("panel.title"),
-        environment: "prod",
-        window: defaultIncidentWindow(),
-        sessionId,
-      })
-    )
-  }, [openIncident, runtime, sessionId, t])
+  const createFromForm = useCallback(
+    (values: CreateIncidentValues) => {
+      if (!runtime) return
+      setCreating(false)
+      openIncident(
+        createIncident({
+          id: newId(),
+          now: nowIso(),
+          title: values.title,
+          environment: values.environment,
+          window: defaultIncidentWindow({ coverage: () => runtime.provider().coverage }),
+          sessionId,
+        })
+      )
+    },
+    [openIncident, runtime, sessionId]
+  )
 
-  const createFromAlert = useCallback(() => {
-    openIncident(
-      createIncidentFromAlert(
+  /**
+   * The walk-through incident: opened from the alert that ships with the demo
+   * corpus, and tagged `demo` so the list never shows it as a real page.
+   */
+  const openDemoIncident = useCallback(() => {
+    openIncident({
+      ...createIncidentFromAlert(
         {
           time: FIXTURE_ALERT.time,
-          severity: FIXTURE_ALERT.severity as "info" | "warning" | "critical",
+          severity: alertSeverity(FIXTURE_ALERT.severity),
           service: FIXTURE_ALERT.service,
           message: FIXTURE_ALERT.message,
           provider: FIXTURE_ALERT.provider,
           model: FIXTURE_ALERT.model,
         },
         { id: newId(), now: nowIso(), environment: "prod", sessionId }
-      )
-    )
+      ),
+      demo: true,
+    })
   }, [openIncident, sessionId])
 
   /**
@@ -250,12 +288,16 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
   const pin = useCallback(
     async (incident: SreIncident, evidenceIds: string[]) => {
       if (!runtime || evidenceIds.length === 0) return
-      const result = await runtime.queryLogs({
-        environment: incident.environment,
-        ...incident.window,
-        ids: evidenceIds,
-      })
-      save(attachEvidence(incident, result.evidenceIds, nowIso()))
+      try {
+        const result = await runtime.queryLogs({
+          environment: incident.environment,
+          ...incident.window,
+          ids: evidenceIds,
+        })
+        save(attachEvidence(incident, result.evidenceIds, nowIso()))
+      } catch (error) {
+        setActionError({ key: "error.pin", message: messageOf(error) })
+      }
     },
     [runtime, save]
   )
@@ -263,17 +305,21 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
   const pinAgentEvidence = useCallback(
     async (incident: SreIncident) => {
       if (!runtime) return
-      const { logIds, pooledIds } = unpinnedAgentEvidenceByKind(activity, incident)
-      const resolved = runtime.resolveEvidenceIds(pooledIds)
-      const logs =
-        logIds.length > 0
-          ? await runtime.queryLogs({
-              environment: incident.environment,
-              ...incident.window,
-              ids: logIds,
-            })
-          : null
-      save(attachEvidence(incident, [...(logs?.evidenceIds ?? []), ...resolved], nowIso()))
+      try {
+        const { logIds, pooledIds } = unpinnedAgentEvidenceByKind(activity, incident)
+        const resolved = runtime.resolveEvidenceIds(pooledIds)
+        const logs =
+          logIds.length > 0
+            ? await runtime.queryLogs({
+                environment: incident.environment,
+                ...incident.window,
+                ids: logIds,
+              })
+            : null
+        save(attachEvidence(incident, [...(logs?.evidenceIds ?? []), ...resolved], nowIso()))
+      } catch (error) {
+        setActionError({ key: "error.pin", message: messageOf(error) })
+      }
     },
     [activity, runtime, save]
   )
@@ -289,6 +335,8 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
           recommendations: incident.recommendations,
         })
         save(applyValidation(incident, result, nowIso()))
+      } catch (error) {
+        setActionError({ key: "error.validate", message: messageOf(error) })
       } finally {
         setValidating(false)
       }
@@ -296,20 +344,34 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
     [runtime, save]
   )
 
+  /** Delete after an explicit confirmation; the row stays if the delete fails. */
   const remove = useCallback(
-    (incident: SreIncident) => {
-      setIncidents((previous) => previous.filter((entry) => entry.id !== incident.id))
-      setSelectedId(null)
-      if (dexie) void deleteIncidentRow(dexie, incident.id)
+    async (incident: SreIncident) => {
+      if (!bridge) return
+      const confirmed = await bridge.confirm({
+        title: t("delete.confirmTitle"),
+        message: t("delete.confirmBody", { title: incident.title }),
+        confirmLabel: t("delete.confirm"),
+        cancelLabel: t("delete.cancel"),
+        variant: "destructive",
+      })
+      if (!confirmed) return
+      try {
+        if (dexie) await deleteIncidentRow(dexie, incident.id)
+        setIncidents((previous) => previous.filter((entry) => entry.id !== incident.id))
+        setSelectedId(null)
+      } catch (error) {
+        setActionError({ key: "error.delete", message: messageOf(error) })
+      }
     },
-    [dexie]
+    [bridge, dexie, t]
   )
 
   if (!runtime) {
     return (
       <div className="space-y-2 p-4" data-testid="sre-unavailable">
         <div className="flex items-center gap-2">
-          <ShieldAlertIcon className="size-4 text-destructive" />
+          <ShieldAlertIcon aria-hidden className="size-4 text-destructive" />
           <h2 className="text-sm font-medium">{t("panel.unavailable.title")}</h2>
         </div>
         <p className="text-xs text-muted-foreground">{t("panel.unavailable.body")}</p>
@@ -340,41 +402,112 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-6"
+            className={TOUCH_ICON_BUTTON}
             aria-label={t("panel.back")}
             onClick={() => setSelectedId(null)}
           >
             <ArrowLeftIcon className="size-3.5" />
           </Button>
         ) : null}
-        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-          {selected ? selected.title : t("panel.title")}
-        </h2>
-        {selected ? (
-          <span className="shrink-0 rounded-pill bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {t(`severity.${selected.severity}`)}
-          </span>
-        ) : null}
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{t("panel.title")}</h2>
+        {selected ? <SeverityLabel severity={selected.severity} /> : null}
       </header>
 
+      <DemoNotice runtime={runtime} />
+
       {!dexie ? (
-        <p className="shrink-0 border-b px-3 py-1.5 text-xs text-amber-700 dark:text-amber-500">
+        <p className="shrink-0 border-b px-3 py-1.5 text-xs text-warning">
           {t("panel.storageUnavailable")}
         </p>
       ) : null}
 
+      {loadError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 text-xs text-destructive"
+          data-testid="sre-load-error"
+        >
+          <span className="min-w-0 flex-1 break-words">
+            {t("error.load", { message: loadError })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className={TOUCH_BUTTON}
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
+            {t("error.retry")}
+          </Button>
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-start gap-2 border-b px-3 py-2 text-xs text-destructive"
+          data-testid="sre-action-error"
+        >
+          <span className="min-w-0 flex-1 break-words">
+            {t(actionError.key, { message: actionError.message })}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={TOUCH_ICON_BUTTON}
+            aria-label={t("error.dismiss")}
+            onClick={() => setActionError(null)}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
+
       <ScrollArea className="min-h-0 flex-1">
         {!selected ? (
-          <IncidentList
-            incidents={incidents}
-            runtime={runtime as SreRuntime}
-            canCreate={Boolean(sessionId)}
-            onOpen={setSelectedId}
-            onCreate={createHere}
-            onCreateFromAlert={createFromAlert}
-          />
+          <>
+            {creating ? (
+              <CreateIncidentForm onSubmit={createFromForm} onCancel={() => setCreating(false)} />
+            ) : null}
+            <IncidentList
+              incidents={incidents}
+              runtime={runtime}
+              canCreate={Boolean(sessionId)}
+              onOpen={setSelectedId}
+              onNew={() => setCreating(true)}
+              onOpenDemo={openDemoIncident}
+            />
+          </>
         ) : (
           <div className={cn("space-y-4 p-3", wide && "px-4")} data-wide={wide || undefined}>
+            <section className="space-y-1.5" data-testid="sre-incident-details">
+              <h3 className="text-sm font-medium break-words" data-testid="sre-incident-title">
+                {selected.title}
+              </h3>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-muted-foreground">{t("detail.environment")}</dt>
+                <dd className="break-words">{selected.environment}</dd>
+                <dt className="text-muted-foreground">{t("detail.window")}</dt>
+                <dd className="font-mono break-all">
+                  {t("detail.windowRange", {
+                    start: selected.window.startTime,
+                    end: selected.window.endTime,
+                  })}
+                </dd>
+                {selected.services.length > 0 ? (
+                  <>
+                    <dt className="text-muted-foreground">{t("detail.services")}</dt>
+                    <dd className="break-words">{selected.services.join(" · ")}</dd>
+                  </>
+                ) : null}
+                {selected.alert ? (
+                  <>
+                    <dt className="text-muted-foreground">{t("detail.alert")}</dt>
+                    <dd className="break-words">{selected.alert.message}</dd>
+                  </>
+                ) : null}
+              </dl>
+            </section>
+
             <PhaseStrip incident={selected} compact={!wide} />
 
             <div className="flex flex-wrap items-center gap-2">
@@ -385,7 +518,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 px-2 text-xs"
+                  className={TOUCH_BUTTON}
                   onClick={() => void pinAgentEvidence(selected)}
                   data-testid="sre-pin-agent-evidence"
                 >
@@ -396,7 +529,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
 
             <LogLens
               incident={selected}
-              runtime={runtime as SreRuntime}
+              runtime={runtime}
               wide={wide}
               enabled={active}
               pinnedIds={selected.evidenceIds}
@@ -412,7 +545,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-6 px-2 text-xs"
+                className={TOUCH_BUTTON}
                 onClick={() => {
                   const withTimeline = applyTimeline(selected, agentTimelineDraft, nowIso())
                   save(applyValidation(withTimeline, agentTimelineValidation, nowIso()))
@@ -432,7 +565,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
               {selected.status === "unconfirmed" ? (
                 <Button
                   size="sm"
-                  className="h-6 px-2 text-xs"
+                  className={TOUCH_BUTTON}
                   onClick={() => save(confirmIncident(selected, nowIso()))}
                   data-testid="sre-confirm"
                 >
@@ -443,7 +576,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 px-2 text-xs"
+                  className={TOUCH_BUTTON}
                   onClick={() => save(dismissIncident(selected, nowIso()))}
                   data-testid="sre-dismiss"
                 >
@@ -453,7 +586,7 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-6 px-2 text-xs"
+                  className={TOUCH_BUTTON}
                   onClick={() => save(reopenIncident(selected, nowIso()))}
                   data-testid="sre-reopen"
                 >
@@ -463,8 +596,8 @@ export function IncidentPanel({ resource, active }: ContextPanelRenderProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 px-2 text-xs text-muted-foreground"
-                onClick={() => remove(selected)}
+                className={cn(TOUCH_BUTTON, "text-destructive")}
+                onClick={() => void remove(selected)}
                 data-testid="sre-delete"
               >
                 {t("actions.delete")}

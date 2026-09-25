@@ -21,15 +21,22 @@
  * gate and the audit ledger all apply. The manifest declares `network:fetch`
  * (fetch + download both ride that grant) and `agent:control` (invokeTool +
  * tool-enabled runs).
+ *
+ * Settings (`userAgent`, `downloadDirectory`) are read from the per-call
+ * `callCtx.config`, never from `ctx.config`: the latter is a snapshot taken at
+ * activation and would ignore a change the user made since.
  */
 
 import {
   defineContextProvider,
+  definePlugin,
+  definePluginManifest,
+  definePluginTool,
   wrapUntrustedContent,
   type PluginContext,
-  type PluginDefinition,
   type PluginToolContext,
 } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
 /** How `web_fetch` should present the response body. */
 type FetchFormat = "auto" | "text" | "raw"
@@ -54,19 +61,29 @@ interface FetchArgs {
   offset?: number
 }
 
-interface ResearchArgs {
-  query: string
-  urls?: string[]
+/**
+ * `web_research` fetches up to this many seed URLs. Each read is a distilled
+ * `web_fetch`; beyond a handful the corpus is truncated to `CORPUS_MAX_CHARS`
+ * anyway, so more URLs only spend time and rate-limit budget.
+ */
+export const RESEARCH_MAX_URLS = 10
+/** Seed pages read at once — small, so one call cannot saturate the rate limiter. */
+export const RESEARCH_FETCH_CONCURRENCY = 3
+/** Page reads plus a streamed, tool-enabled summarization run. */
+export const WEB_RESEARCH_TIMEOUT_MS = 300_000
+/** Large files stream through the Rust gateway; 30 s is far too short for them. */
+export const WEB_DOWNLOAD_TIMEOUT_MS = 300_000
+const PAGE_MAX_BYTES = 20_000
+const CORPUS_MAX_CHARS = 60_000
+
+type ToolFailure = { ok: false; error: string }
+
+function failure(error: string): ToolFailure {
+  return { ok: false, error }
 }
 
-interface DownloadArgs {
-  url: string
-  filename?: string
-  /**
-   * Subfolder inside the plugin's data directory (desktop). Relative only —
-   * absolute paths and `..` segments are rejected, never resolved.
-   */
-  directory?: string
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 function basenameFromUrl(url: string): string {
@@ -84,7 +101,7 @@ function basenameFromUrl(url: string): string {
  * filenames are attacker-adjacent input: `../`, absolute paths and separator
  * tricks all collapse to the basename, control characters are stripped.
  */
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   const base = name.split(/[/\\]/).filter(Boolean).pop() ?? ""
   // Strip C0 controls + DEL — filenames must be printable path segments.
   const clean = base.replace(/[\x00-\x1f\x7f]/g, "").trim()
@@ -96,7 +113,9 @@ function sanitizeFilename(name: string): string {
  * empty segments and `..` are all rejected with an explicit error rather than
  * silently rewritten — the model sees exactly why the call was refused.
  */
-function sanitizeSubdir(raw: string): { ok: true; dir: string } | { ok: false; error: string } {
+export function sanitizeSubdir(
+  raw: string
+): { ok: true; dir: string } | { ok: false; error: string } {
   const trimmed = raw.trim()
   if (!trimmed) return { ok: false, error: "directory is empty" }
   if (trimmed.startsWith("/") || trimmed.startsWith("\\") || /^[A-Za-z]:/.test(trimmed)) {
@@ -116,10 +135,37 @@ function sanitizeSubdir(raw: string): { ok: true; dir: string } | { ok: false; e
   return { ok: true, dir: parts.join("/") }
 }
 
-function pickConfig(ctx: PluginContext, key: string, fallback: string): string {
-  const cfg = (ctx.config as Record<string, unknown> | undefined) ?? {}
-  const value = cfg[key]
-  return typeof value === "string" && value.length > 0 ? value : fallback
+/** A non-empty string setting from THIS call's config snapshot, else `fallback`. */
+function callSetting(callCtx: PluginToolContext, key: string, fallback: string): string {
+  const value = callCtx.config?.[key]
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
+/**
+ * Map `items` through `fn` with at most `limit` in flight, keeping input order.
+ * `shouldStop` is checked before each new item starts, so a cancelled call or
+ * a run-wide refusal stops launching further work.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+  shouldStop: () => boolean = () => false
+): Promise<Array<R | undefined>> {
+  const results: Array<R | undefined> = new Array(items.length).fill(undefined)
+  let next = 0
+  const worker = async () => {
+    while (next < items.length && !shouldStop()) {
+      const index = next++
+      results[index] = await fn(items[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker))
+  return results
 }
 
 /**
@@ -128,56 +174,52 @@ function pickConfig(ctx: PluginContext, key: string, fallback: string): string {
  * Goes through `ctx.agent.invokeTool` rather than the shared core directly:
  * that is the one door where the Settings kill switch, the SSRF guard, the
  * outbound rate limiter, the PII gate and this plugin's own
- * `networkAccess` clamp all run. Reaching into the core skipped every one of
- * them and forced this helper to re-implement the kill switch by hand.
+ * `networkAccess` clamp all run.
  *
- * The `userAgent` plugin setting rides in as a header, which is exactly how
- * the core applied it (an explicit `args.headers` entry still wins). The tool
- * call's session/message/signal context is forwarded so the call bills the
- * right session on multi-session hosts and honours cancellation.
+ * The `userAgent` setting rides in as a header (an explicit `args.headers`
+ * entry still wins). The tool call's session/message/signal context is
+ * forwarded so the call bills the right session on multi-session hosts and
+ * honours cancellation.
  */
 async function webFetch(
   args: FetchArgs,
   ctx: PluginContext,
-  callCtx?: PluginToolContext
+  callCtx: PluginToolContext
 ): Promise<unknown> {
-  if (!ctx.agent?.invokeTool) {
-    return { ok: false as const, error: "host does not expose the Agent SDK (invokeTool)" }
-  }
-  const userAgent = pickConfig(ctx, "userAgent", "")
+  const userAgent = callSetting(callCtx, "userAgent", "")
   const headers: Record<string, string> = { ...(args.headers ?? {}) }
   if (userAgent && !headers["User-Agent"]) headers["User-Agent"] = userAgent
   return ctx.agent.invokeTool(
     "web_fetch",
     { ...args, headers },
     {
-      ...(callCtx?.signal ? { signal: callCtx.signal } : {}),
-      ...(callCtx?.sessionId ? { sessionId: callCtx.sessionId } : {}),
-      ...(callCtx?.messageId ? { messageId: callCtx.messageId } : {}),
+      ...(callCtx.signal ? { signal: callCtx.signal } : {}),
+      ...(callCtx.sessionId ? { sessionId: callCtx.sessionId } : {}),
+      ...(callCtx.messageId ? { messageId: callCtx.messageId } : {}),
     }
   )
 }
 
-async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unknown> {
-  if (!args.url || typeof args.url !== "string") {
-    return { ok: false as const, error: "url is required" }
-  }
+async function webDownload(
+  args: Record<string, unknown>,
+  ctx: PluginContext,
+  callCtx: PluginToolContext
+): Promise<unknown> {
+  const url = optionalString(args.url)?.trim()
+  if (!url) return failure("url is required")
   // The mobile WebView has no download manager: the anchor the browser
   // fallback synthesises is a dead click. Refuse explicitly so the model
   // learns the file was NOT saved instead of reporting a phantom success.
   if (ctx.capabilities.mobile) {
-    return {
-      ok: false as const,
-      error: "web_download cannot save files from the mobile shell",
-    }
+    return failure("web_download cannot save files from the mobile shell")
   }
 
-  const filename = sanitizeFilename(args.filename ?? basenameFromUrl(args.url))
-  const rawDir = args.directory ?? pickConfig(ctx, "downloadDirectory", "")
+  const filename = sanitizeFilename(optionalString(args.filename) ?? basenameFromUrl(url))
+  const rawDir = optionalString(args.directory) ?? callSetting(callCtx, "downloadDirectory", "")
   let dir = ""
   if (rawDir) {
     const scoped = sanitizeSubdir(rawDir)
-    if (!scoped.ok) return { ok: false as const, error: scoped.error }
+    if (!scoped.ok) return failure(scoped.error)
     dir = scoped.dir
   }
   const destPath = dir ? `${dir}/${filename}` : filename
@@ -186,11 +228,8 @@ async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unkn
     // `ctx.network.download`, not a manual `fetch` + `fs.writeFile`: the Rust
     // gateway streams the body as real BYTES into `<plugin>/data/<destPath>`
     // (`resolve_scoped` rejects traversal server-side), while the browser
-    // fallback lands in the user's download folder. The old path fetched the
-    // body as an `arraybuffer` — a type the gateway returns as a decoded
-    // STRING — and wrote the result through `@tauri-apps/plugin-fs`, which
-    // produced a 0-byte file outside every audited permission.
-    const res = await ctx.network.download(args.url, destPath)
+    // fallback lands in the user's download folder.
+    const res = await ctx.network.download(url, destPath)
     return {
       ok: true as const,
       path: res.path,
@@ -201,19 +240,29 @@ async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unkn
         : ("browser-download" as const),
     }
   } catch (err) {
-    return {
-      ok: false as const,
-      error: err instanceof Error ? err.message : String(err),
-    }
+    return failure(errorMessage(err))
   }
 }
 
+interface FetchedPage {
+  ok?: boolean
+  code?: string
+  error?: string
+  text?: string
+  body?: string
+}
+
+type PageOutcome =
+  | { kind: "ok"; url: string; body: string }
+  | { kind: "failed"; url: string; error: string }
+  | { kind: "disabled"; error: string }
+
 /**
- * `web_research` — a dogfood of the plugin Agent SDK (ADR-0026 §Agent-SDK).
- * Exercises all four new surfaces in one real path:
+ * `web_research` — a dogfood of the plugin Agent SDK (ADR-0026 §Agent-SDK):
  *   1. Shared `web_fetch` core via `invokeTool` — gather source text without
  *      registering another `web_fetch` tool or duplicating its
- *      SSRF/extraction/cache policy.
+ *      SSRF/extraction/cache policy. Seed pages are read in parallel, at most
+ *      `RESEARCH_FETCH_CONCURRENCY` at a time.
  *   2. `ctx.agent.runStreamed` — summarize the corpus as a live event stream.
  *   3. `outputFormat` — structured `{ summary, sources[] }` JSON output.
  *   4. PII redaction — applied by the host to every plugin run, so this tool
@@ -224,61 +273,85 @@ async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unkn
  * sidecar it degrades to the text channel and `toolsAvailable` reports false.
  */
 async function webResearch(
-  args: ResearchArgs,
+  args: Record<string, unknown>,
   ctx: PluginContext,
-  callCtx?: PluginToolContext
+  callCtx: PluginToolContext
 ): Promise<unknown> {
   const query = typeof args.query === "string" ? args.query.trim() : ""
-  if (!query) {
-    return { ok: false as const, error: "query is required" }
+  if (!query) return failure("query is required")
+  if (args.urls !== undefined && !Array.isArray(args.urls)) {
+    return failure("urls must be an array of URL strings")
   }
-  const agent = ctx.agent
-  if (!agent?.runStreamed) {
-    return { ok: false as const, error: "host does not expose the Agent SDK (runStreamed)" }
+  const urls = Array.from(
+    new Set(
+      ((args.urls as unknown[] | undefined) ?? [])
+        .filter((u): u is string => typeof u === "string")
+        .map((u) => u.trim())
+        .filter(Boolean)
+    )
+  )
+  if (urls.length > RESEARCH_MAX_URLS) {
+    return failure(
+      `web_research reads at most ${RESEARCH_MAX_URLS} seed URLs per call (got ${urls.length}); pass the most relevant ones — the run can fetch follow-up pages itself`
+    )
   }
+
+  const signal = callCtx.signal
+  const cancelled = () => failure("web_research was cancelled")
+  if (signal?.aborted) return cancelled()
 
   // 1. Gather source text through the same first-class fetch core, distilled
   //    per-source against the query so long pages collapse to the relevant
   //    part instead of filling the corpus with boilerplate.
-  const urls = Array.isArray(args.urls) ? args.urls.filter((u) => typeof u === "string") : []
+  let disabledError: string | null = null
+  const outcomes = await mapWithConcurrency<string, PageOutcome>(
+    urls,
+    RESEARCH_FETCH_CONCURRENCY,
+    async (url) => {
+      try {
+        const fetched = (await webFetch(
+          { url, maxBytes: PAGE_MAX_BYTES, prompt: query },
+          ctx,
+          callCtx
+        )) as FetchedPage | undefined
+        // The kill switch is about the whole run, not this one URL: gathering
+        // empty bodies from every source would answer from nothing and hide why.
+        if (fetched?.code === "web-disabled") {
+          disabledError = fetched.error ?? "Web tools are disabled in Settings."
+          return { kind: "disabled", error: disabledError }
+        }
+        const body =
+          typeof fetched?.text === "string"
+            ? fetched.text
+            : typeof fetched?.body === "string"
+              ? fetched.body
+              : ""
+        if (fetched?.ok === false || !body) {
+          return { kind: "failed", url, error: fetched?.error ?? "no readable content" }
+        }
+        return { kind: "ok", url, body }
+      } catch (err) {
+        const message = errorMessage(err)
+        ctx.logger.warn(`web_research: fetch failed for ${url}: ${message}`)
+        return { kind: "failed", url, error: message }
+      }
+    },
+    () => disabledError !== null || signal?.aborted === true
+  )
+  if (disabledError !== null) return failure(disabledError)
+  if (signal?.aborted) return cancelled()
+
   const gathered: Array<{ url: string; body: string }> = []
   const failed: Array<{ url: string; error: string }> = []
-  for (const url of urls) {
-    try {
-      const fetched = (await webFetch({ url, maxBytes: 20_000, prompt: query }, ctx, callCtx)) as {
-        ok?: boolean
-        code?: string
-        error?: string
-        text?: string
-        body?: string
-      }
-      // The kill switch is about the whole run, not this one URL: gathering
-      // empty bodies from every source would answer from nothing and hide why.
-      if (fetched?.code === "web-disabled") {
-        return { ok: false as const, error: fetched.error ?? "Web tools are disabled in Settings." }
-      }
-      const body =
-        typeof fetched?.text === "string"
-          ? fetched.text
-          : typeof fetched?.body === "string"
-            ? fetched.body
-            : ""
-      if (fetched?.ok === false || !body) {
-        failed.push({ url, error: fetched?.error ?? "no readable content" })
-        continue
-      }
-      gathered.push({ url, body })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      ctx.logger?.warn?.(`web_research: fetch failed for ${url}: ${message}`)
-      failed.push({ url, error: message })
-    }
+  for (const outcome of outcomes) {
+    if (outcome?.kind === "ok") gathered.push({ url: outcome.url, body: outcome.body })
+    else if (outcome?.kind === "failed") failed.push({ url: outcome.url, error: outcome.error })
   }
 
   const corpus = gathered
     .map((g) => `# ${g.url}\n${g.body}`)
     .join("\n\n")
-    .slice(0, 60_000)
+    .slice(0, CORPUS_MAX_CHARS)
   // The fetch core moved its banner to a payload-level `untrustedNotice` that
   // this tool does not forward, so the frame has to be re-applied here: every
   // byte of `corpus` is attacker-controlled page text going into a tool-enabled
@@ -290,7 +363,7 @@ async function webResearch(
   // 2-4. Summarize as a structured, PII-gated, streaming run. `toolsEnabled`
   // + `allowedTools` are a pair — without the former the run lands on the
   // text channel and the allowlist silently does nothing.
-  const run = agent.runStreamed(prompt, {
+  const run = ctx.agent.runStreamed(prompt, {
     appendSystem: "You are a precise research summarizer. Cite the source URLs you used.",
     toolsEnabled: true,
     allowedTools: ["web_fetch"],
@@ -324,37 +397,33 @@ async function webResearch(
     ],
     // Package A — onStop lifecycle hook (observability).
     hooks: {
-      onStop: (info) => ctx.logger?.info?.(`web_research finished on the ${info.channel} channel`),
+      onStop: (info) => ctx.logger.debug(`web_research finished on the ${info.channel} channel`),
     },
     // Package F — emit a per-run trace span.
     trace: true,
-    ...(callCtx?.signal ? { abortSignal: callCtx.signal } : {}),
+    ...(signal ? { abortSignal: signal } : {}),
   })
 
-  // Surface streamed deltas to the plugin log (best-effort) — a hiccup while
-  // draining the delta stream must not abort an otherwise-fine run; the
-  // authoritative outcome comes from `run.result` below.
+  // Drain the event stream. Deltas go to the DEBUG log only — at info level a
+  // long summary flooded the plugin log one token at a time. A hiccup while
+  // draining must not abort an otherwise-fine run; the authoritative outcome
+  // comes from `run.result` below.
   try {
     for await (const event of run) {
-      if (event.type === "text-delta") ctx.logger?.info?.(event.delta)
+      if (event.type === "text-delta") ctx.logger.debug(event.delta)
     }
   } catch (err) {
-    ctx.logger?.warn?.(
-      `web_research stream logging error: ${err instanceof Error ? err.message : String(err)}`
-    )
+    ctx.logger.warn(`web_research stream error: ${errorMessage(err)}`)
   }
 
-  // `run.result` rejects on guardrail tripwires, the outbound PII gate and
-  // provider failures — collapse those into the same `{ ok:false }` envelope
-  // every other failure path in this plugin returns.
+  // `run.result` rejects on guardrail tripwires, the outbound PII gate,
+  // cancellation and provider failures — collapse those into the same
+  // `{ ok:false }` envelope every other failure path in this plugin returns.
   let result
   try {
     result = await run.result
   } catch (err) {
-    return {
-      ok: false as const,
-      error: err instanceof Error ? err.message : String(err),
-    }
+    return signal?.aborted ? cancelled() : failure(errorMessage(err))
   }
 
   return {
@@ -372,50 +441,22 @@ async function webResearch(
   }
 }
 
-const definition: PluginDefinition = {
-  manifest: {
-    id: "cognia-web-tools",
-    name: "Web Tools",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools", "configuration"],
-    main: "src/index.ts",
-  } as never,
-  activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("web-tools activated")
+export const WEB_TOOL_NAMES = ["web_download", "web_research"] as const
 
-    if (!ctx.agent) {
-      ctx.logger?.warn?.(
-        "web-tools: host does not expose the Agent SDK — web_download and web_research are unavailable"
-      )
-      return
-    }
-
-    // Package E — register an ambient context provider so every agent run this
-    // plugin starts knows the web tools are available without re-stating it.
-    ctx.agent.context?.registerProvider?.(
-      defineContextProvider({
-        id: "web-tools:availability",
-        name: "Web tools availability",
-        // Speaks only for THIS plugin's tools. Whether the host's promoted
-        // web_search / web_fetch can run is the host's own answer — it owns the
-        // settings, and a plugin narrating them had to read the renderer store
-        // to do it, which is both a layering break and a second copy of a
-        // verdict that can drift from the one the tools actually enforce.
-        provide: () =>
-          "web_download saves a URL to disk; web_research summarizes one or more URLs into a cited answer.",
-      })
-    )
-
-    ctx.agent.registerTool?.({
+function buildTools(ctx: PluginContext) {
+  return [
+    definePluginTool({
       name: "web_download",
-      pluginId: ctx.pluginId,
       definition: {
         name: "web_download",
         description:
           "Download a URL to disk. Desktop saves into the plugin's data folder (optional `directory` is a relative subfolder inside it); a plain browser triggers a download. Not supported on mobile.",
+        // Writes a file the user did not pick, from a URL the model chose.
+        requiresApproval: true,
+        timeoutMs: WEB_DOWNLOAD_TIMEOUT_MS,
         parametersSchema: {
           type: "object",
+          additionalProperties: false,
           properties: {
             url: { type: "string", description: "The URL to download." },
             filename: {
@@ -431,35 +472,55 @@ const definition: PluginDefinition = {
           },
           required: ["url"],
         },
-      } as never,
-      execute: (args) => webDownload((args ?? {}) as unknown as DownloadArgs, ctx),
-    })
-
-    ctx.agent.registerTool?.({
+      },
+      execute: (args, callCtx) => webDownload(args, ctx, callCtx),
+    }),
+    definePluginTool({
       name: "web_research",
-      pluginId: ctx.pluginId,
       definition: {
         name: "web_research",
-        description:
-          "Research a question over one or more URLs and return a structured summary with cited sources. May fetch follow-up pages.",
+        description: `Research a question over up to ${RESEARCH_MAX_URLS} URLs and return a structured summary with cited sources. May fetch follow-up pages.`,
+        timeoutMs: WEB_RESEARCH_TIMEOUT_MS,
         parametersSchema: {
           type: "object",
+          additionalProperties: false,
           properties: {
             query: { type: "string", description: "The research question." },
             urls: {
               type: "array",
               items: { type: "string" },
-              description: "Seed URLs to read first (optional — the run can fetch its own).",
+              maxItems: RESEARCH_MAX_URLS,
+              description: `Seed URLs to read first, at most ${RESEARCH_MAX_URLS} (optional — the run can fetch its own).`,
             },
           },
           required: ["query"],
         },
-      } as never,
-      execute: (args, callCtx) =>
-        webResearch((args ?? {}) as unknown as ResearchArgs, ctx, callCtx),
-    })
-  },
-  deactivate: async () => {},
+      },
+      execute: (args, callCtx) => webResearch(args, ctx, callCtx),
+    }),
+  ]
 }
 
-export default definition
+// plugin.json is the manifest source of truth; the tools register
+// imperatively in `activate`.
+export const manifest = definePluginManifest(manifestJson)
+
+export default definePlugin({
+  manifest,
+  activate: (ctx) => {
+    // Package E — register an ambient context provider so every agent run this
+    // plugin starts knows the web tools are available without re-stating it.
+    ctx.agent.context.registerProvider(
+      defineContextProvider({
+        id: "web-tools:availability",
+        name: "Web tools availability",
+        // Speaks only for THIS plugin's tools. Whether the host's promoted
+        // web_search / web_fetch can run is the host's own answer.
+        provide: () =>
+          "web_download saves a URL to disk; web_research summarizes one or more URLs into a cited answer.",
+      })
+    )
+    for (const tool of buildTools(ctx)) ctx.agent.registerTool(tool)
+    ctx.logger.info("web-tools activated")
+  },
+})

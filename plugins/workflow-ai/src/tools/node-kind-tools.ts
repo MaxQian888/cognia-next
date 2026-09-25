@@ -11,10 +11,9 @@
  * Both are read-only, never require approval.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi } from "../store-bridge"
 import type { NodeCatalogEntry } from "@cognia/plugin-sdk/api/workflow-template"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 interface ListedEntry {
   kind: string
@@ -38,11 +37,10 @@ function summarize(entry: NodeCatalogEntry): ListedEntry {
   }
 }
 
-export function buildNodeKindTools(): PluginTool[] {
+export function buildNodeKindTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_list_node_kinds",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_node_kinds",
         description:
@@ -85,10 +83,9 @@ export function buildNodeKindTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_describe_node_kind",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_describe_node_kind",
         description:
@@ -146,6 +143,6 @@ export function buildNodeKindTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

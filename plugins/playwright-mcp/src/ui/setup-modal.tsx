@@ -7,7 +7,8 @@
  * presets plus the two this plugin contributes), what each one requires, and
  * deep-links straight to the matching gallery card via the MCP panel's
  * `?preset=` param. The environment check runs `node --version` /
- * `npx --version` through the plugin's allowlisted `ctx.shell` — the single
+ * `npx --version` through the plugin's allowlisted `ctx.shell` (published to
+ * this component through `runtime.ts`, as is `ctx.ui.navigate`) — the single
  * failure mode every preset shares is a missing Node.js toolchain, so the
  * guide surfaces it instead of leaving users with a server that never
  * connects.
@@ -18,8 +19,8 @@
  */
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import type { PluginModalProps } from "@cognia/plugin-sdk"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
 import {
   Alert,
   AlertDescription,
@@ -31,8 +32,8 @@ import {
   DialogTitle,
   cn,
 } from "@cognia/plugin-ui"
-import { getPluginShell } from "../runtime"
-import { usePluginT } from "./use-plugin-t"
+import { PLUGIN_ID } from "../ids"
+import { getSetupModalHost } from "../runtime"
 
 interface ModeRow {
   /** Catalog id the CTA deep-links to — matches a gallery card one-for-one. */
@@ -87,15 +88,18 @@ type EnvState =
 
 const DOCS_URL = "https://github.com/microsoft/playwright-mcp"
 
+/** 36px tall on touch-first narrow screens, the compact 32px from `sm` up. */
+const TOUCH_BUTTON = "h-9 sm:h-8"
+
 export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
-  const t = usePluginT()
-  const router = useRouter()
+  const t = usePluginTranslations(PLUGIN_ID)
   const focus = typeof args?.focus === "string" ? args.focus : undefined
-  const shell = getPluginShell()
+  const host = getSetupModalHost()
+  const shell = host?.shell
   const [env, setEnv] = useState<EnvState>({ status: "idle" })
 
   const runEnvCheck = async (): Promise<void> => {
-    if (!shell?.execute) {
+    if (!shell) {
       setEnv({ status: "unavailable" })
       return
     }
@@ -124,7 +128,7 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
     // the card in the merged (static ⊕ plugin) catalog. Plugins cannot import
     // the host's `mcpHref` builder, so the route is spelled out here and
     // pinned by the modal test.
-    router.push(`/settings?section=mcp&preset=${encodeURIComponent(presetId)}`)
+    host?.navigate(`/settings?section=mcp&preset=${encodeURIComponent(presetId)}`)
   }
 
   return (
@@ -141,10 +145,11 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
       >
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium">{t("modal.env.label")}</span>
-          {shell?.execute ? (
+          {shell ? (
             <Button
               size="sm"
               variant="outline"
+              className={TOUCH_BUTTON}
               onClick={() => void runEnvCheck()}
               disabled={env.status === "running"}
               data-testid="env-check-run"
@@ -156,7 +161,7 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
         <p
           className={cn(
             "mt-2 text-xs",
-            env.status === "ready" && "text-emerald-600 dark:text-emerald-400",
+            env.status === "ready" && "text-success",
             (env.status === "missing" || env.status === "error") && "text-destructive",
             (env.status === "idle" || env.status === "unavailable" || env.status === "running") &&
               "text-muted-foreground"
@@ -166,7 +171,7 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
             ? t("modal.env.ready", { node: env.node, npx: env.npx })
             : env.status === "missing"
               ? t("modal.env.missing")
-              : env.status === "unavailable" || !shell?.execute
+              : env.status === "unavailable" || !shell
                 ? t("modal.env.unavailable")
                 : env.status === "error"
                   ? t("modal.env.error")
@@ -185,13 +190,14 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
             data-testid={`mode-${mode.presetId}`}
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <span aria-hidden>{mode.icon}</span>
-                <span className="text-sm font-medium">{mode.title}</span>
+                <span className="min-w-0 text-sm font-medium break-words">{mode.title}</span>
               </div>
               <Button
                 size="sm"
                 variant="secondary"
+                className={cn(TOUCH_BUTTON, "shrink-0")}
                 onClick={() => openInSettings(mode.presetId)}
                 data-testid={`setup-${mode.presetId}`}
               >
@@ -225,11 +231,11 @@ export function PlaywrightSetupModal({ onClose, args }: PluginModalProps) {
           href={DOCS_URL}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          className="inline-flex min-h-9 items-center text-xs text-muted-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none sm:min-h-0"
         >
           {t("modal.docs")}
         </a>
-        <Button variant="outline" size="sm" onClick={onClose}>
+        <Button variant="outline" size="sm" className={TOUCH_BUTTON} onClick={onClose}>
           {t("modal.close")}
         </Button>
       </DialogFooter>

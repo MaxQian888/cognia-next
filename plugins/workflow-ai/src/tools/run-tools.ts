@@ -19,11 +19,9 @@
  * instead of starting the run.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { TriggerEvent } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
-
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -58,13 +56,20 @@ function pickTrigger(workflowId: string, payload?: unknown): TriggerEvent {
   }
 }
 
-export function buildRunTools(): PluginTool[] {
+/**
+ * `wf_run_workflow` / `wf_run_from_step` wait for the run to finish. A
+ * registered tool without `timeoutMs` gets 30 s, which would sever any
+ * workflow with an agent turn, an approval, or a wait in it.
+ */
+export const WORKFLOW_RUN_TIMEOUT_MS = 600_000
+
+export function buildRunTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_run_workflow",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_run_workflow",
+        timeoutMs: WORKFLOW_RUN_TIMEOUT_MS,
         description:
           "Execute the entire workflow from its manual trigger right now. Requires user approval. Returns the runId, final status (succeeded / failed / cancelled), and final error (if failed). Validation errors short-circuit before any node runs. Pass an optional payload to populate $trigger.payload for the run. ALWAYS fill `workflowName` and `entrySummary` so the approval dialog can show the user what they are about to run.",
         category: "workflow",
@@ -135,12 +140,12 @@ export function buildRunTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_run_from_step",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_run_from_step",
+        timeoutMs: WORKFLOW_RUN_TIMEOUT_MS,
         description:
           "Execute the workflow starting from a specific step id. Every node strictly upstream of `stepId` is marked skipped. Useful for re-running just a failing branch. Requires user approval.",
         category: "workflow",
@@ -189,10 +194,9 @@ export function buildRunTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_cancel_run",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_cancel_run",
         description:
@@ -217,7 +221,7 @@ export function buildRunTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }
 

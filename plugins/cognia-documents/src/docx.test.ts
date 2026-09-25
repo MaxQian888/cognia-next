@@ -132,13 +132,14 @@ it("flags unsupported features without blocking clean documents", async () => {
   const bytes = await fixture({
     "word/document.xml": documentXml(`
       <w:p><w:hyperlink w:id="rId1"><w:r><w:t>link</w:t></w:r></w:hyperlink></w:p>
-      <w:p><w:r><w:instrText> TOC </w:instrText></w:r></w:p>`),
-    "word/footnotes.xml": "<w:footnotes/>",
+      <w:p><w:r><w:instrText> TOC </w:instrText></w:r></w:p>
+      <w:p><w:r><w:t>Cited</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p>`),
+    "word/footnotes.xml": `<w:footnotes ${W}><w:footnote w:type="separator" w:id="-1"/><w:footnote w:id="1"><w:p><w:r><w:t>Note</w:t></w:r></w:p></w:footnote></w:footnotes>`,
     "word/media/image1.png": "png",
   })
   const model = await importDocx(bytes, "rich.docx")
   expect(model.importedFeatures).toEqual(
-    expect.arrayContaining(["images", "hyperlinks", "footnotes", "fields (TOC, cross-references)"])
+    expect.arrayContaining(["images", "hyperlinks", "footnotes", "fields"])
   )
   // The link text still lands in the paragraph text.
   expect(model.blocks[0]).toMatchObject({ text: "link" })
@@ -186,6 +187,109 @@ it("exports a session transcript as a DOCX blob", async () => {
   expect(text).toContain("Design review")
   expect(text).toContain("Here is the plan.")
   expect(text).not.toContain("thinking")
+})
+
+it("does not flag the separator-only notes parts every DOCX writer emits", async () => {
+  const separators = (kind: "footnote" | "endnote") =>
+    `<w:${kind}s ${W}><w:${kind} w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:${kind}>` +
+    `<w:${kind} w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:${kind}></w:${kind}s>`
+  const bytes = await fixture({
+    "word/document.xml": documentXml(`<w:p><w:r><w:t>Plain</w:t></w:r></w:p>`),
+    "word/footnotes.xml": separators("footnote"),
+    "word/endnotes.xml": separators("endnote"),
+  })
+  expect((await importDocx(bytes, "plain.docx")).importedFeatures).toEqual([])
+})
+
+it("flags a real endnote even without a body reference", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(`<w:p><w:r><w:t>Body</w:t></w:r></w:p>`),
+    "word/endnotes.xml": `<w:endnotes ${W}><w:endnote w:id="2"><w:p><w:r><w:t>Orphan note</w:t></w:r></w:p></w:endnote></w:endnotes>`,
+  })
+  expect((await importDocx(bytes, "notes.docx")).importedFeatures).toEqual(["endnotes"])
+})
+
+it("round-trips its own export without false losses or a duplicated title", async () => {
+  const model = applyDocumentOperations(createDocument("Quarterly brief", "Opening line"), [
+    { op: "appendHeading", text: "Details", level: 2 },
+    { op: "addComment", blockId: "b1", text: "Check", author: "Jane" },
+  ])
+  const imported = await importDocx(await exportDocx(model), "brief.docx")
+  expect(imported.title).toBe("Quarterly brief")
+  expect(imported.importedFeatures).toEqual([])
+  expect(imported.blocks.map((block) => ("text" in block ? block.text : ""))).toEqual([
+    "Opening line",
+    "Details",
+  ])
+  expect(imported.blocks[0].id).toBe("b1")
+  expect(imported.comments).toEqual([
+    expect.objectContaining({ blockId: "b1", text: "Check", author: "Jane" }),
+  ])
+})
+
+it("uses a leading Title paragraph as the title and keeps a Subtitle as content", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(`
+      <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Visible title</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Subtitle"/></w:pPr><w:r><w:t>Sub</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Body</w:t></w:r></w:p>`),
+    "docProps/core.xml": `<?xml version="1.0"?>
+      <cp:coreProperties xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Stale core title</dc:title></cp:coreProperties>`,
+  })
+  const model = await importDocx(bytes, "titled.docx")
+  expect(model.title).toBe("Visible title")
+  expect(model.blocks).toEqual([
+    { id: "b1", type: "heading", level: 1, text: "Sub" },
+    { id: "b2", type: "paragraph", text: "Body" },
+  ])
+})
+
+it("keeps a leading Title paragraph as content when the caller names the document", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(`
+      <w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Quarterly Report</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Body</w:t></w:r></w:p>`),
+  })
+  const renamed = await importDocx(bytes, "q3.docx", undefined, "Q3 review")
+  expect(renamed.title).toBe("Q3 review")
+  expect(renamed.blocks).toEqual([
+    { id: "b0", type: "heading", level: 1, text: "Quarterly Report" },
+    { id: "b1", type: "paragraph", text: "Body" },
+  ])
+  // Naming it what it already says changes nothing: no duplicate heading.
+  const same = await importDocx(bytes, "q3.docx", undefined, "Quarterly Report")
+  expect(same.blocks.map((block) => block.id)).toEqual(["b1"])
+})
+
+it("keeps a Title-only document's comments on its title", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      `<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:commentRangeStart w:id="0"/><w:r><w:t>Only a title</w:t></w:r></w:p>`
+    ),
+    "word/comments.xml": `<?xml version="1.0"?><w:comments ${W}><w:comment w:id="0" w:author="Jane"><w:p><w:r><w:t>Check</w:t></w:r></w:p></w:comment></w:comments>`,
+  })
+  const model = await importDocx(bytes, "title-only.docx")
+  expect(model.title).toBe("Only a title")
+  expect(model.blocks).toEqual([{ id: "b0", type: "heading", level: 1, text: "Only a title" }])
+  expect(model.comments).toEqual([
+    expect.objectContaining({ blockId: "b0", text: "Check", author: "Jane" }),
+  ])
+})
+
+it("writes the caller's localized labels for empty comments and missing authors", async () => {
+  const bytes = await fixture({
+    "word/document.xml": documentXml(
+      `<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Annotated</w:t></w:r></w:p>`
+    ),
+    "word/comments.xml": `<?xml version="1.0"?><w:comments ${W}><w:comment w:id="0"><w:p/></w:comment></w:comments>`,
+  })
+  const model = await importDocx(bytes, "", {
+    emptyComment: "（空批注）",
+    unknownAuthor: "未知",
+    untitled: "文档",
+  })
+  expect(model.title).toBe("文档")
+  expect(model.comments[0]).toMatchObject({ text: "（空批注）", author: "未知" })
 })
 
 it("rejects invalid DOCX packages", async () => {

@@ -12,12 +12,24 @@ jest.mock("./pptx", () => ({
 
 import type { Artifact } from "@cognia/plugin-sdk"
 import { PRESENTATION_ARTIFACT_KIND } from "./model"
-import { createPresentationsRuntime } from "./runtime"
+import manifestJson from "../plugin.json"
+import { createPresentationsRuntime, normalizePptxName } from "./runtime"
+
+const EN = manifestJson.i18n.locales.en as Record<string, string>
 import { importPptx } from "./pptx"
 
 function createCtx(overrides?: { ownerPluginId?: string }) {
   const artifacts = new Map<string, Artifact>()
-  const save = jest.fn(async () => ({ saved: true }))
+  const save = jest.fn(
+    async (): Promise<{
+      saved: boolean
+      platform?: "desktop" | "mobile" | "web"
+      location?: string
+    }> => ({
+      saved: true,
+      platform: "desktop",
+    })
+  )
   const open = jest.fn(async () => [])
   const readAttachment = jest.fn(async () => ({ name: "deck.pptx", bytes: new Uint8Array([1]) }))
   const updateArtifact = jest.fn((id: string, input: { content: string }) => {
@@ -55,6 +67,7 @@ function createCtx(overrides?: { ownerPluginId?: string }) {
       openArtifact: jest.fn(),
     },
     files: { save, open, readAttachment },
+    i18n: { t: (key: string) => EN[key] ?? key },
   } as never
   return { ctx, artifacts, save, open, readAttachment, updateArtifact }
 }
@@ -88,13 +101,60 @@ it("creates, validates, and exports a presentation artifact", async () => {
     })
   ).resolves.toMatchObject({ artifactId: "p1", findings: [] })
   await expect(runtime.validate("p1")).resolves.toMatchObject({ ok: true })
-  await expect(runtime.exportPptx("p1")).resolves.toMatchObject({ ok: true })
+  await expect(runtime.exportPptx("p1")).resolves.toMatchObject({
+    ok: true,
+    saved: true,
+    filename: "Launch.pptx",
+    message: expect.stringContaining("save dialog"),
+  })
   const imported = JSON.parse(artifacts.get("p1")!.content)
   imported.importedFeatures = ["native charts"]
   artifacts.get("p1")!.content = JSON.stringify(imported)
-  await expect(runtime.exportPptx("p1")).rejects.toThrow("allowUnsupportedFeatureLoss")
+  save.mockClear()
+  await expect(runtime.exportPptx("p1")).resolves.toMatchObject({
+    ok: false,
+    requiresConfirmation: true,
+    unsupportedFeatures: ["native charts"],
+    error: expect.stringContaining("allowUnsupportedFeatureLoss"),
+  })
+  expect(save).not.toHaveBeenCalled()
   await expect(runtime.exportPptx("p1", undefined, true)).resolves.toMatchObject({ ok: true })
   expect(save).toHaveBeenCalled()
+})
+
+it("marks tool-created decks as not user-initiated and localizes history entries", async () => {
+  const { ctx, updateArtifact } = createCtx()
+  const runtime = createPresentationsRuntime(ctx)
+  await seed(runtime)
+  const createArtifact = (ctx as unknown as { artifact: { createArtifact: jest.Mock } }).artifact
+    .createArtifact
+  expect(createArtifact.mock.calls[0][0].metadata).toMatchObject({ userInitiated: false })
+  runtime.apply({
+    artifactId: "p1",
+    expectedVersion: 1,
+    operations: [{ op: "addSlide", title: "x" }],
+  })
+  expect(updateArtifact.mock.calls[0][1]).toMatchObject({ changeDescription: "Edit presentation" })
+})
+
+it("tells the model where a mobile export landed and reports a cancelled save", async () => {
+  const { ctx, save } = createCtx()
+  const runtime = createPresentationsRuntime(ctx)
+  await seed(runtime)
+  save.mockResolvedValueOnce({
+    saved: true,
+    platform: "mobile",
+    location: "file:///Documents/cognia/exports/Launch.pptx",
+  })
+  await expect(runtime.exportPptx("p1", "Launch/final")).resolves.toMatchObject({
+    ok: true,
+    filename: "Launch-final.pptx",
+    platform: "mobile",
+    message: expect.stringContaining("Documents/cognia/exports"),
+  })
+  save.mockResolvedValueOnce({ saved: false })
+  await expect(runtime.exportPptx("p1")).resolves.toMatchObject({ ok: false, cancelled: true })
+  expect(normalizePptxName("deck.PPTX")).toBe("deck.pptx")
 })
 
 it("rejects artifacts owned by another plugin", async () => {

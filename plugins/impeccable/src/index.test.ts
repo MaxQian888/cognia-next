@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
 
-import definition from "./index"
+import { createTestPluginContext } from "@cognia/plugin-sdk/testing"
+
+import definition, { manifest as moduleManifest } from "./index"
 import manifest from "../plugin.json"
 
 const pluginRoot = resolve(__dirname, "..")
@@ -30,8 +32,12 @@ describe("cognia-impeccable plugin", () => {
     })
     expect(manifest.skills).toEqual([
       expect.objectContaining({
-        id: "impeccable",
+        id: "cognia-impeccable:impeccable",
+        slug: "impeccable",
+        name: "Impeccable (frontend design)",
         source: { kind: "local-bundle", path: "skills/impeccable" },
+        // The detector scripts run through Bash and the references are Read.
+        allowedTools: ["Bash", "Read"],
       }),
     ])
   })
@@ -101,14 +107,19 @@ describe("cognia-impeccable plugin", () => {
     expect(offenders).toEqual([])
   })
 
-  it("logs activation and deactivation without registering privileged runtime behavior", async () => {
-    const info = jest.fn()
-    const context = { logger: { info } }
+  it("adopts plugin.json verbatim and registers nothing imperatively", async () => {
+    expect(moduleManifest).toBe(manifest)
+    const { ctx, calls } = createTestPluginContext({ pluginId: manifest.id })
+    await definition.activate(ctx)
+    expect(calls).toEqual([])
+    expect(definition.deactivate).toBeUndefined()
+  })
 
-    await definition.activate?.(context as never)
-    await definition.deactivate?.(context as never)
-
-    expect(info).toHaveBeenNthCalledWith(1, "cognia-impeccable activated")
-    expect(info).toHaveBeenNthCalledWith(2, "cognia-impeccable deactivated")
+  it("documents that main is build output the plugin needs before it can load", () => {
+    expect(manifest.main).toBe("dist/index.js")
+    const readme = readFileSync(join(pluginRoot, "README.md"), "utf8")
+    expect(readme).toContain("pnpm exec node plugins/impeccable/build.mjs")
+    expect(readme).toContain("cannot load")
+    expect(readme).not.toMatch(/attach the `impeccable` skill to a character/)
   })
 })

@@ -10,8 +10,10 @@ import definition, {
   clearClipboard,
   createClipboardTools,
   createClipboardWorkflowNodes,
+  imageToolResult,
   readClipboardImage,
   readClipboardStatus,
+  sniffImageMime,
   writeClipboardText,
 } from "./index"
 
@@ -66,16 +68,38 @@ describe("clipboard-tools (built-in)", () => {
     expect(definition.manifest.permissions).toEqual(["clipboard:read", "clipboard:write"])
   })
 
-  it("registers exactly the tools plugin.json declares, with matching access classes", async () => {
+  it("registers exactly the tools plugin.json declares, with matching approval gates", async () => {
     const { ctx, tools } = makeCtx(makeClipboard())
     await definition.activate?.(ctx)
     const declared = (manifestJson.tools ?? []).map((t) => t.name).sort()
     expect(Object.keys(tools).sort()).toEqual(declared)
     for (const declaredTool of manifestJson.tools ?? []) {
-      expect(tools[declaredTool.name].definition.access).toBe(declaredTool.access)
-      expect(tools[declaredTool.name].definition.parametersSchema).toEqual(
-        declaredTool.parametersSchema
+      const registered = tools[declaredTool.name].definition
+      expect(registered.requiresApproval).toBe(
+        (declaredTool as { requiresApproval?: boolean }).requiresApproval
       )
+      expect(registered.parametersSchema).toEqual(declaredTool.parametersSchema)
+      // No clipboard tool takes a filesystem path, so none declares an access class.
+      expect(registered.access).toBeUndefined()
+      expect(declaredTool).not.toHaveProperty("access")
+    }
+    // Overwriting / emptying the user's clipboard needs approval; reads do not.
+    expect(tools.clipboard_write_text.definition.requiresApproval).toBe(true)
+    expect(tools.clipboard_clear.definition.requiresApproval).toBe(true)
+    expect(tools.clipboard_status.definition.requiresApproval).toBeUndefined()
+  })
+
+  it("localizes every workflow node's label and description in both locales", () => {
+    const nodes = createClipboardWorkflowNodes(makeClipboard())
+    const locales = manifestJson.i18n.locales as Record<string, Record<string, string>>
+    for (const node of nodes) {
+      for (const field of ["label", "description"] as const) {
+        const key = `workflow.nodes.${node.kind}.${field}`
+        // English bundle matches the author fallback; zh-CN is a real translation.
+        expect(locales.en[key]).toBe(node[field])
+        expect(locales["zh-CN"][key]).toEqual(expect.any(String))
+        expect(locales["zh-CN"][key]).not.toBe(node[field])
+      }
     }
   })
 
@@ -153,6 +177,39 @@ describe("clipboard-tools (built-in)", () => {
   })
 
   describe("clipboard_read_image", () => {
+    it("the tool returns an MCP image block the model can see", async () => {
+      const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47])
+      const [, imageTool] = createClipboardTools(
+        makeClipboard({ readImage: jest.fn(async () => bytes) })
+      )
+      await expect(run(imageTool)).resolves.toEqual({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ ok: true, mimeType: "image/png", byteLength: 4 }),
+          },
+          { type: "image", data: bytesToBase64(bytes), mimeType: "image/png" },
+        ],
+      })
+    })
+
+    it("the tool keeps a failure as a plain ok:false envelope", async () => {
+      const [, imageTool] = createClipboardTools(makeClipboard())
+      await expect(run(imageTool)).resolves.toMatchObject({ ok: false })
+      expect(imageToolResult({ ok: false, error: "x" })).toEqual({ ok: false, error: "x" })
+    })
+
+    it("sniffs the real image encoding from its magic bytes", () => {
+      expect(sniffImageMime(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg")
+      expect(sniffImageMime(Uint8Array.from([0x47, 0x49, 0x46, 0x38]))).toBe("image/gif")
+      expect(
+        sniffImageMime(
+          Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])
+        )
+      ).toBe("image/webp")
+      expect(sniffImageMime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]))).toBe("image/png")
+    })
+
     it("returns the bytes as base64 PNG", async () => {
       const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47])
       const clipboard = makeClipboard({ readImage: jest.fn(async () => bytes) })

@@ -1,8 +1,10 @@
 {
   "id": "cognia-material-icon-theme",
   "name": "Material Icon Theme",
+  "nameKey": "manifest.name",
   "version": "5.38.1",
   "description": "File icons from Material Icon Theme 5.38.1 for the file tree, editor tabs, breadcrumbs, Quick Open and every other file list. Off by default: enable it to replace the built-in file glyphs, disable it to restore them.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["themes"],
   "main": "src/index.ts",
@@ -32,5 +34,17 @@
       "label": "Material Icon Theme",
       "path": "dist/material-icons.json"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Material Icon Theme",
+        "manifest.description": "File icons from Material Icon Theme 5.38.1 for the file tree, editor tabs, breadcrumbs, Quick Open and every other file list. Off by default: enable it to replace the built-in file glyphs, disable it to restore them."
+      },
+      "zh-CN": {
+        "manifest.name": "Material 图标主题",
+        "manifest.description": "来自 Material Icon Theme 5.38.1 的文件图标，用于文件树、编辑器标签、面包屑、快速打开及所有文件列表。默认关闭：启用后替换内置文件图标，停用即恢复。"
+      }
+    }
+  }
 }

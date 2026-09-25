@@ -95,6 +95,12 @@ export interface SreIncident {
   concludedAt?: string
   /** Chat session the incident was opened from, so the panel can scope its list. */
   sessionId?: string
+  /**
+   * Opened from the alert that ships with the bundled demo corpus rather than
+   * described by a person. The list tags it "Demo corpus" so a walk-through
+   * incident is never read as a real page.
+   */
+  demo?: boolean
 }
 
 /** Why an incident may not be concluded yet. Codes, so the panel can translate them. */

@@ -4,9 +4,11 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import { ScanForm } from "./scan-form"
+import { registerStrixBundle, unregisterStrixBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerStrixBundle())
+afterEach(() => unregisterStrixBundle())
 
 function setup(props: Partial<Parameters<typeof ScanForm>[0]> = {}) {
   const onStart = jest.fn()

@@ -12,16 +12,13 @@
  * available for 24 hours and can resolve a later matching waitpoint once.
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { formatToolError, getWorkflowApi } from "../store-bridge"
 
-const PLUGIN_ID = "cognia-workflow-ai"
-
-export function buildWakeTools(): PluginTool[] {
+export function buildWakeTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_emit_workflow_event",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_emit_workflow_event",
         description:
@@ -77,6 +74,6 @@ export function buildWakeTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

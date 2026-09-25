@@ -1,8 +1,10 @@
 {
   "id": "cognia-computer-use",
   "name": "Computer Use",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "Revision-bound native app automation through the shared Cognia automation core.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["commands", "tools", "subagent", "agent-team-template"],
   "main": "src/index.ts",
@@ -24,7 +26,7 @@
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Requires Tauri Rust commands for screen capture and input synthesis \u2014 desktop only."
+      "reason": "Requires Tauri Rust commands for screen capture and input synthesis — desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -33,7 +35,7 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Screen capture and input synthesis require native desktop APIs \u2014 unavailable in the mobile WebView."
+      "reason": "Screen capture and input synthesis require native desktop APIs — unavailable in the mobile WebView."
     }
   },
   "commands": [
@@ -41,7 +43,44 @@
       "id": "cu",
       "name": "/cu",
       "description": "Show Computer Use status and app-session capabilities.",
+      "descriptionKey": "commands.cu.description",
       "icon": "MousePointer"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Computer Use",
+        "manifest.description": "Revision-bound native app automation through the shared Cognia automation core.",
+        "slash.cu.description": "Show Computer Use plugin status.",
+        "slash.cu.body": "Characters with `enableComputerUse: true` receive these tools on every send. Tier and consent live under Settings → Automation.",
+        "slash.cu.ready": "Computer Use is available on this desktop ({platform}): app-scoped state, deep accessibility queries and revision-bound actions.",
+        "slash.cu.limited": "Computer Use is only partly available on this desktop ({platform}):",
+        "slash.cu.unavailable": "Computer Use is not available here: {reason}",
+        "slash.cu.noBackend": "this app has no native automation backend (it needs the desktop app on macOS, Windows or Linux).",
+        "slash.cu.capability.tree": "Accessibility tree: {state}",
+        "slash.cu.capability.input": "Mouse and keyboard input: {state}",
+        "slash.cu.capability.screenshot": "Screen capture: {state} ({count} monitors)",
+        "slash.cu.state.on": "available",
+        "slash.cu.state.off": "unavailable",
+        "commands.cu.description": "Show Computer Use status and app-session capabilities."
+      },
+      "zh-CN": {
+        "manifest.name": "电脑操作",
+        "manifest.description": "通过共享的 Cognia 自动化内核，按版本绑定地自动化操作本机应用。",
+        "slash.cu.description": "显示 Computer Use 插件状态。",
+        "slash.cu.body": "启用了 `enableComputerUse: true` 的角色将在每次发送时获得这些工具。等级与授权见“设置 → 自动化”。",
+        "slash.cu.ready": "此桌面（{platform}）可以使用 Computer Use：应用级状态、深层无障碍查询和修订绑定动作。",
+        "slash.cu.limited": "此桌面（{platform}）只能部分使用 Computer Use：",
+        "slash.cu.unavailable": "此处无法使用 Computer Use：{reason}",
+        "slash.cu.noBackend": "当前应用没有原生自动化后端（需要 macOS、Windows 或 Linux 上的桌面版）。",
+        "slash.cu.capability.tree": "无障碍树：{state}",
+        "slash.cu.capability.input": "鼠标与键盘输入：{state}",
+        "slash.cu.capability.screenshot": "屏幕截图：{state}（{count} 个显示器）",
+        "slash.cu.state.on": "可用",
+        "slash.cu.state.off": "不可用",
+        "commands.cu.description": "显示电脑操作的状态与应用会话能力。"
+      }
+    }
+  }
 }

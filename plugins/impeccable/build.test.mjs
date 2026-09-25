@@ -27,19 +27,22 @@ test("the install ZIP contains a standalone executable entry and its declared fi
       if (runtime.availability === "supported") assert.ok(archive.file(runtime.entrypoint))
     }
 
-    // Match the host's CommonJS contract; any unbundled dependency fails here.
+    // Match the host's CommonJS contract: the SDK is the one host-shared
+    // module the bundle may require (the loader hands out the host's copy);
+    // any other unbundled dependency fails here.
+    const hostSdk = { definePlugin: (definition) => definition, definePluginManifest: (m) => m }
     const pluginModule = { exports: {} }
     runInNewContext(entry, {
       module: pluginModule,
       exports: pluginModule.exports,
       require: (id) => {
+        if (id === "@cognia/plugin-sdk") return hostSdk
         throw new Error(`Unexpected runtime dependency: ${id}`)
       },
     })
     assert.deepEqual(JSON.parse(JSON.stringify(pluginModule.exports.default.manifest)), manifest)
-    const context = { logger: { info() {} } }
-    assert.equal(await pluginModule.exports.default.activate(context), undefined)
-    assert.equal(await pluginModule.exports.default.deactivate(context), undefined)
+    assert.equal(await pluginModule.exports.default.activate({}), undefined)
+    assert.equal(pluginModule.exports.default.deactivate, undefined)
 
     await buildPlugin({ outputDirectory })
     assert.deepEqual(await readFile(archivePath), archiveBytes)

@@ -26,8 +26,13 @@ export interface E2BConnectionStatus {
 
 export interface E2BPanelRuntime {
   pool: E2BSandboxPool
-  /** Toast surface for release failures; null on hosts without `ctx.ui`. */
-  ui: Pick<PluginUIAPI, "showToast"> | null
+  /** Toast surface for release failures. */
+  ui: Pick<PluginUIAPI, "showToast">
+  /**
+   * `isProvisioningAvailable()` at activation. While false the panel labels
+   * workspace provisioning and the microVM tier as inactive (`provisioning.ts`).
+   */
+  provisioningAvailable: boolean
   getConnectionStatus: () => E2BConnectionStatus
 }
 

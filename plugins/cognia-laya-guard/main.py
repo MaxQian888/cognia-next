@@ -30,6 +30,9 @@ removed rather than shipped as a broken feature; see README for the data.
 
 from __future__ import annotations
 
+import re
+import threading
+import time
 from typing import Any, Dict, Optional
 
 import cognia
@@ -41,6 +44,99 @@ ENGINE = GuardEngine(logger=cognia.log)
 
 
 # ---------------------------------------------------------------------------
+# user-facing text
+# ---------------------------------------------------------------------------
+
+#: Every string this plugin paints into the host UI — the hover note on an
+#: observe-mode inbound label and the decision provider's status line in
+#: Settings → Conversation — with its English default. The translations live in
+#: plugin.json ``i18n.locales``; ``ctx.i18n.t`` resolves them against this
+#: plugin's own bundle (locale → en → key), and ``{name}`` placeholders are
+#: filled here so a template is fetched once rather than per message.
+TEXT_DEFAULTS: Dict[str, str] = {
+    "inbound.observeNote": "laya observe mode · threshold {threshold}",
+    "inbound.truncatedNote": "message truncated to the head window",
+    "status.loading": "laya checkpoint is loading",
+    "status.notLoaded": "laya checkpoint is not loaded",
+    "status.retrying": "{message} (retrying in {seconds} s)",
+}
+
+#: Seconds between locale re-checks on the inbound path. ``i18n.onLocaleChange``
+#: registers a host-side callback, which cannot cross the stdio boundary
+#: (ADR-0145), so the language is polled instead — at most once a minute, and
+#: only when a label is about to be written, never per clean message.
+TEXT_REFRESH_SECONDS = 60.0
+
+#: Bound on each ``ctx.i18n`` round trip. A host that does not answer must not
+#: stall an inbound message; the English default is the fallback.
+_TEXT_CALL_TIMEOUT = 2.0
+
+#: Injected so tests can move time without patching the ``time`` module the
+#: event loop also reads.
+_clock = time.monotonic
+
+_TEXT: Dict[str, str] = dict(TEXT_DEFAULTS)
+_TEXT_STATE: Dict[str, Any] = {"locale": None, "checkedAt": None}
+_TEXT_LOCK = threading.Lock()
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+
+def refresh_text() -> None:
+    """Re-read this plugin's strings in the app's current language.
+
+    Called from synchronous code only — the host runs sync hooks, tools and
+    contribution methods on a worker thread, which is where
+    ``cognia.ctx.run_sync`` is allowed to block. Any failure (no host attached,
+    a headless host with no i18n namespace, a timeout) leaves the current table
+    in place: English by default, never a raw dotted key.
+    """
+    with _TEXT_LOCK:
+        _TEXT_STATE["checkedAt"] = _clock()
+    try:
+        locale = str(
+            cognia.ctx.run_sync(cognia.ctx.i18n.getCurrentLocale(), timeout=_TEXT_CALL_TIMEOUT)
+            or ""
+        )
+    except Exception as exc:  # noqa: BLE001 — English is the fallback, not an error
+        cognia.log(f"laya-guard: i18n unavailable ({exc}); strings stay English")
+        return
+    with _TEXT_LOCK:
+        if locale == _TEXT_STATE["locale"]:
+            return
+    resolved = dict(TEXT_DEFAULTS)
+    for key in TEXT_DEFAULTS:
+        try:
+            value = cognia.ctx.run_sync(cognia.ctx.i18n.t(key), timeout=_TEXT_CALL_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 — per key: one miss keeps its default
+            cognia.log(f"laya-guard: i18n.t({key}) failed: {exc}")
+            continue
+        # `t` echoes the key back when nothing resolved it; that is not a string.
+        if isinstance(value, str) and value and value != key:
+            resolved[key] = value
+    with _TEXT_LOCK:
+        _TEXT.clear()
+        _TEXT.update(resolved)
+        _TEXT_STATE["locale"] = locale
+
+
+def _refresh_text_if_due() -> None:
+    with _TEXT_LOCK:
+        checked_at = _TEXT_STATE["checkedAt"]
+    if checked_at is None or _clock() - checked_at >= TEXT_REFRESH_SECONDS:
+        refresh_text()
+
+
+def text(key: str, **params: Any) -> str:
+    """The current translation of ``key`` with ``{name}`` placeholders filled."""
+    with _TEXT_LOCK:
+        template = _TEXT.get(key) or TEXT_DEFAULTS[key]
+    return _PLACEHOLDER.sub(
+        lambda match: str(params[match.group(1)]) if match.group(1) in params else match.group(0),
+        template,
+    )
+
+
+# ---------------------------------------------------------------------------
 # lifecycle
 # ---------------------------------------------------------------------------
 
@@ -49,11 +145,13 @@ def on_startup() -> None:
     ENGINE.configure(get_config())
     if ENGINE.config["warmup"]:
         ENGINE.request_load()
+    refresh_text()
     cognia.log(f"cognia-laya-guard started: {ENGINE.status()}")
 
 
 def on_config_updated(config: Dict[str, Any]) -> None:
     ENGINE.configure(config)
+    refresh_text()
 
 
 def on_shutdown() -> None:
@@ -105,14 +203,24 @@ def moderate_inbound(payload: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
+#: Literal fallbacks only. All four keys are in the host's
+#: ``KNOWN_INBOUND_LABEL_KEYS``, so the chip itself is translated by the host;
+#: the literal is what a paired companion device (which never loads plugins)
+#: would show if that list ever shrank.
 _LABEL_TEXT = {"spam": "Spam", "toxic": "Toxic", "harassment": "Harassment", "threat": "Threat"}
 
 
 def observe_labels(verdict: Dict[str, Any], config: Dict[str, Any]) -> list:
-    """Inbound labels for the fields that crossed the threshold (host-translated keys)."""
-    note = f"laya observe mode · threshold {config['inboundThreshold']}"
+    """Inbound labels for the fields that crossed the threshold (host-translated keys).
+
+    The hover ``note`` is this plugin's own prose, so it is translated here
+    (``inbound.*`` in plugin.json) in the app's language at the time the
+    message arrived — the label is persisted on the message row.
+    """
+    _refresh_text_if_due()
+    note = text("inbound.observeNote", threshold=config["inboundThreshold"])
     if verdict.get("truncated"):
-        note += " · message truncated to the head window"
+        note += " · " + text("inbound.truncatedNote")
     return [
         {
             "key": name,
@@ -207,9 +315,14 @@ class LayaDecisionProvider:
         status = ENGINE.status()
         if status["ready"]:
             return {"ready": True}
+        # The host asks when it is about to show the provider (Settings →
+        # Conversation), which is the moment the language is worth re-reading.
+        refresh_text()
         if status["loading"]:
-            return {"ready": False, "loading": True, "message": "laya checkpoint is loading"}
-        message = status["error"] or "laya checkpoint is not loaded"
+            return {"ready": False, "loading": True, "message": text("status.loading")}
+        # `error` is the engine's own diagnostic (an exception string) — data
+        # relayed as-is; only the wording around it is ours to translate.
+        message = status["error"] or text("status.notLoaded")
         if status.get("retryInSeconds"):
-            message += f" (retrying in {int(status['retryInSeconds'])} s)"
+            message = text("status.retrying", message=message, seconds=int(status["retryInSeconds"]))
         return {"ready": False, "message": message}

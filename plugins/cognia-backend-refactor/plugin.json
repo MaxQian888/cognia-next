@@ -1,8 +1,10 @@
 {
   "id": "cognia-backend-refactor",
-  "name": "Backend Refactor Suite",
+  "name": "Go Backend Refactor Suite",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "A reusable backend-refactoring development system: role characters, a synchronous tool-enabled agent.turn workflow node, a review-board agent team, refactoring skills, and an end-to-end backend-refactor-pipeline workflow template. Point a role at a repo clone and run the pipeline.",
+  "description": "A refactoring system for Go backends: six role characters, a tool-enabled agent.turn workflow node, a review-board agent team, Go refactoring skills, and a Go backend refactor pipeline workflow template that stops before committing unless the build passes, the reviewer approves, and you approve. The pipeline runs in the desktop app; point it at a clean clone of a Go repository.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": [
     "character-pack",
@@ -23,9 +25,9 @@
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "supported",
+      "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
+      "reason": "Characters, skills, the review-board team, and the workflow template load in the browser, but the pipeline cannot run there: its agent.turn node drives the desktop sidecar and its gates run go/git in the desktop terminal."
     },
     "tauri": {
       "availability": "supported",
@@ -34,7 +36,19 @@
     "mobile": {
       "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "reason": "Characters, skills, and templates load on mobile; the agent.turn node needs the desktop sidecar Claude Agent SDK."
+      "reason": "Characters, skills, the review-board team, and the workflow template load on mobile, but the pipeline cannot run there: its agent.turn node drives the desktop sidecar and its gates run go/git in the desktop terminal."
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Go Backend Refactor Suite",
+        "manifest.description": "A refactoring system for Go backends: six role characters, a tool-enabled agent.turn workflow node, a review-board agent team, Go refactoring skills, and a Go backend refactor pipeline workflow template that stops before committing unless the build passes, the reviewer approves, and you approve. The pipeline runs in the desktop app; point it at a clean clone of a Go repository."
+      },
+      "zh-CN": {
+        "manifest.name": "Go 后端重构套件",
+        "manifest.description": "面向 Go 后端的重构体系：六个角色、可调用工具的 agent.turn 工作流节点、评审委员会 Agent 团队、Go 重构技能，以及一个 Go 后端重构流水线模板——除非构建通过、评审批准并经你确认，否则不会提交。流水线在桌面端运行；请指向一个干净的 Go 仓库克隆。"
+      }
     }
   }
 }

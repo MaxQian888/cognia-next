@@ -1,36 +1,28 @@
-import type { PluginContext, PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
-import { I18N_MESSAGES } from "./i18n"
 import { PANEL_ACTIVITY, PANEL_ID, PLUGIN_ID } from "./ids"
 import { createSreTools } from "./tools"
-import { createSreRuntime, type SrePluginContext } from "./runtime"
+import { createSreRuntime } from "./runtime"
 import { clearSrePanelRuntime, setSrePanelRuntime } from "./panel-runtime"
 import { IncidentPanel } from "./panel/incident-panel"
 
 let lifecycleController: AbortController | undefined
 let disposePanel: (() => void) | undefined
 
-export const manifest: PluginManifest = {
-  ...(manifestJson as unknown as PluginManifest),
-  id: PLUGIN_ID,
-}
-
 /**
- * Manifest handed to the plugin manager.
+ * plugin.json is the whole manifest — tools, subagent, Dexie table and the
+ * i18n bundle (flat keys; the manager prefixes `plugin.sre-agent.`).
  *
- * The i18n bundle is overlaid here rather than duplicated into `plugin.json`:
- * `i18n` is not a parity-checked contribution field, and keeping ~120 strings
- * in TypeScript is what lets `i18n.test.ts` prove en/zh parity at build time.
+ * Demo, and opt-in: the only evidence backend is the bundled demo corpus
+ * (`SreProviderKind` `"fixture"`), so the plugin declares no `startup`
+ * activation — it runs only for someone who enabled it — and every tool
+ * description, result and the panel say "demo corpus".
  */
-const activationManifest = {
-  ...(manifestJson as unknown as PluginManifest),
-  id: PLUGIN_ID,
-  i18n: { locales: I18N_MESSAGES },
-} as PluginManifest
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
-  manifest: activationManifest,
-  activate: async (ctx: PluginContext) => {
+export default definePlugin({
+  manifest,
+  activate: async (ctx) => {
     lifecycleController?.abort()
     lifecycleController = new AbortController()
     disposePanel?.()
@@ -40,26 +32,23 @@ const definition: PluginDefinition = {
     // pools, and `sre_validate_timeline` resolves cited ids against the pool
     // it owns — a row citing what the panel pinned would come back
     // `row.evidence_unknown` purely because the agent queried elsewhere.
-    const runtime = createSreRuntime(ctx as unknown as SrePluginContext)
+    const runtime = createSreRuntime()
     setSrePanelRuntime({
       runtime,
       dexie: ctx.dexie ?? null,
-      contextPanels: ctx.contextPanels ?? null,
+      contextPanels: ctx.contextPanels,
+      confirm: (options) => ctx.ui.showConfirmDialog(options),
     })
 
-    for (const tool of createSreTools(
-      ctx as unknown as SrePluginContext,
-      lifecycleController.signal,
-      runtime
-    )) {
+    for (const tool of createSreTools(runtime, lifecycleController.signal)) {
       ctx.agent.registerTool(tool)
     }
 
     try {
-      disposePanel = ctx.contextPanels?.register({
+      disposePanel = ctx.contextPanels.register({
         id: PANEL_ID,
         activity: PANEL_ACTIVITY,
-        label: "SRE incidents",
+        label: ctx.i18n.t("panel.title"),
         labelKey: `plugin.${PLUGIN_ID}.panel.title`,
         resourceKinds: ["session"],
         icon: "Radar",
@@ -74,12 +63,12 @@ const definition: PluginDefinition = {
       // Registration throws when `extension:ui` / `session:read` were not
       // granted. The tools still work, so this degrades the plugin instead of
       // failing the whole activation — but it is never silent.
-      ctx.logger?.error?.(
+      ctx.logger.error(
         `sre-agent: context panel not registered — ${error instanceof Error ? error.message : String(error)}`
       )
     }
 
-    ctx.logger?.info("sre-agent plugin activated")
+    ctx.logger.info("sre-agent plugin activated (demo corpus)")
   },
   deactivate: async () => {
     lifecycleController?.abort()
@@ -88,6 +77,4 @@ const definition: PluginDefinition = {
     disposePanel = undefined
     clearSrePanelRuntime()
   },
-}
-
-export default definition
+})

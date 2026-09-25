@@ -115,7 +115,10 @@ it("imports slide order, geometry, images, tables, charts, and notes from a real
     "ppt/notesSlides/notesSlide1.xml",
     `<?xml version="1.0"?><p:notes xmlns:a="${A_NS}" xmlns:p="${P_NS}"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>Talk about pricing.</a:t></a:r></a:p></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>`
   )
-  zip.file("ppt/media/image1.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  zip.file(
+    "ppt/media/image1.png",
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
+  )
 
   const deck = await importPptx(new Uint8Array(await zip.generateAsync({ type: "uint8array" })))
   expect(deck.title).toBe("Quarterly & Results")

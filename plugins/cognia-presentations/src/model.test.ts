@@ -1,6 +1,7 @@
 import {
   applyPresentationOperations,
   assertSlideElements,
+  sniffImageMime,
   createPresentation,
   normalizeHexColor,
   parsePresentation,
@@ -59,7 +60,39 @@ it("reorders slides and replaces content atomically", () => {
   ).toThrow("Slide not found")
 })
 
+const PNG_BASE64 = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d,
+]).toString("base64")
+const JPEG_BASE64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("base64")
+
+function imageElement(dataBase64: string, mimeType: string) {
+  return {
+    id: "e1",
+    type: "image",
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    dataBase64,
+    mimeType,
+    alt: "a",
+  }
+}
+
+describe("sniffImageMime", () => {
+  it("recognises PNG and JPEG by magic number only", () => {
+    expect(sniffImageMime(Buffer.from(PNG_BASE64, "base64"))).toBe("image/png")
+    expect(sniffImageMime(Buffer.from(JPEG_BASE64, "base64"))).toBe("image/jpeg")
+    expect(sniffImageMime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]))).toBeNull()
+    expect(sniffImageMime(Uint8Array.from([0x47, 0x49, 0x46, 0x38]))).toBeNull()
+  })
+})
+
 describe("assertSlideElements", () => {
+  it("accepts a real PNG payload", () => {
+    expect(() => assertSlideElements([imageElement(PNG_BASE64, "image/png")])).not.toThrow()
+  })
+
   it.each([
     ["not-an-array", "must be an array"],
     [[{ id: "e1", type: "text", x: 0, y: 0, width: 1, height: 1 }], "requires a string text"],
@@ -111,6 +144,13 @@ describe("assertSlideElements", () => {
       ],
       "image/png or image/jpeg",
     ],
+    [[imageElement(JPEG_BASE64, "image/png")], "declares image/png but its bytes are image/jpeg"],
+    [[imageElement(Buffer.from("<svg/>").toString("base64"), "image/png")], "not a PNG or JPEG"],
+    [
+      [imageElement(`data:image/png;base64,${PNG_BASE64}`, "image/png")],
+      'without a "data:" URL prefix',
+    ],
+    [[imageElement("not base64!", "image/png")], "not valid base64"],
     [
       [{ id: "e1", type: "table", x: 0, y: 0, width: 1, height: 1, rows: [] }],
       "rows of non-empty string arrays",
@@ -146,7 +186,7 @@ describe("assertSlideElements", () => {
           y: 0,
           width: 1,
           height: 1,
-          dataBase64: "AA==",
+          dataBase64: JPEG_BASE64,
           mimeType: "image/jpeg",
           alt: "alt",
         },

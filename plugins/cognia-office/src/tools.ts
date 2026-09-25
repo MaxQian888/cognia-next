@@ -1,4 +1,4 @@
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import type { WorkbookOperation } from "./model"
 import { createOfficeRuntime, type OfficePluginContext } from "./runtime"
 
@@ -15,24 +15,37 @@ export const OFFICE_TOOL_NAMES = [
 
 const artifactIdSchema = { type: "string", minLength: 1 } as const
 
-export function createOfficeTools(ctx: OfficePluginContext): PluginTool[] {
+/** A file dialog stays open while the user decides — outlast the 30 s default. */
+const FILE_DIALOG_TIMEOUT_MS = 120_000
+/** Creating a multi-sheet spreadsheet through the Lark API is several round trips. */
+const LARK_SYNC_TIMEOUT_MS = 120_000
+
+export function createOfficeTools(ctx: OfficePluginContext): PluginToolRegistration[] {
   const runtime = createOfficeRuntime(ctx)
   return [
-    tool(
-      OFFICE_TOOL_NAMES[0],
-      "Create a native XLSX-ready workbook artifact from deterministic workbook operations.",
-      {
-        type: "object",
-        properties: {
-          title: { type: "string", minLength: 1 },
-          sheetTitle: { type: "string", minLength: 1 },
-          content: { type: "string", minLength: 1 },
-          operations: operationArraySchema,
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[0],
+      definition: {
+        name: OFFICE_TOOL_NAMES[0],
+        description:
+          "Create a native XLSX-ready workbook artifact from deterministic workbook operations.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", minLength: 1 },
+            sheetTitle: { type: "string", minLength: 1 },
+            content: {
+              type: "string",
+              minLength: 1,
+              description: "Optional CSV/TSV text to seed the first sheet.",
+            },
+            operations: operationArraySchema,
+          },
+          required: ["title"],
+          additionalProperties: false,
         },
-        required: ["title"],
-        additionalProperties: false,
       },
-      (args, toolCtx) =>
+      execute: async (args, toolCtx) =>
         runtime.create({
           ...(args as {
             title: string
@@ -42,47 +55,60 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginTool[] {
           }),
           sessionId: toolCtx.sessionId,
           messageId: toolCtx.messageId,
-        })
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[1],
-      "Import an XLSX attachment handle, or open the user file picker when no handle is supplied.",
-      {
-        type: "object",
-        properties: {
-          handle: { type: "string", minLength: 1 },
-          title: { type: "string", minLength: 1 },
+        }),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[1],
+      definition: {
+        name: OFFICE_TOOL_NAMES[1],
+        description:
+          "Import an XLSX attachment handle, or open the user file picker when no handle is supplied.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "string", minLength: 1 },
+            title: { type: "string", minLength: 1 },
+          },
+          additionalProperties: false,
         },
-        additionalProperties: false,
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
       },
-      (args, toolCtx) =>
+      execute: async (args, toolCtx) =>
         runtime.importXlsx({
           ...(args as { handle?: string; title?: string }),
           sessionId: toolCtx.sessionId,
           messageId: toolCtx.messageId,
-        })
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[2],
-      "Inspect workbook sheets, version, populated cells, merges, and compatibility warnings.",
-      artifactOnlySchema,
-      (args) => runtime.inspect((args as { artifactId: string }).artifactId)
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[3],
-      "Atomically apply deterministic workbook operations with optimistic version checking.",
-      {
-        type: "object",
-        properties: {
-          artifactId: artifactIdSchema,
-          expectedVersion: { type: "integer", minimum: 1 },
-          operations: operationArraySchema,
-          changeDescription: { type: "string", minLength: 1 },
-        },
-        required: ["artifactId", "expectedVersion", "operations"],
-        additionalProperties: false,
+        }),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[2],
+      definition: {
+        name: OFFICE_TOOL_NAMES[2],
+        description:
+          "Inspect workbook sheets, version, populated cells, merges, and compatibility warnings.",
+        parametersSchema: artifactOnlySchema,
       },
-      (args) =>
+      execute: async (args) => runtime.inspect((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[3],
+      definition: {
+        name: OFFICE_TOOL_NAMES[3],
+        description:
+          "Atomically apply deterministic workbook operations with optimistic version checking.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId: artifactIdSchema,
+            expectedVersion: { type: "integer", minimum: 1 },
+            operations: operationArraySchema,
+            changeDescription: { type: "string", minLength: 1 },
+          },
+          required: ["artifactId", "expectedVersion", "operations"],
+          additionalProperties: false,
+        },
+      },
+      execute: async (args) =>
         runtime.applyOperations(
           args as {
             artifactId: string
@@ -90,43 +116,60 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginTool[] {
             operations: WorkbookOperation[]
             changeDescription?: string
           }
-        )
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[4],
-      "Validate a workbook before export and return actionable error/warning findings.",
-      artifactOnlySchema,
-      (args) => runtime.validate((args as { artifactId: string }).artifactId)
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[5],
-      "Open the read-only workbook preview.",
-      artifactOnlySchema,
-      (args) => {
+        ),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[4],
+      definition: {
+        name: OFFICE_TOOL_NAMES[4],
+        description:
+          "Validate a workbook before export and return actionable error/warning findings.",
+        parametersSchema: artifactOnlySchema,
+      },
+      execute: async (args) => runtime.validate((args as { artifactId: string }).artifactId),
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[5],
+      definition: {
+        name: OFFICE_TOOL_NAMES[5],
+        description: "Open the read-only workbook preview.",
+        parametersSchema: artifactOnlySchema,
+      },
+      execute: async (args) => {
         const artifactId = (args as { artifactId: string }).artifactId
         runtime.inspect(artifactId)
         ctx.artifact.openArtifact(artifactId)
         return { ok: true, artifactId }
-      }
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[6],
-      "Validate and download a native XLSX workbook.",
-      {
-        type: "object",
-        properties: {
-          artifactId: artifactIdSchema,
-          suggestedName: { type: "string", minLength: 1 },
-          allowUnsupportedFeatureLoss: {
-            type: "boolean",
-            description:
-              "Required to export an imported workbook that contains unsupported OOXML features.",
-          },
-        },
-        required: ["artifactId"],
-        additionalProperties: false,
       },
-      (args) => {
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[6],
+      definition: {
+        name: OFFICE_TOOL_NAMES[6],
+        description:
+          "Validate and save a native XLSX workbook. Desktop shows a save dialog, mobile saves " +
+          "to Documents/cognia/exports, web downloads it; relay the returned message to the user.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId: artifactIdSchema,
+            suggestedName: {
+              type: "string",
+              minLength: 1,
+              description: "File name without a path; .xlsx is added when missing.",
+            },
+            allowUnsupportedFeatureLoss: {
+              type: "boolean",
+              description:
+                "Required to export an imported workbook that contains unsupported OOXML features.",
+            },
+          },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+        timeoutMs: FILE_DIALOG_TIMEOUT_MS,
+      },
+      execute: async (args) => {
         const input = args as {
           artifactId: string
           suggestedName?: string
@@ -137,48 +180,44 @@ export function createOfficeTools(ctx: OfficePluginContext): PluginTool[] {
           input.suggestedName,
           input.allowUnsupportedFeatureLoss
         )
-      }
-    ),
-    tool(
-      OFFICE_TOOL_NAMES[7],
-      "Create a Lark Sheets workbook through the audited built-in Lark skill bridge.",
-      {
-        type: "object",
-        properties: {
-          artifactId: artifactIdSchema,
-          folderToken: {
-            type: "string",
-            minLength: 1,
-            description: "Optional Lark Drive folder token to create the spreadsheet in.",
-          },
-        },
-        required: ["artifactId"],
-        additionalProperties: false,
       },
-      (args, toolCtx) => {
-        if (!toolCtx.sessionId) throw new Error("office_sync_lark requires a chat session")
+    }),
+    definePluginTool({
+      name: OFFICE_TOOL_NAMES[7],
+      definition: {
+        name: OFFICE_TOOL_NAMES[7],
+        description:
+          "Create a Lark Sheets workbook through the audited built-in Lark skill bridge.",
+        parametersSchema: {
+          type: "object",
+          properties: {
+            artifactId: artifactIdSchema,
+            folderToken: {
+              type: "string",
+              minLength: 1,
+              description: "Optional Lark Drive folder token to create the spreadsheet in.",
+            },
+          },
+          required: ["artifactId"],
+          additionalProperties: false,
+        },
+        timeoutMs: LARK_SYNC_TIMEOUT_MS,
+      },
+      execute: async (args, toolCtx) => {
         const input = args as { artifactId: string; folderToken?: string }
+        if (!toolCtx.sessionId)
+          return {
+            ok: false as const,
+            artifactId: input.artifactId,
+            error: "office_sync_lark needs a chat session; call it from a conversation.",
+          }
         return runtime.syncLark(input.artifactId, toolCtx.sessionId, {
           folderToken: input.folderToken,
           signal: toolCtx.signal,
         })
-      }
-    ),
+      },
+    }),
   ]
-}
-
-function tool(
-  name: string,
-  description: string,
-  parametersSchema: Record<string, unknown>,
-  execute: (...args: Parameters<PluginTool["execute"]>) => unknown | Promise<unknown>
-): PluginTool {
-  return {
-    name,
-    pluginId: "cognia-office",
-    definition: { name, description, parametersSchema },
-    execute: async (...args) => execute(...args),
-  }
 }
 
 const artifactOnlySchema = {
@@ -192,7 +231,7 @@ const cellSchema = {
   type: "object",
   properties: {
     type: { enum: ["string", "number", "boolean", "date", "blank", "error"] },
-    value: { type: ["string", "number", "boolean"] },
+    value: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] },
     formula: { type: "string", minLength: 1 },
     style: {
       type: "object",

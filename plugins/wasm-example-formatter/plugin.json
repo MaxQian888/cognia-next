@@ -1,8 +1,10 @@
 {
   "id": "wasm-example-formatter",
   "name": "WASM Example: Rust Formatter",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
   "description": "Reference plugin showing fs + process + workflow composition: invokes rustfmt on input source via the cognia WASM process capability.",
+  "descriptionKey": "manifest.description",
   "type": "wasm",
   "capabilities": ["tools", "workflow"],
   "wasmMain": "wasm_example_formatter.wasm",
@@ -12,6 +14,7 @@
     "callTimeoutMs": 15000
   },
   "permissions": ["notification", "filesystem:read", "filesystem:write", "process:spawn"],
+  "shellCommands": ["rustfmt"],
   "author": {
     "name": "cognia-next"
   },
@@ -26,13 +29,6 @@
           "source": {
             "type": "string",
             "description": "Rust source to format"
-          },
-          "args": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Extra rustfmt args (optional)"
           }
         },
         "required": ["source"]
@@ -81,5 +77,17 @@
       "reason": "Invokes rustfmt via the process:spawn capability \u2014 unavailable on mobile."
     }
   },
-  "minAppVersion": "0.1.0"
+  "minAppVersion": "0.1.0",
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "WASM Example: Rust Formatter",
+        "manifest.description": "Reference plugin showing fs + process + workflow composition: invokes rustfmt on input source via the cognia WASM process capability."
+      },
+      "zh-CN": {
+        "manifest.name": "WASM 示例：Rust 格式化器",
+        "manifest.description": "演示 fs + process + 工作流组合的参考插件：通过 cognia WASM 进程能力对输入源码调用 rustfmt。"
+      }
+    }
+  }
 }

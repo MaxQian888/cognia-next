@@ -1,13 +1,11 @@
-import type { PluginDefinition, PluginManifest } from "@cognia/plugin-sdk"
+import { definePlugin, definePluginManifest } from "@cognia/plugin-sdk"
 import manifestJson from "../plugin.json"
 
 // The installed manifest is also the module's single source of truth.
-export const manifest = manifestJson as PluginManifest
+export const manifest = definePluginManifest(manifestJson)
 
-const definition: PluginDefinition = {
+export default definePlugin({
   manifest,
   // The host registers declarative contributions and cleans them up on disable.
   activate: async () => {},
-}
-
-export default definition
+})

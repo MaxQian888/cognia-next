@@ -1,8 +1,10 @@
 {
   "id": "cognia-prompt-templates",
   "name": "Prompt Templates",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "User-managed prompt templates, browsable from the chat right rail and surfaced as slash commands.",
+  "description": "User-managed prompt templates: insert one into the composer with /template or from the chat right rail's Templates panel.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["commands", "context-panel"],
   "main": "src/index.ts",
@@ -12,13 +14,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [
-    "settings:read",
-    "settings:write",
-    "extension:ui",
-    "session:read",
-    "clipboard:write"
-  ],
+  "permissions": ["extension:ui", "session:read", "session:write", "clipboard:write"],
   "activationEvents": [
     "startup",
     "onCommand:template",
@@ -45,26 +41,96 @@
     {
       "id": "template",
       "name": "/template",
-      "description": "Insert a stored prompt template by name.",
+      "description": "Insert a stored prompt template into the composer by name.",
+      "descriptionKey": "commands.template.description",
       "icon": "FileText"
     },
     {
       "id": "template-add",
       "name": "/template-add",
       "description": "Store a new prompt template.",
+      "descriptionKey": "commands.template-add.description",
       "icon": "FilePlus"
     },
     {
       "id": "template-remove",
       "name": "/template-remove",
       "description": "Delete a stored prompt template.",
+      "descriptionKey": "commands.template-remove.description",
       "icon": "FileMinus"
     },
     {
       "id": "template-list",
       "name": "/template-list",
       "description": "List stored prompt templates.",
+      "descriptionKey": "commands.template-list.description",
       "icon": "List"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Prompt Templates",
+        "manifest.description": "User-managed prompt templates: insert one into the composer with /template or from the chat right rail's Templates panel.",
+        "panel.label": "Prompt Templates",
+        "panel.loading": "Loading templates…",
+        "panel.loadFailed": "Could not load your templates.",
+        "panel.retry": "Retry",
+        "panel.emptyTitle": "No prompt templates yet",
+        "panel.emptyHint": "Save one with the command:",
+        "panel.emptyCommand": "/template-add <name> <body>",
+        "panel.insert": "Insert",
+        "panel.insertLabel": "Insert template \"{name}\" into the composer",
+        "panel.copyLabel": "Copy template \"{name}\"",
+        "toast.inserted": "Inserted template \"{name}\" into the composer.",
+        "toast.insertFailed": "Could not insert template \"{name}\".",
+        "toast.copied": "Copied template \"{name}\".",
+        "toast.copyFailed": "Could not copy template \"{name}\".",
+        "command.templateUsage": "Usage: /template <name>",
+        "command.addUsage": "Usage: /template-add <name> <body>",
+        "command.removeUsage": "Usage: /template-remove <name>",
+        "command.notFound": "Template \"{name}\" not found.",
+        "command.inserted": "Inserted template \"{name}\" into the composer.",
+        "command.saved": "Saved template \"{name}\".",
+        "command.removed": "Removed template \"{name}\".",
+        "command.listEmpty": "No prompt templates saved yet.",
+        "command.listHeader": "Saved prompt templates ({count}):",
+        "commands.template.description": "Insert a stored prompt template into the composer by name.",
+        "commands.template-add.description": "Store a new prompt template.",
+        "commands.template-remove.description": "Delete a stored prompt template.",
+        "commands.template-list.description": "List stored prompt templates."
+      },
+      "zh-CN": {
+        "manifest.name": "提示词模板",
+        "manifest.description": "用户管理的提示词模板：用 /template 或在对话右栏的模板面板中把模板插入输入框。",
+        "panel.label": "提示词模板",
+        "panel.loading": "正在加载模板…",
+        "panel.loadFailed": "无法加载你的模板。",
+        "panel.retry": "重试",
+        "panel.emptyTitle": "还没有提示词模板",
+        "panel.emptyHint": "使用以下命令保存一个：",
+        "panel.emptyCommand": "/template-add <名称> <内容>",
+        "panel.insert": "插入",
+        "panel.insertLabel": "将模板“{name}”插入输入框",
+        "panel.copyLabel": "复制模板“{name}”",
+        "toast.inserted": "已将模板“{name}”插入输入框。",
+        "toast.insertFailed": "无法插入模板“{name}”。",
+        "toast.copied": "已复制模板“{name}”。",
+        "toast.copyFailed": "无法复制模板“{name}”。",
+        "command.templateUsage": "用法：/template <名称>",
+        "command.addUsage": "用法：/template-add <名称> <内容>",
+        "command.removeUsage": "用法：/template-remove <名称>",
+        "command.notFound": "未找到模板“{name}”。",
+        "command.inserted": "已将模板“{name}”插入输入框。",
+        "command.saved": "已保存模板“{name}”。",
+        "command.removed": "已删除模板“{name}”。",
+        "command.listEmpty": "还没有保存任何提示词模板。",
+        "command.listHeader": "已保存的提示词模板（{count} 个）：",
+        "commands.template.description": "按名称把已保存的提示词模板插入输入框。",
+        "commands.template-add.description": "保存一个新的提示词模板。",
+        "commands.template-remove.description": "删除一个已保存的提示词模板。",
+        "commands.template-list.description": "列出已保存的提示词模板。"
+      }
+    }
+  }
 }

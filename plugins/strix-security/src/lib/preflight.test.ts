@@ -1,4 +1,4 @@
-import { counterId, createMockTerminal, immediateSleep } from "./mock-shell"
+import { counterId, createMockTerminal, immediateSleep } from "./mock-shell.test-helpers"
 import { parseStrixVersion, runPreflight } from "./preflight"
 
 describe("parseStrixVersion", () => {

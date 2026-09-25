@@ -11,20 +11,24 @@
  * Approval: never. Reads only.
  */
 
-import type { PluginContext, PluginTool } from "@cognia/plugin-sdk"
+import {
+  definePluginTool,
+  type PluginContext,
+  type PluginToolRegistration,
+} from "@cognia/plugin-sdk"
 import { formatToolError } from "../store-bridge"
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const EMPTY_PARAMS = {
   type: "object" as const,
   properties: {},
 }
 
-export function buildResourceTools(resources: PluginContext["resources"]): PluginTool[] {
+export function buildResourceTools(
+  resources: PluginContext["resources"]
+): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_list_characters",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_characters",
         description:
@@ -51,10 +55,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_twins",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_twins",
         description:
@@ -88,10 +91,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_teams",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_teams",
         description:
@@ -117,10 +119,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_skills",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_skills",
         description:
@@ -145,10 +146,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_connectors",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_connectors",
         description:
@@ -174,10 +174,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_mcp_servers",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_mcp_servers",
         description:
@@ -202,10 +201,9 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_list_plugins",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_list_plugins",
         description:
@@ -233,6 +231,6 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

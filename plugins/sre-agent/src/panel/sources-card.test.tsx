@@ -3,11 +3,13 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({ useLocale: () => "en" }))
-
 import type { SreIngestSource } from "../providers/types"
 import type { SreRuntime } from "../runtime"
 import { SourcesCard } from "./sources-card"
+import { registerSreBundle, unregisterSreBundle } from "../i18n.test-helpers"
+
+beforeEach(() => registerSreBundle())
+afterEach(() => unregisterSreBundle())
 
 function runtimeWith(sources: SreIngestSource[] | Error): SreRuntime {
   return {
@@ -60,9 +62,11 @@ describe("SourcesCard", () => {
     expect(screen.queryByTestId("sre-sources")).not.toBeInTheDocument()
   })
 
-  it("degrades to an empty list when the backend refuses", async () => {
+  it("says the backend refused rather than showing an empty, healthy-looking list", async () => {
     render(<SourcesCard runtime={runtimeWith(new Error("nope"))} />)
-    await waitFor(() => expect(screen.getByTestId("sre-sources")).toBeInTheDocument())
-    expect(screen.queryByTestId("sre-source")).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Ingest sources could not be read: nope")
+    )
+    expect(screen.queryByTestId("sre-sources")).not.toBeInTheDocument()
   })
 })

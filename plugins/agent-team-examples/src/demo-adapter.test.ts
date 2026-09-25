@@ -6,7 +6,12 @@
  * other's entries.
  */
 
-import { demoSharedMemoryAdapter, __resetDemoAdapterForTesting } from "./demo-adapter"
+import {
+  createDemoSharedMemoryAdapter,
+  DEMO_SHARED_MEMORY_ADAPTER_ID,
+  demoSharedMemoryAdapter as manifestAdapter,
+} from "./demo-adapter"
+import type { PluginSharedMemoryAdapterDef } from "@cognia/plugin-sdk"
 import type { SharedMemoryEntry } from "@cognia/plugin-sdk"
 const TEAM = "team-1"
 const OTHER = "team-2"
@@ -23,8 +28,22 @@ function entry(key: string, version: number, value: unknown = `v-${key}`): Share
 }
 
 describe("demoSharedMemoryAdapter", () => {
+  // A fresh adapter (and store) per test — the factory owns the state, so no
+  // test needs a reset hook on the production module.
+  let demoSharedMemoryAdapter: PluginSharedMemoryAdapterDef
   beforeEach(() => {
-    __resetDemoAdapterForTesting()
+    demoSharedMemoryAdapter = createDemoSharedMemoryAdapter()
+  })
+
+  it("contributes one manifest instance and gives each factory call its own store", async () => {
+    expect(manifestAdapter.id).toBe(DEMO_SHARED_MEMORY_ADAPTER_ID)
+    const other = createDemoSharedMemoryAdapter()
+    await demoSharedMemoryAdapter.write(TEAM, entry("plan", 1))
+    expect(await other.read(TEAM, "plan")).toBeUndefined()
+  })
+
+  it("labels itself as an example", () => {
+    expect(demoSharedMemoryAdapter.name).toContain("(example)")
   })
 
   it("declares the identity the manifest contributes", () => {
@@ -110,11 +129,12 @@ describe("demoSharedMemoryAdapter", () => {
     expect(await demoSharedMemoryAdapter.read(OTHER, "a")).toBeDefined()
   })
 
-  it("wipes every team through the test reset helper", async () => {
+  it("starts every new adapter with an empty store", async () => {
     await demoSharedMemoryAdapter.write(TEAM, entry("a", 1))
     await demoSharedMemoryAdapter.write(OTHER, entry("a", 1))
-    __resetDemoAdapterForTesting()
-    expect(await demoSharedMemoryAdapter.read(TEAM, "a")).toBeUndefined()
-    expect(await demoSharedMemoryAdapter.read(OTHER, "a")).toBeUndefined()
+    const fresh = createDemoSharedMemoryAdapter()
+    expect(await fresh.read(TEAM, "a")).toBeUndefined()
+    expect(await fresh.read(OTHER, "a")).toBeUndefined()
+    expect((await fresh.listChanges(TEAM)).entries).toEqual([])
   })
 })

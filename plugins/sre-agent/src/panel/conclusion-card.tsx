@@ -3,7 +3,9 @@
 import { Button } from "@cognia/plugin-ui"
 import type { SreFinding } from "../evidence"
 import { canConclude, type SreIncident } from "../incident/model"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
+import { TOUCH_BUTTON } from "./touch"
 
 function FindingList({ items, emptyLabel }: { items: SreFinding[]; emptyLabel: string }) {
   if (items.length === 0) {
@@ -12,7 +14,11 @@ function FindingList({ items, emptyLabel }: { items: SreFinding[]; emptyLabel: s
   return (
     <ul className="space-y-1">
       {items.map((item, index) => (
-        <li key={`${item.text}-${index}`} className="text-xs" data-testid="sre-finding">
+        <li
+          key={`${item.text}-${index}`}
+          className="text-xs break-words whitespace-pre-wrap"
+          data-testid="sre-finding"
+        >
           {item.text}
           {item.evidenceIds.length > 0 ? (
             <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
@@ -39,7 +45,7 @@ export function ConclusionCard({
   incident: SreIncident
   onConclude: () => void
 }) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const check = canConclude(incident)
 
   return (
@@ -59,7 +65,7 @@ export function ConclusionCard({
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Button
           size="sm"
-          className="h-6 px-2 text-xs"
+          className={TOUCH_BUTTON}
           disabled={!check.ok}
           onClick={onConclude}
           data-testid="sre-conclude"

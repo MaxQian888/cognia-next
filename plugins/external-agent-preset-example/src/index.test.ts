@@ -4,20 +4,18 @@
  * contextProviders entry flows through the context-providers bridge.
  */
 
-import type { PluginManifest } from "@cognia/plugin-sdk"
-import definition, { TYPED_CONTRIBUTIONS } from "./index"
-// Read the JSON manifest, NOT the TS module overlay: this plugin is in
-// `INTENTIONALLY_UNBUNDLED`, so an installed copy only ever sees plugin.json.
-// Asserting the TS manifest is what hid the fact that the contributions
-// existed nowhere an installed copy could reach.
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
+import { unregisterExternalAgentPresetsByPlugin as unregisterPresetsByPlugin } from "@cognia/plugin-sdk/api/external-agent-preset"
+import definition, { manifest as moduleManifest, TYPED_CONTRIBUTIONS } from "./index"
+// Read the JSON manifest, NOT the TS module overlay: this plugin is
+// deliberately not bundled into the app, so an installed copy only ever sees
+// plugin.json. Asserting the TS manifest is what hid the fact that the
+// contributions existed nowhere an installed copy could reach.
 import manifestJson from "../plugin.json"
-const manifest = manifestJson as unknown as PluginManifest
 import { createEnvBannerProvider } from "./context-provider"
-import {
-  getExternalAgentPresetConfig as getPresetConfig,
-  registerExternalAgentPreset as registerPreset,
-  unregisterExternalAgentPresetsByPlugin as unregisterPresetsByPlugin,
-} from "@cognia/plugin-sdk/api/external-agent-preset"
+
+const manifest = moduleManifest
 const PLUGIN_ID = "cognia-external-agent-preset-example"
 
 describe("external-agent-preset-example plugin", () => {
@@ -42,22 +40,32 @@ describe("external-agent-preset-example plugin", () => {
     expect(["codex", "claude-code", "gemini-cli", "cursor-cli"]).not.toContain(id)
   })
 
-  it("registers + resolves its preset through the overlay, then cleans up", () => {
-    const def = manifest.externalAgentPresets![0]
-    const { id, ...config } = def
-    registerPreset(id, config, { pluginId: PLUGIN_ID })
+  it("leaves registration to the manager: activating registers nothing itself", async () => {
+    // The manager registers `externalAgentPresets[]` on enable; the plugin's
+    // own code must not reach into the overlay. The teardown helper the
+    // manager uses on disable finds nothing this plugin put there by hand.
+    await definition.activate({} as PluginContext)
+    expect(unregisterPresetsByPlugin(PLUGIN_ID)).toBe(0)
+  })
 
-    expect(getPresetConfig("example-acp-cli")?.name).toBe("Example ACP CLI")
+  it("passes the installer's manifest validation", () => {
+    expect(validatePluginManifest(manifest).errors).toEqual([])
+    expect(manifest).toEqual(manifestJson)
+  })
 
-    expect(unregisterPresetsByPlugin(PLUGIN_ID)).toBe(1)
-    expect(getPresetConfig("example-acp-cli")).toBeNull()
+  it("installs from the built bundle and stays opt-in", () => {
+    expect(manifest.main).toBe("dist/index.js")
+    for (const runtime of Object.values(manifest.runtimeCompatibility ?? {})) {
+      if (runtime?.availability === "supported") expect(runtime.entrypoint).toBe("dist/index.js")
+    }
+    expect(manifest.activationEvents).toBeUndefined()
   })
 
   it("declares a resolvable context-provider factory", async () => {
     const contribution = manifest.contextProviders?.[0]
     expect(contribution).toMatchObject({
       id: "env-banner",
-      entry: "src/context-provider.ts",
+      entry: "dist/context-provider.js",
       export: "createEnvBannerProvider",
     })
     expect(typeof createEnvBannerProvider).toBe("function")

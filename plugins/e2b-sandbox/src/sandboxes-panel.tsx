@@ -11,10 +11,12 @@
  * owns the mount and hands the renderer only `{resource, active}`.
  */
 
-import { useState, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { BoxIcon } from "lucide-react"
 import { Badge, Button, cn, ScrollArea } from "@cognia/plugin-ui"
 import type { ContextPanelRenderProps } from "@cognia/plugin-sdk"
+import { usePluginTranslations, type PluginTranslate } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "./ids"
 import type { E2BSandboxPoolEntry } from "./sandbox-pool"
 import {
   getE2BPanelRuntimeVersion,
@@ -22,10 +24,21 @@ import {
   subscribeE2BPanelRuntime,
   type E2BConnectionStatus,
 } from "./panel-runtime"
-import { usePluginT, type PluginTranslate } from "./use-plugin-t"
+
+/** How long an armed "Confirm release" waits before disarming itself. */
+export const RELEASE_CONFIRM_RESET_MS = 4_000
+
+/**
+ * Session and sandbox ids are long opaque tokens that wrap badly at 375px and
+ * mean nothing to read in full. Show a short prefix; the full value stays in
+ * the element's `title`.
+ */
+export function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id
+}
 
 export function SandboxesPanel({ resource }: ContextPanelRenderProps) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   // One external store covers both signals: the runtime swaps on
   // activate/deactivate, and the bridge funnels every pool mutation through
   // the same version bump — the monotonic version is the whole snapshot.
@@ -38,7 +51,7 @@ export function SandboxesPanel({ resource }: ContextPanelRenderProps) {
   const sessionId = resource.kind === "session" ? resource.sessionId : null
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       <div className="space-y-1 border-b px-3 py-2.5">
         <div className="flex items-center gap-2">
           <BoxIcon className="size-4 text-muted-foreground" aria-hidden />
@@ -47,7 +60,9 @@ export function SandboxesPanel({ resource }: ContextPanelRenderProps) {
         <p className="text-xs text-muted-foreground">{t("panel.subtitle")}</p>
       </div>
 
-      {runtime && status ? <StatusHeader status={status} t={t} /> : null}
+      {runtime && status ? (
+        <StatusHeader status={status} provisioningAvailable={runtime.provisioningAvailable} t={t} />
+      ) : null}
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-2 p-3">
@@ -69,7 +84,7 @@ export function SandboxesPanel({ resource }: ContextPanelRenderProps) {
                   try {
                     await pool?.removeWorkspace(path)
                   } catch {
-                    runtime.ui?.showToast(t("panel.row.releaseFailed", { path }), "error")
+                    runtime.ui.showToast(t("panel.row.releaseFailed", { path }), "error")
                   }
                 }}
               />
@@ -85,21 +100,33 @@ export function SandboxesPanel({ resource }: ContextPanelRenderProps) {
   )
 }
 
-function StatusHeader({ status, t }: { status: E2BConnectionStatus; t: PluginTranslate }) {
+function StatusHeader({
+  status,
+  provisioningAvailable,
+  t,
+}: {
+  status: E2BConnectionStatus
+  provisioningAvailable: boolean
+  t: PluginTranslate
+}) {
   return (
     <div className="space-y-1.5 border-b px-3 py-2 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground">{t("panel.status.endpoint")}</span>
-        <Badge variant="outline" className="max-w-48 truncate font-mono text-[10px]">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-muted-foreground">{t("panel.status.endpoint")}</span>
+        <Badge
+          variant="outline"
+          className="min-w-0 max-w-48 truncate font-mono text-[10px]"
+          title={status.kind === "cloud" ? undefined : status.endpoint}
+        >
           {status.kind === "cloud" ? t("panel.status.cloud") : status.endpoint}
         </Badge>
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground">{t("panel.status.apiKey")}</span>
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-muted-foreground">{t("panel.status.apiKey")}</span>
         <Badge
           variant={status.apiKey === "keyring" ? "secondary" : "outline"}
           className={cn(
-            "text-[10px]",
+            "min-w-0 truncate text-[10px]",
             status.apiKey === "missing" && "border-amber-500/40 text-amber-600 dark:text-amber-400"
           )}
         >
@@ -110,7 +137,11 @@ function StatusHeader({ status, t }: { status: E2BConnectionStatus; t: PluginTra
               : t("panel.status.keyMissing")}
         </Badge>
       </div>
-      <p className="text-[10px] text-muted-foreground">{t("panel.status.sdkDormant")}</p>
+      {provisioningAvailable ? null : (
+        <p className="text-[10px] text-muted-foreground" data-testid="e2b-provisioning-inactive">
+          {t("panel.status.sdkDormant")}
+        </p>
+      )}
     </div>
   )
 }
@@ -131,10 +162,18 @@ function WorkspaceRow({
   const claimedByCurrentSession = currentSessionId !== null && entry.ownerGroup === currentSessionId
   const busy = entry.closing || releasing
 
+  // An armed confirm must not stay armed forever: a later stray click would
+  // release without the user having just decided to.
+  useEffect(() => {
+    if (!confirming) return
+    const timer = setTimeout(() => setConfirming(false), RELEASE_CONFIRM_RESET_MS)
+    return () => clearTimeout(timer)
+  }, [confirming])
+
   return (
     <div
       className={cn(
-        "space-y-1.5 rounded-md border px-2.5 py-2",
+        "min-w-0 space-y-1.5 rounded-md border px-2.5 py-2",
         claimedByCurrentSession && "border-primary/40"
       )}
       data-testid={`sandbox-row-${entry.workspacePath}`}
@@ -151,9 +190,16 @@ function WorkspaceRow({
         </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-        <span className="font-mono">{entry.sandboxId}</span>
+        <span className="font-mono" title={entry.sandboxId}>
+          {t("panel.row.sandbox", { id: shortId(entry.sandboxId) })}
+        </span>
         {entry.ownerGroup ? (
-          <span>· {t("panel.row.session", { id: entry.ownerGroup })}</span>
+          <span title={entry.ownerGroup}>
+            ·{" "}
+            {claimedByCurrentSession
+              ? t("panel.row.currentSession")
+              : t("panel.row.session", { id: shortId(entry.ownerGroup) })}
+          </span>
         ) : null}
         <span>· {t("panel.row.owners", { count: entry.ownerRefs.length })}</span>
         {entry.handleReleased ? (
@@ -172,10 +218,18 @@ function WorkspaceRow({
           type="button"
           variant={confirming ? "destructive" : "ghost"}
           size="sm"
-          className="h-6 px-2 text-[11px]"
+          className="min-h-9 px-3 text-xs"
           disabled={busy}
-          aria-label={t("panel.row.releaseAria", { path: entry.workspacePath })}
+          aria-label={
+            confirming
+              ? t("panel.row.releaseConfirmAria", { path: entry.workspacePath })
+              : t("panel.row.releaseAria", { path: entry.workspacePath })
+          }
           data-testid={`sandbox-release-${entry.workspacePath}`}
+          onBlur={() => setConfirming(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setConfirming(false)
+          }}
           onClick={() => {
             if (!confirming) {
               setConfirming(true)

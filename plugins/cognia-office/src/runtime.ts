@@ -1,5 +1,5 @@
-import type { FullPluginContext } from "@cognia/plugin-sdk/context"
-import type { PluginArtifactAPI, PluginFilesAPI, PluginSkillsAPI } from "@cognia/plugin-sdk"
+import type { PluginContext } from "@cognia/plugin-sdk"
+import { normalizeExportName, summarizeSave } from "./export-file"
 import {
   applyWorkbookOperations,
   createWorkbook,
@@ -12,10 +12,11 @@ import {
 } from "./model"
 import { exportWorkbookXlsx, importDelimitedWorkbook, importWorkbookXlsx, XLSX_MIME } from "./xlsx"
 
-export type OfficePluginContext = Pick<FullPluginContext, "pluginId"> & {
-  artifact: PluginArtifactAPI
-  files: PluginFilesAPI
-  skills: PluginSkillsAPI
+export type OfficePluginContext = Pick<PluginContext, "artifact" | "files" | "skills" | "i18n">
+
+/** A `.xlsx` filename `ctx.files.save` accepts, built from a title or model-supplied name. */
+export function normalizeXlsxName(value: string | undefined): string {
+  return normalizeExportName(value, "xlsx", "workbook")
 }
 
 export function createOfficeRuntime(ctx: OfficePluginContext) {
@@ -43,7 +44,8 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
       messageId: options.messageId,
       metadata: {
         sourceOrigin: "tool",
-        userInitiated: true,
+        // Every artifact this runtime creates comes from an agent tool call.
+        userInitiated: false,
         previewable: true,
         exportFormats: ["raw"],
       },
@@ -63,7 +65,7 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
     }) => {
       const workbook = applyWorkbookOperations(
         input.content?.trim()
-          ? importDelimitedWorkbook(input.content, input.title)
+          ? await importDelimitedWorkbook(input.content, input.title, ctx.i18n.t("import.untitled"))
           : createWorkbook(input.title, input.sheetTitle),
         input.operations ?? []
       )
@@ -81,7 +83,12 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
         ? await ctx.files.readAttachment(input.handle)
         : (await ctx.files.open({ accept: [".xlsx", XLSX_MIME], maxBytes: 50 * 1024 * 1024 }))[0]
       if (!file) return { ok: false as const, cancelled: true as const }
-      const workbook = await importWorkbookXlsx(file.bytes, input.title ?? "", file.name)
+      const workbook = await importWorkbookXlsx(
+        file.bytes,
+        input.title ?? "",
+        file.name,
+        ctx.i18n.t("import.untitled")
+      )
       const artifactId = await createArtifact(workbook, input)
       return { ok: true as const, artifactId, workbook, warnings: workbook.unsupportedFeatures }
     },
@@ -144,20 +151,33 @@ export function createOfficeRuntime(ctx: OfficePluginContext) {
       const { workbook } = readArtifact(artifactId)
       const findings = validateWorkbook(workbook)
       if (findings.some((finding) => finding.severity === "error")) {
-        throw new Error("workbook has validation errors and cannot be exported")
+        return {
+          ok: false as const,
+          artifactId,
+          findings,
+          error: "The workbook has validation errors; fix them before exporting.",
+        }
       }
       if (workbook.unsupportedFeatures.length > 0 && !allowUnsupportedFeatureLoss) {
-        throw new Error(
-          "workbook contains unsupported features; review warnings and set allowUnsupportedFeatureLoss to export a potentially lossy copy"
-        )
+        return {
+          ok: false as const,
+          artifactId,
+          requiresConfirmation: true as const,
+          unsupportedFeatures: workbook.unsupportedFeatures,
+          error:
+            "The workbook contains unsupported features that the export would drop. Ask the " +
+            "user to confirm, then retry with allowUnsupportedFeatureLoss: true.",
+        }
       }
       const bytes = await exportWorkbookXlsx(workbook)
-      const result = await ctx.files.save({
-        suggestedName: suggestedName ?? `${safeFilename(workbook.title)}.xlsx`,
-        mimeType: XLSX_MIME,
-        bytes,
-      })
-      return { ok: result.saved, artifactId, byteLength: bytes.byteLength, findings }
+      const filename = normalizeXlsxName(suggestedName ?? workbook.title)
+      const outcome = await ctx.files.save({ suggestedName: filename, mimeType: XLSX_MIME, bytes })
+      return {
+        ...summarizeSave(outcome, filename),
+        artifactId,
+        byteLength: bytes.byteLength,
+        findings,
+      }
     },
 
     syncLark: async (
@@ -202,8 +222,4 @@ function sheetToValues(sheet: WorkbookDocument["sheets"][number]): unknown[][] {
   for (const { row, column, cell } of decoded)
     values[row][column] = cell.formula ? `=${cell.formula}` : (cell.value ?? null)
   return values
-}
-
-function safeFilename(value: string): string {
-  return value.replace(/[\\/:*?"<>|]/g, "-").trim() || "workbook"
 }

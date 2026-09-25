@@ -4,22 +4,29 @@
  * The `pet.console.tab` extension surface: three daily quests with progress
  * and claim buttons, plus the remaining reward-budget footer. Renders from
  * the module-level quest store; all mutation flows through the store's host
- * effects (persist / reward), never directly through ctx.
+ * effects (persist / reward / failure report), never directly through ctx.
  */
 
 import { useSyncExternalStore } from "react"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { Button } from "@cognia/plugin-ui"
+import manifestJson from "../plugin.json"
 import { questDef } from "./quest-engine"
 import {
   claimQuestReward,
   getQuestState,
+  getQuestStoreVersion,
   getRemainingBudget,
+  isClaimInFlight,
   subscribeQuestStore,
 } from "./quest-store"
-import { usePluginT } from "./use-plugin-t"
 
 export function QuestsTab() {
-  const t = usePluginT()
-  const state = useSyncExternalStore(subscribeQuestStore, getQuestState, () => null)
+  const t = usePluginTranslations(manifestJson.id)
+  // Subscribed on the store's version, not its state: a claim starting or
+  // settling changes no quest but does change what the buttons show.
+  useSyncExternalStore(subscribeQuestStore, getQuestStoreVersion, getQuestStoreVersion)
+  const state = getQuestState()
   const budget = getRemainingBudget()
 
   if (!state) {
@@ -41,6 +48,8 @@ export function QuestsTab() {
         {state.quests.map((quest) => {
           const def = questDef(quest.id)
           if (!def) return null
+          const title = t(`quest.${quest.id}`)
+          const claiming = isClaimInFlight(quest.id)
           return (
             <div
               key={quest.id}
@@ -49,41 +58,41 @@ export function QuestsTab() {
               className="flex items-center gap-3 rounded-lg border p-3"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{t(`quest.${quest.id}`)}</div>
+                <div className="truncate text-sm font-medium">{title}</div>
                 <div className="text-xs text-muted-foreground">
                   {t("progress", {
-                    progress: String(Math.min(quest.progress, def.count)),
-                    count: String(def.count),
+                    progress: Math.min(quest.progress, def.count),
+                    count: def.count,
                   })}
                   {" · "}
-                  {t("reward", { xp: String(def.rewardXp), coins: String(def.rewardCoins) })}
+                  {t("reward", { xp: def.rewardXp, coins: def.rewardCoins })}
                 </div>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 data-action={`claim-${quest.id}`}
-                disabled={!quest.done || quest.claimed}
-                // Swallow-and-log rather than `void`: `claimQuestReward`
-                // rejects when the pet rate limiter trips or `pet:interact`
-                // is denied, and an unhandled rejection left the user with no
-                // signal at all. The quest stays claimable (the store only
-                // marks it claimed after a successful grant).
+                aria-label={quest.claimed ? undefined : t("claimAria", { quest: title })}
+                aria-busy={claiming}
+                disabled={!quest.done || quest.claimed || claiming}
+                // The store reports a failed grant itself (localized toast via
+                // ctx.ui) and keeps the quest claimable; the rejection is
+                // settled here only so it is not left unhandled.
                 onClick={() => {
-                  claimQuestReward(quest.id).catch((error: unknown) => {
-                    console.warn("[pet-daily-quests] claim failed", error)
-                  })
+                  claimQuestReward(quest.id).catch(() => undefined)
                 }}
-                className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                className="min-h-9 shrink-0"
               >
-                {quest.claimed ? t("claimed") : t("claim")}
-              </button>
+                {quest.claimed ? t("claimed") : claiming ? t("claiming") : t("claim")}
+              </Button>
             </div>
           )
         })}
       </div>
 
       <p data-testid="pet-daily-quests-budget" className="text-xs text-muted-foreground">
-        {t("budgetLeft", { xp: String(budget.xp), coins: String(budget.coins) })} {t("resetsDaily")}
+        {t("budgetLeft", { xp: budget.xp, coins: budget.coins })} {t("resetsDaily")}
       </p>
     </div>
   )

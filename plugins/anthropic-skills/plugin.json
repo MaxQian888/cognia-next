@@ -1,8 +1,10 @@
 {
   "id": "cognia-anthropic-skills",
-  "name": "Anthropic Skills",
+  "name": "Starter Skills",
+  "nameKey": "manifest.name",
   "version": "0.1.0",
-  "description": "Bundled Anthropic Agent Skills \u2014 code review, data analysis, web research. Pulled from the anthropics/skills public repo as inline starter content.",
+  "description": "Three hand-written starter skills in the Agent Skills (SKILL.md) format — code review, data analysis, and web research — as short inline playbooks. Enable the plugin, then turn a skill on for a conversation from the composer's skill picker (type @skill:). /skill lists them.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["skills", "commands"],
   "main": "src/index.ts",
@@ -12,7 +14,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["startup", "onCommand:skill"],
+  "activationEvents": ["onCommand:skill"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -31,8 +33,43 @@
     {
       "id": "skill",
       "name": "/skill",
-      "description": "List available skills.",
+      "description": "List the starter skills and how to turn one on.",
+      "descriptionKey": "commands.skill.description",
       "icon": "Sparkles"
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Starter Skills",
+        "manifest.description": "Three hand-written starter skills in the Agent Skills (SKILL.md) format — code review, data analysis, and web research — as short inline playbooks. Enable the plugin, then turn a skill on for a conversation from the composer's skill picker (type @skill:). /skill lists them.",
+        "skill.title": "Starter skills",
+        "skill.intro": "These playbooks come with the Starter Skills plugin:",
+        "skill.item": "- **{name}** — {description}",
+        "skill.howTo": "To use one, type `@skill:` in the chat composer (or open the composer's skill picker) and pick it. It stays on for this conversation.",
+        "skill.codeReview.name": "Code Review",
+        "skill.codeReview.description": "Review a diff or files for bugs, security issues, and missing tests, with file:line findings and suggested fixes.",
+        "skill.dataAnalysis.name": "Data Analysis",
+        "skill.dataAnalysis.description": "Inspect tabular data, check quality, and report statistics with stated uncertainty.",
+        "skill.webResearch.name": "Web Research",
+        "skill.webResearch.description": "Research a topic from primary sources, cross-check claims, and cite URLs.",
+        "commands.skill.description": "List the starter skills and how to turn one on."
+      },
+      "zh-CN": {
+        "manifest.name": "入门技能",
+        "manifest.description": "三个按 Agent Skills（SKILL.md）格式手写的入门技能——代码审查、数据分析、网页调研——均为简短的内联操作手册。启用插件后，在输入框的技能选择器（输入 @skill:）中为对话开启技能；/skill 可列出它们。",
+        "skill.title": "入门技能",
+        "skill.intro": "「入门技能」插件提供以下技能手册：",
+        "skill.item": "- **{name}** —— {description}",
+        "skill.howTo": "使用方法：在聊天输入框中输入 `@skill:`（或打开输入框的技能选择器）并选中它，该技能会在本次对话中保持开启。",
+        "skill.codeReview.name": "代码审查",
+        "skill.codeReview.description": "审查 diff 或文件中的缺陷、安全问题与缺失的测试，按 文件:行号 给出问题和修复建议。",
+        "skill.dataAnalysis.name": "数据分析",
+        "skill.dataAnalysis.description": "检查表格数据的结构与质量，并给出带不确定性说明的统计结论。",
+        "skill.webResearch.name": "网络调研",
+        "skill.webResearch.description": "基于一手来源调研主题，交叉核对结论并附上来源链接。",
+        "commands.skill.description": "列出入门技能，并说明如何启用。"
+      }
+    }
+  }
 }

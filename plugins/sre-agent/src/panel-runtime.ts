@@ -15,8 +15,7 @@
  * so it can watch a run it did not start and must not pretend it can steer one.
  */
 
-import type { PluginDexieAPI } from "@cognia/plugin-sdk"
-import type { PluginContextPanelAPI } from "@cognia/plugin-sdk"
+import type { PluginContextPanelAPI, PluginDexieAPI, PluginUIAPI } from "@cognia/plugin-sdk"
 import type { SreTimelineDraft, SreValidationResult } from "./evidence"
 import type { SreRuntime } from "./runtime"
 
@@ -26,10 +25,11 @@ export interface SrePanelRuntime {
   dexie: PluginDexieAPI | null
   /**
    * The workbench API the panel was registered through, so the panel can push
-   * an open-incident count onto its own rail button. Null in a shell that
-   * refused the registration.
+   * an open-incident count onto its own rail button.
    */
-  contextPanels: PluginContextPanelAPI | null
+  contextPanels: Pick<PluginContextPanelAPI, "setBadge">
+  /** `ctx.ui.showConfirmDialog` — destructive actions ask first. */
+  confirm: PluginUIAPI["showConfirmDialog"]
 }
 
 export interface SreToolActivity {

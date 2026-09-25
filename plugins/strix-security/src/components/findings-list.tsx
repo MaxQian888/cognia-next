@@ -13,15 +13,16 @@ import {
   type SuppressionRule,
 } from "../types"
 import { findingStateOf, isSuppressed } from "../lib/triage"
-import { usePluginT } from "../use-plugin-t"
+import { usePluginTranslations } from "@cognia/plugin-sdk/api/i18n"
+import { PLUGIN_ID } from "../ids"
 import { FindingCard } from "./finding-card"
 
 const SEVERITY_CHIP: Record<Severity, string> = {
-  critical: "text-red-600 dark:text-red-400",
-  high: "text-orange-600 dark:text-orange-400",
-  medium: "text-amber-600 dark:text-amber-400",
-  low: "text-yellow-600 dark:text-yellow-400",
-  info: "text-slate-500 dark:text-slate-400",
+  critical: "text-destructive",
+  high: "text-destructive/80",
+  medium: "text-warning",
+  low: "text-warning/80",
+  info: "text-muted-foreground",
 }
 
 type Filter = "all" | "open" | "muted"
@@ -48,7 +49,7 @@ export function FindingsList({
   onUnsuppressRule,
   onExport,
 }: FindingsListProps) {
-  const t = usePluginT()
+  const t = usePluginTranslations(PLUGIN_ID)
   const [filter, setFilter] = useState<Filter>("all")
 
   if (findings.length === 0) {
@@ -57,7 +58,7 @@ export function FindingsList({
         className="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-muted-foreground"
         data-testid="strix-findings-empty"
       >
-        <ShieldCheck className="size-6 text-emerald-500" />
+        <ShieldCheck className="size-6 text-success" />
         <p>{t("findings.none")}</p>
       </div>
     )

@@ -1,6 +1,11 @@
 export const VISUALIZATION_SCHEMA_VERSION = 1 as const
 export const VISUALIZATION_ARTIFACT_KIND = "cognia-visualize/visualization"
 
+/**
+ * Profiles the renderer actually draws as what they claim to be. Each has its
+ * own layout in `chart.ts`; there is no profile that silently falls back to
+ * another chart.
+ */
 export const VISUALIZATION_PROFILES = [
   "line",
   "bar",
@@ -8,7 +13,6 @@ export const VISUALIZATION_PROFILES = [
   "scatter",
   "pie",
   "donut",
-  "histogram",
   "box",
   "heatmap",
   "treemap",
@@ -19,13 +23,27 @@ export const VISUALIZATION_PROFILES = [
   "funnel",
   "radar",
   "gauge",
-  "map",
   "table",
   "metric",
   "process",
-  "simulation",
 ] as const
 export type VisualizationProfile = (typeof VISUALIZATION_PROFILES)[number]
+
+/**
+ * Profiles earlier versions accepted but only faked: "histogram" drew plain
+ * bars of the given values (no binning), "map" drew a scatter with no basemap,
+ * "simulation" drew a line. New specs cannot use them; stored artifacts that
+ * do are read as the chart they always rendered as.
+ */
+export const LEGACY_PROFILE_ALIASES: Readonly<Record<string, VisualizationProfile>> = {
+  histogram: "bar",
+  map: "scatter",
+  simulation: "line",
+}
+
+function isVisualizationProfile(value: unknown): value is VisualizationProfile {
+  return VISUALIZATION_PROFILES.includes(value as VisualizationProfile)
+}
 
 export interface VisualizationDatum {
   label: string
@@ -54,11 +72,15 @@ export function createVisualization(
   input: Omit<VisualizationSpec, "schemaVersion" | "palette" | "accessibility"> & {
     palette?: string[]
     accessibility?: Partial<VisualizationSpec["accessibility"]>
-  }
+  },
+  /** Summary used when the caller supplies none (the runtime passes a localized one). */
+  defaultSummary?: string
 ): VisualizationSpec {
   if (!input.title.trim()) throw new Error("Visualization title is required.")
-  if (!VISUALIZATION_PROFILES.includes(input.profile))
-    throw new Error(`Unsupported visualization profile: ${input.profile}`)
+  if (!isVisualizationProfile(input.profile))
+    throw new Error(
+      `Unsupported visualization profile: ${String(input.profile)}. Use one of: ${VISUALIZATION_PROFILES.join(", ")}.`
+    )
   return {
     ...input,
     title: input.title.trim(),
@@ -68,7 +90,9 @@ export function createVisualization(
       : ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626"],
     accessibility: {
       summary:
-        input.accessibility?.summary?.trim() || `${input.title}: ${input.data.length} data points.`,
+        input.accessibility?.summary?.trim() ||
+        defaultSummary ||
+        `${input.title}: ${input.data.length} data points.`,
       showDataTable: input.accessibility?.showDataTable ?? true,
     },
   }
@@ -79,17 +103,19 @@ export function parseVisualization(content: string): VisualizationSpec {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new Error("Unsupported Cognia visualization schema.")
   const spec = parsed as Partial<VisualizationSpec>
-  if (
-    spec.schemaVersion !== VISUALIZATION_SCHEMA_VERSION ||
-    !VISUALIZATION_PROFILES.includes(spec.profile as VisualizationProfile)
-  )
+  const profile = isVisualizationProfile(spec.profile)
+    ? spec.profile
+    : typeof spec.profile === "string"
+      ? LEGACY_PROFILE_ALIASES[spec.profile]
+      : undefined
+  if (spec.schemaVersion !== VISUALIZATION_SCHEMA_VERSION || !profile)
     throw new Error("Unsupported Cognia visualization schema.")
   if (!Array.isArray(spec.data)) throw new Error("Cognia visualization data must be an array.")
   return {
     ...spec,
     title: typeof spec.title === "string" ? spec.title : "",
     schemaVersion: VISUALIZATION_SCHEMA_VERSION,
-    profile: spec.profile as VisualizationProfile,
+    profile,
     data: spec.data.map((datum): VisualizationDatum => {
       const raw = datum && typeof datum === "object" ? (datum as VisualizationDatum) : null
       return {
@@ -115,8 +141,20 @@ export function parseVisualization(content: string): VisualizationSpec {
   }
 }
 
-export function validateVisualization(spec: VisualizationSpec) {
-  const findings: Array<{ severity: "error" | "warning"; code: string; message: string }> = []
+/**
+ * One validation finding. `message` is the English text tools hand to the
+ * model; `params` carries what the preview needs to render the same finding
+ * through the `finding.<code>` translation key.
+ */
+export interface VisualizationFinding {
+  severity: "error" | "warning"
+  code: string
+  message: string
+  params?: Record<string, string | number>
+}
+
+export function validateVisualization(spec: VisualizationSpec): VisualizationFinding[] {
+  const findings: VisualizationFinding[] = []
   if (!spec.data.length)
     findings.push({
       severity: "error",
@@ -129,12 +167,14 @@ export function validateVisualization(spec: VisualizationSpec) {
         severity: "error",
         code: "data.label",
         message: `Data point ${index + 1} requires a label.`,
+        params: { index: index + 1 },
       })
     if (!Number.isFinite(datum.value))
       findings.push({
         severity: "error",
         code: "data.value",
         message: `Data point ${index + 1} has a non-finite value.`,
+        params: { index: index + 1 },
       })
   })
   if (!spec.accessibility.summary.trim())
@@ -151,21 +191,14 @@ export function validateVisualization(spec: VisualizationSpec) {
       severity: "error",
       code: "graph.edge",
       message: `${spec.profile} data points require source and target.`,
+      params: { profile: spec.profile },
     })
   if (["timeline", "gantt"].includes(spec.profile) && spec.data.some((datum) => !datum.start))
     findings.push({
       severity: "error",
       code: "time.start",
       message: `${spec.profile} data points require start dates.`,
-    })
-  if (
-    spec.profile === "map" &&
-    spec.data.some((datum) => datum.x === undefined || datum.y === undefined)
-  )
-    findings.push({
-      severity: "error",
-      code: "map.coordinates",
-      message: "Map data points require x/longitude and y/latitude.",
+      params: { profile: spec.profile },
     })
   return findings
 }
@@ -204,7 +237,16 @@ export function recommendProfile(intent: string): {
       "Network diagrams show connected entities.",
     ],
     [/process|workflow|流程/, "process", "Process diagrams show ordered steps and decisions."],
-    [/location|geographic|地图|地域/, "map", "Maps encode values at geographic coordinates."],
+    [
+      /location|geographic|地图|地域/,
+      "scatter",
+      "There is no basemap: plot longitude as x and latitude as y on a scatter, or use a table.",
+    ],
+    [
+      /distribution|histogram|分布|直方图/,
+      "bar",
+      "Bin the values first, then chart one bar per bin with the count as its value.",
+    ],
     [/single|headline|kpi|指标/, "metric", "A metric view foregrounds one headline value."],
     [/exact|table|明细|表格/, "table", "Tables preserve exact values and dense lookup."],
   ]

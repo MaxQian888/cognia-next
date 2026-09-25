@@ -11,7 +11,7 @@ import { createEditorStore } from "@/lib/workflow/editor/store"
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
 import { createWorkflowAuthorAPI } from "@/lib/plugin/api/workflow-author-api"
 import type { VisualWorkflow } from "@cognia/plugin-sdk"
-import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
+import type { PluginToolRegistration, PluginToolContext } from "@cognia/plugin-sdk"
 import { buildProposeTools, validateProposalOps } from "./propose-tools"
 import { configureWorkflowApi } from "../store-bridge"
 
@@ -36,7 +36,7 @@ function workflow(id: string): VisualWorkflow {
 
 const EMPTY_CTX: PluginToolContext = { config: {} }
 
-function findTool(tools: PluginTool[], name: string): PluginTool {
+function findTool(tools: PluginToolRegistration[], name: string): PluginToolRegistration {
   const t = tools.find((x) => x.name === name)
   if (!t) throw new Error(`Tool not found: ${name}`)
   return t

@@ -1,8 +1,10 @@
 {
   "id": "cognia-genshin-theme",
   "name": "Genshin Impact: Seven Nations (Unofficial)",
+  "nameKey": "manifest.name",
   "version": "1.0.0",
   "description": "A complete elemental appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "descriptionKey": "manifest.description",
   "type": "frontend",
   "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
   "main": "src/index.ts",
@@ -19,7 +21,6 @@
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
-  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
     "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
@@ -175,7 +176,7 @@
     {
       "id": "raiden-rain",
       "name": "INAZUMA // Quiet Thunder",
-      "description": "Rain-softened violet surfaces with a calm shrine veranda and measured motion.",
+      "description": "Rain-softened violet surfaces with a calm shrine veranda and measured spacing.",
       "preview": {
         "light": "/plugins/cognia-genshin-theme/assets/characters/raiden-shogun-rain-veranda.webp",
         "dark": "/plugins/cognia-genshin-theme/assets/characters/raiden-shogun-rain-veranda.webp"
@@ -184,8 +185,7 @@
         "themeId": "seven-nations-twilight",
         "wallpaperId": "raiden-shogun-rain-veranda",
         "density": "adventurer-journal",
-        "radius": 0.5,
-        "motionSpeed": 0.5
+        "radius": 0.5
       }
     },
     {
@@ -200,14 +200,13 @@
         "themeId": "seven-nations-twilight",
         "wallpaperId": "furina-opera-after-rain",
         "density": "adventurer-journal",
-        "radius": 0.75,
-        "motionSpeed": 0.75
+        "radius": 0.75
       }
     },
     {
       "id": "arlecchino-study",
       "name": "HEARTH // Winter Correspondence",
-      "description": "A restrained charcoal-and-crimson study profile with low motion and quiet density.",
+      "description": "A restrained charcoal-and-crimson study profile with quiet density.",
       "preview": {
         "light": "/plugins/cognia-genshin-theme/assets/characters/arlecchino-winter-study.webp",
         "dark": "/plugins/cognia-genshin-theme/assets/characters/arlecchino-winter-study.webp"
@@ -216,8 +215,7 @@
         "themeId": "seven-nations-twilight",
         "wallpaperId": "arlecchino-winter-study",
         "density": "adventurer-journal",
-        "radius": 0.25,
-        "motionSpeed": 0.5
+        "radius": 0.25
       }
     },
     {
@@ -232,8 +230,7 @@
         "themeId": "seven-nations-twilight",
         "wallpaperId": "nahida-greenhouse-library",
         "density": "adventurer-journal",
-        "radius": 0.875,
-        "motionSpeed": 0.5
+        "radius": 0.875
       }
     },
     {
@@ -248,9 +245,20 @@
         "themeId": "seven-nations-twilight",
         "wallpaperId": "yae-miko-rain-shrine-study",
         "density": "adventurer-journal",
-        "radius": 0.625,
-        "motionSpeed": 0.5
+        "radius": 0.625
       }
     }
-  ]
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "manifest.name": "Genshin Impact: Seven Nations (Unofficial)",
+        "manifest.description": "A complete elemental appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets."
+      },
+      "zh-CN": {
+        "manifest.name": "原神：七国（非官方）",
+        "manifest.description": "完整的元素风外观包：角色壁纸、完整语义配色、密度控制和一键预设。"
+      }
+    }
+  }
 }

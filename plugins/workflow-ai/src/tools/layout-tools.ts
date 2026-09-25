@@ -10,11 +10,9 @@
  * (auto-layout updates node positions but the user can Ctrl+Z).
  */
 
-import type { PluginTool } from "@cognia/plugin-sdk"
+import { definePluginTool, type PluginToolRegistration } from "@cognia/plugin-sdk"
 import { ELK_DIRECTIONS, type AutoLayoutDirection } from "@cognia/plugin-sdk/api/workflow-editor"
 import { formatToolError, getWorkflowApi, resolveStore } from "../store-bridge"
-
-const PLUGIN_ID = "cognia-workflow-ai"
 
 const WORKFLOW_ID_SCHEMA = {
   type: "string",
@@ -22,11 +20,10 @@ const WORKFLOW_ID_SCHEMA = {
     "Workflow id to target. Omit if exactly one editor is open and you want to act on it.",
 } as const
 
-export function buildLayoutTools(): PluginTool[] {
+export function buildLayoutTools(): PluginToolRegistration[] {
   return [
-    {
+    definePluginTool({
       name: "wf_auto_layout",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_auto_layout",
         description:
@@ -64,10 +61,9 @@ export function buildLayoutTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_group_nodes",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_group_nodes",
         description:
@@ -95,10 +91,9 @@ export function buildLayoutTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_select_nodes",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_select_nodes",
         description:
@@ -126,10 +121,9 @@ export function buildLayoutTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
-    {
+    }),
+    definePluginTool({
       name: "wf_focus_viewport",
-      pluginId: PLUGIN_ID,
       definition: {
         name: "wf_focus_viewport",
         description:
@@ -193,6 +187,6 @@ export function buildLayoutTools(): PluginTool[] {
           return formatToolError(err)
         }
       },
-    },
+    }),
   ]
 }

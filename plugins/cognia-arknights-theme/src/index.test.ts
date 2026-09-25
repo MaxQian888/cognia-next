@@ -8,7 +8,8 @@ import { join } from "node:path"
 
 import { wcagContrast } from "@/lib/appearance/contrast"
 import { THEME_TOKEN_CSS_VARS } from "@/lib/appearance/theme-token-catalog"
-import definition from "./index"
+import { validatePluginManifest } from "@cognia/plugin-sdk/manifest"
+import definition, { manifest as moduleManifest } from "./index"
 import manifest from "../plugin.json"
 
 const publicPluginRoot = join(__dirname, "../../../public/plugins/cognia-arknights-theme")
@@ -76,9 +77,34 @@ describe("cognia-arknights-theme", () => {
     )
   })
 
-  it("activates and deactivates without imperative host dependencies", async () => {
-    const ctx = { pluginId: manifest.id, logger: { info: jest.fn() } } as never
-    await expect(definition.activate?.(ctx)).resolves.toBeUndefined()
-    await expect(definition.deactivate?.(ctx)).resolves.toBeUndefined()
+  it("never overrides the user's motion-speed accessibility preference", () => {
+    for (const pack of manifest.themePacks) {
+      expect(pack.applies).not.toHaveProperty("motionSpeed")
+    }
+  })
+
+  it("names every wallpaper in one language", () => {
+    // Contribution names are plain strings (no per-locale key), so a mix of
+    // Chinese and English names read as two different packs in either locale.
+    for (const wallpaper of manifest.wallpapers) {
+      expect(wallpaper.name).not.toMatch(/[\u3400-\u9fff]/)
+    }
+  })
+
+  it("stays off until the user enables it", () => {
+    expect(manifest).not.toHaveProperty("activationEvents")
+    expect(manifest).not.toHaveProperty("activateOnStartup")
+  })
+
+  it("exports plugin.json itself as the module manifest and passes the host validator", () => {
+    expect(moduleManifest).toBe(manifest)
+    expect(definition.manifest).toBe(moduleManifest)
+    expect(validatePluginManifest(moduleManifest).errors).toEqual([])
+  })
+
+  it("activates without imperative host dependencies", async () => {
+    const ctx = {} as Parameters<typeof definition.activate>[0]
+    await expect(Promise.resolve(definition.activate(ctx))).resolves.toBeUndefined()
+    expect(definition.deactivate).toBeUndefined()
   })
 })

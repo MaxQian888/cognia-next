@@ -3,7 +3,9 @@
  *
  * The plugin registers this implementation through
  * `ctx.workspace.registerBackend(...)` (the former `setE2BBackend` shim has
- * been removed). Integrations that select `worktreeMode: "e2b"`
+ * been removed) — but only while `isProvisioningAvailable()` in
+ * `provisioning.ts` is true, which it is not in this build (see below).
+ * Integrations that select `worktreeMode: "e2b"`
  * run their AI loop inside a fresh Firecracker microVM instead of writing to
  * the host filesystem.
  *
@@ -315,7 +317,7 @@ function shellEscape(s: string): string {
  * Resolve the E2B SDK connection from live plugin configuration and explicit
  * construction options. The frontend plugin cannot read host process
  * environment variables; MCP subprocess environment is configured separately
- * by the preset in `index.ts`.
+ * by the preset in `plugin.json`, whose own `E2B_API_KEY` field the user fills.
  */
 export function resolveSandboxConnection(
   opts: Pick<E2BWorkspaceBackendOptions, "apiKey" | "apiUrl" | "domain" | "connection">
