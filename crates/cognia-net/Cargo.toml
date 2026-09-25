@@ -47,6 +47,8 @@ dirs.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+# HTTP mock server for `http_client`.
+wiremock.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile.workspace = true
 rcgen.workspace = true

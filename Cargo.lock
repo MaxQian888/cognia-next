@@ -2359,6 +2359,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-socks",
  "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -2627,7 +2628,6 @@ dependencies = [
  "cap-fs-ext",
  "cap-std",
  "chrono",
- "cognia-connectors",
  "cognia-core",
  "cognia-exec-sandbox",
  "cognia-net",

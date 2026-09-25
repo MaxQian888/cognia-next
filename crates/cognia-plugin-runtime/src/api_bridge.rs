@@ -1173,7 +1173,7 @@ async fn handle_network(
     op: &str,
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
-    use cognia_connectors::types::TauriHttpRequest;
+    use cognia_net::http_client::HttpRequest as TauriHttpRequest;
     match op {
         "fetch" => {
             let url = payload_str(payload, "url")?;
@@ -1200,7 +1200,7 @@ async fn handle_network(
                 timeout_ms: None,
                 allow_invalid_certificates: None,
             };
-            let resp = cognia_connectors::http_client::http_request(req)
+            let resp = cognia_net::http_client::http_request(req)
                 .await
                 .map_err(|e| PluginApiError::internal(format!("network:fetch: {e}")))?;
             let ok = (200..300).contains(&resp.status);

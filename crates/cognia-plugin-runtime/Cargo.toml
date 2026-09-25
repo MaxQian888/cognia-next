@@ -27,7 +27,6 @@ cognia-secrets = { path = "../cognia-secrets" }
 # Sandboxed Python plugin launches (bwrap/sandbox-exec prefixes, env filter).
 cognia-exec-sandbox = { path = "../cognia-exec-sandbox" }
 cognia-terminal = { path = "../cognia-terminal" }
-cognia-connectors = { path = "../cognia-connectors" }
 tauri = { workspace = true }
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager.workspace = true

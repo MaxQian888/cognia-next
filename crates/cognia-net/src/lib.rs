@@ -5,6 +5,8 @@
 //!   proxy-client detection. `app_lib` keeps a facade module so existing
 //!   `crate::proxy_config::…` call sites (and the app-side `proxy_*` command
 //!   shells) are unchanged.
+//! - [`http_client`] — the rate-limited, proxy-aware request/response client
+//!   behind `connectors_http_request` and the plugin `network:fetch` bridge.
 //! - [`http_download`] — streaming download to a file with an incremental
 //!   SHA-256 and a hard byte ceiling, shared by the code-server tarball fetch
 //!   (`src-tauri`) and the Open VSX `.vsix` fetch (`cognia-plugin-runtime`).
@@ -21,6 +23,7 @@
 //!   cloud metadata endpoints, shared by every egress filter.
 
 pub mod egress;
+pub mod http_client;
 pub mod http_download;
 pub mod inbound_policy;
 pub mod ndjson_stream;

@@ -10,7 +10,9 @@ pub mod attachments;
 pub mod axum_app;
 pub mod commands;
 pub mod discord_upload;
-pub mod http_client;
+// Moved to `cognia-net` (ADR-0196); re-exported so `connectors::http_client::…`
+// and `super::http_client::…` resolve unchanged.
+pub use cognia_net::http_client;
 pub mod keyring;
 pub mod lark_upload;
 pub mod lark_ws;

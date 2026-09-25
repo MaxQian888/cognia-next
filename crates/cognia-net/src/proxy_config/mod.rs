@@ -868,8 +868,15 @@ pub fn install_process_proxy_environment(config: &ProxyConfig) {
     }
 }
 
+/// Serializes every test in this crate that reads or writes the process-wide
+/// proxy policy. Tests run on parallel threads of one process, so one that
+/// installs a policy and one that asserts the fail-closed default would
+/// otherwise race.
 #[cfg(test)]
-fn reset_uninitialized() {
+pub(crate) static NETWORK_ENV_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+pub(crate) fn reset_uninitialized() {
     *slot().write().expect("proxy config lock poisoned") = ProxyRuntimeState::Uninitialized;
 }
 
@@ -911,8 +918,6 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-
-    static NETWORK_ENV_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn manual(host: &str, port: u16) -> ProxyConfig {
         ProxyConfig {
@@ -1057,8 +1062,7 @@ mod tests {
 
     #[test]
     fn runtime_starts_fail_closed_and_apply_replaces_it() {
-        static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = TEST_STATE.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.blocking_lock();
         reset_uninitialized();
         assert_eq!(
             current().unwrap_err().code,
@@ -1242,8 +1246,7 @@ mod tests {
 
     #[test]
     fn child_network_env_covers_ready_off_and_uninitialized() {
-        static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = TEST_STATE.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.blocking_lock();
 
         // Uninitialized: the same black hole the process environment gets, so
         // a child spawned during hydration cannot be the one path that escapes.

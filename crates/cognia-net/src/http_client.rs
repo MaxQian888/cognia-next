@@ -1,9 +1,12 @@
-//! Outbound HTTP client for platform connectors.
+//! Outbound HTTP client for platform connectors and the plugin runtime's
+//! `network:fetch` bridge.
 //!
 //! Wraps `reqwest::Client` with a 30-second default timeout and a simple
 //! per-host token-bucket rate limiter (hand-rolled with `Arc<Mutex<...>>`
-//! to avoid pulling in extra tower layers). The Tauri command surface lives
-//! in `commands.rs`.
+//! to avoid pulling in extra tower layers). The `connectors_http_request`
+//! Tauri command in `cognia-connectors` wraps [`http_request`]; this module
+//! moved here (ADR-0196) so the plugin runtime reaches it without linking the
+//! connectors crate and its Matrix E2EE stack.
 //!
 //! # SSRF trust model
 //!
@@ -25,8 +28,95 @@ use std::time::{Duration, Instant};
 
 use reqwest::Client;
 
-use super::types::{TauriHttpRequest, TauriHttpResponse};
-use cognia_net::proxy_config;
+use reqwest::Method;
+use serde::{Deserialize, Serialize};
+
+use crate::proxy_config;
+
+pub const DEFAULT_HTTP_TIMEOUT_MS: u64 = 30_000;
+pub const MAX_HTTP_TIMEOUT_MS: u64 = 120_000;
+
+/// A platform HTTP request, as the renderer sends it through
+/// `connectors_http_request` or a plugin through `network:fetch`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpRequest {
+    pub url: String,
+    pub method: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub body: Option<String>,
+    pub timeout_ms: Option<u64>,
+    /// Opt-in for user-configured self-hosted endpoints. Defaults to strict
+    /// platform trust; callers must never enable this implicitly.
+    pub allow_invalid_certificates: Option<bool>,
+}
+
+impl HttpRequest {
+    pub fn validated_method(&self) -> Result<Method, String> {
+        match self.method.trim().to_ascii_uppercase().as_str() {
+            "GET" => Ok(Method::GET),
+            "POST" => Ok(Method::POST),
+            "PUT" => Ok(Method::PUT),
+            "PATCH" => Ok(Method::PATCH),
+            "DELETE" => Ok(Method::DELETE),
+            "HEAD" => Ok(Method::HEAD),
+            "OPTIONS" => Ok(Method::OPTIONS),
+            "PROPFIND" => Method::from_bytes(b"PROPFIND")
+                .map_err(|error| format!("invalid PROPFIND method: {error}")),
+            "MKCOL" => Method::from_bytes(b"MKCOL")
+                .map_err(|error| format!("invalid MKCOL method: {error}")),
+            _ => Err(format!(
+                "unsupported HTTP method: {}",
+                safe_http_method_label(&self.method)
+            )),
+        }
+    }
+
+    pub fn timeout_duration(&self) -> Duration {
+        let timeout_ms = self
+            .timeout_ms
+            .unwrap_or(DEFAULT_HTTP_TIMEOUT_MS)
+            .clamp(1, MAX_HTTP_TIMEOUT_MS);
+        Duration::from_millis(timeout_ms)
+    }
+
+    pub fn accept_invalid_certificates(&self) -> bool {
+        self.allow_invalid_certificates.unwrap_or(false)
+    }
+}
+
+fn safe_http_method_label(value: &str) -> String {
+    let normalized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || ch.is_whitespace() {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let collapsed = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return "<empty>".to_string();
+    }
+    const MAX_METHOD_LABEL_CHARS: usize = 80;
+    if collapsed.chars().count() <= MAX_METHOD_LABEL_CHARS {
+        return collapsed;
+    }
+    let mut bounded: String = collapsed.chars().take(MAX_METHOD_LABEL_CHARS).collect();
+    bounded.push_str("...");
+    bounded
+}
+
+/// The HTTP response handed back to the caller.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
 
 // ---------------------------------------------------------------------------
 // Simple token-bucket rate limiter (per host)
@@ -99,7 +189,7 @@ fn check_rate_limit(host: &str) -> Result<(), Duration> {
 
 /// Execute a platform HTTP request. Returns a structured response or a string
 /// error that the TS side can inspect.
-pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, String> {
+pub async fn http_request(req: HttpRequest) -> Result<HttpResponse, String> {
     // Extract host for rate-limit keying.
     let parsed = url::Url::parse(&req.url).map_err(|e| format!("invalid URL: {e}"))?;
     let host = parsed.host_str().unwrap_or("").to_string();
@@ -163,7 +253,7 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
         .await
         .map_err(|e| format!("failed to read response body: {e}"))?;
 
-    Ok(TauriHttpResponse {
+    Ok(HttpResponse {
         status,
         headers,
         body,
@@ -235,7 +325,7 @@ mod tests {
 
     #[tokio::test]
     async fn metadata_endpoint_is_denied() {
-        let err = http_request(TauriHttpRequest {
+        let err = http_request(HttpRequest {
             url: "http://169.254.169.254/latest/meta-data/".to_string(),
             method: "GET".to_string(),
             headers: None,
@@ -251,6 +341,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_request_returns_correct_body() {
+        let _guard = crate::proxy_config::NETWORK_ENV_TEST.lock().await;
+        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default()).unwrap();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -259,7 +351,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let req = TauriHttpRequest {
+        let req = HttpRequest {
             url: format!("{}/ping", mock_server.uri()),
             method: "GET".to_string(),
             headers: None,
@@ -271,10 +363,13 @@ mod tests {
         let resp = http_request(req).await.unwrap();
         assert_eq!(resp.status, 200);
         assert_eq!(resp.body, "pong");
+        crate::proxy_config::reset_uninitialized();
     }
 
     #[tokio::test]
     async fn post_request_with_body() {
+        let _guard = crate::proxy_config::NETWORK_ENV_TEST.lock().await;
+        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default()).unwrap();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("POST"))
@@ -283,7 +378,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let req = TauriHttpRequest {
+        let req = HttpRequest {
             url: format!("{}/echo", mock_server.uri()),
             method: "POST".to_string(),
             headers: None,
@@ -295,5 +390,99 @@ mod tests {
         let resp = http_request(req).await.unwrap();
         assert_eq!(resp.status, 201);
         assert_eq!(resp.body, "created");
+        crate::proxy_config::reset_uninitialized();
+    }
+
+    use reqwest::Method;
+
+    fn request(method: &str, timeout_ms: Option<u64>) -> HttpRequest {
+        HttpRequest {
+            url: "https://example.com".to_string(),
+            method: method.to_string(),
+            headers: None,
+            body: None,
+            timeout_ms,
+            allow_invalid_certificates: None,
+        }
+    }
+
+    #[test]
+    fn validated_method_accepts_contract_methods_case_insensitively() {
+        assert_eq!(
+            request("get", None).validated_method().unwrap(),
+            Method::GET
+        );
+        assert_eq!(
+            request("POST", None).validated_method().unwrap(),
+            Method::POST
+        );
+        assert_eq!(
+            request(" patch ", None).validated_method().unwrap(),
+            Method::PATCH
+        );
+        assert_eq!(
+            request("DELETE", None).validated_method().unwrap(),
+            Method::DELETE
+        );
+    }
+
+    #[test]
+    fn validated_method_accepts_webdav_contract_methods() {
+        assert_eq!(
+            request("PROPFIND", None).validated_method().unwrap(),
+            Method::from_bytes(b"PROPFIND").unwrap()
+        );
+        assert_eq!(
+            request("mkcol", None).validated_method().unwrap(),
+            Method::from_bytes(b"MKCOL").unwrap()
+        );
+        assert_eq!(
+            request("HEAD", None).validated_method().unwrap(),
+            Method::HEAD
+        );
+        assert_eq!(
+            request("OPTIONS", None).validated_method().unwrap(),
+            Method::OPTIONS
+        );
+    }
+
+    #[test]
+    fn validated_method_rejects_methods_outside_frontend_contract() {
+        let err = request("TRACE\r\nX-Injected: 1", None)
+            .validated_method()
+            .unwrap_err();
+
+        assert_eq!(err, "unsupported HTTP method: TRACE X-Injected: 1");
+        assert!(!err.contains('\r'));
+        assert!(!err.contains('\n'));
+    }
+
+    #[test]
+    fn timeout_duration_defaults_and_bounds_untrusted_values() {
+        assert_eq!(
+            request("GET", None).timeout_duration(),
+            Duration::from_millis(DEFAULT_HTTP_TIMEOUT_MS)
+        );
+        assert_eq!(
+            request("GET", Some(0)).timeout_duration(),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            request("GET", Some(MAX_HTTP_TIMEOUT_MS + 1)).timeout_duration(),
+            Duration::from_millis(MAX_HTTP_TIMEOUT_MS)
+        );
+    }
+
+    #[test]
+    fn invalid_certificate_acceptance_is_explicit_and_defaults_off() {
+        assert!(!request("GET", None).accept_invalid_certificates());
+
+        let enabled: HttpRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://nas.example",
+            "method": "GET",
+            "allowInvalidCertificates": true
+        }))
+        .unwrap();
+        assert!(enabled.accept_invalid_certificates());
     }
 }
