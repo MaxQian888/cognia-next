@@ -5,7 +5,8 @@
  * conversation header, that resolves the DM contact behind the open
  * conversation (platform + remoteChatId → platformIdentities) and shows its
  * directory entry plus any cross-platform identities it has absorbed, each
- * reversible via unmergeIdentity. The identity directory is populated by the
+ * reversible via unmergeIdentity, and the user-authored relationship / note the
+ * IM reply copilot reads as always-on knowledge (ADR-0194). The identity directory is populated by the
  * connector bus on every inbound; conversations whose chat id isn't a known
  * user (group chats, never-seen contacts) show an empty state.
  */
@@ -25,14 +26,20 @@ import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { UserRoundXIcon } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
-  getByPlatformUser,
+  MAX_CONTACT_NOTE_CHARS,
+  MAX_RELATIONSHIP_CHARS,
   listMergeCandidates,
   unmergeIdentity,
+  updateIdentityProfile,
   type IdentityUnmergeFailureReason,
 } from "@/lib/db/platform-identities"
 import type { PlatformIdentityRow } from "@/lib/db/connector-types"
-import { parseConversationKey } from "@/types/connectors/event"
+import { useInboxWriteRoute } from "@/lib/connectors/inbox-writes"
+import { resolveConversationContact } from "@/lib/reply-copilot/resolve-contact"
 import { IdentityMergeDialog } from "@/components/connectors/identity-merge-dialog"
 
 interface ContactGroup {
@@ -51,13 +58,9 @@ function useContact(conversationKey: string): ContactGroup | null {
   return (
     useLiveQuery<ContactGroup | null>(async () => {
       if (typeof window === "undefined") return null
-      let parsed
-      try {
-        parsed = parseConversationKey(conversationKey)
-      } catch {
-        return null
-      }
-      const primary = await getByPlatformUser(parsed.platform, parsed.remoteChatId)
+      // The latest sender, not the chat id: on Slack / Discord / Lark a DM
+      // channel id is not the member id (`resolveConversationContact`).
+      const primary = await resolveConversationContact(conversationKey)
       if (!primary) return null
       return {
         primary,
@@ -65,6 +68,85 @@ function useContact(conversationKey: string): ContactGroup | null {
         candidates: await listMergeCandidates(primary.id),
       }
     }, [conversationKey]) ?? null
+  )
+}
+
+/**
+ * Relationship + note for the contact. Editable only where this device owns
+ * the identity directory (local inbox writes); a paired companion mirrors the
+ * directory read-only — the sync handler never writes identities back — so it
+ * shows the values with the reason instead of an editor that could not save.
+ */
+function ContactProfileNotes({ primary }: { primary: PlatformIdentityRow }) {
+  const t = useTranslations("inbox.contactProfile")
+  const route = useInboxWriteRoute()
+  const [relationship, setRelationship] = useState(primary.relationship ?? "")
+  const [note, setNote] = useState(primary.note ?? "")
+  const [saving, setSaving] = useState(false)
+  const dirty = relationship !== (primary.relationship ?? "") || note !== (primary.note ?? "")
+
+  if (route !== "local") {
+    return (
+      <div className="space-y-1 text-xs" data-testid="contact-profile-notes-readonly">
+        <p className="font-medium">{t("profileTitle")}</p>
+        <p>
+          {primary.relationship
+            ? t("relationshipValue", { value: primary.relationship })
+            : t("noRelationship")}
+        </p>
+        {primary.note ? <p className="whitespace-pre-wrap">{primary.note}</p> : null}
+        <p className="text-muted-foreground">{t("profileReadOnly")}</p>
+      </div>
+    )
+  }
+
+  async function save() {
+    setSaving(true)
+    try {
+      const result = await updateIdentityProfile(primary.id, { relationship, note })
+      if (!result.ok) toast.error(t(`errors.profile_${result.reason}`))
+      else toast.success(t("profileSaved"))
+    } catch {
+      toast.error(t("errors.unexpected"))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2" data-testid="contact-profile-notes">
+      <p className="text-xs font-medium">{t("profileTitle")}</p>
+      <div className="space-y-1">
+        <Label htmlFor="contact-relationship" className="text-xs">
+          {t("relationship")}
+        </Label>
+        <Input
+          id="contact-relationship"
+          className="h-8 text-xs"
+          maxLength={MAX_RELATIONSHIP_CHARS}
+          placeholder={t("relationshipPlaceholder")}
+          value={relationship}
+          onChange={(event) => setRelationship(event.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="contact-note" className="text-xs">
+          {t("note")}
+        </Label>
+        <Textarea
+          id="contact-note"
+          className="min-h-16 text-xs"
+          maxLength={MAX_CONTACT_NOTE_CHARS}
+          placeholder={t("notePlaceholder")}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">{t("profileHint")}</p>
+      <Button type="button" size="sm" disabled={!dirty || saving} onClick={() => void save()}>
+        {t("profileSave")}
+      </Button>
+    </div>
   )
 }
 
@@ -128,6 +210,8 @@ export function ContactProfileDrawer({
                 </div>
               </dl>
             </div>
+
+            <ContactProfileNotes key={contact.primary.id} primary={contact.primary} />
 
             {contact.merged.length > 0 && (
               <div className="space-y-1">

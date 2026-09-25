@@ -14,7 +14,9 @@
     "local": "Runs on this device",
     "remote": "Remote service",
     "calibrated": "Calibrated probabilities",
-    "uncalibrated": "Uncalibrated"
+    "uncalibrated": "Uncalibrated",
+    "copilotValidated": "Validated for the reply copilot",
+    "copilotNotValidated": "Not validated for the reply copilot"
   },
   "status": {
     "checking": "Checking…",

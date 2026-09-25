@@ -27,6 +27,7 @@ describe("registerDecisionProvidersForPlugin — python", () => {
       locality: "local",
       calibrated: true,
       limits: { headTokens: 192, inputTokens: 512, optionTokens: 48, junk: -1 },
+      validatedQuestionSets: ["jev-judge/v1", "", 3],
       decide,
       status,
     }))
@@ -53,6 +54,7 @@ describe("registerDecisionProvidersForPlugin — python", () => {
       locality: "local",
       calibrated: true,
       limits: { headTokens: 192, inputTokens: 512, optionTokens: 48 },
+      validatedQuestionSets: ["jev-judge/v1"],
     })
     const request = { state: "hi", questions: { q: { type: "noul" as const, instructions: "?" } } }
     await provider.decide(request, { signal: new AbortController().signal })

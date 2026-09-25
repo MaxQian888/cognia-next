@@ -1,0 +1,825 @@
+{
+  "source": "jev-chat/jev-chat-jarvis tools/jev/fixtures/labeled_set.json",
+  "license": "MIT — Copyright (c) 2026 Finderchangchang and the jev-chat contributors",
+  "note": "Speaker 'her' is mapped to 'other' to match the copilot's neutral wire shape.",
+  "cases": [
+    {
+      "id": "c01",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "今天下雨了，你带伞了吗"
+        },
+        {
+          "from": "me",
+          "text": "带了，还好早上看了天气预报"
+        },
+        {
+          "from": "other",
+          "text": "那还行，我刚差点淋到"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "casual_chat",
+        "danger_level": 0,
+        "should_reply_now": false,
+        "best_action": "acknowledge",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c02",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "今天食堂的糖醋里脊还不错"
+        },
+        {
+          "from": "me",
+          "text": "那我改天也去试试"
+        },
+        {
+          "from": "other",
+          "text": "推荐你配那个紫菜汤"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "casual_chat",
+        "danger_level": 0,
+        "should_reply_now": false,
+        "best_action": "acknowledge",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c03",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "me",
+          "text": "我订好了，今晚七点那家日料"
+        },
+        {
+          "from": "other",
+          "text": "好呀，我喜欢那家"
+        },
+        {
+          "from": "other",
+          "text": "到时候见～"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "close_topic",
+        "danger_level": 0,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c04",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你又踩点，差一分钟开场哈哈"
+        },
+        {
+          "from": "me",
+          "text": "地铁延误，下次提前出门"
+        },
+        {
+          "from": "other",
+          "text": "行吧，看在你跑来的份上原谅你"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "close_topic",
+        "danger_level": 1,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c05",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "又通宵打游戏？黑眼圈都快掉地上了"
+        },
+        {
+          "from": "me",
+          "text": "今晚早睡，保证"
+        },
+        {
+          "from": "other",
+          "text": "噗，听过好多次了你"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "casual_chat",
+        "danger_level": 2,
+        "should_reply_now": false,
+        "best_action": "acknowledge",
+        "she_needs": "nothing",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c06",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "me",
+          "text": "对不起，昨天不该凶你"
+        },
+        {
+          "from": "other",
+          "text": "知道就好"
+        },
+        {
+          "from": "other",
+          "text": "过去了，别再那样就行"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "close_topic",
+        "danger_level": 2,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c07",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "other",
+          "text": "那个周报今天下班前能发我吗"
+        },
+        {
+          "from": "me",
+          "text": "我在写，大概下午能弄完"
+        },
+        {
+          "from": "other",
+          "text": "行，那我先按下午四点排"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "close_topic",
+        "danger_level": 1,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c08",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你今天回消息好慢啊"
+        },
+        {
+          "from": "me",
+          "text": "开会一直没看手机"
+        },
+        {
+          "from": "other",
+          "text": "那你下次开会前跟我说一声嘛"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 2,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c09",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你最近加班有点勤"
+        },
+        {
+          "from": "me",
+          "text": "这周项目节点，忙完就好"
+        },
+        {
+          "from": "other",
+          "text": "知道了，那你记得吃饭，别又只喝咖啡"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 2,
+        "should_reply_now": true,
+        "best_action": "acknowledge",
+        "she_needs": "action",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c10",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你是不是把周六约会忘了"
+        },
+        {
+          "from": "me",
+          "text": "没有，我记得"
+        },
+        {
+          "from": "other",
+          "text": "那地点和时间你再说一遍"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "confirm_you_care",
+        "danger_level": 3,
+        "should_reply_now": false,
+        "best_action": "check_history",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c11",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "上次你放我鸽子了"
+        },
+        {
+          "from": "me",
+          "text": "对不住，那天临时有事"
+        },
+        {
+          "from": "other",
+          "text": "这次说话算话啊，别又到点消失"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "request_action",
+        "danger_level": 3,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c12",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "other",
+          "text": "客户在催方案"
+        },
+        {
+          "from": "me",
+          "text": "我还差最后一页"
+        },
+        {
+          "from": "other",
+          "text": "最晚几点能给，我好跟他们对"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "request_action",
+        "danger_level": 3,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c13",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你今天是不是又忘了我跟你说过什么？"
+        },
+        {
+          "from": "me",
+          "text": "记得，你先别提示我，让我自己说。"
+        },
+        {
+          "from": "other",
+          "text": "那你说。"
+        },
+        {
+          "from": "me",
+          "text": "等一下，我想说完整一点。"
+        },
+        {
+          "from": "other",
+          "text": "你最好是。"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "confirm_you_care",
+        "danger_level": 4,
+        "should_reply_now": false,
+        "best_action": "check_history",
+        "she_needs": "care",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c14",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "哟，大忙人终于肯回消息了"
+        },
+        {
+          "from": "me",
+          "text": "刚才在忙，抱歉"
+        },
+        {
+          "from": "other",
+          "text": "没事，我都习惯了"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "confirm_you_care",
+        "danger_level": 4,
+        "should_reply_now": true,
+        "best_action": "acknowledge",
+        "she_needs": "care",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c15",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "纪念日不用我提醒了吧"
+        },
+        {
+          "from": "me",
+          "text": "当然记得"
+        },
+        {
+          "from": "other",
+          "text": "那你说几号，什么安排"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "confirm_you_care",
+        "danger_level": 4,
+        "should_reply_now": false,
+        "best_action": "check_history",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c16",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "这事我跟你说了三遍了"
+        },
+        {
+          "from": "me",
+          "text": "哪件事"
+        },
+        {
+          "from": "other",
+          "text": "你当耳旁风是吧"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "confirm_you_care",
+        "danger_level": 5,
+        "should_reply_now": false,
+        "best_action": "check_history",
+        "she_needs": "care",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c17",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "other",
+          "text": "这个需求你拖了一周了"
+        },
+        {
+          "from": "me",
+          "text": "中间插了两个线上问题"
+        },
+        {
+          "from": "other",
+          "text": "今天必须给我，别再推"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 5,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c18",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你为什么昨天不接电话"
+        },
+        {
+          "from": "me",
+          "text": "睡着了没听到"
+        },
+        {
+          "from": "other",
+          "text": "我不信，把经过说清楚"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "seek_explanation",
+        "danger_level": 5,
+        "should_reply_now": true,
+        "best_action": "explain",
+        "she_needs": "explanation",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c19",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你根本不在乎我"
+        },
+        {
+          "from": "me",
+          "text": "我在乎，你别这样说"
+        },
+        {
+          "from": "other",
+          "text": "每次都这样，说了也没用"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "vent_anger",
+        "danger_level": 6,
+        "should_reply_now": true,
+        "best_action": "acknowledge",
+        "she_needs": "care",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c20",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你每次放鸽子都有理由"
+        },
+        {
+          "from": "me",
+          "text": "这次真的是加班"
+        },
+        {
+          "from": "other",
+          "text": "我懒得听了"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "vent_anger",
+        "danger_level": 6,
+        "should_reply_now": true,
+        "best_action": "apologize",
+        "she_needs": "apology",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c21",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "我跟你说话你永远在看手机"
+        },
+        {
+          "from": "me",
+          "text": "我在回工作消息"
+        },
+        {
+          "from": "other",
+          "text": "行，那我以后也不说了"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "vent_anger",
+        "danger_level": 6,
+        "should_reply_now": true,
+        "best_action": "acknowledge",
+        "she_needs": "care",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c22",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你再这样我真不想说了"
+        },
+        {
+          "from": "me",
+          "text": "我改，你告诉我哪件让你最难受"
+        },
+        {
+          "from": "other",
+          "text": "每次都说改，我已经不想解释了"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "vent_anger",
+        "danger_level": 7,
+        "should_reply_now": true,
+        "best_action": "apologize",
+        "she_needs": "apology",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c23",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "other",
+          "text": "这次再出问题我没法帮你扛"
+        },
+        {
+          "from": "me",
+          "text": "我知道，今晚我盯着"
+        },
+        {
+          "from": "other",
+          "text": "不是盯着，是你自己把验收清单过完再交"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 7,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c24",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你自己看着办吧"
+        },
+        {
+          "from": "me",
+          "text": "你别这样，我们谈谈"
+        },
+        {
+          "from": "other",
+          "text": "谈什么，你心里没数吗"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "vent_anger",
+        "danger_level": 7,
+        "should_reply_now": true,
+        "best_action": "apologize",
+        "she_needs": "apology",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c25",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "你再忘一次我们分开"
+        },
+        {
+          "from": "me",
+          "text": "我不会再忘"
+        },
+        {
+          "from": "other",
+          "text": "你最好把日历设上，我不会再提醒"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 8,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c26",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "other",
+          "text": "今晚交不出来我就向经理汇报"
+        },
+        {
+          "from": "me",
+          "text": "我尽量"
+        },
+        {
+          "from": "other",
+          "text": "不是尽量，是交还是不交，你给句准话"
+        }
+      ],
+      "expect": {
+        "literal_question": false,
+        "true_intent": "request_action",
+        "danger_level": 8,
+        "should_reply_now": true,
+        "best_action": "give_commitment",
+        "she_needs": "action",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c27",
+      "relationship": "romantic partners",
+      "messages": [
+        {
+          "from": "other",
+          "text": "不用回了"
+        },
+        {
+          "from": "me",
+          "text": "你听我说"
+        },
+        {
+          "from": "other",
+          "text": "分手吧，我累了"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "vent_anger",
+        "danger_level": 9,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c28",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "我已经把你删了"
+        },
+        {
+          "from": "me",
+          "text": "别冲动，我们当面说"
+        },
+        {
+          "from": "other",
+          "text": "你爱干嘛干嘛，别再找我"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "vent_anger",
+        "danger_level": 9,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": false
+      }
+    },
+    {
+      "id": "c29",
+      "relationship": "friends",
+      "messages": [
+        {
+          "from": "other",
+          "text": "周末有空吃饭吗"
+        },
+        {
+          "from": "me",
+          "text": "周六可以"
+        },
+        {
+          "from": "other",
+          "text": "那周六晚上六点，火锅？"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "casual_chat",
+        "danger_level": 0,
+        "should_reply_now": true,
+        "best_action": "make_plan",
+        "she_needs": "action",
+        "tension_resolved": true
+      }
+    },
+    {
+      "id": "c30",
+      "relationship": "coworkers",
+      "messages": [
+        {
+          "from": "me",
+          "text": "方案发你邮箱了"
+        },
+        {
+          "from": "other",
+          "text": "收到，我看一下"
+        },
+        {
+          "from": "other",
+          "text": "没问题，谢谢"
+        }
+      ],
+      "expect": {
+        "literal_question": true,
+        "true_intent": "close_topic",
+        "danger_level": 0,
+        "should_reply_now": false,
+        "best_action": "say_less",
+        "she_needs": "nothing",
+        "tension_resolved": true
+      }
+    }
+  ]
+}

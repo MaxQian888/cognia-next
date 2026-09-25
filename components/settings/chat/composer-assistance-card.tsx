@@ -67,6 +67,7 @@ export function ComposerAssistanceCard() {
   // it is the difference between "silently does nothing on a subscription" and
   // "spends an agent turn after every reply". See `suggestions.agentFallback`.
   const agentFallbackEnabled = ca.suggestions?.agentFallback === true
+  const replyCopilotMemory = ca.replyCopilot?.memory === true
   const providers = useUtilityProviderOptions()
 
   function update(patch: Partial<ComposerAssistance>): void {
@@ -154,6 +155,16 @@ export function ComposerAssistanceCard() {
           onChange={(next) => update({ suggestions: { ...ca.suggestions, agentFallback: next } })}
         />
       ) : null}
+
+      {/* ADR-0194: off by default — recalled memories can reach a remote
+          decision endpoint (redacted) when the reply copilot judges a chat. */}
+      <ToggleRow
+        id="composer-reply-copilot-memory"
+        label={t("replyCopilotMemory.label")}
+        hint={t("replyCopilotMemory.hint")}
+        checked={replyCopilotMemory}
+        onChange={(next) => update({ replyCopilot: { ...ca.replyCopilot, memory: next } })}
+      />
 
       {/* `composerAssistance.model` was readable by all four helpers above and
           writable by nobody — the one knob that lets them run on a provider

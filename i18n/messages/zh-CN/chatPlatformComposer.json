@@ -1,18 +1,5 @@
 {
   "destination": "发送到 {platform} · {destination}",
-  "aiDraft": "AI 拟回复",
-  "description": "根据最近 30 条文本消息和你的要求拟回复，不向 AI 发送附件。请审阅并编辑结果，再放入输入框。点击发送前不会发往平台。",
-  "instructions": "回复要求（可选）",
-  "preview": "回复草稿",
-  "generate": "生成草稿",
-  "generating": "正在生成…",
-  "cancel": "取消",
-  "apply": "放入输入框",
-  "noModel": "请配置模型或连接主机后使用 AI 拟回复。",
-  "pii": "检测到敏感信息，请修改要求或对话内容后再使用 AI 辅助。",
-  "emptyContext": "请填写回复要求，或收到消息后再生成草稿。",
-  "noOutput": "AI 未返回有效回复，请重试。",
-  "failed": "生成回复失败，已保留输入内容。",
   "reviewDrafts": "审阅草稿（{count}）",
   "sendFailed": "发送失败，已保留输入内容和附件。",
   "attachmentsUnsupported": "当前连接无法向 {platform} 上传这些附件。可移除附件后发送文字，草稿已保留。"

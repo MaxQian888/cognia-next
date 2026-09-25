@@ -215,6 +215,13 @@ export interface DecisionProvider {
   calibrated: boolean
   limits?: DecisionProviderLimits
   /**
+   * Named question sets this provider was measured against and passed (e.g.
+   * `"jev-judge/v1"`, the reply copilot's judge + rank). Calibrated
+   * probabilities are not the same as being right on a task: a feature built
+   * on a question set only trusts providers that list it. Absent = none.
+   */
+  validatedQuestionSets?: string[]
+  /**
    * Answer the questions. `options.signal` is best-effort: in-process
    * providers honor it; a python-backed provider cannot be interrupted across
    * the RPC, so the host races the signal instead.
@@ -235,6 +242,7 @@ export interface DecisionProviderInfo {
   locality: "local" | "remote"
   calibrated: boolean
   limits?: DecisionProviderLimits
+  validatedQuestionSets?: string[]
 }
 
 /** Remote decisions endpoints with a known URL + default model. */

@@ -1,0 +1,78 @@
+{
+  "literal_question": {
+    "type": "noul",
+    "instructions": "Is the other person's latest message meant literally, with no subtext?",
+    "criteria": {
+      "true": "plain statement, question or plan; no hint or test",
+      "false": "subtext: a test, sarcasm, a hint or a hidden complaint"
+    }
+  },
+  "true_intent": {
+    "type": "choice",
+    "instructions": "What does the other person really want with the latest message?",
+    "criteria": {
+      "confirm_you_care": "testing whether you remember or still care",
+      "vent_anger": "angry or hurt; wants the feeling acknowledged",
+      "request_action": "wants a concrete action, time or commitment now",
+      "seek_explanation": "wants to know why something happened",
+      "casual_chat": "light friendly talk, no test and no conflict",
+      "close_topic": "peacefully wrapping up; needs nothing more"
+    }
+  },
+  "danger_level": {
+    "type": "score",
+    "instructions": "How close is this chat to a fight right now?",
+    "criteria": [
+      "light chat or joking",
+      "mild tease, easy to laugh off",
+      "mild complaint said without heat",
+      "unhappy, but still a chance to fix it",
+      "sarcasm or a test; a sloppy reply escalates",
+      "openly upset, says you do not care",
+      "clearly angry and blaming you",
+      "last-chance warning; trust almost gone",
+      "an ultimatum is on the table",
+      "active rupture: it is over, do not reply"
+    ]
+  },
+  "should_reply_now": {
+    "type": "noul",
+    "instructions": "Should your next message carry substance: a known fault, fact, time or plan?",
+    "criteria": {
+      "true": "the needed fact or plan is already in this chat",
+      "false": "a holding line is safer, or the needed fact is missing"
+    }
+  },
+  "best_action": {
+    "type": "choice",
+    "instructions": "Which kind of next action fits best?",
+    "criteria": {
+      "check_history": "look up what they refer to first",
+      "apologize": "sincerely apologize for a known mistake",
+      "give_commitment": "give a concrete promise or deadline",
+      "explain": "explain what happened or why",
+      "acknowledge": "show you heard them and care",
+      "say_less": "keep it short or say nothing more",
+      "make_plan": "propose or confirm a time, place or task"
+    }
+  },
+  "she_needs": {
+    "type": "choice",
+    "instructions": "What does the other person need from you now?",
+    "criteria": {
+      "apology": "a sincere apology",
+      "action": "a concrete action or commitment",
+      "explanation": "a clear explanation",
+      "care": "proof that you remember or care",
+      "nothing": "nothing more; it is settled"
+    }
+  },
+  "tension_resolved": {
+    "type": "noul",
+    "instructions": "Is the tension in this chat already resolved?",
+    "criteria": {
+      "true": "no tension left, or they accepted and cooled down",
+      "false": "still waiting, testing, angry or sarcastic"
+    }
+  }
+}

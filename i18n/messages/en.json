@@ -8812,21 +8812,8 @@
     "userIdPlaceholder": "usr_…"
   },
   "chatPlatformComposer": {
-    "aiDraft": "AI draft reply",
-    "apply": "Use in input",
     "attachmentsUnsupported": "{platform} cannot upload these attachments through this connection. Remove them to send text; your draft has been kept.",
-    "cancel": "Cancel",
-    "description": "Use the latest 30 messages of text and your instructions to draft a reply. Attachments are not sent to AI. Review and edit the result, then place it in the input. Nothing is sent to the platform until you press Send.",
     "destination": "Send to {platform} · {destination}",
-    "emptyContext": "Add instructions or wait for a message before drafting a reply.",
-    "failed": "Could not generate the reply. Your input has been kept.",
-    "generate": "Generate draft",
-    "generating": "Generating…",
-    "instructions": "Instructions for the reply (optional)",
-    "noModel": "Configure a model or connect to a host to draft a reply.",
-    "noOutput": "AI did not return a usable reply. Try again.",
-    "pii": "Sensitive information was detected. Edit the instructions or conversation before using AI assistance.",
-    "preview": "Reply draft",
     "reviewDrafts": "Review drafts ({count})",
     "sendFailed": "Could not send the message. Your input and attachments have been kept."
   },
@@ -16189,13 +16176,26 @@
         "alias_conflict": "The saved identity contains conflicting aliases.",
         "identity_conflict": "Another contact now owns this platform identity.",
         "primary_missing": "This contact no longer exists.",
+        "profile_absorbed": "This identity was merged into another contact; edit that contact instead.",
+        "profile_missing": "This contact no longer exists.",
         "snapshot_missing": "This identity is no longer merged with the contact.",
         "unexpected": "The identity change failed. Please refresh and try again."
       },
       "lastSeen": "Last seen",
       "merge": "Merge",
       "mergedTitle": "Merged identities",
+      "noRelationship": "No relationship set.",
+      "note": "Note",
+      "notePlaceholder": "Things worth remembering when you reply",
       "platform": "Platform",
+      "profileHint": "Used by the reply copilot as background when it reads this conversation. Stays on this device.",
+      "profileReadOnly": "Edit these on the host device — a paired device shows the host's directory read-only.",
+      "profileSave": "Save",
+      "profileSaved": "Contact notes saved",
+      "profileTitle": "Relationship & notes",
+      "relationship": "Relationship",
+      "relationshipPlaceholder": "e.g. manager, close friend",
+      "relationshipValue": "Relationship: {value}",
       "remoteId": "User ID",
       "subtitle": "Identity directory entry for this conversation.",
       "title": "Contact",
@@ -29460,6 +29460,121 @@
       "skipped": "Not enough recent activity yet — nothing to report."
     }
   },
+  "replyCopilot": {
+    "action": {
+      "acknowledge": "acknowledge",
+      "apologize": "apologize",
+      "check_history": "check what they mean first",
+      "explain": "explain",
+      "give_commitment": "commit to something",
+      "make_plan": "make a plan",
+      "say_less": "say less"
+    },
+    "dialog": {
+      "close": "Close",
+      "description": "Reads the latest messages, judges intent and risk, drafts three replies and ranks them. Review a draft before sending — nothing is sent for you.",
+      "failed": "The copilot could not finish. Your input has been kept.",
+      "instructions": "What you want to say (optional)",
+      "openSettings": "Decision provider settings",
+      "rerun": "Try again",
+      "run": "Analyze and draft",
+      "running": "Working…",
+      "title": "Reply copilot",
+      "trigger": "Reply copilot"
+    },
+    "drafts": {
+      "best": "Best fit · {p}%",
+      "copied": "Copied",
+      "copy": "Copy",
+      "failed": "Could not draft replies.",
+      "fill": "Use",
+      "score": "{p}%",
+      "skipped": {
+        "empty": "Nothing to reply to yet. Add what you want to say.",
+        "no-model": "Configure a model to draft replies.",
+        "no-output": "The model returned no usable replies. Try again.",
+        "pii": "Drafting was skipped: personal data remained after redaction."
+      },
+      "title": "Suggested replies",
+      "unrankedError": "Not ranked: {reason}.",
+      "unrankedReason": {
+        "no_provider": "Not ranked — no decision provider is selected.",
+        "not_validated": "Not ranked — the selected provider is not validated for ranking replies.",
+        "single_candidate": "Only one reply was drafted, so there was nothing to rank."
+      }
+    },
+    "errors": {
+      "aborted": "the request was cancelled",
+      "cors_unreachable": "the browser version cannot reach this endpoint",
+      "http_status": "the decision endpoint returned an error",
+      "invalid_request": "the request was rejected as malformed",
+      "network": "the decision endpoint could not be reached",
+      "no_provider": "no decision provider is selected",
+      "not_configured": "the decision endpoint is not fully configured",
+      "pii": "personal data remained after redaction",
+      "provider_error": "the decision provider failed",
+      "provider_unavailable": "the decision provider is not ready",
+      "recursive_provider": "a plugin cannot use its own provider",
+      "timeout": "the decision provider timed out"
+    },
+    "intent": {
+      "casual_chat": "casual chat",
+      "close_topic": "to wrap up",
+      "confirm_you_care": "to see you care",
+      "request_action": "an action from you",
+      "seek_explanation": "an explanation",
+      "vent_anger": "to vent"
+    },
+    "judge": {
+      "actionLabel": "Best move",
+      "backgroundDropped": "The endpoint rejected the contact background, so it was left out.",
+      "danger": "Risk {level}/9",
+      "failed": "Could not read the conversation: {reason}.",
+      "holdingLine": "A holding line is enough for now ({p}%)",
+      "intentLabel": "Wants",
+      "needLabel": "Needs",
+      "substanceNow": "Give substance now — a fact, time or plan ({p}%)",
+      "subtext": "Likely has subtext ({p}%)",
+      "tensionOpen": "Tension is still open ({p}%)",
+      "tensionResolved": "Tension looks resolved",
+      "title": "Their message",
+      "truncated": "Part of the conversation did not fit the local model; the read may be less precise.",
+      "unavailable": {
+        "cors_unreachable": "The browser version cannot reach the decision endpoint. Use the desktop or mobile app.",
+        "no_provider": "No decision provider is selected, so the conversation is not judged and drafts are not ranked. Pick one in Settings → Conversation.",
+        "not_configured": "The decision endpoint is missing a URL, model or key.",
+        "not_validated": "The selected decision provider has not passed calibration for conversation judgment (the local laya checkpoint scores near chance on it), so this chat is not judged and drafts are not ranked. Use a remote Jev endpoint in Settings → Conversation for this.",
+        "provider_unavailable": "The decision provider is not ready yet (the model may still be loading)."
+      }
+    },
+    "knowledge": {
+      "memorySkipped": {
+        "disabled": "Memory not used (turn it on in Settings → Conversation → Composer assistance).",
+        "empty": "No relevant memories.",
+        "pii": "Memory not used: the conversation still had personal data after redaction."
+      },
+      "memoryUsed": "{count, plural, =1 {1 memory used} other {# memories used}}",
+      "noNote": "No contact note",
+      "noRelationship": "No relationship set — add one in the contact profile.",
+      "note": "Contact note included",
+      "relationship": "Relationship: {relationship}",
+      "summary": "Context: {contact} · {memory, plural, =0 {no memories} =1 {1 memory} other {# memories}}",
+      "unknownContact": "unknown contact"
+    },
+    "need": {
+      "action": "action",
+      "apology": "an apology",
+      "care": "care",
+      "explanation": "an explanation",
+      "nothing": "nothing more"
+    },
+    "tone": {
+      "calm": "calm",
+      "critical": "critical",
+      "tense": "tense",
+      "watch": "watch out"
+    }
+  },
   "retrievalControl": {
     "actions": {
       "cancel": "Cancel",
@@ -35288,6 +35403,10 @@
         "hint": "Complete from your own history and commands without calling a model.",
         "label": "Local suggestions only"
       },
+      "replyCopilotMemory": {
+        "hint": "Recall what you have told Cognia about people and plans when the IM reply copilot judges a conversation and drafts replies. Off by default: recalled facts are redacted but may be sent to a remote decision endpoint.",
+        "label": "Let the reply copilot use memory"
+      },
       "starters": {
         "hint": "Suggest opening prompts on the empty chat screen.",
         "label": "AI starter prompts"
@@ -38581,6 +38700,8 @@
       "title": "Decision provider",
       "traits": {
         "calibrated": "Calibrated probabilities",
+        "copilotNotValidated": "Not validated for the reply copilot",
+        "copilotValidated": "Validated for the reply copilot",
         "local": "Runs on this device",
         "remote": "Remote service",
         "uncalibrated": "Uncalibrated"

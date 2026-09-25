@@ -99,6 +99,8 @@ describe("DecisionProviderCard", () => {
     render(<DecisionProviderCard />)
     expect(screen.getByText("traits.local")).toBeInTheDocument()
     expect(screen.getByText("traits.calibrated")).toBeInTheDocument()
+    // laya declares no validated question set: not offered as a copilot judge.
+    expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
     expect(await screen.findByText("status.loading")).toBeInTheDocument()
     // Remote endpoint fields only belong to the built-in provider.
     expect(screen.queryByLabelText("http.preset")).not.toBeInTheDocument()
@@ -118,6 +120,8 @@ describe("DecisionProviderCard", () => {
     }
     render(<DecisionProviderCard />)
     expect(screen.getByText("http.problems.no_url")).toBeInTheDocument()
+    // A custom URL is not a model anyone measured on the copilot's questions.
+    expect(screen.getByText("traits.copilotNotValidated")).toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText("http.preset"), "bocha")
     expect(save).toHaveBeenLastCalledWith({
       decisions: { providerId: "builtin:decisions-http", http: { preset: "bocha" } },
@@ -132,6 +136,7 @@ describe("DecisionProviderCard", () => {
     const user = userEvent.setup()
     mockSettings = { decisions: { providerId: "builtin:decisions-http", http: { preset: "zen" } } }
     render(<DecisionProviderCard />)
+    expect(screen.getByText("traits.copilotValidated")).toBeInTheDocument()
     await user.type(screen.getByLabelText("http.key"), "sk-1")
     await user.click(screen.getByText("http.saveKey"))
     expect(setDecisionHttpKey).toHaveBeenCalledWith("zen", "sk-1")

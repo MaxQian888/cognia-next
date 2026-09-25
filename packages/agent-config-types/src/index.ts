@@ -3992,6 +3992,13 @@ export interface AppSettings {
        */
       agentFallback?: boolean
     }
+    /**
+     * IM reply copilot (ADR-0194). `memory` lets the copilot recall long-term
+     * memories about the conversation into its judge + drafts. Default OFF:
+     * recalled facts about the user may go to a remote decision endpoint
+     * (redacted), so it is a deliberate opt-in — Jarvis's `contextEnabled`.
+     */
+    replyCopilot?: { memory?: boolean }
     /** Per-feature provider/model override for all three assistance calls. */
     model?: UtilityModelConfig
   }

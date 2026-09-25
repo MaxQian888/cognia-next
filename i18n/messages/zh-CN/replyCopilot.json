@@ -1,0 +1,115 @@
+{
+  "dialog": {
+    "trigger": "回复副驾",
+    "title": "回复副驾",
+    "description": "读取最近消息，判断对方意图与风险，起草三条回复并排序。发送前请先审阅，副驾不会替你发送。",
+    "instructions": "你想表达的意思（可选）",
+    "run": "分析并起草",
+    "rerun": "重新生成",
+    "running": "处理中…",
+    "close": "关闭",
+    "failed": "副驾未能完成，你的输入已保留。",
+    "openSettings": "决策模型设置"
+  },
+  "judge": {
+    "title": "对方这条消息",
+    "danger": "风险 {level}/9",
+    "intentLabel": "想要",
+    "needLabel": "需要",
+    "actionLabel": "最佳动作",
+    "subtext": "可能话里有话（{p}%）",
+    "substanceNow": "现在给出实质内容：事实、时间或计划（{p}%）",
+    "holdingLine": "先稳住，暂不需要给实质内容（{p}%）",
+    "tensionResolved": "紧张气氛看起来已化解",
+    "tensionOpen": "紧张气氛仍在（{p}%）",
+    "truncated": "部分对话超出本地模型的容量，判断可能不够精确。",
+    "backgroundDropped": "接口拒绝了联系人背景，已不带背景重新判断。",
+    "failed": "无法判断这段对话：{reason}。",
+    "unavailable": {
+      "no_provider": "未选择决策模型，因此不会判断对话，也不会给回复排序。请在 设置 → 对话 中选择。",
+      "provider_unavailable": "决策模型尚未就绪（模型可能仍在加载）。",
+      "not_configured": "决策接口缺少地址、模型或密钥。",
+      "cors_unreachable": "浏览器版无法访问决策接口，请使用桌面端或移动端。",
+      "not_validated": "所选决策模型未通过对话判断校准（本地 laya 检查点在该题集上接近随机），因此不判断这段对话，也不给回复排序。请在 设置 → 对话 中改用远程 Jev 接口。"
+    }
+  },
+  "tone": {
+    "calm": "平稳",
+    "watch": "需留意",
+    "tense": "紧张",
+    "critical": "危险"
+  },
+  "intent": {
+    "confirm_you_care": "确认你在乎",
+    "vent_anger": "发泄情绪",
+    "request_action": "要你行动",
+    "seek_explanation": "要个解释",
+    "casual_chat": "随便聊聊",
+    "close_topic": "收尾结束"
+  },
+  "need": {
+    "apology": "道歉",
+    "action": "行动",
+    "explanation": "解释",
+    "care": "关心",
+    "nothing": "无需更多"
+  },
+  "action": {
+    "check_history": "先确认对方指什么",
+    "apologize": "道歉",
+    "give_commitment": "给出承诺",
+    "explain": "解释",
+    "acknowledge": "表示理解",
+    "say_less": "少说",
+    "make_plan": "定个安排"
+  },
+  "drafts": {
+    "title": "候选回复",
+    "best": "最合适 · {p}%",
+    "score": "{p}%",
+    "fill": "填入",
+    "copy": "复制",
+    "copied": "已复制",
+    "unrankedError": "未排序：{reason}。",
+    "failed": "无法起草回复。",
+    "skipped": {
+      "pii": "已跳过起草：脱敏后仍含个人信息。",
+      "empty": "还没有可回复的内容，请写下你想表达的意思。",
+      "no-output": "模型没有返回可用的回复，请重试。",
+      "no-model": "请先配置模型以起草回复。"
+    },
+    "unrankedReason": {
+      "no_provider": "未排序：未选择决策模型。",
+      "not_validated": "未排序：所选决策模型未通过回复排序校准。",
+      "single_candidate": "只起草了一条回复，无需排序。"
+    }
+  },
+  "errors": {
+    "no_provider": "未选择决策模型",
+    "provider_unavailable": "决策模型尚未就绪",
+    "not_configured": "决策接口配置不完整",
+    "invalid_request": "请求格式被拒绝",
+    "pii": "脱敏后仍含个人信息",
+    "network": "无法连接决策接口",
+    "http_status": "决策接口返回错误",
+    "cors_unreachable": "浏览器版无法访问该接口",
+    "timeout": "决策模型超时",
+    "aborted": "请求已取消",
+    "recursive_provider": "插件不能使用自己的提供方",
+    "provider_error": "决策模型出错"
+  },
+  "knowledge": {
+    "summary": "上下文：{contact} · {memory, plural, =0 {无记忆} other {# 条记忆}}",
+    "unknownContact": "未知联系人",
+    "relationship": "关系：{relationship}",
+    "noRelationship": "未设置关系，可在联系人资料中添加。",
+    "note": "已带上联系人备注",
+    "noNote": "没有联系人备注",
+    "memoryUsed": "{count, plural, other {使用了 # 条记忆}}",
+    "memorySkipped": {
+      "disabled": "未使用记忆（可在 设置 → 对话 → 输入辅助 中开启）。",
+      "pii": "未使用记忆：对话脱敏后仍含个人信息。",
+      "empty": "没有相关记忆。"
+    }
+  }
+}

@@ -82,6 +82,12 @@ function readLimits(value: unknown): DecisionProviderLimits | undefined {
   return Object.keys(limits).length ? limits : undefined
 }
 
+function readQuestionSets(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const sets = value.filter((item): item is string => typeof item === "string" && item.length > 0)
+  return sets.length ? sets : undefined
+}
+
 async function resolvePythonProvider(
   def: PluginDecisionProviderDef,
   pluginId: string,
@@ -100,6 +106,7 @@ async function resolvePythonProvider(
   }
   const locality = described.locality === "remote" ? "remote" : "local"
   const limits = readLimits(described.limits)
+  const validatedQuestionSets = readQuestionSets(described.validatedQuestionSets)
   return {
     id: def.id,
     label: def.label,
@@ -107,6 +114,7 @@ async function resolvePythonProvider(
     locality,
     calibrated: described.calibrated === true,
     ...(limits ? { limits } : {}),
+    ...(validatedQuestionSets ? { validatedQuestionSets } : {}),
     // Only the request crosses the RPC; see the module comment.
     decide: (request: DecisionRequest) =>
       (decide as (req: DecisionRequest) => Promise<DecisionProviderResponse>)(request),

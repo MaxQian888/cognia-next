@@ -583,6 +583,15 @@ export interface PlatformIdentityRow extends PlatformIdentity {
    * (which keeps just the ids for quick membership checks).
    */
   mergedSnapshots?: PlatformIdentityRow[]
+  /**
+   * User-authored relationship to this contact ("my manager", "close friend"),
+   * read by the IM reply copilot (ADR-0194) as always-on knowledge. Non-indexed
+   * — no schema bump; merges carry it in `mergedSnapshots` like every other
+   * field. Written only on the host (`updateIdentityProfile`).
+   */
+  relationship?: string
+  /** User-authored note about this contact, same rules as `relationship`. */
+  note?: string
 }
 
 /**

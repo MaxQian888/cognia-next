@@ -28,6 +28,10 @@
     "hint": "Complete from your own history and commands without calling a model.",
     "label": "Local suggestions only"
   },
+  "replyCopilotMemory": {
+    "hint": "Recall what you have told Cognia about people and plans when the IM reply copilot judges a conversation and drafts replies. Off by default: recalled facts are redacted but may be sent to a remote decision endpoint.",
+    "label": "Let the reply copilot use memory"
+  },
   "starters": {
     "hint": "Suggest opening prompts on the empty chat screen.",
     "label": "AI starter prompts"

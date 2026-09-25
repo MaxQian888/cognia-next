@@ -142,4 +142,13 @@ describe("ComposerAssistanceCard", () => {
       composerAssistance: { suggestions: { starters: false, agentFallback: true } },
     })
   })
+
+  it("keeps the reply copilot memory opt-in off by default and saves it", async () => {
+    const user = userEvent.setup()
+    render(<ComposerAssistanceCard />)
+    const toggle = screen.getByLabelText("replyCopilotMemory.label")
+    expect(toggle).not.toBeChecked()
+    await user.click(toggle)
+    expect(save).toHaveBeenCalledWith({ composerAssistance: { replyCopilot: { memory: true } } })
+  })
 })

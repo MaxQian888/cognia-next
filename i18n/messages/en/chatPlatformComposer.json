@@ -1,18 +1,5 @@
 {
   "destination": "Send to {platform} · {destination}",
-  "aiDraft": "AI draft reply",
-  "description": "Use the latest 30 messages of text and your instructions to draft a reply. Attachments are not sent to AI. Review and edit the result, then place it in the input. Nothing is sent to the platform until you press Send.",
-  "instructions": "Instructions for the reply (optional)",
-  "preview": "Reply draft",
-  "generate": "Generate draft",
-  "generating": "Generating…",
-  "cancel": "Cancel",
-  "apply": "Use in input",
-  "noModel": "Configure a model or connect to a host to draft a reply.",
-  "pii": "Sensitive information was detected. Edit the instructions or conversation before using AI assistance.",
-  "emptyContext": "Add instructions or wait for a message before drafting a reply.",
-  "noOutput": "AI did not return a usable reply. Try again.",
-  "failed": "Could not generate the reply. Your input has been kept.",
   "reviewDrafts": "Review drafts ({count})",
   "sendFailed": "Could not send the message. Your input and attachments have been kept.",
   "attachmentsUnsupported": "{platform} cannot upload these attachments through this connection. Remove them to send text; your draft has been kept."

@@ -83,3 +83,17 @@ describe("validateDecisionRequest", () => {
     expect(result.ok).toBe(false)
   })
 })
+
+describe("cross-realm payloads", () => {
+  it("accepts plain objects from another realm and still rejects class instances", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { runInNewContext } = require("node:vm") as typeof import("node:vm")
+    const foreign = runInNewContext('({ q: { type: "noul", instructions: "?" } })')
+    expect(validateDecisionQuestions(foreign)).toBeNull()
+    class Question {
+      type = "noul"
+      instructions = "?"
+    }
+    expect(validateDecisionQuestions({ q: new Question() })).toContain("must be an object")
+  })
+})

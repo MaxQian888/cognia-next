@@ -1,0 +1,115 @@
+{
+  "dialog": {
+    "trigger": "Reply copilot",
+    "title": "Reply copilot",
+    "description": "Reads the latest messages, judges intent and risk, drafts three replies and ranks them. Review a draft before sending — nothing is sent for you.",
+    "instructions": "What you want to say (optional)",
+    "run": "Analyze and draft",
+    "rerun": "Try again",
+    "running": "Working…",
+    "close": "Close",
+    "failed": "The copilot could not finish. Your input has been kept.",
+    "openSettings": "Decision provider settings"
+  },
+  "judge": {
+    "title": "Their message",
+    "danger": "Risk {level}/9",
+    "intentLabel": "Wants",
+    "needLabel": "Needs",
+    "actionLabel": "Best move",
+    "subtext": "Likely has subtext ({p}%)",
+    "substanceNow": "Give substance now — a fact, time or plan ({p}%)",
+    "holdingLine": "A holding line is enough for now ({p}%)",
+    "tensionResolved": "Tension looks resolved",
+    "tensionOpen": "Tension is still open ({p}%)",
+    "truncated": "Part of the conversation did not fit the local model; the read may be less precise.",
+    "backgroundDropped": "The endpoint rejected the contact background, so it was left out.",
+    "failed": "Could not read the conversation: {reason}.",
+    "unavailable": {
+      "no_provider": "No decision provider is selected, so the conversation is not judged and drafts are not ranked. Pick one in Settings → Conversation.",
+      "provider_unavailable": "The decision provider is not ready yet (the model may still be loading).",
+      "not_configured": "The decision endpoint is missing a URL, model or key.",
+      "cors_unreachable": "The browser version cannot reach the decision endpoint. Use the desktop or mobile app.",
+      "not_validated": "The selected decision provider has not passed calibration for conversation judgment (the local laya checkpoint scores near chance on it), so this chat is not judged and drafts are not ranked. Use a remote Jev endpoint in Settings → Conversation for this."
+    }
+  },
+  "tone": {
+    "calm": "calm",
+    "watch": "watch out",
+    "tense": "tense",
+    "critical": "critical"
+  },
+  "intent": {
+    "confirm_you_care": "to see you care",
+    "vent_anger": "to vent",
+    "request_action": "an action from you",
+    "seek_explanation": "an explanation",
+    "casual_chat": "casual chat",
+    "close_topic": "to wrap up"
+  },
+  "need": {
+    "apology": "an apology",
+    "action": "action",
+    "explanation": "an explanation",
+    "care": "care",
+    "nothing": "nothing more"
+  },
+  "action": {
+    "check_history": "check what they mean first",
+    "apologize": "apologize",
+    "give_commitment": "commit to something",
+    "explain": "explain",
+    "acknowledge": "acknowledge",
+    "say_less": "say less",
+    "make_plan": "make a plan"
+  },
+  "drafts": {
+    "title": "Suggested replies",
+    "best": "Best fit · {p}%",
+    "score": "{p}%",
+    "fill": "Use",
+    "copy": "Copy",
+    "copied": "Copied",
+    "unrankedError": "Not ranked: {reason}.",
+    "failed": "Could not draft replies.",
+    "skipped": {
+      "pii": "Drafting was skipped: personal data remained after redaction.",
+      "empty": "Nothing to reply to yet. Add what you want to say.",
+      "no-output": "The model returned no usable replies. Try again.",
+      "no-model": "Configure a model to draft replies."
+    },
+    "unrankedReason": {
+      "no_provider": "Not ranked — no decision provider is selected.",
+      "not_validated": "Not ranked — the selected provider is not validated for ranking replies.",
+      "single_candidate": "Only one reply was drafted, so there was nothing to rank."
+    }
+  },
+  "errors": {
+    "no_provider": "no decision provider is selected",
+    "provider_unavailable": "the decision provider is not ready",
+    "not_configured": "the decision endpoint is not fully configured",
+    "invalid_request": "the request was rejected as malformed",
+    "pii": "personal data remained after redaction",
+    "network": "the decision endpoint could not be reached",
+    "http_status": "the decision endpoint returned an error",
+    "cors_unreachable": "the browser version cannot reach this endpoint",
+    "timeout": "the decision provider timed out",
+    "aborted": "the request was cancelled",
+    "recursive_provider": "a plugin cannot use its own provider",
+    "provider_error": "the decision provider failed"
+  },
+  "knowledge": {
+    "summary": "Context: {contact} · {memory, plural, =0 {no memories} =1 {1 memory} other {# memories}}",
+    "unknownContact": "unknown contact",
+    "relationship": "Relationship: {relationship}",
+    "noRelationship": "No relationship set — add one in the contact profile.",
+    "note": "Contact note included",
+    "noNote": "No contact note",
+    "memoryUsed": "{count, plural, =1 {1 memory used} other {# memories used}}",
+    "memorySkipped": {
+      "disabled": "Memory not used (turn it on in Settings → Conversation → Composer assistance).",
+      "pii": "Memory not used: the conversation still had personal data after redaction.",
+      "empty": "No relevant memories."
+    }
+  }
+}

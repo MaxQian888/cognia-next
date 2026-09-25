@@ -284,6 +284,60 @@ export async function listByAdapter(adapterId: string): Promise<PlatformIdentity
   return rows.sort((a, b) => b.lastSeenAt - a.lastSeenAt)
 }
 
+/** Longest relationship / note kept — these are prompt context, not documents. */
+export const MAX_RELATIONSHIP_CHARS = 120
+export const MAX_CONTACT_NOTE_CHARS = 1000
+
+export type IdentityProfileUpdateResult =
+  { ok: true; primary: PlatformIdentityRow } | { ok: false; reason: "missing" | "absorbed" }
+
+/**
+ * Set or clear the user-authored relationship / note on a top-level identity.
+ * Empty strings clear the field. Stamps `updatedAt` — the companion-sync cursor
+ * (`lib/sync/handlers/platform-identities.ts`) — so paired devices see the edit.
+ * An absorbed alias is refused: the profile belongs to the surviving primary.
+ */
+export async function updateIdentityProfile(
+  primaryId: string,
+  patch: { relationship?: string; note?: string }
+): Promise<IdentityProfileUpdateResult> {
+  const db = getDb()
+  return db.transaction("rw", db.platformIdentities, async () => {
+    const row = await db.platformIdentities.get(primaryId)
+    if (!row) {
+      const rows = await db.platformIdentities.toArray()
+      return { ok: false, reason: findOwnerById(rows, primaryId) ? "absorbed" : "missing" }
+    }
+    const next: PlatformIdentityRow = { ...row, updatedAt: Date.now() }
+    if (patch.relationship !== undefined) {
+      const value = patch.relationship.trim().slice(0, MAX_RELATIONSHIP_CHARS)
+      if (value) next.relationship = value
+      else delete next.relationship
+    }
+    if (patch.note !== undefined) {
+      const value = patch.note.trim().slice(0, MAX_CONTACT_NOTE_CHARS)
+      if (value) next.note = value
+      else delete next.note
+    }
+    await db.platformIdentities.put(next)
+    return { ok: true, primary: next }
+  })
+}
+
+/**
+ * The relationship / note to use for a contact: the primary's own values, else
+ * the first non-empty value an absorbed alias carried in before the merge.
+ */
+export function contactProfileOf(primary: PlatformIdentityRow): {
+  relationship?: string
+  note?: string
+} {
+  const tree = flattenIdentityTree(primary)
+  const relationship = tree.find((identity) => identity.relationship?.trim())?.relationship
+  const note = tree.find((identity) => identity.note?.trim())?.note
+  return { ...(relationship ? { relationship } : {}), ...(note ? { note } : {}) }
+}
+
 /** Resolve a top-level or absorbed platform address to its surviving primary. */
 export async function getByPlatformUser(
   platform: PlatformKind,

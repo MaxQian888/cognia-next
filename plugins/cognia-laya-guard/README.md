@@ -37,6 +37,32 @@ every request before it reaches the plugin; `decide` honors `stateTrim`
 checkpoint's token budgets (`headTokens` 192 english / 256 multilingual) so
 callers can choose compact question wording.
 
+### Measured: not a conversation judge (yet)
+
+`tools/calibrate_jev.py` scores the checkpoint on the reply copilot's
+`jev-judge/v1` question set with jev-chat-jarvis's 30-case labeled set
+(vendored in `tools/fixtures/`, MIT) against Jarvis's acceptance bar
+(danger MAE < 1.0, intent / need hit rate ≥ 60%). Zero-shot results
+(2026-09-25, Apple Silicon, `checkpoint: auto` → multilingual):
+
+| Question           | Compact wording | Full wording | Bar   |
+| ------------------ | --------------- | ------------ | ----- |
+| `true_intent`      | 23%             | 17%          | ≥ 60% |
+| `she_needs`        | 37%             | 27%          | ≥ 60% |
+| `danger_level` MAE | 2.28            | 2.18         | < 1.0 |
+| `best_action`      | 33%             | 27%          | —     |
+| `literal_question` | 37%             | 30%          | —     |
+| `should_reply_now` | 57%             | 47%          | —     |
+| `tension_resolved` | 57%             | 67%          | —     |
+
+Six-way intent at 17–23% is chance. The provider therefore declares no
+`validatedQuestionSets`, and the copilot neither judges nor ranks with it
+(it says so in the panel and still drafts). Re-run after a checkpoint change:
+
+```bash
+plugins/cognia-laya-guard/.venv/bin/python plugins/cognia-laya-guard/tools/calibrate_jev.py
+```
+
 ## Checkpoint routing
 
 Default `checkpoint: "auto"` uses laya's `Router` — it detects script/language

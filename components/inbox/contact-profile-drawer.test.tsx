@@ -6,12 +6,19 @@ import "fake-indexeddb/auto"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { toast } from "sonner"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { upsertIdentity, mergeIdentities, getByPlatformUser } from "@/lib/db/platform-identities"
+import {
+  upsertIdentity,
+  mergeIdentities,
+  getByPlatformUser,
+  updateIdentityProfile,
+} from "@/lib/db/platform-identities"
 import { ContactProfileDrawer } from "./contact-profile-drawer"
 
 const mockUnmergeIdentity = jest.fn()
+const mockRoute = jest.fn(() => "local")
 
-jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+jest.mock("@/lib/connectors/inbox-writes", () => ({ useInboxWriteRoute: () => mockRoute() }))
 jest.mock("@/lib/db/platform-identities", () => {
   const actual = jest.requireActual("@/lib/db/platform-identities")
   return {
@@ -22,6 +29,7 @@ jest.mock("@/lib/db/platform-identities", () => {
 
 beforeEach(async () => {
   jest.restoreAllMocks()
+  mockRoute.mockReturnValue("local")
   ;(toast.error as jest.Mock).mockReset()
   mockUnmergeIdentity
     .mockReset()
@@ -169,5 +177,73 @@ describe("ContactProfileDrawer", () => {
     )
     expect(screen.getByText("Alice")).toBeInTheDocument()
     expect(screen.queryByText("Alice Discord")).not.toBeInTheDocument()
+  })
+
+  it("resolves a Slack DM by its latest sender, not the channel id", async () => {
+    await upsertIdentity({
+      platform: "slack",
+      adapterId: "a1",
+      remoteUserId: "U1",
+      displayName: "Umi",
+    })
+    const db = getDb()
+    await db.sessions.add({
+      id: "s-dm",
+      title: "DM",
+      createdAt: 1,
+      updatedAt: 1,
+      platformConversationKey: "slack:a1:D9",
+      platformBinding: { adapterId: "a1", conversationKey: "slack:a1:D9" },
+    } as never)
+    await db.messages.add({
+      id: "m1",
+      sessionId: "s-dm",
+      role: "user",
+      createdAt: 2,
+      parts: [{ type: "text", text: "hi" }],
+      metadata: {
+        platformMessage: {
+          messageId: "p1",
+          platform: "slack",
+          sender: { id: "x", platform: "slack", remoteUserId: "U1", displayName: "Umi" },
+        },
+      },
+    } as never)
+    render(<ContactProfileDrawer open onOpenChange={noop} conversationKey="slack:a1:D9" />)
+    await waitFor(() => expect(screen.getByText("Umi")).toBeInTheDocument(), SETTLE)
+  })
+
+  it("edits and saves the relationship and note on the host", async () => {
+    const primary = await upsertIdentity({
+      platform: "telegram",
+      adapterId: "a1",
+      remoteUserId: "u1",
+      displayName: "Alice",
+    })
+    render(<ContactProfileDrawer open onOpenChange={noop} conversationKey="telegram:a1:u1" />)
+    const relationship = await screen.findByLabelText("Relationship", {}, SETTLE)
+    fireEvent.change(relationship, { target: { value: "manager" } })
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "prefers mornings" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(async () => {
+      const row = await getDb().platformIdentities.get(primary.id)
+      expect(row).toMatchObject({ relationship: "manager", note: "prefers mornings" })
+    }, SETTLE)
+    expect(toast.success).toHaveBeenCalledWith("Contact notes saved")
+  })
+
+  it("shows the profile read-only on a paired device", async () => {
+    mockRoute.mockReturnValue("remote")
+    const primary = await upsertIdentity({
+      platform: "telegram",
+      adapterId: "a1",
+      remoteUserId: "u1",
+      displayName: "Alice",
+    })
+    await updateIdentityProfile(primary.id, { relationship: "sister" })
+    render(<ContactProfileDrawer open onOpenChange={noop} conversationKey="telegram:a1:u1" />)
+    const readOnly = await screen.findByTestId("contact-profile-notes-readonly", {}, SETTLE)
+    expect(readOnly).toHaveTextContent("Relationship: sister")
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument()
   })
 })

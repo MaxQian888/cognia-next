@@ -14,7 +14,9 @@
     "local": "在本机运行",
     "remote": "远程服务",
     "calibrated": "概率已校准",
-    "uncalibrated": "概率未校准"
+    "uncalibrated": "概率未校准",
+    "copilotValidated": "已通过回复副驾校准",
+    "copilotNotValidated": "未通过回复副驾校准"
   },
   "status": {
     "checking": "检查中…",

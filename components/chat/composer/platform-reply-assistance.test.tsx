@@ -1,140 +1,111 @@
 /** @jest-environment jsdom */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { PlatformReplyAssistance } from "./platform-reply-assistance"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { PlatformReplyAssistance } from "./platform-reply-assistance"
+import { loadCopilotContext } from "@/lib/reply-copilot/load-context"
+import { runCopilot, type CopilotResult } from "@/lib/reply-copilot/run-copilot"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
-import { toast } from "sonner"
-import { generateReplyDraft } from "@/lib/inbox/ai-reply-draft"
 
 const mockSetInput = jest.fn()
-const mockRecent = jest
-  .fn()
-  .mockResolvedValue([{ role: "user", parts: [{ type: "text", text: "Tomorrow?" }] }])
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("@/components/ai-elements/prompt-input", () => ({
   usePromptInputController: () => ({ textInput: { value: "existing", setInput: mockSetInput } }),
-}))
-jest.mock("@/lib/db/messages", () => ({
-  listRecentMessages: (...args: unknown[]) => mockRecent(...args),
 }))
 jest.mock("@/lib/ai/generation/utility-client", () => ({
   buildUtilityLlmClient: jest.fn(() => ({ complete: jest.fn() })),
 }))
 jest.mock("@/lib/ai/headless-turn-llm-client", () => ({ buildHeadlessTurnLlmClient: jest.fn() }))
-jest.mock("@/lib/inbox/ai-reply-draft", () => ({ generateReplyDraft: jest.fn() }))
+jest.mock("@/lib/reply-copilot/load-context", () => ({ loadCopilotContext: jest.fn() }))
+jest.mock("@/lib/reply-copilot/run-copilot", () => ({ runCopilot: jest.fn() }))
 jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: () => ({ settings: {} }) } }))
-jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
+jest.mock("@/components/reply-copilot/copilot-result-card", () => ({
+  CopilotResultCard: ({ onFill }: { onFill?: (text: string) => void }) => (
+    <button type="button" onClick={() => onFill?.("明早九点前发你")}>
+      use-best
+    </button>
+  ),
+}))
+
 const session = { id: "im-session" } as ChatSession
+const context = {
+  transcript: { turns: [], latestFrom: "other", latestOtherSender: null, isGroup: false },
+  knowledge: {
+    relationship: "",
+    background: "",
+    contactId: null,
+    contactName: null,
+    hasNote: false,
+    memoryLines: 0,
+    memorySkipped: "disabled",
+  },
+}
+const result: CopilotResult = {
+  judge: { kind: "unavailable", reason: "no_provider" },
+  drafts: {
+    kind: "ok",
+    ranked: false,
+    candidates: [{ text: "明早九点前发你", probability: null, slot: 0 }],
+  },
+  variant: "full",
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
-  ;(generateReplyDraft as jest.Mock).mockResolvedValue({ kind: "draft", text: "Tomorrow works" })
+  ;(loadCopilotContext as jest.Mock).mockResolvedValue(context)
+  ;(runCopilot as jest.Mock).mockResolvedValue(result)
 })
 
-it("keeps the original input until an edited result is explicitly applied", async () => {
+it("runs the copilot with the typed instructions and fills the composer only on Use", async () => {
   render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  expect(screen.getByRole("textbox", { name: "instructions" })).toHaveValue("existing")
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await screen.findByRole("textbox", { name: "preview" })
-  expect(mockRecent).toHaveBeenCalledWith("im-session", 30)
+  fireEvent.click(screen.getByRole("button", { name: "dialog.trigger" }))
+  expect(screen.getByRole("textbox", { name: "dialog.instructions" })).toHaveValue("existing")
+  fireEvent.click(screen.getByRole("button", { name: "dialog.run" }))
+  await screen.findByRole("button", { name: "use-best" })
+  expect(loadCopilotContext).toHaveBeenCalledWith(session, {})
+  expect(runCopilot).toHaveBeenCalledWith(
+    expect.objectContaining({ instructions: "existing", transcript: context.transcript })
+  )
+  expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+    expect.objectContaining({ featureId: "im-reply-copilot" })
+  )
   expect(mockSetInput).not.toHaveBeenCalled()
-  fireEvent.change(screen.getByRole("textbox", { name: "preview" }), {
-    target: { value: "Friday works" },
-  })
-  fireEvent.click(screen.getByRole("button", { name: "apply" }))
-  expect(mockSetInput).toHaveBeenCalledWith("Friday works")
+  fireEvent.click(screen.getByRole("button", { name: "use-best" }))
+  expect(mockSetInput).toHaveBeenCalledWith("明早九点前发你")
+  expect(screen.queryByRole("button", { name: "use-best" })).not.toBeInTheDocument()
 })
 
-it("aborts generation on close and ignores late results", async () => {
-  let finish!: (result: unknown) => void
-  ;(generateReplyDraft as jest.Mock).mockImplementation(
+it("aborts on close and ignores a late result", async () => {
+  let finish!: (value: CopilotResult) => void
+  ;(runCopilot as jest.Mock).mockImplementation(
     () =>
       new Promise((resolve) => {
         finish = resolve
       })
   )
   render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await waitFor(() => expect(generateReplyDraft).toHaveBeenCalled())
-  const signal = (generateReplyDraft as jest.Mock).mock.calls[0][0].signal
-  fireEvent.click(screen.getByRole("button", { name: "cancel" }))
+  fireEvent.click(screen.getByRole("button", { name: "dialog.trigger" }))
+  fireEvent.click(screen.getByRole("button", { name: "dialog.run" }))
+  await waitFor(() => expect(runCopilot).toHaveBeenCalled())
+  const signal = (runCopilot as jest.Mock).mock.calls[0][0].signal as AbortSignal
+  fireEvent.click(screen.getByRole("button", { name: "dialog.close" }))
   expect(signal.aborted).toBe(true)
-  await act(async () => finish({ kind: "draft", text: "late" }))
-  expect(mockSetInput).not.toHaveBeenCalled()
-  expect(screen.queryByRole("textbox", { name: "preview" })).not.toBeInTheDocument()
-})
-
-it("preserves input on generation errors and permits retry", async () => {
-  ;(generateReplyDraft as jest.Mock).mockRejectedValueOnce(new Error("offline"))
-  render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await waitFor(() => expect(screen.getByRole("button", { name: "generate" })).toBeEnabled())
+  await act(async () => finish(result))
+  expect(screen.queryByRole("button", { name: "use-best" })).not.toBeInTheDocument()
   expect(mockSetInput).not.toHaveBeenCalled()
 })
 
-it.each([
-  ["pii", "pii"],
-  ["empty", "emptyContext"],
-  ["no-output", "noOutput"],
-])("shows %s without replacing the input", async (reason, label) => {
-  ;(generateReplyDraft as jest.Mock).mockResolvedValueOnce({ kind: "skipped", reason })
+it("keeps the input on failure and allows a retry", async () => {
+  ;(runCopilot as jest.Mock).mockRejectedValueOnce(new Error("offline"))
   render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.change(screen.getByRole("textbox", { name: "instructions" }), {
-    target: { value: "Reply briefly" },
-  })
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await waitFor(() => expect(toast.info).toHaveBeenCalledWith(label))
+  fireEvent.click(screen.getByRole("button", { name: "dialog.trigger" }))
+  fireEvent.click(screen.getByRole("button", { name: "dialog.run" }))
+  expect(await screen.findByText("dialog.failed")).toBeInTheDocument()
   expect(mockSetInput).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "dialog.run" }))
+  await screen.findByRole("button", { name: "use-best" })
 })
 
-it("reports unavailable models without losing instructions", async () => {
-  ;(buildUtilityLlmClient as jest.Mock).mockReturnValueOnce(null)
-  render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("noModel"))
-  expect(screen.getByRole("textbox", { name: "instructions" })).toHaveValue("existing")
-})
-
-it("aborts pending history reads when the dialog closes and skips generation", async () => {
-  let finish!: (value: unknown[]) => void
-  mockRecent.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve
-    })
-  )
-  render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  fireEvent.click(screen.getByRole("button", { name: "cancel" }))
-  await act(async () => finish([]))
-  expect(generateReplyDraft).not.toHaveBeenCalled()
-})
-
-it("takes text only, preserves sender names, and excludes system messages", async () => {
-  mockRecent.mockResolvedValueOnce([
-    { role: "system", parts: [{ type: "text", text: "private system" }] },
-    {
-      role: "user",
-      metadata: { platformMessage: { sender: { displayName: "Alice" } } },
-      parts: [
-        { type: "file", url: "data:private" },
-        { type: "text", text: "hello" },
-      ],
-    },
-  ])
-  render(<PlatformReplyAssistance session={session} />)
-  fireEvent.click(screen.getByRole("button", { name: "aiDraft" }))
-  fireEvent.click(screen.getByRole("button", { name: "generate" }))
-  await waitFor(() =>
-    expect(generateReplyDraft).toHaveBeenCalledWith(
-      expect.objectContaining({ history: [{ role: "Alice", text: "hello" }] })
-    )
-  )
-  fireEvent.click(screen.getByRole("button", { name: "Close" }))
-  expect(mockSetInput).not.toHaveBeenCalled()
+it("respects disabled", () => {
+  render(<PlatformReplyAssistance session={session} disabled />)
+  expect(screen.getByRole("button", { name: "dialog.trigger" })).toBeDisabled()
 })

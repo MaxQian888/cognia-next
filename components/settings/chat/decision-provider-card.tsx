@@ -20,6 +20,7 @@ import { DECISION_HTTP_PRESETS, resolveDecisionEndpoint } from "@/lib/decisions/
 import { BUILTIN_HTTP_PROVIDER_ID } from "@/lib/decisions/providers/decisions-http"
 import { runDecision } from "@/lib/decisions/run-decision"
 import { resolvePluginLabel } from "@/lib/plugin/i18n/plugin-label"
+import { COPILOT_QUESTION_SET } from "@/lib/reply-copilot/questions"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   DECISION_HTTP_PRESET_IDS,
@@ -156,6 +157,15 @@ export function DecisionProviderCard() {
   }
 
   const endpoint = isRemote ? resolveDecisionEndpoint(http) : null
+  // Calibration on the reply copilot's question set, not just calibrated
+  // probabilities: the built-in presets are the Jev models Jarvis measured; a
+  // plugin has to declare the set it passed (laya does not — it scored near
+  // chance). Mirrors `run-copilot.ts` `selectedProvider`.
+  const copilotValidated = selected
+    ? selected.id === BUILTIN_HTTP_PROVIDER_ID
+      ? http.preset !== "custom"
+      : (selected.validatedQuestionSets ?? []).includes(COPILOT_QUESTION_SET)
+    : false
   const missingProvider = Boolean(decisions.providerId) && !selected
 
   return (
@@ -200,6 +210,9 @@ export function DecisionProviderCard() {
           </Badge>
           <Badge variant={selected.calibrated ? "secondary" : "outline"}>
             {selected.calibrated ? t("traits.calibrated") : t("traits.uncalibrated")}
+          </Badge>
+          <Badge variant={copilotValidated ? "secondary" : "outline"}>
+            {copilotValidated ? t("traits.copilotValidated") : t("traits.copilotNotValidated")}
           </Badge>
           {status?.kind === "checking" ? (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">

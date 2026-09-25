@@ -170,6 +170,10 @@ class LayaDecisionProvider:
     """``manifest.decisionProviders[laya-local]`` — typed decisions on this machine."""
 
     def describe(self) -> Dict[str, Any]:
+        # No `validatedQuestionSets`: measured on the reply copilot's
+        # "jev-judge/v1" set (tools/calibrate_jev.py) the zero-shot checkpoint
+        # scores near chance, so the copilot will not use it to judge or rank.
+        # Add a set here only after a calibration run passes its bar.
         return {"locality": "local", "calibrated": True, "limits": _limits()}
 
     def decide(self, request: Any) -> Dict[str, Any]:

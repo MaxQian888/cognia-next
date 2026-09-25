@@ -121,6 +121,17 @@ deadline.
 `locality` is shown to the user but **does not** relax redaction — the host
 cannot verify it.
 
+`calibrated` means your probabilities are honest; it does **not** mean you are
+right on someone else's task. Features built on a named question set (the IM
+reply copilot uses `jev-judge/v1`) only use providers that list it in
+`validatedQuestionSets` — add a set only after measuring against its labeled
+data, as `plugins/cognia-laya-guard/tools/calibrate_jev.py` does:
+
+```python
+def describe(self):
+    return {"locality": "local", "calibrated": True, "validatedQuestionSets": ["my-triage/v1"]}
+```
+
 ### TypeScript
 
 ```ts title="src/judge.ts"

@@ -82,5 +82,8 @@ export function toDecisionProviderInfo(provider: DecisionProvider): DecisionProv
     locality: provider.locality,
     calibrated: provider.calibrated,
     ...(provider.limits ? { limits: provider.limits } : {}),
+    ...(provider.validatedQuestionSets?.length
+      ? { validatedQuestionSets: [...provider.validatedQuestionSets] }
+      : {}),
   }
 }

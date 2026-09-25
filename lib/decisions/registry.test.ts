@@ -72,6 +72,7 @@ describe("toDecisionProviderInfo", () => {
       ...provider("p:x", "p"),
       labelKey: "provider.label",
       limits: { headTokens: 192 },
+      validatedQuestionSets: ["jev-judge/v1"],
       status: () => ({ ready: true }),
     })
     expect(info).toEqual({
@@ -82,7 +83,11 @@ describe("toDecisionProviderInfo", () => {
       locality: "local",
       calibrated: true,
       limits: { headTokens: 192 },
+      validatedQuestionSets: ["jev-judge/v1"],
     })
     expect(Object.keys(toDecisionProviderInfo(provider("b")))).not.toContain("pluginId")
+    expect(Object.keys(toDecisionProviderInfo(provider("b")))).not.toContain(
+      "validatedQuestionSets"
+    )
   })
 })

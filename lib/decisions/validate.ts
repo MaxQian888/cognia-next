@@ -19,10 +19,15 @@ export const MAX_DECISION_REQUEST_CHARS = 256 * 1024
 export type DecisionValidation =
   { ok: true; request: DecisionRequest } | { ok: false; message: string }
 
+/**
+ * Realm-agnostic plain-object check: a payload built in another realm
+ * (structuredClone in a worker or test VM, an iframe, the RPC decoder) has a
+ * different `Object.prototype`, so identity against ours would reject it.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false
-  const proto = Object.getPrototypeOf(value)
-  return proto === Object.prototype || proto === null
+  const proto: unknown = Object.getPrototypeOf(value)
+  return proto === null || Object.getPrototypeOf(proto) === null
 }
 
 function isNonEmptyString(value: unknown): value is string {

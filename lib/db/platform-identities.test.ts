@@ -10,6 +10,9 @@ import {
   listByAdapter,
   getByPlatformUser,
   listMergeCandidates,
+  updateIdentityProfile,
+  contactProfileOf,
+  MAX_RELATIONSHIP_CHARS,
 } from "./platform-identities"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -340,5 +343,65 @@ describe("platform-identities", () => {
     expect((await listMergeCandidates(primary.id)).map((identity) => identity.id)).toEqual([
       candidate.id,
     ])
+  })
+
+  describe("contact profile (reply copilot knowledge)", () => {
+    it("sets, trims, caps and clears relationship / note, stamping updatedAt", async () => {
+      const row = await upsertIdentity(baseInput())
+      const before = row.updatedAt!
+      await new Promise((r) => setTimeout(r, 2))
+      const set = await updateIdentityProfile(row.id, {
+        relationship: "  manager  ",
+        note: "prefers mornings",
+      })
+      expect(set).toMatchObject({
+        ok: true,
+        primary: { relationship: "manager", note: "prefers mornings" },
+      })
+      if (set.ok) expect(set.primary.updatedAt!).toBeGreaterThan(before)
+      const long = await updateIdentityProfile(row.id, { relationship: "x".repeat(500) })
+      expect(long.ok && long.primary.relationship?.length).toBe(MAX_RELATIONSHIP_CHARS)
+      const cleared = await updateIdentityProfile(row.id, { note: "  " })
+      expect(cleared.ok && "note" in cleared.primary).toBe(false)
+      expect(cleared.ok && cleared.primary.relationship).toBeTruthy() // untouched field kept
+    })
+
+    it("refuses missing and absorbed identities", async () => {
+      await expect(updateIdentityProfile("pid_nope", { note: "x" })).resolves.toEqual({
+        ok: false,
+        reason: "missing",
+      })
+      const primary = await upsertIdentity(baseInput())
+      const secondary = await upsertIdentity({ ...baseInput(), remoteUserId: "user_2" })
+      expect((await mergeIdentities(primary.id, secondary.id)).ok).toBe(true)
+      await expect(updateIdentityProfile(secondary.id, { note: "x" })).resolves.toEqual({
+        ok: false,
+        reason: "absorbed",
+      })
+    })
+
+    it("survives merge, inbound upserts and unmerge", async () => {
+      const primary = await upsertIdentity(baseInput())
+      const secondary = await upsertIdentity({ ...baseInput(), remoteUserId: "user_2" })
+      await updateIdentityProfile(secondary.id, { note: "met at the conference" })
+      await updateIdentityProfile(primary.id, { relationship: "colleague" })
+      const merged = await mergeIdentities(primary.id, secondary.id)
+      expect(merged.ok).toBe(true)
+      if (!merged.ok) return
+      // The primary's own value wins; an absorbed alias fills the gap.
+      expect(contactProfileOf(merged.primary)).toEqual({
+        relationship: "colleague",
+        note: "met at the conference",
+      })
+      await upsertIdentity({ ...baseInput(), displayName: "Alice again" })
+      const afterInbound = (await getDb().platformIdentities.get(primary.id))!
+      expect(afterInbound.relationship).toBe("colleague")
+      const restored = await unmergeIdentity(primary.id, secondary.id)
+      expect(restored.ok && restored.restored.note).toBe("met at the conference")
+    })
+
+    it("reports nothing for a contact without a profile", async () => {
+      expect(contactProfileOf(await upsertIdentity(baseInput()))).toEqual({})
+    })
   })
 })

@@ -98,6 +98,24 @@ Without a provider, a consumer gets `no_provider`. Features that need a judge
 render that as an explicit inert state (the reply copilot still drafts, unranked)
 rather than quietly skipping the judgment.
 
+### 6. Calibrated is not validated — features gate on measured question sets
+
+`calibrated: true` says a provider's probabilities are honest, not that it is
+right about a given task. A provider lists the named question sets it was
+measured on and passed in `validatedQuestionSets`; a feature built on a set
+uses only providers that list it.
+
+The reply copilot's judge + rank set is `jev-judge/v1`. The built-in endpoint
+counts as validated for its Jev presets (the models Jarvis calibrated it on)
+and not for a custom URL. Laya was measured with
+`plugins/cognia-laya-guard/tools/calibrate_jev.py` on Jarvis's 30-case labeled
+set and scored near chance (intent 17–23% on six options, danger MAE 2.2,
+against a bar of ≥60% / <1.0), in both the compact and the full wording. It
+therefore declares no set: with laya selected the copilot reports
+`not_validated`, drafts without ranking, and says so. Laya stays a provider
+for everything it does measure well (inbound moderation) and for plugins'
+own questions.
+
 ## Alternatives rejected
 
 - **Emulate the judge with the chat LLM.** Cheap to build, but it yields model

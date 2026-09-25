@@ -8812,21 +8812,8 @@
     "userIdPlaceholder": "usr_…"
   },
   "chatPlatformComposer": {
-    "aiDraft": "AI 拟回复",
-    "apply": "放入输入框",
     "attachmentsUnsupported": "当前连接无法向 {platform} 上传这些附件。可移除附件后发送文字，草稿已保留。",
-    "cancel": "取消",
-    "description": "根据最近 30 条文本消息和你的要求拟回复，不向 AI 发送附件。请审阅并编辑结果，再放入输入框。点击发送前不会发往平台。",
     "destination": "发送到 {platform} · {destination}",
-    "emptyContext": "请填写回复要求，或收到消息后再生成草稿。",
-    "failed": "生成回复失败，已保留输入内容。",
-    "generate": "生成草稿",
-    "generating": "正在生成…",
-    "instructions": "回复要求（可选）",
-    "noModel": "请配置模型或连接主机后使用 AI 拟回复。",
-    "noOutput": "AI 未返回有效回复，请重试。",
-    "pii": "检测到敏感信息，请修改要求或对话内容后再使用 AI 辅助。",
-    "preview": "回复草稿",
     "reviewDrafts": "审阅草稿（{count}）",
     "sendFailed": "发送失败，已保留输入内容和附件。"
   },
@@ -16189,13 +16176,26 @@
         "alias_conflict": "保存的身份包含冲突别名。",
         "identity_conflict": "另一个联系人已占用该平台身份。",
         "primary_missing": "该联系人已不存在。",
+        "profile_absorbed": "该身份已合并到另一个联系人，请编辑那个联系人。",
+        "profile_missing": "该联系人已不存在。",
         "snapshot_missing": "该身份已不再与联系人合并。",
         "unexpected": "身份变更失败，请刷新后重试。"
       },
       "lastSeen": "最近出现",
       "merge": "合并",
       "mergedTitle": "已合并的身份",
+      "noRelationship": "未设置关系。",
+      "note": "备注",
+      "notePlaceholder": "回复时值得记住的事",
       "platform": "平台",
+      "profileHint": "回复副驾读取这段对话时会把它作为背景。只保存在本设备。",
+      "profileReadOnly": "请在主机设备上编辑，配对设备只读显示主机的联系人目录。",
+      "profileSave": "保存",
+      "profileSaved": "联系人备注已保存",
+      "profileTitle": "关系与备注",
+      "relationship": "关系",
+      "relationshipPlaceholder": "例如：上司、好朋友",
+      "relationshipValue": "关系：{value}",
       "remoteId": "用户 ID",
       "subtitle": "该会话对应的身份目录记录。",
       "title": "联系人",
@@ -29460,6 +29460,121 @@
       "skipped": "近期活动不足，暂无可报告内容。"
     }
   },
+  "replyCopilot": {
+    "action": {
+      "acknowledge": "表示理解",
+      "apologize": "道歉",
+      "check_history": "先确认对方指什么",
+      "explain": "解释",
+      "give_commitment": "给出承诺",
+      "make_plan": "定个安排",
+      "say_less": "少说"
+    },
+    "dialog": {
+      "close": "关闭",
+      "description": "读取最近消息，判断对方意图与风险，起草三条回复并排序。发送前请先审阅，副驾不会替你发送。",
+      "failed": "副驾未能完成，你的输入已保留。",
+      "instructions": "你想表达的意思（可选）",
+      "openSettings": "决策模型设置",
+      "rerun": "重新生成",
+      "run": "分析并起草",
+      "running": "处理中…",
+      "title": "回复副驾",
+      "trigger": "回复副驾"
+    },
+    "drafts": {
+      "best": "最合适 · {p}%",
+      "copied": "已复制",
+      "copy": "复制",
+      "failed": "无法起草回复。",
+      "fill": "填入",
+      "score": "{p}%",
+      "skipped": {
+        "empty": "还没有可回复的内容，请写下你想表达的意思。",
+        "no-model": "请先配置模型以起草回复。",
+        "no-output": "模型没有返回可用的回复，请重试。",
+        "pii": "已跳过起草：脱敏后仍含个人信息。"
+      },
+      "title": "候选回复",
+      "unrankedError": "未排序：{reason}。",
+      "unrankedReason": {
+        "no_provider": "未排序：未选择决策模型。",
+        "not_validated": "未排序：所选决策模型未通过回复排序校准。",
+        "single_candidate": "只起草了一条回复，无需排序。"
+      }
+    },
+    "errors": {
+      "aborted": "请求已取消",
+      "cors_unreachable": "浏览器版无法访问该接口",
+      "http_status": "决策接口返回错误",
+      "invalid_request": "请求格式被拒绝",
+      "network": "无法连接决策接口",
+      "no_provider": "未选择决策模型",
+      "not_configured": "决策接口配置不完整",
+      "pii": "脱敏后仍含个人信息",
+      "provider_error": "决策模型出错",
+      "provider_unavailable": "决策模型尚未就绪",
+      "recursive_provider": "插件不能使用自己的提供方",
+      "timeout": "决策模型超时"
+    },
+    "intent": {
+      "casual_chat": "随便聊聊",
+      "close_topic": "收尾结束",
+      "confirm_you_care": "确认你在乎",
+      "request_action": "要你行动",
+      "seek_explanation": "要个解释",
+      "vent_anger": "发泄情绪"
+    },
+    "judge": {
+      "actionLabel": "最佳动作",
+      "backgroundDropped": "接口拒绝了联系人背景，已不带背景重新判断。",
+      "danger": "风险 {level}/9",
+      "failed": "无法判断这段对话：{reason}。",
+      "holdingLine": "先稳住，暂不需要给实质内容（{p}%）",
+      "intentLabel": "想要",
+      "needLabel": "需要",
+      "substanceNow": "现在给出实质内容：事实、时间或计划（{p}%）",
+      "subtext": "可能话里有话（{p}%）",
+      "tensionOpen": "紧张气氛仍在（{p}%）",
+      "tensionResolved": "紧张气氛看起来已化解",
+      "title": "对方这条消息",
+      "truncated": "部分对话超出本地模型的容量，判断可能不够精确。",
+      "unavailable": {
+        "cors_unreachable": "浏览器版无法访问决策接口，请使用桌面端或移动端。",
+        "no_provider": "未选择决策模型，因此不会判断对话，也不会给回复排序。请在 设置 → 对话 中选择。",
+        "not_configured": "决策接口缺少地址、模型或密钥。",
+        "not_validated": "所选决策模型未通过对话判断校准（本地 laya 检查点在该题集上接近随机），因此不判断这段对话，也不给回复排序。请在 设置 → 对话 中改用远程 Jev 接口。",
+        "provider_unavailable": "决策模型尚未就绪（模型可能仍在加载）。"
+      }
+    },
+    "knowledge": {
+      "memorySkipped": {
+        "disabled": "未使用记忆（可在 设置 → 对话 → 输入辅助 中开启）。",
+        "empty": "没有相关记忆。",
+        "pii": "未使用记忆：对话脱敏后仍含个人信息。"
+      },
+      "memoryUsed": "{count, plural, other {使用了 # 条记忆}}",
+      "noNote": "没有联系人备注",
+      "noRelationship": "未设置关系，可在联系人资料中添加。",
+      "note": "已带上联系人备注",
+      "relationship": "关系：{relationship}",
+      "summary": "上下文：{contact} · {memory, plural, =0 {无记忆} other {# 条记忆}}",
+      "unknownContact": "未知联系人"
+    },
+    "need": {
+      "action": "行动",
+      "apology": "道歉",
+      "care": "关心",
+      "explanation": "解释",
+      "nothing": "无需更多"
+    },
+    "tone": {
+      "calm": "平稳",
+      "critical": "危险",
+      "tense": "紧张",
+      "watch": "需留意"
+    }
+  },
   "retrievalControl": {
     "actions": {
       "cancel": "取消",
@@ -35288,6 +35403,10 @@
         "hint": "只用你自己的历史记录和命令补全，不调用模型。",
         "label": "仅本地建议"
       },
+      "replyCopilotMemory": {
+        "hint": "IM 回复副驾判断对话、起草回复时，调用你告诉过 Cognia 的人与事。默认关闭：召回的内容会先脱敏，但可能发送到远程决策接口。",
+        "label": "允许回复副驾使用记忆"
+      },
       "starters": {
         "hint": "在空聊天页推荐起始提示。",
         "label": "AI 起始提示"
@@ -38581,6 +38700,8 @@
       "title": "决策模型",
       "traits": {
         "calibrated": "概率已校准",
+        "copilotNotValidated": "未通过回复副驾校准",
+        "copilotValidated": "已通过回复副驾校准",
         "local": "在本机运行",
         "remote": "远程服务",
         "uncalibrated": "概率未校准"
